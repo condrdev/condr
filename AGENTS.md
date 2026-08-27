@@ -52,6 +52,12 @@ GUI 关闭只断开连接。server、PTY、agent 与 Session 继续运行;重新
 - **Linux server(arm64,headless)**:murmur-core 的全部开发与测试(`cargo test/clippy` 无需显示器)。GUI 无法在此运行。
 - **Windows 笔记本**:GUI 原生构建与手动验证(GPUI 不做交叉编译),同时验证 ConPTY 路径。
 
+### 开发阶段兼容性
+
+- 当前项目处于未发布开发阶段。API、wire protocol、配置和持久化数据结构允许破坏性变更,不要求向后兼容。
+- 优先选择边界清晰、实现简单的最终设计;不要仅为旧实现保留兼容层、迁移路径或废弃 API。
+- 发生破坏性变更时,同步更新仓库内调用方、测试和源文档。只有任务明确要求时才实现旧版本迁移或兼容。
+
 ## 常用命令
 
 ```bash
@@ -62,6 +68,13 @@ cargo test <name>      # 单个测试
 cargo clippy           # lint
 cargo fmt              # 格式化
 ```
+
+## 架构原则
+
+- GUI 只做编排与呈现,对话/工具循环交给嵌入的 agent CLI 子进程,不重复造轮子
+- server 是 Session、PTY、VT、agent 与 Git/worktree runtime 的唯一所有者;GUI 的 local/remote 功能走同一协议。Client 重连先获取 Server/Session 的权威结构快照和各 Pane 的 live terminal view,再订阅增量事件;GUI 关闭不会停止 server 或其子进程。
+- 保持轻量:避免 webview、避免不必要的依赖
+
 
 ## Agent skills
 
@@ -76,9 +89,3 @@ GitHub Issues(`gh` CLI)。See `docs/agents/issue-tracker.md`.
 ### Domain docs
 
 Single-context:根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
-
-## 架构原则
-
-- GUI 只做编排与呈现,对话/工具循环交给嵌入的 agent CLI 子进程,不重复造轮子
-- server 是 Session、PTY、VT、agent 与 Git/worktree runtime 的唯一所有者;GUI 的 local/remote 功能走同一协议。Client 重连先获取 Server/Session 的权威结构快照和各 Pane 的 live terminal view,再订阅增量事件;GUI 关闭不会停止 server 或其子进程。
-- 保持轻量:避免 webview、避免不必要的依赖

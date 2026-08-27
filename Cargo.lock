@@ -3872,6 +3872,7 @@ dependencies = [
  "interprocess",
  "murmur-core",
  "tokio",
+ "widestring",
 ]
 
 [[package]]

@@ -18,6 +18,7 @@ gpui_platform = { version = "=0.1.0", git = "https://github.com/zed-industries/z
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "9890a77c2d427f05b2512f05ddc6cce84686f9a6" }
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
+widestring = "1.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

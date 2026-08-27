@@ -12,5 +12,8 @@ interprocess.workspace = true
 murmur-core = { path = "../murmur-core" }
 tokio.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+widestring.workspace = true
+
 [lints]
 workspace = true

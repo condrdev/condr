@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use interprocess::local_socket::traits::Listener as _;
-#[cfg(windows)]
-use interprocess::local_socket::traits::Stream as _;
 
 pub type LocalListener = interprocess::local_socket::Listener;
 pub type LocalStream = interprocess::local_socket::Stream;
@@ -89,9 +87,13 @@ impl EndpointListener {
     pub fn accept(&self) -> io::Result<EndpointStream> {
         match self {
             Self::Local(listener) => listener.accept().map(EndpointStream::Local),
-            Self::Tcp(listener) => listener
-                .accept()
-                .map(|(stream, _)| EndpointStream::Tcp(stream)),
+            Self::Tcp(listener) => {
+                let (stream, _) = listener.accept()?;
+                // Accepted sockets inherit nonblocking mode on Windows. Client handlers use
+                // blocking framed reads, so normalize the stream on every platform.
+                stream.set_nonblocking(false)?;
+                Ok(EndpointStream::Tcp(stream))
+            }
         }
     }
 
@@ -129,6 +131,16 @@ impl std::io::Write for EndpointStream {
 }
 
 impl EndpointStream {
+    pub fn try_clone(&self) -> io::Result<Self> {
+        match self {
+            Self::Local(stream) => {
+                use interprocess::TryClone as _;
+                stream.try_clone().map(Self::Local)
+            }
+            Self::Tcp(stream) => stream.try_clone().map(Self::Tcp),
+        }
+    }
+
     pub fn set_handshake_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         match self {
             Self::Local(stream) => {
@@ -204,11 +216,20 @@ fn bind_local(path: &Path) -> io::Result<LocalListener> {
     #[cfg(windows)]
     {
         use interprocess::local_socket::{GenericNamespaced, ListenerOptions, prelude::*};
+        use interprocess::os::windows::{
+            local_socket::ListenerOptionsExt as _, security_descriptor::SecurityDescriptor,
+        };
+
         let name = path.to_string_lossy().to_string();
         let name = name.to_ns_name::<GenericNamespaced>()?;
+        // Protected DACL: generic-all access for the object owner and LocalSystem only.
+        let sddl = widestring::U16CString::from_str("D:P(A;;GA;;;OW)(A;;GA;;;SY)")
+            .map_err(io::Error::other)?;
+        let security_descriptor = SecurityDescriptor::deserialize(&sddl)?;
         let listener = ListenerOptions::new()
             .name(name)
             .reclaim_name(false)
+            .security_descriptor(security_descriptor)
             .create_sync()?;
         fs::write(path, b"murmur-local-endpoint\n")?;
         Ok(listener)
@@ -243,11 +264,6 @@ fn prepare_local_path(path: &Path) -> io::Result<()> {
 fn restrict_permissions(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn restrict_permissions(_: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]

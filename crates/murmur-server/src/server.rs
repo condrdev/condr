@@ -1,13 +1,13 @@
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use murmur_core::Session;
 use murmur_core::protocol::{
-    ClientMessage, Hello, PROTOCOL_VERSION, RuntimeEpoch, ServerId, ServerMessage,
+    ClientMessage, FramingError, Hello, PROTOCOL_VERSION, RuntimeEpoch, ServerId, ServerMessage,
     SessionBootstrap, SessionEvent, SessionId, VersionCheck, check_version,
 };
 
@@ -201,6 +201,7 @@ struct RuntimeState {
     session: Session,
     active_controller: Option<u64>,
     events: std::collections::VecDeque<SequencedEvent>,
+    subscribers: std::collections::HashMap<u64, mpsc::Sender<ServerMessage>>,
 }
 
 struct SequencedEvent {
@@ -218,6 +219,7 @@ impl RuntimeState {
             session: Session::new(),
             active_controller: None,
             events: std::collections::VecDeque::new(),
+            subscribers: std::collections::HashMap::new(),
         }
     }
 
@@ -231,7 +233,11 @@ impl RuntimeState {
         }
     }
 
-    fn record_snapshot_change(&mut self) -> SessionEvent {
+    fn publish_snapshot_change(
+        &mut self,
+        origin_client_id: u64,
+        origin: &mpsc::Sender<ServerMessage>,
+    ) -> bool {
         // ponytail: bounded in-memory replay; persist an event log only if reconnect gaps require it.
         self.sequence = self.sequence.saturating_add(1);
         let event = SessionEvent::SnapshotChanged;
@@ -242,7 +248,21 @@ impl RuntimeState {
         while self.events.len() > EVENT_HISTORY_LIMIT {
             self.events.pop_front();
         }
-        event
+        let message = ServerMessage::Event {
+            server_id: self.server_id,
+            session_id: self.session_id,
+            sequence: self.sequence,
+            event,
+        };
+        let origin_failed = origin.send(message.clone()).is_err();
+        self.subscribers.retain(|client_id, sender| {
+            if *client_id == origin_client_id {
+                !origin_failed
+            } else {
+                sender.send(message.clone()).is_ok()
+            }
+        });
+        origin_failed
     }
 }
 
@@ -264,7 +284,14 @@ fn handle_client(
             let _ = send_error(&mut stream, &state, "expected Hello as first message");
             return;
         }
-        Err(_) => return,
+        Err(error) => {
+            let _ = send_error(
+                &mut stream,
+                &state,
+                &format!("invalid handshake frame: {error}"),
+            );
+            return;
+        }
     };
 
     let (server_id, runtime_epoch, session_id) = {
@@ -304,7 +331,33 @@ fn handle_client(
     }
     let _ = stream.set_handshake_timeout(None);
 
-    while let Ok(message) = murmur_core::protocol::read_message(&mut stream) {
+    let mut writer_stream = match stream.try_clone() {
+        Ok(stream) => stream,
+        Err(_) => return,
+    };
+    let (outbound, outbound_rx) = mpsc::channel();
+    let writer = thread::spawn(move || {
+        while let Ok(message) = outbound_rx.recv() {
+            if send_message(&mut writer_stream, &message).is_err() {
+                break;
+            }
+        }
+    });
+
+    loop {
+        let message = match murmur_core::protocol::read_message(&mut stream) {
+            Ok(message) => message,
+            Err(error @ (FramingError::Oversized { .. } | FramingError::Codec(_))) => {
+                let _ = queue_message(
+                    &outbound,
+                    ServerMessage::Error {
+                        message: format!("invalid client frame: {error}"),
+                    },
+                );
+                break;
+            }
+            Err(_) => break,
+        };
         let should_close = match message {
             ClientMessage::SnapshotRequest { session_id } => {
                 let response = {
@@ -317,30 +370,39 @@ fn handle_client(
                         ServerMessage::Bootstrap(state.bootstrap())
                     }
                 };
-                send_message(&mut stream, &response).is_err()
+                queue_message(&outbound, response)
             }
             ClientMessage::Subscribe {
                 session_id,
                 after_sequence,
             } => {
-                let responses = {
-                    let state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().expect("server state lock poisoned");
+                let (responses, should_subscribe) = {
                     if session_id != state.session_id {
-                        vec![ServerMessage::Error {
-                            message: "unknown Session".into(),
-                        }]
+                        (
+                            vec![ServerMessage::Error {
+                                message: "unknown Session".into(),
+                            }],
+                            false,
+                        )
                     } else if after_sequence > state.sequence {
-                        vec![ServerMessage::Error {
-                            message: "event cursor is ahead of the server".into(),
-                        }]
+                        (
+                            vec![ServerMessage::Error {
+                                message: "event cursor is ahead of the server".into(),
+                            }],
+                            false,
+                        )
                     } else if state
                         .events
                         .front()
                         .is_some_and(|event| after_sequence.saturating_add(1) < event.sequence)
                     {
-                        vec![ServerMessage::Error {
-                            message: "event cursor expired; request a fresh Bootstrap".into(),
-                        }]
+                        (
+                            vec![ServerMessage::Error {
+                                message: "event cursor expired; request a fresh Bootstrap".into(),
+                            }],
+                            false,
+                        )
                     } else {
                         let mut responses = state
                             .events
@@ -358,38 +420,38 @@ fn handle_client(
                             session_id: state.session_id,
                             sequence: state.sequence,
                         });
-                        responses
+                        (responses, true)
                     }
                 };
-                let mut failed = false;
-                for response in responses {
-                    if send_message(&mut stream, &response).is_err() {
-                        failed = true;
-                        break;
-                    }
+                if should_subscribe {
+                    state.subscribers.insert(client_id, outbound.clone());
+                }
+                let failed = responses
+                    .into_iter()
+                    .any(|response| queue_message(&outbound, response));
+                if failed {
+                    state.subscribers.remove(&client_id);
                 }
                 failed
             }
             ClientMessage::Ping { server_id, nonce } => {
                 let state = state.lock().expect("server state lock poisoned");
                 if server_id != state.server_id {
-                    send_message(
-                        &mut stream,
-                        &ServerMessage::Error {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::Error {
                             message: "unknown Server".into(),
                         },
                     )
-                    .is_err()
                 } else {
-                    send_message(
-                        &mut stream,
-                        &ServerMessage::Pong {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::Pong {
                             server_id,
                             nonce,
                             sequence: state.sequence,
                         },
                     )
-                    .is_err()
                 }
             }
             ClientMessage::AcquireControl { session_id } => {
@@ -417,7 +479,7 @@ fn handle_client(
                         }
                     }
                 };
-                send_message(&mut stream, &response).is_err()
+                queue_message(&outbound, response)
             }
             ClientMessage::ReleaseControl { session_id } => {
                 let response = {
@@ -440,55 +502,53 @@ fn handle_client(
                         }
                     }
                 };
-                send_message(&mut stream, &response).is_err()
+                queue_message(&outbound, response)
             }
             ClientMessage::CreateWorkspace {
                 server_id,
                 session_id,
                 root_directory,
             } => {
-                let response = {
-                    let mut state = state.lock().expect("server state lock poisoned");
-                    if server_id != state.server_id {
+                let mut state = state.lock().expect("server state lock poisoned");
+                if server_id != state.server_id {
+                    queue_message(
+                        &outbound,
                         ServerMessage::Error {
                             message: "unknown Server".into(),
-                        }
-                    } else if session_id != state.session_id {
+                        },
+                    )
+                } else if session_id != state.session_id {
+                    queue_message(
+                        &outbound,
                         ServerMessage::Error {
                             message: "unknown Session".into(),
-                        }
-                    } else if state.active_controller != Some(client_id) {
+                        },
+                    )
+                } else if state.active_controller != Some(client_id) {
+                    queue_message(
+                        &outbound,
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
                             reason: "acquire Session control before mutating layout".into(),
-                        }
-                    } else {
-                        state.session.create_workspace(root_directory);
-                        let sequence = state.sequence.saturating_add(1);
-                        let event = state.record_snapshot_change();
-                        ServerMessage::Event {
-                            server_id: state.server_id,
-                            session_id: state.session_id,
-                            sequence,
-                            event,
-                        }
-                    }
-                };
-                send_message(&mut stream, &response).is_err()
+                        },
+                    )
+                } else {
+                    state.session.create_workspace(root_directory);
+                    state.publish_snapshot_change(client_id, &outbound)
+                }
             }
             ClientMessage::StopServer { server_id } => {
                 let known_server = state.lock().expect("server state lock poisoned").server_id;
                 if server_id != known_server {
-                    send_message(
-                        &mut stream,
-                        &ServerMessage::Error {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::Error {
                             message: "unknown Server".into(),
                         },
                     )
-                    .is_err()
                 } else {
-                    let _ = send_message(&mut stream, &ServerMessage::ServerStopping);
+                    let _ = queue_message(&outbound, ServerMessage::ServerStopping);
                     stop.store(true, Ordering::Release);
                     true
                 }
@@ -502,9 +562,17 @@ fn handle_client(
     }
 
     let mut state = state.lock().expect("server state lock poisoned");
+    state.subscribers.remove(&client_id);
     if state.active_controller == Some(client_id) {
         state.active_controller = None;
     }
+    drop(state);
+    drop(outbound);
+    let _ = writer.join();
+}
+
+fn queue_message(outbound: &mpsc::Sender<ServerMessage>, message: ServerMessage) -> bool {
+    outbound.send(message).is_err()
 }
 
 fn send_bootstrap(stream: &mut EndpointStream, state: &Arc<Mutex<RuntimeState>>) -> io::Result<()> {
@@ -566,37 +634,29 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
         }
     }
 
-    let executable = std::env::current_exe()?;
-    let sibling = executable
-        .parent()
-        .map(|parent| {
-            parent.join(if cfg!(windows) {
-                "murmur-server.exe"
-            } else {
-                "murmur-server"
-            })
-        })
-        .unwrap_or_else(|| PathBuf::from("murmur-server"));
-    let (server_executable, server_args) = if sibling.is_file() {
-        (sibling, Vec::new())
-    } else {
-        (executable, vec!["--server".to_string()])
-    };
-    let mut command = std::process::Command::new(server_executable);
+    let server_executable = resolve_server_executable()?;
+    let mut command = std::process::Command::new(&server_executable);
     command
-        .args(server_args)
         .arg("--endpoint")
         .arg(endpoint.as_local_path().expect("local endpoint"))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("failed to start murmur-server: {error}"),
-            )
-        })?;
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.spawn().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to start murmur-server at {}: {error}",
+                server_executable.display()
+            ),
+        )
+    })?;
 
     for _ in 0..150 {
         if let Ok(stream) = endpoint.connect()
@@ -610,6 +670,35 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
         io::ErrorKind::TimedOut,
         "murmur-server did not become ready",
     ))
+}
+
+fn resolve_server_executable() -> io::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("MURMUR_SERVER_EXECUTABLE") {
+        let path = PathBuf::from(path);
+        return path.is_file().then_some(path).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "MURMUR_SERVER_EXECUTABLE does not name a file",
+            )
+        });
+    }
+
+    let current_executable = std::env::current_exe()?;
+    let server_name = if cfg!(windows) {
+        "murmur-server.exe"
+    } else {
+        "murmur-server"
+    };
+    let sibling = current_executable
+        .parent()
+        .map(|parent| parent.join(server_name))
+        .unwrap_or_else(|| PathBuf::from(server_name));
+    sibling.is_file().then_some(sibling).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "murmur-server is not installed beside the GUI; build or install the standalone server",
+        )
+    })
 }
 
 fn probe_protocol(stream: EndpointStream) -> io::Result<()> {
@@ -764,6 +853,26 @@ mod tests {
     }
 
     #[test]
+    fn oversized_client_frame_is_rejected_with_a_clear_error() {
+        let (handle, endpoint, thread) = start();
+        let mut stream = connect_and_bootstrap(&endpoint);
+        let claimed = (murmur_core::protocol::MAX_FRAME_SIZE as u32) + 1;
+        std::io::Write::write_all(&mut stream, &claimed.to_le_bytes()).unwrap();
+
+        let response: ServerMessage = murmur_core::protocol::read_message(&mut stream).unwrap();
+        assert!(matches!(
+            response,
+            ServerMessage::Error { message }
+                if message.contains("exceeds maximum")
+        ));
+
+        handle.stop();
+        drop(stream);
+        thread.join().unwrap().unwrap();
+        let _ = endpoint.cleanup();
+    }
+
+    #[test]
     fn controller_is_exclusive_and_released_on_disconnect() {
         let (handle, endpoint, thread) = start();
         let mut first = connect_and_bootstrap(&endpoint);
@@ -887,6 +996,67 @@ mod tests {
         handle.stop();
         drop(first);
         drop(second);
+        thread.join().unwrap().unwrap();
+        let _ = endpoint.cleanup();
+    }
+
+    #[test]
+    fn subscribed_client_receives_future_events_in_sequence_order() {
+        let (handle, endpoint, thread) = start();
+        let mut controller = connect_and_bootstrap(&endpoint);
+        let mut subscriber = connect_and_bootstrap(&endpoint);
+        let server_id = handle.server_id();
+        let session_id = handle.state.lock().unwrap().session_id;
+
+        murmur_core::protocol::write_message(
+            &mut subscriber,
+            &ClientMessage::Subscribe {
+                session_id,
+                after_sequence: 0,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap(),
+            ServerMessage::Subscribed { sequence: 0, .. }
+        ));
+
+        murmur_core::protocol::write_message(
+            &mut controller,
+            &ClientMessage::AcquireControl { session_id },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
+            ServerMessage::ControlGranted { .. }
+        ));
+
+        for expected_sequence in 1..=2 {
+            murmur_core::protocol::write_message(
+                &mut controller,
+                &ClientMessage::CreateWorkspace {
+                    server_id,
+                    session_id,
+                    root_directory: std::env::temp_dir(),
+                },
+            )
+            .unwrap();
+            assert!(matches!(
+                murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
+                ServerMessage::Event { sequence, .. } if sequence == expected_sequence
+            ));
+        }
+
+        for expected_sequence in 1..=2 {
+            assert!(matches!(
+                murmur_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap(),
+                ServerMessage::Event { sequence, .. } if sequence == expected_sequence
+            ));
+        }
+
+        handle.stop();
+        drop(controller);
+        drop(subscriber);
         thread.join().unwrap().unwrap();
         let _ = endpoint.cleanup();
     }
