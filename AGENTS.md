@@ -24,10 +24,10 @@ Murmur 用原生 GUI 解决:跨端、轻量、快。
 herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio、interprocess、bincode+serde、ratatui、server/client 架构、Apache-2.0。
 
 - **许可证:Apache-2.0**(与 herdr 一致)。⚠️ 因此 Zed 的 `terminal`/`terminal_view`(GPL-3.0)只能参考思路,禁止复制代码。
-- **VT 终端模拟:`alacritty_terminal`**(唯一不对齐项)— 纯 Rust、免 Zig/FFI、有 Zed 的 GPUI 渲染先例;herdr 用 libghostty-vt 是 TUI 场景的选择。
+- **VT 终端模拟:`alacritty_terminal`**— 纯 Rust、免 Zig/FFI、有 Zed 的 GPUI 渲染先例;herdr 用 libghostty-vt 是 TUI 场景的选择。
 - **PTY:`portable-pty`**(对齐 herdr;Unix pty / Windows ConPTY)。
-- **异步:core 用 tokio**(对齐 herdr);**GUI 用 GPUI 自带 executor**,两者以 channel 桥接。
-- **IPC:`interprocess`**(对齐;unix socket / named pipe 统一抽象)。
+- **异步:server/core 用 tokio**(对齐 herdr);**GUI 用 GPUI 自带 executor**,两者通过协议连接。
+- **传输:版本化协议 over TCP**。本地 server 默认只监听 loopback;跨机器 MVP 通过 SSH tunnel 或显式 trusted endpoint 连接,认证/授权后置。
 - **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
 - **终端渲染:自研 GPUI element**(项目最大自研件)— gpui-component 无终端组件。
 - **布局:gpui-component 的 Dock** → 映射 workspace/tab/pane 模型。
@@ -37,14 +37,15 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 
 ### 架构与工程结构
 
-对齐 herdr 的 server/client 思路,但第一版不做进程分离,只做 crate 分层留门:
+Murmur 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `murmur-server` 后连接:
 
 ```
-crates/murmur-core   # PTY、VT、agent 检测、会话、协议 — 无 GUI 依赖,headless 可测
-crates/murmur-gui    # GPUI 渲染层(终端 element、Dock 布局)
+crates/murmur-core    # 领域、协议、PTY、VT、agent 检测、Git — 无 GUI 依赖,headless 可测
+crates/murmur-server  # 独立进程,拥有 Session、Terminal runtime、持久化与连接
+crates/murmur-gui     # 纯 client,连接一个或多个 server,负责 GPUI 渲染
 ```
 
-后期把 core 拆成后台 server(interprocess socket + JSON),GUI 变成客户端,即获得 herdr 的会话保活/远程重连能力。
+GUI 关闭只断开连接。server、PTY、agent 与 Session 继续运行;重新打开 GUI 时优先连接已有本地 server。停止 server 是显式操作。
 
 ### 开发环境(双机)
 
@@ -79,4 +80,5 @@ Single-context:根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md
 ## 架构原则
 
 - GUI 只做编排与呈现,对话/工具循环交给嵌入的 agent CLI 子进程,不重复造轮子
+- server 是 Session、PTY、VT、agent 与 Git/worktree runtime 的唯一所有者;GUI 的 local/remote 功能走同一协议
 - 保持轻量:避免 webview、避免不必要的依赖

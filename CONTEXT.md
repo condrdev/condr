@@ -4,8 +4,16 @@ Murmur organizes terminal-first work across projects while recognizing agent CLI
 
 ## Language
 
+**Server**:
+A long-lived Murmur runtime that owns one or more Sessions and their Terminals. A local Server is the same Server started on the GUI machine; closing a Client does not stop it or its work.
+_Avoid_: Local backend, GUI runtime
+
+**Client**:
+The native GUI that connects to one or more Servers and presents their Sessions. It does not own Terminal processes.
+_Avoid_: Server, runtime owner
+
 **Session**:
-The top-level saved working arrangement containing zero or more Workspaces and the current selection. It is not an agent conversation.
+A Server-owned working arrangement containing zero or more Workspaces and the current selection. It is not an agent conversation.
 _Avoid_: Agent session, conversation
 
 **Start Page**:
@@ -39,5 +47,5 @@ A linked Git worktree created by Murmur and explicitly associated with its paren
 _Avoid_: Git Workspace, any detected worktree
 
 **Session Snapshot**:
-A saved description of Session structure, including an empty Session, used to rebuild the working arrangement on a later launch. It does not represent terminal history, live processes, or agent conversations.
+A durable description of Session structure, including an empty Session, used to rebuild the arrangement after a Server restart. It does not represent terminal history, live processes, or agent conversations; reconnecting a Client to a running Server instead receives the live Session layout and Pane views, including Agents that are still running.
 _Avoid_: Backup, process snapshot

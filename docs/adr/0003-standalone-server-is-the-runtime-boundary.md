@@ -1,0 +1,3 @@
+# Standalone Server Is the Runtime Boundary
+
+Murmur always runs Sessions, PTYs, VT state, agents, and Git/worktree operations in a standalone `murmur-server`; the GUI is a client of one or more servers. Local mode only discovers or starts that same server on the GUI machine and then uses the same versioned protocol as a remote connection, so closing the GUI disconnects without stopping work and reopening it live-attaches to the authoritative Session/layout and current Pane views, including running Agents. This adds process and transport work before the terminal slice, but avoids a second local runtime whose ownership and behavior would diverge; network listeners default to loopback while application authentication and authorization remain deferred.
