@@ -27,7 +27,7 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 - **VT 终端模拟:`alacritty_terminal`**— 纯 Rust、免 Zig/FFI、有 Zed 的 GPUI 渲染先例;herdr 用 libghostty-vt 是 TUI 场景的选择。
 - **PTY:`portable-pty`**(对齐 herdr;Unix pty / Windows ConPTY)。
 - **异步:server/core 用 tokio**(对齐 herdr);**GUI 用 GPUI 自带 executor**,两者通过协议连接。
-- **传输:版本化协议 over TCP**。本地 server 默认只监听 loopback;跨机器 MVP 通过 SSH tunnel 或显式 trusted endpoint 连接,认证/授权后置。
+- **传输:版本化二进制协议 over transport adapters**。协议使用 `bincode + serde` 长度前缀帧与严格版本握手;本地优先使用 `interprocess` 的 Unix domain socket / Windows named pipe,远程 MVP 通过 SSH stdio bridge 或显式 trusted TCP endpoint 接入同一协议,认证/授权后置。Server 默认只暴露本地私有 endpoint,不监听公网。
 - **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
 - **终端渲染:自研 GPUI element**(项目最大自研件)— gpui-component 无终端组件。
 - **布局:gpui-component 的 Dock** → 映射 workspace/tab/pane 模型。
@@ -80,5 +80,5 @@ Single-context:根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md
 ## 架构原则
 
 - GUI 只做编排与呈现,对话/工具循环交给嵌入的 agent CLI 子进程,不重复造轮子
-- server 是 Session、PTY、VT、agent 与 Git/worktree runtime 的唯一所有者;GUI 的 local/remote 功能走同一协议
+- server 是 Session、PTY、VT、agent 与 Git/worktree runtime 的唯一所有者;GUI 的 local/remote 功能走同一协议。Client 重连先获取 Server/Session 的权威结构快照和各 Pane 的 live terminal view,再订阅增量事件;GUI 关闭不会停止 server 或其子进程。
 - 保持轻量:避免 webview、避免不必要的依赖
