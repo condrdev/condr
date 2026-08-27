@@ -1,5 +1,5 @@
 [package]
-name = "murmur-gui"
+name = "murmur-server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,11 +8,9 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component.workspace = true
+interprocess.workspace = true
 murmur-core = { path = "../murmur-core" }
-murmur-server = { path = "../murmur-server" }
+tokio.workspace = true
 
 [lints]
 workspace = true
