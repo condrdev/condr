@@ -3830,6 +3830,10 @@ dependencies = [
 [[package]]
 name = "murmur-core"
 version = "0.1.0"
+dependencies = [
+ "bincode",
+ "serde",
+]
 
 [[package]]
 name = "murmur-gui"
