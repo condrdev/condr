@@ -8,7 +8,9 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+alacritty_terminal.workspace = true
 bincode.workspace = true
+portable-pty.workspace = true
 serde.workspace = true
 
 [lints]
