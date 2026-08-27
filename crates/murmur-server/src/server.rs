@@ -344,6 +344,7 @@ fn handle_client(
         }
     });
 
+    let mut stopping_server = false;
     loop {
         let message = match murmur_core::protocol::read_message(&mut stream) {
             Ok(message) => message,
@@ -549,7 +550,7 @@ fn handle_client(
                     )
                 } else {
                     let _ = queue_message(&outbound, ServerMessage::ServerStopping);
-                    stop.store(true, Ordering::Release);
+                    stopping_server = true;
                     true
                 }
             }
@@ -569,6 +570,9 @@ fn handle_client(
     drop(state);
     drop(outbound);
     let _ = writer.join();
+    if stopping_server {
+        stop.store(true, Ordering::Release);
+    }
 }
 
 fn queue_message(outbound: &mpsc::Sender<ServerMessage>, message: ServerMessage) -> bool {
