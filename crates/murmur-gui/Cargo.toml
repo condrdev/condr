@@ -1,0 +1,17 @@
+[package]
+name = "murmur-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui-component.workspace = true
+murmur-core = { path = "../murmur-core" }
+
+[lints]
+workspace = true
