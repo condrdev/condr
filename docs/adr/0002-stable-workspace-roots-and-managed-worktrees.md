@@ -1,0 +1,3 @@
+# Stable Workspace Roots and Managed Worktrees
+
+Murmur keeps each Workspace Root Directory stable instead of deriving its identity from a live Pane cwd. Git metadata is optional and derived, while permission to remove a checkout comes only from explicit Managed Worktree state created by Murmur. Close Workspace affects runtime state only; Remove Worktree is separate, refuses dirty or untracked files, and does not delete the branch. This gives folder-oriented GUI identity and conservative deletion semantics at the cost of not following Herdr's dynamic identity, parent-group close cascade, or forced worktree removal.
