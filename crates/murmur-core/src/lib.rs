@@ -8,6 +8,10 @@ pub use session::{
     WorkspaceId,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
-pub use terminal::{CommandBuilder, TerminalRuntime, TerminalSize};
+pub use terminal::{
+    CommandBuilder, TerminalCell, TerminalColor, TerminalCommand, TerminalCursor,
+    TerminalCursorShape, TerminalKey, TerminalModifiers, TerminalPosition, TerminalRuntime,
+    TerminalScroll, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
+};
 
 pub const APP_NAME: &str = "Murmur";

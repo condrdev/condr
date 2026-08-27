@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SessionSnapshot;
+use crate::{PaneId, SessionSnapshot, TerminalCommand, TerminalView};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_SIZE: usize = 2 * 1024 * 1024;
@@ -55,6 +55,12 @@ pub enum ClientMessage {
         session_id: SessionId,
         root_directory: PathBuf,
     },
+    Terminal {
+        server_id: ServerId,
+        session_id: SessionId,
+        pane_id: PaneId,
+        command: TerminalCommand,
+    },
     StopServer {
         server_id: ServerId,
     },
@@ -68,11 +74,21 @@ pub struct SessionBootstrap {
     pub session_id: SessionId,
     pub sequence: u64,
     pub snapshot: SessionSnapshot,
+    pub terminals: Vec<PaneTerminalSnapshot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PaneTerminalSnapshot {
+    pub pane_id: PaneId,
+    pub view: TerminalView,
+    pub exited: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SessionEvent {
     SnapshotChanged,
+    TerminalChanged { pane_id: PaneId, view: TerminalView },
+    TerminalExited { pane_id: PaneId, view: TerminalView },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -113,6 +129,10 @@ pub enum ServerMessage {
         server_id: ServerId,
         session_id: SessionId,
         reason: String,
+    },
+    TerminalCopied {
+        pane_id: PaneId,
+        text: Option<String>,
     },
     ServerStopping,
     Error {
