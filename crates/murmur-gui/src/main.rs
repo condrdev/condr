@@ -1807,11 +1807,16 @@ impl Murmur {
         }
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some((key, pane_id)) = self.target_pane else {
             return;
         };
         let stroke = &event.keystroke;
+        if let Some(action) = fixed_shortcut(stroke) {
+            window.dispatch_action(action, cx);
+            cx.stop_propagation();
+            return;
+        }
         let modifiers = stroke.modifiers;
         let copy_paste = modifiers.platform || (modifiers.control && modifiers.shift);
         if copy_paste && stroke.key == "c" {
@@ -2286,6 +2291,36 @@ fn home_directory() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
 
+fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
+    let modifiers = stroke.modifiers;
+    if modifiers.platform || modifiers.function {
+        return None;
+    }
+    match (
+        modifiers.control,
+        modifiers.alt,
+        modifiers.shift,
+        stroke.key.as_str(),
+    ) {
+        (true, false, true, "p") => Some(Box::new(OpenCommandPalette)),
+        (true, false, true, "t") => Some(Box::new(NewTab)),
+        (true, false, true, "w") => Some(Box::new(ClosePane)),
+        (true, false, false, "tab") => Some(Box::new(NextTab)),
+        (true, false, true, "tab") => Some(Box::new(PreviousTab)),
+        (false, true, true, "=") => Some(Box::new(SplitRight)),
+        (false, true, true, "-") => Some(Box::new(SplitDown)),
+        (false, true, false, "left") => Some(Box::new(FocusLeft)),
+        (false, true, false, "right") => Some(Box::new(FocusRight)),
+        (false, true, false, "up") => Some(Box::new(FocusUp)),
+        (false, true, false, "down") => Some(Box::new(FocusDown)),
+        (false, true, true, "left") => Some(Box::new(ResizeLeft)),
+        (false, true, true, "right") => Some(Box::new(ResizeRight)),
+        (false, true, true, "up") => Some(Box::new(ResizeUp)),
+        (false, true, true, "down") => Some(Box::new(ResizeDown)),
+        _ => None,
+    }
+}
+
 fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-shift-p", OpenCommandPalette, Some("Murmur")),
@@ -2325,4 +2360,33 @@ fn main() {
         })
         .detach();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::Keystroke;
+
+    use super::{FocusLeft, NextTab, OpenCommandPalette, PreviousTab, SplitRight, fixed_shortcut};
+
+    #[test]
+    fn terminal_shortcut_fallback_maps_only_fixed_chords() {
+        let action = |keys: &str| fixed_shortcut(&Keystroke::parse(keys).unwrap());
+
+        assert!(
+            action("ctrl-shift-p")
+                .unwrap()
+                .as_any()
+                .is::<OpenCommandPalette>()
+        );
+        assert!(action("ctrl-tab").unwrap().as_any().is::<NextTab>());
+        assert!(
+            action("ctrl-shift-tab")
+                .unwrap()
+                .as_any()
+                .is::<PreviousTab>()
+        );
+        assert!(action("alt-shift-=").unwrap().as_any().is::<SplitRight>());
+        assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
+        assert!(action("ctrl-p").is_none());
+    }
 }
