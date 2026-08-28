@@ -11,7 +11,6 @@ use gpui::{
     TextStyle, UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb,
     size,
 };
-use gpui_component::ActiveTheme as _;
 use murmur_core::protocol::RuntimeEpoch;
 use murmur_core::{
     PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSelection, TerminalSide,
@@ -30,6 +29,48 @@ const HIDDEN: u16 = 1 << 8;
 const STRIKEOUT: u16 = 1 << 9;
 const LEADING_WIDE_CHAR_SPACER: u16 = 1 << 10;
 const ALL_UNDERLINES: u16 = 0b0111_1000_0000_1000;
+
+#[derive(Clone, PartialEq)]
+struct TerminalPalette {
+    background: Hsla,
+    foreground: Hsla,
+    cursor: Hsla,
+    selection: Hsla,
+    normal: [Hsla; 8],
+    bright: [Hsla; 8],
+}
+
+impl TerminalPalette {
+    // Fixed dark palette until terminal theme configuration is available.
+    fn temporary_dark() -> Self {
+        Self {
+            background: rgb(0x0d1117).into(),
+            foreground: rgb(0xc9d1d9).into(),
+            cursor: rgb(0xf0f6fc).into(),
+            selection: rgb(0x264f78).into(),
+            normal: [
+                rgb(0x484f58).into(),
+                rgb(0xff7b72).into(),
+                rgb(0x3fb950).into(),
+                rgb(0xd29922).into(),
+                rgb(0x58a6ff).into(),
+                rgb(0xbc8cff).into(),
+                rgb(0x39c5cf).into(),
+                rgb(0xb1bac4).into(),
+            ],
+            bright: [
+                rgb(0x6e7681).into(),
+                rgb(0xffa198).into(),
+                rgb(0x56d364).into(),
+                rgb(0xe3b341).into(),
+                rgb(0x79c0ff).into(),
+                rgb(0xd2a8ff).into(),
+                rgb(0x56d4dd).into(),
+                rgb(0xffffff).into(),
+            ],
+        }
+    }
+}
 
 pub(crate) struct TerminalElement {
     view: Entity<Murmur>,
@@ -54,9 +95,7 @@ struct TerminalRenderCacheKey {
     size: TerminalSize,
     style: TextStyle,
     font_size: Pixels,
-    foreground: Hsla,
-    background: Hsla,
-    primary: Hsla,
+    palette: TerminalPalette,
 }
 
 #[derive(Default)]
@@ -285,7 +324,8 @@ impl Element for TerminalElement {
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        let mut quads = vec![fill(bounds, cx.theme().background)];
+        let palette = TerminalPalette::temporary_dark();
+        let mut quads = vec![fill(bounds, palette.background)];
         let mut cells = Vec::with_capacity(self.props.terminal.cells.len());
         let cache_key = TerminalRenderCacheKey {
             runtime_epoch: self.props.runtime_epoch,
@@ -293,9 +333,7 @@ impl Element for TerminalElement {
             size: self.props.terminal.size,
             style: style.clone(),
             font_size,
-            foreground: cx.theme().foreground,
-            background: cx.theme().background,
-            primary: cx.theme().primary,
+            palette: palette.clone(),
         };
         let mut render_cache = self.props.render_cache.borrow_mut();
         if render_cache.key.as_ref() != Some(&cache_key) {
@@ -316,15 +354,15 @@ impl Element for TerminalElement {
                     ),
                     cell_size,
                 );
-                let mut foreground = terminal_color(cell.foreground, true, cx);
-                let mut background = terminal_color(cell.background, false, cx);
+                let mut foreground = terminal_color(cell.foreground, true, &palette);
+                let mut background = terminal_color(cell.background, false, &palette);
                 if cell.flags & INVERSE != 0 {
                     std::mem::swap(&mut foreground, &mut background);
                 }
                 if cell.flags & DIM != 0 {
                     foreground = foreground.opacity(0.65);
                 }
-                if background != cx.theme().background {
+                if background != palette.background {
                     quads.push(fill(cell_bounds, background));
                 }
                 if cell.flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0
@@ -392,7 +430,7 @@ impl Element for TerminalElement {
                 self.props.terminal.size,
                 bounds,
                 cell_size,
-                cx.theme().selection,
+                palette.selection,
             );
         }
 
@@ -404,7 +442,7 @@ impl Element for TerminalElement {
                 ),
                 cell_size,
             );
-            let cursor_color = terminal_color(TerminalColor::Named(258), true, cx);
+            let cursor_color = terminal_color(TerminalColor::Named(258), true, &palette);
             match cursor.shape {
                 TerminalCursorShape::Block => {
                     quads.push(fill(cursor_bounds, cursor_color.opacity(0.55)))
@@ -639,30 +677,32 @@ fn terminal_position(
     }
 }
 
-fn terminal_color(color: TerminalColor, foreground: bool, cx: &App) -> Hsla {
+fn terminal_color(color: TerminalColor, foreground: bool, palette: &TerminalPalette) -> Hsla {
     match color {
         TerminalColor::Rgb { red, green, blue } => {
             rgb((u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)).into()
         }
-        TerminalColor::Indexed(index) => indexed_color(index),
-        TerminalColor::Named(256 | 267) => cx.theme().foreground,
-        TerminalColor::Named(257) => cx.theme().background,
-        TerminalColor::Named(258) => cx.theme().primary,
-        TerminalColor::Named(index @ 259..=266) => indexed_color((index - 259) as u8).opacity(0.65),
-        TerminalColor::Named(268) => cx.theme().foreground.opacity(0.65),
-        TerminalColor::Named(index @ 0..=15) => indexed_color(index as u8),
-        TerminalColor::Named(_) if foreground => cx.theme().foreground,
-        TerminalColor::Named(_) => cx.theme().background,
+        TerminalColor::Indexed(index) => indexed_color(index, palette),
+        TerminalColor::Named(256 | 267) => palette.foreground,
+        TerminalColor::Named(257) => palette.background,
+        TerminalColor::Named(258) => palette.cursor,
+        TerminalColor::Named(index @ 259..=266) => {
+            palette.normal[usize::from(index - 259)].opacity(0.65)
+        }
+        TerminalColor::Named(268) => palette.foreground.opacity(0.65),
+        TerminalColor::Named(index @ 0..=15) => indexed_color(index as u8, palette),
+        TerminalColor::Named(_) if foreground => palette.foreground,
+        TerminalColor::Named(_) => palette.background,
     }
 }
 
-fn indexed_color(index: u8) -> Hsla {
-    const ANSI: [u32; 16] = [
-        0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6, 0x666666,
-        0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
-    ];
+fn indexed_color(index: u8, palette: &TerminalPalette) -> Hsla {
     if index < 16 {
-        return rgb(ANSI[usize::from(index)]).into();
+        return if index < 8 {
+            palette.normal[usize::from(index)]
+        } else {
+            palette.bright[usize::from(index - 8)]
+        };
     }
     let (red, green, blue) = if index < 232 {
         let value = index - 16;
@@ -685,6 +725,40 @@ fn color_cube(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temporary_palette_resolves_terminal_colors_independently_from_ui_theme() {
+        let palette = TerminalPalette::temporary_dark();
+
+        assert_eq!(
+            terminal_color(TerminalColor::Named(256), true, &palette),
+            palette.foreground
+        );
+        assert_eq!(
+            terminal_color(TerminalColor::Named(257), false, &palette),
+            palette.background
+        );
+        assert_eq!(
+            terminal_color(TerminalColor::Indexed(1), true, &palette),
+            palette.normal[1]
+        );
+        assert_eq!(
+            terminal_color(TerminalColor::Indexed(9), true, &palette),
+            palette.bright[1]
+        );
+        assert_eq!(
+            terminal_color(
+                TerminalColor::Rgb {
+                    red: 0x12,
+                    green: 0x34,
+                    blue: 0x56,
+                },
+                true,
+                &palette,
+            ),
+            rgb(0x123456).into()
+        );
+    }
 
     #[test]
     fn mouse_points_map_to_clamped_terminal_cells() {
