@@ -976,7 +976,8 @@ impl Murmur {
         else {
             return;
         };
-        if connection.can_mutate()
+        let read_only = matches!(&command, TerminalCommand::Copy { .. });
+        if (read_only || connection.can_mutate())
             && !connection
                 .terminals
                 .get(&pane_id)
@@ -1857,20 +1858,29 @@ impl Murmur {
         key: ConnectionKey,
         pane_id: PaneId,
         position: TerminalPosition,
+        click_count: usize,
         cx: &mut Context<Self>,
     ) {
-        let display_offset = self
-            .terminal(key, pane_id)
-            .map_or(0, |terminal| terminal.view.display_offset);
+        let Some(terminal) = self.terminal(key, pane_id) else {
+            return;
+        };
+        let display_offset = terminal.view.display_offset;
+        let multi_click_range = match click_count {
+            2 => terminal
+                .view
+                .word_selection_at(position.row, position.column),
+            3.. => terminal.view.line_selection_at(position.row),
+            _ => None,
+        };
         self.terminal_selection = Some(LocalTerminalSelection {
             connection_key: key,
             pane_id,
-            range: TerminalSelection {
+            range: multi_click_range.unwrap_or(TerminalSelection {
                 start: position,
                 end: position,
                 display_offset,
-            },
-            dragging: true,
+            }),
+            dragging: click_count == 1,
         });
         cx.notify();
     }
@@ -1921,6 +1931,37 @@ impl Murmur {
             .map(|selection| selection.range)
     }
 
+    fn copy_terminal_selection(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(selection) = self.selection_for(key, pane_id) else {
+            return false;
+        };
+        let Some(columns) = self
+            .terminal(key, pane_id)
+            .map(|terminal| terminal.view.size.columns)
+        else {
+            return false;
+        };
+        if selection.selected_cell_range(columns).is_none() {
+            return false;
+        }
+
+        self.terminal_command(key, pane_id, TerminalCommand::Copy { selection });
+        self.clear_selection(cx);
+        true
+    }
+
+    fn paste_into_terminal(&mut self, key: ConnectionKey, pane_id: PaneId, cx: &mut Context<Self>) {
+        self.clear_selection(cx);
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            self.terminal_command(key, pane_id, TerminalCommand::Paste(text));
+        }
+    }
+
     fn clear_selection(&mut self, cx: &mut Context<Self>) {
         if self.terminal_selection.take().is_some() {
             cx.notify();
@@ -1955,19 +1996,23 @@ impl Murmur {
             return;
         }
         let modifiers = stroke.modifiers;
-        let copy_paste = modifiers.platform || (modifiers.control && modifiers.shift);
-        if copy_paste && stroke.key == "c" {
-            if let Some(selection) = self.selection_for(key, pane_id) {
-                self.terminal_command(key, pane_id, TerminalCommand::Copy { selection });
-            }
+        let explicit_copy_paste = modifiers.platform || (modifiers.control && modifiers.shift);
+        let retained_selection_copy = modifiers.control
+            && !modifiers.alt
+            && self
+                .selection_for(key, pane_id)
+                .and_then(|selection| {
+                    let columns = self.terminal(key, pane_id)?.view.size.columns;
+                    selection.selected_cell_range(columns)
+                })
+                .is_some();
+        if stroke.key == "c" && (explicit_copy_paste || retained_selection_copy) {
+            self.copy_terminal_selection(key, pane_id, cx);
             cx.stop_propagation();
             return;
         }
-        if copy_paste && stroke.key == "v" {
-            self.clear_selection(cx);
-            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                self.terminal_command(key, pane_id, TerminalCommand::Paste(text));
-            }
+        if explicit_copy_paste && stroke.key == "v" {
+            self.paste_into_terminal(key, pane_id, cx);
             cx.stop_propagation();
             return;
         }
@@ -2681,12 +2726,12 @@ mod tests {
         use std::time::{Duration, Instant};
 
         use gpui::{
-            AppContext as _, Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext,
-            point, px, size,
+            AppContext as _, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
+            TestAppContext, VisualTestContext, point, px, size,
         };
         use gpui_component::{Root, WindowExt as _};
         use murmur_core::protocol::LayoutCommand;
-        use murmur_core::{PaneId, TabId};
+        use murmur_core::{PaneId, TabId, TerminalCommand};
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{
@@ -2903,7 +2948,7 @@ mod tests {
             window.update(|window, cx| {
                 _ = window.draw(cx);
             });
-            window.simulate_keystrokes("down down enter");
+            window.simulate_keystrokes("down enter");
             window.run_until_parked();
             assert!(window.update(|window, cx| window.has_active_dialog(cx)));
             window.update(|window, cx| {
@@ -3115,6 +3160,117 @@ mod tests {
         }
 
         #[test]
+        fn terminal_double_click_and_ctrl_c_copy_a_word() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    });
+                });
+            });
+
+            let mut pane_id = None;
+            assert!(wait_until(window, |window| {
+                pane_id = window.read(|app| {
+                    view.read(app)
+                        .active_session()?
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().focused_pane().id())
+                });
+                pane_id.is_some_and(|pane_id| {
+                    window.debug_bounds(terminal_selector(pane_id)).is_some()
+                })
+            }));
+            let pane_id = pane_id.unwrap();
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.terminal_command(
+                        1,
+                        pane_id,
+                        TerminalCommand::Text("echo MURMUR_COPY_WORD\r".into()),
+                    );
+                });
+            });
+
+            let word = "MURMUR_COPY_WORD";
+            let word_chars = word.chars().collect::<Vec<_>>();
+            let mut word_cell = None;
+            assert!(wait_until_event_driven(window, |window| {
+                word_cell = window.read(|app| {
+                    let terminal = &view.read(app).terminal(1, pane_id)?.view;
+                    for row in 0..terminal.size.rows {
+                        for column in 0..terminal.size.columns {
+                            let matches =
+                                word_chars.iter().enumerate().all(|(offset, expected)| {
+                                    let Ok(offset) = u16::try_from(offset) else {
+                                        return false;
+                                    };
+                                    terminal
+                                        .cell(row, column.saturating_add(offset))
+                                        .and_then(|cell| cell.text.chars().next())
+                                        == Some(*expected)
+                                });
+                            if matches {
+                                return Some((row, column));
+                            }
+                        }
+                    }
+                    None
+                });
+                word_cell.is_some()
+            }));
+            let (row, column) = word_cell.unwrap();
+            let click = window.read(|app| {
+                let geometry = view
+                    .read(app)
+                    .terminal_geometry
+                    .get(&(1, pane_id))
+                    .copied()
+                    .unwrap();
+                point(
+                    geometry.bounds.left() + geometry.cell_size.width * (f32::from(column) + 0.5),
+                    geometry.bounds.top() + geometry.cell_size.height * (f32::from(row) + 0.5),
+                )
+            });
+
+            window.simulate_event(MouseDownEvent {
+                button: MouseButton::Left,
+                position: click,
+                modifiers: Modifiers::default(),
+                click_count: 2,
+                first_mouse: false,
+            });
+            window.simulate_event(MouseUpEvent {
+                button: MouseButton::Left,
+                position: click,
+                modifiers: Modifiers::default(),
+                click_count: 2,
+            });
+
+            let selection = window.read(|app| view.read(app).terminal_selection.unwrap());
+            assert!(!selection.dragging);
+            assert_eq!(selection.range.start.column, column);
+            assert_eq!(
+                selection.range.end.column,
+                column + u16::try_from(word_chars.len()).unwrap() - 1
+            );
+
+            window.simulate_keystrokes("ctrl-c");
+            assert!(window.read(|app| view.read(app).terminal_selection.is_none()));
+            assert!(wait_until_event_driven(window, |window| {
+                window
+                    .read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .is_some_and(|text| text == word)
+            }));
+        }
+
+        #[test]
         fn rename_dialogs_commit_server_workspace_and_tab_names() {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -3319,7 +3475,7 @@ mod tests {
             window.update(|window, cx| {
                 _ = window.draw(cx);
             });
-            window.simulate_keystrokes("down enter");
+            window.simulate_keystrokes("down down enter");
             let split_right = wait_until(window, |window| {
                 window.read(|app| {
                     view.read(app).active_session().is_some_and(|session| {

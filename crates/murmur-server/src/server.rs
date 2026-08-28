@@ -798,6 +798,7 @@ fn handle_client(
                 command,
             } => {
                 let state = state.lock().expect("server state lock poisoned");
+                let is_copy = matches!(&command, TerminalCommand::Copy { .. });
                 if server_id != state.server_id {
                     queue_message(
                         &outbound,
@@ -812,7 +813,7 @@ fn handle_client(
                             message: "unknown Session".into(),
                         },
                     )
-                } else if state.active_controller != Some(client_id) {
+                } else if !is_copy && state.active_controller != Some(client_id) {
                     queue_message(
                         &outbound,
                         ServerMessage::ControlDenied {
@@ -829,7 +830,6 @@ fn handle_client(
                         },
                     )
                 } else {
-                    let is_copy = matches!(&command, TerminalCommand::Copy { .. });
                     let result = state
                         .terminals
                         .get(&pane_id)

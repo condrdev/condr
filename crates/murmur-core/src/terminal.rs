@@ -179,6 +179,119 @@ impl TerminalSelection {
     }
 }
 
+impl TerminalView {
+    pub fn word_selection_at(&self, row: u16, column: u16) -> Option<TerminalSelection> {
+        if row >= self.size.rows || column >= self.size.columns {
+            return None;
+        }
+        let clicked = self.semantic_character(row, column)?;
+        if is_word_separator(clicked) {
+            return None;
+        }
+
+        let mut start = column;
+        while start > 0
+            && self
+                .semantic_character(row, start - 1)
+                .is_some_and(|ch| !is_word_separator(ch))
+        {
+            start -= 1;
+        }
+
+        let mut end = column;
+        while end + 1 < self.size.columns
+            && self
+                .semantic_character(row, end + 1)
+                .is_some_and(|ch| !is_word_separator(ch))
+        {
+            end += 1;
+        }
+
+        while start <= end
+            && self
+                .semantic_character(row, start)
+                .is_some_and(is_leading_token_wrapper)
+        {
+            start += 1;
+        }
+        while start <= end
+            && self
+                .semantic_character(row, end)
+                .is_some_and(is_trailing_token_wrapper)
+        {
+            if end == 0 {
+                return None;
+            }
+            end -= 1;
+        }
+        if !(start..=end).contains(&column) {
+            return None;
+        }
+
+        Some(TerminalSelection {
+            start: TerminalPosition {
+                row,
+                column: start,
+                side: TerminalSide::Left,
+            },
+            end: TerminalPosition {
+                row,
+                column: end,
+                side: TerminalSide::Right,
+            },
+            display_offset: self.display_offset,
+        })
+    }
+
+    pub fn line_selection_at(&self, row: u16) -> Option<TerminalSelection> {
+        let end = self.size.columns.checked_sub(1)?;
+        (row < self.size.rows).then_some(TerminalSelection {
+            start: TerminalPosition {
+                row,
+                column: 0,
+                side: TerminalSide::Left,
+            },
+            end: TerminalPosition {
+                row,
+                column: end,
+                side: TerminalSide::Right,
+            },
+            display_offset: self.display_offset,
+        })
+    }
+
+    fn semantic_character(&self, row: u16, column: u16) -> Option<char> {
+        let cell = self.cell(row, column)?;
+        let flags = Flags::from_bits_retain(cell.flags);
+        if flags.contains(Flags::WIDE_CHAR_SPACER) {
+            return column
+                .checked_sub(1)
+                .and_then(|column| self.cell(row, column))
+                .and_then(|cell| cell.text.chars().next());
+        }
+        cell.text.chars().next()
+    }
+}
+
+fn is_word_separator(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '|' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '!'
+        )
+}
+
+fn is_leading_token_wrapper(ch: char) -> bool {
+    matches!(ch, '(' | '[' | '{' | '<' | '"' | '\'' | '`')
+}
+
+fn is_trailing_token_wrapper(ch: char) -> bool {
+    matches!(
+        ch,
+        ')' | ']' | '}' | '>' | '"' | '\'' | '`' | '.' | ',' | ';' | ':' | '!' | '?'
+    )
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TerminalCommand {
     Key {
@@ -1021,5 +1134,50 @@ mod tests {
         );
         assert!(reversed.contains_cell(0, 8, 10));
         assert!(reversed.contains_cell(1, 1, 10));
+    }
+
+    #[test]
+    fn terminal_view_selects_words_by_display_column() {
+        let text = "run https://example.com/a?q=1, next";
+        let size = TerminalSize::new(1, 40);
+        let mut cells = vec![blank_cell(); usize::from(size.columns)];
+        for (column, ch) in text.chars().enumerate() {
+            cells[column].text = ch.to_string();
+        }
+        let view = TerminalView {
+            revision: 1,
+            size,
+            display_offset: 3,
+            cells,
+            cursor: None,
+        };
+
+        let selection = view.word_selection_at(0, 12).unwrap();
+        assert_eq!(selection.start.column, 4);
+        assert_eq!(selection.end.column, 28);
+        assert_eq!(selection.display_offset, 3);
+        assert!(view.word_selection_at(0, 3).is_none());
+        assert!(view.word_selection_at(0, 29).is_none());
+
+        let mut punctuation = view.clone();
+        punctuation.cells[0].text = ".".into();
+        punctuation.cells[1].text = " ".into();
+        assert!(punctuation.word_selection_at(0, 0).is_none());
+    }
+
+    #[test]
+    fn terminal_view_selects_a_complete_line() {
+        let view = TerminalView {
+            revision: 1,
+            size: TerminalSize::new(3, 10),
+            display_offset: 2,
+            cells: vec![blank_cell(); 30],
+            cursor: None,
+        };
+
+        let selection = view.line_selection_at(1).unwrap();
+        assert_eq!((selection.start.row, selection.start.column), (1, 0));
+        assert_eq!((selection.end.row, selection.end.column), (1, 9));
+        assert_eq!(selection.display_offset, 2);
     }
 }

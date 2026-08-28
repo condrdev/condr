@@ -514,7 +514,7 @@ impl Element for TerminalElement {
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
                 view.update(cx, |view, cx| {
                     view.select_pane(connection_key, pane_id, cx);
-                    view.begin_selection(connection_key, pane_id, position, cx);
+                    view.begin_selection(connection_key, pane_id, position, event.click_count, cx);
                 });
                 cx.stop_propagation();
             }
