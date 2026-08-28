@@ -266,7 +266,7 @@ impl TerminalRuntime {
         #[cfg(windows)]
         let mut command = {
             let mut command = CommandBuilder::new("pwsh.exe");
-            command.args(["-NoLogo", "-NoProfile", "-NoExit"]);
+            command.args(["-NoLogo", "-NoExit"]);
             command
         };
         #[cfg(not(windows))]

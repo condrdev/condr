@@ -11,6 +11,7 @@ publish = false
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true
+gpui-component-assets.workspace = true
 murmur-core = { path = "../murmur-core" }
 murmur-server = { path = "../murmur-server" }
 

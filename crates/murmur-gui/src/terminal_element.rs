@@ -1,9 +1,12 @@
+use std::ops::Range;
+
 use gpui::{
-    App, BorderStyle, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler,
-    Entity, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle, Style,
-    TextAlign, TextRun, UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
+    App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
+    ElementInputHandler, Entity, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
+    InputHandler, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollDelta, ScrollWheelEvent,
+    ShapedLine, Size, StrikethroughStyle, Style, TextAlign, TextInputConfiguration, TextRun,
+    UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
 };
 use gpui_component::ActiveTheme as _;
 use murmur_core::{
@@ -31,6 +34,113 @@ pub(crate) struct TerminalElement {
     pane_id: PaneId,
     terminal: TerminalView,
     marked_text: Option<String>,
+}
+
+// Terminals accept IME text, but printable chords must reach keybindings first.
+struct TerminalInputHandler {
+    inner: ElementInputHandler<Murmur>,
+}
+
+impl TerminalInputHandler {
+    fn new(bounds: Bounds<Pixels>, view: Entity<Murmur>) -> Self {
+        Self {
+            inner: ElementInputHandler::new(bounds, view),
+        }
+    }
+}
+
+impl InputHandler for TerminalInputHandler {
+    fn selected_text_range(
+        &mut self,
+        ignore_disabled_input: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<UTF16Selection> {
+        self.inner
+            .selected_text_range(ignore_disabled_input, window, cx)
+    }
+
+    fn marked_text_range(&mut self, window: &mut Window, cx: &mut App) -> Option<Range<usize>> {
+        self.inner.marked_text_range(window, cx)
+    }
+
+    fn text_for_range(
+        &mut self,
+        range: Range<usize>,
+        adjusted_range: &mut Option<Range<usize>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<String> {
+        self.inner.text_for_range(range, adjusted_range, window, cx)
+    }
+
+    fn replace_text_in_range(
+        &mut self,
+        range: Option<Range<usize>>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.inner.replace_text_in_range(range, text, window, cx);
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        range: Option<Range<usize>>,
+        new_text: &str,
+        new_selected_range: Option<Range<usize>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.inner
+            .replace_and_mark_text_in_range(range, new_text, new_selected_range, window, cx);
+    }
+
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut App) {
+        self.inner.unmark_text(window, cx);
+    }
+
+    fn paste(&mut self, item: ClipboardItem, window: &mut Window, cx: &mut App) {
+        self.inner.paste(item, window, cx);
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        range: Range<usize>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Bounds<Pixels>> {
+        self.inner.bounds_for_range(range, window, cx)
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        point: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<usize> {
+        self.inner.character_index_for_point(point, window, cx)
+    }
+
+    fn element_bounds(&mut self, window: &mut Window, cx: &mut App) -> Option<Bounds<Pixels>> {
+        self.inner.element_bounds(window, cx)
+    }
+
+    fn accepts_text_input(&mut self, window: &mut Window, cx: &mut App) -> bool {
+        self.inner.accepts_text_input(window, cx)
+    }
+
+    fn prefers_ime_for_printable_keys(&mut self, _: &mut Window, _: &mut App) -> bool {
+        false
+    }
+
+    fn text_input_configuration(
+        &mut self,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> TextInputConfiguration {
+        self.inner.text_input_configuration(window, cx)
+    }
 }
 
 struct ShapedCell {
@@ -293,7 +403,7 @@ impl Element for TerminalElement {
     ) {
         window.handle_input(
             &self.focus_handle,
-            ElementInputHandler::new(bounds, self.view.clone()),
+            TerminalInputHandler::new(bounds, self.view.clone()),
             cx,
         );
         window.set_cursor_style(CursorStyle::IBeam, &prepaint.hitbox);

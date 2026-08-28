@@ -29,6 +29,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Root, Selectable as _, Sizable as _,
     StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
+use gpui_component_assets::Assets;
 use murmur_core::protocol::{
     ClientMessage, LayoutCommand, PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage,
     SessionBootstrap, SessionEvent, SessionId,
@@ -402,7 +403,9 @@ impl Render for TerminalPanel {
                 let _ = click_owner.update(cx, |app, cx| app.select_pane(key, pane_id, cx));
             })
             .on_mouse_down(MouseButton::Right, move |_, _, cx| {
-                let _ = right_click_owner.update(cx, |app, cx| app.select_pane(key, pane_id, cx));
+                let _ = right_click_owner.update(cx, |app, cx| {
+                    app.set_target_pane(key, pane_id, cx);
+                });
             })
             .size_full()
             .overflow_hidden()
@@ -776,13 +779,16 @@ impl Murmur {
     }
 
     fn refresh_target_pane(&mut self, key: ConnectionKey) {
-        let target = self
-            .connection(key)
-            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
-            .and_then(|session| Some(session.active_workspace()?.active_tab().focused_pane().id()));
+        let target = self.connection_focused_pane(key);
         if key == self.active_connection {
             self.target_pane = target.map(|pane_id| (key, pane_id));
         }
+    }
+
+    fn connection_focused_pane(&self, key: ConnectionKey) -> Option<PaneId> {
+        self.connection(key)
+            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
+            .and_then(|session| Some(session.active_workspace()?.active_tab().focused_pane().id()))
     }
 
     fn select_server(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
@@ -806,16 +812,33 @@ impl Murmur {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
+        if self.set_target_pane(key, pane_id, cx).is_none()
+            || self.connection_focused_pane(key) == Some(pane_id)
+        {
+            return;
+        }
+        self.send_layout_to(key, LayoutCommand::FocusPane { pane_id });
+    }
+
+    fn set_target_pane(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
         if !self
             .connection(key)
             .is_some_and(ServerConnection::can_mutate)
         {
-            return;
+            return None;
         }
+        let changed = self.active_connection != key || self.target_pane != Some((key, pane_id));
         self.active_connection = key;
         self.target_pane = Some((key, pane_id));
-        self.send_layout_to(key, LayoutCommand::FocusPane { pane_id });
-        cx.notify();
+        if changed {
+            cx.notify();
+        }
+        Some(changed)
     }
 
     fn send_layout(&mut self, command: LayoutCommand) {
@@ -2288,7 +2311,7 @@ fn main() {
         murmur_server::ensure_local_server().unwrap_or_else(|_| ServerConfig::default().endpoint);
     let initial =
         ClientConnection::connect(&endpoint, "murmur-gui").map_err(|error| error.to_string());
-    let app = gpui_platform::application();
+    let app = gpui_platform::application().with_assets(Assets);
 
     app.run(move |cx| {
         gpui_component::init(cx);
