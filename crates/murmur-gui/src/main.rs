@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
@@ -466,18 +466,6 @@ impl Render for TerminalPanel {
             menu.menu_with_enable("Split Right", Box::new(SplitRight), controlling)
                 .menu_with_enable("Split Down", Box::new(SplitDown), controlling)
                 .separator()
-                .submenu("Focus", window, cx, move |menu, _, _| {
-                    menu.menu_with_enable("Left", Box::new(FocusLeft), controlling)
-                        .menu_with_enable("Right", Box::new(FocusRight), controlling)
-                        .menu_with_enable("Up", Box::new(FocusUp), controlling)
-                        .menu_with_enable("Down", Box::new(FocusDown), controlling)
-                })
-                .submenu("Resize", window, cx, move |menu, _, _| {
-                    menu.menu_with_enable("Left", Box::new(ResizeLeft), controlling)
-                        .menu_with_enable("Right", Box::new(ResizeRight), controlling)
-                        .menu_with_enable("Up", Box::new(ResizeUp), controlling)
-                        .menu_with_enable("Down", Box::new(ResizeDown), controlling)
-                })
                 .submenu("Swap", window, cx, move |menu, _, _| {
                     menu.menu_with_enable("Left", Box::new(SwapLeft), controlling)
                         .menu_with_enable("Right", Box::new(SwapRight), controlling)
@@ -653,7 +641,7 @@ impl Murmur {
         let endpoint = connection.endpoint.clone();
         let sender = self.connect_results_tx.clone();
         thread::spawn(move || {
-            let connected_endpoint = if matches!(endpoint, Endpoint::Local(_)) {
+            let connected_endpoint = if endpoint == ServerConfig::default().endpoint {
                 murmur_server::ensure_local_server().unwrap_or(endpoint)
             } else {
                 endpoint
@@ -666,6 +654,53 @@ impl Murmur {
                 result,
             });
         });
+    }
+
+    fn disconnect_server(&mut self, key: ConnectionKey) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if let Some(io) = connection.io.take() {
+            let _ = io.outgoing.send(ClientMessage::Detach);
+        }
+        connection.status = ConnectionStatus::Disconnected;
+        connection.controlling = false;
+        connection.error = None;
+    }
+
+    fn remove_server(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
+        self.disconnect_server(key);
+        let Some(index) = self
+            .connections
+            .iter()
+            .position(|connection| connection.key == key)
+        else {
+            return;
+        };
+        let was_active = self.active_connection == key;
+        self.connections.remove(index);
+        self.panels
+            .retain(|(connection_key, _), _| *connection_key != key);
+        self.pending_sizes
+            .retain(|(connection_key, _), _| *connection_key != key);
+        self.terminal_geometry
+            .retain(|(connection_key, _), _| *connection_key != key);
+        if self
+            .selecting_from
+            .is_some_and(|(connection_key, _, _)| connection_key == key)
+        {
+            self.selecting_from = None;
+        }
+        if was_active {
+            self.active_connection = self
+                .connections
+                .get(index)
+                .or_else(|| self.connections.last())
+                .map_or(0, |connection| connection.key);
+            self.refresh_target_pane(self.active_connection);
+            self.rebuild_dock(window, cx);
+        }
+        cx.notify();
     }
 
     fn poll_connections(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -1344,7 +1379,10 @@ impl Murmur {
                                 return false;
                             }
                             let apply = apply.clone();
-                            let _ = owner.update(cx, |this, _| apply(this, value));
+                            let _ = owner.update(cx, |this, cx| {
+                                apply(this, value);
+                                cx.notify();
+                            });
                             true
                         },
                     ))
@@ -1380,6 +1418,55 @@ impl Murmur {
             window,
             cx,
         );
+    }
+
+    fn prompt_rename_server_on(
+        &mut self,
+        key: ConnectionKey,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_text(
+            "Rename Server",
+            name,
+            move |this, name| {
+                if let Some(connection) = this.connection_mut(key) {
+                    connection.label = name;
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn confirm_delete_server_on(
+        &mut self,
+        key: ConnectionKey,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let owner = cx.weak_entity();
+        window.defer(cx, move |window, cx| {
+            window.open_alert_dialog(cx, move |alert, _, _| {
+                let owner = owner.clone();
+                alert
+                    .title(format!("Delete \"{name}\"?"))
+                    .description("This removes the Server from Murmur. Its terminals keep running.")
+                    .button_props(
+                        DialogButtonProps::default()
+                            .ok_text("Delete")
+                            .ok_variant(ButtonVariant::Danger)
+                            .show_cancel(true)
+                            .on_ok(move |_, window, cx| {
+                                let _ = owner
+                                    .update(cx, |this, cx| this.remove_server(key, window, cx));
+                                true
+                            }),
+                    )
+            });
+        });
     }
 
     fn prompt_rename_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1863,12 +1950,10 @@ impl Murmur {
                 .ok()
                 .map(|session| {
                     let active_workspace = session.active_workspace_id();
-                    let workspace_count = session.workspaces().len();
                     session
                         .workspaces()
                         .iter()
-                        .enumerate()
-                        .map(|(workspace_index, workspace)| {
+                        .map(|workspace| {
                             let workspace_id = workspace.id();
                             let workspace_name = workspace.name().to_owned();
                             let owner = owner.clone();
@@ -1878,23 +1963,10 @@ impl Murmur {
                                 .active(active_server && active_workspace == Some(workspace_id))
                                 .disable(!connected)
                                 .context_menu(move |menu, _, _| {
-                                    let new_tab_owner = menu_owner.clone();
                                     let rename_owner = menu_owner.clone();
-                                    let move_up_owner = menu_owner.clone();
-                                    let move_down_owner = menu_owner.clone();
                                     let close_owner = menu_owner.clone();
                                     let rename_name = workspace_name.clone();
                                     menu.item(
-                                        PopupMenuItem::new("New Tab")
-                                            .disabled(!connected)
-                                            .on_click(move |_, _, cx| {
-                                                let _ = new_tab_owner.update(cx, |this, _| {
-                                                    this.new_tab_on(key, workspace_id)
-                                                });
-                                            }),
-                                    )
-                                    .separator()
-                                    .item(
                                         PopupMenuItem::new("Rename Workspace…")
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
@@ -1906,41 +1978,6 @@ impl Murmur {
                                                         name,
                                                         window,
                                                         cx,
-                                                    )
-                                                });
-                                            }),
-                                    )
-                                    .item(
-                                        PopupMenuItem::new("Move Up")
-                                            .disabled(!connected || workspace_index == 0)
-                                            .on_click(move |_, _, cx| {
-                                                let _ = move_up_owner.update(cx, |this, _| {
-                                                    this.send_layout_to(
-                                                        key,
-                                                        LayoutCommand::MoveWorkspace {
-                                                            workspace_id,
-                                                            target_index: (workspace_index - 1)
-                                                                as u32,
-                                                        },
-                                                    )
-                                                });
-                                            }),
-                                    )
-                                    .item(
-                                        PopupMenuItem::new("Move Down")
-                                            .disabled(
-                                                !connected
-                                                    || workspace_index + 1 == workspace_count,
-                                            )
-                                            .on_click(move |_, _, cx| {
-                                                let _ = move_down_owner.update(cx, |this, _| {
-                                                    this.send_layout_to(
-                                                        key,
-                                                        LayoutCommand::MoveWorkspace {
-                                                            workspace_id,
-                                                            target_index: (workspace_index + 1)
-                                                                as u32,
-                                                        },
                                                     )
                                                 });
                                             }),
@@ -1973,32 +2010,55 @@ impl Murmur {
             let select_owner = owner.clone();
             let new_workspace_owner = owner.clone();
             let server_menu_owner = owner.clone();
+            let server_name = connection.label.clone();
+            let status = connection.status;
             let new_workspace_label = connection.label.clone();
-            let reconnect_enabled = connection.status == ConnectionStatus::Disconnected;
             SidebarMenuItem::new(label)
                 .icon(IconName::HardDrive)
                 .active(active_server)
                 .default_open(true)
                 .children(workspaces)
                 .context_menu(move |menu, _, _| {
-                    let new_workspace_owner = server_menu_owner.clone();
-                    let reconnect_owner = server_menu_owner.clone();
-                    menu.item(
-                        PopupMenuItem::new("New Workspace…")
-                            .disabled(!connected)
-                            .on_click(move |_, window, cx| {
-                                let _ = new_workspace_owner.update(cx, |this, cx| {
-                                    this.choose_workspace_directory_on(key, window, cx)
+                    let rename_owner = server_menu_owner.clone();
+                    let connection_owner = server_menu_owner.clone();
+                    let delete_owner = server_menu_owner.clone();
+                    let rename_name = server_name.clone();
+                    let delete_name = server_name.clone();
+                    let (connection_label, connection_disabled) = match status {
+                        ConnectionStatus::Connected => ("Disconnect", false),
+                        ConnectionStatus::Disconnected => ("Connect", false),
+                        ConnectionStatus::Connecting => ("Connecting…", true),
+                    };
+                    menu.item(PopupMenuItem::new("Rename Server…").on_click(
+                        move |_, window, cx| {
+                            let name = rename_name.clone();
+                            let _ = rename_owner.update(cx, |this, cx| {
+                                this.prompt_rename_server_on(key, name, window, cx)
+                            });
+                        },
+                    ))
+                    .item(
+                        PopupMenuItem::new(connection_label)
+                            .disabled(connection_disabled)
+                            .on_click(move |_, _, cx| {
+                                let _ = connection_owner.update(cx, |this, cx| {
+                                    match status {
+                                        ConnectionStatus::Connected => this.disconnect_server(key),
+                                        ConnectionStatus::Disconnected => this.start_connect(key),
+                                        ConnectionStatus::Connecting => {}
+                                    }
+                                    cx.notify();
                                 });
                             }),
                     )
+                    .separator()
                     .item(
-                        PopupMenuItem::new("Reconnect")
-                            .disabled(!reconnect_enabled)
-                            .on_click(move |_, _, cx| {
-                                let _ =
-                                    reconnect_owner.update(cx, |this, _| this.start_connect(key));
-                            }),
+                        PopupMenuItem::new("Delete Server").on_click(move |_, window, cx| {
+                            let name = delete_name.clone();
+                            let _ = delete_owner.update(cx, |this, cx| {
+                                this.confirm_delete_server_on(key, name, window, cx)
+                            });
+                        }),
                     )
                 })
                 .suffix(move |_, _| {
@@ -2110,12 +2170,10 @@ impl Murmur {
         let workspace_id = workspace.id();
         let active_tab = workspace.active_tab().id();
         let closes_workspace = workspace.tabs().len() == 1;
-        let tab_count = workspace.tabs().len();
-        let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
+        let tab_buttons = workspace.tabs().iter().map(|tab| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
             let activate_owner = cx.weak_entity();
-            let close_owner = cx.weak_entity();
             let menu_owner = cx.weak_entity();
             h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
@@ -2133,24 +2191,8 @@ impl Murmur {
                             });
                         }),
                 )
-                .child(
-                    Button::new(("close-tab", tab_id.as_u64()))
-                        .debug_selector(|| "close-tab".into())
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Close)
-                        .tooltip("Close Tab")
-                        .disabled(!can_mutate)
-                        .on_click(move |_, window, cx| {
-                            let _ = close_owner.update(cx, |this, cx| {
-                                this.close_tab_id(key, tab_id, closes_workspace, window, cx)
-                            });
-                        }),
-                )
                 .context_menu(move |menu, _, _| {
                     let rename_owner = menu_owner.clone();
-                    let move_left_owner = menu_owner.clone();
-                    let move_right_owner = menu_owner.clone();
                     let close_owner = menu_owner.clone();
                     let rename_name = tab_name.clone();
                     menu.item(
@@ -2160,36 +2202,6 @@ impl Murmur {
                                 let name = rename_name.clone();
                                 let _ = rename_owner.update(cx, |this, cx| {
                                     this.prompt_rename_tab_on(key, tab_id, name, window, cx)
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("Move Left")
-                            .disabled(!can_mutate || tab_index == 0)
-                            .on_click(move |_, _, cx| {
-                                let _ = move_left_owner.update(cx, |this, _| {
-                                    this.send_layout_to(
-                                        key,
-                                        LayoutCommand::MoveTab {
-                                            tab_id,
-                                            target_index: (tab_index - 1) as u32,
-                                        },
-                                    )
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("Move Right")
-                            .disabled(!can_mutate || tab_index + 1 == tab_count)
-                            .on_click(move |_, _, cx| {
-                                let _ = move_right_owner.update(cx, |this, _| {
-                                    this.send_layout_to(
-                                        key,
-                                        LayoutCommand::MoveTab {
-                                            tab_id,
-                                            target_index: (tab_index + 1) as u32,
-                                        },
-                                    )
                                 });
                             }),
                     )
@@ -2565,7 +2577,9 @@ mod tests {
         use murmur_core::{PaneId, TabId};
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
-        use super::super::{DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options};
+        use super::super::{
+            ConnectionStatus, DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options,
+        };
 
         struct TestServer {
             handle: ServerHandle,
@@ -2712,11 +2726,21 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
             let tab_id = tab_id.expect("server-scoped button should create a Workspace");
+            assert!(
+                window.debug_bounds("close-tab").is_none(),
+                "Tab row should not render a close button"
+            );
 
-            let close_tab = window
-                .debug_bounds("close-tab")
-                .expect("the only Tab should expose Close Tab");
-            window.simulate_click(close_tab.center(), Modifiers::default());
+            let tab = window
+                .debug_bounds(tab_selector(tab_id))
+                .expect("the only Tab should be rendered");
+            window.simulate_mouse_down(tab.center(), MouseButton::Right, Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+            window.simulate_keystrokes("down down enter");
+            window.run_until_parked();
             assert!(window.update(|window, cx| window.has_active_dialog(cx)));
             window.update(|window, cx| {
                 window.close_dialog(cx);
@@ -2740,6 +2764,73 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
             assert!(empty, "closing the only Tab should close its Workspace");
+        }
+
+        #[test]
+        fn server_disconnect_reconnect_and_remove_preserve_runtime() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+            let identity = window.read(|app| {
+                let connection = view.read(app).connection(1).unwrap();
+                (
+                    connection.server_id,
+                    connection.runtime_epoch,
+                    connection.session_id,
+                )
+            });
+
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    this.disconnect_server(1);
+                    cx.notify();
+                });
+            });
+            assert!(window.read(|app| {
+                view.read(app).connection(1).is_some_and(|connection| {
+                    connection.status == ConnectionStatus::Disconnected && !connection.can_mutate()
+                })
+            }));
+
+            std::thread::sleep(Duration::from_millis(50));
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    this.start_connect(1);
+                    cx.notify();
+                });
+            });
+            let mut reconnected = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                reconnected = window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .is_some_and(ServerConnection::can_mutate)
+                });
+                if reconnected {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(reconnected, "Server did not reconnect");
+            assert_eq!(
+                window.read(|app| {
+                    let connection = view.read(app).connection(1).unwrap();
+                    (
+                        connection.server_id,
+                        connection.runtime_epoch,
+                        connection.session_id,
+                    )
+                }),
+                identity,
+                "reconnect should retain the Server runtime"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| this.remove_server(1, window, cx));
+            });
+            assert!(window.read(|app| view.read(app).connections.is_empty()));
             window.quit();
         }
 
