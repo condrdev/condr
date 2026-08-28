@@ -6,8 +6,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use murmur_core::protocol::{
-    ClientMessage, FramingError, Hello, PROTOCOL_VERSION, PaneTerminalSnapshot, RuntimeEpoch,
-    ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, VersionCheck,
+    ClientMessage, FramingError, Hello, LayoutCommand, PROTOCOL_VERSION, PaneTerminalSnapshot,
+    RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, VersionCheck,
     check_version,
 };
 use murmur_core::{
@@ -257,15 +257,22 @@ impl RuntimeState {
             sequence: self.sequence,
             snapshot: self.session.snapshot(),
             terminals,
+            zoomed_panes: self
+                .session
+                .workspaces()
+                .iter()
+                .flat_map(|workspace| workspace.tabs())
+                .filter_map(|tab| tab.zoomed_pane_id())
+                .collect(),
         }
     }
 
-    fn publish_snapshot_change(
+    fn publish_layout_change(
         &mut self,
         origin_client_id: u64,
         origin: &mpsc::Sender<ServerMessage>,
     ) -> bool {
-        let event = SessionEvent::SnapshotChanged;
+        let event = SessionEvent::LayoutChanged;
         self.publish_event(event, Some((origin_client_id, origin)))
     }
 
@@ -303,6 +310,204 @@ impl RuntimeState {
         });
         origin_failed
     }
+}
+
+struct LayoutEffect {
+    started_terminal: Option<(PaneId, mpsc::Receiver<TerminalUpdate>)>,
+    removed_terminals: Vec<TerminalRuntime>,
+}
+
+fn apply_layout_command(
+    state: &mut RuntimeState,
+    command: LayoutCommand,
+) -> Result<LayoutEffect, String> {
+    let mut candidate = state.session.clone();
+    let mut new_pane = None;
+    let mut closed = None;
+
+    match command {
+        LayoutCommand::CreateWorkspace { root_directory } => {
+            let workspace_id = candidate.create_workspace(root_directory);
+            new_pane = Some(
+                candidate
+                    .workspace(workspace_id)
+                    .expect("new Workspace exists")
+                    .active_tab()
+                    .focused_pane()
+                    .id(),
+            );
+        }
+        LayoutCommand::CreateTab { workspace_id } => {
+            let tab_id = candidate
+                .create_tab(workspace_id)
+                .ok_or_else(|| "unknown Workspace".to_string())?;
+            new_pane = Some(
+                candidate
+                    .tab(tab_id)
+                    .expect("new Tab exists")
+                    .focused_pane()
+                    .id(),
+            );
+        }
+        LayoutCommand::RenameWorkspace { workspace_id, name } => {
+            if !candidate.rename_workspace(workspace_id, name) {
+                return Err("unknown Workspace or empty name".into());
+            }
+        }
+        LayoutCommand::RenameTab { tab_id, name } => {
+            if !candidate.rename_tab(tab_id, name) {
+                return Err("unknown Tab or empty name".into());
+            }
+        }
+        LayoutCommand::ActivateWorkspace { workspace_id } => {
+            if !candidate.activate_workspace(workspace_id) {
+                return Err("unknown Workspace".into());
+            }
+        }
+        LayoutCommand::ActivateTab { tab_id } => {
+            if !candidate.activate_tab(tab_id) {
+                return Err("unknown Tab".into());
+            }
+        }
+        LayoutCommand::MoveWorkspace {
+            workspace_id,
+            target_index,
+        } => {
+            if candidate.workspace(workspace_id).is_none() {
+                return Err("unknown Workspace".into());
+            }
+            if target_index as usize >= candidate.workspaces().len() {
+                return Err("Workspace target index is out of range".into());
+            }
+            candidate.move_workspace(workspace_id, target_index as usize);
+        }
+        LayoutCommand::MoveTab {
+            tab_id,
+            target_index,
+        } => {
+            let Some(workspace) = candidate
+                .workspaces()
+                .iter()
+                .find(|workspace| workspace.tabs().iter().any(|tab| tab.id() == tab_id))
+            else {
+                return Err("unknown Tab".into());
+            };
+            if target_index as usize >= workspace.tabs().len() {
+                return Err("Tab target index is out of range".into());
+            }
+            candidate.move_tab(tab_id, target_index as usize);
+        }
+        LayoutCommand::SplitPane { pane_id, direction } => {
+            new_pane = Some(
+                candidate
+                    .split_pane(pane_id, direction, 0.5)
+                    .ok_or_else(|| "unknown Pane".to_string())?,
+            );
+        }
+        LayoutCommand::FocusPane { pane_id } => {
+            if !candidate.focus_pane(pane_id) {
+                return Err("unknown Pane".into());
+            }
+        }
+        LayoutCommand::FocusPaneDirection { pane_id, direction } => {
+            if candidate.pane(pane_id).is_none() {
+                return Err("unknown Pane".into());
+            }
+            candidate.focus_pane_in_direction(pane_id, direction);
+        }
+        LayoutCommand::ResizePane {
+            pane_id,
+            direction,
+            amount,
+        } => {
+            if candidate.pane(pane_id).is_none() {
+                return Err("unknown Pane".into());
+            }
+            if !amount.is_finite() || amount <= 0.0 {
+                return Err("Pane resize amount must be a positive finite number".into());
+            }
+            candidate.resize_pane(pane_id, direction, amount);
+        }
+        LayoutCommand::SetSplitRatios { tab_id, ratios } => {
+            let tab = candidate
+                .tab(tab_id)
+                .ok_or_else(|| "unknown Tab".to_string())?;
+            if ratios.iter().any(|ratio| !ratio.is_finite()) {
+                return Err("split ratios must be finite".into());
+            }
+            if ratios.len() != tab.panes().len().saturating_sub(1) {
+                return Err("split ratio count does not match the Tab layout".into());
+            }
+            candidate.set_tab_split_ratios(tab_id, &ratios);
+        }
+        LayoutCommand::SwapPane { pane_id, direction } => {
+            if candidate.pane(pane_id).is_none() {
+                return Err("unknown Pane".into());
+            }
+            candidate.swap_pane(pane_id, direction);
+        }
+        LayoutCommand::TogglePaneZoom { pane_id } => {
+            if candidate.pane(pane_id).is_none() {
+                return Err("unknown Pane".into());
+            }
+            candidate.toggle_pane_zoom(pane_id);
+        }
+        LayoutCommand::ClosePane { pane_id } => {
+            closed = Some(
+                candidate
+                    .close_pane(pane_id)
+                    .ok_or_else(|| "unknown Pane".to_string())?,
+            );
+        }
+        LayoutCommand::CloseTab { tab_id } => {
+            closed = Some(
+                candidate
+                    .close_tab(tab_id)
+                    .ok_or_else(|| "unknown Tab".to_string())?,
+            );
+        }
+        LayoutCommand::CloseWorkspace { workspace_id } => {
+            closed = Some(
+                candidate
+                    .close_workspace(workspace_id)
+                    .ok_or_else(|| "unknown Workspace".to_string())?,
+            );
+        }
+    }
+
+    let started = if let Some(pane_id) = new_pane {
+        let cwd = candidate
+            .pane(pane_id)
+            .and_then(|pane| pane.cwd())
+            .ok_or_else(|| "new Pane has no working directory".to_string())?;
+        let mut runtime = TerminalRuntime::spawn_shell(cwd, TerminalSize::new(24, 80))
+            .map_err(|error| format!("failed to start terminal: {error}"))?;
+        let updates = runtime
+            .take_updates()
+            .expect("new Terminal update receiver exists");
+        Some((pane_id, runtime, updates))
+    } else {
+        None
+    };
+
+    state.session = candidate;
+    let mut removed_terminals = Vec::new();
+    if let Some(closed) = closed {
+        for pane_id in closed.panes() {
+            state.exited_terminals.remove(pane_id);
+            if let Some(runtime) = state.terminals.remove(pane_id) {
+                removed_terminals.push(runtime);
+            }
+        }
+    }
+    let started_terminal = started.map(|(pane_id, runtime, updates)| {
+        state.terminals.insert(pane_id, runtime);
+        (pane_id, updates)
+    });
+    Ok(LayoutEffect {
+        started_terminal,
+        removed_terminals,
+    })
 }
 
 fn handle_client(
@@ -399,6 +604,7 @@ fn handle_client(
             Err(_) => break,
         };
         let mut started_terminal = None;
+        let mut removed_terminals = Vec::new();
         let should_close = match message {
             ClientMessage::SnapshotRequest { session_id } => {
                 let response = {
@@ -545,10 +751,10 @@ fn handle_client(
                 };
                 queue_message(&outbound, response)
             }
-            ClientMessage::CreateWorkspace {
+            ClientMessage::Layout {
                 server_id,
                 session_id,
-                root_directory,
+                command,
             } => {
                 let mut state = state.lock().expect("server state lock poisoned");
                 if server_id != state.server_id {
@@ -575,32 +781,13 @@ fn handle_client(
                         },
                     )
                 } else {
-                    let mut candidate = Session::restore(state.session.snapshot())
-                        .expect("live Session always restores from its own Snapshot");
-                    let workspace_id = candidate.create_workspace(root_directory);
-                    let pane = candidate
-                        .workspace(workspace_id)
-                        .expect("new Workspace exists")
-                        .active_tab()
-                        .focused_pane();
-                    let pane_id = pane.id();
-                    let cwd = pane.cwd().expect("new Pane has a cwd").to_path_buf();
-                    match TerminalRuntime::spawn_shell(cwd, TerminalSize::new(24, 80)) {
-                        Ok(mut runtime) => {
-                            let updates = runtime
-                                .take_updates()
-                                .expect("new Terminal update receiver exists");
-                            state.session = candidate;
-                            state.terminals.insert(pane_id, runtime);
-                            started_terminal = Some((pane_id, updates));
-                            state.publish_snapshot_change(client_id, &outbound)
+                    match apply_layout_command(&mut state, command) {
+                        Ok(effect) => {
+                            started_terminal = effect.started_terminal;
+                            removed_terminals = effect.removed_terminals;
+                            state.publish_layout_change(client_id, &outbound)
                         }
-                        Err(error) => queue_message(
-                            &outbound,
-                            ServerMessage::Error {
-                                message: format!("failed to start terminal: {error}"),
-                            },
-                        ),
+                        Err(message) => queue_message(&outbound, ServerMessage::Error { message }),
                     }
                 }
             }
@@ -684,6 +871,7 @@ fn handle_client(
         if let Some((pane_id, updates)) = started_terminal {
             monitor_terminal(pane_id, updates, Arc::clone(&state));
         }
+        drop(removed_terminals);
         if should_close {
             break;
         }
@@ -943,6 +1131,234 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn apply_for_test(
+        state: &mut RuntimeState,
+        updates: &mut Vec<mpsc::Receiver<TerminalUpdate>>,
+        command: LayoutCommand,
+    ) -> usize {
+        let effect = apply_layout_command(state, command).unwrap();
+        if let Some((_, receiver)) = effect.started_terminal {
+            updates.push(receiver);
+        }
+        effect.removed_terminals.len()
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
+        use murmur_core::{PaneDirection, PaneLayout, SplitDirection};
+
+        let mut state = RuntimeState::new(&test_endpoint());
+        let mut updates = Vec::new();
+        let root = std::env::temp_dir();
+
+        assert_eq!(
+            apply_for_test(
+                &mut state,
+                &mut updates,
+                LayoutCommand::CreateWorkspace {
+                    root_directory: root.clone(),
+                },
+            ),
+            0
+        );
+        let workspace_id = state.session.active_workspace_id().unwrap();
+        let tab_one = state.session.active_workspace().unwrap().active_tab().id();
+        let pane_one = state
+            .session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::CreateTab { workspace_id },
+        );
+        let tab_two = state.session.active_workspace().unwrap().active_tab().id();
+        let pane_two = state
+            .session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::RenameWorkspace {
+                workspace_id,
+                name: "renamed workspace".into(),
+            },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::RenameTab {
+                tab_id: tab_two,
+                name: "renamed tab".into(),
+            },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::SplitPane {
+                pane_id: pane_two,
+                direction: SplitDirection::Horizontal,
+            },
+        );
+        let pane_three = state.session.tab(tab_two).unwrap().focused_pane().id();
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::FocusPane { pane_id: pane_two },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::FocusPaneDirection {
+                pane_id: pane_two,
+                direction: PaneDirection::Right,
+            },
+        );
+        assert_eq!(
+            state.session.tab(tab_two).unwrap().focused_pane().id(),
+            pane_three
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::ResizePane {
+                pane_id: pane_three,
+                direction: PaneDirection::Left,
+                amount: 0.05,
+            },
+        );
+
+        let before_invalid_ratio = state.session.snapshot();
+        assert!(
+            apply_layout_command(
+                &mut state,
+                LayoutCommand::SetSplitRatios {
+                    tab_id: tab_two,
+                    ratios: Vec::new(),
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(state.session.snapshot(), before_invalid_ratio);
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::SetSplitRatios {
+                tab_id: tab_two,
+                ratios: vec![0.6],
+            },
+        );
+        assert!(matches!(
+            state.session.tab(tab_two).unwrap().layout(),
+            PaneLayout::Split { ratio, .. } if (*ratio - 0.6).abs() < f32::EPSILON
+        ));
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::SwapPane {
+                pane_id: pane_three,
+                direction: PaneDirection::Left,
+            },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::TogglePaneZoom {
+                pane_id: pane_three,
+            },
+        );
+        assert_eq!(state.bootstrap().zoomed_panes, vec![pane_three]);
+
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::CreateWorkspace {
+                root_directory: root,
+            },
+        );
+        let workspace_two = state.session.active_workspace_id().unwrap();
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::MoveWorkspace {
+                workspace_id: workspace_two,
+                target_index: 0,
+            },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::ActivateWorkspace { workspace_id },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::MoveTab {
+                tab_id: tab_two,
+                target_index: 0,
+            },
+        );
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::ActivateTab { tab_id: tab_two },
+        );
+
+        assert_eq!(state.terminals.len(), 4);
+        assert_eq!(
+            apply_for_test(
+                &mut state,
+                &mut updates,
+                LayoutCommand::ClosePane {
+                    pane_id: pane_three,
+                },
+            ),
+            1
+        );
+        assert_eq!(
+            apply_for_test(
+                &mut state,
+                &mut updates,
+                LayoutCommand::CloseTab { tab_id: tab_two },
+            ),
+            1
+        );
+        assert_eq!(
+            apply_for_test(
+                &mut state,
+                &mut updates,
+                LayoutCommand::CloseWorkspace { workspace_id },
+            ),
+            1
+        );
+        assert!(state.session.pane(pane_one).is_none());
+        assert_eq!(state.terminals.len(), 1);
+        assert_eq!(
+            apply_for_test(
+                &mut state,
+                &mut updates,
+                LayoutCommand::CloseWorkspace {
+                    workspace_id: workspace_two,
+                },
+            ),
+            1
+        );
+        assert!(state.session.is_empty());
+        assert!(state.terminals.is_empty());
+        assert!(state.bootstrap().zoomed_panes.is_empty());
+        assert!(state.session.tab(tab_one).is_none());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         use murmur_core::{TerminalPosition, TerminalScroll, TerminalSide};
@@ -979,10 +1395,12 @@ mod tests {
         ));
         murmur_core::protocol::write_message(
             &mut first,
-            &ClientMessage::CreateWorkspace {
+            &ClientMessage::Layout {
                 server_id,
                 session_id,
-                root_directory: std::env::temp_dir(),
+                command: LayoutCommand::CreateWorkspace {
+                    root_directory: std::env::temp_dir(),
+                },
             },
         )
         .unwrap();
@@ -990,7 +1408,7 @@ mod tests {
             matches!(
                 message,
                 ServerMessage::Event {
-                    event: SessionEvent::SnapshotChanged,
+                    event: SessionEvent::LayoutChanged,
                     ..
                 }
             )
@@ -1422,10 +1840,12 @@ mod tests {
         ));
         murmur_core::protocol::write_message(
             &mut first,
-            &ClientMessage::CreateWorkspace {
+            &ClientMessage::Layout {
                 server_id,
                 session_id,
-                root_directory: std::env::temp_dir(),
+                command: LayoutCommand::CreateWorkspace {
+                    root_directory: std::env::temp_dir(),
+                },
             },
         )
         .unwrap();
@@ -1435,7 +1855,7 @@ mod tests {
                 server_id: event_server,
                 session_id: event_session,
                 sequence: 1,
-                event: SessionEvent::SnapshotChanged,
+                event: SessionEvent::LayoutChanged,
             } if event_server == server_id && event_session == session_id
         ));
         murmur_core::protocol::write_message(
@@ -1463,7 +1883,7 @@ mod tests {
             match murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap() {
                 ServerMessage::Event {
                     sequence: 1,
-                    event: SessionEvent::SnapshotChanged,
+                    event: SessionEvent::LayoutChanged,
                     ..
                 } => {}
                 ServerMessage::Event { .. } => {}
@@ -1539,10 +1959,12 @@ mod tests {
         for _ in 0..2 {
             murmur_core::protocol::write_message(
                 &mut controller,
-                &ClientMessage::CreateWorkspace {
+                &ClientMessage::Layout {
                     server_id,
                     session_id,
-                    root_directory: std::env::temp_dir(),
+                    command: LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    },
                 },
             )
             .unwrap();
@@ -1550,7 +1972,7 @@ mod tests {
             {
                 ServerMessage::Event {
                     sequence,
-                    event: SessionEvent::SnapshotChanged,
+                    event: SessionEvent::LayoutChanged,
                     ..
                 } => snapshot_sequences.push(sequence),
                 other => panic!("unexpected mutation response: {other:?}"),
@@ -1567,7 +1989,7 @@ mod tests {
                 } => {
                     assert_eq!(sequence, previous_sequence + 1);
                     previous_sequence = sequence;
-                    if event == SessionEvent::SnapshotChanged {
+                    if event == SessionEvent::LayoutChanged {
                         replayed_snapshots.push(sequence);
                     }
                 }

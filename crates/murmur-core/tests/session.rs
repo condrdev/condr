@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use murmur_core::{
-    PaneLayout, Session, SessionSnapshot, SnapshotError, SplitDirection, WorkspaceId,
+    PaneDirection, PaneLayout, Session, SessionSnapshot, SnapshotError, SplitDirection, WorkspaceId,
 };
 
 #[test]
@@ -462,6 +462,63 @@ fn unknown_pane_cwd_falls_back_to_the_stable_workspace_root() {
         .find(|pane| pane.id() == split_pane_id)
         .expect("split Pane exists");
     assert_eq!(split_pane.cwd(), Some(root_directory.as_path()));
+}
+
+#[test]
+fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
+    let mut session = Session::new();
+    session.create_workspace(PathBuf::from("projects/murmur"));
+    let first = session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let tab_id = session.active_workspace().unwrap().active_tab().id();
+    let second = session
+        .split_pane(first, SplitDirection::Horizontal, 0.5)
+        .unwrap();
+    let third = session
+        .split_pane(second, SplitDirection::Vertical, 0.5)
+        .unwrap();
+
+    assert!(session.focus_pane(first));
+    assert!(session.focus_pane_in_direction(first, PaneDirection::Right));
+    assert_eq!(
+        session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id(),
+        second
+    );
+    assert!(session.resize_pane(second, PaneDirection::Left, 0.1));
+    assert!(session.swap_pane(second, PaneDirection::Down));
+    assert_eq!(
+        session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id(),
+        second
+    );
+    assert!(session.toggle_pane_zoom(third));
+    let tab = session.active_workspace().unwrap().active_tab();
+    assert_eq!(tab.focused_pane().id(), third);
+    assert_eq!(tab.zoomed_pane_id(), Some(third));
+
+    assert!(session.set_tab_split_ratios(tab_id, &[0.7, 0.3]));
+    let restored = Session::restore(session.snapshot()).unwrap();
+    assert_eq!(
+        restored
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .zoomed_pane_id(),
+        None
+    );
 }
 
 #[test]

@@ -2,9 +2,9 @@
 
 ## Outcome
 
-Murmur MVP is a native GUI client for organizing ordinary shell terminals across one or more connected Servers, Sessions, Workspaces, Tabs, and split Panes. An agent CLI is an optional process that the user starts inside a Terminal; Murmur never selects or launches one automatically.
+Murmur MVP is a native GUI client for organizing ordinary shell terminals across one or more connected Servers, Workspaces, Tabs, and split Panes. An agent CLI is an optional process that the user starts inside a Terminal; Murmur never selects or launches one automatically.
 
-The GUI discovers an existing local `murmur-server` or starts the same standalone server used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. An empty active Session shows a Start Page with `New Terminal Workspace` and `Open Folder`; a non-empty Session shows its Server/Session/Workspace/Agent hierarchy, Tab row, and active Pane layout.
+The GUI discovers an existing local `murmur-server` or starts the same standalone server used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Terminal Workspace` and `Open Folder`; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
 
 ## Architecture Boundary
 
@@ -32,6 +32,13 @@ Each phase starts only after the preceding exit condition holds.
 | 5. Agent and Git workflows | Foreground agent recognition, bottom-buffer status rules, unseen `done`, branch display, create/open worktree, clean managed removal | State transitions and Git safety rules pass core/server tests and are visible for local and remote Sessions |
 | 6. Persistence and failure handling | Debounced atomic Session Snapshot on the Server, Server-restart recovery with fresh shells, partial pruning, reconnect and Start Page fallbacks | Round-trip and corruption tests pass; live reconnect preserves running work, while Server restart restores structure but not processes or terminal history |
 | 7. Release gate | Cross-platform checks, Windows-to-Linux remote evidence, documented limitations | Every required check below passes at one commit |
+
+### Phase 4 UI Contract
+
+- `Session` remains a Server-owned domain and protocol boundary; it is not a user-visible navigation item. The sidebar hierarchy is Server → Workspace, with recognized Agents added under their Workspace in Phase 5.
+- The sidebar is persistent and resizable. Selecting a Server shows its last active Workspace or Start Page; selecting an Agent activates its Workspace, Tab, and Pane.
+- The active Workspace owns the Tab row. Panes have no permanent title bar; a visible focus treatment identifies the active Pane, while Pane commands remain available through shortcuts, context menus, and the command palette.
+- A disconnected Server keeps its last Workspace tree and terminal views visible but read-only, shows connection status and a reconnect action, and disables mutations until control is restored.
 
 ## Linux/arm64 Automated Gate
 

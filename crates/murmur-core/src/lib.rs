@@ -4,8 +4,8 @@ mod snapshot;
 mod terminal;
 
 pub use session::{
-    CloseOutcome, Pane, PaneId, PaneLayout, Session, SplitDirection, Tab, TabId, Workspace,
-    WorkspaceId,
+    CloseOutcome, Pane, PaneDirection, PaneId, PaneLayout, Session, SplitDirection, Tab, TabId,
+    Workspace, WorkspaceId,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
 pub use terminal::{

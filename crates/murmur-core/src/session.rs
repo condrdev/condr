@@ -25,10 +25,36 @@ pub struct TabId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PaneId(u64);
 
+impl WorkspaceId {
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl TabId {
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl PaneId {
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SplitDirection {
     Horizontal,
     Vertical,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneDirection {
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -42,13 +68,13 @@ pub enum PaneLayout {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Session {
     workspaces: Vec<Workspace>,
     active_workspace: Option<WorkspaceId>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Workspace {
     id: WorkspaceId,
     name: String,
@@ -58,7 +84,7 @@ pub struct Workspace {
     next_tab_number: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Tab {
     id: TabId,
     name: String,
@@ -66,9 +92,10 @@ pub struct Tab {
     focused_pane: PaneId,
     focus_history: Vec<PaneId>,
     layout: PaneLayout,
+    zoomed_pane: Option<PaneId>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Pane {
     id: PaneId,
     cwd: Option<PathBuf>,
@@ -133,6 +160,21 @@ impl Session {
             .find(|workspace| workspace.id == workspace_id)
     }
 
+    pub fn tab(&self, tab_id: TabId) -> Option<&Tab> {
+        self.workspaces
+            .iter()
+            .flat_map(Workspace::tabs)
+            .find(|tab| tab.id == tab_id)
+    }
+
+    pub fn pane(&self, pane_id: PaneId) -> Option<&Pane> {
+        self.workspaces
+            .iter()
+            .flat_map(Workspace::tabs)
+            .flat_map(Tab::panes)
+            .find(|pane| pane.id == pane_id)
+    }
+
     pub fn create_workspace(&mut self, root_directory: PathBuf) -> WorkspaceId {
         let workspace_id = WorkspaceId(next_id());
         let tab_id = TabId(next_id());
@@ -151,6 +193,7 @@ impl Session {
                 focused_pane: pane_id,
                 focus_history: Vec::new(),
                 layout: PaneLayout::Pane(pane_id),
+                zoomed_pane: None,
             }],
             active_tab: tab_id,
             next_tab_number: 2,
@@ -186,6 +229,7 @@ impl Session {
             focused_pane: pane_id,
             focus_history: Vec::new(),
             layout: PaneLayout::Pane(pane_id),
+            zoomed_pane: None,
         });
         workspace.active_tab = tab_id;
         self.active_workspace = Some(workspace_id);
@@ -222,6 +266,7 @@ impl Session {
         tab.focus_history.retain(|id| *id != previous_focus);
         tab.focus_history.push(previous_focus);
         tab.focused_pane = new_pane_id;
+        tab.zoomed_pane = None;
         tab.panes.push(Pane {
             id: new_pane_id,
             cwd: Some(cwd),
@@ -277,6 +322,9 @@ impl Session {
                 .expect("a multi-pane layout remains after one pane closes");
             tab.panes.remove(pane_ix);
             tab.focus_history.retain(|id| *id != pane_id);
+            if tab.zoomed_pane == Some(pane_id) {
+                tab.zoomed_pane = None;
+            }
             if tab.focused_pane == pane_id {
                 tab.focused_pane = tab
                     .focus_history
@@ -404,6 +452,112 @@ impl Session {
         false
     }
 
+    pub fn rename_workspace(&mut self, workspace_id: WorkspaceId, name: impl Into<String>) -> bool {
+        let name = name.into();
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return false;
+        };
+        workspace.name = name.to_owned();
+        true
+    }
+
+    pub fn rename_tab(&mut self, tab_id: TabId, name: impl Into<String>) -> bool {
+        let name = name.into();
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        for workspace in &mut self.workspaces {
+            if let Some(tab) = workspace.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+                tab.name = name.to_owned();
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn focus_pane_in_direction(&mut self, pane_id: PaneId, direction: PaneDirection) -> bool {
+        let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
+            return false;
+        };
+        let Some(neighbor) = neighbor_pane_id(
+            &self.workspaces[workspace_ix].tabs[tab_ix].layout,
+            pane_id,
+            direction,
+        ) else {
+            return false;
+        };
+        self.focus_pane(neighbor)
+    }
+
+    pub fn resize_pane(&mut self, pane_id: PaneId, direction: PaneDirection, amount: f32) -> bool {
+        if !amount.is_finite() || amount == 0.0 {
+            return false;
+        }
+        let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
+            return false;
+        };
+        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let Some(neighbor) = neighbor_pane_id(&tab.layout, pane_id, direction) else {
+            return false;
+        };
+        resize_between(&mut tab.layout, pane_id, neighbor, amount.abs().min(0.4))
+    }
+
+    pub fn swap_pane(&mut self, pane_id: PaneId, direction: PaneDirection) -> bool {
+        let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
+            return false;
+        };
+        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let Some(neighbor) = neighbor_pane_id(&tab.layout, pane_id, direction) else {
+            return false;
+        };
+        swap_layout_panes(&mut tab.layout, pane_id, neighbor);
+        true
+    }
+
+    pub fn set_tab_split_ratios(&mut self, tab_id: TabId, ratios: &[f32]) -> bool {
+        if ratios.iter().any(|ratio| !ratio.is_finite()) {
+            return false;
+        }
+        for workspace in &mut self.workspaces {
+            let Some(tab) = workspace.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+                continue;
+            };
+            if split_count(&tab.layout) != ratios.len() {
+                return false;
+            }
+            let previous = tab.layout.clone();
+            let mut ratios = ratios.iter().copied();
+            apply_split_ratios(&mut tab.layout, &mut ratios);
+            return tab.layout != previous;
+        }
+        false
+    }
+
+    pub fn toggle_pane_zoom(&mut self, pane_id: PaneId) -> bool {
+        if !self.focus_pane(pane_id) {
+            return false;
+        }
+        let (workspace_ix, tab_ix, _) = self
+            .find_pane(pane_id)
+            .expect("focused Pane remains in the Session");
+        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        if tab.panes.len() == 1 {
+            return false;
+        }
+        tab.zoomed_pane = (tab.zoomed_pane != Some(pane_id)).then_some(pane_id);
+        true
+    }
+
     pub fn snapshot(&self) -> SessionSnapshot {
         SessionSnapshot {
             version: SNAPSHOT_VERSION,
@@ -470,6 +624,7 @@ impl Session {
                             focused_pane: tab.focused_pane,
                             focus_history: tab.focus_history,
                             layout: tab.layout,
+                            zoomed_pane: None,
                         })
                         .collect(),
                     active_tab: workspace.active_tab,
@@ -633,6 +788,10 @@ impl Tab {
     pub fn layout(&self) -> &PaneLayout {
         &self.layout
     }
+
+    pub fn zoomed_pane_id(&self) -> Option<PaneId> {
+        self.zoomed_pane
+    }
 }
 
 impl Pane {
@@ -724,6 +883,182 @@ fn first_pane_id(layout: &PaneLayout) -> PaneId {
     match layout {
         PaneLayout::Pane(id) => *id,
         PaneLayout::Split { first, .. } => first_pane_id(first),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PaneRect {
+    id: PaneId,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+}
+
+fn neighbor_pane_id(
+    layout: &PaneLayout,
+    target: PaneId,
+    direction: PaneDirection,
+) -> Option<PaneId> {
+    let mut rects = Vec::new();
+    collect_pane_rects(layout, 0.0, 0.0, 1.0, 1.0, &mut rects);
+    let target = *rects.iter().find(|rect| rect.id == target)?;
+    rects
+        .into_iter()
+        .filter(|candidate| candidate.id != target.id)
+        .filter_map(|candidate| {
+            directional_score(target, candidate, direction).map(|score| (candidate.id, score))
+        })
+        .min_by(|(_, left), (_, right)| left.total_cmp(right))
+        .map(|(id, _)| id)
+}
+
+fn collect_pane_rects(
+    layout: &PaneLayout,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+    rects: &mut Vec<PaneRect>,
+) {
+    match layout {
+        PaneLayout::Pane(id) => rects.push(PaneRect {
+            id: *id,
+            left,
+            top,
+            right,
+            bottom,
+        }),
+        PaneLayout::Split {
+            direction: SplitDirection::Horizontal,
+            ratio,
+            first,
+            second,
+        } => {
+            let split = left + (right - left) * ratio;
+            collect_pane_rects(first, left, top, split, bottom, rects);
+            collect_pane_rects(second, split, top, right, bottom, rects);
+        }
+        PaneLayout::Split {
+            direction: SplitDirection::Vertical,
+            ratio,
+            first,
+            second,
+        } => {
+            let split = top + (bottom - top) * ratio;
+            collect_pane_rects(first, left, top, right, split, rects);
+            collect_pane_rects(second, left, split, right, bottom, rects);
+        }
+    }
+}
+
+fn directional_score(
+    target: PaneRect,
+    candidate: PaneRect,
+    direction: PaneDirection,
+) -> Option<f32> {
+    let (primary, secondary, center) = match direction {
+        PaneDirection::Left if candidate.right <= target.left + f32::EPSILON => (
+            target.left - candidate.right,
+            interval_gap(target.top, target.bottom, candidate.top, candidate.bottom),
+            ((target.top + target.bottom) - (candidate.top + candidate.bottom)).abs(),
+        ),
+        PaneDirection::Right if candidate.left >= target.right - f32::EPSILON => (
+            candidate.left - target.right,
+            interval_gap(target.top, target.bottom, candidate.top, candidate.bottom),
+            ((target.top + target.bottom) - (candidate.top + candidate.bottom)).abs(),
+        ),
+        PaneDirection::Up if candidate.bottom <= target.top + f32::EPSILON => (
+            target.top - candidate.bottom,
+            interval_gap(target.left, target.right, candidate.left, candidate.right),
+            ((target.left + target.right) - (candidate.left + candidate.right)).abs(),
+        ),
+        PaneDirection::Down if candidate.top >= target.bottom - f32::EPSILON => (
+            candidate.top - target.bottom,
+            interval_gap(target.left, target.right, candidate.left, candidate.right),
+            ((target.left + target.right) - (candidate.left + candidate.right)).abs(),
+        ),
+        _ => return None,
+    };
+    Some(primary * 100.0 + secondary * 10.0 + center)
+}
+
+fn interval_gap(first_start: f32, first_end: f32, second_start: f32, second_end: f32) -> f32 {
+    if first_end < second_start {
+        second_start - first_end
+    } else if second_end < first_start {
+        first_start - second_end
+    } else {
+        0.0
+    }
+}
+
+fn contains_pane(layout: &PaneLayout, pane_id: PaneId) -> bool {
+    match layout {
+        PaneLayout::Pane(id) => *id == pane_id,
+        PaneLayout::Split { first, second, .. } => {
+            contains_pane(first, pane_id) || contains_pane(second, pane_id)
+        }
+    }
+}
+
+fn resize_between(layout: &mut PaneLayout, target: PaneId, neighbor: PaneId, amount: f32) -> bool {
+    let PaneLayout::Split {
+        ratio,
+        first,
+        second,
+        ..
+    } = layout
+    else {
+        return false;
+    };
+    let target_first = contains_pane(first, target);
+    let neighbor_first = contains_pane(first, neighbor);
+    if target_first != neighbor_first {
+        let next = valid_split_ratio(*ratio + if target_first { amount } else { -amount });
+        if next == *ratio {
+            return false;
+        }
+        *ratio = next;
+        return true;
+    }
+    if target_first {
+        resize_between(first, target, neighbor, amount)
+    } else {
+        resize_between(second, target, neighbor, amount)
+    }
+}
+
+fn swap_layout_panes(layout: &mut PaneLayout, first_id: PaneId, second_id: PaneId) {
+    match layout {
+        PaneLayout::Pane(id) if *id == first_id => *id = second_id,
+        PaneLayout::Pane(id) if *id == second_id => *id = first_id,
+        PaneLayout::Pane(_) => {}
+        PaneLayout::Split { first, second, .. } => {
+            swap_layout_panes(first, first_id, second_id);
+            swap_layout_panes(second, first_id, second_id);
+        }
+    }
+}
+
+fn split_count(layout: &PaneLayout) -> usize {
+    match layout {
+        PaneLayout::Pane(_) => 0,
+        PaneLayout::Split { first, second, .. } => 1 + split_count(first) + split_count(second),
+    }
+}
+
+fn apply_split_ratios(layout: &mut PaneLayout, ratios: &mut impl Iterator<Item = f32>) {
+    if let PaneLayout::Split {
+        ratio,
+        first,
+        second,
+        ..
+    } = layout
+    {
+        *ratio = valid_split_ratio(ratios.next().expect("split ratio count was checked"));
+        apply_split_ratios(first, ratios);
+        apply_split_ratios(second, ratios);
     }
 }
 

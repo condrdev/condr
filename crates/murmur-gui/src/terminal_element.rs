@@ -1,16 +1,17 @@
 use gpui::{
     App, BorderStyle, Bounds, ContentMask, CursorStyle, Element, ElementId, ElementInputHandler,
-    Entity, Focusable as _, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
+    Entity, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
     Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle, Style,
     TextAlign, TextRun, UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
 };
 use gpui_component::ActiveTheme as _;
 use murmur_core::{
-    TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSide, TerminalSize, TerminalView,
+    PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSide, TerminalSize,
+    TerminalView,
 };
 
-use crate::Murmur;
+use crate::{ConnectionKey, Murmur};
 
 const INVERSE: u16 = 1 << 0;
 const BOLD: u16 = 1 << 1;
@@ -25,6 +26,9 @@ const ALL_UNDERLINES: u16 = 0b0111_1000_0000_1000;
 
 pub(crate) struct TerminalElement {
     view: Entity<Murmur>,
+    focus_handle: FocusHandle,
+    connection_key: ConnectionKey,
+    pane_id: PaneId,
     terminal: TerminalView,
     marked_text: Option<String>,
 }
@@ -44,11 +48,17 @@ pub(crate) struct PrepaintState {
 impl TerminalElement {
     pub(crate) fn new(
         view: Entity<Murmur>,
+        focus_handle: FocusHandle,
+        connection_key: ConnectionKey,
+        pane_id: PaneId,
         terminal: TerminalView,
         marked_text: Option<String>,
     ) -> Self {
         Self {
             view,
+            focus_handle,
+            connection_key,
+            pane_id,
             terminal,
             marked_text,
         }
@@ -123,10 +133,12 @@ impl Element for TerminalElement {
             cell_height: cell_size.height.as_f32().round() as u16,
         };
         let view = self.view.clone();
+        let connection_key = self.connection_key;
+        let pane_id = self.pane_id;
         window.defer(cx, move |_, cx| {
             view.update(cx, |view, cx| {
-                view.update_terminal_geometry(bounds, cell_size);
-                view.resize_terminal(terminal_size, cx);
+                view.update_terminal_geometry(connection_key, pane_id, bounds, cell_size);
+                view.resize_terminal(connection_key, pane_id, terminal_size, cx);
             });
         });
 
@@ -279,9 +291,8 @@ impl Element for TerminalElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let focus_handle = self.view.read(cx).focus_handle(cx);
         window.handle_input(
-            &focus_handle,
+            &self.focus_handle,
             ElementInputHandler::new(bounds, self.view.clone()),
             cx,
         );
@@ -309,11 +320,16 @@ impl Element for TerminalElement {
         let view = self.view.clone();
         let terminal_size = self.terminal.size;
         let cell_size = prepaint.cell_size;
+        let connection_key = self.connection_key;
+        let pane_id = self.pane_id;
+        let focus_handle = self.focus_handle.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase.bubble() && event.button == MouseButton::Left && hitbox.is_hovered(window) {
+                focus_handle.focus(window, cx);
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
                 view.update(cx, |view, cx| {
-                    view.begin_selection(position, window, cx);
+                    view.select_pane(connection_key, pane_id, cx);
+                    view.begin_selection(connection_key, pane_id, position);
                 });
                 cx.stop_propagation();
             }
@@ -321,18 +337,28 @@ impl Element for TerminalElement {
 
         let view = self.view.clone();
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-            if phase.bubble() && event.dragging() && view.read(cx).is_selecting() {
+            if phase.bubble()
+                && event.dragging()
+                && view.read(cx).is_selecting(connection_key, pane_id)
+            {
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                view.update(cx, |view, _| view.update_selection(position));
+                view.update(cx, |view, _| {
+                    view.update_selection(connection_key, pane_id, position)
+                });
                 cx.stop_propagation();
             }
         });
 
         let view = self.view.clone();
         window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-            if phase.bubble() && event.button == MouseButton::Left && view.read(cx).is_selecting() {
+            if phase.bubble()
+                && event.button == MouseButton::Left
+                && view.read(cx).is_selecting(connection_key, pane_id)
+            {
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                view.update(cx, |view, _| view.end_selection(position));
+                view.update(cx, |view, _| {
+                    view.end_selection(connection_key, pane_id, position)
+                });
                 cx.stop_propagation();
             }
         });
@@ -352,7 +378,9 @@ impl Element for TerminalElement {
             } else {
                 delta.round() as i32
             };
-            view.update(cx, |view, _| view.scroll_terminal(lines));
+            view.update(cx, |view, _| {
+                view.scroll_terminal(connection_key, pane_id, lines)
+            });
             cx.stop_propagation();
         });
     }

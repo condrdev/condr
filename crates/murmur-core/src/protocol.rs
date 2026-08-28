@@ -10,7 +10,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{PaneId, SessionSnapshot, TerminalCommand, TerminalView};
+use crate::{
+    PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalCommand, TerminalView,
+    WorkspaceId,
+};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_SIZE: usize = 2 * 1024 * 1024;
@@ -30,7 +33,7 @@ pub struct Hello {
     pub client_name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello(Hello),
     SnapshotRequest {
@@ -50,10 +53,10 @@ pub enum ClientMessage {
     ReleaseControl {
         session_id: SessionId,
     },
-    CreateWorkspace {
+    Layout {
         server_id: ServerId,
         session_id: SessionId,
-        root_directory: PathBuf,
+        command: LayoutCommand,
     },
     Terminal {
         server_id: ServerId,
@@ -68,6 +71,74 @@ pub enum ClientMessage {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LayoutCommand {
+    CreateWorkspace {
+        root_directory: PathBuf,
+    },
+    CreateTab {
+        workspace_id: WorkspaceId,
+    },
+    RenameWorkspace {
+        workspace_id: WorkspaceId,
+        name: String,
+    },
+    RenameTab {
+        tab_id: TabId,
+        name: String,
+    },
+    ActivateWorkspace {
+        workspace_id: WorkspaceId,
+    },
+    ActivateTab {
+        tab_id: TabId,
+    },
+    MoveWorkspace {
+        workspace_id: WorkspaceId,
+        target_index: u32,
+    },
+    MoveTab {
+        tab_id: TabId,
+        target_index: u32,
+    },
+    SplitPane {
+        pane_id: PaneId,
+        direction: SplitDirection,
+    },
+    FocusPane {
+        pane_id: PaneId,
+    },
+    FocusPaneDirection {
+        pane_id: PaneId,
+        direction: PaneDirection,
+    },
+    ResizePane {
+        pane_id: PaneId,
+        direction: PaneDirection,
+        amount: f32,
+    },
+    SetSplitRatios {
+        tab_id: TabId,
+        ratios: Vec<f32>,
+    },
+    SwapPane {
+        pane_id: PaneId,
+        direction: PaneDirection,
+    },
+    TogglePaneZoom {
+        pane_id: PaneId,
+    },
+    ClosePane {
+        pane_id: PaneId,
+    },
+    CloseTab {
+        tab_id: TabId,
+    },
+    CloseWorkspace {
+        workspace_id: WorkspaceId,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SessionBootstrap {
     pub server_id: ServerId,
     pub runtime_epoch: RuntimeEpoch,
@@ -75,6 +146,7 @@ pub struct SessionBootstrap {
     pub sequence: u64,
     pub snapshot: SessionSnapshot,
     pub terminals: Vec<PaneTerminalSnapshot>,
+    pub zoomed_panes: Vec<PaneId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -86,7 +158,7 @@ pub struct PaneTerminalSnapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SessionEvent {
-    SnapshotChanged,
+    LayoutChanged,
     TerminalChanged { pane_id: PaneId, view: TerminalView },
     TerminalExited { pane_id: PaneId, view: TerminalView },
 }
@@ -270,6 +342,24 @@ mod tests {
             read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
+    }
+
+    #[test]
+    fn layout_command_round_trip_uses_the_existing_protocol_version() {
+        let message = ClientMessage::Layout {
+            server_id: ServerId(4),
+            session_id: SessionId(1),
+            command: LayoutCommand::CreateWorkspace {
+                root_directory: PathBuf::from("projects/murmur"),
+            },
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
