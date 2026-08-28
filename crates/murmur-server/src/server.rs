@@ -1424,7 +1424,7 @@ mod tests {
             .focused_pane()
             .id();
         let pid_command = if cfg!(windows) {
-            "pwsh.exe -NoLogo -NoProfile -NoExit -Command \"Write-Output ('murmur-' + 'pid=' + $PID)\"\r"
+            "Write-Output ('murmur-' + 'pid=' + $PID)\r"
         } else {
             "printf 'murmur-%s=%s\\n' pid $$\r"
         };
