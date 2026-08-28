@@ -829,7 +829,7 @@ fn handle_client(
                         },
                     )
                 } else {
-                    let is_copy = matches!(&command, TerminalCommand::Copy);
+                    let is_copy = matches!(&command, TerminalCommand::Copy { .. });
                     let result = state
                         .terminals
                         .get(&pane_id)
@@ -1554,28 +1554,21 @@ mod tests {
             server_id,
             session_id,
             pane_id,
-            TerminalCommand::Select {
-                start: TerminalPosition {
-                    row: 0,
-                    column: 0,
-                    side: TerminalSide::Left,
-                },
-                end: TerminalPosition {
-                    row: 0,
-                    column: 3,
-                    side: TerminalSide::Right,
+            TerminalCommand::Copy {
+                selection: murmur_core::TerminalSelection {
+                    start: TerminalPosition {
+                        row: 0,
+                        column: 0,
+                        side: TerminalSide::Left,
+                    },
+                    end: TerminalPosition {
+                        row: 0,
+                        column: 3,
+                        side: TerminalSide::Right,
+                    },
+                    display_offset: scrolled.display_offset,
                 },
             },
-        );
-        wait_for_terminal(&mut second, pane_id, |view| {
-            view.cell(0, 0).is_some_and(|cell| cell.selected)
-        });
-        send_terminal(
-            &mut second,
-            server_id,
-            session_id,
-            pane_id,
-            TerminalCommand::Copy,
         );
         let copied = wait_for_message(
             &mut second,

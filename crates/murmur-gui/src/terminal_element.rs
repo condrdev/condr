@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
@@ -6,12 +8,14 @@ use gpui::{
     InputHandler, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollDelta, ScrollWheelEvent,
     ShapedLine, Size, StrikethroughStyle, Style, TextAlign, TextInputConfiguration, TextRun,
-    UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
+    TextStyle, UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb,
+    size,
 };
 use gpui_component::ActiveTheme as _;
+use murmur_core::protocol::RuntimeEpoch;
 use murmur_core::{
-    PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSide, TerminalSize,
-    TerminalView,
+    PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSelection, TerminalSide,
+    TerminalSize, TerminalView,
 };
 
 use crate::{ConnectionKey, Murmur};
@@ -29,11 +33,45 @@ const ALL_UNDERLINES: u16 = 0b0111_1000_0000_1000;
 
 pub(crate) struct TerminalElement {
     view: Entity<Murmur>,
-    focus_handle: FocusHandle,
-    connection_key: ConnectionKey,
-    pane_id: PaneId,
-    terminal: TerminalView,
-    marked_text: Option<String>,
+    props: TerminalElementProps,
+}
+
+pub(crate) struct TerminalElementProps {
+    pub(crate) focus_handle: FocusHandle,
+    pub(crate) connection_key: ConnectionKey,
+    pub(crate) pane_id: PaneId,
+    pub(crate) terminal: TerminalView,
+    pub(crate) marked_text: Option<String>,
+    pub(crate) selection: Option<TerminalSelection>,
+    pub(crate) runtime_epoch: Option<RuntimeEpoch>,
+    pub(crate) render_cache: Rc<RefCell<TerminalRenderCache>>,
+}
+
+#[derive(Clone, PartialEq)]
+struct TerminalRenderCacheKey {
+    runtime_epoch: Option<RuntimeEpoch>,
+    revision: u64,
+    size: TerminalSize,
+    style: TextStyle,
+    font_size: Pixels,
+    foreground: Hsla,
+    background: Hsla,
+    primary: Hsla,
+}
+
+#[derive(Default)]
+pub(crate) struct TerminalRenderCache {
+    key: Option<TerminalRenderCacheKey>,
+    cells: Vec<Option<ShapedLine>>,
+    #[cfg(all(test, feature = "test-support"))]
+    shaped_cells: usize,
+}
+
+#[cfg(all(test, feature = "test-support"))]
+impl TerminalRenderCache {
+    pub(crate) fn shaped_cells(&self) -> usize {
+        self.shaped_cells
+    }
 }
 
 // Terminals accept IME text, but printable chords must reach keybindings first.
@@ -156,22 +194,8 @@ pub(crate) struct PrepaintState {
 }
 
 impl TerminalElement {
-    pub(crate) fn new(
-        view: Entity<Murmur>,
-        focus_handle: FocusHandle,
-        connection_key: ConnectionKey,
-        pane_id: PaneId,
-        terminal: TerminalView,
-        marked_text: Option<String>,
-    ) -> Self {
-        Self {
-            view,
-            focus_handle,
-            connection_key,
-            pane_id,
-            terminal,
-            marked_text,
-        }
+    pub(crate) fn new(view: Entity<Murmur>, props: TerminalElementProps) -> Self {
+        Self { view, props }
     }
 }
 
@@ -243,23 +267,46 @@ impl Element for TerminalElement {
             cell_height: cell_size.height.as_f32().round() as u16,
         };
         let view = self.view.clone();
-        let connection_key = self.connection_key;
-        let pane_id = self.pane_id;
-        window.defer(cx, move |_, cx| {
-            view.update(cx, |view, cx| {
-                view.update_terminal_geometry(connection_key, pane_id, bounds, cell_size);
-                view.resize_terminal(connection_key, pane_id, terminal_size, cx);
+        let connection_key = self.props.connection_key;
+        let pane_id = self.props.pane_id;
+        if !view.read(cx).terminal_layout_is_current(
+            connection_key,
+            pane_id,
+            bounds,
+            cell_size,
+            terminal_size,
+        ) {
+            window.defer(cx, move |_, cx| {
+                view.update(cx, |view, cx| {
+                    view.update_terminal_geometry(connection_key, pane_id, bounds, cell_size);
+                    view.resize_terminal(connection_key, pane_id, terminal_size, cx);
+                });
             });
-        });
+        }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let mut quads = vec![fill(bounds, cx.theme().background)];
-        let mut cells = Vec::new();
+        let mut cells = Vec::with_capacity(self.props.terminal.cells.len());
+        let cache_key = TerminalRenderCacheKey {
+            runtime_epoch: self.props.runtime_epoch,
+            revision: self.props.terminal.revision,
+            size: self.props.terminal.size,
+            style: style.clone(),
+            font_size,
+            foreground: cx.theme().foreground,
+            background: cx.theme().background,
+            primary: cx.theme().primary,
+        };
+        let mut render_cache = self.props.render_cache.borrow_mut();
+        if render_cache.key.as_ref() != Some(&cache_key) {
+            render_cache.key = Some(cache_key);
+            render_cache.cells = vec![None; self.props.terminal.cells.len()];
+        }
 
-        // ponytail: full visible-grid repaint; add damage tracking only after profiling proves it matters.
-        for row in 0..self.terminal.size.rows {
-            for column in 0..self.terminal.size.columns {
-                let Some(cell) = self.terminal.cell(row, column) else {
+        // Selection-only frames reuse shaped cells; terminal revisions invalidate the cache.
+        for row in 0..self.props.terminal.size.rows {
+            for column in 0..self.props.terminal.size.columns {
+                let Some(cell) = self.props.terminal.cell(row, column) else {
                     continue;
                 };
                 let cell_bounds = Bounds::new(
@@ -274,9 +321,6 @@ impl Element for TerminalElement {
                 if cell.flags & INVERSE != 0 {
                     std::mem::swap(&mut foreground, &mut background);
                 }
-                if cell.selected {
-                    background = cx.theme().selection;
-                }
                 if cell.flags & DIM != 0 {
                     foreground = foreground.opacity(0.65);
                 }
@@ -289,36 +333,51 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                let mut font = style.font();
-                if cell.flags & BOLD != 0 {
-                    font = font.bold();
-                }
-                if cell.flags & ITALIC != 0 {
-                    font = font.italic();
-                }
-                let underline =
-                    (cell.flags & (UNDERLINE | ALL_UNDERLINES) != 0).then_some(UnderlineStyle {
-                        thickness: px(1.),
-                        color: Some(foreground),
-                        wavy: false,
-                    });
-                let strikethrough = (cell.flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
-                    thickness: px(1.),
-                    color: Some(foreground),
-                });
-                let line = window.text_system().shape_line(
-                    cell.text.clone().into(),
-                    font_size,
-                    &[TextRun {
-                        len: cell.text.len(),
-                        font,
-                        color: foreground,
-                        background_color: None,
-                        underline,
-                        strikethrough,
-                    }],
-                    None,
-                );
+                let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
+                    + usize::from(column);
+                let line = match render_cache.cells[cache_index].clone() {
+                    Some(line) => line,
+                    None => {
+                        let mut font = style.font();
+                        if cell.flags & BOLD != 0 {
+                            font = font.bold();
+                        }
+                        if cell.flags & ITALIC != 0 {
+                            font = font.italic();
+                        }
+                        let underline = (cell.flags & (UNDERLINE | ALL_UNDERLINES) != 0).then_some(
+                            UnderlineStyle {
+                                thickness: px(1.),
+                                color: Some(foreground),
+                                wavy: false,
+                            },
+                        );
+                        let strikethrough =
+                            (cell.flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
+                                thickness: px(1.),
+                                color: Some(foreground),
+                            });
+                        let line = window.text_system().shape_line(
+                            cell.text.clone().into(),
+                            font_size,
+                            &[TextRun {
+                                len: cell.text.len(),
+                                font,
+                                color: foreground,
+                                background_color: None,
+                                underline,
+                                strikethrough,
+                            }],
+                            None,
+                        );
+                        render_cache.cells[cache_index] = Some(line.clone());
+                        #[cfg(all(test, feature = "test-support"))]
+                        {
+                            render_cache.shaped_cells += 1;
+                        }
+                        line
+                    }
+                };
                 cells.push(ShapedCell {
                     origin: cell_bounds.origin,
                     line,
@@ -326,7 +385,18 @@ impl Element for TerminalElement {
             }
         }
 
-        if let Some(cursor) = self.terminal.cursor {
+        if let Some(selection) = self.props.selection {
+            push_selection_quads(
+                &mut quads,
+                selection,
+                self.props.terminal.size,
+                bounds,
+                cell_size,
+                cx.theme().selection,
+            );
+        }
+
+        if let Some(cursor) = self.props.terminal.cursor {
             let cursor_bounds = Bounds::new(
                 point(
                     bounds.left() + cell_size.width * usize::from(cursor.column),
@@ -359,7 +429,12 @@ impl Element for TerminalElement {
                 TerminalCursorShape::Hidden => {}
             }
 
-            if let Some(marked_text) = self.marked_text.as_ref().filter(|text| !text.is_empty()) {
+            if let Some(marked_text) = self
+                .props
+                .marked_text
+                .as_ref()
+                .filter(|text| !text.is_empty())
+            {
                 cells.push(ShapedCell {
                     origin: cursor_bounds.origin,
                     line: window.text_system().shape_line(
@@ -402,7 +477,7 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) {
         window.handle_input(
-            &self.focus_handle,
+            &self.props.focus_handle,
             TerminalInputHandler::new(bounds, self.view.clone()),
             cx,
         );
@@ -428,18 +503,18 @@ impl Element for TerminalElement {
 
         let hitbox = prepaint.hitbox.clone();
         let view = self.view.clone();
-        let terminal_size = self.terminal.size;
+        let terminal_size = self.props.terminal.size;
         let cell_size = prepaint.cell_size;
-        let connection_key = self.connection_key;
-        let pane_id = self.pane_id;
-        let focus_handle = self.focus_handle.clone();
+        let connection_key = self.props.connection_key;
+        let pane_id = self.props.pane_id;
+        let focus_handle = self.props.focus_handle.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase.bubble() && event.button == MouseButton::Left && hitbox.is_hovered(window) {
                 focus_handle.focus(window, cx);
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
                 view.update(cx, |view, cx| {
                     view.select_pane(connection_key, pane_id, cx);
-                    view.begin_selection(connection_key, pane_id, position);
+                    view.begin_selection(connection_key, pane_id, position, cx);
                 });
                 cx.stop_propagation();
             }
@@ -452,8 +527,8 @@ impl Element for TerminalElement {
                 && view.read(cx).is_selecting(connection_key, pane_id)
             {
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                view.update(cx, |view, _| {
-                    view.update_selection(connection_key, pane_id, position)
+                view.update(cx, |view, cx| {
+                    view.update_selection(connection_key, pane_id, position, cx)
                 });
                 cx.stop_propagation();
             }
@@ -466,8 +541,8 @@ impl Element for TerminalElement {
                 && view.read(cx).is_selecting(connection_key, pane_id)
             {
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                view.update(cx, |view, _| {
-                    view.end_selection(connection_key, pane_id, position)
+                view.update(cx, |view, cx| {
+                    view.end_selection(connection_key, pane_id, position, cx)
                 });
                 cx.stop_propagation();
             }
@@ -488,11 +563,57 @@ impl Element for TerminalElement {
             } else {
                 delta.round() as i32
             };
-            view.update(cx, |view, _| {
-                view.scroll_terminal(connection_key, pane_id, lines)
+            view.update(cx, |view, cx| {
+                view.scroll_terminal(connection_key, pane_id, lines, cx)
             });
             cx.stop_propagation();
         });
+    }
+}
+
+fn push_selection_quads(
+    quads: &mut Vec<PaintQuad>,
+    selection: TerminalSelection,
+    terminal_size: TerminalSize,
+    bounds: Bounds<Pixels>,
+    cell_size: Size<Pixels>,
+    color: Hsla,
+) {
+    let columns = u32::from(terminal_size.columns);
+    let cell_count = columns * u32::from(terminal_size.rows);
+    let Some(last_cell) = cell_count.checked_sub(1) else {
+        return;
+    };
+    let Some((start, end)) = selection.selected_cell_range(terminal_size.columns) else {
+        return;
+    };
+    let start = start.min(last_cell);
+    let end = end.min(last_cell);
+
+    for row in (start / columns)..=(end / columns) {
+        let start_column = if row == start / columns {
+            start % columns
+        } else {
+            0
+        };
+        let end_column = if row == end / columns {
+            end % columns
+        } else {
+            columns - 1
+        };
+        quads.push(fill(
+            Bounds::new(
+                point(
+                    bounds.left() + cell_size.width * start_column as usize,
+                    bounds.top() + cell_size.height * row as usize,
+                ),
+                size(
+                    cell_size.width * (end_column - start_column + 1) as usize,
+                    cell_size.height,
+                ),
+            ),
+            color,
+        ));
     }
 }
 
@@ -591,5 +712,32 @@ mod tests {
             terminal_position(point(px(0.), px(0.)), bounds, cell_size, terminal_size).side,
             TerminalSide::Left
         );
+    }
+
+    #[test]
+    fn selection_backgrounds_are_compacted_by_row() {
+        let mut quads = Vec::new();
+        push_selection_quads(
+            &mut quads,
+            TerminalSelection {
+                start: TerminalPosition {
+                    row: 0,
+                    column: 2,
+                    side: TerminalSide::Left,
+                },
+                end: TerminalPosition {
+                    row: 2,
+                    column: 7,
+                    side: TerminalSide::Right,
+                },
+                display_offset: 0,
+            },
+            TerminalSize::new(4, 10),
+            Bounds::new(point(px(0.), px(0.)), size(px(100.), px(40.))),
+            size(px(10.), px(10.)),
+            rgb(0xffffff).into(),
+        );
+
+        assert_eq!(quads.len(), 3);
     }
 }

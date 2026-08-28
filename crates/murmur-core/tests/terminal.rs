@@ -70,25 +70,28 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
         view.cell(0, 0).unwrap().foreground,
         view.cell(0, 0).unwrap().background
     );
-    runtime
-        .execute(TerminalCommand::Select {
-            start: TerminalPosition {
-                row: 0,
-                column: 0,
-                side: TerminalSide::Left,
-            },
-            end: TerminalPosition {
-                row: 0,
-                column: 4,
-                side: TerminalSide::Right,
-            },
-        })
-        .unwrap();
-    assert!(runtime.view().cell(0, 0).unwrap().selected);
+    let revision = runtime.revision();
     assert_eq!(
-        runtime.execute(TerminalCommand::Copy).unwrap(),
+        runtime
+            .execute(TerminalCommand::Copy {
+                selection: murmur_core::TerminalSelection {
+                    start: TerminalPosition {
+                        row: 0,
+                        column: 0,
+                        side: TerminalSide::Left,
+                    },
+                    end: TerminalPosition {
+                        row: 0,
+                        column: 4,
+                        side: TerminalSide::Right,
+                    },
+                    display_offset: view.display_offset,
+                },
+            })
+            .unwrap(),
         Some("alpha".into())
     );
+    assert_eq!(runtime.revision(), revision);
     let _ = runtime.shutdown().unwrap();
 
     let mut command = CommandBuilder::new("/bin/sh");

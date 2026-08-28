@@ -48,7 +48,6 @@ pub struct TerminalCell {
     pub foreground: TerminalColor,
     pub background: TerminalColor,
     pub flags: u16,
-    pub selected: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -128,6 +127,58 @@ pub struct TerminalPosition {
     pub side: TerminalSide,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminalSelection {
+    pub start: TerminalPosition,
+    pub end: TerminalPosition,
+    pub display_offset: u32,
+}
+
+impl TerminalSelection {
+    pub fn contains_cell(self, row: u16, column: u16, columns: u16) -> bool {
+        let Some((start, end)) = self.selected_cell_range(columns) else {
+            return false;
+        };
+        let cell = u32::from(row) * u32::from(columns) + u32::from(column);
+        (start..=end).contains(&cell)
+    }
+
+    pub fn selected_cell_range(self, columns: u16) -> Option<(u32, u32)> {
+        if columns == 0 {
+            return None;
+        }
+
+        let mut start = self.start;
+        let mut end = self.end;
+        start.column = start.column.min(columns - 1);
+        end.column = end.column.min(columns - 1);
+        if (start.row, start.column) > (end.row, end.column) {
+            std::mem::swap(&mut start, &mut end);
+        }
+
+        if start == end
+            || (start.row == end.row
+                && start.column.checked_add(1) == Some(end.column)
+                && start.side == TerminalSide::Right
+                && end.side == TerminalSide::Left)
+        {
+            return None;
+        }
+
+        let different_cells = (start.row, start.column) != (end.row, end.column);
+        let mut start_cell = u32::from(start.row) * u32::from(columns) + u32::from(start.column);
+        let mut end_cell = u32::from(end.row) * u32::from(columns) + u32::from(end.column);
+        if different_cells && start.side == TerminalSide::Right {
+            start_cell += 1;
+        }
+        if different_cells && end.side == TerminalSide::Left {
+            end_cell = end_cell.saturating_sub(1);
+        }
+
+        (start_cell <= end_cell).then_some((start_cell, end_cell))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TerminalCommand {
     Key {
@@ -138,12 +189,9 @@ pub enum TerminalCommand {
     Paste(String),
     Resize(TerminalSize),
     Scroll(TerminalScroll),
-    Select {
-        start: TerminalPosition,
-        end: TerminalPosition,
+    Copy {
+        selection: TerminalSelection,
     },
-    ClearSelection,
-    Copy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -399,15 +447,7 @@ impl TerminalRuntime {
                 self.scroll(scroll);
                 Ok(None)
             }
-            TerminalCommand::Select { start, end } => {
-                self.select(start, end);
-                Ok(None)
-            }
-            TerminalCommand::ClearSelection => {
-                self.clear_selection();
-                Ok(None)
-            }
-            TerminalCommand::Copy => Ok(self.copy_selection()),
+            TerminalCommand::Copy { selection } => Ok(self.copy_range(selection)),
         }
     }
 
@@ -434,7 +474,6 @@ impl TerminalRuntime {
         let terminal = self.terminal.lock().expect("terminal state lock poisoned");
         let content = terminal.renderable_content();
         let display_offset = content.display_offset;
-        let selection = content.selection;
         let cursor = content.cursor;
         let colors = content.colors;
         let mut cells = vec![blank_cell(); usize::from(size.rows) * usize::from(size.columns)];
@@ -454,15 +493,12 @@ impl TerminalRuntime {
             if let Some(zerowidth) = cell.zerowidth() {
                 text.extend(zerowidth);
             }
-            let selected = selection
-                .is_some_and(|range| range.contains_cell(&cell, cursor.point, cursor.shape));
             cells[usize::from(row) * usize::from(size.columns) + usize::from(column)] =
                 TerminalCell {
                     text,
                     foreground: terminal_color(cell.fg, colors),
                     background: terminal_color(cell.bg, colors),
                     flags: cell.flags.bits(),
-                    selected,
                 };
         }
 
@@ -536,32 +572,19 @@ impl TerminalRuntime {
         }
     }
 
-    pub fn select(&self, start: TerminalPosition, end: TerminalPosition) {
+    pub fn copy_range(&self, selection: TerminalSelection) -> Option<String> {
         let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        let start_side = side(start.side);
-        let start = viewport_point(&terminal, start);
-        let end_side = side(end.side);
-        let end = viewport_point(&terminal, end);
-        let mut selection = Selection::new(SelectionType::Simple, start, start_side);
-        selection.update(end, end_side);
-        terminal.selection = Some(selection);
-        drop(terminal);
-        self.notify_view();
-    }
-
-    pub fn clear_selection(&self) {
-        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        if terminal.selection.take().is_some() {
-            drop(terminal);
-            self.notify_view();
-        }
-    }
-
-    pub fn copy_selection(&self) -> Option<String> {
-        self.terminal
-            .lock()
-            .expect("terminal state lock poisoned")
-            .selection_to_string()
+        let start_side = side(selection.start.side);
+        let start = viewport_point(&terminal, selection.start, selection.display_offset);
+        let end_side = side(selection.end.side);
+        let end = viewport_point(&terminal, selection.end, selection.display_offset);
+        let previous = terminal.selection.take();
+        let mut range = Selection::new(SelectionType::Simple, start, start_side);
+        range.update(end, end_side);
+        terminal.selection = Some(range);
+        let text = terminal.selection_to_string();
+        terminal.selection = previous;
+        text
     }
 
     fn scroll_to_bottom(&self) {
@@ -695,7 +718,6 @@ fn blank_cell() -> TerminalCell {
         foreground: TerminalColor::Named(NamedColor::Foreground as u16),
         background: TerminalColor::Named(NamedColor::Background as u16),
         flags: 0,
-        selected: false,
     }
 }
 
@@ -732,11 +754,11 @@ impl From<CursorShape> for TerminalCursorShape {
     }
 }
 
-fn viewport_point(terminal: &Terminal, position: TerminalPosition) -> Point {
+fn viewport_point(terminal: &Terminal, position: TerminalPosition, display_offset: u32) -> Point {
     let row = usize::from(position.row).min(terminal.screen_lines().saturating_sub(1));
     let column = usize::from(position.column).min(terminal.columns().saturating_sub(1));
     Point::new(
-        Line(row as i32 - terminal.grid().display_offset() as i32),
+        Line(row as i32 - i32::try_from(display_offset).unwrap_or(i32::MAX)),
         Column(column),
     )
 }
@@ -962,5 +984,42 @@ mod tests {
     fn terminal_size_rejects_unbounded_grid_allocations() {
         assert!(TerminalSize::new(256, 256).validate().is_ok());
         assert!(TerminalSize::new(257, 256).validate().is_err());
+    }
+
+    #[test]
+    fn terminal_selection_matches_simple_cell_boundary_semantics() {
+        let position = |row, column, side| TerminalPosition { row, column, side };
+        let selection = |start, end| TerminalSelection {
+            start,
+            end,
+            display_offset: 0,
+        };
+
+        let empty = selection(
+            position(0, 1, TerminalSide::Left),
+            position(0, 1, TerminalSide::Left),
+        );
+        assert!(!empty.contains_cell(0, 1, 10));
+
+        let one_cell = selection(
+            position(0, 1, TerminalSide::Left),
+            position(0, 1, TerminalSide::Right),
+        );
+        assert!(one_cell.contains_cell(0, 1, 10));
+
+        let middle_cell = selection(
+            position(0, 1, TerminalSide::Right),
+            position(0, 3, TerminalSide::Left),
+        );
+        assert!(!middle_cell.contains_cell(0, 1, 10));
+        assert!(middle_cell.contains_cell(0, 2, 10));
+        assert!(!middle_cell.contains_cell(0, 3, 10));
+
+        let reversed = selection(
+            position(1, 1, TerminalSide::Right),
+            position(0, 8, TerminalSide::Left),
+        );
+        assert!(reversed.contains_cell(0, 8, 10));
+        assert!(reversed.contains_cell(1, 1, 10));
     }
 }

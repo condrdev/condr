@@ -1,5 +1,6 @@
 mod terminal_element;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::ops::Range;
@@ -7,7 +8,6 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -36,11 +36,11 @@ use murmur_core::protocol::{
 use murmur_core::{
     PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot, SplitDirection, TabId,
     TerminalCommand, TerminalKey, TerminalModifiers, TerminalPosition, TerminalScroll,
-    TerminalSize, WorkspaceId,
+    TerminalSelection, TerminalSize, WorkspaceId,
 };
 use murmur_server::{ClientConnection, Endpoint, ServerConfig};
 
-use crate::terminal_element::TerminalElement;
+use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 
 actions!(
     murmur,
@@ -81,6 +81,8 @@ actions!(
 pub(crate) type ConnectionKey = u64;
 
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
+const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
+const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
 
 fn default_window_options(cx: &App) -> WindowOptions {
     WindowOptions {
@@ -96,15 +98,20 @@ enum Incoming {
 
 struct ClientIo {
     outgoing: mpsc::Sender<ClientMessage>,
-    incoming: mpsc::Receiver<Incoming>,
+    _incoming_task: Task<()>,
 }
 
 impl ClientIo {
-    fn start(connection: ClientConnection) -> std::io::Result<Self> {
+    fn start(
+        connection: ClientConnection,
+        key: ConnectionKey,
+        window: &Window,
+        cx: &Context<Murmur>,
+    ) -> std::io::Result<Self> {
         let mut reader = connection.into_stream();
         let mut writer = reader.try_clone()?;
         let (outgoing, outgoing_rx) = mpsc::channel();
-        let (incoming_tx, incoming) = mpsc::channel();
+        let (incoming_tx, incoming_rx) = async_channel::bounded(SERVER_EVENT_BUFFER_CAPACITY);
         let writer_events = incoming_tx.clone();
 
         thread::Builder::new()
@@ -113,7 +120,8 @@ impl ClientIo {
                 while let Ok(message) = outgoing_rx.recv() {
                     if let Err(error) = murmur_core::protocol::write_message(&mut writer, &message)
                     {
-                        let _ = writer_events.send(Incoming::Disconnected(error.to_string()));
+                        let _ =
+                            writer_events.send_blocking(Incoming::Disconnected(error.to_string()));
                         break;
                     }
                 }
@@ -124,19 +132,43 @@ impl ClientIo {
                 loop {
                     match murmur_core::protocol::read_message(&mut reader) {
                         Ok(message) => {
-                            if incoming_tx.send(Incoming::Message(message)).is_err() {
+                            if incoming_tx
+                                .send_blocking(Incoming::Message(message))
+                                .is_err()
+                            {
                                 break;
                             }
                         }
                         Err(error) => {
-                            let _ = incoming_tx.send(Incoming::Disconnected(error.to_string()));
+                            let _ = incoming_tx
+                                .send_blocking(Incoming::Disconnected(error.to_string()));
                             break;
                         }
                     }
                 }
             })?;
 
-        Ok(Self { outgoing, incoming })
+        let incoming_task = cx.spawn_in(window, async move |owner, cx| {
+            while let Ok(incoming) = incoming_rx.recv().await {
+                if owner
+                    .update_in(cx, |this, window, cx| {
+                        if this.handle_incoming(key, incoming, cx) && key == this.active_connection
+                        {
+                            this.rebuild_dock(window, cx);
+                        }
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        Ok(Self {
+            outgoing,
+            _incoming_task: incoming_task,
+        })
     }
 }
 
@@ -237,10 +269,18 @@ impl ServerConnection {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct TerminalGeometry {
     bounds: Bounds<Pixels>,
     cell_size: Size<Pixels>,
+}
+
+#[derive(Clone, Copy)]
+struct LocalTerminalSelection {
+    connection_key: ConnectionKey,
+    pane_id: PaneId,
+    range: TerminalSelection,
+    dragging: bool,
 }
 
 struct TerminalPanel {
@@ -248,6 +288,7 @@ struct TerminalPanel {
     pane_id: PaneId,
     owner: WeakEntity<Murmur>,
     focus_handle: FocusHandle,
+    render_cache: Rc<RefCell<TerminalRenderCache>>,
 }
 
 struct MurmurDockRenderer;
@@ -365,6 +406,7 @@ impl TerminalPanel {
             pane_id,
             owner,
             focus_handle: cx.focus_handle(),
+            render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
         }
     }
 }
@@ -394,7 +436,7 @@ impl BasePanel for TerminalPanel {
 impl Render for TerminalPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = self.owner.upgrade();
-        let (terminal, active, controlling, marked_text) = owner
+        let (terminal, active, controlling, marked_text, selection, runtime_epoch) = owner
             .as_ref()
             .map(|owner| {
                 let app = owner.read(cx);
@@ -405,9 +447,12 @@ impl Render for TerminalPanel {
                     app.connection(self.connection_key)
                         .is_some_and(ServerConnection::can_mutate),
                     active.then(|| app.marked_text.clone()).flatten(),
+                    app.selection_for(self.connection_key, self.pane_id),
+                    app.connection(self.connection_key)
+                        .and_then(|connection| connection.runtime_epoch),
                 )
             })
-            .unwrap_or((None, false, false, None));
+            .unwrap_or((None, false, false, None, None, None));
 
         let key = self.connection_key;
         let pane_id = self.pane_id;
@@ -443,11 +488,16 @@ impl Render for TerminalPanel {
             .child(if let (Some(owner), Some(terminal)) = (owner, terminal) {
                 TerminalElement::new(
                     owner,
-                    self.focus_handle.clone(),
-                    key,
-                    pane_id,
-                    terminal.view,
-                    marked_text,
+                    TerminalElementProps {
+                        focus_handle: self.focus_handle.clone(),
+                        connection_key: key,
+                        pane_id,
+                        terminal: terminal.view,
+                        marked_text,
+                        selection,
+                        runtime_epoch,
+                        render_cache: self.render_cache.clone(),
+                    },
                 )
                 .into_any_element()
             } else {
@@ -483,8 +533,8 @@ pub(crate) struct Murmur {
     connections: Vec<ServerConnection>,
     active_connection: ConnectionKey,
     next_connection_key: ConnectionKey,
-    connect_results_tx: mpsc::Sender<ConnectionResult>,
-    connect_results_rx: mpsc::Receiver<ConnectionResult>,
+    connect_results_tx: async_channel::Sender<ConnectionResult>,
+    _connect_results_task: Task<()>,
     dock_area: Entity<DockArea>,
     _dock_subscription: Subscription,
     rebuilding_dock: bool,
@@ -493,7 +543,7 @@ pub(crate) struct Murmur {
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     target_pane: Option<(ConnectionKey, PaneId)>,
     focus_handle: FocusHandle,
-    selecting_from: Option<(ConnectionKey, PaneId, TerminalPosition)>,
+    terminal_selection: Option<LocalTerminalSelection>,
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
     marked_text: Option<String>,
@@ -520,9 +570,10 @@ impl Murmur {
                 }
             },
         );
-        let (connect_results_tx, connect_results_rx) = mpsc::channel();
+        let (connect_results_tx, connect_results_rx) =
+            async_channel::bounded(CONNECTION_RESULT_BUFFER_CAPACITY);
         let mut connection = ServerConnection::new(1, "Local".into(), endpoint);
-        if let Err(error) = Self::install_connection(&mut connection, initial) {
+        if let Err(error) = Self::install_connection(&mut connection, initial, window, cx) {
             connection.status = ConnectionStatus::Disconnected;
             connection.error = Some(error);
         }
@@ -532,7 +583,7 @@ impl Murmur {
             active_connection: 1,
             next_connection_key: 2,
             connect_results_tx,
-            connect_results_rx,
+            _connect_results_task: Task::ready(()),
             dock_area,
             _dock_subscription: dock_subscription,
             rebuilding_dock: false,
@@ -541,7 +592,7 @@ impl Murmur {
             panels: HashMap::new(),
             target_pane: None,
             focus_handle: cx.focus_handle(),
-            selecting_from: None,
+            terminal_selection: None,
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
             marked_text: None,
@@ -549,24 +600,19 @@ impl Murmur {
         };
         this.acquire_and_subscribe(1);
 
-        cx.spawn_in(window, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
-                if this
+        this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {
+            while let Ok(result) = connect_results_rx.recv().await {
+                if owner
                     .update_in(cx, |this, window, cx| {
-                        if this.poll_connections(window, cx) {
-                            cx.notify();
-                        }
+                        this.handle_connection_result(result, window, cx);
+                        cx.notify();
                     })
                     .is_err()
                 {
                     break;
                 }
             }
-        })
-        .detach();
+        });
 
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
@@ -578,10 +624,13 @@ impl Murmur {
     fn install_connection(
         connection: &mut ServerConnection,
         result: Result<ClientConnection, String>,
+        window: &Window,
+        cx: &Context<Self>,
     ) -> Result<(), String> {
         let client = result?;
         let bootstrap = client.bootstrap().clone();
-        let io = ClientIo::start(client).map_err(|error| error.to_string())?;
+        let io = ClientIo::start(client, connection.key, window, cx)
+            .map_err(|error| error.to_string())?;
         connection.apply_bootstrap(bootstrap);
         connection.io = Some(io);
         connection.controlling = false;
@@ -648,7 +697,7 @@ impl Murmur {
             };
             let result = ClientConnection::connect(&connected_endpoint, "murmur-gui")
                 .map_err(|error| error.to_string());
-            let _ = sender.send(ConnectionResult {
+            let _ = sender.send_blocking(ConnectionResult {
                 key,
                 endpoint: connected_endpoint,
                 result,
@@ -686,10 +735,10 @@ impl Murmur {
         self.terminal_geometry
             .retain(|(connection_key, _), _| *connection_key != key);
         if self
-            .selecting_from
-            .is_some_and(|(connection_key, _, _)| connection_key == key)
+            .terminal_selection
+            .is_some_and(|selection| selection.connection_key == key)
         {
-            self.selecting_from = None;
+            self.terminal_selection = None;
         }
         if was_active {
             self.active_connection = self
@@ -703,48 +752,33 @@ impl Murmur {
         cx.notify();
     }
 
-    fn poll_connections(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let mut changed = false;
-        while let Ok(result) = self.connect_results_rx.try_recv() {
-            let key = result.key;
-            let installed = if let Some(connection) = self.connection_mut(key) {
-                connection.endpoint = result.endpoint;
-                match Self::install_connection(connection, result.result) {
-                    Ok(()) => true,
-                    Err(error) => {
-                        connection.status = ConnectionStatus::Disconnected;
-                        connection.error = Some(error);
-                        false
-                    }
-                }
-            } else {
-                false
-            };
-            if installed {
-                self.acquire_and_subscribe(key);
-                self.refresh_target_pane(key);
-                if key == self.active_connection {
-                    self.rebuild_dock(window, cx);
+    fn handle_connection_result(
+        &mut self,
+        result: ConnectionResult,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = result.key;
+        let installed = if let Some(connection) = self.connection_mut(key) {
+            connection.endpoint = result.endpoint;
+            match Self::install_connection(connection, result.result, window, cx) {
+                Ok(()) => true,
+                Err(error) => {
+                    connection.status = ConnectionStatus::Disconnected;
+                    connection.error = Some(error);
+                    false
                 }
             }
-            changed = true;
-        }
-
-        let mut incoming = Vec::new();
-        for connection in &self.connections {
-            if let Some(io) = &connection.io {
-                while let Ok(message) = io.incoming.try_recv() {
-                    incoming.push((connection.key, message));
-                }
-            }
-        }
-        for (key, message) in incoming {
-            changed = true;
-            if self.handle_incoming(key, message, cx) && key == self.active_connection {
+        } else {
+            false
+        };
+        if installed {
+            self.acquire_and_subscribe(key);
+            self.refresh_target_pane(key);
+            if key == self.active_connection {
                 self.rebuild_dock(window, cx);
             }
         }
-        changed
     }
 
     fn handle_incoming(
@@ -1803,21 +1837,42 @@ impl Murmur {
             .insert((key, pane_id), TerminalGeometry { bounds, cell_size });
     }
 
+    pub(crate) fn terminal_layout_is_current(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        bounds: Bounds<Pixels>,
+        cell_size: Size<Pixels>,
+        terminal_size: TerminalSize,
+    ) -> bool {
+        self.terminal_geometry.get(&(key, pane_id)) == Some(&TerminalGeometry { bounds, cell_size })
+            && (self.pending_sizes.get(&(key, pane_id)) == Some(&terminal_size)
+                || self
+                    .terminal(key, pane_id)
+                    .is_some_and(|terminal| terminal.view.size == terminal_size))
+    }
+
     pub(crate) fn begin_selection(
         &mut self,
         key: ConnectionKey,
         pane_id: PaneId,
         position: TerminalPosition,
+        cx: &mut Context<Self>,
     ) {
-        self.selecting_from = Some((key, pane_id, position));
-        self.terminal_command(
-            key,
+        let display_offset = self
+            .terminal(key, pane_id)
+            .map_or(0, |terminal| terminal.view.display_offset);
+        self.terminal_selection = Some(LocalTerminalSelection {
+            connection_key: key,
             pane_id,
-            TerminalCommand::Select {
+            range: TerminalSelection {
                 start: position,
                 end: position,
+                display_offset,
             },
-        );
+            dragging: true,
+        });
+        cx.notify();
     }
 
     pub(crate) fn update_selection(
@@ -1825,27 +1880,23 @@ impl Murmur {
         key: ConnectionKey,
         pane_id: PaneId,
         position: TerminalPosition,
+        cx: &mut Context<Self>,
     ) {
-        if let Some((selected_key, selected_pane, start)) = self.selecting_from
-            && selected_key == key
-            && selected_pane == pane_id
+        if let Some(selection) = &mut self.terminal_selection
+            && selection.dragging
+            && selection.connection_key == key
+            && selection.pane_id == pane_id
+            && selection.range.end != position
         {
-            self.terminal_command(
-                key,
-                pane_id,
-                TerminalCommand::Select {
-                    start,
-                    end: position,
-                },
-            );
+            selection.range.end = position;
+            cx.notify();
         }
     }
 
     pub(crate) fn is_selecting(&self, key: ConnectionKey, pane_id: PaneId) -> bool {
-        self.selecting_from
-            .is_some_and(|(selected_key, selected_pane, _)| {
-                selected_key == key && selected_pane == pane_id
-            })
+        self.terminal_selection.is_some_and(|selection| {
+            selection.dragging && selection.connection_key == key && selection.pane_id == pane_id
+        })
     }
 
     pub(crate) fn end_selection(
@@ -1853,13 +1904,38 @@ impl Murmur {
         key: ConnectionKey,
         pane_id: PaneId,
         position: TerminalPosition,
+        cx: &mut Context<Self>,
     ) {
-        self.update_selection(key, pane_id, position);
-        self.selecting_from = None;
+        self.update_selection(key, pane_id, position, cx);
+        if let Some(selection) = &mut self.terminal_selection
+            && selection.connection_key == key
+            && selection.pane_id == pane_id
+        {
+            selection.dragging = false;
+        }
     }
 
-    pub(crate) fn scroll_terminal(&mut self, key: ConnectionKey, pane_id: PaneId, lines: i32) {
+    fn selection_for(&self, key: ConnectionKey, pane_id: PaneId) -> Option<TerminalSelection> {
+        self.terminal_selection
+            .filter(|selection| selection.connection_key == key && selection.pane_id == pane_id)
+            .map(|selection| selection.range)
+    }
+
+    fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        if self.terminal_selection.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn scroll_terminal(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        lines: i32,
+        cx: &mut Context<Self>,
+    ) {
         if lines != 0 {
+            self.clear_selection(cx);
             self.terminal_command(
                 key,
                 pane_id,
@@ -1881,11 +1957,14 @@ impl Murmur {
         let modifiers = stroke.modifiers;
         let copy_paste = modifiers.platform || (modifiers.control && modifiers.shift);
         if copy_paste && stroke.key == "c" {
-            self.terminal_command(key, pane_id, TerminalCommand::Copy);
+            if let Some(selection) = self.selection_for(key, pane_id) {
+                self.terminal_command(key, pane_id, TerminalCommand::Copy { selection });
+            }
             cx.stop_propagation();
             return;
         }
         if copy_paste && stroke.key == "v" {
+            self.clear_selection(cx);
             if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                 self.terminal_command(key, pane_id, TerminalCommand::Paste(text));
             }
@@ -1893,6 +1972,7 @@ impl Murmur {
             return;
         }
         if modifiers.shift && stroke.key == "pageup" {
+            self.clear_selection(cx);
             self.terminal_command(
                 key,
                 pane_id,
@@ -1902,6 +1982,7 @@ impl Murmur {
             return;
         }
         if modifiers.shift && stroke.key == "pagedown" {
+            self.clear_selection(cx);
             self.terminal_command(
                 key,
                 pane_id,
@@ -1943,6 +2024,7 @@ impl Murmur {
             _ => None,
         };
         if let Some(key_code) = key_code {
+            self.clear_selection(cx);
             self.terminal_command(
                 key,
                 pane_id,
@@ -2332,8 +2414,9 @@ impl EntityInputHandler for Murmur {
         cx.notify();
     }
 
-    fn paste(&mut self, item: ClipboardItem, _: &mut Window, _: &mut Context<Self>) {
+    fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
         if let (Some(text), Some((key, pane_id))) = (item.text(), self.target_pane) {
+            self.clear_selection(cx);
             self.terminal_command(key, pane_id, TerminalCommand::Paste(text));
         }
     }
@@ -2343,12 +2426,13 @@ impl EntityInputHandler for Murmur {
         _: Option<Range<usize>>,
         text: &str,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         self.marked_text = None;
         if !text.is_empty()
             && let Some((key, pane_id)) = self.target_pane
         {
+            self.clear_selection(cx);
             self.terminal_command(key, pane_id, TerminalCommand::Text(text.into()));
         }
     }
@@ -2597,8 +2681,8 @@ mod tests {
         use std::time::{Duration, Instant};
 
         use gpui::{
-            AppContext as _, Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, px,
-            size,
+            AppContext as _, Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext,
+            point, px, size,
         };
         use gpui_component::{Root, WindowExt as _};
         use murmur_core::protocol::LayoutCommand;
@@ -2736,6 +2820,21 @@ mod tests {
             false
         }
 
+        fn wait_until_event_driven(
+            window: &mut VisualTestContext,
+            mut predicate: impl FnMut(&mut VisualTestContext) -> bool,
+        ) -> bool {
+            let deadline = Instant::now() + TEST_TIMEOUT;
+            while Instant::now() < deadline {
+                window.run_until_parked();
+                if predicate(window) {
+                    return true;
+                }
+                std::thread::sleep(TEST_POLL_INTERVAL);
+            }
+            false
+        }
+
         #[test]
         fn default_window_options_create_1280_by_720_window() {
             let app = TestAppContext::single();
@@ -2857,7 +2956,7 @@ mod tests {
                     cx.notify();
                 });
             });
-            let reconnected = wait_until(window, |window| {
+            let reconnected = wait_until_event_driven(window, |window| {
                 window.read(|app| {
                     view.read(app)
                         .connection(1)
@@ -2902,6 +3001,117 @@ mod tests {
                 window.read(|app| view.read(app).connection(1).unwrap().label.clone()),
                 "Build Server"
             );
+        }
+
+        #[test]
+        fn server_events_wake_gui_without_polling_clock() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    });
+                });
+            });
+
+            assert!(
+                wait_until_event_driven(window, |window| {
+                    window.read(|app| {
+                        view.read(app)
+                            .active_session()
+                            .is_some_and(|session| session.active_workspace().is_some())
+                    })
+                }),
+                "server events should wake GPUI without a timer tick"
+            );
+        }
+
+        #[test]
+        fn terminal_drag_selection_updates_locally() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    });
+                });
+            });
+
+            let mut pane_id = None;
+            assert!(wait_until(window, |window| {
+                pane_id = window.read(|app| {
+                    view.read(app)
+                        .active_session()?
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().focused_pane().id())
+                });
+                pane_id.is_some_and(|pane_id| {
+                    window.debug_bounds(terminal_selector(pane_id)).is_some()
+                })
+            }));
+            let pane_id = pane_id.unwrap();
+            let render_cache = window.read(|app| {
+                view.read(app)
+                    .panels
+                    .get(&(1, pane_id))
+                    .unwrap()
+                    .read(app)
+                    .render_cache
+                    .clone()
+            });
+            let mut last_revision = None;
+            let mut stable_since = Instant::now();
+            assert!(wait_until(window, |window| {
+                window.update(|window, cx| _ = window.draw(cx));
+                let (revision, resize_pending) = window.read(|app| {
+                    let murmur = view.read(app);
+                    (
+                        murmur.terminal(1, pane_id).unwrap().view.revision,
+                        murmur.pending_sizes.contains_key(&(1, pane_id)),
+                    )
+                });
+                if last_revision != Some(revision) {
+                    last_revision = Some(revision);
+                    stable_since = Instant::now();
+                }
+                !resize_pending
+                    && render_cache.borrow().shaped_cells() > 0
+                    && stable_since.elapsed() >= Duration::from_millis(50)
+            }));
+            let shaped_before_drag = render_cache.borrow().shaped_cells();
+            let terminal = window.debug_bounds(terminal_selector(pane_id)).unwrap();
+            let start = point(
+                terminal.left() + terminal.size.width * 0.25,
+                terminal.top() + terminal.size.height * 0.35,
+            );
+            let end = point(
+                terminal.left() + terminal.size.width * 0.75,
+                terminal.top() + terminal.size.height * 0.65,
+            );
+
+            window.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            window.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            let dragging = window.read(|app| view.read(app).terminal_selection.unwrap());
+            assert!(dragging.dragging);
+            assert_eq!((dragging.connection_key, dragging.pane_id), (1, pane_id));
+            assert_ne!(dragging.range.start, dragging.range.end);
+            window.update(|window, cx| _ = window.draw(cx));
+            assert_eq!(
+                render_cache.borrow().shaped_cells(),
+                shaped_before_drag,
+                "selection-only frames must reuse shaped terminal cells"
+            );
+
+            window.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            let completed = window.read(|app| view.read(app).terminal_selection.unwrap());
+            assert!(!completed.dragging);
+            assert_eq!(completed.range, dragging.range);
         }
 
         #[test]
