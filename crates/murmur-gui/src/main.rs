@@ -12,7 +12,7 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_component::dialog::DialogButtonProps;
+use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
 use gpui_component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
     PanelState, TabGroupRenderer, TilesRenderer,
@@ -1368,23 +1368,36 @@ impl Murmur {
                     .content(move |content, _, _| {
                         content.child(Input::new(&input_for_content).w_full())
                     })
-                    .button_props(
-                        DialogButtonProps::default()
-                            .ok_text(ok_text)
-                            .show_cancel(true)
-                            .on_ok(move |_, _, cx| {
-                                let value = input_for_ok.read(cx).value().trim().to_owned();
-                                if value.is_empty() {
-                                    return false;
-                                }
-                                let apply = apply.clone();
-                                let _ = owner.update(cx, |this, cx| {
-                                    apply(this, value);
-                                    cx.notify();
-                                });
-                                true
-                            }),
+                    .footer(
+                        DialogFooter::new()
+                            .child(
+                                DialogClose::new().child(
+                                    Button::new("dialog-cancel")
+                                        .debug_selector(|| "dialog-cancel".into())
+                                        .label("Cancel"),
+                                ),
+                            )
+                            .child(
+                                DialogAction::new().child(
+                                    Button::new("dialog-primary-action")
+                                        .debug_selector(|| "dialog-primary-action".into())
+                                        .primary()
+                                        .label(ok_text),
+                                ),
+                            ),
                     )
+                    .on_ok(move |_, _, cx| {
+                        let value = input_for_ok.read(cx).value().trim().to_owned();
+                        if value.is_empty() {
+                            return false;
+                        }
+                        let apply = apply.clone();
+                        let _ = owner.update(cx, |this, cx| {
+                            apply(this, value);
+                            cx.notify();
+                        });
+                        true
+                    })
             });
             input.update(cx, |input, cx| {
                 input.focus(window, cx);
@@ -1433,7 +1446,7 @@ impl Murmur {
     ) {
         self.prompt_text(
             "Rename Server",
-            "Rename",
+            "Save",
             name,
             move |this, name| {
                 if let Some(connection) = this.connection_mut(key) {
@@ -1500,7 +1513,7 @@ impl Murmur {
     ) {
         self.prompt_text(
             "Rename Workspace",
-            "Rename",
+            "Save",
             name,
             move |this, name| {
                 this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
@@ -1537,7 +1550,7 @@ impl Murmur {
     ) {
         self.prompt_text(
             "Rename Tab",
-            "Rename",
+            "Save",
             name,
             move |this, name| {
                 this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });
@@ -2684,7 +2697,18 @@ mod tests {
             assert!(window.update(|window, cx| window.has_active_dialog(cx)));
             assert!(window.update(|window, cx| window.has_focused_input(cx)));
             window.simulate_input(value);
-            window.simulate_keystrokes("enter");
+            window.update(|window, cx| _ = window.draw(cx));
+            let cancel = window
+                .debug_bounds("dialog-cancel")
+                .expect("text dialog should render Cancel");
+            let primary = window
+                .debug_bounds("dialog-primary-action")
+                .expect("text dialog should render its primary action");
+            assert!(
+                cancel.left() < primary.left(),
+                "use the default button order"
+            );
+            window.simulate_click(primary.center(), Modifiers::default());
         }
 
         fn wait_until(
