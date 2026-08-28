@@ -2351,8 +2351,12 @@ fn main() {
     app.run(move |cx| {
         gpui_component::init(cx);
         bind_keys(cx);
+        let window_options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(720.0)), cx)),
+            ..Default::default()
+        };
         cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
+            cx.open_window(window_options, |window, cx| {
                 let view = cx.new(|cx| Murmur::new(endpoint, initial, window, cx));
                 cx.new(|cx| Root::new(view, window, cx))
             })
