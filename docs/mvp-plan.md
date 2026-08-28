@@ -28,7 +28,7 @@ Each phase starts only after the preceding exit condition holds.
 | 1. Core domain | Session, Workspace, Tab, Pane, stable Root Directory, split tree, focus/order, Pane-to-Tab-to-Workspace close cascade, durable snapshot schema | Headless tests prove domain invariants without GPUI or a real shell |
 | 2. Server/client foundation | Standalone `murmur-server`, stable Server/Session addressing, transport-independent versioned command/event protocol, private local IPC, local discovery/start, SSH remote bridge/trusted endpoint configuration, disconnect/reconnect | Headless integration proves the same framed client protocol reaches local IPC and remote-style SSH/TCP endpoints, rejects incompatible versions and oversized frames, preserves Sessions with zero clients, bootstraps authoritative structure plus Server identity/epoch before ordered events on reconnect, distinguishes a live reconnect from a replacement Server, enforces one active controller, and never exposes a non-loopback listener by default |
 | 3. Terminal vertical slice | Server-owned `portable-pty` shell runtime, persistent `alacritty_terminal` state, ordered I/O, resize, input encoding, paste, scrollback, selection/copy, terminal synchronization | A real PTY integration test passes on Linux; one Windows shell/Agent Pane survives GUI disconnect/reconnect with its process, layout, and terminal state intact |
-| 4. Native orchestration UI | Multi-Server navigation, Start Page, sidebar, Tab row, Dock projection, split/focus/resize/swap/zoom/close, command palette and fixed shortcuts | One GUI controls the complete Workspace/Tab/Pane workflow across local and remote Servers; Dock cannot mutate Server state independently |
+| 4. Native orchestration UI | Multi-Server navigation, Start Page, sidebar, Tab row, Dock projection, split/focus/resize/swap/zoom/close, and fixed shortcuts | One GUI controls the complete Workspace/Tab/Pane workflow across local and remote Servers; Dock cannot mutate Server state independently |
 | 5. Agent and Git workflows | Foreground agent recognition, bottom-buffer status rules, unseen `done`, branch display, create/open worktree, clean managed removal | State transitions and Git safety rules pass core/server tests and are visible for local and remote Sessions |
 | 6. Persistence and failure handling | Debounced atomic Session Snapshot on the Server, Server-restart recovery with fresh shells, partial pruning, reconnect and Start Page fallbacks | Round-trip and corruption tests pass; live reconnect preserves running work, while Server restart restores structure but not processes or terminal history |
 | 7. Release gate | Cross-platform checks, Windows-to-Linux remote evidence, documented limitations | Every required check below passes at one commit |
@@ -37,7 +37,7 @@ Each phase starts only after the preceding exit condition holds.
 
 - `Session` remains a Server-owned domain and protocol boundary; it is not a user-visible navigation item. The sidebar hierarchy is Server → Workspace, with recognized Agents added under their Workspace in Phase 5.
 - The sidebar is persistent and resizable. Selecting a Server shows its last active Workspace or Start Page; selecting an Agent activates its Workspace, Tab, and Pane.
-- The active Workspace owns the Tab row. Panes have no permanent title bar; a visible focus treatment identifies the active Pane, while Pane commands remain available through shortcuts, context menus, and the command palette.
+- The active Workspace owns the Tab row. Panes have no permanent title bar; a visible focus treatment identifies the active Pane, while Pane commands remain available through shortcuts and context menus.
 - A disconnected Server keeps its last Workspace tree and terminal views visible but read-only, shows connection status and a reconnect action, and disables mutations until control is restored.
 
 ## Linux/arm64 Automated Gate
@@ -74,6 +74,7 @@ Record the Windows version, commit, Rust toolchain, shell, GPU, Server endpoint,
 ```powershell
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo build --workspace
 cargo run -p murmur-gui
 ```
 
@@ -85,7 +86,7 @@ cargo run -p murmur-gui
 - One representative agent CLI can be started manually and used interactively without product-specific launch code. Its recognized states appear in the sidebar; clicking it activates its Server, Session, Workspace, Tab, and Pane.
 - New Tab, split right/down, Pane focus, divider and keyboard resize, swap, zoom, Tab/Workspace reorder, and close all preserve the intended focus. New Tabs are auto-named. A failed shell spawn leaves the previous layout usable.
 - Closing a Pane or Tab does not inspect its foreground process. An operation that closes a Workspace asks for confirmation; closing a parent repository Workspace does not close associated worktree Workspaces.
-- `Ctrl+Shift+P`, `Ctrl+Shift+T`, `Ctrl+Shift+W`, `Ctrl+Tab`, `Ctrl+Shift+Tab`, `Alt+Shift++`, `Alt+Shift+-`, `Alt+Arrow`, and `Alt+Shift+Arrow` invoke their documented commands without being sent to the shell.
+- `Ctrl+Shift+T`, `Ctrl+Shift+W`, `Ctrl+Tab`, `Ctrl+Shift+Tab`, `Alt+Shift++`, `Alt+Shift+-`, `Alt+Arrow`, and `Alt+Shift+Arrow` invoke their documented commands without being sent to the shell.
 - The current Git branch is shown. Create Worktree and Open Existing Worktree open the expected checkout. Closing either Workspace leaves files intact. Dirty removal is refused; clean managed removal deletes only the checkout and keeps the branch.
 - Restarting a Server restores Workspace/Tab/Pane structure, names, layout, order, and cwd using fresh shells. Closing all Workspaces keeps the Server Session empty and the connected GUI on Start Page.
 

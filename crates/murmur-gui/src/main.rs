@@ -12,7 +12,6 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::command::{Command, CommandItem, CommandState};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
@@ -45,7 +44,6 @@ use crate::terminal_element::TerminalElement;
 actions!(
     murmur,
     [
-        OpenCommandPalette,
         AddServer,
         ReconnectServer,
         NewWorkspace,
@@ -472,7 +470,6 @@ pub(crate) struct Murmur {
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
     marked_text: Option<String>,
-    command_palette: Entity<CommandState>,
     app_error: Option<String>,
 }
 
@@ -519,7 +516,6 @@ impl Murmur {
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
             marked_text: None,
-            command_palette: cx.new(|cx| CommandState::new(window, cx)),
             app_error: None,
         };
         this.acquire_and_subscribe(1);
@@ -1339,172 +1335,6 @@ impl Murmur {
         }
     }
 
-    fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if window.has_active_dialog(cx) {
-            return;
-        }
-        let palette = self.command_palette.clone();
-        palette.update(cx, |state, cx| state.set_query("", window, cx));
-        let can_mutate = self
-            .active_connection()
-            .is_some_and(ServerConnection::can_mutate);
-        let has_workspace = self
-            .active_session()
-            .is_some_and(|session| !session.is_empty());
-        let disconnected = self
-            .active_connection()
-            .is_some_and(|connection| connection.status == ConnectionStatus::Disconnected);
-        let commands = vec![
-            CommandItem::new()
-                .label("New Terminal Workspace")
-                .disabled(!can_mutate)
-                .action(Box::new(NewWorkspace)),
-            CommandItem::new()
-                .label("Open Folder")
-                .disabled(!can_mutate)
-                .action(Box::new(OpenFolder)),
-            CommandItem::new()
-                .label("Add Server")
-                .action(Box::new(AddServer)),
-            CommandItem::new()
-                .label("Reconnect Server")
-                .disabled(!disconnected)
-                .action(Box::new(ReconnectServer)),
-            CommandItem::new()
-                .label("New Tab")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(NewTab)),
-            CommandItem::new()
-                .label("Rename Workspace")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(RenameWorkspace)),
-            CommandItem::new()
-                .label("Rename Tab")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(RenameTab)),
-            CommandItem::new()
-                .label("Move Workspace Up")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(MoveWorkspaceUp)),
-            CommandItem::new()
-                .label("Move Workspace Down")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(MoveWorkspaceDown)),
-            CommandItem::new()
-                .label("Move Tab Left")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(MoveTabLeft)),
-            CommandItem::new()
-                .label("Move Tab Right")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(MoveTabRight)),
-            CommandItem::new()
-                .label("Split Right")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(SplitRight)),
-            CommandItem::new()
-                .label("Split Down")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(SplitDown)),
-            CommandItem::new()
-                .label("Focus Pane Left")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(FocusLeft)),
-            CommandItem::new()
-                .label("Focus Pane Right")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(FocusRight)),
-            CommandItem::new()
-                .label("Focus Pane Up")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(FocusUp)),
-            CommandItem::new()
-                .label("Focus Pane Down")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(FocusDown)),
-            CommandItem::new()
-                .label("Resize Pane Left")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(ResizeLeft)),
-            CommandItem::new()
-                .label("Resize Pane Right")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(ResizeRight)),
-            CommandItem::new()
-                .label("Resize Pane Up")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(ResizeUp)),
-            CommandItem::new()
-                .label("Resize Pane Down")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(ResizeDown)),
-            CommandItem::new()
-                .label("Swap Pane Left")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(SwapLeft)),
-            CommandItem::new()
-                .label("Swap Pane Right")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(SwapRight)),
-            CommandItem::new()
-                .label("Swap Pane Up")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(SwapUp)),
-            CommandItem::new()
-                .label("Swap Pane Down")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(SwapDown)),
-            CommandItem::new()
-                .label("Toggle Pane Zoom")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(ToggleZoom)),
-            CommandItem::new()
-                .label("Close Pane")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(ClosePane)),
-            CommandItem::new()
-                .label("Close Tab")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(CloseTab)),
-            CommandItem::new()
-                .label("Close Workspace")
-                .disabled(!can_mutate || !has_workspace)
-                .action(Box::new(CloseWorkspace)),
-        ];
-        let focus_once = Rc::new(std::cell::Cell::new(true));
-        window.open_dialog(cx, move |dialog, _, _| {
-            let palette = palette.clone();
-            let focus_once = focus_once.clone();
-            let commands = commands.clone();
-            dialog
-                .close_button(false)
-                .p_0()
-                .content(move |content, window, cx| {
-                    if focus_once.replace(false) {
-                        let palette = palette.clone();
-                        window.defer(cx, move |window, cx| {
-                            palette.read(cx).focus_handle(cx).focus(window, cx);
-                        });
-                    }
-                    content.child(
-                        Command::new(&palette)
-                            .bordered(false)
-                            .placeholder("Type a command")
-                            .items(commands.clone()),
-                    )
-                })
-        });
-    }
-
-    fn action_open_palette(
-        &mut self,
-        _: &OpenCommandPalette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_command_palette(window, cx);
-    }
-
     fn action_add_server(&mut self, _: &AddServer, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_dialog(window, cx);
         self.prompt_add_server(window, cx);
@@ -2210,7 +2040,6 @@ impl Render for Murmur {
             .key_context("Murmur")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
-            .on_action(cx.listener(Self::action_open_palette))
             .on_action(cx.listener(Self::action_add_server))
             .on_action(cx.listener(Self::action_reconnect))
             .on_action(cx.listener(Self::action_new_workspace))
@@ -2302,7 +2131,6 @@ fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
         modifiers.shift,
         stroke.key.as_str(),
     ) {
-        (true, false, true, "p") => Some(Box::new(OpenCommandPalette)),
         (true, false, true, "t") => Some(Box::new(NewTab)),
         (true, false, true, "w") => Some(Box::new(ClosePane)),
         (true, false, false, "tab") => Some(Box::new(NextTab)),
@@ -2323,7 +2151,6 @@ fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
 
 fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("ctrl-shift-p", OpenCommandPalette, Some("Murmur")),
         KeyBinding::new("ctrl-shift-t", NewTab, Some("Murmur")),
         KeyBinding::new("ctrl-shift-w", ClosePane, Some("Murmur")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Murmur")),
@@ -2358,7 +2185,9 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
                 let view = cx.new(|cx| Murmur::new(endpoint, initial, window, cx));
-                cx.new(|cx| Root::new(view, window, cx))
+                let root = cx.new(|cx| Root::new(view, window, cx));
+                window.resize(size(px(1280.0), px(720.0)));
+                root
             })
             .expect("failed to open Murmur window");
         })
@@ -2370,18 +2199,12 @@ fn main() {
 mod tests {
     use gpui::Keystroke;
 
-    use super::{FocusLeft, NextTab, OpenCommandPalette, PreviousTab, SplitRight, fixed_shortcut};
+    use super::{FocusLeft, NextTab, PreviousTab, SplitRight, fixed_shortcut};
 
     #[test]
     fn terminal_shortcut_fallback_maps_only_fixed_chords() {
         let action = |keys: &str| fixed_shortcut(&Keystroke::parse(keys).unwrap());
 
-        assert!(
-            action("ctrl-shift-p")
-                .unwrap()
-                .as_any()
-                .is::<OpenCommandPalette>()
-        );
         assert!(action("ctrl-tab").unwrap().as_any().is::<NextTab>());
         assert!(
             action("ctrl-shift-tab")
