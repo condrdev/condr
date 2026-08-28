@@ -12,7 +12,7 @@ use std::time::Duration;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
+use gpui_component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
 use gpui_component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
     PanelState, TabGroupRenderer, TilesRenderer,
@@ -1371,19 +1371,24 @@ impl Murmur {
                     .footer(
                         DialogFooter::new()
                             .child(
-                                DialogClose::new().child(
-                                    Button::new("dialog-cancel")
-                                        .debug_selector(|| "dialog-cancel".into())
-                                        .label("Cancel"),
-                                ),
+                                Button::new("dialog-cancel")
+                                    .debug_selector(|| "dialog-cancel".into())
+                                    .label("Cancel")
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(Cancel), cx)
+                                    }),
                             )
                             .child(
-                                DialogAction::new().child(
-                                    Button::new("dialog-primary-action")
-                                        .debug_selector(|| "dialog-primary-action".into())
-                                        .primary()
-                                        .label(ok_text),
-                                ),
+                                Button::new("dialog-primary-action")
+                                    .debug_selector(|| "dialog-primary-action".into())
+                                    .primary()
+                                    .label(ok_text)
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(Confirm { secondary: false }),
+                                            cx,
+                                        )
+                                    }),
                             ),
                     )
                     .on_ok(move |_, _, cx| {
@@ -2587,8 +2592,9 @@ mod tests {
         use std::cell::RefCell;
         use std::ops::Deref;
         use std::rc::Rc;
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::thread::JoinHandle;
-        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        use std::time::{Duration, Instant};
 
         use gpui::{
             AppContext as _, Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, px,
@@ -2602,6 +2608,10 @@ mod tests {
         use super::super::{
             ConnectionStatus, DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options,
         };
+
+        const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+        const TEST_POLL_INTERVAL: Duration = Duration::from_millis(2);
+        static NEXT_TEST_SERVER_ID: AtomicU64 = AtomicU64::new(1);
 
         struct TestServer {
             handle: ServerHandle,
@@ -2621,10 +2631,7 @@ mod tests {
             let endpoint = Endpoint::local(std::env::temp_dir().join(format!(
                 "murmur-gui-{}-{}.sock",
                 std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
+                NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
             )));
             let server = BoundServer::bind(ServerConfig {
                 endpoint: endpoint.clone(),
@@ -2646,12 +2653,13 @@ mod tests {
         ) -> (Entity<Murmur>, &mut VisualTestContext, TestServer) {
             let (server, endpoint) = start_server();
             let mut initial = None;
-            for _ in 0..100 {
+            let deadline = Instant::now() + TEST_TIMEOUT;
+            while Instant::now() < deadline {
                 if let Ok(connection) = ClientConnection::connect(&endpoint, "murmur-gui-test") {
                     initial = Some(connection);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(2));
+                std::thread::sleep(TEST_POLL_INTERVAL);
             }
             let initial = initial.map_or_else(
                 || Err("test server did not accept a client connection".into()),
@@ -2668,17 +2676,14 @@ mod tests {
                 .borrow_mut()
                 .take()
                 .expect("Murmur view should be created with the Root");
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                if window.read(|app| {
+            if wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app)
                         .connection(1)
                         .is_some_and(ServerConnection::can_mutate)
-                }) {
-                    return (view, window, server);
-                }
-                std::thread::sleep(Duration::from_millis(2));
+                })
+            }) {
+                return (view, window, server);
             }
             panic!("GUI did not acquire control from the test server");
         }
@@ -2708,6 +2713,10 @@ mod tests {
                 cancel.left() < primary.left(),
                 "use the default button order"
             );
+            assert!(
+                primary.left() - cancel.right() <= px(12.),
+                "keep text dialog actions compact"
+            );
             window.simulate_click(primary.center(), Modifiers::default());
         }
 
@@ -2715,13 +2724,14 @@ mod tests {
             window: &mut VisualTestContext,
             mut predicate: impl FnMut(&mut VisualTestContext) -> bool,
         ) -> bool {
-            for _ in 0..100 {
+            let deadline = Instant::now() + TEST_TIMEOUT;
+            while Instant::now() < deadline {
                 window.executor().advance_clock(Duration::from_millis(20));
                 window.run_until_parked();
                 if predicate(window) {
                     return true;
                 }
-                std::thread::sleep(Duration::from_millis(2));
+                std::thread::sleep(TEST_POLL_INTERVAL);
             }
             false
         }
@@ -2769,20 +2779,18 @@ mod tests {
             });
 
             let mut tab_id = None;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                tab_id = window.read(|app| {
-                    view.read(app)
-                        .active_session()
-                        .and_then(|session| Some(session.active_workspace()?.active_tab().id()))
-                });
-                if tab_id.is_some() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            let tab_id = tab_id.expect("server-scoped button should create a Workspace");
+            assert!(
+                wait_until(window, |window| {
+                    tab_id = window.read(|app| {
+                        view.read(app)
+                            .active_session()
+                            .and_then(|session| Some(session.active_workspace()?.active_tab().id()))
+                    });
+                    tab_id.is_some()
+                }),
+                "server-scoped button should create a Workspace"
+            );
+            let tab_id = tab_id.unwrap();
             assert!(
                 window.debug_bounds("close-tab").is_none(),
                 "Tab row should not render a close button"
@@ -2806,20 +2814,13 @@ mod tests {
                 });
             });
 
-            let mut empty = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                empty = window.read(|app| {
+            let empty = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app)
                         .active_session()
                         .is_some_and(|session| session.workspaces().is_empty())
-                });
-                if empty {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(empty, "closing the only Tab should close its Workspace");
         }
 
@@ -2856,20 +2857,13 @@ mod tests {
                     cx.notify();
                 });
             });
-            let mut reconnected = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                reconnected = window.read(|app| {
+            let reconnected = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app)
                         .connection(1)
                         .is_some_and(ServerConnection::can_mutate)
-                });
-                if reconnected {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(reconnected, "Server did not reconnect");
             assert_eq!(
                 window.read(|app| {
@@ -2889,6 +2883,25 @@ mod tests {
             });
             assert!(window.read(|app| view.read(app).connections.is_empty()));
             window.quit();
+        }
+
+        #[test]
+        fn text_dialog_actions_are_compact_and_submit() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.prompt_rename_server_on(1, "Local".into(), window, cx)
+                });
+            });
+            submit_text_dialog(window, "Build Server");
+
+            assert_eq!(
+                window.read(|app| view.read(app).connection(1).unwrap().label.clone()),
+                "Build Server"
+            );
         }
 
         #[test]
@@ -2980,7 +2993,7 @@ mod tests {
         fn new_workspace_round_trip_updates_gui_from_real_server() {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, server) = connected_murmur(&mut cx);
             let button = window
                 .debug_bounds("new-terminal-workspace")
                 .expect("new workspace button should be rendered");
@@ -2990,23 +3003,28 @@ mod tests {
             let selected_root = workspace_root.clone();
             window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
 
-            let mut received = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                if window.read(|app| {
+            let received = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app)
                         .active_session()
                         .is_some_and(|session| session.active_workspace().is_some())
-                }) {
-                    received = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(
                 received,
-                "GUI did not render the workspace created by the real server"
+                "GUI did not render the workspace created by the real server; server workspaces: {}, client workspaces: {}, client sequence: {}, connection error: {:?}",
+                murmur_core::Session::restore(server.handle.snapshot())
+                    .unwrap()
+                    .workspaces()
+                    .len(),
+                window.read(|app| murmur_core::Session::restore(
+                    view.read(app).connection(1).unwrap().snapshot.clone()
+                )
+                .unwrap()
+                .workspaces()
+                .len()),
+                window.read(|app| view.read(app).connection(1).unwrap().sequence),
+                window.read(|app| view.read(app).connection(1).unwrap().error.clone()),
             );
             assert_eq!(
                 window.read(|app| {
@@ -3025,22 +3043,15 @@ mod tests {
                 .debug_bounds("new-tab")
                 .expect("new tab button should be rendered after workspace creation");
             window.simulate_click(new_tab.center(), Modifiers::default());
-            let mut tab_created = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                if window.read(|app| {
+            let tab_created = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app).active_session().is_some_and(|session| {
                         session
                             .active_workspace()
                             .is_some_and(|workspace| workspace.tabs().len() == 2)
                     })
-                }) {
-                    tab_created = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(
                 tab_created,
                 "GUI did not render the tab created by the real server"
@@ -3080,11 +3091,8 @@ mod tests {
                 })
                 .unwrap();
             let initial_terminal = terminal_selector(initial_pane);
-            let mut terminal_ready = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                if window.read(|app| {
+            let terminal_ready = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app).connection(1).is_some_and(|connection| {
                         connection
                             .terminals
@@ -3092,12 +3100,7 @@ mod tests {
                             .any(|terminal| !terminal.exited)
                     })
                 }) && window.debug_bounds(initial_terminal).is_some()
-                {
-                    terminal_ready = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+            });
             assert!(terminal_ready, "GUI did not render the server PTY");
 
             let terminal = window.debug_bounds(initial_terminal).unwrap();
@@ -3107,22 +3110,15 @@ mod tests {
                 _ = window.draw(cx);
             });
             window.simulate_keystrokes("down enter");
-            let mut split_right = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                split_right = window.read(|app| {
+            let split_right = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app).active_session().is_some_and(|session| {
                         session
                             .active_workspace()
                             .is_some_and(|workspace| workspace.active_tab().panes().len() == 2)
                     })
-                });
-                if split_right {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(split_right, "Pane context menu did not split right");
 
             let (pane_to_focus, rebuilds_before_focus) = window.read(|app| {
@@ -3142,22 +3138,15 @@ mod tests {
                 .debug_bounds(terminal_selector(pane_to_focus))
                 .expect("the other Pane should be rendered");
             window.simulate_click(other_terminal.center(), Modifiers::default());
-            let mut pane_focused = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                pane_focused = window.read(|app| {
+            let pane_focused = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app).active_session().is_some_and(|session| {
                         session.active_workspace().is_some_and(|workspace| {
                             workspace.active_tab().focused_pane().id() == pane_to_focus
                         })
                     })
-                });
-                if pane_focused {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(pane_focused, "clicking a Pane did not focus it");
             assert_eq!(
                 window.read(|app| view.read(app).dock_rebuild_count),
@@ -3166,32 +3155,22 @@ mod tests {
             );
 
             window.simulate_keystrokes("alt-shift--");
-            let mut split_down = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                split_down = window.read(|app| {
+            let split_down = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app).active_session().is_some_and(|session| {
                         session
                             .active_workspace()
                             .is_some_and(|workspace| workspace.active_tab().panes().len() == 3)
                     })
-                });
-                if split_down {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(split_down, "Alt+Shift+- did not split down");
 
             window.simulate_input("printf MURMUR_E2E");
             window.simulate_keystrokes("enter");
 
-            let mut output_received = false;
-            for _ in 0..150 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
-                if window.read(|app| {
+            let output_received = wait_until(window, |window| {
+                window.read(|app| {
                     view.read(app).connection(1).is_some_and(|connection| {
                         connection.terminals.values().any(|terminal| {
                             terminal
@@ -3203,12 +3182,8 @@ mod tests {
                                 .contains("MURMUR_E2E")
                         })
                     })
-                }) {
-                    output_received = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                })
+            });
             assert!(
                 output_received,
                 "GUI did not receive output from the server PTY"
@@ -3222,10 +3197,7 @@ mod tests {
                 })
             });
             window.simulate_keystrokes("ctrl-tab");
-            let mut tab_switched = false;
-            for _ in 0..100 {
-                window.executor().advance_clock(Duration::from_millis(20));
-                window.run_until_parked();
+            let tab_switched = wait_until(window, |window| {
                 let next_tab = window.read(|app| {
                     view.read(app).active_session().and_then(|session| {
                         session
@@ -3233,12 +3205,8 @@ mod tests {
                             .map(|workspace| workspace.active_tab().id())
                     })
                 });
-                if next_tab.is_some() && next_tab != active_tab {
-                    tab_switched = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+                next_tab.is_some() && next_tab != active_tab
+            });
             assert!(
                 tab_switched,
                 "Ctrl+Tab did not switch tabs through the real server"
