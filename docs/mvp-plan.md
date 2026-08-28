@@ -48,7 +48,13 @@ Run:
 cargo fmt --all -- --check
 cargo clippy -p murmur-core -p murmur-server --all-targets -- -D warnings
 cargo test -p murmur-core -p murmur-server
+cargo test -p murmur-gui --features test-support
 ```
+
+The GUI test-support suite runs headless with GPUI's `TestPlatform`, but starts a real
+`murmur-server` over a local IPC endpoint. It drives the same Root, buttons, keyboard
+shortcuts, Session/Layout protocol, PTY, and terminal rendering path as the desktop client;
+it does not replace the small Windows ConPTY/window-manager smoke test.
 
 The core/server suite must prove:
 

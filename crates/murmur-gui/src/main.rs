@@ -80,6 +80,15 @@ actions!(
 
 pub(crate) type ConnectionKey = u64;
 
+const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
+
+fn default_window_options(cx: &App) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::centered(DEFAULT_WINDOW_SIZE, cx)),
+        ..Default::default()
+    }
+}
+
 enum Incoming {
     Message(ServerMessage),
     Disconnected(String),
@@ -394,6 +403,7 @@ impl Render for TerminalPanel {
         let right_click_owner = self.owner.clone();
         let body = div()
             .id(format!("terminal-pane-{key}-{}", pane_id.as_u64()))
+            .debug_selector(|| "terminal-pane".into())
             .key_context("Murmur")
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
@@ -1842,6 +1852,7 @@ impl Murmur {
                 })
                 .child(
                     Button::new("new-terminal-workspace")
+                        .debug_selector(|| "new-terminal-workspace".into())
                         .primary()
                         .icon(IconName::SquareTerminal)
                         .label("New Terminal Workspace")
@@ -1869,10 +1880,11 @@ impl Murmur {
         };
 
         let active_tab = workspace.active_tab().id();
-        let tab_buttons = workspace.tabs().iter().map(|tab| {
+        let tab_buttons = workspace.tabs().iter().enumerate().map(|(index, tab)| {
             let tab_id = tab.id();
             let owner = cx.weak_entity();
             Button::new(("tab", tab_id.as_u64()))
+                .debug_selector(move || format!("tab-{index}"))
                 .ghost()
                 .small()
                 .selected(tab_id == active_tab)
@@ -1900,6 +1912,7 @@ impl Murmur {
                     .children(tab_buttons)
                     .child(
                         Button::new("new-tab")
+                            .debug_selector(|| "new-tab".into())
                             .ghost()
                             .small()
                             .icon(IconName::Plus)
@@ -2081,7 +2094,12 @@ impl Render for Murmur {
                             .size(px(240.))
                             .size_range(px(180.)..px(360.))
                             .flex_none()
-                            .child(self.render_sidebar(cx)),
+                            .child(
+                                div()
+                                    .debug_selector(|| "murmur-sidebar".into())
+                                    .size_full()
+                                    .child(self.render_sidebar(cx)),
+                            ),
                     )
                     .child(self.render_workspace(cx)),
             )
@@ -2178,15 +2196,12 @@ fn main() {
     app.run(move |cx| {
         gpui_component::init(cx);
         bind_keys(cx);
-        let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1280.0), px(720.0)), cx)),
-            ..Default::default()
-        };
+        let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
                 let view = cx.new(|cx| Murmur::new(endpoint, initial, window, cx));
                 let root = cx.new(|cx| Root::new(view, window, cx));
-                window.resize(size(px(1280.0), px(720.0)));
+                window.resize(DEFAULT_WINDOW_SIZE);
                 root
             })
             .expect("failed to open Murmur window");
@@ -2215,5 +2230,267 @@ mod tests {
         assert!(action("alt-shift-=").unwrap().as_any().is::<SplitRight>());
         assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
         assert!(action("ctrl-p").is_none());
+    }
+
+    #[cfg(feature = "test-support")]
+    mod visual {
+        use std::cell::RefCell;
+        use std::ops::Deref;
+        use std::rc::Rc;
+        use std::thread::JoinHandle;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        use gpui::{
+            AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, px, size,
+        };
+        use gpui_component::Root;
+        use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
+
+        use super::super::{DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options};
+
+        struct TestServer {
+            handle: ServerHandle,
+            thread: Option<JoinHandle<std::io::Result<()>>>,
+        }
+
+        impl Drop for TestServer {
+            fn drop(&mut self) {
+                self.handle.stop();
+                if let Some(thread) = self.thread.take() {
+                    let _ = thread.join();
+                }
+            }
+        }
+
+        fn start_server() -> (TestServer, Endpoint) {
+            let endpoint = Endpoint::local(std::env::temp_dir().join(format!(
+                "murmur-gui-{}-{}.sock",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            )));
+            let server = BoundServer::bind(ServerConfig {
+                endpoint: endpoint.clone(),
+            })
+            .unwrap();
+            let handle = server.handle();
+            let thread = std::thread::spawn(move || server.run());
+            (
+                TestServer {
+                    handle,
+                    thread: Some(thread),
+                },
+                endpoint,
+            )
+        }
+
+        fn connected_murmur(
+            cx: &mut TestAppContext,
+        ) -> (Entity<Murmur>, &mut VisualTestContext, TestServer) {
+            let (server, endpoint) = start_server();
+            let mut initial = None;
+            for _ in 0..100 {
+                if let Ok(connection) = ClientConnection::connect(&endpoint, "murmur-gui-test") {
+                    initial = Some(connection);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let initial = initial.map_or_else(
+                || Err("test server did not accept a client connection".into()),
+                Ok,
+            );
+            let view_holder = Rc::new(RefCell::new(None));
+            let view_holder_for_window = view_holder.clone();
+            let (_root, window) = cx.add_window_view(move |window, cx| {
+                let view = cx.new(|cx| Murmur::new(endpoint, initial, window, cx));
+                view_holder_for_window.borrow_mut().replace(view.clone());
+                Root::new(view, window, cx)
+            });
+            let view = view_holder
+                .borrow_mut()
+                .take()
+                .expect("Murmur view should be created with the Root");
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                if window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .is_some_and(ServerConnection::can_mutate)
+                }) {
+                    return (view, window, server);
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            panic!("GUI did not acquire control from the test server");
+        }
+
+        #[test]
+        fn default_window_options_create_1280_by_720_window() {
+            let app = TestAppContext::single();
+            let handle = app.update(|cx| {
+                cx.open_window(default_window_options(cx), |_, cx| cx.new(|_| gpui::Empty))
+                    .unwrap()
+            });
+            let window = VisualTestContext::from_window(*handle.deref(), &app).into_mut();
+            let bounds = window.update(|window, _| window.bounds());
+
+            assert_eq!(bounds.size, DEFAULT_WINDOW_SIZE);
+            window.quit();
+        }
+
+        #[test]
+        fn new_workspace_round_trip_updates_gui_from_real_server() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+            let button = window
+                .debug_bounds("new-terminal-workspace")
+                .expect("new workspace button should be rendered");
+            window.simulate_click(button.center(), Modifiers::default());
+
+            let mut received = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                if window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .is_some_and(|session| session.active_workspace().is_some())
+                }) {
+                    received = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(
+                received,
+                "GUI did not render the workspace created by the real server"
+            );
+
+            let new_tab = window
+                .debug_bounds("new-tab")
+                .expect("new tab button should be rendered after workspace creation");
+            window.simulate_click(new_tab.center(), Modifiers::default());
+            let mut tab_created = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                if window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session
+                            .active_workspace()
+                            .is_some_and(|workspace| workspace.tabs().len() == 2)
+                    })
+                }) {
+                    tab_created = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(
+                tab_created,
+                "GUI did not render the tab created by the real server"
+            );
+
+            let mut terminal_ready = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                if window.read(|app| {
+                    view.read(app).connection(1).is_some_and(|connection| {
+                        connection
+                            .terminals
+                            .values()
+                            .any(|terminal| !terminal.exited)
+                    })
+                }) && window.debug_bounds("terminal-pane").is_some()
+                {
+                    terminal_ready = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(terminal_ready, "GUI did not render the server PTY");
+            let terminal = window.debug_bounds("terminal-pane").unwrap();
+            window.simulate_click(terminal.center(), Modifiers::default());
+            window.simulate_input("printf MURMUR_E2E");
+            window.simulate_keystrokes("enter");
+
+            let mut output_received = false;
+            for _ in 0..150 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                if window.read(|app| {
+                    view.read(app).connection(1).is_some_and(|connection| {
+                        connection.terminals.values().any(|terminal| {
+                            terminal
+                                .view
+                                .cells
+                                .iter()
+                                .map(|cell| cell.text.as_str())
+                                .collect::<String>()
+                                .contains("MURMUR_E2E")
+                        })
+                    })
+                }) {
+                    output_received = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(
+                output_received,
+                "GUI did not receive output from the server PTY"
+            );
+
+            let active_tab = window.read(|app| {
+                view.read(app).active_session().and_then(|session| {
+                    session
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().id())
+                })
+            });
+            window.simulate_keystrokes("ctrl-tab");
+            let mut tab_switched = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                let next_tab = window.read(|app| {
+                    view.read(app).active_session().and_then(|session| {
+                        session
+                            .active_workspace()
+                            .map(|workspace| workspace.active_tab().id())
+                    })
+                });
+                if next_tab.is_some() && next_tab != active_tab {
+                    tab_switched = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(
+                tab_switched,
+                "Ctrl+Tab did not switch tabs through the real server"
+            );
+            window.quit();
+        }
+
+        #[test]
+        fn visual_context_can_resize_murmur_window() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (_, window, _server) = connected_murmur(&mut cx);
+            window.simulate_resize(size(px(1280.), px(720.)));
+            let bounds = window
+                .debug_bounds("murmur-sidebar")
+                .expect("sidebar should remain rendered");
+            assert!(bounds.size.width > px(0.));
+            assert!(bounds.size.height > px(0.));
+            window.quit();
+        }
     }
 }
