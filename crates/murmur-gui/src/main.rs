@@ -1018,7 +1018,13 @@ impl Murmur {
     }
 
     fn new_workspace(&mut self, root_directory: PathBuf) {
-        self.send_layout(LayoutCommand::CreateWorkspace { root_directory });
+        self.new_workspace_on(self.active_connection, root_directory);
+    }
+
+    fn new_workspace_on(&mut self, key: ConnectionKey, root_directory: PathBuf) {
+        self.active_connection = key;
+        self.target_pane = None;
+        self.send_layout_to(key, LayoutCommand::CreateWorkspace { root_directory });
     }
 
     fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1167,10 +1173,24 @@ impl Murmur {
         let Some(workspace) = session.active_workspace() else {
             return;
         };
-        let tab_id = workspace.active_tab().id();
+        self.close_tab_id(
+            workspace.active_tab().id(),
+            workspace.tabs().len() == 1,
+            window,
+            cx,
+        );
+    }
+
+    fn close_tab_id(
+        &mut self,
+        tab_id: murmur_core::TabId,
+        closes_workspace: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.confirm_close(
             LayoutCommand::CloseTab { tab_id },
-            workspace.tabs().len() == 1,
+            closes_workspace,
             window,
             cx,
         );
@@ -1773,14 +1793,32 @@ impl Murmur {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let owner = owner.clone();
+            let select_owner = owner.clone();
+            let new_workspace_owner = owner.clone();
+            let new_workspace_label = connection.label.clone();
             SidebarMenuItem::new(label)
                 .icon(IconName::HardDrive)
                 .active(active_server)
                 .default_open(true)
                 .children(workspaces)
+                .suffix(move |_, _| {
+                    let owner = new_workspace_owner.clone();
+                    let tooltip = format!("New Workspace on {new_workspace_label}");
+                    Button::new(("new-workspace", key))
+                        .debug_selector(move || format!("new-workspace-server-{key}"))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Plus)
+                        .tooltip(tooltip)
+                        .disabled(!connected)
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            let root = home_directory().unwrap_or_else(|| PathBuf::from("."));
+                            let _ = owner.update(cx, |this, _| this.new_workspace_on(key, root));
+                        })
+                })
                 .on_click(move |_, window, cx| {
-                    let _ = owner.update(cx, |this, cx| this.select_server(key, window, cx));
+                    let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
                 })
         });
 
@@ -1802,6 +1840,7 @@ impl Murmur {
                 SidebarFooter::new()
                     .child(
                         Button::new("add-server")
+                            .debug_selector(|| "add-server".into())
                             .ghost()
                             .small()
                             .icon(IconName::Plus)
@@ -1880,21 +1919,40 @@ impl Murmur {
         };
 
         let active_tab = workspace.active_tab().id();
-        let tab_buttons = workspace.tabs().iter().enumerate().map(|(index, tab)| {
+        let closes_workspace = workspace.tabs().len() == 1;
+        let tab_buttons = workspace.tabs().iter().map(|tab| {
             let tab_id = tab.id();
-            let owner = cx.weak_entity();
-            Button::new(("tab", tab_id.as_u64()))
-                .debug_selector(move || format!("tab-{index}"))
-                .ghost()
-                .small()
-                .selected(tab_id == active_tab)
-                .label(tab.name().to_owned())
-                .disabled(!can_mutate)
-                .on_click(move |_, _, cx| {
-                    let _ = owner.update(cx, |this, _| {
-                        this.send_layout(LayoutCommand::ActivateTab { tab_id })
-                    });
-                })
+            let activate_owner = cx.weak_entity();
+            let close_owner = cx.weak_entity();
+            h_flex()
+                .child(
+                    Button::new(("tab", tab_id.as_u64()))
+                        .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
+                        .ghost()
+                        .small()
+                        .selected(tab_id == active_tab)
+                        .label(tab.name().to_owned())
+                        .disabled(!can_mutate)
+                        .on_click(move |_, _, cx| {
+                            let _ = activate_owner.update(cx, |this, _| {
+                                this.send_layout(LayoutCommand::ActivateTab { tab_id })
+                            });
+                        }),
+                )
+                .child(
+                    Button::new(("close-tab", tab_id.as_u64()))
+                        .debug_selector(|| "close-tab".into())
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Close)
+                        .tooltip("Close Tab")
+                        .disabled(!can_mutate)
+                        .on_click(move |_, window, cx| {
+                            let _ = close_owner.update(cx, |this, cx| {
+                                this.close_tab_id(tab_id, closes_workspace, window, cx)
+                            });
+                        }),
+                )
         });
         let new_tab_owner = cx.weak_entity();
 
@@ -2143,6 +2201,16 @@ fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
     if modifiers.platform || modifiers.function {
         return None;
     }
+    if !modifiers.control && modifiers.alt {
+        // Windows GPUI turns Shift+= / Shift+- into + / _ and clears Shift.
+        let key_char = stroke.key_char.as_deref();
+        if (modifiers.shift && stroke.key == "=") || stroke.key == "+" || key_char == Some("+") {
+            return Some(Box::new(SplitRight));
+        }
+        if (modifiers.shift && stroke.key == "-") || stroke.key == "_" || key_char == Some("_") {
+            return Some(Box::new(SplitDown));
+        }
+    }
     match (
         modifiers.control,
         modifiers.alt,
@@ -2153,8 +2221,6 @@ fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
         (true, false, true, "w") => Some(Box::new(ClosePane)),
         (true, false, false, "tab") => Some(Box::new(NextTab)),
         (true, false, true, "tab") => Some(Box::new(PreviousTab)),
-        (false, true, true, "=") => Some(Box::new(SplitRight)),
-        (false, true, true, "-") => Some(Box::new(SplitDown)),
         (false, true, false, "left") => Some(Box::new(FocusLeft)),
         (false, true, false, "right") => Some(Box::new(FocusRight)),
         (false, true, false, "up") => Some(Box::new(FocusUp)),
@@ -2214,7 +2280,7 @@ fn main() {
 mod tests {
     use gpui::Keystroke;
 
-    use super::{FocusLeft, NextTab, PreviousTab, SplitRight, fixed_shortcut};
+    use super::{FocusLeft, NextTab, PreviousTab, SplitDown, SplitRight, fixed_shortcut};
 
     #[test]
     fn terminal_shortcut_fallback_maps_only_fixed_chords() {
@@ -2228,6 +2294,9 @@ mod tests {
                 .is::<PreviousTab>()
         );
         assert!(action("alt-shift-=").unwrap().as_any().is::<SplitRight>());
+        assert!(action("alt-shift--").unwrap().as_any().is::<SplitDown>());
+        assert!(action("alt-+").unwrap().as_any().is::<SplitRight>());
+        assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
         assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
         assert!(action("ctrl-p").is_none());
     }
@@ -2243,7 +2312,8 @@ mod tests {
         use gpui::{
             AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, px, size,
         };
-        use gpui_component::Root;
+        use gpui_component::{Root, WindowExt as _};
+        use murmur_core::protocol::LayoutCommand;
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options};
@@ -2343,6 +2413,72 @@ mod tests {
         }
 
         #[test]
+        fn server_workspace_button_and_only_tab_close_round_trip() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            let add_server = window
+                .debug_bounds("add-server")
+                .expect("Add Server button should be rendered");
+            window.simulate_click(add_server.center(), Modifiers::default());
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            window.update(|window, cx| window.close_dialog(cx));
+            window.run_until_parked();
+            assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+
+            let new_workspace = window
+                .debug_bounds("new-workspace-server-1")
+                .expect("Local server should expose New Workspace");
+            window.simulate_click(new_workspace.center(), Modifiers::default());
+
+            let mut tab_id = None;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                tab_id = window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .and_then(|session| Some(session.active_workspace()?.active_tab().id()))
+                });
+                if tab_id.is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let tab_id = tab_id.expect("server-scoped button should create a Workspace");
+
+            let close_tab = window
+                .debug_bounds("close-tab")
+                .expect("the only Tab should expose Close Tab");
+            window.simulate_click(close_tab.center(), Modifiers::default());
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            window.update(|window, cx| {
+                window.close_dialog(cx);
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CloseTab { tab_id });
+                });
+            });
+
+            let mut empty = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                empty = window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .is_some_and(|session| session.workspaces().is_empty())
+                });
+                if empty {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(empty, "closing the only Tab should close its Workspace");
+            window.quit();
+        }
+
+        #[test]
         fn new_workspace_round_trip_updates_gui_from_real_server() {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -2415,8 +2551,47 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
             assert!(terminal_ready, "GUI did not render the server PTY");
+
             let terminal = window.debug_bounds("terminal-pane").unwrap();
             window.simulate_click(terminal.center(), Modifiers::default());
+            window.simulate_keystrokes("alt-shift-=");
+            let mut split_right = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                split_right = window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session
+                            .active_workspace()
+                            .is_some_and(|workspace| workspace.active_tab().panes().len() == 2)
+                    })
+                });
+                if split_right {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(split_right, "Alt+Shift++ did not split right");
+
+            window.simulate_keystrokes("alt-shift--");
+            let mut split_down = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                split_down = window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session
+                            .active_workspace()
+                            .is_some_and(|workspace| workspace.active_tab().panes().len() == 3)
+                    })
+                });
+                if split_down {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(split_down, "Alt+Shift+- did not split down");
+
             window.simulate_input("printf MURMUR_E2E");
             window.simulate_keystrokes("enter");
 
