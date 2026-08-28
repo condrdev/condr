@@ -18,7 +18,7 @@ use gpui_component::dock::{
     PanelState, TabGroupRenderer, TilesRenderer,
 };
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::sidebar::{
     Sidebar, SidebarCollapsible, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu,
@@ -34,8 +34,9 @@ use murmur_core::protocol::{
     SessionBootstrap, SessionEvent, SessionId,
 };
 use murmur_core::{
-    PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot, SplitDirection, TerminalCommand,
-    TerminalKey, TerminalModifiers, TerminalPosition, TerminalScroll, TerminalSize, WorkspaceId,
+    PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot, SplitDirection, TabId,
+    TerminalCommand, TerminalKey, TerminalModifiers, TerminalPosition, TerminalScroll,
+    TerminalSize, WorkspaceId,
 };
 use murmur_server::{ClientConnection, Endpoint, ServerConfig};
 
@@ -47,7 +48,6 @@ actions!(
         AddServer,
         ReconnectServer,
         NewWorkspace,
-        OpenFolder,
         NewTab,
         RenameWorkspace,
         RenameTab,
@@ -194,7 +194,8 @@ impl ServerConnection {
         self.status == ConnectionStatus::Connected && self.controlling
     }
 
-    fn apply_bootstrap(&mut self, bootstrap: SessionBootstrap) {
+    fn apply_bootstrap(&mut self, bootstrap: SessionBootstrap) -> bool {
+        let previous_layout = self.dock_projection();
         self.server_id = Some(bootstrap.server_id);
         self.runtime_epoch = Some(bootstrap.runtime_epoch);
         self.session_id = Some(bootstrap.session_id);
@@ -208,6 +209,18 @@ impl ServerConnection {
         self.zoomed_panes = bootstrap.zoomed_panes.into_iter().collect();
         self.status = ConnectionStatus::Connected;
         self.error = None;
+        previous_layout != self.dock_projection()
+    }
+
+    fn dock_projection(&self) -> Option<PaneLayout> {
+        let session = Session::restore(self.snapshot.clone()).ok()?;
+        let tab = session.active_workspace()?.active_tab();
+        self.zoomed_panes
+            .iter()
+            .copied()
+            .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
+            .map(PaneLayout::Pane)
+            .or_else(|| Some(tab.layout().clone()))
     }
 
     fn send(&mut self, message: ClientMessage) {
@@ -403,7 +416,7 @@ impl Render for TerminalPanel {
         let right_click_owner = self.owner.clone();
         let body = div()
             .id(format!("terminal-pane-{key}-{}", pane_id.as_u64()))
-            .debug_selector(|| "terminal-pane".into())
+            .debug_selector(move || format!("terminal-pane-{}", pane_id.as_u64()))
             .key_context("Murmur")
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
@@ -449,14 +462,28 @@ impl Render for TerminalPanel {
                     .into_any_element()
             });
 
-        body.context_menu(move |menu, _, _| {
+        body.context_menu(move |menu, window, cx| {
             menu.menu_with_enable("Split Right", Box::new(SplitRight), controlling)
                 .menu_with_enable("Split Down", Box::new(SplitDown), controlling)
                 .separator()
-                .menu_with_enable("Swap Left", Box::new(SwapLeft), controlling)
-                .menu_with_enable("Swap Right", Box::new(SwapRight), controlling)
-                .menu_with_enable("Swap Up", Box::new(SwapUp), controlling)
-                .menu_with_enable("Swap Down", Box::new(SwapDown), controlling)
+                .submenu("Focus", window, cx, move |menu, _, _| {
+                    menu.menu_with_enable("Left", Box::new(FocusLeft), controlling)
+                        .menu_with_enable("Right", Box::new(FocusRight), controlling)
+                        .menu_with_enable("Up", Box::new(FocusUp), controlling)
+                        .menu_with_enable("Down", Box::new(FocusDown), controlling)
+                })
+                .submenu("Resize", window, cx, move |menu, _, _| {
+                    menu.menu_with_enable("Left", Box::new(ResizeLeft), controlling)
+                        .menu_with_enable("Right", Box::new(ResizeRight), controlling)
+                        .menu_with_enable("Up", Box::new(ResizeUp), controlling)
+                        .menu_with_enable("Down", Box::new(ResizeDown), controlling)
+                })
+                .submenu("Swap", window, cx, move |menu, _, _| {
+                    menu.menu_with_enable("Left", Box::new(SwapLeft), controlling)
+                        .menu_with_enable("Right", Box::new(SwapRight), controlling)
+                        .menu_with_enable("Up", Box::new(SwapUp), controlling)
+                        .menu_with_enable("Down", Box::new(SwapDown), controlling)
+                })
                 .separator()
                 .menu_with_enable("Toggle Zoom", Box::new(ToggleZoom), controlling)
                 .menu_with_enable("Close Pane", Box::new(ClosePane), controlling)
@@ -473,6 +500,8 @@ pub(crate) struct Murmur {
     dock_area: Entity<DockArea>,
     _dock_subscription: Subscription,
     rebuilding_dock: bool,
+    #[cfg(feature = "test-support")]
+    dock_rebuild_count: usize,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     target_pane: Option<(ConnectionKey, PaneId)>,
     focus_handle: FocusHandle,
@@ -519,6 +548,8 @@ impl Murmur {
             dock_area,
             _dock_subscription: dock_subscription,
             rebuilding_dock: false,
+            #[cfg(feature = "test-support")]
+            dock_rebuild_count: 0,
             panels: HashMap::new(),
             target_pane: None,
             focus_handle: cx.focus_handle(),
@@ -708,9 +739,9 @@ impl Murmur {
 
         match message {
             ServerMessage::Bootstrap(bootstrap) => {
-                self.connections[index].apply_bootstrap(bootstrap);
+                let rebuild = self.connections[index].apply_bootstrap(bootstrap);
                 self.refresh_target_pane(key);
-                true
+                rebuild
             }
             ServerMessage::Event {
                 sequence, event, ..
@@ -907,6 +938,10 @@ impl Murmur {
     }
 
     fn rebuild_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "test-support")]
+        {
+            self.dock_rebuild_count += 1;
+        }
         let Some(connection) = self.active_connection() else {
             return;
         };
@@ -1017,28 +1052,37 @@ impl Murmur {
         self.start_connect(self.active_connection);
     }
 
-    fn new_workspace(&mut self, root_directory: PathBuf) {
-        self.new_workspace_on(self.active_connection, root_directory);
-    }
-
     fn new_workspace_on(&mut self, key: ConnectionKey, root_directory: PathBuf) {
         self.active_connection = key;
         self.target_pane = None;
         self.send_layout_to(key, LayoutCommand::CreateWorkspace { root_directory });
     }
 
-    fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn choose_workspace_directory_on(
+        &mut self,
+        key: ConnectionKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(label) = self
+            .connection(key)
+            .map(|connection| connection.label.clone())
+        else {
+            return;
+        };
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Open Folder".into()),
+            prompt: Some(format!("New Workspace on {label}").into()),
         });
         let owner = cx.weak_entity();
         window
             .spawn(cx, async move |cx| {
                 let path = paths.await.ok()?.ok()??.into_iter().next()?;
-                owner.update(cx, |this, _| this.new_workspace(path)).ok()?;
+                owner
+                    .update(cx, |this, _| this.new_workspace_on(key, path))
+                    .ok()?;
                 Some(())
             })
             .detach();
@@ -1051,7 +1095,13 @@ impl Murmur {
         else {
             return;
         };
-        self.send_layout(LayoutCommand::CreateTab { workspace_id });
+        self.new_tab_on(self.active_connection, workspace_id);
+    }
+
+    fn new_tab_on(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
+        self.active_connection = key;
+        self.target_pane = None;
+        self.send_layout_to(key, LayoutCommand::CreateTab { workspace_id });
     }
 
     fn cycle_tab(&mut self, step: isize) {
@@ -1158,7 +1208,8 @@ impl Murmur {
                     && workspace.tabs()[0].panes()[0].id() == pane_id
             })
         });
-        self.confirm_close(
+        self.confirm_close_on(
+            self.active_connection,
             LayoutCommand::ClosePane { pane_id },
             closes_workspace,
             window,
@@ -1174,6 +1225,7 @@ impl Murmur {
             return;
         };
         self.close_tab_id(
+            self.active_connection,
             workspace.active_tab().id(),
             workspace.tabs().len() == 1,
             window,
@@ -1183,12 +1235,14 @@ impl Murmur {
 
     fn close_tab_id(
         &mut self,
-        tab_id: murmur_core::TabId,
+        key: ConnectionKey,
+        tab_id: TabId,
         closes_workspace: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.confirm_close(
+        self.confirm_close_on(
+            key,
             LayoutCommand::CloseTab { tab_id },
             closes_workspace,
             window,
@@ -1203,7 +1257,18 @@ impl Murmur {
         else {
             return;
         };
-        self.confirm_close(
+        self.close_workspace_id(self.active_connection, workspace_id, window, cx);
+    }
+
+    fn close_workspace_id(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm_close_on(
+            key,
             LayoutCommand::CloseWorkspace { workspace_id },
             true,
             window,
@@ -1211,15 +1276,16 @@ impl Murmur {
         );
     }
 
-    fn confirm_close(
+    fn confirm_close_on(
         &mut self,
+        key: ConnectionKey,
         command: LayoutCommand,
         closes_workspace: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !closes_workspace {
-            self.send_layout(command);
+            self.send_layout_to(key, command);
             return;
         }
         let owner = cx.weak_entity();
@@ -1232,7 +1298,8 @@ impl Murmur {
                     .title("Close Workspace?")
                     .description("The workspace terminals will be stopped. Files are not deleted.")
                     .on_ok(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, _| this.send_layout(command.clone()));
+                        let _ =
+                            owner.update(cx, |this, _| this.send_layout_to(key, command.clone()));
                         true
                     })
             });
@@ -1322,16 +1389,28 @@ impl Murmur {
         let Some(workspace) = session.active_workspace() else {
             return;
         };
-        let id = workspace.id();
-        let name = workspace.name().to_owned();
+        self.prompt_rename_workspace_on(
+            self.active_connection,
+            workspace.id(),
+            workspace.name().to_owned(),
+            window,
+            cx,
+        );
+    }
+
+    fn prompt_rename_workspace_on(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.prompt_text(
             "Rename Workspace",
             name,
             move |this, name| {
-                this.send_layout(LayoutCommand::RenameWorkspace {
-                    workspace_id: id,
-                    name,
-                });
+                this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
             },
             window,
             cx,
@@ -1346,13 +1425,28 @@ impl Murmur {
             return;
         };
         let tab = workspace.active_tab();
-        let id = tab.id();
-        let name = tab.name().to_owned();
+        self.prompt_rename_tab_on(
+            self.active_connection,
+            tab.id(),
+            tab.name().to_owned(),
+            window,
+            cx,
+        );
+    }
+
+    fn prompt_rename_tab_on(
+        &mut self,
+        key: ConnectionKey,
+        tab_id: TabId,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.prompt_text(
             "Rename Tab",
             name,
             move |this, name| {
-                this.send_layout(LayoutCommand::RenameTab { tab_id: id, name });
+                this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });
             },
             window,
             cx,
@@ -1388,12 +1482,7 @@ impl Murmur {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_dialog(window, cx);
-        self.new_workspace(home_directory().unwrap_or_else(|| PathBuf::from(".")));
-    }
-
-    fn action_open_folder(&mut self, _: &OpenFolder, window: &mut Window, cx: &mut Context<Self>) {
-        self.dismiss_dialog(window, cx);
-        self.open_folder(window, cx);
+        self.choose_workspace_directory_on(self.active_connection, window, cx);
     }
 
     fn action_new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -1774,16 +1863,104 @@ impl Murmur {
                 .ok()
                 .map(|session| {
                     let active_workspace = session.active_workspace_id();
+                    let workspace_count = session.workspaces().len();
                     session
                         .workspaces()
                         .iter()
-                        .map(|workspace| {
+                        .enumerate()
+                        .map(|(workspace_index, workspace)| {
                             let workspace_id = workspace.id();
+                            let workspace_name = workspace.name().to_owned();
                             let owner = owner.clone();
-                            SidebarMenuItem::new(workspace.name().to_owned())
+                            let menu_owner = owner.clone();
+                            SidebarMenuItem::new(workspace_name.clone())
                                 .icon(IconName::Folder)
                                 .active(active_server && active_workspace == Some(workspace_id))
                                 .disable(!connected)
+                                .context_menu(move |menu, _, _| {
+                                    let new_tab_owner = menu_owner.clone();
+                                    let rename_owner = menu_owner.clone();
+                                    let move_up_owner = menu_owner.clone();
+                                    let move_down_owner = menu_owner.clone();
+                                    let close_owner = menu_owner.clone();
+                                    let rename_name = workspace_name.clone();
+                                    menu.item(
+                                        PopupMenuItem::new("New Tab")
+                                            .disabled(!connected)
+                                            .on_click(move |_, _, cx| {
+                                                let _ = new_tab_owner.update(cx, |this, _| {
+                                                    this.new_tab_on(key, workspace_id)
+                                                });
+                                            }),
+                                    )
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Rename Workspace…")
+                                            .disabled(!connected)
+                                            .on_click(move |_, window, cx| {
+                                                let name = rename_name.clone();
+                                                let _ = rename_owner.update(cx, |this, cx| {
+                                                    this.prompt_rename_workspace_on(
+                                                        key,
+                                                        workspace_id,
+                                                        name,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new("Move Up")
+                                            .disabled(!connected || workspace_index == 0)
+                                            .on_click(move |_, _, cx| {
+                                                let _ = move_up_owner.update(cx, |this, _| {
+                                                    this.send_layout_to(
+                                                        key,
+                                                        LayoutCommand::MoveWorkspace {
+                                                            workspace_id,
+                                                            target_index: (workspace_index - 1)
+                                                                as u32,
+                                                        },
+                                                    )
+                                                });
+                                            }),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new("Move Down")
+                                            .disabled(
+                                                !connected
+                                                    || workspace_index + 1 == workspace_count,
+                                            )
+                                            .on_click(move |_, _, cx| {
+                                                let _ = move_down_owner.update(cx, |this, _| {
+                                                    this.send_layout_to(
+                                                        key,
+                                                        LayoutCommand::MoveWorkspace {
+                                                            workspace_id,
+                                                            target_index: (workspace_index + 1)
+                                                                as u32,
+                                                        },
+                                                    )
+                                                });
+                                            }),
+                                    )
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Close Workspace")
+                                            .disabled(!connected)
+                                            .on_click(move |_, window, cx| {
+                                                let _ = close_owner.update(cx, |this, cx| {
+                                                    this.close_workspace_id(
+                                                        key,
+                                                        workspace_id,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                });
+                                            }),
+                                    )
+                                })
                                 .on_click(move |_, _, cx| {
                                     let _ = owner.update(cx, |this, _| {
                                         this.select_workspace(key, workspace_id)
@@ -1795,15 +1972,38 @@ impl Murmur {
                 .unwrap_or_default();
             let select_owner = owner.clone();
             let new_workspace_owner = owner.clone();
+            let server_menu_owner = owner.clone();
             let new_workspace_label = connection.label.clone();
+            let reconnect_enabled = connection.status == ConnectionStatus::Disconnected;
             SidebarMenuItem::new(label)
                 .icon(IconName::HardDrive)
                 .active(active_server)
                 .default_open(true)
                 .children(workspaces)
+                .context_menu(move |menu, _, _| {
+                    let new_workspace_owner = server_menu_owner.clone();
+                    let reconnect_owner = server_menu_owner.clone();
+                    menu.item(
+                        PopupMenuItem::new("New Workspace…")
+                            .disabled(!connected)
+                            .on_click(move |_, window, cx| {
+                                let _ = new_workspace_owner.update(cx, |this, cx| {
+                                    this.choose_workspace_directory_on(key, window, cx)
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Reconnect")
+                            .disabled(!reconnect_enabled)
+                            .on_click(move |_, _, cx| {
+                                let _ =
+                                    reconnect_owner.update(cx, |this, _| this.start_connect(key));
+                            }),
+                    )
+                })
                 .suffix(move |_, _| {
                     let owner = new_workspace_owner.clone();
-                    let tooltip = format!("New Workspace on {new_workspace_label}");
+                    let tooltip = format!("New Workspace on {new_workspace_label}…");
                     Button::new(("new-workspace", key))
                         .debug_selector(move || format!("new-workspace-server-{key}"))
                         .ghost()
@@ -1811,10 +2011,11 @@ impl Murmur {
                         .icon(IconName::Plus)
                         .tooltip(tooltip)
                         .disabled(!connected)
-                        .on_click(move |_, _, cx| {
+                        .on_click(move |_, window, cx| {
                             cx.stop_propagation();
-                            let root = home_directory().unwrap_or_else(|| PathBuf::from("."));
-                            let _ = owner.update(cx, |this, _| this.new_workspace_on(key, root));
+                            let _ = owner.update(cx, |this, cx| {
+                                this.choose_workspace_directory_on(key, window, cx)
+                            });
                         })
                 })
                 .on_click(move |_, window, cx| {
@@ -1880,7 +2081,7 @@ impl Murmur {
         };
         let Some(workspace) = session.active_workspace() else {
             let new_owner = cx.weak_entity();
-            let folder_owner = cx.weak_entity();
+            let key = connection.key;
             return v_flex()
                 .size_full()
                 .items_center()
@@ -1894,37 +2095,30 @@ impl Murmur {
                         .debug_selector(|| "new-terminal-workspace".into())
                         .primary()
                         .icon(IconName::SquareTerminal)
-                        .label("New Terminal Workspace")
-                        .disabled(!can_mutate)
-                        .on_click(move |_, _, cx| {
-                            let _ = new_owner.update(cx, |this, _| {
-                                this.new_workspace(
-                                    home_directory().unwrap_or_else(|| PathBuf::from(".")),
-                                )
-                            });
-                        }),
-                )
-                .child(
-                    Button::new("open-folder")
-                        .outline()
-                        .icon(IconName::Folder)
-                        .label("Open Folder")
+                        .label("New Workspace…")
                         .disabled(!can_mutate)
                         .on_click(move |_, window, cx| {
-                            let _ =
-                                folder_owner.update(cx, |this, cx| this.open_folder(window, cx));
+                            let _ = new_owner.update(cx, |this, cx| {
+                                this.choose_workspace_directory_on(key, window, cx)
+                            });
                         }),
                 )
                 .into_any_element();
         };
 
+        let key = connection.key;
+        let workspace_id = workspace.id();
         let active_tab = workspace.active_tab().id();
         let closes_workspace = workspace.tabs().len() == 1;
-        let tab_buttons = workspace.tabs().iter().map(|tab| {
+        let tab_count = workspace.tabs().len();
+        let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
+            let tab_name = tab.name().to_owned();
             let activate_owner = cx.weak_entity();
             let close_owner = cx.weak_entity();
+            let menu_owner = cx.weak_entity();
             h_flex()
+                .id(("tab-menu", tab_id.as_u64()))
                 .child(
                     Button::new(("tab", tab_id.as_u64()))
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
@@ -1935,7 +2129,7 @@ impl Murmur {
                         .disabled(!can_mutate)
                         .on_click(move |_, _, cx| {
                             let _ = activate_owner.update(cx, |this, _| {
-                                this.send_layout(LayoutCommand::ActivateTab { tab_id })
+                                this.send_layout_to(key, LayoutCommand::ActivateTab { tab_id })
                             });
                         }),
                 )
@@ -1949,10 +2143,67 @@ impl Murmur {
                         .disabled(!can_mutate)
                         .on_click(move |_, window, cx| {
                             let _ = close_owner.update(cx, |this, cx| {
-                                this.close_tab_id(tab_id, closes_workspace, window, cx)
+                                this.close_tab_id(key, tab_id, closes_workspace, window, cx)
                             });
                         }),
                 )
+                .context_menu(move |menu, _, _| {
+                    let rename_owner = menu_owner.clone();
+                    let move_left_owner = menu_owner.clone();
+                    let move_right_owner = menu_owner.clone();
+                    let close_owner = menu_owner.clone();
+                    let rename_name = tab_name.clone();
+                    menu.item(
+                        PopupMenuItem::new("Rename Tab…")
+                            .disabled(!can_mutate)
+                            .on_click(move |_, window, cx| {
+                                let name = rename_name.clone();
+                                let _ = rename_owner.update(cx, |this, cx| {
+                                    this.prompt_rename_tab_on(key, tab_id, name, window, cx)
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Move Left")
+                            .disabled(!can_mutate || tab_index == 0)
+                            .on_click(move |_, _, cx| {
+                                let _ = move_left_owner.update(cx, |this, _| {
+                                    this.send_layout_to(
+                                        key,
+                                        LayoutCommand::MoveTab {
+                                            tab_id,
+                                            target_index: (tab_index - 1) as u32,
+                                        },
+                                    )
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Move Right")
+                            .disabled(!can_mutate || tab_index + 1 == tab_count)
+                            .on_click(move |_, _, cx| {
+                                let _ = move_right_owner.update(cx, |this, _| {
+                                    this.send_layout_to(
+                                        key,
+                                        LayoutCommand::MoveTab {
+                                            tab_id,
+                                            target_index: (tab_index + 1) as u32,
+                                        },
+                                    )
+                                });
+                            }),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("Close Tab")
+                            .disabled(!can_mutate)
+                            .on_click(move |_, window, cx| {
+                                let _ = close_owner.update(cx, |this, cx| {
+                                    this.close_tab_id(key, tab_id, closes_workspace, window, cx)
+                                });
+                            }),
+                    )
+                })
         });
         let new_tab_owner = cx.weak_entity();
 
@@ -1977,7 +2228,8 @@ impl Murmur {
                             .tooltip("New Tab")
                             .disabled(!can_mutate)
                             .on_click(move |_, _, cx| {
-                                let _ = new_tab_owner.update(cx, |this, _| this.new_tab());
+                                let _ = new_tab_owner
+                                    .update(cx, |this, _| this.new_tab_on(key, workspace_id));
                             }),
                     )
                     .when_some(error, |row, error| {
@@ -2114,7 +2366,6 @@ impl Render for Murmur {
             .on_action(cx.listener(Self::action_add_server))
             .on_action(cx.listener(Self::action_reconnect))
             .on_action(cx.listener(Self::action_new_workspace))
-            .on_action(cx.listener(Self::action_open_folder))
             .on_action(cx.listener(Self::action_new_tab))
             .on_action(cx.listener(Self::action_rename_workspace))
             .on_action(cx.listener(Self::action_rename_tab))
@@ -2190,10 +2441,6 @@ fn collect_dock_ratios(state: &PanelState, ratios: &mut Vec<f32>) {
     for child in &state.children {
         collect_dock_ratios(child, ratios);
     }
-}
-
-fn home_directory() -> Option<PathBuf> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
 
 fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
@@ -2310,10 +2557,12 @@ mod tests {
         use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
         use gpui::{
-            AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, px, size,
+            AppContext as _, Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, px,
+            size,
         };
         use gpui_component::{Root, WindowExt as _};
         use murmur_core::protocol::LayoutCommand;
+        use murmur_core::{PaneId, TabId};
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options};
@@ -2398,6 +2647,14 @@ mod tests {
             panic!("GUI did not acquire control from the test server");
         }
 
+        fn terminal_selector(pane_id: PaneId) -> &'static str {
+            Box::leak(format!("terminal-pane-{}", pane_id.as_u64()).into_boxed_str())
+        }
+
+        fn tab_selector(tab_id: TabId) -> &'static str {
+            Box::leak(format!("tab-{}", tab_id.as_u64()).into_boxed_str())
+        }
+
         #[test]
         fn default_window_options_create_1280_by_720_window() {
             let app = TestAppContext::single();
@@ -2431,6 +2688,14 @@ mod tests {
                 .debug_bounds("new-workspace-server-1")
                 .expect("Local server should expose New Workspace");
             window.simulate_click(new_workspace.center(), Modifiers::default());
+            assert!(window.did_prompt_for_paths());
+            window.simulate_path_prompt_response(|options| {
+                assert!(!options.files);
+                assert!(options.directories);
+                assert!(!options.multiple);
+                assert_eq!(options.prompt.as_deref(), Some("New Workspace on Local"));
+                Some(vec![std::env::temp_dir()])
+            });
 
             let mut tab_id = None;
             for _ in 0..100 {
@@ -2487,6 +2752,10 @@ mod tests {
                 .debug_bounds("new-terminal-workspace")
                 .expect("new workspace button should be rendered");
             window.simulate_click(button.center(), Modifiers::default());
+            assert!(window.did_prompt_for_paths());
+            let workspace_root = std::env::temp_dir();
+            let selected_root = workspace_root.clone();
+            window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
 
             let mut received = false;
             for _ in 0..100 {
@@ -2505,6 +2774,18 @@ mod tests {
             assert!(
                 received,
                 "GUI did not render the workspace created by the real server"
+            );
+            assert_eq!(
+                window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .unwrap()
+                        .active_workspace()
+                        .unwrap()
+                        .root_directory()
+                        .to_path_buf()
+                }),
+                workspace_root
             );
 
             let new_tab = window
@@ -2532,6 +2813,40 @@ mod tests {
                 "GUI did not render the tab created by the real server"
             );
 
+            let active_tab = window
+                .read(|app| {
+                    view.read(app)
+                        .active_session()?
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().id())
+                })
+                .unwrap();
+            let tab = window
+                .debug_bounds(tab_selector(active_tab))
+                .expect("active Tab should be rendered");
+            window.simulate_mouse_down(tab.center(), MouseButton::Right, Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+            window.simulate_keystrokes("down enter");
+            window.run_until_parked();
+            assert!(
+                window.update(|window, cx| window.has_active_dialog(cx)),
+                "Rename Tab should open from its context menu"
+            );
+            window.update(|window, cx| window.close_dialog(cx));
+            window.run_until_parked();
+
+            let initial_pane = window
+                .read(|app| {
+                    view.read(app)
+                        .active_session()?
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().focused_pane().id())
+                })
+                .unwrap();
+            let initial_terminal = terminal_selector(initial_pane);
             let mut terminal_ready = false;
             for _ in 0..100 {
                 window.executor().advance_clock(Duration::from_millis(20));
@@ -2543,7 +2858,7 @@ mod tests {
                             .values()
                             .any(|terminal| !terminal.exited)
                     })
-                }) && window.debug_bounds("terminal-pane").is_some()
+                }) && window.debug_bounds(initial_terminal).is_some()
                 {
                     terminal_ready = true;
                     break;
@@ -2552,9 +2867,13 @@ mod tests {
             }
             assert!(terminal_ready, "GUI did not render the server PTY");
 
-            let terminal = window.debug_bounds("terminal-pane").unwrap();
-            window.simulate_click(terminal.center(), Modifiers::default());
-            window.simulate_keystrokes("alt-shift-=");
+            let terminal = window.debug_bounds(initial_terminal).unwrap();
+            window.simulate_mouse_down(terminal.center(), MouseButton::Right, Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+            window.simulate_keystrokes("down enter");
             let mut split_right = false;
             for _ in 0..100 {
                 window.executor().advance_clock(Duration::from_millis(20));
@@ -2571,7 +2890,47 @@ mod tests {
                 }
                 std::thread::sleep(Duration::from_millis(2));
             }
-            assert!(split_right, "Alt+Shift++ did not split right");
+            assert!(split_right, "Pane context menu did not split right");
+
+            let (pane_to_focus, rebuilds_before_focus) = window.read(|app| {
+                let murmur = view.read(app);
+                let workspace = murmur.active_session().unwrap();
+                let tab = workspace.active_workspace().unwrap().active_tab();
+                let focused = tab.focused_pane().id();
+                let other = tab
+                    .panes()
+                    .iter()
+                    .find(|pane| pane.id() != focused)
+                    .unwrap()
+                    .id();
+                (other, murmur.dock_rebuild_count)
+            });
+            let other_terminal = window
+                .debug_bounds(terminal_selector(pane_to_focus))
+                .expect("the other Pane should be rendered");
+            window.simulate_click(other_terminal.center(), Modifiers::default());
+            let mut pane_focused = false;
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                pane_focused = window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session.active_workspace().is_some_and(|workspace| {
+                            workspace.active_tab().focused_pane().id() == pane_to_focus
+                        })
+                    })
+                });
+                if pane_focused {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(pane_focused, "clicking a Pane did not focus it");
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds_before_focus,
+                "focus-only updates must not rebuild Dock"
+            );
 
             window.simulate_keystrokes("alt-shift--");
             let mut split_down = false;
@@ -2651,7 +3010,6 @@ mod tests {
                 tab_switched,
                 "Ctrl+Tab did not switch tabs through the real server"
             );
-            window.quit();
         }
 
         #[test]

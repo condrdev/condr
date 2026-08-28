@@ -17,7 +17,7 @@ A Server-owned working arrangement containing zero or more Workspaces and the cu
 _Avoid_: Agent session, conversation
 
 **Start Page**:
-The window surface shown when a Session contains no Workspaces. It offers entry points to create a terminal Workspace or open a folder, but is not itself a Workspace.
+The window surface shown when a Session contains no Workspaces. It offers an entry point to choose a Root Directory and create a Workspace, but is not itself a Workspace.
 _Avoid_: Empty Workspace, empty Pane
 
 **Workspace**:
