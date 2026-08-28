@@ -1344,6 +1344,7 @@ impl Murmur {
     fn prompt_text(
         &mut self,
         title: &'static str,
+        ok_text: &'static str,
         initial: String,
         apply: impl Fn(&mut Murmur, String) + 'static,
         window: &mut Window,
@@ -1355,14 +1356,9 @@ impl Murmur {
         window.defer(cx, move |window, cx| {
             let input_for_content = input.clone();
             let input_for_ok = input.clone();
-            let focus = input.clone();
             let owner = owner.clone();
             let apply = apply.clone();
-            window.open_dialog(cx, move |dialog, window, cx| {
-                let focus = focus.clone();
-                window.defer(cx, move |window, cx| {
-                    focus.read(cx).focus_handle(cx).focus(window, cx);
-                });
+            window.open_dialog(cx, move |dialog, _, _| {
                 let input_for_content = input_for_content.clone();
                 let input_for_ok = input_for_ok.clone();
                 let owner = owner.clone();
@@ -1372,20 +1368,27 @@ impl Murmur {
                     .content(move |content, _, _| {
                         content.child(Input::new(&input_for_content).w_full())
                     })
-                    .button_props(DialogButtonProps::default().show_cancel(true).on_ok(
-                        move |_, _, cx| {
-                            let value = input_for_ok.read(cx).value().trim().to_owned();
-                            if value.is_empty() {
-                                return false;
-                            }
-                            let apply = apply.clone();
-                            let _ = owner.update(cx, |this, cx| {
-                                apply(this, value);
-                                cx.notify();
-                            });
-                            true
-                        },
-                    ))
+                    .button_props(
+                        DialogButtonProps::default()
+                            .ok_text(ok_text)
+                            .show_cancel(true)
+                            .on_ok(move |_, _, cx| {
+                                let value = input_for_ok.read(cx).value().trim().to_owned();
+                                if value.is_empty() {
+                                    return false;
+                                }
+                                let apply = apply.clone();
+                                let _ = owner.update(cx, |this, cx| {
+                                    apply(this, value);
+                                    cx.notify();
+                                });
+                                true
+                            }),
+                    )
+            });
+            input.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.select_all(window, cx);
             });
         });
     }
@@ -1393,6 +1396,7 @@ impl Murmur {
     fn prompt_add_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prompt_text(
             "Add Server",
+            "Add",
             "127.0.0.1:7341".into(),
             |this, value| {
                 if let Ok(address) = value.parse::<SocketAddr>() {
@@ -1429,6 +1433,7 @@ impl Murmur {
     ) {
         self.prompt_text(
             "Rename Server",
+            "Rename",
             name,
             move |this, name| {
                 if let Some(connection) = this.connection_mut(key) {
@@ -1495,6 +1500,7 @@ impl Murmur {
     ) {
         self.prompt_text(
             "Rename Workspace",
+            "Rename",
             name,
             move |this, name| {
                 this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
@@ -1531,6 +1537,7 @@ impl Murmur {
     ) {
         self.prompt_text(
             "Rename Tab",
+            "Rename",
             name,
             move |this, name| {
                 this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });
@@ -2370,7 +2377,8 @@ impl EntityInputHandler for Murmur {
 }
 
 impl Render for Murmur {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialog_layer = Root::render_dialog_layer(window, cx);
         div()
             .key_context("Murmur")
             .track_focus(&self.focus_handle)
@@ -2424,6 +2432,7 @@ impl Render for Murmur {
                     )
                     .child(self.render_workspace(cx)),
             )
+            .children(dialog_layer)
     }
 }
 
@@ -2669,6 +2678,30 @@ mod tests {
             Box::leak(format!("tab-{}", tab_id.as_u64()).into_boxed_str())
         }
 
+        fn submit_text_dialog(window: &mut VisualTestContext, value: &str) {
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            assert!(window.update(|window, cx| window.has_focused_input(cx)));
+            window.simulate_input(value);
+            window.simulate_keystrokes("enter");
+        }
+
+        fn wait_until(
+            window: &mut VisualTestContext,
+            mut predicate: impl FnMut(&mut VisualTestContext) -> bool,
+        ) -> bool {
+            for _ in 0..100 {
+                window.executor().advance_clock(Duration::from_millis(20));
+                window.run_until_parked();
+                if predicate(window) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            false
+        }
+
         #[test]
         fn default_window_options_create_1280_by_720_window() {
             let app = TestAppContext::single();
@@ -2832,6 +2865,91 @@ mod tests {
             });
             assert!(window.read(|app| view.read(app).connections.is_empty()));
             window.quit();
+        }
+
+        #[test]
+        fn rename_dialogs_commit_server_workspace_and_tab_names() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.prompt_rename_server_on(1, "Local".into(), window, cx)
+                });
+            });
+            submit_text_dialog(window, "Build Server");
+            assert_eq!(
+                window.read(|app| view.read(app).connection(1).unwrap().label.clone()),
+                "Build Server"
+            );
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    });
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window
+                    .read(|app| {
+                        let session = view.read(app).active_session()?;
+                        let workspace = session.active_workspace()?;
+                        Some((workspace.id(), workspace.active_tab().id()))
+                    })
+                    .is_some()
+            }));
+            let (workspace_id, tab_id) = window
+                .read(|app| {
+                    let session = view.read(app).active_session()?;
+                    let workspace = session.active_workspace()?;
+                    Some((workspace.id(), workspace.active_tab().id()))
+                })
+                .unwrap();
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.prompt_rename_workspace_on(
+                        1,
+                        workspace_id,
+                        "Workspace 1".into(),
+                        window,
+                        cx,
+                    )
+                });
+            });
+            submit_text_dialog(window, "Build Workspace");
+            let workspace_renamed = wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session
+                            .workspace(workspace_id)
+                            .is_some_and(|workspace| workspace.name() == "Build Workspace")
+                    })
+                })
+            });
+            assert!(
+                workspace_renamed,
+                "Workspace rename did not reach the server"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.prompt_rename_tab_on(1, tab_id, "Tab 1".into(), window, cx)
+                });
+            });
+            submit_text_dialog(window, "Build Tab");
+            let tab_renamed = wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session
+                            .tab(tab_id)
+                            .is_some_and(|tab| tab.name() == "Build Tab")
+                    })
+                })
+            });
+            assert!(tab_renamed, "Tab rename did not reach the server");
         }
 
         #[test]
