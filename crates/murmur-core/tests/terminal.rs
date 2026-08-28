@@ -1,12 +1,10 @@
-#![cfg(target_os = "linux")]
-
 use std::time::{Duration, Instant};
 
-use murmur_core::{
-    CommandBuilder, TerminalCommand, TerminalPosition, TerminalRuntime, TerminalScroll,
-    TerminalSide, TerminalSize, TerminalUpdate,
-};
+use murmur_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
+#[cfg(target_os = "linux")]
+use murmur_core::{TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate};
 
+#[cfg(target_os = "linux")]
 #[test]
 fn shell_round_trip_updates_vt_replies_and_resizes() {
     let cwd = std::env::temp_dir().canonicalize().unwrap();
@@ -54,6 +52,7 @@ stty size"#,
     assert!(runtime.shutdown().is_err());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
     let mut command = CommandBuilder::new("/bin/sh");
@@ -123,6 +122,40 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
     assert!(runtime.visible_text().contains("final"));
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn conpty_round_trip_resizes_unicode_and_eof() {
+    let mut command = CommandBuilder::new("pwsh.exe");
+    command.args(["-NoLogo", "-NoProfile"]);
+    command.cwd(std::env::temp_dir());
+    let mut runtime =
+        TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).expect("spawn pwsh in ConPTY");
+
+    runtime
+        .execute(TerminalCommand::Text(
+            "Write-Output 'ready \u{4e16}\u{754c}'\r".into(),
+        ))
+        .unwrap();
+    wait_for_text(&runtime, "ready \u{4e16}\u{754c}");
+
+    runtime.resize(TerminalSize::new(40, 100)).unwrap();
+    runtime
+        .execute(TerminalCommand::Text(
+            "$s=$Host.UI.RawUI.WindowSize; Write-Output \"size=$($s.Height)x$($s.Width)\"\r".into(),
+        ))
+        .unwrap();
+    wait_for_text(&runtime, "size=40x100");
+
+    runtime
+        .execute(TerminalCommand::Text(
+            "Write-Output 'final-before-exit'; exit\r".into(),
+        ))
+        .unwrap();
+    wait_for_text(&runtime, "final-before-exit");
+    assert!(runtime.wait().unwrap().success());
+    assert!(runtime.visible_text().contains("final-before-exit"));
+}
+
 fn wait_for_text(runtime: &TerminalRuntime, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -137,6 +170,7 @@ fn wait_for_text(runtime: &TerminalRuntime, needle: &str) {
     );
 }
 
+#[cfg(target_os = "linux")]
 fn wait_for_revision_after(runtime: &TerminalRuntime, revision: u64) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -148,6 +182,7 @@ fn wait_for_revision_after(runtime: &TerminalRuntime, revision: u64) {
     panic!("terminal revision never advanced past {revision}");
 }
 
+#[cfg(target_os = "linux")]
 fn visible_rows(view: &murmur_core::TerminalView) -> Vec<String> {
     (0..view.size.rows)
         .map(|row| {

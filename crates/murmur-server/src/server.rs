@@ -942,7 +942,7 @@ mod tests {
         stream
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         use murmur_core::{TerminalPosition, TerminalScroll, TerminalSide};
@@ -1005,14 +1005,20 @@ mod tests {
             .active_tab()
             .focused_pane()
             .id();
+        let pid_command = if cfg!(windows) {
+            "pwsh.exe -NoLogo -NoProfile -NoExit -Command \"Write-Output ('murmur-' + 'pid=' + $PID)\"\r"
+        } else {
+            "printf 'murmur-%s=%s\\n' pid $$\r"
+        };
         send_terminal(
             &mut first,
             server_id,
             session_id,
             pane_id,
-            TerminalCommand::Text("printf 'murmur-pid=%s\\n' $$\r".into()),
+            TerminalCommand::Text(pid_command.into()),
         );
-        wait_for_terminal_text(&mut first, pane_id, "murmur-pid=");
+        let first_view = wait_for_terminal_text(&mut first, pane_id, "murmur-pid=");
+        let first_pid = marker_value(&view_text(&first_view), "murmur-pid=");
         let snapshot_before_disconnect = handle.snapshot();
         drop(first);
         thread::sleep(Duration::from_millis(30));
@@ -1052,6 +1058,32 @@ mod tests {
         wait_for_message(&mut second, |message| {
             matches!(message, ServerMessage::Subscribed { .. })
         });
+
+        let reconnect_command = if cfg!(windows) {
+            "Write-Output ('reconnect-' + 'pid=' + $PID)\r"
+        } else {
+            "printf 'reconnect-%s=%s\\n' pid $$\r"
+        };
+        send_terminal(
+            &mut second,
+            server_id,
+            session_id,
+            pane_id,
+            TerminalCommand::Text(reconnect_command.into()),
+        );
+        let reconnect_view = wait_for_terminal_text(&mut second, pane_id, "reconnect-pid=");
+        assert_eq!(
+            marker_value(&view_text(&reconnect_view), "reconnect-pid="),
+            first_pid
+        );
+
+        if cfg!(windows) {
+            handle.stop();
+            drop(second);
+            thread.join().unwrap().unwrap();
+            let _ = endpoint.cleanup();
+            return;
+        }
 
         send_terminal(
             &mut second,
@@ -1142,7 +1174,7 @@ mod tests {
         let _ = endpoint.cleanup();
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn send_terminal(
         stream: &mut EndpointStream,
         server_id: ServerId,
@@ -1162,7 +1194,7 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_terminal_text(
         stream: &mut EndpointStream,
         pane_id: PaneId,
@@ -1171,7 +1203,7 @@ mod tests {
         wait_for_terminal(stream, pane_id, |view| view_text(view).contains(needle))
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_terminal(
         stream: &mut EndpointStream,
         pane_id: PaneId,
@@ -1194,7 +1226,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_message(
         stream: &mut EndpointStream,
         predicate: impl Fn(&ServerMessage) -> bool,
@@ -1210,12 +1242,12 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn read_server(stream: &mut EndpointStream) -> ServerMessage {
         murmur_core::protocol::read_message(stream).unwrap()
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn view_text(view: &murmur_core::TerminalView) -> String {
         (0..view.size.rows)
             .map(|row| {
@@ -1226,6 +1258,15 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn marker_value(text: &str, marker: &str) -> String {
+        text.split(marker)
+            .nth(1)
+            .and_then(|tail| tail.split_whitespace().next())
+            .expect("terminal marker has a value")
+            .to_owned()
     }
 
     #[test]

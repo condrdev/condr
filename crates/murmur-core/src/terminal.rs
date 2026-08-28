@@ -604,10 +604,10 @@ impl TerminalRuntime {
     }
 
     fn finish_io(&mut self) -> io::Result<()> {
-        let reader_result = join(&mut self.reader, "terminal reader");
         let _ = self.io.send(IoCommand::Shutdown);
         let writer_result = join(&mut self.writer, "terminal writer");
-        reader_result.and(writer_result)
+        let reader_result = join(&mut self.reader, "terminal reader");
+        writer_result.and(reader_result)
     }
 }
 
