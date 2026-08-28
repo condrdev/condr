@@ -15,7 +15,8 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::command::{Command, CommandItem, CommandState};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::dock::{
-    BasePanel, DockArea, DockEvent, DockLayout, PanelEvent, PanelInfo, PanelState,
+    BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
+    PanelState, TabGroupRenderer, TilesRenderer,
 };
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::ContextMenuExt as _;
@@ -228,6 +229,109 @@ struct TerminalPanel {
     focus_handle: FocusHandle,
 }
 
+struct MurmurDockRenderer;
+
+impl DockAreaRenderer for MurmurDockRenderer {
+    fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
+        div()
+            .id("murmur-dock-area")
+            .size_full()
+            .overflow_hidden()
+            .flex()
+            .flex_row()
+    }
+
+    fn center_frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
+        div()
+            .id("murmur-dock-center")
+            .flex()
+            .flex_1()
+            .flex_col()
+            .overflow_hidden()
+    }
+
+    fn split_frame(
+        &self,
+        node: gpui_component::dock::NodeId,
+        _: Axis,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Stateful<Div> {
+        div()
+            .id(("murmur-dock-split", node.as_u64()))
+            .size_full()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+    }
+
+    fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
+        Rc::new(MurmurTabGroupRenderer)
+    }
+
+    fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
+        Rc::new(MurmurTilesRenderer)
+    }
+}
+
+struct MurmurTabGroupRenderer;
+
+impl TabGroupRenderer for MurmurTabGroupRenderer {
+    fn frame(
+        &self,
+        _: &gpui_component::dock::TabGroupContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Stateful<Div> {
+        div()
+            .id("murmur-tab-group")
+            .size_full()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+    }
+
+    fn content_frame(
+        &self,
+        _: &gpui_component::dock::TabGroupContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Stateful<Div> {
+        div()
+            .id("murmur-tab-content")
+            .size_full()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+    }
+
+    fn render_tab_bar(
+        &self,
+        _: &gpui_component::dock::TabGroupContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> AnyElement {
+        Empty.into_any_element()
+    }
+}
+
+struct MurmurTilesRenderer;
+
+impl TilesRenderer for MurmurTilesRenderer {
+    fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
+        div().id("murmur-tiles").size_full().overflow_hidden()
+    }
+
+    fn render_drag_bar(
+        &self,
+        _: &gpui_component::dock::TileContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> AnyElement {
+        Empty.into_any_element()
+    }
+}
+
 impl TerminalPanel {
     fn new(
         connection_key: ConnectionKey,
@@ -376,7 +480,10 @@ impl Murmur {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let dock_area = cx.new(|cx| DockArea::new("murmur-workspace", None, window, cx));
+        let dock_area = cx.new(|cx| {
+            DockArea::new("murmur-workspace", None, window, cx)
+                .with_renderer(Rc::new(MurmurDockRenderer))
+        });
         let dock_subscription = cx.subscribe_in(
             &dock_area,
             window,

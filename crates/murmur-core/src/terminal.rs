@@ -263,6 +263,13 @@ pub struct TerminalRuntime {
 
 impl TerminalRuntime {
     pub fn spawn_shell(cwd: impl AsRef<Path>, size: TerminalSize) -> io::Result<Self> {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = CommandBuilder::new("pwsh.exe");
+            command.args(["-NoLogo", "-NoProfile", "-NoExit"]);
+            command
+        };
+        #[cfg(not(windows))]
         let mut command = CommandBuilder::new_default_prog();
         command.cwd(cwd.as_ref());
         Self::spawn(command, size)
