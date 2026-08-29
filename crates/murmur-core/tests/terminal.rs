@@ -152,7 +152,7 @@ fn foreground_agent_process_and_terminal_text_produce_a_snapshot() {
     let mut command = CommandBuilder::new("/bin/bash");
     command.args([
         "-c",
-        "printf 'Working (1s - esc to interrupt)\\n'; bash -c 'exec -a codex sleep 30' & wait",
+        "printf '◦ Working (1s - esc to interrupt)\\n'; bash -c 'exec -a codex sleep 30' & wait",
     ]);
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 50)).unwrap();
     wait_for_text(&runtime, "esc to interrupt");
@@ -178,7 +178,8 @@ fn foreground_agent_survives_its_process_group_leader_exiting() {
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(8, 60)).unwrap();
     runtime
         .write(
-            b"printf 'Working - esc to interrupt\\n'; true | bash -c 'exec -a codex sleep 30'\r"
+            "printf '◦ Working (1s - esc to interrupt)\\n'; true | bash -c 'exec -a codex sleep 30'\r"
+                .as_bytes()
                 .to_vec(),
         )
         .unwrap();

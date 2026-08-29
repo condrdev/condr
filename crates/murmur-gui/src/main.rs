@@ -3938,7 +3938,7 @@ mod tests {
                         1,
                         agent_pane,
                         TerminalCommand::Text(
-                            "exec -a codex /bin/bash -c \"echo 'Working - esc to interrupt'; sleep 1; printf '\\033[2J\\033[H›\\n'; sleep 30 & wait\"\r"
+                            "exec -a codex /bin/bash -c \"echo '◦ Working (1s - esc to interrupt)'; sleep 1; printf '\\033[2J\\033[H›\\n'; sleep 30 & wait\"\r"
                                 .into(),
                         ),
                     );

@@ -180,38 +180,136 @@ fn identify_command_name(command: &str) -> Option<AgentKind> {
 }
 
 fn is_transcript_viewer(kind: AgentKind, text: &str) -> bool {
-    match kind {
-        AgentKind::Claude => text.contains("showing detailed transcript"),
-        AgentKind::Codex => text.contains("pgup/pgdn to") && text.contains("home/end to jump"),
-    }
+    let marker = match kind {
+        AgentKind::Claude => text.rfind("showing detailed transcript"),
+        AgentKind::Codex => (text.contains("pgup/pgdn to") && text.contains("home/end to jump"))
+            .then(|| text.rfind("home/end to jump"))
+            .flatten(),
+    };
+    marker.is_some_and(|marker| last_prompt_marker(text).is_none_or(|prompt| marker > prompt))
 }
 
 fn is_blocked(kind: AgentKind, text: &str) -> bool {
-    let common = [
-        "[y/n]",
-        "do you want to",
-        "would you like to",
-        "waiting for permission",
-    ];
-    common.iter().any(|pattern| text.contains(pattern))
-        || match kind {
-            AgentKind::Claude => {
-                text.contains("do you want to proceed?")
-                    || (text.contains("esc to cancel")
-                        && (text.contains("enter to confirm") || text.contains("enter to select")))
-            }
-            AgentKind::Codex => {
-                text.contains("action required")
-                    || text.contains("allow command?")
-                    || text.contains("press enter to confirm or esc to cancel")
-                    || text.contains("enter to submit answer")
-                    || text.contains("enter to submit all")
-            }
+    let prompt = last_prompt_marker(text);
+    let current = prompt.map_or(text, |prompt| &text[prompt..]);
+    let output = current
+        .lines()
+        .enumerate()
+        .filter(|(index, _)| prompt.is_none() || *index != 0)
+        .map(|(_, line)| line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if output.contains("[y/n]")
+        || output.contains("waiting for permission")
+        || ((output.contains("do you want to") || output.contains("would you like to"))
+            && output.contains("yes"))
+    {
+        return true;
+    }
+    match kind {
+        AgentKind::Claude => {
+            output.contains("do you want to proceed?")
+                || (output.contains("esc to cancel")
+                    && (output.contains("enter to confirm") || output.contains("enter to select")))
         }
+        AgentKind::Codex => [
+            "action required",
+            "allow command?",
+            "press enter to confirm or esc to cancel",
+            "enter to submit answer",
+            "enter to submit all",
+        ]
+        .iter()
+        .any(|pattern| output.contains(pattern)),
+    }
 }
 
-fn is_working(_kind: AgentKind, text: &str) -> bool {
-    text.contains("esc to interrupt") && !text.contains("conversation interrupted")
+fn is_working(kind: AgentKind, text: &str) -> bool {
+    let recent_lines = match kind {
+        AgentKind::Claude => 5,
+        AgentKind::Codex => 3,
+    };
+    let lines = text.lines().collect::<Vec<_>>();
+    let Some(working) = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .rev()
+        .take(recent_lines)
+        .find_map(|(index, line)| match kind {
+            AgentKind::Claude => (line.contains("esc to interrupt")
+                && !line.trim_start().starts_with(['›', '❯']))
+            .then_some(index),
+            AgentKind::Codex => codex_working_line(line).then_some(index),
+        })
+    else {
+        return false;
+    };
+    !lines
+        .iter()
+        .skip(working + 1)
+        .any(|line| line.contains("conversation interrupted") || matches!(line.trim(), "›" | "❯"))
+}
+
+fn codex_working_line(line: &str) -> bool {
+    let line = line.trim_end();
+    let Some(status) = line
+        .strip_prefix("• working (")
+        .or_else(|| line.strip_prefix("◦ working ("))
+    else {
+        return false;
+    };
+    let Some(close) = status.rfind(')') else {
+        return false;
+    };
+    let suffix = status[close + 1..].trim_start();
+    status[..close].contains("esc to interrupt")
+        && (suffix.is_empty() || suffix == "·" || suffix.starts_with("· "))
+}
+
+fn last_prompt_marker(text: &str) -> Option<usize> {
+    text.match_indices('\n')
+        .map(|(index, _)| index + 1)
+        .chain(std::iter::once(0))
+        .filter(|&start| is_user_prompt_at(text, start))
+        .max()
+}
+
+fn is_user_prompt_at(text: &str, start: usize) -> bool {
+    let Some(line) = text[start..].lines().next() else {
+        return false;
+    };
+    if !line.trim_start().starts_with(['›', '❯']) {
+        return false;
+    }
+    let preceding = &text[..start];
+    let following = &text[start + line.len()..];
+    let choice = line
+        .trim_start()
+        .strip_prefix(['›', '❯'])
+        .map(str::trim_start)
+        .is_some_and(|choice| {
+            choice
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_digit())
+                || ["yes", "no"].into_iter().any(|word| {
+                    choice.strip_prefix(word).is_some_and(|rest| {
+                        rest.chars()
+                            .next()
+                            .is_none_or(|next| !next.is_ascii_alphanumeric() && next != '_')
+                    })
+                })
+        });
+    let preceding_question = preceding
+        .lines()
+        .rev()
+        .take(3)
+        .any(|line| line.contains("do you want to proceed?"));
+    let permission_menu = (following.contains("esc to cancel")
+        && (following.contains("enter to confirm") || following.contains("enter to select")))
+        || (choice && preceding_question);
+    !permission_menu
 }
 
 #[cfg(test)]
@@ -275,6 +373,126 @@ mod tests {
         );
         assert_eq!(
             classify_agent(AgentKind::Claude, "❯", AgentState::Working),
+            AgentState::Idle
+        );
+    }
+
+    #[test]
+    fn classification_ignores_state_markers_before_the_current_prompt() {
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "◦ Working (12s · esc to interrupt)\n\n›\ngpt-5.6-sol",
+                AgentState::Working,
+            ),
+            AgentState::Idle
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "Allow command?\npress enter to confirm or esc to cancel\n\n› Use /skills",
+                AgentState::Blocked,
+            ),
+            AgentState::Idle
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "pgup/pgdn to scroll, home/end to jump\n\n› Use /skills",
+                AgentState::Working,
+            ),
+            AgentState::Idle
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "■ Conversation interrupted\n◦ Working (1s · esc to interrupt)",
+                AgentState::Idle,
+            ),
+            AgentState::Working
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Claude,
+                "❯ Do you want to refactor this?\n◦ Working (1s · esc to interrupt)",
+                AgentState::Idle,
+            ),
+            AgentState::Working
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "› Explain what [y/n] means\ngpt-5.6-sol",
+                AgentState::Blocked,
+            ),
+            AgentState::Idle
+        );
+    }
+
+    #[test]
+    fn classification_keeps_live_blockers_and_rejects_prompt_text_as_working() {
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "◦ Working (4s · esc to interrupt)\n› Run the command\ndo you want to continue? [y/n]",
+                AgentState::Working,
+            ),
+            AgentState::Blocked
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Claude,
+                "Do you want to proceed?\n❯ 1. Yes\n  2. No",
+                AgentState::Idle,
+            ),
+            AgentState::Blocked
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Claude,
+                "Do you want to proceed?\n❯ 1. Yes\n  2. No\nesc to cancel",
+                AgentState::Idle,
+            ),
+            AgentState::Blocked
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Claude,
+                "Do you want to proceed?\n❯ Yes\n  No\nesc to cancel\nenter to confirm",
+                AgentState::Idle,
+            ),
+            AgentState::Blocked
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "› Explain the text ◦ Working (1m · esc to interrupt)\ngpt-5.6-sol",
+                AgentState::Working,
+            ),
+            AgentState::Idle
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Codex,
+                "› Do you want to refactor this?\n◦ Working (1s · esc to interrupt)\ngpt-5.6-sol",
+                AgentState::Idle,
+            ),
+            AgentState::Working
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Claude,
+                "❯ Yes, do you want to refactor this?\n◦ Working (1s · esc to interrupt)",
+                AgentState::Idle,
+            ),
+            AgentState::Working
+        );
+        assert_eq!(
+            classify_agent(
+                AgentKind::Claude,
+                "❯ 1. Explain what [y/n] means\nclaude ready",
+                AgentState::Blocked,
+            ),
             AgentState::Idle
         );
     }
