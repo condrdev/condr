@@ -2,6 +2,7 @@
 
 mod client_writer;
 mod endpoint;
+pub(crate) mod persistence;
 mod server;
 
 pub use endpoint::{Endpoint, EndpointStream, default_socket_path};

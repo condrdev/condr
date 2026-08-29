@@ -7,13 +7,24 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::snapshot::{
-    PaneSnapshot, SNAPSHOT_VERSION, SessionSnapshot, SnapshotError, TabSnapshot, WorkspaceSnapshot,
+    LayoutNodeSnapshot, LayoutSnapshot, MAX_SNAPSHOT_LAYOUT_DEPTH, MAX_SNAPSHOT_LAYOUT_NODES,
+    MAX_SNAPSHOT_PANES, MAX_SNAPSHOT_TABS, MAX_SNAPSHOT_WORKSPACES, PaneSnapshot, SNAPSHOT_VERSION,
+    SessionSnapshot, SnapshotError, TabSnapshot, WorkspaceSnapshot,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+const MAX_STABLE_ID: u64 = u64::MAX / 2;
+const MAX_NEXT_STABLE_ID_EXCLUSIVE: u64 = MAX_STABLE_ID + 1;
+const MAX_NEXT_TAB_NUMBER_EXCLUSIVE: u64 = u64::MAX - 1;
 
-fn next_id() -> u64 {
-    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+fn reserve_ids(count: u64) -> Option<u64> {
+    debug_assert!(count > 0);
+    NEXT_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+            next.checked_add(count)
+                .filter(|end| *end <= MAX_NEXT_STABLE_ID_EXCLUSIVE)
+        })
+        .ok()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -183,10 +194,25 @@ impl Session {
             .find(|pane| pane.id == pane_id)
     }
 
-    pub fn create_workspace(&mut self, root_directory: PathBuf) -> WorkspaceId {
-        let workspace_id = WorkspaceId(next_id());
-        let tab_id = TabId(next_id());
-        let pane_id = PaneId(next_id());
+    pub fn create_workspace(&mut self, root_directory: PathBuf) -> Option<WorkspaceId> {
+        if self.workspaces.len() >= MAX_SNAPSHOT_WORKSPACES
+            || self.tab_count() >= MAX_SNAPSHOT_TABS
+            || self.pane_count() >= MAX_SNAPSHOT_PANES
+        {
+            return None;
+        }
+        let first_id = reserve_ids(3)?;
+        let workspace_id = WorkspaceId(first_id);
+        let tab_id = TabId(
+            first_id
+                .checked_add(1)
+                .expect("three stable IDs were reserved"),
+        );
+        let pane_id = PaneId(
+            first_id
+                .checked_add(2)
+                .expect("three stable IDs were reserved"),
+        );
         let workspace = Workspace {
             id: workspace_id,
             name: workspace_name(&root_directory),
@@ -210,24 +236,36 @@ impl Session {
 
         self.workspaces.push(workspace);
         self.active_workspace = Some(workspace_id);
-        workspace_id
+        Some(workspace_id)
     }
 
     pub fn create_tab(&mut self, workspace_id: WorkspaceId) -> Option<TabId> {
-        let workspace = self
+        if self.tab_count() >= MAX_SNAPSHOT_TABS || self.pane_count() >= MAX_SNAPSHOT_PANES {
+            return None;
+        }
+        let workspace_ix = self
             .workspaces
-            .iter_mut()
-            .find(|workspace| workspace.id == workspace_id)?;
+            .iter()
+            .position(|workspace| workspace.id == workspace_id)?;
+        let workspace = &mut self.workspaces[workspace_ix];
         let cwd = workspace
             .active_tab()
             .focused_pane()
             .cwd
             .clone()
             .unwrap_or_else(|| workspace.root_directory.clone());
-        let tab_id = TabId(next_id());
-        let pane_id = PaneId(next_id());
         let tab_number = workspace.next_tab_number;
-        workspace.next_tab_number += 1;
+        let next_tab_number = tab_number
+            .checked_add(1)
+            .filter(|next| *next < MAX_NEXT_TAB_NUMBER_EXCLUSIVE)?;
+        let first_id = reserve_ids(2)?;
+        let tab_id = TabId(first_id);
+        let pane_id = PaneId(
+            first_id
+                .checked_add(1)
+                .expect("two stable IDs were reserved"),
+        );
+        workspace.next_tab_number = next_tab_number;
         workspace.tabs.push(Tab {
             id: tab_id,
             name: format!("Tab {tab_number}"),
@@ -251,6 +289,9 @@ impl Session {
         direction: SplitDirection,
         ratio: f32,
     ) -> Option<PaneId> {
+        if self.pane_count() >= MAX_SNAPSHOT_PANES {
+            return None;
+        }
         let (workspace_ix, tab_ix, pane_ix) = self.find_pane(pane_id)?;
         let workspace = &mut self.workspaces[workspace_ix];
         let workspace_id = workspace.id;
@@ -259,7 +300,12 @@ impl Session {
             .cwd
             .clone()
             .unwrap_or_else(|| workspace.root_directory.clone());
-        let new_pane_id = PaneId(next_id());
+        if pane_layout_depth(&workspace.tabs[tab_ix].layout, pane_id, 1)?
+            >= MAX_SNAPSHOT_LAYOUT_DEPTH
+        {
+            return None;
+        }
+        let new_pane_id = PaneId(reserve_ids(1)?);
         let tab = &mut workspace.tabs[tab_ix];
         if !split_layout(
             &mut tab.layout,
@@ -635,7 +681,7 @@ impl Session {
                                 .collect(),
                             focused_pane: tab.focused_pane,
                             focus_history: tab.focus_history.clone(),
-                            layout: tab.layout.clone(),
+                            layout: LayoutSnapshot::from_layout(&tab.layout),
                         })
                         .collect(),
                     active_tab: workspace.active_tab,
@@ -650,43 +696,48 @@ impl Session {
         if snapshot.version != SNAPSHOT_VERSION {
             return Err(SnapshotError::UnsupportedVersion(snapshot.version));
         }
-        let session = Self {
-            workspaces: snapshot
-                .workspaces
-                .into_iter()
-                .map(|workspace| Workspace {
-                    id: workspace.id,
-                    name: workspace.name,
-                    root_directory: workspace.root_directory,
-                    worktree: workspace.worktree,
-                    tabs: workspace
-                        .tabs
+        validate_snapshot_resources(&snapshot)?;
+
+        let mut workspaces = Vec::with_capacity(snapshot.workspaces.len());
+        for workspace in snapshot.workspaces {
+            let mut tabs = Vec::with_capacity(workspace.tabs.len());
+            for tab in workspace.tabs {
+                tabs.push(Tab {
+                    id: tab.id,
+                    name: tab.name,
+                    panes: tab
+                        .panes
                         .into_iter()
-                        .map(|tab| Tab {
-                            id: tab.id,
-                            name: tab.name,
-                            panes: tab
-                                .panes
-                                .into_iter()
-                                .map(|pane| Pane {
-                                    id: pane.id,
-                                    cwd: pane.cwd,
-                                })
-                                .collect(),
-                            focused_pane: tab.focused_pane,
-                            focus_history: tab.focus_history,
-                            layout: tab.layout,
-                            zoomed_pane: None,
+                        .map(|pane| Pane {
+                            id: pane.id,
+                            cwd: pane.cwd,
                         })
                         .collect(),
-                    active_tab: workspace.active_tab,
-                    next_tab_number: workspace.next_tab_number,
-                })
-                .collect(),
+                    focused_pane: tab.focused_pane,
+                    focus_history: tab.focus_history,
+                    layout: restore_layout(&tab.layout),
+                    zoomed_pane: None,
+                });
+            }
+            workspaces.push(Workspace {
+                id: workspace.id,
+                name: workspace.name,
+                root_directory: workspace.root_directory,
+                worktree: workspace.worktree,
+                tabs,
+                active_tab: workspace.active_tab,
+                next_tab_number: workspace.next_tab_number,
+            });
+        }
+        let session = Self {
+            workspaces,
             active_workspace: snapshot.active_workspace,
         };
         let max_id = session.validate()?;
-        NEXT_ID.fetch_max(max_id + 1, Ordering::Relaxed);
+        let next_id = max_id
+            .checked_add(1)
+            .ok_or(SnapshotError::Invalid("stable ID space is exhausted"))?;
+        NEXT_ID.fetch_max(next_id, Ordering::Relaxed);
         Ok(session)
     }
 
@@ -715,11 +766,13 @@ impl Session {
             if workspace.name.is_empty() || workspace.tabs.is_empty() {
                 return Err(SnapshotError::Invalid("invalid Workspace"));
             }
-            if workspace.worktree.as_ref().is_some_and(|worktree| {
-                worktree.parent_workspace_id == workspace.id
+            if let Some(worktree) = &workspace.worktree {
+                validate_id(worktree.parent_workspace_id.0, &mut max_id)?;
+                if worktree.parent_workspace_id == workspace.id
                     || worktree.parent_root_directory.as_os_str().is_empty()
-            }) {
-                return Err(SnapshotError::Invalid("invalid Worktree association"));
+                {
+                    return Err(SnapshotError::Invalid("invalid Worktree association"));
+                }
             }
             if !workspace
                 .tabs
@@ -728,7 +781,9 @@ impl Session {
             {
                 return Err(SnapshotError::Invalid("active Tab is missing"));
             }
-            if workspace.next_tab_number <= workspace.tabs.len() as u64 {
+            if workspace.next_tab_number <= workspace.tabs.len() as u64
+                || workspace.next_tab_number >= MAX_NEXT_TAB_NUMBER_EXCLUSIVE
+            {
                 return Err(SnapshotError::Invalid("invalid next Tab number"));
             }
 
@@ -777,6 +832,21 @@ impl Session {
             }
         }
         None
+    }
+
+    fn tab_count(&self) -> usize {
+        self.workspaces
+            .iter()
+            .map(|workspace| workspace.tabs.len())
+            .sum()
+    }
+
+    fn pane_count(&self) -> usize {
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| &workspace.tabs)
+            .map(|tab| tab.panes.len())
+            .sum()
     }
 }
 
@@ -918,6 +988,14 @@ fn split_layout(
             split_layout(first, target, new_pane, direction, ratio)
                 || split_layout(second, target, new_pane, direction, ratio)
         }
+    }
+}
+
+fn pane_layout_depth(layout: &PaneLayout, target: PaneId, depth: usize) -> Option<usize> {
+    match layout {
+        PaneLayout::Pane(id) => (*id == target).then_some(depth),
+        PaneLayout::Split { first, second, .. } => pane_layout_depth(first, target, depth + 1)
+            .or_else(|| pane_layout_depth(second, target, depth + 1)),
     }
 }
 
@@ -1138,8 +1216,150 @@ fn apply_split_ratios(layout: &mut PaneLayout, ratios: &mut impl Iterator<Item =
     }
 }
 
+fn validate_snapshot_resources(snapshot: &SessionSnapshot) -> Result<(), SnapshotError> {
+    if snapshot.workspaces.len() > MAX_SNAPSHOT_WORKSPACES {
+        return Err(SnapshotError::Invalid("too many Workspaces"));
+    }
+
+    let mut tab_count = 0usize;
+    let mut pane_count = 0usize;
+    let mut layout_node_count = 0usize;
+    for workspace in &snapshot.workspaces {
+        tab_count = tab_count
+            .checked_add(workspace.tabs.len())
+            .ok_or(SnapshotError::Invalid("too many Tabs"))?;
+        if tab_count > MAX_SNAPSHOT_TABS {
+            return Err(SnapshotError::Invalid("too many Tabs"));
+        }
+        for tab in &workspace.tabs {
+            pane_count = pane_count
+                .checked_add(tab.panes.len())
+                .ok_or(SnapshotError::Invalid("too many Panes"))?;
+            if pane_count > MAX_SNAPSHOT_PANES {
+                return Err(SnapshotError::Invalid("too many Panes"));
+            }
+            layout_node_count = layout_node_count
+                .checked_add(tab.layout.nodes.len())
+                .ok_or(SnapshotError::Invalid("too many layout nodes"))?;
+            if layout_node_count > MAX_SNAPSHOT_LAYOUT_NODES {
+                return Err(SnapshotError::Invalid("too many layout nodes"));
+            }
+        }
+    }
+
+    for workspace in &snapshot.workspaces {
+        for tab in &workspace.tabs {
+            let pane_ids = tab.panes.iter().map(|pane| pane.id).collect::<HashSet<_>>();
+            if pane_ids.len() != tab.panes.len() {
+                return Err(SnapshotError::Invalid("duplicate Pane ID"));
+            }
+            validate_layout_snapshot(&tab.layout, &pane_ids)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_layout_snapshot(
+    layout: &LayoutSnapshot,
+    expected_panes: &HashSet<PaneId>,
+) -> Result<(), SnapshotError> {
+    let expected_node_count = expected_panes
+        .len()
+        .checked_mul(2)
+        .and_then(|count| count.checked_sub(1))
+        .ok_or(SnapshotError::Invalid("invalid empty layout"))?;
+    if layout.nodes.len() != expected_node_count {
+        return Err(SnapshotError::Invalid(
+            "layout node count does not match Tab",
+        ));
+    }
+
+    let root = usize::try_from(layout.root)
+        .map_err(|_| SnapshotError::Invalid("layout root is out of bounds"))?;
+    if root >= layout.nodes.len() {
+        return Err(SnapshotError::Invalid("layout root is out of bounds"));
+    }
+
+    let mut states = vec![0u8; layout.nodes.len()];
+    let mut stack = vec![(root, 1usize, false)];
+    let mut layout_panes = HashSet::new();
+    while let Some((index, depth, exiting)) = stack.pop() {
+        if index >= layout.nodes.len() {
+            return Err(SnapshotError::Invalid("layout node is out of bounds"));
+        }
+        if exiting {
+            states[index] = 2;
+            continue;
+        }
+        match states[index] {
+            1 => return Err(SnapshotError::Invalid("cycle in layout")),
+            2 => return Err(SnapshotError::Invalid("duplicate layout node reference")),
+            _ => {}
+        }
+        if depth > MAX_SNAPSHOT_LAYOUT_DEPTH {
+            return Err(SnapshotError::Invalid("layout exceeds maximum depth"));
+        }
+
+        states[index] = 1;
+        match &layout.nodes[index] {
+            LayoutNodeSnapshot::Pane(pane_id) => {
+                if !layout_panes.insert(*pane_id) {
+                    return Err(SnapshotError::Invalid("duplicate Pane in layout"));
+                }
+                states[index] = 2;
+            }
+            LayoutNodeSnapshot::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
+                    return Err(SnapshotError::Invalid("invalid split ratio"));
+                }
+                let first = usize::try_from(*first)
+                    .map_err(|_| SnapshotError::Invalid("layout node is out of bounds"))?;
+                let second = usize::try_from(*second)
+                    .map_err(|_| SnapshotError::Invalid("layout node is out of bounds"))?;
+                stack.push((index, depth, true));
+                stack.push((second, depth + 1, false));
+                stack.push((first, depth + 1, false));
+            }
+        }
+    }
+
+    if states.contains(&0) {
+        return Err(SnapshotError::Invalid("unreachable layout node"));
+    }
+    if &layout_panes != expected_panes {
+        return Err(SnapshotError::Invalid("layout Pane set does not match Tab"));
+    }
+    Ok(())
+}
+
+fn restore_layout(layout: &LayoutSnapshot) -> PaneLayout {
+    fn restore_node(nodes: &[LayoutNodeSnapshot], index: usize) -> PaneLayout {
+        match &nodes[index] {
+            LayoutNodeSnapshot::Pane(pane_id) => PaneLayout::Pane(*pane_id),
+            LayoutNodeSnapshot::Split {
+                direction,
+                ratio,
+                first,
+                second,
+            } => PaneLayout::Split {
+                direction: *direction,
+                ratio: *ratio,
+                first: Box::new(restore_node(nodes, *first as usize)),
+                second: Box::new(restore_node(nodes, *second as usize)),
+            },
+        }
+    }
+
+    restore_node(&layout.nodes, layout.root as usize)
+}
+
 fn validate_id(id: u64, max_id: &mut u64) -> Result<(), SnapshotError> {
-    if id == 0 || id == u64::MAX {
+    if id == 0 || id > MAX_STABLE_ID {
         return Err(SnapshotError::Invalid("invalid stable ID"));
     }
     *max_id = (*max_id).max(id);

@@ -82,8 +82,12 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
 fn worktree_association_survives_parent_workspace_close() {
     let mut session = Session::new();
     let parent_root = PathBuf::from("/tmp/murmur-parent");
-    let parent = session.create_workspace(parent_root.clone());
-    let child = session.create_workspace(PathBuf::from("/tmp/murmur-child"));
+    let parent = session
+        .create_workspace(parent_root.clone())
+        .expect("Workspace capacity");
+    let child = session
+        .create_workspace(PathBuf::from("/tmp/murmur-child"))
+        .expect("Workspace capacity");
     assert!(session.associate_worktree(child, parent, parent_root.clone(), true));
 
     let restored = Session::restore(session.snapshot()).unwrap();

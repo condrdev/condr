@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -30,9 +31,10 @@ use gpui_component::{
 };
 use gpui_component_assets::Assets;
 use murmur_core::protocol::{
-    ClientMessage, LayoutCommand, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId,
+    BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand, MAX_CHUNK_PAYLOAD_SIZE,
+    MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId,
     ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
-    WorkspaceGitSnapshot,
+    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
 };
 use murmur_core::{
     AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot,
@@ -85,6 +87,9 @@ pub(crate) type ConnectionKey = u64;
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
 const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
 const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
+const CONTROL_RETRY_DELAY: Duration = Duration::from_millis(50);
+const MAX_CONTROL_RETRY_ATTEMPTS: u8 = 20;
+const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 
 fn default_worktree_branch(workspace_name: &str) -> String {
     let slug = workspace_name
@@ -109,6 +114,7 @@ fn default_window_options(cx: &App) -> WindowOptions {
 }
 
 enum Incoming {
+    Bootstrap(SessionBootstrap),
     Message(ServerMessage),
     VisualReady(u64),
     TerminalResync,
@@ -190,6 +196,189 @@ impl TerminalVisualSlot {
     }
 }
 
+struct TerminalFrameChunkAssembly {
+    server_id: ServerId,
+    session_id: SessionId,
+    pane_id: PaneId,
+    revision: u64,
+    next_chunk_index: u32,
+    chunk_count: u32,
+    payload: Vec<u8>,
+}
+
+fn read_bootstrap_batches(
+    reader: &mut impl std::io::Read,
+    header: BootstrapHeader,
+) -> Result<SessionBootstrap, String> {
+    let batch_count = header.batch_count;
+    let mut assembler = BootstrapAssembler::new(header)?;
+    for _ in 0..batch_count {
+        let message: ServerMessage = murmur_core::protocol::read_message(reader)
+            .map_err(|error| format!("cannot read Bootstrap batch: {error}"))?;
+        let ServerMessage::BootstrapBatch(batch) = message else {
+            return Err(format!("expected Bootstrap batch, received {message:?}"));
+        };
+        assembler.push(batch)?;
+    }
+    assembler.finish()
+}
+
+fn assemble_terminal_frame_chunk(
+    assembly: &mut Option<TerminalFrameChunkAssembly>,
+    chunk: TerminalFrameChunk,
+) -> Result<Option<PaneTerminalFrame>, String> {
+    if chunk.chunk_count == 0 || chunk.chunk_index >= chunk.chunk_count {
+        return Err("terminal frame chunk has an invalid range".into());
+    }
+    if chunk.payload.is_empty() || chunk.payload.len() > MAX_CHUNK_PAYLOAD_SIZE {
+        return Err("terminal frame chunk has an invalid payload size".into());
+    }
+
+    let state = assembly.get_or_insert_with(|| TerminalFrameChunkAssembly {
+        server_id: chunk.server_id,
+        session_id: chunk.session_id,
+        pane_id: chunk.pane_id,
+        revision: chunk.revision,
+        next_chunk_index: 0,
+        chunk_count: chunk.chunk_count,
+        payload: Vec::new(),
+    });
+    if state.server_id != chunk.server_id
+        || state.session_id != chunk.session_id
+        || state.pane_id != chunk.pane_id
+        || state.revision != chunk.revision
+        || state.chunk_count != chunk.chunk_count
+        || state.next_chunk_index != chunk.chunk_index
+    {
+        return Err("terminal frame chunks are not one contiguous record".into());
+    }
+    let next_size = state
+        .payload
+        .len()
+        .checked_add(chunk.payload.len())
+        .ok_or_else(|| "terminal frame record size overflowed usize".to_string())?;
+    if next_size > MAX_CHUNKED_RECORD_SIZE {
+        return Err("terminal frame record exceeds the protocol limit".into());
+    }
+    state
+        .payload
+        .try_reserve(chunk.payload.len())
+        .map_err(|_| "terminal frame record allocation failed".to_string())?;
+    state.payload.extend_from_slice(&chunk.payload);
+    state.next_chunk_index += 1;
+    if state.next_chunk_index != state.chunk_count {
+        return Ok(None);
+    }
+
+    let completed = assembly
+        .take()
+        .expect("terminal frame chunk assembly must exist");
+    let pane = decode_pane_terminal_frame(&completed.payload)?;
+    if pane.pane_id != completed.pane_id
+        || terminal_view_frame_revision(&pane.frame) != completed.revision
+    {
+        return Err("terminal frame chunk metadata does not match its payload".into());
+    }
+    Ok(Some(pane))
+}
+
+fn terminal_chunk_identity_matches(
+    assembly: &mut Option<TerminalFrameChunkAssembly>,
+    chunk: &TerminalFrameChunk,
+    server_id: ServerId,
+    session_id: SessionId,
+) -> Result<bool, String> {
+    if chunk.server_id == server_id && chunk.session_id == session_id {
+        return Ok(true);
+    }
+    if assembly.take().is_some() {
+        return Err("terminal frame chunk identity changed during a record".into());
+    }
+    Ok(false)
+}
+
+fn enforce_terminal_chunk_reliable_fence(
+    assembly: &mut Option<TerminalFrameChunkAssembly>,
+    message: &ServerMessage,
+) -> Result<(), String> {
+    if assembly.is_none()
+        || matches!(
+            message,
+            ServerMessage::TerminalFrame(_) | ServerMessage::TerminalFrameChunk(_)
+        )
+    {
+        return Ok(());
+    }
+    *assembly = None;
+    Err("reliable server message interrupted a terminal frame record".into())
+}
+
+fn terminal_view_frame_revision(frame: &TerminalViewFrame) -> u64 {
+    match frame {
+        TerminalViewFrame::Full(view) => view.revision,
+        TerminalViewFrame::Delta(delta) => delta.revision,
+    }
+}
+
+fn publish_terminal_batch(
+    visual_slot: &TerminalVisualSlot,
+    incoming: &async_channel::Sender<Incoming>,
+    resync_pending: &mut bool,
+    batch: TerminalFrameBatch,
+) -> Result<(), ()> {
+    match visual_slot.publish(batch) {
+        Ok(Some(generation)) => incoming
+            .send_blocking(Incoming::VisualReady(generation))
+            .map_err(|_| ()),
+        Ok(None) => Ok(()),
+        Err(()) => request_terminal_resync(visual_slot, incoming, resync_pending),
+    }
+}
+
+fn apply_terminal_frame_batch(
+    terminals: &mut HashMap<PaneId, PaneTerminalSnapshot>,
+    panes: Vec<PaneTerminalFrame>,
+) -> Result<Vec<PaneId>, ()> {
+    let mut pane_ids = Vec::with_capacity(panes.len());
+    let mut staged = Vec::with_capacity(panes.len());
+    let mut seen = HashSet::with_capacity(panes.len());
+    for pane in panes {
+        if !seen.insert(pane.pane_id) {
+            return Err(());
+        }
+        let mut view = terminals.get(&pane.pane_id).ok_or(())?.view.clone();
+        view.apply_frame(pane.frame).map_err(|_| ())?;
+        pane_ids.push(pane.pane_id);
+        staged.push((pane.pane_id, view));
+    }
+    for (pane_id, view) in staged {
+        terminals
+            .get_mut(&pane_id)
+            .expect("staged terminal still exists")
+            .view = view;
+    }
+    Ok(pane_ids)
+}
+
+fn clear_pending_sizes_for_bootstrap(
+    pending_sizes: &mut HashMap<(ConnectionKey, PaneId), TerminalSize>,
+    key: ConnectionKey,
+) {
+    pending_sizes.retain(|(connection_key, _), _| *connection_key != key);
+}
+
+fn request_terminal_resync(
+    visual_slot: &TerminalVisualSlot,
+    incoming: &async_channel::Sender<Incoming>,
+    resync_pending: &mut bool,
+) -> Result<(), ()> {
+    visual_slot.advance();
+    *resync_pending = true;
+    incoming
+        .send_blocking(Incoming::TerminalResync)
+        .map_err(|_| ())
+}
+
 fn merge_terminal_frames(
     previous: TerminalViewFrame,
     next: TerminalViewFrame,
@@ -265,6 +454,7 @@ impl ClientIo {
     fn start(
         connection: ClientConnection,
         key: ConnectionKey,
+        connection_generation: u64,
         initial_server_id: ServerId,
         initial_session_id: SessionId,
         window: &Window,
@@ -296,61 +486,163 @@ impl ClientIo {
                 let mut server_id = initial_server_id;
                 let mut session_id = initial_session_id;
                 let mut resync_pending = false;
+                let mut terminal_chunk_assembly = None;
                 loop {
-                    match murmur_core::protocol::read_message(&mut reader) {
-                        Ok(ServerMessage::TerminalFrame(batch)) => {
-                            if resync_pending
-                                || batch.server_id != server_id
-                                || batch.session_id != session_id
-                            {
+                    let message = match murmur_core::protocol::read_message(&mut reader) {
+                        Ok(message) => message,
+                        Err(error) => {
+                            let _ = incoming_tx
+                                .send_blocking(Incoming::Disconnected(error.to_string()));
+                            break;
+                        }
+                    };
+                    if let Err(error) = enforce_terminal_chunk_reliable_fence(
+                        &mut terminal_chunk_assembly,
+                        &message,
+                    ) {
+                        match &message {
+                            ServerMessage::Bootstrap(_) | ServerMessage::ServerStopping => {}
+                            ServerMessage::Welcome { .. } | ServerMessage::BootstrapBatch(_) => {
+                                let _ = incoming_tx.send_blocking(Incoming::Disconnected(error));
+                                break;
+                            }
+                            _ => {
+                                if request_terminal_resync(
+                                    &reader_visual_slot,
+                                    &incoming_tx,
+                                    &mut resync_pending,
+                                )
+                                .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    match message {
+                        ServerMessage::TerminalFrame(batch) => {
+                            if resync_pending {
                                 continue;
                             }
-                            match reader_visual_slot.publish(batch) {
-                                Ok(Some(generation)) => {
-                                    if incoming_tx
-                                        .send_blocking(Incoming::VisualReady(generation))
-                                        .is_err()
+                            if terminal_chunk_assembly.is_some() {
+                                terminal_chunk_assembly = None;
+                                if request_terminal_resync(
+                                    &reader_visual_slot,
+                                    &incoming_tx,
+                                    &mut resync_pending,
+                                )
+                                .is_err()
+                                {
+                                    break;
+                                }
+                                continue;
+                            }
+                            if batch.server_id != server_id || batch.session_id != session_id {
+                                continue;
+                            }
+                            if publish_terminal_batch(
+                                &reader_visual_slot,
+                                &incoming_tx,
+                                &mut resync_pending,
+                                batch,
+                            )
+                            .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        ServerMessage::TerminalFrameChunk(chunk) => {
+                            if resync_pending {
+                                continue;
+                            }
+                            match terminal_chunk_identity_matches(
+                                &mut terminal_chunk_assembly,
+                                &chunk,
+                                server_id,
+                                session_id,
+                            ) {
+                                Ok(true) => {}
+                                Ok(false) => continue,
+                                Err(_) => {
+                                    if request_terminal_resync(
+                                        &reader_visual_slot,
+                                        &incoming_tx,
+                                        &mut resync_pending,
+                                    )
+                                    .is_err()
+                                    {
+                                        break;
+                                    }
+                                    continue;
+                                }
+                            }
+                            match assemble_terminal_frame_chunk(&mut terminal_chunk_assembly, chunk)
+                            {
+                                Ok(Some(pane)) => {
+                                    if publish_terminal_batch(
+                                        &reader_visual_slot,
+                                        &incoming_tx,
+                                        &mut resync_pending,
+                                        TerminalFrameBatch {
+                                            server_id,
+                                            session_id,
+                                            panes: vec![pane],
+                                        },
+                                    )
+                                    .is_err()
                                     {
                                         break;
                                     }
                                 }
                                 Ok(None) => {}
-                                Err(()) => {
-                                    reader_visual_slot.advance();
-                                    resync_pending = true;
-                                    if incoming_tx.send_blocking(Incoming::TerminalResync).is_err()
+                                Err(_) => {
+                                    terminal_chunk_assembly = None;
+                                    if request_terminal_resync(
+                                        &reader_visual_slot,
+                                        &incoming_tx,
+                                        &mut resync_pending,
+                                    )
+                                    .is_err()
                                     {
                                         break;
                                     }
                                 }
                             }
                         }
-                        Ok(ServerMessage::Bootstrap(bootstrap)) => {
+                        ServerMessage::Bootstrap(header) => {
+                            let bootstrap = match read_bootstrap_batches(&mut reader, header) {
+                                Ok(bootstrap) => bootstrap,
+                                Err(error) => {
+                                    let _ =
+                                        incoming_tx.send_blocking(Incoming::Disconnected(error));
+                                    break;
+                                }
+                            };
                             server_id = bootstrap.server_id;
                             session_id = bootstrap.session_id;
                             resync_pending = false;
+                            terminal_chunk_assembly = None;
                             reader_visual_slot.advance();
                             if incoming_tx
-                                .send_blocking(Incoming::Message(ServerMessage::Bootstrap(
-                                    bootstrap,
-                                )))
+                                .send_blocking(Incoming::Bootstrap(bootstrap))
                                 .is_err()
                             {
                                 break;
                             }
                         }
-                        Ok(message) => {
+                        ServerMessage::BootstrapBatch(_) => {
+                            let _ = incoming_tx.send_blocking(Incoming::Disconnected(
+                                "unexpected Bootstrap batch without a header".into(),
+                            ));
+                            break;
+                        }
+                        message => {
                             if incoming_tx
                                 .send_blocking(Incoming::Message(message))
                                 .is_err()
                             {
                                 break;
                             }
-                        }
-                        Err(error) => {
-                            let _ = incoming_tx
-                                .send_blocking(Incoming::Disconnected(error.to_string()));
-                            break;
                         }
                     }
                 }
@@ -376,7 +668,8 @@ impl ClientIo {
                                 }
                                 incoming => incoming,
                             };
-                            let next = this.handle_incoming(key, incoming, cx);
+                            let next =
+                                this.handle_incoming(key, connection_generation, incoming, cx);
                             effect.rebuild |= next.rebuild;
                             effect.notify |= next.notify;
                         }
@@ -403,6 +696,7 @@ impl ClientIo {
 
 struct ConnectionResult {
     key: ConnectionKey,
+    generation: u64,
     endpoint: Endpoint,
     result: Result<ClientConnection, String>,
 }
@@ -430,7 +724,10 @@ struct ServerConnection {
     workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
     zoomed_panes: HashSet<PaneId>,
     io: Option<ClientIo>,
+    connect_generation: u64,
     controlling: bool,
+    control_retry_attempts: u8,
+    control_retry_scheduled: bool,
     terminal_resync_pending: bool,
     error: Option<String>,
 }
@@ -441,7 +738,7 @@ impl ServerConnection {
             key,
             label,
             endpoint,
-            status: ConnectionStatus::Connecting,
+            status: ConnectionStatus::Disconnected,
             server_id: None,
             runtime_epoch: None,
             session_id: None,
@@ -453,7 +750,10 @@ impl ServerConnection {
             workspace_git: HashMap::new(),
             zoomed_panes: HashSet::new(),
             io: None,
+            connect_generation: 0,
             controlling: false,
+            control_retry_attempts: 0,
+            control_retry_scheduled: false,
             terminal_resync_pending: false,
             error: None,
         }
@@ -900,6 +1200,7 @@ impl Murmur {
         let io = ClientIo::start(
             client,
             connection.key,
+            connection.connect_generation,
             bootstrap.server_id,
             bootstrap.session_id,
             window,
@@ -909,6 +1210,8 @@ impl Murmur {
         connection.apply_bootstrap(bootstrap);
         connection.io = Some(io);
         connection.controlling = false;
+        connection.control_retry_attempts = 0;
+        connection.control_retry_scheduled = false;
         Ok(())
     }
 
@@ -954,14 +1257,65 @@ impl Murmur {
         });
     }
 
+    fn schedule_control_retry(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if connection.status != ConnectionStatus::Connected
+            || connection.controlling
+            || connection.control_retry_scheduled
+            || connection.control_retry_attempts >= MAX_CONTROL_RETRY_ATTEMPTS
+        {
+            return;
+        }
+        let Some(session_id) = connection.session_id else {
+            return;
+        };
+        let generation = connection.connect_generation;
+        connection.control_retry_scheduled = true;
+        connection.control_retry_attempts = connection.control_retry_attempts.saturating_add(1);
+
+        cx.spawn(async move |owner, cx| {
+            cx.background_executor().timer(CONTROL_RETRY_DELAY).await;
+            owner
+                .update(cx, |this, cx| {
+                    let Some(connection) = this.connection_mut(key) else {
+                        return;
+                    };
+                    if connection.connect_generation != generation {
+                        return;
+                    }
+                    connection.control_retry_scheduled = false;
+                    if connection.status == ConnectionStatus::Connected
+                        && !connection.controlling
+                        && connection.session_id == Some(session_id)
+                    {
+                        connection.send(ClientMessage::AcquireControl { session_id });
+                        cx.notify();
+                    }
+                })
+                .ok();
+        })
+        .detach();
+    }
+
     fn start_connect(&mut self, key: ConnectionKey) {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
+        if connection.status == ConnectionStatus::Connecting {
+            return;
+        }
+        if let Some(io) = connection.io.take() {
+            let _ = io.outgoing.send(ClientMessage::Detach);
+        }
+        connection.connect_generation = connection.connect_generation.wrapping_add(1);
+        let generation = connection.connect_generation;
         connection.status = ConnectionStatus::Connecting;
         connection.controlling = false;
+        connection.control_retry_attempts = 0;
+        connection.control_retry_scheduled = false;
         connection.error = None;
-        connection.io = None;
         let endpoint = connection.endpoint.clone();
         let sender = self.connect_results_tx.clone();
         thread::spawn(move || {
@@ -974,6 +1328,7 @@ impl Murmur {
                 .map_err(|error| error.to_string());
             let _ = sender.send_blocking(ConnectionResult {
                 key,
+                generation,
                 endpoint: connected_endpoint,
                 result,
             });
@@ -987,8 +1342,11 @@ impl Murmur {
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
         }
+        connection.connect_generation = connection.connect_generation.wrapping_add(1);
         connection.status = ConnectionStatus::Disconnected;
         connection.controlling = false;
+        connection.control_retry_attempts = 0;
+        connection.control_retry_scheduled = false;
         connection.error = None;
     }
 
@@ -1033,10 +1391,21 @@ impl Murmur {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let key = result.key;
+        let ConnectionResult {
+            key,
+            generation,
+            endpoint,
+            result,
+        } = result;
+        if !self.connection(key).is_some_and(|connection| {
+            connection.status == ConnectionStatus::Connecting
+                && connection.connect_generation == generation
+        }) {
+            return;
+        }
         let installed = if let Some(connection) = self.connection_mut(key) {
-            connection.endpoint = result.endpoint;
-            match Self::install_connection(connection, result.result, window, cx) {
+            connection.endpoint = endpoint;
+            match Self::install_connection(connection, result, window, cx) {
                 Ok(()) => true,
                 Err(error) => {
                     connection.status = ConnectionStatus::Disconnected;
@@ -1059,6 +1428,7 @@ impl Murmur {
     fn handle_incoming(
         &mut self,
         key: ConnectionKey,
+        generation: u64,
         incoming: Incoming,
         cx: &mut Context<Self>,
     ) -> IncomingEffect {
@@ -1069,7 +1439,19 @@ impl Murmur {
         else {
             return IncomingEffect::default();
         };
+        if self.connections[index].connect_generation != generation {
+            return IncomingEffect::default();
+        }
         let message = match incoming {
+            Incoming::Bootstrap(bootstrap) => {
+                let rebuild = self.connections[index].apply_bootstrap(bootstrap);
+                clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+                self.refresh_target_pane(key);
+                return IncomingEffect {
+                    rebuild,
+                    notify: true,
+                };
+            }
             Incoming::Message(message) => message,
             Incoming::TerminalResync => {
                 self.connections[index].request_snapshot();
@@ -1080,6 +1462,8 @@ impl Murmur {
                 let connection = &mut self.connections[index];
                 connection.status = ConnectionStatus::Disconnected;
                 connection.controlling = false;
+                connection.control_retry_attempts = 0;
+                connection.control_retry_scheduled = false;
                 connection.error = Some(format!("Server connection closed: {error}"));
                 connection.io = None;
                 return IncomingEffect {
@@ -1090,25 +1474,11 @@ impl Murmur {
         };
 
         match message {
-            ServerMessage::Bootstrap(bootstrap) => {
-                let rebuild = self.connections[index].apply_bootstrap(bootstrap);
-                let terminal_sizes = self.connections[index]
-                    .terminals
-                    .iter()
-                    .map(|(pane_id, terminal)| (*pane_id, terminal.view.size))
-                    .collect::<HashMap<_, _>>();
-                self.pending_sizes
-                    .retain(|(connection_key, pane_id), size| {
-                        *connection_key != key
-                            || terminal_sizes
-                                .get(pane_id)
-                                .is_some_and(|terminal_size| terminal_size != size)
-                    });
-                self.refresh_target_pane(key);
-                IncomingEffect {
-                    rebuild,
-                    notify: true,
-                }
+            ServerMessage::Bootstrap(_)
+            | ServerMessage::BootstrapBatch(_)
+            | ServerMessage::TerminalFrameChunk(_) => {
+                self.connections[index].request_snapshot();
+                IncomingEffect::default()
             }
             ServerMessage::Event {
                 server_id,
@@ -1176,40 +1546,43 @@ impl Murmur {
                 }
             }
             ServerMessage::TerminalFrame(batch) => {
-                let connection = &mut self.connections[index];
-                if connection.server_id != Some(batch.server_id)
-                    || connection.session_id != Some(batch.session_id)
+                if self.connections[index].server_id != Some(batch.server_id)
+                    || self.connections[index].session_id != Some(batch.session_id)
                 {
                     return IncomingEffect::default();
                 }
 
-                let mut applied = false;
-                let mut needs_snapshot = false;
-                for pane in batch.panes {
-                    let Some(terminal) = connection.terminals.get_mut(&pane.pane_id) else {
-                        needs_snapshot = true;
-                        continue;
-                    };
-                    if terminal.view.apply_frame(pane.frame).is_err() {
-                        needs_snapshot = true;
-                        continue;
+                let pane_ids = match apply_terminal_frame_batch(
+                    &mut self.connections[index].terminals,
+                    batch.panes,
+                ) {
+                    Ok(pane_ids) => pane_ids,
+                    Err(()) => {
+                        self.connections[index].request_snapshot();
+                        return IncomingEffect::default();
                     }
-                    let pending_key = (key, pane.pane_id);
-                    if self.pending_sizes.get(&pending_key) == Some(&terminal.view.size) {
+                };
+                for pane_id in &pane_ids {
+                    let terminal_size = self.connections[index]
+                        .terminals
+                        .get(pane_id)
+                        .expect("applied terminal still exists")
+                        .view
+                        .size;
+                    let pending_key = (key, *pane_id);
+                    if self.pending_sizes.get(&pending_key) == Some(&terminal_size) {
                         self.pending_sizes.remove(&pending_key);
                     }
-                    applied = true;
-                }
-                if needs_snapshot {
-                    connection.request_snapshot();
                 }
                 IncomingEffect {
                     rebuild: false,
-                    notify: applied,
+                    notify: !pane_ids.is_empty(),
                 }
             }
             ServerMessage::ControlGranted { .. } => {
                 self.connections[index].controlling = true;
+                self.connections[index].control_retry_attempts = 0;
+                self.connections[index].control_retry_scheduled = false;
                 self.connections[index].error = None;
                 IncomingEffect {
                     notify: true,
@@ -1218,14 +1591,27 @@ impl Murmur {
             }
             ServerMessage::ControlReleased { .. } => {
                 self.connections[index].controlling = false;
+                self.connections[index].control_retry_attempts = 0;
+                self.connections[index].control_retry_scheduled = false;
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
                 }
             }
-            ServerMessage::ControlDenied { reason, .. }
-            | ServerMessage::Error { message: reason } => {
+            ServerMessage::ControlDenied { reason, .. } => {
+                let retry_control = reason == CONTROL_BUSY_REASON;
+                self.connections[index].controlling = false;
                 self.connections[index].error = Some(reason);
+                if retry_control {
+                    self.schedule_control_retry(key, cx);
+                }
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::Error { message } => {
+                self.connections[index].error = Some(message);
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -1241,6 +1627,8 @@ impl Murmur {
                 let connection = &mut self.connections[index];
                 connection.status = ConnectionStatus::Disconnected;
                 connection.controlling = false;
+                connection.control_retry_attempts = 0;
+                connection.control_retry_scheduled = false;
                 connection.error = Some("murmur-server stopped".into());
                 connection.io = None;
                 IncomingEffect {
@@ -2889,8 +3277,10 @@ impl Murmur {
                                 .icon(IconName::LoaderCircle)
                                 .tooltip("Reconnect")
                                 .on_click(move |_, _, cx| {
-                                    let _ = reconnect_owner
-                                        .update(cx, |this, _| this.reconnect_active());
+                                    let _ = reconnect_owner.update(cx, |this, cx| {
+                                        this.reconnect_active();
+                                        cx.notify();
+                                    });
                                 }),
                         )
                     }),
@@ -3312,15 +3702,21 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use gpui::Keystroke;
-    use murmur_core::protocol::{PaneTerminalFrame, ServerId, SessionId, TerminalFrameBatch};
+    use murmur_core::protocol::{
+        BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
+        RuntimeEpoch, ServerId, ServerMessage, SessionId, TerminalFrameBatch, TerminalFrameChunk,
+        encode_bootstrap_record, encode_pane_terminal_frame,
+    };
     use murmur_core::{
         Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize, TerminalView,
         TerminalViewDelta, TerminalViewFrame,
     };
 
     use super::{
-        FocusLeft, NextTab, PreviousTab, SplitDown, SplitRight, TerminalVisualSlot, fixed_shortcut,
-        merge_terminal_deltas,
+        FocusLeft, NextTab, PreviousTab, SplitDown, SplitRight, TerminalVisualSlot,
+        apply_terminal_frame_batch, assemble_terminal_frame_chunk,
+        clear_pending_sizes_for_bootstrap, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
+        merge_terminal_deltas, read_bootstrap_batches, terminal_chunk_identity_matches,
     };
 
     fn terminal_cell(text: &str) -> TerminalCell {
@@ -3348,13 +3744,253 @@ mod tests {
 
     fn pane_id() -> murmur_core::PaneId {
         let mut session = Session::new();
-        session.create_workspace(std::env::temp_dir());
+        session
+            .create_workspace(std::env::temp_dir())
+            .expect("Workspace capacity");
         session
             .active_workspace()
             .unwrap()
             .active_tab()
             .focused_pane()
             .id()
+    }
+
+    #[test]
+    fn authoritative_bootstrap_releases_pending_resize_for_retry() {
+        let pane_id = pane_id();
+        let mut pending_sizes = std::collections::HashMap::from([
+            ((1, pane_id), TerminalSize::new(40, 100)),
+            ((2, pane_id), TerminalSize::new(20, 80)),
+        ]);
+
+        clear_pending_sizes_for_bootstrap(&mut pending_sizes, 1);
+
+        assert!(!pending_sizes.contains_key(&(1, pane_id)));
+        assert_eq!(
+            pending_sizes.get(&(2, pane_id)),
+            Some(&TerminalSize::new(20, 80))
+        );
+    }
+
+    #[test]
+    fn terminal_frame_chunks_are_exposed_only_after_complete_reassembly() {
+        let pane_id = pane_id();
+        let expected = PaneTerminalFrame {
+            pane_id,
+            frame: TerminalViewFrame::Full(terminal_view(7, "chunked")),
+        };
+        let payload = encode_pane_terminal_frame(&expected).unwrap();
+        let midpoint = payload.len() / 2;
+        let chunks = [&payload[..midpoint], &payload[midpoint..]];
+        let mut assembly = None;
+
+        for (chunk_index, payload) in chunks.into_iter().enumerate() {
+            let assembled = assemble_terminal_frame_chunk(
+                &mut assembly,
+                TerminalFrameChunk {
+                    server_id: ServerId(1),
+                    session_id: SessionId(1),
+                    pane_id,
+                    revision: 7,
+                    chunk_index: chunk_index as u32,
+                    chunk_count: 2,
+                    payload: payload.to_vec(),
+                },
+            )
+            .unwrap();
+            if chunk_index == 0 {
+                assert!(assembled.is_none());
+            } else {
+                assert_eq!(assembled, Some(expected.clone()));
+            }
+        }
+        assert!(assembly.is_none());
+    }
+
+    #[test]
+    fn terminal_chunk_identity_mismatch_aborts_the_in_progress_record() {
+        let pane_id = pane_id();
+        let mut assembly = None;
+        assemble_terminal_frame_chunk(
+            &mut assembly,
+            TerminalFrameChunk {
+                server_id: ServerId(1),
+                session_id: SessionId(2),
+                pane_id,
+                revision: 7,
+                chunk_index: 0,
+                chunk_count: 2,
+                payload: vec![1],
+            },
+        )
+        .unwrap();
+
+        let mismatched = TerminalFrameChunk {
+            server_id: ServerId(9),
+            session_id: SessionId(2),
+            pane_id,
+            revision: 7,
+            chunk_index: 1,
+            chunk_count: 2,
+            payload: vec![2],
+        };
+        assert!(
+            terminal_chunk_identity_matches(&mut assembly, &mismatched, ServerId(1), SessionId(2))
+                .is_err()
+        );
+        assert!(assembly.is_none());
+    }
+
+    #[test]
+    fn reliable_message_is_a_terminal_chunk_protocol_fence() {
+        let pane_id = pane_id();
+        let mut assembly = None;
+        assemble_terminal_frame_chunk(
+            &mut assembly,
+            TerminalFrameChunk {
+                server_id: ServerId(1),
+                session_id: SessionId(2),
+                pane_id,
+                revision: 7,
+                chunk_index: 0,
+                chunk_count: 2,
+                payload: vec![1],
+            },
+        )
+        .unwrap();
+
+        let reliable = ServerMessage::ControlGranted {
+            server_id: ServerId(1),
+            session_id: SessionId(2),
+        };
+        assert!(enforce_terminal_chunk_reliable_fence(&mut assembly, &reliable).is_err());
+        assert!(assembly.is_none());
+    }
+
+    #[test]
+    fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
+        let first_pane = pane_id();
+        let second_pane = pane_id();
+        let first_view = terminal_view(1, "a");
+        let second_view = terminal_view(1, "b");
+        let mut terminals = std::collections::HashMap::from([
+            (
+                first_pane,
+                PaneTerminalSnapshot {
+                    pane_id: first_pane,
+                    view: first_view.clone(),
+                    exited: false,
+                },
+            ),
+            (
+                second_pane,
+                PaneTerminalSnapshot {
+                    pane_id: second_pane,
+                    view: second_view.clone(),
+                    exited: false,
+                },
+            ),
+        ]);
+        let batch = vec![
+            PaneTerminalFrame {
+                pane_id: first_pane,
+                frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                    base_revision: 1,
+                    revision: 2,
+                    display_offset: 0,
+                    cursor: None,
+                    runs: vec![TerminalCellRun {
+                        start: 0,
+                        cells: vec![terminal_cell("x")],
+                    }],
+                }),
+            },
+            PaneTerminalFrame {
+                pane_id: second_pane,
+                frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                    base_revision: 99,
+                    revision: 100,
+                    display_offset: 0,
+                    cursor: None,
+                    runs: vec![TerminalCellRun {
+                        start: 0,
+                        cells: vec![terminal_cell("y")],
+                    }],
+                }),
+            },
+        ];
+
+        assert!(apply_terminal_frame_batch(&mut terminals, batch).is_err());
+        assert_eq!(terminals[&first_pane].view, first_view);
+        assert_eq!(terminals[&second_pane].view, second_view);
+    }
+
+    #[test]
+    fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
+        let mut session = Session::new();
+        session
+            .create_workspace(std::env::temp_dir())
+            .expect("Workspace capacity");
+        let pane_id = session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        let terminal = PaneTerminalSnapshot {
+            pane_id,
+            view: terminal_view(3, "restore"),
+            exited: false,
+        };
+        let payload =
+            encode_bootstrap_record(&BootstrapRecord::Terminal(terminal.clone())).unwrap();
+        let midpoint = payload.len() / 2;
+        let header = BootstrapHeader {
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(1),
+            sequence: 4,
+            snapshot: session.snapshot(),
+            batch_count: 2,
+        };
+        let batches = [
+            BootstrapBatch {
+                server_id: ServerId(1),
+                session_id: SessionId(1),
+                batch_index: 0,
+                record_index: 0,
+                chunk_index: 0,
+                chunk_count: 2,
+                payload: payload[..midpoint].to_vec(),
+            },
+            BootstrapBatch {
+                server_id: ServerId(1),
+                session_id: SessionId(1),
+                batch_index: 1,
+                record_index: 0,
+                chunk_index: 1,
+                chunk_count: 2,
+                payload: payload[midpoint..].to_vec(),
+            },
+        ];
+        let mut complete = Vec::new();
+        for batch in &batches {
+            murmur_core::protocol::write_message(
+                &mut complete,
+                &ServerMessage::BootstrapBatch(batch.clone()),
+            )
+            .unwrap();
+        }
+        let assembled = read_bootstrap_batches(&mut complete.as_slice(), header.clone()).unwrap();
+        assert_eq!(assembled.terminals, vec![terminal]);
+
+        let mut incomplete = Vec::new();
+        murmur_core::protocol::write_message(
+            &mut incomplete,
+            &ServerMessage::BootstrapBatch(batches[0].clone()),
+        )
+        .unwrap();
+        assert!(read_bootstrap_batches(&mut incomplete.as_slice(), header).is_err());
     }
 
     #[test]
@@ -3498,12 +4134,13 @@ mod tests {
         use gpui_component::{Root, WindowExt as _};
         #[cfg(target_os = "linux")]
         use murmur_core::SplitDirection;
-        use murmur_core::protocol::LayoutCommand;
+        use murmur_core::protocol::{ClientMessage, LayoutCommand, ServerMessage};
         use murmur_core::{PaneId, TabId, TerminalCommand, WorkspaceId};
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{
-            ConnectionStatus, DEFAULT_WINDOW_SIZE, Murmur, ServerConnection, default_window_options,
+            CONTROL_BUSY_REASON, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE, Murmur,
+            ServerConnection, default_window_options,
         };
 
         const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -3513,6 +4150,15 @@ mod tests {
         struct TestServer {
             handle: ServerHandle,
             thread: Option<JoinHandle<std::io::Result<()>>>,
+        }
+
+        impl TestServer {
+            fn stop(&mut self) {
+                self.handle.stop();
+                if let Some(thread) = self.thread.take() {
+                    thread.join().unwrap().unwrap();
+                }
+            }
         }
 
         impl Drop for TestServer {
@@ -3530,25 +4176,32 @@ mod tests {
                 std::process::id(),
                 NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
             )));
-            let server = BoundServer::bind(ServerConfig {
-                endpoint: endpoint.clone(),
-            })
-            .unwrap();
+            let server = start_server_with_config(ServerConfig::ephemeral(endpoint.clone()));
+            (server, endpoint)
+        }
+
+        fn start_server_with_config(config: ServerConfig) -> TestServer {
+            let server = BoundServer::bind(config).unwrap();
             let handle = server.handle();
             let thread = std::thread::spawn(move || server.run());
-            (
-                TestServer {
-                    handle,
-                    thread: Some(thread),
-                },
-                endpoint,
-            )
+            TestServer {
+                handle,
+                thread: Some(thread),
+            }
         }
 
         fn connected_murmur(
             cx: &mut TestAppContext,
         ) -> (Entity<Murmur>, &mut VisualTestContext, TestServer) {
             let (server, endpoint) = start_server();
+            connected_murmur_with(cx, server, endpoint)
+        }
+
+        fn connected_murmur_with(
+            cx: &mut TestAppContext,
+            server: TestServer,
+            endpoint: Endpoint,
+        ) -> (Entity<Murmur>, &mut VisualTestContext, TestServer) {
             let mut initial = None;
             let deadline = Instant::now() + TEST_TIMEOUT;
             while Instant::now() < deadline {
@@ -3784,6 +4437,121 @@ mod tests {
         }
 
         #[test]
+        fn stale_connection_result_cannot_replace_the_current_attempt() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    let connection = this.connection_mut(1).unwrap();
+                    let original_endpoint = connection.endpoint.clone();
+                    let original_generation = connection.connect_generation;
+                    connection.connect_generation = original_generation.wrapping_add(1);
+                    connection.status = ConnectionStatus::Connecting;
+
+                    this.handle_connection_result(
+                        ConnectionResult {
+                            key: 1,
+                            generation: original_generation,
+                            endpoint: Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+                            result: Err("stale failure".into()),
+                        },
+                        window,
+                        cx,
+                    );
+
+                    let connection = this.connection_mut(1).unwrap();
+                    assert_eq!(connection.endpoint, original_endpoint);
+                    assert!(connection.status == ConnectionStatus::Connecting);
+                    assert!(connection.error.is_none());
+                    connection.connect_generation = original_generation;
+                    connection.status = ConnectionStatus::Connected;
+                });
+            });
+        }
+
+        #[test]
+        fn denied_replacement_connection_retries_after_the_controller_releases() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+            let endpoint = window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .expect("local connection exists")
+                    .endpoint
+                    .clone()
+            });
+
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    this.disconnect_server(1);
+                    cx.notify();
+                });
+            });
+
+            let contender = ClientConnection::connect(&endpoint, "control-contender").unwrap();
+            let session_id = contender.bootstrap().session_id;
+            let mut contender_stream = contender.into_stream();
+            let deadline = Instant::now() + TEST_TIMEOUT;
+            loop {
+                murmur_core::protocol::write_message(
+                    &mut contender_stream,
+                    &ClientMessage::AcquireControl { session_id },
+                )
+                .unwrap();
+                match murmur_core::protocol::read_message(&mut contender_stream).unwrap() {
+                    ServerMessage::ControlGranted { .. } => break,
+                    ServerMessage::ControlDenied { .. } => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "the disconnected GUI never released control"
+                        );
+                        std::thread::sleep(TEST_POLL_INTERVAL);
+                    }
+                    message => panic!("unexpected control response: {message:?}"),
+                }
+            }
+
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    this.start_connect(1);
+                    cx.notify();
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).connection(1).is_some_and(|connection| {
+                        connection.status == ConnectionStatus::Connected
+                            && !connection.controlling
+                            && connection.error.as_deref() == Some(CONTROL_BUSY_REASON)
+                    })
+                })
+            }));
+
+            murmur_core::protocol::write_message(
+                &mut contender_stream,
+                &ClientMessage::ReleaseControl { session_id },
+            )
+            .unwrap();
+            assert!(matches!(
+                murmur_core::protocol::read_message(&mut contender_stream).unwrap(),
+                ServerMessage::ControlReleased { .. }
+            ));
+            assert!(
+                wait_until(window, |window| {
+                    window.read(|app| {
+                        view.read(app)
+                            .connection(1)
+                            .is_some_and(ServerConnection::can_mutate)
+                    })
+                }),
+                "replacement connection did not retry control acquisition"
+            );
+        }
+
+        #[test]
         fn server_disconnect_reconnect_and_remove_preserve_runtime() {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -3809,10 +4577,16 @@ mod tests {
                 })
             }));
 
-            std::thread::sleep(Duration::from_millis(50));
             window.update(|_, cx| {
                 view.update(cx, |this, cx| {
                     this.start_connect(1);
+                    let generation = this.connection(1).unwrap().connect_generation;
+                    this.start_connect(1);
+                    assert_eq!(
+                        this.connection(1).unwrap().connect_generation,
+                        generation,
+                        "a duplicate reconnect must share the in-flight attempt"
+                    );
                     cx.notify();
                 });
             });
@@ -3841,6 +4615,185 @@ mod tests {
                 view.update(cx, |this, cx| this.remove_server(1, window, cx));
             });
             assert!(window.read(|app| view.read(app).connections.is_empty()));
+            window.quit();
+        }
+
+        #[test]
+        fn replacement_server_restores_structure_with_fresh_terminal_state() {
+            let directory = TestDirectory::new("persistent-restart");
+            let workspace_root = directory.0.join("workspace");
+            std::fs::create_dir_all(&workspace_root).unwrap();
+            let endpoint = Endpoint::local(directory.0.join("server.sock"));
+            let snapshot_path = directory.0.join("session.snapshot");
+            let server = start_server_with_config(
+                ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+            );
+
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, mut server) =
+                connected_murmur_with(&mut cx, server, endpoint.clone());
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: workspace_root.clone(),
+                    });
+                });
+            });
+            assert!(wait_until_event_driven(window, |window| {
+                window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session.active_workspace().is_some_and(|workspace| {
+                            workspace.root_directory() == workspace_root.as_path()
+                        })
+                    })
+                })
+            }));
+
+            let (server_id, runtime_epoch, expected_snapshot, pane_id) = window.read(|app| {
+                let murmur = view.read(app);
+                let connection = murmur.connection(1).unwrap();
+                let pane_id = murmur
+                    .active_session()
+                    .unwrap()
+                    .active_workspace()
+                    .unwrap()
+                    .active_tab()
+                    .focused_pane()
+                    .id();
+                (
+                    connection.server_id,
+                    connection.runtime_epoch,
+                    connection.snapshot.clone(),
+                    pane_id,
+                )
+            });
+            let old_terminal_marker = "MURMUR_PH6_OLD_TERMINAL_STATE";
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.terminal_command(
+                        1,
+                        pane_id,
+                        TerminalCommand::Text(old_terminal_marker.into()),
+                    );
+                });
+            });
+            assert!(wait_until_event_driven(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .and_then(|connection| connection.terminals.get(&pane_id))
+                        .is_some_and(|terminal| {
+                            terminal
+                                .view
+                                .cells
+                                .iter()
+                                .map(|cell| cell.text.as_str())
+                                .collect::<String>()
+                                .contains(old_terminal_marker)
+                        })
+                })
+            }));
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    let connection = this.connection_mut(1).unwrap();
+                    connection.send(ClientMessage::StopServer {
+                        server_id: connection.server_id.unwrap(),
+                    });
+                });
+            });
+            assert!(wait_until_event_driven(window, |window| {
+                window.read(|app| {
+                    view.read(app).connection(1).is_some_and(|connection| {
+                        connection.status == ConnectionStatus::Disconnected
+                    })
+                })
+            }));
+            server.stop();
+
+            let _replacement = start_server_with_config(
+                ServerConfig::new(endpoint).with_snapshot_path(snapshot_path),
+            );
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    this.start_connect(1);
+                    cx.notify();
+                });
+            });
+            assert!(wait_until_event_driven(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .is_some_and(ServerConnection::can_mutate)
+                })
+            }));
+
+            window.read(|app| {
+                let murmur = view.read(app);
+                let connection = murmur.connection(1).unwrap();
+                assert_eq!(connection.server_id, server_id);
+                assert_ne!(connection.runtime_epoch, runtime_epoch);
+                assert_eq!(connection.snapshot, expected_snapshot);
+                assert_eq!(connection.terminals.len(), 1);
+                assert!(connection.agents.is_empty());
+                assert!(
+                    !connection.terminals[&pane_id]
+                        .view
+                        .cells
+                        .iter()
+                        .map(|cell| cell.text.as_str())
+                        .collect::<String>()
+                        .contains(old_terminal_marker)
+                );
+                assert_eq!(
+                    murmur
+                        .active_session()
+                        .unwrap()
+                        .active_workspace()
+                        .unwrap()
+                        .root_directory(),
+                    workspace_root.as_path()
+                );
+            });
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(
+                window.debug_bounds(terminal_selector(pane_id)).is_some(),
+                "restored Pane should remain visible after reconnecting to the replacement Server"
+            );
+            window.quit();
+        }
+
+        #[test]
+        fn corrupt_snapshot_connects_to_an_operable_start_page() {
+            let directory = TestDirectory::new("corrupt-snapshot");
+            let endpoint = Endpoint::local(directory.0.join("server.sock"));
+            let snapshot_path = directory.0.join("session.snapshot");
+            std::fs::write(&snapshot_path, b"not a Murmur snapshot").unwrap();
+            let server = start_server_with_config(
+                ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path),
+            );
+
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            assert!(window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .is_some_and(|session| session.workspaces().is_empty())
+            }));
+            assert!(window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .is_some_and(|connection| connection.terminals.is_empty())
+            }));
+            window.update(|window, cx| _ = window.draw(cx));
+            let new_workspace = window
+                .debug_bounds("new-terminal-workspace")
+                .expect("Start Page should offer New Workspace after a corrupt snapshot");
+            window.simulate_click(new_workspace.center(), Modifiers::default());
+            assert!(window.did_prompt_for_paths());
+            window.simulate_path_prompt_response(|_| None);
             window.quit();
         }
 

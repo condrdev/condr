@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+atomicwrites.workspace = true
 bincode.workspace = true
 interprocess.workspace = true
 murmur-core = { path = "../murmur-core" }

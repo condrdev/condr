@@ -14,7 +14,8 @@ pub(crate) struct ClientWriterReceiver {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ClientWriteItem {
     Reliable(Vec<u8>),
-    Render(Vec<u8>),
+    ReliableBatch(Vec<Vec<u8>>),
+    Render { data: Vec<u8>, slot_drained: bool },
 }
 
 #[derive(Debug)]
@@ -25,8 +26,9 @@ struct ClientWriterQueue {
 
 #[derive(Debug)]
 struct ClientWriterQueueState {
-    reliable: VecDeque<Vec<u8>>,
-    render: Option<Vec<u8>>,
+    reliable: VecDeque<ClientWriteItem>,
+    // One visual generation stays shared so a Bootstrap can discard its unsent frames.
+    render: Option<VecDeque<Vec<u8>>>,
     senders: usize,
     writer_alive: bool,
 }
@@ -55,20 +57,42 @@ impl ClientWriter {
         if !state.writer_alive {
             return Err(SendError(data));
         }
-        state.reliable.push_back(data);
+        state.reliable.push_back(ClientWriteItem::Reliable(data));
         self.queue.ready.notify_one();
         Ok(())
     }
 
-    pub(crate) fn try_send_render(&self, data: Vec<u8>) -> Result<(), TrySendError<Vec<u8>>> {
+    pub(crate) fn send_reliable_batch(
+        &self,
+        frames: Vec<Vec<u8>>,
+    ) -> Result<(), SendError<Vec<Vec<u8>>>> {
         let mut state = self.queue.lock_state();
         if !state.writer_alive {
-            return Err(TrySendError::Disconnected(data));
+            return Err(SendError(frames));
+        }
+        state
+            .reliable
+            .push_back(ClientWriteItem::ReliableBatch(frames));
+        self.queue.ready.notify_one();
+        Ok(())
+    }
+
+    pub(crate) fn try_send_render(
+        &self,
+        frames: Vec<Vec<u8>>,
+    ) -> Result<(), TrySendError<Vec<Vec<u8>>>> {
+        assert!(
+            !frames.is_empty(),
+            "render slot requires at least one frame"
+        );
+        let mut state = self.queue.lock_state();
+        if !state.writer_alive {
+            return Err(TrySendError::Disconnected(frames));
         }
         if state.render.is_some() {
-            return Err(TrySendError::Full(data));
+            return Err(TrySendError::Full(frames));
         }
-        state.render = Some(data);
+        state.render = Some(frames.into());
         self.queue.ready.notify_one();
         Ok(())
     }
@@ -101,11 +125,19 @@ impl ClientWriterReceiver {
     pub(crate) fn recv(&self) -> Option<ClientWriteItem> {
         let mut state = self.queue.lock_state();
         loop {
-            if let Some(data) = state.reliable.pop_front() {
-                return Some(ClientWriteItem::Reliable(data));
+            if let Some(item) = state.reliable.pop_front() {
+                return Some(item);
             }
-            if let Some(data) = state.render.take() {
-                return Some(ClientWriteItem::Render(data));
+            if state.render.is_some() {
+                let (data, slot_drained) = {
+                    let frames = state.render.as_mut().expect("render slot must exist");
+                    let data = frames.pop_front().expect("render slot must not be empty");
+                    (data, frames.is_empty())
+                };
+                if slot_drained {
+                    state.render = None;
+                }
+                return Some(ClientWriteItem::Render { data, slot_drained });
             }
             if state.senders == 0 || !state.writer_alive {
                 return None;
@@ -142,7 +174,7 @@ mod tests {
     #[test]
     fn reliable_messages_take_priority_over_the_single_render_slot() {
         let (writer, receiver) = ClientWriter::channel();
-        writer.try_send_render(b"render".to_vec()).unwrap();
+        writer.try_send_render(vec![b"render".to_vec()]).unwrap();
         writer.send_reliable(b"control".to_vec()).unwrap();
 
         assert_eq!(
@@ -151,40 +183,79 @@ mod tests {
         );
         assert_eq!(
             receiver.recv(),
-            Some(ClientWriteItem::Render(b"render".to_vec()))
+            Some(ClientWriteItem::Render {
+                data: b"render".to_vec(),
+                slot_drained: true,
+            })
+        );
+    }
+
+    #[test]
+    fn reliable_messages_preempt_render_between_bounded_frames() {
+        let (writer, receiver) = ClientWriter::channel();
+        writer
+            .try_send_render(vec![b"first".to_vec(), b"second".to_vec()])
+            .unwrap();
+
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Render {
+                data: b"first".to_vec(),
+                slot_drained: false,
+            })
+        );
+        writer.send_reliable(b"control".to_vec()).unwrap();
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"control".to_vec()))
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Render {
+                data: b"second".to_vec(),
+                slot_drained: true,
+            })
         );
     }
 
     #[test]
     fn render_slot_is_bounded_and_can_be_cleared_for_a_bootstrap() {
         let (writer, receiver) = ClientWriter::channel();
-        writer.try_send_render(b"old".to_vec()).unwrap();
+        writer.try_send_render(vec![b"old".to_vec()]).unwrap();
         assert!(matches!(
-            writer.try_send_render(b"new".to_vec()),
+            writer.try_send_render(vec![b"new".to_vec()]),
             Err(TrySendError::Full(_))
         ));
 
         writer.clear_render();
-        writer.try_send_render(b"fresh".to_vec()).unwrap();
+        writer.try_send_render(vec![b"fresh".to_vec()]).unwrap();
         assert_eq!(
             receiver.recv(),
-            Some(ClientWriteItem::Render(b"fresh".to_vec()))
+            Some(ClientWriteItem::Render {
+                data: b"fresh".to_vec(),
+                slot_drained: true,
+            })
         );
     }
 
     #[test]
     fn bootstrap_stays_after_an_in_flight_render_and_before_a_fresh_render() {
         let (writer, receiver) = ClientWriter::channel();
-        writer.try_send_render(b"in-flight".to_vec()).unwrap();
+        writer
+            .try_send_render(vec![b"in-flight".to_vec(), b"stale-tail".to_vec()])
+            .unwrap();
         let in_flight = receiver.recv();
 
         writer.clear_render();
         writer.send_reliable(b"bootstrap".to_vec()).unwrap();
-        writer.try_send_render(b"fresh".to_vec()).unwrap();
+        writer.try_send_render(vec![b"fresh".to_vec()]).unwrap();
 
         assert_eq!(
             in_flight,
-            Some(ClientWriteItem::Render(b"in-flight".to_vec()))
+            Some(ClientWriteItem::Render {
+                data: b"in-flight".to_vec(),
+                slot_drained: false,
+            })
         );
         assert_eq!(
             receiver.recv(),
@@ -192,7 +263,31 @@ mod tests {
         );
         assert_eq!(
             receiver.recv(),
-            Some(ClientWriteItem::Render(b"fresh".to_vec()))
+            Some(ClientWriteItem::Render {
+                data: b"fresh".to_vec(),
+                slot_drained: true,
+            })
+        );
+    }
+
+    #[test]
+    fn reliable_batch_is_one_ordered_queue_item() {
+        let (writer, receiver) = ClientWriter::channel();
+        writer
+            .send_reliable_batch(vec![b"header".to_vec(), b"chunk".to_vec()])
+            .unwrap();
+        writer.send_reliable(b"event".to_vec()).unwrap();
+
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::ReliableBatch(vec![
+                b"header".to_vec(),
+                b"chunk".to_vec()
+            ]))
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"event".to_vec()))
         );
     }
 }

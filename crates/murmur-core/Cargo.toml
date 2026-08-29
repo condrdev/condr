@@ -16,6 +16,7 @@ smol_str.workspace = true
 sysinfo.workspace = true
 
 [target.'cfg(unix)'.dependencies]
+filedescriptor.workspace = true
 nix.workspace = true
 
 [lints]

@@ -1,9 +1,16 @@
 use std::io::{self, Read, Write};
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::{
+    net::Shutdown,
+    os::fd::{AsFd, AsRawFd, RawFd},
+    os::unix::net::UnixStream,
+};
 
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
@@ -13,6 +20,8 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Config, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
+#[cfg(unix)]
+use filedescriptor::FileDescriptor;
 pub use portable_pty::CommandBuilder;
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
@@ -20,12 +29,23 @@ use smol_str::{SmolStr, SmolStrBuilder};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 #[cfg(unix)]
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
+#[cfg(unix)]
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+#[cfg(unix)]
 use nix::unistd::{Pid as UnixPid, getpgid};
 
 use crate::{AgentKind, AgentSnapshot, AgentState, classify_agent, identify_agent_process};
 
 const MAX_TERMINAL_CELLS: usize = 65_536;
+const MAX_TERMINAL_CELL_TEXT_BYTES: usize = 256;
 const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
+const MAX_OSC_CWD_BYTES: usize = 4 * 1024;
+#[cfg(unix)]
+const MAX_CANCEL_DRAIN_READS: u8 = 4;
+
+#[cfg(any(windows, test))]
+const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__MurmurOriginalPrompt) { $global:__MurmurOriginalPrompt = $function:prompt; function global:prompt { $out = @(& $global:__MurmurOriginalPrompt) -join ' '; $loc = $ExecutionContext.SessionState.Path.CurrentLocation; if ($loc.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}; $esc = [string][char]27; $out += $esc + ']9;9;' + $loc.ProviderPath + $esc + '\' }; $out } }";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TerminalSize {
@@ -548,7 +568,7 @@ impl From<TerminalSize> for PtySize {
 
 enum IoCommand {
     Write(Vec<u8>),
-    Resize(TerminalSize, mpsc::Sender<io::Result<()>>),
+    Resize(TerminalSize),
     Shutdown,
 }
 
@@ -576,10 +596,23 @@ impl EventListener for TerminalEventProxy {
 
 type Terminal = Term<TerminalEventProxy>;
 
+struct TerminalIoLoop {
+    master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
+    writer: Box<dyn Write + Send>,
+    commands: mpsc::Receiver<IoCommand>,
+    terminal: Arc<Mutex<Terminal>>,
+    current_size: Arc<Mutex<TerminalSize>>,
+    revision: Arc<AtomicU64>,
+    updates: mpsc::Sender<TerminalUpdate>,
+    stopping: Arc<AtomicBool>,
+}
+
 pub struct TerminalRuntime {
     terminal: Arc<Mutex<Terminal>>,
     master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
     process: ProcessProbe,
+    last_known_cwd: Arc<Mutex<Option<PathBuf>>>,
+    reported_cwd: Arc<Mutex<Option<PathBuf>>>,
     size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
     damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
@@ -589,24 +622,58 @@ pub struct TerminalRuntime {
     child: Option<Box<dyn Child + Send + Sync>>,
     reader: Option<JoinHandle<io::Result<()>>>,
     writer: Option<JoinHandle<io::Result<()>>>,
+    writer_stopping: Arc<AtomicBool>,
+    #[cfg(unix)]
+    reader_cancel: Option<UnixStream>,
+    #[cfg(unix)]
+    writer_cancel: Option<UnixStream>,
 }
 
 impl TerminalRuntime {
     pub fn spawn_shell(cwd: impl AsRef<Path>, size: TerminalSize) -> io::Result<Self> {
+        let cwd = cwd.as_ref();
+        let metadata = std::fs::metadata(cwd).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "cannot use Terminal working directory {}: {error}",
+                    cwd.display()
+                ),
+            )
+        })?;
+        if !metadata.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                format!(
+                    "Terminal working directory is not a directory: {}",
+                    cwd.display()
+                ),
+            ));
+        }
         #[cfg(windows)]
         let mut command = {
             let mut command = CommandBuilder::new("pwsh.exe");
-            command.args(["-NoLogo", "-NoExit"]);
+            command.args([
+                "-NoLogo",
+                "-NoExit",
+                "-Command",
+                WINDOWS_POWERSHELL_CWD_HOOK,
+            ]);
             command
         };
         #[cfg(not(windows))]
         let mut command = CommandBuilder::new_default_prog();
-        command.cwd(cwd.as_ref());
+        command.cwd(cwd);
         Self::spawn(command, size)
     }
 
     pub fn spawn(mut command: CommandBuilder, size: TerminalSize) -> io::Result<Self> {
         let size = size.validate()?;
+        let initial_cwd = command
+            .get_cwd()
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .and_then(resolve_initial_cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
 
@@ -614,6 +681,21 @@ impl TerminalRuntime {
             .openpty(size.into())
             .map_err(other_error)?;
         let reader = pair.master.try_clone_reader().map_err(other_error)?;
+        #[cfg(unix)]
+        let (reader, reader_cancel) = {
+            let poll_fd = duplicate_master_fd(&*pair.master)?;
+            let (cancel, cancel_reader) = UnixStream::pair()?;
+            let reader: Box<dyn Read + Send> = Box::new(UnixPtyReader {
+                reader,
+                poll_fd,
+                cancel: cancel_reader,
+                drain_reads: None,
+            });
+            (reader, cancel)
+        };
+        #[cfg(unix)]
+        let (writer, writer_cancel) = unix_pty_writer(&*pair.master)?;
+        #[cfg(not(unix))]
         let writer = pair.master.take_writer().map_err(other_error)?;
         let mut child = pair.slave.spawn_command(command).map_err(other_error)?;
         let shell_pid = child.process_id();
@@ -630,25 +712,30 @@ impl TerminalRuntime {
         let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
         let revision = Arc::new(AtomicU64::new(0));
         let damage_baseline = Arc::new(Mutex::new(None));
+        let reported_cwd = Arc::new(Mutex::new(None));
+        let last_known_cwd = Arc::new(Mutex::new(initial_cwd));
         let (update_sender, updates) = mpsc::channel();
 
         let writer_terminal = Arc::clone(&terminal);
-        let writer_master = Arc::clone(&master);
+        let writer_master = Arc::downgrade(&master);
         let writer_size = Arc::clone(&current_size);
         let writer_revision = Arc::clone(&revision);
         let writer_updates = update_sender.clone();
+        let writer_stopping = Arc::new(AtomicBool::new(false));
+        let writer_stop = Arc::clone(&writer_stopping);
         let writer_thread = match thread::Builder::new()
             .name("murmur-pty-writer".into())
             .spawn(move || {
-                io_loop(
-                    writer_master,
+                io_loop(TerminalIoLoop {
+                    master: writer_master,
                     writer,
                     commands,
-                    writer_terminal,
-                    writer_size,
-                    writer_revision,
-                    writer_updates,
-                )
+                    terminal: writer_terminal,
+                    current_size: writer_size,
+                    revision: writer_revision,
+                    updates: writer_updates,
+                    stopping: writer_stop,
+                })
             }) {
             Ok(thread) => thread,
             Err(error) => {
@@ -661,10 +748,18 @@ impl TerminalRuntime {
         let reader_terminal = Arc::clone(&terminal);
         let reader_revision = Arc::clone(&revision);
         let reader_updates = update_sender.clone();
+        let reader_reported_cwd = Arc::clone(&reported_cwd);
         let reader_thread = match thread::Builder::new()
             .name("murmur-pty-reader".into())
-            .spawn(move || read_loop(reader, reader_terminal, reader_revision, reader_updates))
-        {
+            .spawn(move || {
+                read_loop(
+                    reader,
+                    reader_terminal,
+                    reader_revision,
+                    reader_updates,
+                    reader_reported_cwd,
+                )
+            }) {
             Ok(thread) => thread,
             Err(error) => {
                 let _ = io.send(IoCommand::Shutdown);
@@ -679,6 +774,8 @@ impl TerminalRuntime {
             terminal,
             master: Some(master),
             process: ProcessProbe::new(shell_pid),
+            last_known_cwd,
+            reported_cwd,
             size: current_size,
             revision,
             damage_baseline,
@@ -688,6 +785,11 @@ impl TerminalRuntime {
             child: Some(child),
             reader: Some(reader_thread),
             writer: Some(writer_thread),
+            writer_stopping,
+            #[cfg(unix)]
+            reader_cancel: Some(reader_cancel),
+            #[cfg(unix)]
+            writer_cancel: Some(writer_cancel),
         })
     }
 
@@ -700,6 +802,24 @@ impl TerminalRuntime {
 
     pub fn take_updates(&mut self) -> Option<mpsc::Receiver<TerminalUpdate>> {
         self.updates.take()
+    }
+
+    pub fn cwd(&self) -> Option<PathBuf> {
+        self.cwd_probe().cwd()
+    }
+
+    pub fn cwd_probe(&self) -> TerminalCwdProbe {
+        TerminalCwdProbe {
+            #[cfg(unix)]
+            master: self.master.as_ref().map(Arc::downgrade),
+            process: if self.child.is_some() {
+                self.process
+            } else {
+                ProcessProbe::new(None)
+            },
+            last_known_cwd: Arc::clone(&self.last_known_cwd),
+            reported_cwd: Arc::clone(&self.reported_cwd),
+        }
     }
 
     pub fn execute(&self, command: TerminalCommand) -> io::Result<Option<String>> {
@@ -729,7 +849,7 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Resize(size) => {
-                self.resize(size)?;
+                self.request_resize(size)?;
                 Ok(None)
             }
             TerminalCommand::Scroll(scroll) => {
@@ -740,22 +860,20 @@ impl TerminalRuntime {
         }
     }
 
-    pub fn resize(&self, size: TerminalSize) -> io::Result<()> {
+    /// Validates and queues a resize. The PTY and VT state are updated in command order.
+    pub fn request_resize(&self, size: TerminalSize) -> io::Result<()> {
         let size = size.validate()?;
-        if *self.size.lock().expect("terminal size lock poisoned") == size {
-            return Ok(());
-        }
-        let (result, response) = mpsc::channel();
         self.io
-            .send(IoCommand::Resize(size, result))
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped"))?;
-        response
-            .recv()
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped"))?
+            .send(IoCommand::Resize(size))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped"))
     }
 
     pub fn revision(&self) -> u64 {
         self.revision.load(Ordering::Acquire)
+    }
+
+    pub fn size(&self) -> TerminalSize {
+        *self.size.lock().expect("terminal size lock poisoned")
     }
 
     pub fn view(&self) -> TerminalView {
@@ -819,7 +937,7 @@ impl TerminalRuntime {
         Some(TerminalAgentProbe {
             terminal: Arc::clone(&self.terminal),
             #[cfg(unix)]
-            master: Arc::clone(self.master.as_ref().expect("checked Terminal PTY master")),
+            master: Arc::downgrade(self.master.as_ref().expect("checked Terminal PTY master")),
             process: self.process,
         })
     }
@@ -882,32 +1000,219 @@ impl TerminalRuntime {
     }
 
     pub fn shutdown(&mut self) -> io::Result<ExitStatus> {
-        let child = self
+        let mut child = self
             .child
-            .as_mut()
+            .take()
             .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?;
-        let status = match child.try_wait()? {
-            Some(status) => status,
-            None => {
-                let kill_error = child.kill().err();
-                let status = child.wait()?;
-                self.child = None;
-                let io_result = self.finish_io();
-                kill_error.map_or(io_result, Err)?;
-                return Ok(status);
+        let mut process_error = None;
+        let status = match child.try_wait() {
+            Ok(Some(status)) => Some(status),
+            Ok(None) => {
+                if let Err(error) = child.kill() {
+                    process_error = Some(error);
+                }
+                match child.wait() {
+                    Ok(status) => Some(status),
+                    Err(error) => {
+                        if process_error.is_none() {
+                            process_error = Some(error);
+                        }
+                        None
+                    }
+                }
+            }
+            Err(error) => {
+                process_error = Some(error);
+                let _ = child.kill();
+                child.wait().ok()
             }
         };
-        self.child = None;
-        self.finish_io()?;
-        Ok(status)
+        let io_result = self.finish_io();
+        if let Some(error) = process_error {
+            return Err(error);
+        }
+        io_result?;
+        status.ok_or_else(|| io::Error::other("terminal child could not be reaped"))
+    }
+
+    /// Stops the Terminal runtime and releases its PTY resources. Repeated calls are harmless.
+    pub fn close(&mut self) -> io::Result<()> {
+        if self.child.is_some() {
+            self.shutdown().map(drop)
+        } else {
+            self.finish_io()
+        }
     }
 
     fn finish_io(&mut self) -> io::Result<()> {
+        self.writer_stopping.store(true, Ordering::Release);
         let _ = self.io.send(IoCommand::Shutdown);
-        let writer_result = join(&mut self.writer, "terminal writer");
+        #[cfg(unix)]
+        if let Some(cancel) = self.writer_cancel.take() {
+            let _ = cancel.shutdown(Shutdown::Both);
+        }
+        #[cfg(not(unix))]
         self.master.take();
+        let writer_result = join(&mut self.writer, "terminal writer");
+        #[cfg(unix)]
+        if let Some(cancel) = self.reader_cancel.take() {
+            let _ = cancel.shutdown(Shutdown::Both);
+        }
         let reader_result = join(&mut self.reader, "terminal reader");
+        #[cfg(unix)]
+        self.master.take();
         writer_result.and(reader_result)
+    }
+}
+
+#[cfg(unix)]
+fn unix_pty_writer(master: &dyn MasterPty) -> io::Result<(Box<dyn Write + Send>, UnixStream)> {
+    let writer = master.take_writer().map_err(other_error)?;
+    let poll_fd = duplicate_master_fd(master)?;
+    let flags = fcntl(poll_fd.as_raw_fd(), FcntlArg::F_GETFL)
+        .map(OFlag::from_bits_truncate)
+        .map_err(|error| io::Error::from_raw_os_error(error as i32))?;
+    fcntl(
+        poll_fd.as_raw_fd(),
+        FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK),
+    )
+    .map_err(|error| io::Error::from_raw_os_error(error as i32))?;
+    let (cancel, cancel_reader) = UnixStream::pair()?;
+    Ok((
+        Box::new(UnixPtyWriter {
+            writer,
+            poll_fd,
+            cancel: cancel_reader,
+        }),
+        cancel,
+    ))
+}
+
+#[cfg(unix)]
+struct RawMasterFd(RawFd);
+
+#[cfg(unix)]
+impl AsRawFd for RawMasterFd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+}
+
+#[cfg(unix)]
+fn duplicate_master_fd(master: &dyn MasterPty) -> io::Result<FileDescriptor> {
+    let raw_fd = master
+        .as_raw_fd()
+        .ok_or_else(|| io::Error::other("Unix PTY master does not expose a file descriptor"))?;
+    FileDescriptor::dup(&RawMasterFd(raw_fd)).map_err(other_error)
+}
+
+#[cfg(unix)]
+struct UnixPtyWriter {
+    writer: Box<dyn Write + Send>,
+    poll_fd: FileDescriptor,
+    cancel: UnixStream,
+}
+
+#[cfg(unix)]
+impl Write for UnixPtyWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        loop {
+            let mut descriptors = [
+                PollFd::new(self.poll_fd.as_fd(), PollFlags::POLLOUT),
+                PollFd::new(self.cancel.as_fd(), PollFlags::POLLIN),
+            ];
+            poll(&mut descriptors, PollTimeout::NONE)
+                .map_err(|error| io::Error::from_raw_os_error(error as i32))?;
+            let writer_events = descriptors[0].revents().unwrap_or(PollFlags::empty());
+            let cancel_events = descriptors[1].revents().unwrap_or(PollFlags::empty());
+            if cancel_events.intersects(
+                PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL,
+            ) {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "Terminal writer was cancelled",
+                ));
+            }
+            if writer_events.contains(PollFlags::POLLNVAL) {
+                return Err(io::Error::other(
+                    "Terminal writer descriptor became invalid",
+                ));
+            }
+            if writer_events
+                .intersects(PollFlags::POLLOUT | PollFlags::POLLHUP | PollFlags::POLLERR)
+            {
+                match self.writer.write(bytes) {
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                    result => return result,
+                }
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+#[cfg(unix)]
+struct UnixPtyReader {
+    reader: Box<dyn Read + Send>,
+    poll_fd: FileDescriptor,
+    cancel: UnixStream,
+    drain_reads: Option<u8>,
+}
+
+#[cfg(unix)]
+impl Read for UnixPtyReader {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let mut descriptors = [
+                PollFd::new(self.poll_fd.as_fd(), PollFlags::POLLIN),
+                PollFd::new(self.cancel.as_fd(), PollFlags::POLLIN),
+            ];
+            let timeout = if self.drain_reads.is_some() {
+                PollTimeout::ZERO
+            } else {
+                PollTimeout::NONE
+            };
+            poll(&mut descriptors, timeout)
+                .map_err(|error| io::Error::from_raw_os_error(error as i32))?;
+            let pty_events = descriptors[0].revents().unwrap_or(PollFlags::empty());
+            let cancel_events = descriptors[1].revents().unwrap_or(PollFlags::empty());
+            let readable =
+                pty_events.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR);
+            let cancelled = cancel_events
+                .intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR);
+
+            if cancelled && self.drain_reads.is_none() {
+                self.drain_reads = Some(MAX_CANCEL_DRAIN_READS);
+            }
+            if let Some(remaining) = self.drain_reads.as_mut() {
+                if !readable || *remaining == 0 {
+                    return Ok(0);
+                }
+                match self.reader.read(bytes) {
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                    result => {
+                        *remaining -= 1;
+                        return result;
+                    }
+                }
+            }
+            if readable {
+                match self.reader.read(bytes) {
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                    result => return result,
+                }
+            }
+            if pty_events.contains(PollFlags::POLLNVAL)
+                || cancel_events.contains(PollFlags::POLLNVAL)
+            {
+                return Err(io::Error::other(
+                    "Terminal reader descriptor became invalid",
+                ));
+            }
+        }
     }
 }
 
@@ -1004,17 +1309,64 @@ impl TerminalViewSource {
 }
 
 #[derive(Clone)]
+pub struct TerminalCwdProbe {
+    #[cfg(unix)]
+    master: Option<Weak<Mutex<Box<dyn MasterPty + Send>>>>,
+    process: ProcessProbe,
+    last_known_cwd: Arc<Mutex<Option<PathBuf>>>,
+    reported_cwd: Arc<Mutex<Option<PathBuf>>>,
+}
+
+impl TerminalCwdProbe {
+    pub fn cwd(&self) -> Option<PathBuf> {
+        let mut last_known = self
+            .last_known_cwd
+            .lock()
+            .expect("Terminal cwd lock poisoned");
+        let reported = || {
+            self.reported_cwd
+                .lock()
+                .expect("Terminal cwd lock poisoned")
+                .clone()
+                .and_then(existing_absolute_directory)
+        };
+        let shell = || self.process.cwd();
+
+        #[cfg(unix)]
+        let observed = self
+            .master
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .and_then(|master| self.process.foreground_cwd(&master))
+            .or_else(reported)
+            .or_else(shell);
+        #[cfg(windows)]
+        let observed = reported().or_else(shell);
+        #[cfg(not(any(unix, windows)))]
+        let observed = reported().or_else(shell);
+        if let Some(cwd) = observed {
+            *last_known = Some(cwd.clone());
+            return Some(cwd);
+        }
+        last_known.clone().and_then(existing_absolute_directory)
+    }
+}
+
+#[derive(Clone)]
 pub struct TerminalAgentProbe {
     terminal: Arc<Mutex<Terminal>>,
     #[cfg(unix)]
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
     process: ProcessProbe,
 }
 
 impl TerminalAgentProbe {
     pub fn snapshot(&self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
         #[cfg(unix)]
-        let kind = self.process.agent_kind(&self.master)?;
+        let kind = {
+            let master = self.master.upgrade()?;
+            self.process.agent_kind(&master)?
+        };
         #[cfg(windows)]
         let kind = self.process.agent_kind()?;
         let previous = previous
@@ -1061,11 +1413,7 @@ fn bottom_text(terminal: &Terminal) -> String {
 
 impl Drop for TerminalRuntime {
     fn drop(&mut self) {
-        if self.child.is_some() {
-            let _ = self.shutdown();
-        } else {
-            let _ = self.finish_io();
-        }
+        let _ = self.close();
     }
 }
 
@@ -1074,13 +1422,21 @@ fn read_loop(
     terminal: Arc<Mutex<Terminal>>,
     revision: Arc<AtomicU64>,
     updates: mpsc::Sender<TerminalUpdate>,
+    reported_cwd: Arc<Mutex<Option<PathBuf>>>,
 ) -> io::Result<()> {
     let mut parser: Processor = Processor::new();
+    let mut cwd_parser = OscCwdParser::default();
     let mut bytes = [0; 16 * 1024];
     let result = loop {
         match reader.read(&mut bytes) {
             Ok(0) => break Ok(()),
             Ok(read) => {
+                cwd_parser.advance(&bytes[..read], |cwd| {
+                    let Some(cwd) = existing_absolute_directory(cwd) else {
+                        return;
+                    };
+                    *reported_cwd.lock().expect("Terminal cwd lock poisoned") = Some(cwd);
+                });
                 let mut terminal = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal, &bytes[..read]);
                 publish_view(&revision, &updates);
@@ -1093,34 +1449,154 @@ fn read_loop(
     result
 }
 
-fn io_loop(
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    mut writer: Box<dyn Write + Send>,
-    commands: mpsc::Receiver<IoCommand>,
-    terminal: Arc<Mutex<Terminal>>,
-    current_size: Arc<Mutex<TerminalSize>>,
-    revision: Arc<AtomicU64>,
-    updates: mpsc::Sender<TerminalUpdate>,
-) -> io::Result<()> {
+#[derive(Default)]
+struct OscCwdParser {
+    state: OscCwdState,
+    payload: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Default)]
+enum OscCwdState {
+    #[default]
+    Ground,
+    Prefix(usize),
+    Payload,
+    PayloadEscape,
+    Discard,
+    DiscardEscape,
+}
+
+impl OscCwdParser {
+    const PREFIX: &'static [u8] = b"\x1b]9;9;";
+
+    fn advance(&mut self, bytes: &[u8], mut report: impl FnMut(PathBuf)) {
+        for &byte in bytes {
+            match self.state {
+                OscCwdState::Ground => {
+                    if byte == Self::PREFIX[0] {
+                        self.state = OscCwdState::Prefix(1);
+                    }
+                }
+                OscCwdState::Prefix(matched) => {
+                    if byte == Self::PREFIX[matched] {
+                        let matched = matched + 1;
+                        if matched == Self::PREFIX.len() {
+                            self.payload.clear();
+                            self.state = OscCwdState::Payload;
+                        } else {
+                            self.state = OscCwdState::Prefix(matched);
+                        }
+                    } else if byte == Self::PREFIX[0] {
+                        self.state = OscCwdState::Prefix(1);
+                    } else {
+                        self.state = OscCwdState::Ground;
+                    }
+                }
+                OscCwdState::Payload => match byte {
+                    0x07 => self.finish(&mut report),
+                    0x1b => self.state = OscCwdState::PayloadEscape,
+                    _ => self.push_payload(byte),
+                },
+                OscCwdState::PayloadEscape => match byte {
+                    b'\\' => self.finish(&mut report),
+                    0x07 => {
+                        self.push_payload(0x1b);
+                        if matches!(self.state, OscCwdState::Payload) {
+                            self.finish(&mut report);
+                        }
+                    }
+                    0x1b => {
+                        self.push_payload(0x1b);
+                        if matches!(self.state, OscCwdState::Payload) {
+                            self.state = OscCwdState::PayloadEscape;
+                        }
+                    }
+                    _ => {
+                        self.push_payload(0x1b);
+                        if matches!(self.state, OscCwdState::Payload) {
+                            self.push_payload(byte);
+                        }
+                    }
+                },
+                OscCwdState::Discard => match byte {
+                    0x07 => self.reset(),
+                    0x1b => self.state = OscCwdState::DiscardEscape,
+                    _ => {}
+                },
+                OscCwdState::DiscardEscape => match byte {
+                    b'\\' => self.reset(),
+                    0x1b => {}
+                    _ => self.state = OscCwdState::Discard,
+                },
+            }
+        }
+    }
+
+    fn push_payload(&mut self, byte: u8) {
+        if self.payload.len() == MAX_OSC_CWD_BYTES {
+            self.payload.clear();
+            self.state = OscCwdState::Discard;
+        } else {
+            self.payload.push(byte);
+            self.state = OscCwdState::Payload;
+        }
+    }
+
+    fn finish(&mut self, report: &mut impl FnMut(PathBuf)) {
+        if let Ok(payload) = std::str::from_utf8(&self.payload) {
+            let payload = payload
+                .strip_prefix('"')
+                .and_then(|payload| payload.strip_suffix('"'))
+                .unwrap_or(payload);
+            report(PathBuf::from(payload));
+        }
+        self.reset();
+    }
+
+    fn reset(&mut self) {
+        self.payload.clear();
+        self.state = OscCwdState::Ground;
+    }
+}
+
+fn io_loop(io: TerminalIoLoop) -> io::Result<()> {
+    let TerminalIoLoop {
+        master,
+        mut writer,
+        commands,
+        terminal,
+        current_size,
+        revision,
+        updates,
+        stopping,
+    } = io;
     while let Ok(command) = commands.recv() {
         match command {
             IoCommand::Write(bytes) => {
-                writer.write_all(&bytes)?;
-                writer.flush()?;
+                if let Err(error) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
+                    if stopping.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
             }
-            IoCommand::Resize(size, response) => {
+            IoCommand::Resize(size) => {
                 let mut terminal = terminal.lock().expect("terminal state lock poisoned");
-                let result = master
-                    .lock()
-                    .expect("PTY master lock poisoned")
-                    .resize(size.into())
-                    .map_err(other_error)
+                master
+                    .upgrade()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "PTY was closed"))
+                    .and_then(|master| {
+                        master
+                            .lock()
+                            .expect("PTY master lock poisoned")
+                            .resize(size.into())
+                            .map_err(other_error)
+                    })
                     .map(|()| {
                         terminal.resize(size);
                         *current_size.lock().expect("terminal size lock poisoned") = size;
                         publish_view(&revision, &updates);
-                    });
-                let _ = response.send(result);
+                    })?;
             }
             IoCommand::Shutdown => return Ok(()),
         }
@@ -1139,9 +1615,51 @@ struct ProcessSnapshot {
     refreshed_at: Option<Instant>,
 }
 
+fn resolve_initial_cwd(cwd: PathBuf) -> Option<PathBuf> {
+    std::path::absolute(cwd)
+        .ok()
+        .and_then(existing_absolute_directory)
+}
+
+fn existing_absolute_directory(cwd: PathBuf) -> Option<PathBuf> {
+    (cwd.is_absolute() && cwd.is_dir()).then_some(cwd)
+}
+
 impl ProcessProbe {
     fn new(shell_pid: Option<u32>) -> Self {
         Self { shell_pid }
+    }
+
+    fn cwd(&self) -> Option<PathBuf> {
+        process_cwd(Pid::from_u32(self.shell_pid?))
+    }
+
+    #[cfg(unix)]
+    fn foreground_cwd(&self, master: &Mutex<Box<dyn MasterPty + Send>>) -> Option<PathBuf> {
+        let foreground_group = master
+            .lock()
+            .expect("PTY master lock poisoned")
+            .process_group_leader()
+            .map(UnixPid::from_raw)?;
+        let leader = u32::try_from(foreground_group.as_raw()).ok()?;
+        if let Some(cwd) = process_cwd(Pid::from_u32(leader)) {
+            return Some(cwd);
+        }
+        let members = {
+            let processes = process_snapshot();
+            processes
+                .system
+                .processes()
+                .keys()
+                .filter_map(|pid| {
+                    let raw_pid = i32::try_from(pid.as_u32()).ok()?;
+                    (raw_pid != foreground_group.as_raw()
+                        && getpgid(Some(UnixPid::from_raw(raw_pid))).ok()? == foreground_group)
+                        .then_some(*pid)
+                })
+                .collect::<Vec<_>>()
+        };
+        members.into_iter().find_map(process_cwd)
     }
 
     #[cfg(unix)]
@@ -1236,6 +1754,20 @@ fn process_snapshot() -> std::sync::MutexGuard<'static, ProcessSnapshot> {
     snapshot
 }
 
+fn process_cwd(pid: Pid) -> Option<PathBuf> {
+    let mut system = System::new();
+    let pids = [pid];
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&pids),
+        ProcessRefreshKind::new().with_cwd(UpdateKind::Always),
+    );
+    system
+        .process(pid)?
+        .cwd()
+        .map(Path::to_path_buf)
+        .and_then(existing_absolute_directory)
+}
+
 fn identify_process(name: &str, argv: &[std::ffi::OsString]) -> Option<AgentKind> {
     let argv = argv
         .iter()
@@ -1296,19 +1828,29 @@ fn snapshot_terminal(terminal: &Terminal, size: TerminalSize, revision: u64) -> 
 }
 
 fn terminal_cell(cell: &Cell, colors: &alacritty_terminal::term::color::Colors) -> TerminalCell {
-    let mut text = SmolStrBuilder::new();
-    text.push(cell.c);
-    if let Some(zerowidth) = cell.zerowidth() {
-        for &character in zerowidth {
-            text.push(character);
-        }
-    }
+    let text = terminal_cell_text(cell);
     TerminalCell {
-        text: text.finish(),
+        text,
         foreground: terminal_color(cell.fg, colors),
         background: terminal_color(cell.bg, colors),
         flags: cell.flags.bits(),
     }
+}
+
+fn terminal_cell_text(cell: &Cell) -> SmolStr {
+    let mut text = SmolStrBuilder::new();
+    text.push(cell.c);
+    let mut text_bytes = cell.c.len_utf8();
+    if let Some(zerowidth) = cell.zerowidth() {
+        for &character in zerowidth {
+            if text_bytes + character.len_utf8() > MAX_TERMINAL_CELL_TEXT_BYTES {
+                break;
+            }
+            text.push(character);
+            text_bytes += character.len_utf8();
+        }
+    }
+    text.finish()
 }
 
 fn terminal_cursor(
@@ -1621,6 +2163,121 @@ mod tests {
     fn terminal_size_rejects_unbounded_grid_allocations() {
         assert!(TerminalSize::new(256, 256).validate().is_ok());
         assert!(TerminalSize::new(257, 256).validate().is_err());
+    }
+
+    #[test]
+    fn terminal_cell_text_keeps_short_content_unchanged() {
+        let mut cell = Cell {
+            c: 'e',
+            ..Cell::default()
+        };
+        cell.push_zerowidth('\u{301}');
+        cell.push_zerowidth('\u{327}');
+
+        assert_eq!(terminal_cell_text(&cell), "e\u{301}\u{327}");
+    }
+
+    #[test]
+    fn terminal_cell_text_truncates_long_combining_sequences() {
+        let mut cell = Cell {
+            c: 'a',
+            ..Cell::default()
+        };
+        for _ in 0..200 {
+            cell.push_zerowidth('\u{301}');
+        }
+
+        let text = terminal_cell_text(&cell);
+        assert_eq!(text.len(), 255);
+        assert_eq!(text.chars().count(), 128);
+        assert_eq!(text.chars().next(), Some('a'));
+        assert!(text.chars().skip(1).all(|character| character == '\u{301}'));
+    }
+
+    #[test]
+    fn terminal_cell_text_truncation_preserves_utf8_boundaries_and_base() {
+        let mut cell = Cell {
+            c: '\u{754c}',
+            ..Cell::default()
+        };
+        for _ in 0..100 {
+            cell.push_zerowidth('\u{1d165}');
+        }
+
+        let text = terminal_cell_text(&cell);
+        assert_eq!(text.len(), 255);
+        assert_eq!(text.chars().count(), 64);
+        assert_eq!(text.chars().next(), Some('\u{754c}'));
+        assert_eq!(std::str::from_utf8(text.as_bytes()).unwrap(), text.as_str());
+    }
+
+    #[test]
+    fn osc_cwd_parser_handles_fragmented_st_and_bel_sequences() {
+        let mut parser = OscCwdParser::default();
+        let mut reported = Vec::new();
+
+        parser.advance(b"noise\x1b]9", |cwd| reported.push(cwd));
+        parser.advance(b";9;C:\\work space\x1b", |cwd| reported.push(cwd));
+        assert!(reported.is_empty());
+        parser.advance(b"\\tail\x1b]9;9;\"D:\\quoted\"\x07", |cwd| {
+            reported.push(cwd)
+        });
+
+        assert_eq!(
+            reported,
+            [PathBuf::from(r"C:\work space"), PathBuf::from(r"D:\quoted")]
+        );
+    }
+
+    #[test]
+    fn osc_cwd_parser_recovers_after_malformed_prefixes() {
+        let mut parser = OscCwdParser::default();
+        let mut reported = Vec::new();
+
+        parser.advance(b"\x1b]9;8;ignored\x07\x1b]9;9;/valid\x07", |cwd| {
+            reported.push(cwd)
+        });
+
+        assert_eq!(reported, [PathBuf::from("/valid")]);
+    }
+
+    #[test]
+    fn powershell_cwd_hook_syncs_win32_before_reporting() {
+        let sync = WINDOWS_POWERSHELL_CWD_HOOK
+            .find("[Environment]::CurrentDirectory = $loc.ProviderPath")
+            .unwrap();
+        let report = WINDOWS_POWERSHELL_CWD_HOOK.find("]9;9;").unwrap();
+        assert!(sync < report);
+    }
+
+    #[test]
+    fn cwd_probe_keeps_the_last_successful_observation_when_sources_disappear() {
+        let directory = std::env::temp_dir().join(format!(
+            "murmur-terminal-cwd-cache-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let initial = directory.join("initial");
+        let observed = directory.join("observed");
+        std::fs::create_dir_all(&initial).unwrap();
+        std::fs::create_dir_all(&observed).unwrap();
+        let reported = Arc::new(Mutex::new(Some(observed.clone())));
+        let probe = TerminalCwdProbe {
+            #[cfg(unix)]
+            master: None,
+            process: ProcessProbe::new(None),
+            last_known_cwd: Arc::new(Mutex::new(Some(initial))),
+            reported_cwd: Arc::clone(&reported),
+        };
+
+        assert_eq!(probe.cwd(), Some(observed.clone()));
+        *reported.lock().unwrap() = None;
+        assert_eq!(probe.cwd(), Some(observed));
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
