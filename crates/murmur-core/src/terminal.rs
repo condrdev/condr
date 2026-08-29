@@ -75,6 +75,54 @@ pub struct TerminalView {
     pub cursor: Option<TerminalCursor>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminalCellRun {
+    pub start: u32,
+    pub cells: Vec<TerminalCell>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminalViewDelta {
+    pub base_revision: u64,
+    pub revision: u64,
+    pub display_offset: u32,
+    pub cursor: Option<TerminalCursor>,
+    pub runs: Vec<TerminalCellRun>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalViewFrame {
+    Full(TerminalView),
+    Delta(TerminalViewDelta),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalFrameError {
+    RevisionMismatch { expected: u64, actual: u64 },
+    NonMonotonicRevision { base: u64, revision: u64 },
+    InvalidCellRun,
+}
+
+impl std::fmt::Display for TerminalFrameError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RevisionMismatch { expected, actual } => write!(
+                formatter,
+                "terminal frame expects revision {expected}, but the client has {actual}"
+            ),
+            Self::NonMonotonicRevision { base, revision } => write!(
+                formatter,
+                "terminal frame revision {revision} does not advance baseline {base}"
+            ),
+            Self::InvalidCellRun => {
+                formatter.write_str("terminal frame contains an invalid cell run")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TerminalFrameError {}
+
 impl TerminalView {
     pub fn cell(&self, row: u16, column: u16) -> Option<&TerminalCell> {
         if row >= self.size.rows || column >= self.size.columns {
@@ -82,6 +130,100 @@ impl TerminalView {
         }
         self.cells
             .get(usize::from(row) * usize::from(self.size.columns) + usize::from(column))
+    }
+
+    pub fn frame_from(previous: Option<&Self>, current: &Self) -> Option<TerminalViewFrame> {
+        let Some(previous) = previous else {
+            return Some(TerminalViewFrame::Full(current.clone()));
+        };
+        if previous.size != current.size
+            || previous.cells.len() != current.cells.len()
+            || current.revision <= previous.revision
+        {
+            return Some(TerminalViewFrame::Full(current.clone()));
+        }
+
+        let mut runs = Vec::new();
+        let mut changed_cells = 0usize;
+        let mut index = 0usize;
+        while index < current.cells.len() {
+            if previous.cells[index] == current.cells[index] {
+                index += 1;
+                continue;
+            }
+            let start = index;
+            while index < current.cells.len() && previous.cells[index] != current.cells[index] {
+                index += 1;
+            }
+            changed_cells += index - start;
+            runs.push(TerminalCellRun {
+                start: u32::try_from(start).expect("terminal cell count fits u32"),
+                cells: current.cells[start..index].to_vec(),
+            });
+        }
+
+        let metadata_changed =
+            previous.display_offset != current.display_offset || previous.cursor != current.cursor;
+        if changed_cells == 0 && !metadata_changed {
+            return None;
+        }
+        if changed_cells > current.cells.len() / 2 {
+            return Some(TerminalViewFrame::Full(current.clone()));
+        }
+
+        Some(TerminalViewFrame::Delta(TerminalViewDelta {
+            base_revision: previous.revision,
+            revision: current.revision,
+            display_offset: current.display_offset,
+            cursor: current.cursor,
+            runs,
+        }))
+    }
+
+    pub fn apply_frame(&mut self, frame: TerminalViewFrame) -> Result<(), TerminalFrameError> {
+        match frame {
+            TerminalViewFrame::Full(view) => {
+                *self = view;
+                Ok(())
+            }
+            TerminalViewFrame::Delta(delta) => {
+                if delta.revision <= delta.base_revision {
+                    return Err(TerminalFrameError::NonMonotonicRevision {
+                        base: delta.base_revision,
+                        revision: delta.revision,
+                    });
+                }
+                if self.revision != delta.base_revision {
+                    return Err(TerminalFrameError::RevisionMismatch {
+                        expected: delta.base_revision,
+                        actual: self.revision,
+                    });
+                }
+                let mut previous_end = 0usize;
+                for run in &delta.runs {
+                    let start = usize::try_from(run.start)
+                        .map_err(|_| TerminalFrameError::InvalidCellRun)?;
+                    let end = start
+                        .checked_add(run.cells.len())
+                        .filter(|end| *end <= self.cells.len())
+                        .ok_or(TerminalFrameError::InvalidCellRun)?;
+                    if run.cells.is_empty() || start < previous_end {
+                        return Err(TerminalFrameError::InvalidCellRun);
+                    }
+                    previous_end = end;
+                }
+                for run in delta.runs {
+                    let start = usize::try_from(run.start)
+                        .map_err(|_| TerminalFrameError::InvalidCellRun)?;
+                    let end = start + run.cells.len();
+                    self.cells[start..end].clone_from_slice(&run.cells);
+                }
+                self.revision = delta.revision;
+                self.display_offset = delta.display_offset;
+                self.cursor = delta.cursor;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -1259,6 +1401,27 @@ fn other_error(error: impl std::fmt::Display) -> io::Error {
 mod tests {
     use super::*;
 
+    fn frame_test_view(revision: u64, text: &str) -> TerminalView {
+        let mut cells = text
+            .chars()
+            .map(|character| TerminalCell {
+                text: SmolStr::from(character.to_string()),
+                ..blank_cell()
+            })
+            .collect::<Vec<_>>();
+        let columns = u16::try_from(cells.len()).unwrap();
+        if cells.is_empty() {
+            cells.push(blank_cell());
+        }
+        TerminalView {
+            revision,
+            size: TerminalSize::new(1, columns.max(1)),
+            display_offset: 0,
+            cells,
+            cursor: None,
+        }
+    }
+
     #[test]
     fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
         let none = TerminalModifiers::default();
@@ -1324,6 +1487,83 @@ mod tests {
     fn terminal_size_rejects_unbounded_grid_allocations() {
         assert!(TerminalSize::new(256, 256).validate().is_ok());
         assert!(TerminalSize::new(257, 256).validate().is_err());
+    }
+
+    #[test]
+    fn sparse_terminal_frame_round_trips_from_the_committed_baseline() {
+        let mut previous = frame_test_view(7, "abcdef");
+        let mut current = frame_test_view(8, "abXdef");
+        current.cursor = Some(TerminalCursor {
+            row: 0,
+            column: 3,
+            shape: TerminalCursorShape::Beam,
+        });
+
+        let frame = TerminalView::frame_from(Some(&previous), &current).unwrap();
+        assert!(matches!(
+            &frame,
+            TerminalViewFrame::Delta(TerminalViewDelta { runs, .. })
+                if runs.len() == 1 && runs[0].start == 2 && runs[0].cells.len() == 1
+        ));
+        previous.apply_frame(frame).unwrap();
+        assert_eq!(previous, current);
+    }
+
+    #[test]
+    fn dense_or_resized_terminal_frames_use_a_full_view() {
+        let previous = frame_test_view(1, "abcdef");
+        let dense = frame_test_view(2, "XYZWef");
+        assert!(matches!(
+            TerminalView::frame_from(Some(&previous), &dense),
+            Some(TerminalViewFrame::Full(_))
+        ));
+
+        let resized = frame_test_view(3, "abcdefg");
+        assert!(matches!(
+            TerminalView::frame_from(Some(&previous), &resized),
+            Some(TerminalViewFrame::Full(_))
+        ));
+    }
+
+    #[test]
+    fn visually_identical_terminal_revision_does_not_create_a_frame() {
+        let previous = frame_test_view(1, "same");
+        let current = frame_test_view(2, "same");
+        assert_eq!(TerminalView::frame_from(Some(&previous), &current), None);
+    }
+
+    #[test]
+    fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
+        let mut view = frame_test_view(4, "abcd");
+        let gap = TerminalViewFrame::Delta(TerminalViewDelta {
+            base_revision: 5,
+            revision: 6,
+            display_offset: 0,
+            cursor: None,
+            runs: Vec::new(),
+        });
+        assert!(matches!(
+            view.apply_frame(gap),
+            Err(TerminalFrameError::RevisionMismatch {
+                expected: 5,
+                actual: 4
+            })
+        ));
+
+        let invalid = TerminalViewFrame::Delta(TerminalViewDelta {
+            base_revision: 4,
+            revision: 5,
+            display_offset: 0,
+            cursor: None,
+            runs: vec![TerminalCellRun {
+                start: 4,
+                cells: vec![blank_cell()],
+            }],
+        });
+        assert_eq!(
+            view.apply_frame(invalid),
+            Err(TerminalFrameError::InvalidCellRun)
+        );
     }
 
     #[test]

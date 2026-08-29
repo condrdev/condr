@@ -111,6 +111,12 @@ enum Incoming {
     Disconnected(String),
 }
 
+#[derive(Default)]
+struct IncomingEffect {
+    rebuild: bool,
+    notify: bool,
+}
+
 struct ClientIo {
     outgoing: mpsc::Sender<ClientMessage>,
     _incoming_task: Task<()>,
@@ -172,14 +178,18 @@ impl ClientIo {
                 }
                 if owner
                     .update_in(cx, |this, window, cx| {
-                        let mut rebuild = false;
+                        let mut effect = IncomingEffect::default();
                         for incoming in incoming {
-                            rebuild |= this.handle_incoming(key, incoming, cx);
+                            let next = this.handle_incoming(key, incoming, cx);
+                            effect.rebuild |= next.rebuild;
+                            effect.notify |= next.notify;
                         }
-                        if rebuild && key == this.active_connection {
+                        if effect.rebuild && key == this.active_connection {
                             this.rebuild_dock(window, cx);
                         }
-                        cx.notify();
+                        if effect.notify || effect.rebuild {
+                            cx.notify();
+                        }
                     })
                     .is_err()
                 {
@@ -225,6 +235,7 @@ struct ServerConnection {
     zoomed_panes: HashSet<PaneId>,
     io: Option<ClientIo>,
     controlling: bool,
+    terminal_resync_pending: bool,
     error: Option<String>,
 }
 
@@ -247,6 +258,7 @@ impl ServerConnection {
             zoomed_panes: HashSet::new(),
             io: None,
             controlling: false,
+            terminal_resync_pending: false,
             error: None,
         }
     }
@@ -287,6 +299,7 @@ impl ServerConnection {
             .collect();
         self.zoomed_panes = bootstrap.zoomed_panes.into_iter().collect();
         self.status = ConnectionStatus::Connected;
+        self.terminal_resync_pending = false;
         self.error = None;
         previous_layout != self.dock_projection()
     }
@@ -313,6 +326,17 @@ impl ServerConnection {
             self.error = Some("Disconnected from murmur-server".into());
             self.io = None;
         }
+    }
+
+    fn request_snapshot(&mut self) {
+        if self.terminal_resync_pending {
+            return;
+        }
+        let Some(session_id) = self.session_id else {
+            return;
+        };
+        self.terminal_resync_pending = true;
+        self.send(ClientMessage::SnapshotRequest { session_id });
     }
 }
 
@@ -834,13 +858,13 @@ impl Murmur {
         key: ConnectionKey,
         incoming: Incoming,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> IncomingEffect {
         let Some(index) = self
             .connections
             .iter()
             .position(|connection| connection.key == key)
         else {
-            return false;
+            return IncomingEffect::default();
         };
         let message = match incoming {
             Incoming::Message(message) => message,
@@ -850,50 +874,66 @@ impl Murmur {
                 connection.controlling = false;
                 connection.error = Some(format!("Server connection closed: {error}"));
                 connection.io = None;
-                return false;
+                return IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                };
             }
         };
 
         match message {
             ServerMessage::Bootstrap(bootstrap) => {
                 let rebuild = self.connections[index].apply_bootstrap(bootstrap);
+                let terminal_sizes = self.connections[index]
+                    .terminals
+                    .iter()
+                    .map(|(pane_id, terminal)| (*pane_id, terminal.view.size))
+                    .collect::<HashMap<_, _>>();
+                self.pending_sizes
+                    .retain(|(connection_key, pane_id), size| {
+                        *connection_key != key
+                            || terminal_sizes
+                                .get(pane_id)
+                                .is_some_and(|terminal_size| terminal_size != size)
+                    });
                 self.refresh_target_pane(key);
-                rebuild
+                IncomingEffect {
+                    rebuild,
+                    notify: true,
+                }
             }
             ServerMessage::Event {
-                sequence, event, ..
+                server_id,
+                session_id,
+                sequence,
+                event,
             } => {
+                let connection = &mut self.connections[index];
+                if connection.server_id != Some(server_id)
+                    || connection.session_id != Some(session_id)
+                {
+                    return IncomingEffect::default();
+                }
+                if sequence != connection.sequence.saturating_add(1) {
+                    if sequence > connection.sequence {
+                        connection.request_snapshot();
+                    }
+                    return IncomingEffect::default();
+                }
                 self.connections[index].sequence = sequence;
+                let mut notify = false;
                 match event {
                     SessionEvent::LayoutChanged => {
-                        if let Some(session_id) = self.connections[index].session_id {
-                            self.connections[index]
-                                .send(ClientMessage::SnapshotRequest { session_id });
-                        }
+                        self.connections[index].request_snapshot();
                     }
-                    SessionEvent::TerminalChanged { pane_id, view } => {
-                        let pending_key = (key, pane_id);
-                        if self.pending_sizes.get(&pending_key) == Some(&view.size) {
-                            self.pending_sizes.remove(&pending_key);
+                    SessionEvent::TerminalExited { pane_id } => {
+                        if let Some(terminal) = self.connections[index].terminals.get_mut(&pane_id)
+                        {
+                            terminal.exited = true;
+                            notify = true;
+                        } else {
+                            self.connections[index].request_snapshot();
                         }
-                        self.connections[index].terminals.insert(
-                            pane_id,
-                            PaneTerminalSnapshot {
-                                pane_id,
-                                view,
-                                exited: false,
-                            },
-                        );
-                    }
-                    SessionEvent::TerminalExited { pane_id, view } => {
-                        self.connections[index].terminals.insert(
-                            pane_id,
-                            PaneTerminalSnapshot {
-                                pane_id,
-                                view,
-                                exited: true,
-                            },
-                        );
                     }
                     SessionEvent::AgentChanged { pane_id, agent } => {
                         let visible = self.active_connection == key
@@ -909,6 +949,7 @@ impl Murmur {
                             self.connections[index].agents.remove(&pane_id);
                             self.connections[index].agent_trackers.remove(&pane_id);
                         }
+                        notify = true;
                     }
                     SessionEvent::WorkspaceGitChanged { workspace_id, git } => {
                         if let Some(git) = git {
@@ -918,29 +959,75 @@ impl Murmur {
                         } else {
                             self.connections[index].workspace_git.remove(&workspace_id);
                         }
+                        notify = true;
                     }
                 }
-                false
+                IncomingEffect {
+                    rebuild: false,
+                    notify,
+                }
+            }
+            ServerMessage::TerminalFrame(batch) => {
+                let connection = &mut self.connections[index];
+                if connection.server_id != Some(batch.server_id)
+                    || connection.session_id != Some(batch.session_id)
+                {
+                    return IncomingEffect::default();
+                }
+
+                let mut applied = false;
+                let mut needs_snapshot = false;
+                for pane in batch.panes {
+                    let Some(terminal) = connection.terminals.get_mut(&pane.pane_id) else {
+                        needs_snapshot = true;
+                        continue;
+                    };
+                    if terminal.view.apply_frame(pane.frame).is_err() {
+                        needs_snapshot = true;
+                        continue;
+                    }
+                    let pending_key = (key, pane.pane_id);
+                    if self.pending_sizes.get(&pending_key) == Some(&terminal.view.size) {
+                        self.pending_sizes.remove(&pending_key);
+                    }
+                    applied = true;
+                }
+                if needs_snapshot {
+                    connection.request_snapshot();
+                }
+                IncomingEffect {
+                    rebuild: false,
+                    notify: applied,
+                }
             }
             ServerMessage::ControlGranted { .. } => {
                 self.connections[index].controlling = true;
                 self.connections[index].error = None;
-                false
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
             }
             ServerMessage::ControlReleased { .. } => {
                 self.connections[index].controlling = false;
-                false
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
             }
             ServerMessage::ControlDenied { reason, .. }
             | ServerMessage::Error { message: reason } => {
                 self.connections[index].error = Some(reason);
-                false
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
             }
             ServerMessage::TerminalCopied { text, .. } => {
                 if let Some(text) = text {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
-                false
+                IncomingEffect::default()
             }
             ServerMessage::ServerStopping => {
                 let connection = &mut self.connections[index];
@@ -948,11 +1035,14 @@ impl Murmur {
                 connection.controlling = false;
                 connection.error = Some("murmur-server stopped".into());
                 connection.io = None;
-                false
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
             }
             ServerMessage::Welcome { .. }
             | ServerMessage::Subscribed { .. }
-            | ServerMessage::Pong { .. } => false,
+            | ServerMessage::Pong { .. } => IncomingEffect::default(),
         }
     }
 

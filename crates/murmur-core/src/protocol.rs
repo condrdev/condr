@@ -1,8 +1,9 @@
 //! Versioned, transport-independent server/client protocol.
 //!
 //! The server owns the runtime. A client starts with [`ClientMessage::Hello`],
-//! receives a [`ServerMessage::Bootstrap`], and then consumes ordered events.
-//! The same framing works over local IPC and a future TCP/SSH transport.
+//! receives a [`ServerMessage::Bootstrap`], and then consumes ordered reliable
+//! events plus coalesced terminal visual frames. The same framing works over
+//! local IPC and a future TCP/SSH transport.
 
 use std::fmt;
 use std::io::{self, Cursor, Read, Write};
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalCommand,
-    TerminalView, WorkspaceId,
+    TerminalView, TerminalViewFrame, WorkspaceId,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -183,15 +184,23 @@ pub struct WorkspaceGitSnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PaneTerminalFrame {
+    pub pane_id: PaneId,
+    pub frame: TerminalViewFrame,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminalFrameBatch {
+    pub server_id: ServerId,
+    pub session_id: SessionId,
+    pub panes: Vec<PaneTerminalFrame>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SessionEvent {
     LayoutChanged,
-    TerminalChanged {
-        pane_id: PaneId,
-        view: TerminalView,
-    },
     TerminalExited {
         pane_id: PaneId,
-        view: TerminalView,
     },
     AgentChanged {
         pane_id: PaneId,
@@ -224,6 +233,7 @@ pub enum ServerMessage {
         sequence: u64,
         event: SessionEvent,
     },
+    TerminalFrame(TerminalFrameBatch),
     Pong {
         server_id: ServerId,
         nonce: u64,

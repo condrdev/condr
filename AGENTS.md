@@ -81,6 +81,7 @@ cargo fmt              # 格式化
 
 - PTY read chunk 只是终端状态 wakeup,不是必须逐条展示的 GUI frame。Server 必须合并连续 wakeup、发布最新状态并保证尾帧/退出帧不丢;不得让无界旧 `TerminalView` 队列增加输入延迟。
 - GUI 消费终端事件时应批量处理并丢弃或覆盖已过期的中间视觉状态;控制、生命周期和布局事件仍必须可靠、有序。
+- 终端视觉更新使用独立于可靠 Session event cursor 的 per-client stream:每个 client writer 只有一个可丢弃的批量视觉槽,可靠消息优先。只有视觉帧成功入槽后才能推进该 client 的 baseline;槽满时只记录待刷新的 Pane,writer drain 后必须从 Server 权威 VT 状态重新生成最新帧。Bootstrap 必须清空排队视觉帧并重置 baseline;GUI 检测到 revision gap 时只请求一次新 Bootstrap。
 - 小范围终端变化不得使整屏 shaping cache 失效。缓存按 cell/row/run 的实际内容与样式失效;避免逐帧整屏字符串分配、整屏 shaping 和不必要的逐 cell paint。全量 view 成为瓶颈时,优先引入 per-client baseline/damage 增量,同时保持 reconnect bootstrap 正确。
 - selection 等纯 GUI 交互必须留在 Client 本地;持续终端输出时也要复用未变化的渲染缓存,不能只优化静止画面。
 - 普通开发命令 `cargo run -p murmur-gui` 也必须具备可用帧率。不要移除根 `Cargo.toml` 中 GPUI、文本 shaping、VT 和 Murmur 热路径的 dev profile 优化,除非有等效替代并完成 Windows 实测。

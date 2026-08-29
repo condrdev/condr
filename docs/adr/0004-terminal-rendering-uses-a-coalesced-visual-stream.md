@@ -1,0 +1,13 @@
+# Terminal Rendering Uses a Coalesced Visual Stream
+
+Murmur separates terminal presentation updates from reliable Session events. The Server remains the owner of PTYs, VT state, and terminal revisions; the GUI remains an event-driven presenter and does not poll terminal state on a display timer.
+
+A reconnect Bootstrap contains complete terminal views. After subscription, layout, lifecycle, agent, and Git changes use the ordered reliable event stream and its replay cursor. Terminal pixels use independent `TerminalFrameBatch` messages that are neither assigned a Session sequence nor retained in event history. Each client has its own terminal baseline. The Server sends a full view without a baseline or after a resize, and otherwise sends changed cell runs plus viewport and cursor metadata.
+
+Each client writer has an unbounded reliable control queue and one bounded visual slot. A visual batch may contain updates for multiple Panes. Reliable messages are always dequeued first. The Server advances a client's terminal baseline only when the corresponding visual batch enters the slot. If the slot is full, it retains only the affected Pane identities; after the writer drains, the Server regenerates a frame from the latest authoritative VT state against the last committed baseline. It does not enqueue or replay obsolete intermediate views.
+
+A fresh Bootstrap clears any queued visual batch, clears deferred Pane identities, and resets the client baseline to the Bootstrap views. A visual batch already being written remains ordered before that Bootstrap on the transport. The GUI applies deltas only to their declared base revision and requests one fresh Bootstrap when a baseline is missing or a revision gap is detected. Selection and other presentation-only interaction remain local to the GUI.
+
+This follows the render ownership and backpressure semantics verified in herdr v0.8.2: its client transport has separate reliable and capacity-one render queues, while its render stream commits a baseline only after a render is accepted and regenerates deferred output after writer drain. Murmur uses semantic cell-run frames because its GUI renders retained terminal cells rather than ANSI bytes.
+
+References: [herdr client transport](https://github.com/herdrdev/herdr/blob/9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c/src/server/client_transport.rs), [herdr render stream](https://github.com/herdrdev/herdr/blob/9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c/src/server/render_stream.rs), [herdr headless drain handling](https://github.com/herdrdev/herdr/blob/9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c/src/server/headless.rs).

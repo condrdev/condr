@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
@@ -7,16 +7,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use murmur_core::protocol::{
     ClientMessage, FramingError, Hello, LayoutCommand, PROTOCOL_VERSION, PaneAgentSnapshot,
-    PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent,
-    SessionId, VersionCheck, WorkspaceGitSnapshot, check_version,
+    PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage,
+    SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch, VersionCheck,
+    WorkspaceGitSnapshot, check_version,
 };
 use murmur_core::{
     AgentSnapshot, GitRepository, PaneId, Session, TerminalAgentProbe, TerminalCommand,
-    TerminalRuntime, TerminalSize, TerminalUpdate, WorkspaceId, create_worktree,
+    TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView, WorkspaceId, create_worktree,
     default_worktree_root, discover_repository, open_worktree, remove_worktree,
     validate_worktree_removal,
 };
 
+use crate::client_writer::{ClientWriteItem, ClientWriter};
 use crate::endpoint::{Endpoint, EndpointListener, EndpointStream, default_socket_path};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
@@ -300,7 +302,27 @@ struct RuntimeState {
     worktree_root: Option<PathBuf>,
     active_controller: Option<u64>,
     events: std::collections::VecDeque<SequencedEvent>,
-    subscribers: std::collections::HashMap<u64, mpsc::Sender<ServerMessage>>,
+    subscribers: std::collections::HashMap<u64, ClientSubscriber>,
+}
+
+struct ClientSubscriber {
+    writer: ClientWriter,
+    terminal_baselines: std::collections::HashMap<PaneId, TerminalView>,
+    pending_terminals: std::collections::HashSet<PaneId>,
+}
+
+impl ClientSubscriber {
+    fn try_send_terminal_render(
+        &mut self,
+        data: Vec<u8>,
+        baselines: Vec<(PaneId, TerminalView)>,
+    ) -> Result<(), mpsc::TrySendError<Vec<u8>>> {
+        self.writer.try_send_render(data)?;
+        for (pane_id, view) in baselines {
+            self.terminal_baselines.insert(pane_id, view);
+        }
+        Ok(())
+    }
 }
 
 struct SequencedEvent {
@@ -370,11 +392,7 @@ impl RuntimeState {
         }
     }
 
-    fn publish_layout_change(
-        &mut self,
-        origin_client_id: u64,
-        origin: &mpsc::Sender<ServerMessage>,
-    ) -> bool {
+    fn publish_layout_change(&mut self, origin_client_id: u64, origin: &ClientWriter) -> bool {
         let event = SessionEvent::LayoutChanged;
         self.publish_event(event, Some((origin_client_id, origin)))
     }
@@ -383,12 +401,7 @@ impl RuntimeState {
         self.publish_event(event, None);
     }
 
-    fn publish_event(
-        &mut self,
-        event: SessionEvent,
-        origin: Option<(u64, &mpsc::Sender<ServerMessage>)>,
-    ) -> bool {
-        // ponytail: bounded full-view replay; add cell damage events only after profiling.
+    fn publish_event(&mut self, event: SessionEvent, origin: Option<(u64, &ClientWriter)>) -> bool {
         self.events.push_back(SequencedEvent {
             sequence: self.sequence.saturating_add(1),
             event: event.clone(),
@@ -403,15 +416,103 @@ impl RuntimeState {
             sequence: self.sequence,
             event,
         };
-        let origin_failed = origin.is_some_and(|(_, sender)| sender.send(message.clone()).is_err());
-        self.subscribers.retain(|client_id, sender| {
+        let data = frame_message(&message).expect("Session event must fit a protocol frame");
+        let origin_failed =
+            origin.is_some_and(|(_, writer)| writer.send_reliable(data.clone()).is_err());
+        self.subscribers.retain(|client_id, subscriber| {
             if origin.is_some_and(|(origin_client_id, _)| *client_id == origin_client_id) {
                 !origin_failed
             } else {
-                sender.send(message.clone()).is_ok()
+                subscriber.writer.send_reliable(data.clone()).is_ok()
             }
         });
         origin_failed
+    }
+
+    fn publish_terminal(&mut self, pane_id: PaneId, view: &TerminalView) {
+        let client_ids = self.subscribers.keys().copied().collect::<Vec<_>>();
+        for client_id in client_ids {
+            if let Some(subscriber) = self.subscribers.get_mut(&client_id) {
+                subscriber.pending_terminals.insert(pane_id);
+            }
+            self.flush_terminal_render(client_id, Some((pane_id, view)));
+        }
+    }
+
+    fn flush_terminal_render(&mut self, client_id: u64, latest: Option<(PaneId, &TerminalView)>) {
+        let Some(subscriber) = self.subscribers.get(&client_id) else {
+            return;
+        };
+        let pending = subscriber
+            .pending_terminals
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let prepared = pending
+            .iter()
+            .filter_map(|pane_id| {
+                let current = latest
+                    .filter(|(latest_pane_id, _)| latest_pane_id == pane_id)
+                    .map(|(_, view)| view.clone())
+                    .or_else(|| self.terminals.get(pane_id).map(TerminalRuntime::view))?;
+                let frame =
+                    TerminalView::frame_from(subscriber.terminal_baselines.get(pane_id), &current)?;
+                Some((*pane_id, current, frame))
+            })
+            .collect::<Vec<_>>();
+
+        if prepared.is_empty() {
+            if let Some(subscriber) = self.subscribers.get_mut(&client_id) {
+                subscriber.pending_terminals.clear();
+                subscriber
+                    .terminal_baselines
+                    .retain(|pane_id, _| self.terminals.contains_key(pane_id));
+            }
+            return;
+        }
+
+        let mut frames = Vec::with_capacity(prepared.len());
+        let mut baselines = Vec::with_capacity(prepared.len());
+        for (pane_id, current, frame) in prepared {
+            frames.push(PaneTerminalFrame { pane_id, frame });
+            baselines.push((pane_id, current));
+        }
+        let Ok(data) = frame_terminal_batches(self.server_id, self.session_id, frames) else {
+            return;
+        };
+        let result = self
+            .subscribers
+            .get_mut(&client_id)
+            .expect("subscriber exists while preparing a terminal render")
+            .try_send_terminal_render(data, baselines);
+        match result {
+            Ok(()) => {
+                let subscriber = self
+                    .subscribers
+                    .get_mut(&client_id)
+                    .expect("subscriber exists while committing a terminal render");
+                for pane_id in pending {
+                    subscriber.pending_terminals.remove(&pane_id);
+                }
+            }
+            Err(mpsc::TrySendError::Full(_)) => {}
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                self.subscribers.remove(&client_id);
+            }
+        }
+    }
+
+    fn reset_terminal_baseline(&mut self, client_id: u64, bootstrap: &SessionBootstrap) {
+        let Some(subscriber) = self.subscribers.get_mut(&client_id) else {
+            return;
+        };
+        subscriber.writer.clear_render();
+        subscriber.pending_terminals.clear();
+        subscriber.terminal_baselines = bootstrap
+            .terminals
+            .iter()
+            .map(|terminal| (terminal.pane_id, terminal.view.clone()))
+            .collect();
     }
 }
 
@@ -1195,13 +1296,25 @@ fn handle_client(
         Ok(stream) => stream,
         Err(_) => return,
     };
-    let (outbound, outbound_rx) = mpsc::channel();
+    let (outbound, outbound_rx) = ClientWriter::channel();
+    let writer_state = Arc::downgrade(&state);
     let writer = thread::spawn(move || {
-        while let Ok(message) = outbound_rx.recv() {
-            if send_message(&mut writer_stream, &message).is_err() {
+        while let Some(item) = outbound_rx.recv() {
+            let (data, render) = match item {
+                ClientWriteItem::Reliable(data) => (data, false),
+                ClientWriteItem::Render(data) => (data, true),
+            };
+            if send_framed(&mut writer_stream, &data).is_err() {
                 break;
             }
+            if render && let Some(state) = writer_state.upgrade() {
+                state
+                    .lock()
+                    .expect("server state lock poisoned")
+                    .flush_terminal_render(client_id, None);
+            }
         }
+        outbound_rx.close();
     });
 
     let mut stopping_server = false;
@@ -1223,17 +1336,19 @@ fn handle_client(
         let mut removed_terminals = Vec::new();
         let should_close = match message {
             ClientMessage::SnapshotRequest { session_id } => {
-                let response = {
-                    let state = state.lock().expect("server state lock poisoned");
-                    if session_id != state.session_id {
+                let mut state = state.lock().expect("server state lock poisoned");
+                if session_id != state.session_id {
+                    queue_message(
+                        &outbound,
                         ServerMessage::Error {
                             message: "unknown Session".into(),
-                        }
-                    } else {
-                        ServerMessage::Bootstrap(state.bootstrap())
-                    }
-                };
-                queue_message(&outbound, response)
+                        },
+                    )
+                } else {
+                    let bootstrap = state.bootstrap();
+                    state.reset_terminal_baseline(client_id, &bootstrap);
+                    queue_message(&outbound, ServerMessage::Bootstrap(bootstrap))
+                }
             }
             ClientMessage::Subscribe {
                 session_id,
@@ -1287,13 +1402,29 @@ fn handle_client(
                     }
                 };
                 if should_subscribe {
-                    state.subscribers.insert(client_id, outbound.clone());
+                    state.subscribers.insert(
+                        client_id,
+                        ClientSubscriber {
+                            writer: outbound.clone(),
+                            terminal_baselines: std::collections::HashMap::new(),
+                            pending_terminals: std::collections::HashSet::new(),
+                        },
+                    );
                 }
                 let failed = responses
                     .into_iter()
                     .any(|response| queue_message(&outbound, response));
                 if failed {
                     state.subscribers.remove(&client_id);
+                } else if should_subscribe {
+                    let pane_ids = state.terminals.keys().copied().collect::<Vec<_>>();
+                    state
+                        .subscribers
+                        .get_mut(&client_id)
+                        .expect("new subscriber exists")
+                        .pending_terminals
+                        .extend(pane_ids);
+                    state.flush_terminal_render(client_id, None);
                 }
                 failed
             }
@@ -1630,7 +1761,7 @@ fn monitor_terminal(
                     else {
                         break;
                     };
-                    state.publish_background(SessionEvent::TerminalChanged { pane_id, view });
+                    state.publish_terminal(pane_id, &view);
                     last_view_publish = Instant::now();
                 }
                 Some(TerminalUpdate::Exited) => {
@@ -1642,7 +1773,8 @@ fn monitor_terminal(
                         break;
                     };
                     state.exited_terminals.insert(pane_id);
-                    state.publish_background(SessionEvent::TerminalExited { pane_id, view });
+                    state.publish_terminal(pane_id, &view);
+                    state.publish_background(SessionEvent::TerminalExited { pane_id });
                     if state.agents.remove(&pane_id).is_some() {
                         state.publish_background(SessionEvent::AgentChanged {
                             pane_id,
@@ -1813,8 +1945,14 @@ fn workspace_git_snapshot(
     }
 }
 
-fn queue_message(outbound: &mpsc::Sender<ServerMessage>, message: ServerMessage) -> bool {
-    outbound.send(message).is_err()
+fn queue_message(outbound: &ClientWriter, message: ServerMessage) -> bool {
+    frame_message(&message)
+        .and_then(|data| {
+            outbound
+                .send_reliable(data)
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "client writer stopped"))
+        })
+        .is_err()
 }
 
 fn send_bootstrap(stream: &mut EndpointStream, state: &Arc<Mutex<RuntimeState>>) -> io::Result<()> {
@@ -1846,6 +1984,62 @@ fn send_error(
 fn send_message(stream: &mut EndpointStream, message: &ServerMessage) -> io::Result<()> {
     murmur_core::protocol::write_message(stream, message)
         .map_err(|error| io::Error::other(error.to_string()))
+}
+
+fn frame_message(message: &ServerMessage) -> io::Result<Vec<u8>> {
+    let mut data = Vec::new();
+    murmur_core::protocol::write_message(&mut data, message)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(data)
+}
+
+fn frame_terminal_batches(
+    server_id: ServerId,
+    session_id: SessionId,
+    panes: Vec<PaneTerminalFrame>,
+) -> io::Result<Vec<u8>> {
+    let mut data = Vec::new();
+    let mut batch = Vec::new();
+    for pane in panes {
+        batch.push(pane);
+        let message = ServerMessage::TerminalFrame(TerminalFrameBatch {
+            server_id,
+            session_id,
+            panes: batch.clone(),
+        });
+        let error = match frame_message(&message) {
+            Ok(_) => continue,
+            Err(error) => error,
+        };
+
+        let last = batch.pop().expect("terminal render batch is non-empty");
+        if batch.is_empty() {
+            return Err(error);
+        }
+        data.extend(frame_message(&ServerMessage::TerminalFrame(
+            TerminalFrameBatch {
+                server_id,
+                session_id,
+                panes: std::mem::take(&mut batch),
+            },
+        ))?);
+        batch.push(last);
+    }
+    if !batch.is_empty() {
+        data.extend(frame_message(&ServerMessage::TerminalFrame(
+            TerminalFrameBatch {
+                server_id,
+                session_id,
+                panes: batch,
+            },
+        ))?);
+    }
+    Ok(data)
+}
+
+fn send_framed(stream: &mut EndpointStream, data: &[u8]) -> io::Result<()> {
+    stream.write_all(data)?;
+    stream.flush()
 }
 
 fn stable_endpoint_id(endpoint: &Endpoint) -> u64 {
@@ -1991,6 +2185,47 @@ mod tests {
             coalesce_terminal_update(TerminalUpdate::View(1), &updates, Instant::now()),
             TerminalUpdate::Exited
         );
+    }
+
+    #[test]
+    fn client_terminal_baseline_advances_only_for_an_accepted_render() {
+        let mut session = Session::new();
+        session.create_workspace(std::env::temp_dir());
+        let pane_id = session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        let view = |revision| TerminalView {
+            revision,
+            size: TerminalSize::new(1, 1),
+            display_offset: 0,
+            cells: Vec::new(),
+            cursor: None,
+        };
+        let (writer, receiver) = ClientWriter::channel();
+        let mut subscriber = ClientSubscriber {
+            writer,
+            terminal_baselines: std::collections::HashMap::new(),
+            pending_terminals: std::collections::HashSet::new(),
+        };
+
+        subscriber
+            .try_send_terminal_render(vec![1], vec![(pane_id, view(1))])
+            .unwrap();
+        assert_eq!(subscriber.terminal_baselines[&pane_id].revision, 1);
+        assert!(matches!(
+            subscriber.try_send_terminal_render(vec![2], vec![(pane_id, view(2))]),
+            Err(mpsc::TrySendError::Full(_))
+        ));
+        assert_eq!(subscriber.terminal_baselines[&pane_id].revision, 1);
+
+        assert_eq!(receiver.recv(), Some(ClientWriteItem::Render(vec![1])));
+        subscriber
+            .try_send_terminal_render(vec![3], vec![(pane_id, view(3))])
+            .unwrap();
+        assert_eq!(subscriber.terminal_baselines[&pane_id].revision, 3);
     }
 
     fn test_endpoint() -> Endpoint {
@@ -2594,6 +2829,7 @@ mod tests {
             read_server(&mut first),
             ServerMessage::Subscribed { .. }
         ));
+        let mut first_terminal_views = std::collections::HashMap::new();
         murmur_core::protocol::write_message(
             &mut first,
             &ClientMessage::Layout {
@@ -2636,7 +2872,12 @@ mod tests {
             pane_id,
             TerminalCommand::Text(pid_command.into()),
         );
-        let first_view = wait_for_terminal_text(&mut first, pane_id, "murmur-pid=");
+        let first_view = wait_for_terminal_text(
+            &mut first,
+            &mut first_terminal_views,
+            pane_id,
+            "murmur-pid=",
+        );
         let first_pid = marker_value(&view_text(&first_view), "murmur-pid=");
         let snapshot_before_disconnect = handle.snapshot();
         drop(first);
@@ -2677,6 +2918,11 @@ mod tests {
         wait_for_message(&mut second, |message| {
             matches!(message, ServerMessage::Subscribed { .. })
         });
+        let mut second_terminal_views = second_bootstrap
+            .terminals
+            .iter()
+            .map(|terminal| (terminal.pane_id, terminal.view.clone()))
+            .collect();
 
         let reconnect_command = if cfg!(windows) {
             "Write-Output ('reconnect-' + 'pid=' + $PID)\r"
@@ -2690,7 +2936,12 @@ mod tests {
             pane_id,
             TerminalCommand::Text(reconnect_command.into()),
         );
-        let reconnect_view = wait_for_terminal_text(&mut second, pane_id, "reconnect-pid=");
+        let reconnect_view = wait_for_terminal_text(
+            &mut second,
+            &mut second_terminal_views,
+            pane_id,
+            "reconnect-pid=",
+        );
         assert_eq!(
             marker_value(&view_text(&reconnect_view), "reconnect-pid="),
             first_pid
@@ -2711,7 +2962,12 @@ mod tests {
             pane_id,
             TerminalCommand::Paste("printf reconnect-ok\n".into()),
         );
-        wait_for_terminal_text(&mut second, pane_id, "reconnect-ok");
+        wait_for_terminal_text(
+            &mut second,
+            &mut second_terminal_views,
+            pane_id,
+            "reconnect-ok",
+        );
         send_terminal(
             &mut second,
             server_id,
@@ -2726,7 +2982,7 @@ mod tests {
             pane_id,
             TerminalCommand::Text("stty size\r".into()),
         );
-        wait_for_terminal_text(&mut second, pane_id, "10 40");
+        wait_for_terminal_text(&mut second, &mut second_terminal_views, pane_id, "10 40");
         send_terminal(
             &mut second,
             server_id,
@@ -2736,7 +2992,7 @@ mod tests {
                 "i=1; while [ $i -le 20 ]; do echo line-$i; i=$((i+1)); done\r".into(),
             ),
         );
-        wait_for_terminal_text(&mut second, pane_id, "line-20");
+        wait_for_terminal_text(&mut second, &mut second_terminal_views, pane_id, "line-20");
         thread::sleep(Duration::from_millis(50));
         send_terminal(
             &mut second,
@@ -2745,7 +3001,10 @@ mod tests {
             pane_id,
             TerminalCommand::Scroll(TerminalScroll::Top),
         );
-        let scrolled = wait_for_terminal(&mut second, pane_id, |view| view.display_offset > 0);
+        let scrolled =
+            wait_for_terminal(&mut second, &mut second_terminal_views, pane_id, |view| {
+                view.display_offset > 0
+            });
         let expected = (0..4)
             .filter_map(|column| scrolled.cell(0, column))
             .map(|cell| cell.text.as_str())
@@ -2809,32 +3068,43 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_terminal_text(
         stream: &mut EndpointStream,
+        views: &mut std::collections::HashMap<PaneId, murmur_core::TerminalView>,
         pane_id: PaneId,
         needle: &str,
     ) -> murmur_core::TerminalView {
-        wait_for_terminal(stream, pane_id, |view| view_text(view).contains(needle))
+        wait_for_terminal(stream, views, pane_id, |view| {
+            view_text(view).contains(needle)
+        })
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_terminal(
         stream: &mut EndpointStream,
+        views: &mut std::collections::HashMap<PaneId, murmur_core::TerminalView>,
         pane_id: PaneId,
         predicate: impl Fn(&murmur_core::TerminalView) -> bool,
     ) -> murmur_core::TerminalView {
-        match wait_for_message(stream, |message| {
-            matches!(
-                message,
-                ServerMessage::Event {
-                    event: SessionEvent::TerminalChanged { pane_id: event_pane, view },
-                    ..
-                } if *event_pane == pane_id && predicate(view)
-            )
-        }) {
-            ServerMessage::Event {
-                event: SessionEvent::TerminalChanged { view, .. },
-                ..
-            } => view,
-            _ => unreachable!(),
+        loop {
+            let message = read_server(stream);
+            if let ServerMessage::Error { message } = &message {
+                panic!("server returned an error: {message}");
+            }
+            let ServerMessage::TerminalFrame(batch) = message else {
+                continue;
+            };
+            for pane in batch.panes {
+                if let Some(view) = views.get_mut(&pane.pane_id) {
+                    view.apply_frame(pane.frame).unwrap();
+                } else if let murmur_core::TerminalViewFrame::Full(view) = pane.frame {
+                    views.insert(pane.pane_id, view);
+                } else {
+                    panic!("first terminal frame for a Pane must be full");
+                }
+                let view = &views[&pane.pane_id];
+                if pane.pane_id == pane_id && predicate(view) {
+                    return view.clone();
+                }
+            }
         }
     }
 
@@ -3162,14 +3432,21 @@ mod tests {
                 },
             )
             .unwrap();
-            match murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap()
-            {
-                ServerMessage::Event {
-                    sequence,
-                    event: SessionEvent::LayoutChanged,
-                    ..
-                } => snapshot_sequences.push(sequence),
-                other => panic!("unexpected mutation response: {other:?}"),
+            loop {
+                match murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller)
+                    .unwrap()
+                {
+                    ServerMessage::Event {
+                        sequence,
+                        event: SessionEvent::LayoutChanged,
+                        ..
+                    } => {
+                        snapshot_sequences.push(sequence);
+                        break;
+                    }
+                    ServerMessage::TerminalFrame(_) => {}
+                    other => panic!("unexpected mutation response: {other:?}"),
+                }
             }
         }
 
@@ -3187,6 +3464,7 @@ mod tests {
                         replayed_snapshots.push(sequence);
                     }
                 }
+                ServerMessage::TerminalFrame(_) => {}
                 other => panic!("unexpected subscriber response: {other:?}"),
             }
         }
