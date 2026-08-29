@@ -16,6 +16,7 @@ use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
 pub use portable_pty::CommandBuilder;
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
+use smol_str::{SmolStr, SmolStrBuilder};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 #[cfg(unix)]
@@ -52,7 +53,7 @@ pub enum TerminalColor {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TerminalCell {
-    pub text: String,
+    pub text: SmolStr,
     pub foreground: TerminalColor,
     pub background: TerminalColor,
     pub flags: u16,
@@ -617,13 +618,16 @@ impl TerminalRuntime {
             if row >= size.rows || column >= size.columns {
                 continue;
             }
-            let mut text = String::from(cell.c);
+            let mut text = SmolStrBuilder::new();
+            text.push(cell.c);
             if let Some(zerowidth) = cell.zerowidth() {
-                text.extend(zerowidth);
+                for &character in zerowidth {
+                    text.push(character);
+                }
             }
             cells[usize::from(row) * usize::from(size.columns) + usize::from(column)] =
                 TerminalCell {
-                    text,
+                    text: text.finish(),
                     foreground: terminal_color(cell.fg, colors),
                     background: terminal_color(cell.bg, colors),
                     flags: cell.flags.bits(),
@@ -1050,7 +1054,7 @@ fn publish_view(revision: &AtomicU64, updates: &mpsc::Sender<TerminalUpdate>) {
 
 fn blank_cell() -> TerminalCell {
     TerminalCell {
-        text: " ".into(),
+        text: SmolStr::new_static(" "),
         foreground: TerminalColor::Named(NamedColor::Foreground as u16),
         background: TerminalColor::Named(NamedColor::Background as u16),
         flags: 0,
@@ -1393,7 +1397,7 @@ mod tests {
         let size = TerminalSize::new(1, 40);
         let mut cells = vec![blank_cell(); usize::from(size.columns)];
         for (column, ch) in text.chars().enumerate() {
-            cells[column].text = ch.to_string();
+            cells[column].text = ch.to_string().into();
         }
         let view = TerminalView {
             revision: 1,

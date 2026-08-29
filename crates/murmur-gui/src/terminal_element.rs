@@ -16,6 +16,7 @@ use murmur_core::{
     PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSelection, TerminalSide,
     TerminalSize, TerminalView,
 };
+use smol_str::SmolStr;
 
 use crate::{ConnectionKey, Murmur};
 
@@ -91,17 +92,28 @@ pub(crate) struct TerminalElementProps {
 #[derive(Clone, PartialEq)]
 struct TerminalRenderCacheKey {
     runtime_epoch: Option<RuntimeEpoch>,
-    revision: u64,
     size: TerminalSize,
     style: TextStyle,
     font_size: Pixels,
     palette: TerminalPalette,
 }
 
+#[derive(Clone, PartialEq)]
+struct TerminalCellShapeKey {
+    text: SmolStr,
+    foreground: Hsla,
+    flags: u16,
+}
+
+struct CachedTerminalCell {
+    key: TerminalCellShapeKey,
+    line: ShapedLine,
+}
+
 #[derive(Default)]
 pub(crate) struct TerminalRenderCache {
     key: Option<TerminalRenderCacheKey>,
-    cells: Vec<Option<ShapedLine>>,
+    cells: Vec<Option<CachedTerminalCell>>,
     #[cfg(all(test, feature = "test-support"))]
     shaped_cells: usize,
 }
@@ -110,6 +122,48 @@ pub(crate) struct TerminalRenderCache {
 impl TerminalRenderCache {
     pub(crate) fn shaped_cells(&self) -> usize {
         self.shaped_cells
+    }
+}
+
+impl TerminalRenderCache {
+    fn prepare(&mut self, key: TerminalRenderCacheKey, cell_count: usize) {
+        if self.key.as_ref() != Some(&key) {
+            self.key = Some(key);
+            self.cells.clear();
+            self.cells.resize_with(cell_count, || None);
+        }
+    }
+
+    fn shaped_line(
+        &mut self,
+        index: usize,
+        text: &SmolStr,
+        foreground: Hsla,
+        flags: u16,
+        shape: impl FnOnce() -> ShapedLine,
+    ) -> ShapedLine {
+        if let Some(cached) = self.cells[index].as_ref()
+            && cached.key.text == *text
+            && cached.key.foreground == foreground
+            && cached.key.flags == flags
+        {
+            return cached.line.clone();
+        }
+
+        let line = shape();
+        self.cells[index] = Some(CachedTerminalCell {
+            key: TerminalCellShapeKey {
+                text: text.clone(),
+                foreground,
+                flags,
+            },
+            line: line.clone(),
+        });
+        #[cfg(all(test, feature = "test-support"))]
+        {
+            self.shaped_cells += 1;
+        }
+        line
     }
 }
 
@@ -329,19 +383,15 @@ impl Element for TerminalElement {
         let mut cells = Vec::with_capacity(self.props.terminal.cells.len());
         let cache_key = TerminalRenderCacheKey {
             runtime_epoch: self.props.runtime_epoch,
-            revision: self.props.terminal.revision,
             size: self.props.terminal.size,
             style: style.clone(),
             font_size,
             palette: palette.clone(),
         };
         let mut render_cache = self.props.render_cache.borrow_mut();
-        if render_cache.key.as_ref() != Some(&cache_key) {
-            render_cache.key = Some(cache_key);
-            render_cache.cells = vec![None; self.props.terminal.cells.len()];
-        }
+        render_cache.prepare(cache_key, self.props.terminal.cells.len());
 
-        // Selection-only frames reuse shaped cells; terminal revisions invalidate the cache.
+        // Terminal revisions often change only a cursor or spinner cell.
         for row in 0..self.props.terminal.size.rows {
             for column in 0..self.props.terminal.size.columns {
                 let Some(cell) = self.props.terminal.cell(row, column) else {
@@ -373,9 +423,12 @@ impl Element for TerminalElement {
 
                 let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
                     + usize::from(column);
-                let line = match render_cache.cells[cache_index].clone() {
-                    Some(line) => line,
-                    None => {
+                let line = render_cache.shaped_line(
+                    cache_index,
+                    &cell.text,
+                    foreground,
+                    cell.flags,
+                    || {
                         let mut font = style.font();
                         if cell.flags & BOLD != 0 {
                             font = font.bold();
@@ -395,8 +448,8 @@ impl Element for TerminalElement {
                                 thickness: px(1.),
                                 color: Some(foreground),
                             });
-                        let line = window.text_system().shape_line(
-                            cell.text.clone().into(),
+                        window.text_system().shape_line(
+                            cell.text.as_str().into(),
                             font_size,
                             &[TextRun {
                                 len: cell.text.len(),
@@ -407,15 +460,9 @@ impl Element for TerminalElement {
                                 strikethrough,
                             }],
                             None,
-                        );
-                        render_cache.cells[cache_index] = Some(line.clone());
-                        #[cfg(all(test, feature = "test-support"))]
-                        {
-                            render_cache.shaped_cells += 1;
-                        }
-                        line
-                    }
-                };
+                        )
+                    },
+                );
                 cells.push(ShapedCell {
                     origin: cell_bounds.origin,
                     line,
@@ -725,6 +772,44 @@ fn color_cube(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn render_cache_reuses_unchanged_cells_across_terminal_frames() {
+        let mut cache = TerminalRenderCache::default();
+        let key = TerminalRenderCacheKey {
+            runtime_epoch: None,
+            size: TerminalSize::new(24, 80),
+            style: TextStyle::default(),
+            font_size: px(14.),
+            palette: TerminalPalette::temporary_dark(),
+        };
+        let foreground: Hsla = rgb(0xffffff).into();
+        cache.prepare(key.clone(), 2);
+        cache.shaped_line(
+            0,
+            &SmolStr::new_inline("x"),
+            foreground,
+            0,
+            ShapedLine::default,
+        );
+        assert_eq!(cache.shaped_cells(), 1);
+
+        cache.prepare(key, 2);
+        cache.shaped_line(0, &SmolStr::new_inline("x"), foreground, 0, || {
+            panic!("unchanged cell should reuse its shaped line")
+        });
+        assert_eq!(cache.shaped_cells(), 1);
+
+        cache.shaped_line(
+            0,
+            &SmolStr::new_inline("y"),
+            foreground,
+            0,
+            ShapedLine::default,
+        );
+        assert_eq!(cache.shaped_cells(), 2);
+    }
 
     #[test]
     fn temporary_palette_resolves_terminal_colors_independently_from_ui_theme() {

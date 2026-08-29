@@ -18,6 +18,7 @@ gpui-component.workspace = true
 gpui-component-assets.workspace = true
 murmur-core = { path = "../murmur-core" }
 murmur-server = { path = "../murmur-server" }
+smol_str.workspace = true
 
 [lints]
 workspace = true

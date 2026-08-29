@@ -24,6 +24,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const EVENT_HISTORY_LIMIT: usize = 256;
 const AGENT_SCAN_INTERVAL: Duration = Duration::from_millis(500);
 const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
+const TERMINAL_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -1595,6 +1596,9 @@ fn monitor_terminal(
 ) {
     thread::spawn(move || {
         let mut last_agent_scan = Instant::now();
+        let mut last_view_publish = Instant::now()
+            .checked_sub(TERMINAL_FRAME_INTERVAL)
+            .unwrap_or_else(Instant::now);
         let mut agent_scan_pending = false;
         let mut git_scan_pending = None;
         loop {
@@ -1610,6 +1614,13 @@ fn monitor_terminal(
                     Err(_) => break,
                 }
             };
+            let update = update.map(|update| {
+                coalesce_terminal_update(
+                    update,
+                    &updates,
+                    last_view_publish + TERMINAL_FRAME_INTERVAL,
+                )
+            });
             match update {
                 Some(TerminalUpdate::View(_)) => {
                     agent_scan_pending = true;
@@ -1620,6 +1631,7 @@ fn monitor_terminal(
                         break;
                     };
                     state.publish_background(SessionEvent::TerminalChanged { pane_id, view });
+                    last_view_publish = Instant::now();
                 }
                 Some(TerminalUpdate::Exited) => {
                     let mut state = state.lock().expect("server state lock poisoned");
@@ -1679,6 +1691,34 @@ fn monitor_terminal(
             }
         }
     });
+}
+
+fn coalesce_terminal_update(
+    first: TerminalUpdate,
+    updates: &mpsc::Receiver<TerminalUpdate>,
+    publish_at: Instant,
+) -> TerminalUpdate {
+    let TerminalUpdate::View(mut revision) = first else {
+        return first;
+    };
+
+    loop {
+        let next = if let Some(remaining) = publish_at.checked_duration_since(Instant::now()) {
+            match updates.recv_timeout(remaining) {
+                Ok(update) => Some(update),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return TerminalUpdate::View(revision),
+            }
+        } else {
+            updates.try_recv().ok()
+        };
+
+        match next {
+            Some(TerminalUpdate::View(next_revision)) => revision = next_revision,
+            Some(TerminalUpdate::Exited) => return TerminalUpdate::Exited,
+            None => return TerminalUpdate::View(revision),
+        }
+    }
 }
 
 fn apply_agent_refresh(state: &mut RuntimeState, pane_id: PaneId, next: Option<AgentSnapshot>) {
@@ -1928,6 +1968,30 @@ pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_frame_coalescing_keeps_the_latest_revision() {
+        let (sender, updates) = mpsc::channel();
+        sender.send(TerminalUpdate::View(2)).unwrap();
+        sender.send(TerminalUpdate::View(3)).unwrap();
+
+        assert_eq!(
+            coalesce_terminal_update(TerminalUpdate::View(1), &updates, Instant::now()),
+            TerminalUpdate::View(3)
+        );
+    }
+
+    #[test]
+    fn terminal_exit_supersedes_queued_view_updates() {
+        let (sender, updates) = mpsc::channel();
+        sender.send(TerminalUpdate::View(2)).unwrap();
+        sender.send(TerminalUpdate::Exited).unwrap();
+
+        assert_eq!(
+            coalesce_terminal_update(TerminalUpdate::View(1), &updates, Instant::now()),
+            TerminalUpdate::Exited
+        );
+    }
 
     fn test_endpoint() -> Endpoint {
         Endpoint::local(std::env::temp_dir().join(format!(

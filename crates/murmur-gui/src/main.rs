@@ -164,11 +164,19 @@ impl ClientIo {
             })?;
 
         let incoming_task = cx.spawn_in(window, async move |owner, cx| {
-            while let Ok(incoming) = incoming_rx.recv().await {
+            while let Ok(first) = incoming_rx.recv().await {
+                let mut incoming = Vec::with_capacity(SERVER_EVENT_BUFFER_CAPACITY.min(16));
+                incoming.push(first);
+                while let Ok(next) = incoming_rx.try_recv() {
+                    incoming.push(next);
+                }
                 if owner
                     .update_in(cx, |this, window, cx| {
-                        if this.handle_incoming(key, incoming, cx) && key == this.active_connection
-                        {
+                        let mut rebuild = false;
+                        for incoming in incoming {
+                            rebuild |= this.handle_incoming(key, incoming, cx);
+                        }
+                        if rebuild && key == this.active_connection {
                             this.rebuild_dock(window, cx);
                         }
                         cx.notify();
@@ -3027,8 +3035,10 @@ mod tests {
             TestAppContext, VisualTestContext, point, px, size,
         };
         use gpui_component::{Root, WindowExt as _};
+        #[cfg(target_os = "linux")]
+        use murmur_core::SplitDirection;
         use murmur_core::protocol::LayoutCommand;
-        use murmur_core::{PaneId, SplitDirection, TabId, TerminalCommand, WorkspaceId};
+        use murmur_core::{PaneId, TabId, TerminalCommand, WorkspaceId};
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{
@@ -3126,6 +3136,7 @@ mod tests {
             Box::leak(format!("workspace-1-{}", workspace_id.as_u64()).into_boxed_str())
         }
 
+        #[cfg(target_os = "linux")]
         fn sidebar_agent_selector(pane_id: PaneId) -> &'static str {
             Box::leak(format!("agent-1-{}", pane_id.as_u64()).into_boxed_str())
         }

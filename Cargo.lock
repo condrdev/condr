@@ -3920,6 +3920,7 @@ dependencies = [
  "nix",
  "portable-pty",
  "serde",
+ "smol_str",
  "sysinfo",
 ]
 
@@ -3934,6 +3935,7 @@ dependencies = [
  "gpui_platform",
  "murmur-core",
  "murmur-server",
+ "smol_str",
 ]
 
 [[package]]
