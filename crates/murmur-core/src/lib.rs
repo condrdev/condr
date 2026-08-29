@@ -23,6 +23,7 @@ pub use terminal::{
     TerminalCommand, TerminalCursor, TerminalCursorShape, TerminalFrameError, TerminalKey,
     TerminalModifiers, TerminalPosition, TerminalRuntime, TerminalScroll, TerminalSelection,
     TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    TerminalViewSource,
 };
 
 pub const APP_NAME: &str = "Murmur";

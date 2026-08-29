@@ -171,4 +171,28 @@ mod tests {
             Some(ClientWriteItem::Render(b"fresh".to_vec()))
         );
     }
+
+    #[test]
+    fn bootstrap_stays_after_an_in_flight_render_and_before_a_fresh_render() {
+        let (writer, receiver) = ClientWriter::channel();
+        writer.try_send_render(b"in-flight".to_vec()).unwrap();
+        let in_flight = receiver.recv();
+
+        writer.clear_render();
+        writer.send_reliable(b"bootstrap".to_vec()).unwrap();
+        writer.try_send_render(b"fresh".to_vec()).unwrap();
+
+        assert_eq!(
+            in_flight,
+            Some(ClientWriteItem::Render(b"in-flight".to_vec()))
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"bootstrap".to_vec()))
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Render(b"fresh".to_vec()))
+        );
+    }
 }

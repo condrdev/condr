@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+bincode.workspace = true
 interprocess.workspace = true
 murmur-core = { path = "../murmur-core" }
 tokio.workspace = true

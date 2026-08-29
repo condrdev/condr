@@ -1,12 +1,12 @@
 mod terminal_element;
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use gpui::prelude::FluentBuilder as _;
@@ -30,13 +30,15 @@ use gpui_component::{
 };
 use gpui_component_assets::Assets;
 use murmur_core::protocol::{
-    ClientMessage, LayoutCommand, PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage,
-    SessionBootstrap, SessionEvent, SessionId, WorkspaceGitSnapshot,
+    ClientMessage, LayoutCommand, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId,
+    ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+    WorkspaceGitSnapshot,
 };
 use murmur_core::{
     AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot,
-    SplitDirection, TabId, TerminalCommand, TerminalKey, TerminalModifiers, TerminalPosition,
-    TerminalScroll, TerminalSelection, TerminalSize, WorkspaceId,
+    SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalKey, TerminalModifiers,
+    TerminalPosition, TerminalScroll, TerminalSelection, TerminalSize, TerminalViewDelta,
+    TerminalViewFrame, WorkspaceId,
 };
 use murmur_server::{ClientConnection, Endpoint, ServerConfig};
 
@@ -108,7 +110,144 @@ fn default_window_options(cx: &App) -> WindowOptions {
 
 enum Incoming {
     Message(ServerMessage),
+    VisualReady(u64),
+    TerminalResync,
     Disconnected(String),
+}
+
+#[derive(Default)]
+struct TerminalVisualSlot {
+    state: Mutex<TerminalVisualSlotState>,
+}
+
+#[derive(Default)]
+struct TerminalVisualSlotState {
+    generation: u64,
+    pending: Option<PendingTerminalVisual>,
+    signaled: bool,
+}
+
+struct PendingTerminalVisual {
+    server_id: ServerId,
+    session_id: SessionId,
+    panes: HashMap<PaneId, TerminalViewFrame>,
+}
+
+impl TerminalVisualSlot {
+    fn publish(&self, batch: TerminalFrameBatch) -> Result<Option<u64>, ()> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let pending = state.pending.get_or_insert_with(|| PendingTerminalVisual {
+            server_id: batch.server_id,
+            session_id: batch.session_id,
+            panes: HashMap::new(),
+        });
+        if pending.server_id != batch.server_id || pending.session_id != batch.session_id {
+            return Err(());
+        }
+        for pane in batch.panes {
+            match pending.panes.remove(&pane.pane_id) {
+                Some(previous) => {
+                    pending
+                        .panes
+                        .insert(pane.pane_id, merge_terminal_frames(previous, pane.frame)?);
+                }
+                None => {
+                    pending.panes.insert(pane.pane_id, pane.frame);
+                }
+            }
+        }
+        if state.signaled {
+            Ok(None)
+        } else {
+            state.signaled = true;
+            Ok(Some(state.generation))
+        }
+    }
+
+    fn take(&self, generation: u64) -> Option<TerminalFrameBatch> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.generation != generation {
+            return None;
+        }
+        state.signaled = false;
+        let pending = state.pending.take()?;
+        Some(TerminalFrameBatch {
+            server_id: pending.server_id,
+            session_id: pending.session_id,
+            panes: pending
+                .panes
+                .into_iter()
+                .map(|(pane_id, frame)| PaneTerminalFrame { pane_id, frame })
+                .collect(),
+        })
+    }
+
+    fn advance(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.generation = state.generation.wrapping_add(1);
+        state.pending = None;
+        state.signaled = false;
+    }
+}
+
+fn merge_terminal_frames(
+    previous: TerminalViewFrame,
+    next: TerminalViewFrame,
+) -> Result<TerminalViewFrame, ()> {
+    match (previous, next) {
+        (TerminalViewFrame::Full(mut view), TerminalViewFrame::Delta(delta)) => {
+            view.apply_frame(TerminalViewFrame::Delta(delta))
+                .map_err(|_| ())?;
+            Ok(TerminalViewFrame::Full(view))
+        }
+        (_, TerminalViewFrame::Full(view)) => Ok(TerminalViewFrame::Full(view)),
+        (TerminalViewFrame::Delta(previous), TerminalViewFrame::Delta(next)) => {
+            merge_terminal_deltas(previous, next).map(TerminalViewFrame::Delta)
+        }
+    }
+}
+
+fn merge_terminal_deltas(
+    previous: TerminalViewDelta,
+    next: TerminalViewDelta,
+) -> Result<TerminalViewDelta, ()> {
+    if previous.revision != next.base_revision {
+        return Err(());
+    }
+    let mut cells = BTreeMap::new();
+    for run in previous.runs.into_iter().chain(next.runs) {
+        if run.cells.is_empty() {
+            return Err(());
+        }
+        for (offset, cell) in run.cells.into_iter().enumerate() {
+            let offset = u32::try_from(offset).map_err(|_| ())?;
+            let index = run.start.checked_add(offset).ok_or(())?;
+            cells.insert(index, cell);
+        }
+    }
+    let mut runs: Vec<TerminalCellRun> = Vec::new();
+    for (index, cell) in cells {
+        if let Some(run) = runs.last_mut()
+            && run
+                .start
+                .checked_add(u32::try_from(run.cells.len()).map_err(|_| ())?)
+                == Some(index)
+        {
+            run.cells.push(cell);
+        } else {
+            runs.push(TerminalCellRun {
+                start: index,
+                cells: vec![cell],
+            });
+        }
+    }
+    Ok(TerminalViewDelta {
+        base_revision: previous.base_revision,
+        revision: next.revision,
+        display_offset: next.display_offset,
+        cursor: next.cursor,
+        runs,
+    })
 }
 
 #[derive(Default)]
@@ -126,6 +265,8 @@ impl ClientIo {
     fn start(
         connection: ClientConnection,
         key: ConnectionKey,
+        initial_server_id: ServerId,
+        initial_session_id: SessionId,
         window: &Window,
         cx: &Context<Murmur>,
     ) -> std::io::Result<Self> {
@@ -134,6 +275,7 @@ impl ClientIo {
         let (outgoing, outgoing_rx) = mpsc::channel();
         let (incoming_tx, incoming_rx) = async_channel::bounded(SERVER_EVENT_BUFFER_CAPACITY);
         let writer_events = incoming_tx.clone();
+        let visual_slot = Arc::new(TerminalVisualSlot::default());
 
         thread::Builder::new()
             .name("murmur-client-writer".into())
@@ -147,11 +289,56 @@ impl ClientIo {
                     }
                 }
             })?;
+        let reader_visual_slot = Arc::clone(&visual_slot);
         thread::Builder::new()
             .name("murmur-client-reader".into())
             .spawn(move || {
+                let mut server_id = initial_server_id;
+                let mut session_id = initial_session_id;
+                let mut resync_pending = false;
                 loop {
                     match murmur_core::protocol::read_message(&mut reader) {
+                        Ok(ServerMessage::TerminalFrame(batch)) => {
+                            if resync_pending
+                                || batch.server_id != server_id
+                                || batch.session_id != session_id
+                            {
+                                continue;
+                            }
+                            match reader_visual_slot.publish(batch) {
+                                Ok(Some(generation)) => {
+                                    if incoming_tx
+                                        .send_blocking(Incoming::VisualReady(generation))
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(()) => {
+                                    reader_visual_slot.advance();
+                                    resync_pending = true;
+                                    if incoming_tx.send_blocking(Incoming::TerminalResync).is_err()
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(ServerMessage::Bootstrap(bootstrap)) => {
+                            server_id = bootstrap.server_id;
+                            session_id = bootstrap.session_id;
+                            resync_pending = false;
+                            reader_visual_slot.advance();
+                            if incoming_tx
+                                .send_blocking(Incoming::Message(ServerMessage::Bootstrap(
+                                    bootstrap,
+                                )))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                         Ok(message) => {
                             if incoming_tx
                                 .send_blocking(Incoming::Message(message))
@@ -180,6 +367,15 @@ impl ClientIo {
                     .update_in(cx, |this, window, cx| {
                         let mut effect = IncomingEffect::default();
                         for incoming in incoming {
+                            let incoming = match incoming {
+                                Incoming::VisualReady(generation) => {
+                                    let Some(batch) = visual_slot.take(generation) else {
+                                        continue;
+                                    };
+                                    Incoming::Message(ServerMessage::TerminalFrame(batch))
+                                }
+                                incoming => incoming,
+                            };
                             let next = this.handle_incoming(key, incoming, cx);
                             effect.rebuild |= next.rebuild;
                             effect.notify |= next.notify;
@@ -701,8 +897,15 @@ impl Murmur {
     ) -> Result<(), String> {
         let client = result?;
         let bootstrap = client.bootstrap().clone();
-        let io = ClientIo::start(client, connection.key, window, cx)
-            .map_err(|error| error.to_string())?;
+        let io = ClientIo::start(
+            client,
+            connection.key,
+            bootstrap.server_id,
+            bootstrap.session_id,
+            window,
+            cx,
+        )
+        .map_err(|error| error.to_string())?;
         connection.apply_bootstrap(bootstrap);
         connection.io = Some(io);
         connection.controlling = false;
@@ -868,6 +1071,11 @@ impl Murmur {
         };
         let message = match incoming {
             Incoming::Message(message) => message,
+            Incoming::TerminalResync => {
+                self.connections[index].request_snapshot();
+                return IncomingEffect::default();
+            }
+            Incoming::VisualReady(_) => return IncomingEffect::default(),
             Incoming::Disconnected(error) => {
                 let connection = &mut self.connections[index];
                 connection.status = ConnectionStatus::Disconnected;
@@ -1209,14 +1417,29 @@ impl Murmur {
         let key = connection.key;
         self.target_pane = Some((key, focused));
         let dock_layout = self.build_dock_layout(key, &layout, cx);
+        let focus = self
+            .panels
+            .get(&(key, focused))
+            .expect("focused terminal Panel exists in the rebuilt Dock")
+            .read(cx)
+            .focus_handle
+            .clone();
         self.rebuilding_dock = true;
         self.dock_area.update(cx, |dock, cx| {
             dock.set_locked(true, window, cx);
             dock.set_center(dock_layout, window, cx);
         });
         let owner = cx.weak_entity();
-        window.defer(cx, move |_, cx| {
-            let _ = owner.update(cx, |this, _| this.rebuilding_dock = false);
+        window.defer(cx, move |window, cx| {
+            let should_focus = owner
+                .update(cx, |this, _| {
+                    this.rebuilding_dock = false;
+                    this.active_connection == key && this.target_pane == Some((key, focused))
+                })
+                .unwrap_or(false);
+            if should_focus && !window.has_active_dialog(cx) {
+                focus.focus(window, cx);
+            }
         });
     }
 
@@ -3089,8 +3312,50 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use gpui::Keystroke;
+    use murmur_core::protocol::{PaneTerminalFrame, ServerId, SessionId, TerminalFrameBatch};
+    use murmur_core::{
+        Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize, TerminalView,
+        TerminalViewDelta, TerminalViewFrame,
+    };
 
-    use super::{FocusLeft, NextTab, PreviousTab, SplitDown, SplitRight, fixed_shortcut};
+    use super::{
+        FocusLeft, NextTab, PreviousTab, SplitDown, SplitRight, TerminalVisualSlot, fixed_shortcut,
+        merge_terminal_deltas,
+    };
+
+    fn terminal_cell(text: &str) -> TerminalCell {
+        TerminalCell {
+            text: text.into(),
+            foreground: TerminalColor::Named(0),
+            background: TerminalColor::Named(0),
+            flags: 0,
+        }
+    }
+
+    fn terminal_view(revision: u64, text: &str) -> TerminalView {
+        let cells = text
+            .chars()
+            .map(|character| terminal_cell(&character.to_string()))
+            .collect::<Vec<_>>();
+        TerminalView {
+            revision,
+            size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
+            display_offset: 0,
+            cells,
+            cursor: None,
+        }
+    }
+
+    fn pane_id() -> murmur_core::PaneId {
+        let mut session = Session::new();
+        session.create_workspace(std::env::temp_dir());
+        session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id()
+    }
 
     #[test]
     fn terminal_shortcut_fallback_maps_only_fixed_chords() {
@@ -3109,6 +3374,112 @@ mod tests {
         assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
         assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
         assert!(action("ctrl-p").is_none());
+    }
+
+    #[test]
+    fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
+        let pane_id = pane_id();
+        let slot = TerminalVisualSlot::default();
+        let batch = |frame| TerminalFrameBatch {
+            server_id: ServerId(1),
+            session_id: SessionId(2),
+            panes: vec![PaneTerminalFrame { pane_id, frame }],
+        };
+        let first = TerminalViewDelta {
+            base_revision: 1,
+            revision: 2,
+            display_offset: 0,
+            cursor: None,
+            runs: vec![TerminalCellRun {
+                start: 1,
+                cells: vec![terminal_cell("X")],
+            }],
+        };
+        let second = TerminalViewDelta {
+            base_revision: 2,
+            revision: 3,
+            display_offset: 0,
+            cursor: None,
+            runs: vec![TerminalCellRun {
+                start: 2,
+                cells: vec![terminal_cell("Y")],
+            }],
+        };
+
+        assert_eq!(
+            slot.publish(batch(TerminalViewFrame::Delta(first)))
+                .unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            slot.publish(batch(TerminalViewFrame::Delta(second)))
+                .unwrap(),
+            None
+        );
+        let mut view = terminal_view(1, "abcd");
+        let pending = slot.take(0).unwrap();
+        assert_eq!(pending.panes.len(), 1);
+        view.apply_frame(pending.panes.into_iter().next().unwrap().frame)
+            .unwrap();
+        assert_eq!(view.revision, 3);
+        assert_eq!(view.cells[1].text.as_str(), "X");
+        assert_eq!(view.cells[2].text.as_str(), "Y");
+    }
+
+    #[test]
+    fn bootstrap_generation_discards_an_old_visual_signal() {
+        let pane_id = pane_id();
+        let slot = TerminalVisualSlot::default();
+        let batch = |revision, text| TerminalFrameBatch {
+            server_id: ServerId(1),
+            session_id: SessionId(2),
+            panes: vec![PaneTerminalFrame {
+                pane_id,
+                frame: TerminalViewFrame::Full(terminal_view(revision, text)),
+            }],
+        };
+
+        assert_eq!(slot.publish(batch(1, "old")).unwrap(), Some(0));
+        slot.advance();
+        assert_eq!(slot.publish(batch(2, "new")).unwrap(), Some(1));
+        assert!(slot.take(0).is_none());
+        let current = slot.take(1).unwrap();
+        assert!(matches!(
+            &current.panes[0].frame,
+            TerminalViewFrame::Full(view) if view.revision == 2
+        ));
+    }
+
+    #[test]
+    fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
+        let previous = TerminalViewDelta {
+            base_revision: 4,
+            revision: 5,
+            display_offset: 0,
+            cursor: None,
+            runs: vec![TerminalCellRun {
+                start: 1,
+                cells: vec![terminal_cell("A"), terminal_cell("B")],
+            }],
+        };
+        let next = TerminalViewDelta {
+            base_revision: 5,
+            revision: 6,
+            display_offset: 3,
+            cursor: None,
+            runs: vec![TerminalCellRun {
+                start: 2,
+                cells: vec![terminal_cell("C")],
+            }],
+        };
+
+        let merged = merge_terminal_deltas(previous, next).unwrap();
+        assert_eq!((merged.base_revision, merged.revision), (4, 6));
+        assert_eq!(merged.display_offset, 3);
+        assert_eq!(merged.runs.len(), 1);
+        assert_eq!(merged.runs[0].start, 1);
+        assert_eq!(merged.runs[0].cells[0].text.as_str(), "A");
+        assert_eq!(merged.runs[0].cells[1].text.as_str(), "C");
     }
 
     #[cfg(feature = "test-support")]
@@ -4172,6 +4543,49 @@ mod tests {
             assert!(
                 tab_created,
                 "GUI did not render the tab created by the real server"
+            );
+
+            let new_pane = window
+                .read(|app| {
+                    view.read(app)
+                        .active_session()?
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().focused_pane().id())
+                })
+                .unwrap();
+            let new_tab_focused = wait_until(window, |window| {
+                let focus = window.read(|app| {
+                    view.read(app)
+                        .panels
+                        .get(&(1, new_pane))
+                        .map(|panel| panel.read(app).focus_handle.clone())
+                });
+                focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+            });
+            assert!(
+                new_tab_focused,
+                "the terminal in a newly created Tab did not receive keyboard focus"
+            );
+            window.simulate_input("MURMUR_NEW_TAB_FOCUS");
+            let new_tab_received_input = wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .and_then(|connection| connection.terminals.get(&new_pane))
+                        .is_some_and(|terminal| {
+                            terminal
+                                .view
+                                .cells
+                                .iter()
+                                .map(|cell| cell.text.as_str())
+                                .collect::<String>()
+                                .contains("MURMUR_NEW_TAB_FOCUS")
+                        })
+                })
+            });
+            assert!(
+                new_tab_received_input,
+                "the terminal in a newly created Tab did not receive text input"
             );
 
             let active_tab = window

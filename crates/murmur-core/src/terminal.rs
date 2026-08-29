@@ -10,8 +10,8 @@ use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
-use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config, TermMode};
+use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::{Config, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
 pub use portable_pty::CommandBuilder;
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
@@ -94,6 +94,21 @@ pub struct TerminalViewDelta {
 pub enum TerminalViewFrame {
     Full(TerminalView),
     Delta(TerminalViewDelta),
+}
+
+#[derive(Clone)]
+pub struct TerminalViewSource {
+    terminal: Arc<Mutex<Terminal>>,
+    size: Arc<Mutex<TerminalSize>>,
+    revision: Arc<AtomicU64>,
+    damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
+}
+
+#[derive(Clone, Copy)]
+struct TerminalDamageBaseline {
+    revision: u64,
+    size: TerminalSize,
+    display_offset: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -567,6 +582,7 @@ pub struct TerminalRuntime {
     process: ProcessProbe,
     size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
+    damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
     update_sender: mpsc::Sender<TerminalUpdate>,
     updates: Option<mpsc::Receiver<TerminalUpdate>>,
     io: mpsc::Sender<IoCommand>,
@@ -613,6 +629,7 @@ impl TerminalRuntime {
         };
         let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
         let revision = Arc::new(AtomicU64::new(0));
+        let damage_baseline = Arc::new(Mutex::new(None));
         let (update_sender, updates) = mpsc::channel();
 
         let writer_terminal = Arc::clone(&terminal);
@@ -664,6 +681,7 @@ impl TerminalRuntime {
             process: ProcessProbe::new(shell_pid),
             size: current_size,
             revision,
+            damage_baseline,
             update_sender,
             updates: Some(updates),
             io,
@@ -741,57 +759,15 @@ impl TerminalRuntime {
     }
 
     pub fn view(&self) -> TerminalView {
-        let size = *self.size.lock().expect("terminal size lock poisoned");
-        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        let content = terminal.renderable_content();
-        let display_offset = content.display_offset;
-        let cursor = content.cursor;
-        let colors = content.colors;
-        let mut cells = vec![blank_cell(); usize::from(size.rows) * usize::from(size.columns)];
+        self.view_source().view()
+    }
 
-        for cell in content.display_iter {
-            let row = cell.point.line.0 + display_offset as i32;
-            let Ok(row) = u16::try_from(row) else {
-                continue;
-            };
-            let Ok(column) = u16::try_from(cell.point.column.0) else {
-                continue;
-            };
-            if row >= size.rows || column >= size.columns {
-                continue;
-            }
-            let mut text = SmolStrBuilder::new();
-            text.push(cell.c);
-            if let Some(zerowidth) = cell.zerowidth() {
-                for &character in zerowidth {
-                    text.push(character);
-                }
-            }
-            cells[usize::from(row) * usize::from(size.columns) + usize::from(column)] =
-                TerminalCell {
-                    text: text.finish(),
-                    foreground: terminal_color(cell.fg, colors),
-                    background: terminal_color(cell.bg, colors),
-                    flags: cell.flags.bits(),
-                };
-        }
-
-        let cursor_row = cursor.point.line.0 + display_offset as i32;
-        let cursor = u16::try_from(cursor_row).ok().and_then(|row| {
-            let column = u16::try_from(cursor.point.column.0).ok()?;
-            (row < size.rows && column < size.columns).then_some(TerminalCursor {
-                row,
-                column,
-                shape: cursor.shape.into(),
-            })
-        });
-
-        TerminalView {
-            revision: self.revision(),
-            size,
-            display_offset: u32::try_from(display_offset).unwrap_or(u32::MAX),
-            cells,
-            cursor,
+    pub fn view_source(&self) -> TerminalViewSource {
+        TerminalViewSource {
+            terminal: Arc::clone(&self.terminal),
+            size: Arc::clone(&self.size),
+            revision: Arc::clone(&self.revision),
+            damage_baseline: Arc::clone(&self.damage_baseline),
         }
     }
 
@@ -935,6 +911,98 @@ impl TerminalRuntime {
     }
 }
 
+impl TerminalViewSource {
+    pub fn view(&self) -> TerminalView {
+        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let size = *self.size.lock().expect("terminal size lock poisoned");
+        snapshot_terminal(&terminal, size, self.revision.load(Ordering::Acquire))
+    }
+
+    pub fn take_frame(&self) -> Option<TerminalViewFrame> {
+        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let size = *self.size.lock().expect("terminal size lock poisoned");
+        let revision = self.revision.load(Ordering::Acquire);
+        let damage = match terminal.damage() {
+            TermDamage::Full => None,
+            TermDamage::Partial(lines) => Some(lines.collect::<Vec<_>>()),
+        };
+        let mut baseline = self
+            .damage_baseline
+            .lock()
+            .expect("terminal damage baseline lock poisoned");
+        let content = terminal.renderable_content();
+        let display_offset = u32::try_from(content.display_offset).unwrap_or(u32::MAX);
+        let cursor = terminal_cursor(
+            content.cursor.point,
+            content.cursor.shape,
+            content.display_offset,
+            size,
+        );
+        let requires_full = baseline.is_none_or(|baseline| {
+            baseline.size != size || baseline.display_offset != display_offset
+        }) || damage.is_none();
+
+        let frame = if baseline.is_some_and(|baseline| revision <= baseline.revision) {
+            None
+        } else if requires_full {
+            Some(TerminalViewFrame::Full(snapshot_terminal(
+                &terminal, size, revision,
+            )))
+        } else {
+            let previous = baseline.expect("partial damage has a baseline");
+            let columns = usize::from(size.columns);
+            let mut runs = Vec::new();
+            let mut changed_cells = 0usize;
+            for bounds in damage.expect("full damage was handled") {
+                if bounds.line >= usize::from(size.rows) || bounds.left >= columns {
+                    continue;
+                }
+                let right = bounds.right.min(columns - 1);
+                if bounds.left > right {
+                    continue;
+                }
+                let mut cells = Vec::with_capacity(right - bounds.left + 1);
+                let line = i32::try_from(bounds.line).unwrap_or(i32::MAX)
+                    - i32::try_from(content.display_offset).unwrap_or(i32::MAX);
+                for column in bounds.left..=right {
+                    cells.push(terminal_cell(
+                        &terminal.grid()[Point::new(Line(line), Column(column))],
+                        content.colors,
+                    ));
+                }
+                changed_cells += cells.len();
+                runs.push(TerminalCellRun {
+                    start: u32::try_from(bounds.line * columns + bounds.left)
+                        .expect("terminal cell count fits u32"),
+                    cells,
+                });
+            }
+            if changed_cells > usize::from(size.rows) * columns / 2 {
+                Some(TerminalViewFrame::Full(snapshot_terminal(
+                    &terminal, size, revision,
+                )))
+            } else {
+                Some(TerminalViewFrame::Delta(TerminalViewDelta {
+                    base_revision: previous.revision,
+                    revision,
+                    display_offset,
+                    cursor,
+                    runs,
+                }))
+            }
+        };
+
+        *baseline = Some(TerminalDamageBaseline {
+            revision,
+            size,
+            display_offset,
+        });
+        drop(baseline);
+        terminal.reset_damage();
+        frame
+    }
+}
+
 #[derive(Clone)]
 pub struct TerminalAgentProbe {
     terminal: Arc<Mutex<Terminal>>,
@@ -1013,10 +1081,8 @@ fn read_loop(
         match reader.read(&mut bytes) {
             Ok(0) => break Ok(()),
             Ok(read) => {
-                parser.advance(
-                    &mut *terminal.lock().expect("terminal state lock poisoned"),
-                    &bytes[..read],
-                );
+                let mut terminal = terminal.lock().expect("terminal state lock poisoned");
+                parser.advance(&mut *terminal, &bytes[..read]);
                 publish_view(&revision, &updates);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -1192,6 +1258,74 @@ fn descendant_depth(system: &System, mut pid: Pid, ancestor: Pid) -> Option<usiz
 fn publish_view(revision: &AtomicU64, updates: &mpsc::Sender<TerminalUpdate>) {
     let revision = revision.fetch_add(1, Ordering::AcqRel) + 1;
     let _ = updates.send(TerminalUpdate::View(revision));
+}
+
+fn snapshot_terminal(terminal: &Terminal, size: TerminalSize, revision: u64) -> TerminalView {
+    let content = terminal.renderable_content();
+    let display_offset = content.display_offset;
+    let cursor = terminal_cursor(
+        content.cursor.point,
+        content.cursor.shape,
+        display_offset,
+        size,
+    );
+    let mut cells = vec![blank_cell(); usize::from(size.rows) * usize::from(size.columns)];
+
+    for cell in content.display_iter {
+        let row = cell.point.line.0 + display_offset as i32;
+        let Ok(row) = u16::try_from(row) else {
+            continue;
+        };
+        let Ok(column) = u16::try_from(cell.point.column.0) else {
+            continue;
+        };
+        if row >= size.rows || column >= size.columns {
+            continue;
+        }
+        cells[usize::from(row) * usize::from(size.columns) + usize::from(column)] =
+            terminal_cell(cell.cell, content.colors);
+    }
+
+    TerminalView {
+        revision,
+        size,
+        display_offset: u32::try_from(display_offset).unwrap_or(u32::MAX),
+        cells,
+        cursor,
+    }
+}
+
+fn terminal_cell(cell: &Cell, colors: &alacritty_terminal::term::color::Colors) -> TerminalCell {
+    let mut text = SmolStrBuilder::new();
+    text.push(cell.c);
+    if let Some(zerowidth) = cell.zerowidth() {
+        for &character in zerowidth {
+            text.push(character);
+        }
+    }
+    TerminalCell {
+        text: text.finish(),
+        foreground: terminal_color(cell.fg, colors),
+        background: terminal_color(cell.bg, colors),
+        flags: cell.flags.bits(),
+    }
+}
+
+fn terminal_cursor(
+    point: Point,
+    shape: CursorShape,
+    display_offset: usize,
+    size: TerminalSize,
+) -> Option<TerminalCursor> {
+    let row = point.line.0 + display_offset as i32;
+    u16::try_from(row).ok().and_then(|row| {
+        let column = u16::try_from(point.column.0).ok()?;
+        (row < size.rows && column < size.columns).then_some(TerminalCursor {
+            row,
+            column,
+            shape: shape.into(),
+        })
+    })
 }
 
 fn blank_cell() -> TerminalCell {
@@ -1507,6 +1641,51 @@ mod tests {
         ));
         previous.apply_frame(frame).unwrap();
         assert_eq!(previous, current);
+    }
+
+    #[test]
+    fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
+        let size = TerminalSize::new(4, 12);
+        let (io, _commands) = mpsc::channel();
+        let shared_size = Arc::new(Mutex::new(size));
+        let terminal = Arc::new(Mutex::new(Term::new(
+            Config::default(),
+            &size,
+            TerminalEventProxy {
+                io,
+                size: Arc::clone(&shared_size),
+            },
+        )));
+        let revision = Arc::new(AtomicU64::new(0));
+        let source = TerminalViewSource {
+            terminal: Arc::clone(&terminal),
+            size: shared_size,
+            revision: Arc::clone(&revision),
+            damage_baseline: Arc::new(Mutex::new(None)),
+        };
+
+        let TerminalViewFrame::Full(mut retained) = source.take_frame().unwrap() else {
+            panic!("the first damage frame must establish a full baseline");
+        };
+        let mut parser: Processor = Processor::new();
+        parser.advance(
+            &mut *terminal.lock().expect("terminal state lock poisoned"),
+            b"abc",
+        );
+        revision.store(1, Ordering::Release);
+
+        let frame = source.take_frame().unwrap();
+        assert!(matches!(
+            &frame,
+            TerminalViewFrame::Delta(TerminalViewDelta {
+                base_revision: 0,
+                revision: 1,
+                runs,
+                ..
+            }) if runs.iter().map(|run| run.cells.len()).sum::<usize>() < retained.cells.len()
+        ));
+        retained.apply_frame(frame).unwrap();
+        assert_eq!(retained, source.view());
     }
 
     #[test]
