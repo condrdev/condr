@@ -69,7 +69,7 @@ reply=$(dd bs=1 count=6 2>/dev/null | od -An -tx1 | tr -d ' \n')
 printf '\033[14t'
 area=$(dd bs=1 count=12 2>/dev/null | od -An -tx1 | tr -d ' \n')
 stty sane
-printf '\r\nreply=%s area=%s env=%s/%s cwd=%s\r\n' "$reply" "$area" "$TERM" "$COLORTERM" "$PWD"
+printf '\r\nreply=%s area=%s env=%s/%s\r\ncwd=%s\r\n' "$reply" "$area" "$TERM" "$COLORTERM" "$PWD"
 IFS= read -r line
 printf 'input=%s\r\n' "$line"
 stty size"#,
@@ -80,6 +80,19 @@ stty size"#,
         TerminalRuntime::spawn(command, TerminalSize::new(24, 80).with_cell_size(8, 16)).unwrap();
     wait_for_text(&runtime, "reply=1b5b323b3152");
     wait_for_text(&runtime, "area=1b5b343b3338343b36343074");
+    let initial_text = runtime.visible_text();
+    assert!(
+        initial_text.contains("ready \u{4e16}\u{754c} e\u{301}"),
+        "{initial_text:?}"
+    );
+    assert!(
+        initial_text.contains("env=xterm-256color/truecolor"),
+        "{initial_text:?}"
+    );
+    assert!(
+        initial_text.contains(&format!("cwd={}", cwd.display())),
+        "{initial_text:?}"
+    );
 
     runtime.request_resize(TerminalSize::new(40, 100)).unwrap();
     runtime.request_resize(TerminalSize::new(24, 80)).unwrap();
@@ -93,9 +106,6 @@ stty size"#,
     assert!(runtime.agent_snapshot(None).is_none());
     assert!(runtime.revision() > 0);
     let text = runtime.visible_text();
-    assert!(text.contains("ready \u{4e16}\u{754c} e\u{301}"), "{text:?}");
-    assert!(text.contains("env=xterm-256color/truecolor"), "{text:?}");
-    assert!(text.contains(&format!("cwd={}", cwd.display())), "{text:?}");
     assert!(text.contains("input=hello"), "{text:?}");
     assert!(text.contains("24 80"), "{text:?}");
 
