@@ -356,6 +356,17 @@ impl Session {
         true
     }
 
+    pub fn clear_worktree_association(&mut self, workspace_id: WorkspaceId) -> bool {
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return false;
+        };
+        workspace.worktree.take().is_some()
+    }
+
     pub fn workspace_for_pane(&self, pane_id: PaneId) -> Option<&Workspace> {
         self.workspaces.iter().find(|workspace| {
             workspace

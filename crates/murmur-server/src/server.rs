@@ -317,7 +317,8 @@ impl BoundServer {
         let mut terminal_result = Ok(());
         let mut final_cwds = Vec::new();
         for (&pane_id, runtime) in &mut terminals {
-            let before_close = runtime.cwd();
+            let cwd_probe = runtime.cwd_probe();
+            let before_close = cwd_probe.observe();
             if let Err(error) = runtime.close() {
                 eprintln!(
                     "murmur-server: failed to close Terminal for Pane {}: {error}",
@@ -330,7 +331,7 @@ impl BoundServer {
                     )));
                 }
             }
-            if let Some(cwd) = shutdown_cwd(before_close, runtime.cwd()) {
+            if let Some(cwd) = shutdown_cwd(before_close, cwd_probe.observe()) {
                 final_cwds.push((pane_id, cwd));
             }
         }
@@ -419,15 +420,20 @@ impl ServerLifecycle {
     }
 }
 
-fn shutdown_cwd(before_close: Option<PathBuf>, after_close: Option<PathBuf>) -> Option<PathBuf> {
+fn shutdown_cwd(
+    before_close: (Option<PathBuf>, u64),
+    after_close: (Option<PathBuf>, u64),
+) -> Option<PathBuf> {
+    let persistable = |cwd: Option<PathBuf>| cwd.filter(|cwd| cwd.to_str().is_some());
+    if after_close.1 != before_close.1 {
+        return persistable(after_close.0).or_else(|| persistable(before_close.0));
+    }
+
     #[cfg(windows)]
-    let candidates = [after_close, before_close];
+    let candidates = [after_close.0, before_close.0];
     #[cfg(not(windows))]
-    let candidates = [before_close, after_close];
-    candidates
-        .into_iter()
-        .flatten()
-        .find(|cwd| cwd.to_str().is_some())
+    let candidates = [before_close.0, after_close.0];
+    candidates.into_iter().find_map(persistable)
 }
 
 fn observe_terminal_cwds(
@@ -437,6 +443,53 @@ fn observe_terminal_cwds(
         .into_iter()
         .map(|(pane_id, instance_id, probe)| (pane_id, instance_id, probe.cwd()))
         .collect()
+}
+
+fn restored_worktree_is_valid(root: &std::path::Path, parent_root: &std::path::Path) -> bool {
+    let Ok(Some(parent)) = discover_repository(parent_root) else {
+        return false;
+    };
+    let Ok(child) = open_worktree(&parent, root) else {
+        return false;
+    };
+    let Ok(root) = std::fs::canonicalize(root) else {
+        return false;
+    };
+    let Ok(discovered_root) = std::fs::canonicalize(child.root()) else {
+        return false;
+    };
+    root == discovered_root
+}
+
+fn clear_invalid_restored_worktrees(session: &mut Session) -> usize {
+    let associations = session
+        .workspaces()
+        .iter()
+        .filter_map(|workspace| {
+            workspace.worktree().map(|association| {
+                (
+                    workspace.id(),
+                    workspace.root_directory().to_path_buf(),
+                    association.parent_root_directory().to_path_buf(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut cleared = 0;
+    for (workspace_id, root, parent_root) in associations {
+        if restored_worktree_is_valid(&root, &parent_root) {
+            continue;
+        }
+        if session.clear_worktree_association(workspace_id) {
+            eprintln!(
+                "murmur-server: clearing stale worktree association for Workspace {} at {}",
+                workspace_id.as_u64(),
+                root.display()
+            );
+            cleared += 1;
+        }
+    }
+    cleared
 }
 
 struct ExternalOperationGuard {
@@ -684,6 +737,12 @@ impl RuntimeState {
             }
         }
 
+        let repaired_worktrees = if restored {
+            clear_invalid_restored_worktrees(&mut session)
+        } else {
+            0
+        };
+
         let launch_specs = session
             .workspaces()
             .iter()
@@ -692,9 +751,8 @@ impl RuntimeState {
                     tab.panes().iter().map(move |pane| {
                         (
                             pane.id(),
-                            pane.cwd()
-                                .unwrap_or_else(|| workspace.root_directory())
-                                .to_path_buf(),
+                            pane.cwd().map(PathBuf::from),
+                            workspace.root_directory().to_path_buf(),
                         )
                     })
                 })
@@ -702,23 +760,55 @@ impl RuntimeState {
             .collect::<Vec<_>>();
         let mut started_runtimes = Vec::new();
         let mut failed_panes = Vec::new();
-        for (pane_id, cwd) in launch_specs {
-            match TerminalRuntime::spawn_shell(&cwd, TerminalSize::new(24, 80)) {
-                Ok(mut runtime) => {
-                    let updates = runtime
-                        .take_updates()
-                        .expect("new Terminal update receiver exists");
-                    started_runtimes.push((pane_id, runtime, updates));
+        let mut repaired_cwds = 0;
+        for (pane_id, saved_cwd, workspace_root) in launch_specs {
+            let requested_cwd = saved_cwd.as_deref().unwrap_or(workspace_root.as_path());
+            let started = match TerminalRuntime::spawn_shell(
+                requested_cwd,
+                TerminalSize::new(24, 80),
+            ) {
+                Ok(runtime) => Some((runtime, requested_cwd.to_path_buf())),
+                Err(error) if requested_cwd != workspace_root.as_path() => {
+                    eprintln!(
+                        "murmur-server: fresh shell failed for Pane {} in saved cwd {}; retrying Workspace Root {}: {error}",
+                        pane_id.as_u64(),
+                        requested_cwd.display(),
+                        workspace_root.display()
+                    );
+                    match TerminalRuntime::spawn_shell(&workspace_root, TerminalSize::new(24, 80)) {
+                        Ok(runtime) => Some((runtime, workspace_root)),
+                        Err(fallback_error) => {
+                            eprintln!(
+                                "murmur-server: pruning Pane {} after fresh shell also failed in Workspace Root: {fallback_error}",
+                                pane_id.as_u64()
+                            );
+                            None
+                        }
+                    }
                 }
                 Err(error) => {
                     eprintln!(
                         "murmur-server: pruning Pane {} after fresh shell failed in {}: {error}",
                         pane_id.as_u64(),
-                        cwd.display()
+                        requested_cwd.display()
                     );
-                    failed_panes.push(pane_id);
+                    None
                 }
+            };
+            let Some((mut runtime, started_cwd)) = started else {
+                failed_panes.push(pane_id);
+                continue;
+            };
+            if saved_cwd.is_some()
+                && saved_cwd.as_deref() != Some(started_cwd.as_path())
+                && session.set_pane_cwd(pane_id, Some(started_cwd))
+            {
+                repaired_cwds += 1;
             }
+            let updates = runtime
+                .take_updates()
+                .expect("new Terminal update receiver exists");
+            started_runtimes.push((pane_id, runtime, updates));
         }
         for pane_id in &failed_panes {
             session
@@ -744,7 +834,7 @@ impl RuntimeState {
             .into_iter()
             .map(|(pane_id, runtime, updates)| state.install_terminal(pane_id, runtime, updates))
             .collect();
-        if restored && !failed_panes.is_empty() {
+        if restored && (!failed_panes.is_empty() || repaired_worktrees != 0 || repaired_cwds != 0) {
             state.schedule_snapshot(state.session.snapshot());
         }
         Ok((state, startup_terminals))
@@ -878,16 +968,6 @@ impl RuntimeState {
         }
     }
 
-    fn refresh_terminal_cwds(&mut self) -> bool {
-        let cwds = self
-            .terminals
-            .iter()
-            .filter(|(pane_id, _)| !self.exited_terminals.contains(pane_id))
-            .filter_map(|(&pane_id, runtime)| runtime.cwd().map(|cwd| (pane_id, cwd)))
-            .collect::<Vec<_>>();
-        self.record_terminal_cwds(cwds)
-    }
-
     fn terminal_cwd_probes(&self) -> Vec<(PaneId, u64, TerminalCwdProbe)> {
         self.terminals
             .iter()
@@ -902,6 +982,51 @@ impl RuntimeState {
             .collect()
     }
 
+    fn terminal_cwd_probe(&self, pane_id: PaneId) -> Option<(PaneId, u64, TerminalCwdProbe)> {
+        if self.exited_terminals.contains(&pane_id) || self.closing_terminals.contains(&pane_id) {
+            return None;
+        }
+        Some((
+            pane_id,
+            *self.terminal_instances.get(&pane_id)?,
+            self.terminals.get(&pane_id)?.cwd_probe(),
+        ))
+    }
+
+    fn terminal_cwd_probes_for_layout(
+        &self,
+        command: &LayoutCommand,
+    ) -> Vec<(PaneId, u64, TerminalCwdProbe)> {
+        if !layout_command_needs_cwd_observation(command) {
+            return Vec::new();
+        }
+        let pane_id = match command {
+            LayoutCommand::CreateTab { workspace_id } => self
+                .session
+                .workspace(*workspace_id)
+                .map(|workspace| workspace.active_tab().focused_pane().id()),
+            LayoutCommand::SplitPane { pane_id, .. } => Some(*pane_id),
+            _ => None,
+        };
+        pane_id
+            .and_then(|pane_id| self.terminal_cwd_probe(pane_id))
+            .into_iter()
+            .collect()
+    }
+
+    fn terminal_cwd_probes_for_workspace(
+        &self,
+        workspace_id: WorkspaceId,
+    ) -> Vec<(PaneId, u64, TerminalCwdProbe)> {
+        self.session
+            .workspace(workspace_id)
+            .into_iter()
+            .flat_map(|workspace| workspace.tabs())
+            .flat_map(|tab| tab.panes())
+            .filter_map(|pane| self.terminal_cwd_probe(pane.id()))
+            .collect()
+    }
+
     fn record_terminal_cwd_observations(
         &mut self,
         observations: Vec<(PaneId, u64, Option<PathBuf>)>,
@@ -909,10 +1034,12 @@ impl RuntimeState {
         let cwds = observations
             .into_iter()
             .filter_map(|(pane_id, instance_id, cwd)| {
-                self.terminal_is_current(pane_id, instance_id)
-                    .then_some(cwd)
-                    .flatten()
-                    .map(|cwd| (pane_id, cwd))
+                (self.terminal_is_current(pane_id, instance_id)
+                    && !self.closing_terminals.contains(&pane_id)
+                    && !self.exited_terminals.contains(&pane_id))
+                .then_some(cwd)
+                .flatten()
+                .map(|cwd| (pane_id, cwd))
             })
             .collect::<Vec<_>>();
         self.record_terminal_cwds(cwds)
@@ -1119,6 +1246,24 @@ impl RuntimeState {
         subscriber.bootstrap_pending = true;
         subscriber.deferred_reliable.clear();
         subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
+    }
+
+    fn ensure_subscriber(&mut self, client_id: u64, writer: ClientWriter) -> bool {
+        match self.subscribers.entry(client_id) {
+            std::collections::hash_map::Entry::Occupied(_) => false,
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let pending_terminals = self.terminals.keys().copied().collect();
+                entry.insert(ClientSubscriber {
+                    writer,
+                    terminal_baselines: std::collections::HashMap::new(),
+                    pending_terminals,
+                    render_generation: 1,
+                    bootstrap_pending: false,
+                    deferred_reliable: std::collections::VecDeque::new(),
+                });
+                true
+            }
+        }
     }
 
     fn finish_bootstrap(&mut self, client_id: u64, framed: FramedBootstrap) -> bool {
@@ -1411,7 +1556,6 @@ fn approve_external_layout(
                 .flat_map(|tab| tab.panes())
                 .map(|pane| pane.id())
                 .collect::<Vec<_>>();
-            state.refresh_terminal_cwds();
             for pane_id in pane_ids {
                 if let Some(runtime) = state.terminals.remove(&pane_id) {
                     if !state.exited_terminals.contains(&pane_id) {
@@ -1460,11 +1604,12 @@ fn finish_external_layout(
             let mut close_errors = Vec::new();
             let mut final_cwds = std::collections::HashMap::new();
             for (pane_id, runtime) in &mut stopped_terminals {
-                let before_close = runtime.cwd();
+                let cwd_probe = runtime.cwd_probe();
+                let before_close = cwd_probe.observe();
                 if let Err(error) = runtime.close() {
                     close_errors.push(format!("Pane {}: {error}", pane_id.as_u64()));
                 }
-                if let Some(cwd) = shutdown_cwd(before_close, runtime.cwd()) {
+                if let Some(cwd) = shutdown_cwd(before_close, cwd_probe.observe()) {
                     final_cwds.insert(*pane_id, cwd);
                 }
             }
@@ -1563,9 +1708,6 @@ fn apply_layout_command(
     state: &mut RuntimeState,
     command: LayoutCommand,
 ) -> Result<LayoutEffect, String> {
-    if layout_command_needs_cwd_refresh(&command) {
-        state.refresh_terminal_cwds();
-    }
     let mut candidate = state.session.clone();
     let mut new_pane = None;
     let mut closed = None;
@@ -1753,7 +1895,7 @@ fn apply_layout_command(
     commit_layout_candidate(state, candidate, closed, started)
 }
 
-fn layout_command_needs_cwd_refresh(command: &LayoutCommand) -> bool {
+fn layout_command_needs_cwd_observation(command: &LayoutCommand) -> bool {
     matches!(
         command,
         LayoutCommand::CreateTab { .. } | LayoutCommand::SplitPane { .. }
@@ -2149,15 +2291,19 @@ fn handle_client(
                 let (responses, should_subscribe) = {
                     if session_id != state.session_id {
                         (
-                            vec![ServerMessage::Error {
-                                message: "unknown Session".into(),
+                            vec![ServerMessage::SubscriptionRejected {
+                                server_id: state.server_id,
+                                session_id: state.session_id,
+                                reason: "unknown Session".into(),
                             }],
                             false,
                         )
                     } else if after_sequence > state.sequence {
                         (
-                            vec![ServerMessage::Error {
-                                message: "event cursor is ahead of the server".into(),
+                            vec![ServerMessage::SubscriptionRejected {
+                                server_id: state.server_id,
+                                session_id: state.session_id,
+                                reason: "event cursor is ahead of the server".into(),
                             }],
                             false,
                         )
@@ -2167,8 +2313,10 @@ fn handle_client(
                         .is_some_and(|event| after_sequence.saturating_add(1) < event.sequence)
                     {
                         (
-                            vec![ServerMessage::Error {
-                                message: "event cursor expired; request a fresh Bootstrap".into(),
+                            vec![ServerMessage::SubscriptionRejected {
+                                server_id: state.server_id,
+                                session_id: state.session_id,
+                                reason: "event cursor expired".into(),
                             }],
                             false,
                         )
@@ -2193,36 +2341,15 @@ fn handle_client(
                     }
                 };
                 if should_subscribe {
-                    state.subscribers.insert(
-                        client_id,
-                        ClientSubscriber {
-                            writer: outbound.clone(),
-                            terminal_baselines: std::collections::HashMap::new(),
-                            pending_terminals: std::collections::HashSet::new(),
-                            render_generation: 0,
-                            bootstrap_pending: false,
-                            deferred_reliable: std::collections::VecDeque::new(),
-                        },
-                    );
+                    state.ensure_subscriber(client_id, outbound.clone());
+                } else if let Some(subscriber) = state.subscribers.remove(&client_id) {
+                    subscriber.writer.clear_render();
                 }
                 let failed = responses
                     .into_iter()
                     .any(|response| queue_message(&outbound, response));
                 if failed {
                     state.subscribers.remove(&client_id);
-                } else if should_subscribe {
-                    let pane_ids = state.terminals.keys().copied().collect::<Vec<_>>();
-                    state
-                        .subscribers
-                        .get_mut(&client_id)
-                        .expect("new subscriber exists")
-                        .pending_terminals
-                        .extend(pane_ids);
-                    let subscriber = state
-                        .subscribers
-                        .get_mut(&client_id)
-                        .expect("new subscriber exists");
-                    subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
                 }
                 let should_flush = should_subscribe && !failed;
                 drop(state);
@@ -2336,7 +2463,28 @@ fn handle_client(
                     }) {
                         Err(message) => queue_message(&outbound, *message),
                         Ok(mut prepared) => {
-                            let approval = {
+                            let probes = {
+                                let state = state.lock().expect("server state lock poisoned");
+                                if let Some(message) = layout_authority_error(
+                                    &state,
+                                    client_id,
+                                    server_id,
+                                    session_id,
+                                    lifecycle.is_stopping(),
+                                ) {
+                                    Err(Box::new(message))
+                                } else if let PreparedExternalLayout::RemoveWorktreeReady {
+                                    workspace_id,
+                                    ..
+                                } = &prepared
+                                {
+                                    Ok(state.terminal_cwd_probes_for_workspace(*workspace_id))
+                                } else {
+                                    Ok(Vec::new())
+                                }
+                            };
+                            let approval = probes.and_then(|probes| {
+                                let observations = observe_terminal_cwds(probes);
                                 let mut state = state.lock().expect("server state lock poisoned");
                                 if let Some(message) = layout_authority_error(
                                     &state,
@@ -2347,11 +2495,12 @@ fn handle_client(
                                 ) {
                                     Err(Box::new(message))
                                 } else {
+                                    state.record_terminal_cwd_observations(observations);
                                     approve_external_layout(&mut state, &mut prepared).map_err(
                                         |message| Box::new(ServerMessage::Error { message }),
                                     )
                                 }
-                            };
+                            });
                             match approval {
                                 Err(message) => {
                                     let failed = queue_message(&outbound, *message);
@@ -2468,24 +2617,45 @@ fn handle_client(
                         }
                     }
                 } else {
-                    let mut state = state.lock().expect("server state lock poisoned");
-                    if let Some(message) = layout_authority_error(
-                        &state,
-                        client_id,
-                        server_id,
-                        session_id,
-                        lifecycle.is_stopping(),
-                    ) {
-                        queue_message(&outbound, message)
-                    } else {
-                        match apply_layout_command(&mut state, command) {
-                            Ok(effect) => {
-                                started_terminals.extend(effect.started_terminals);
-                                removed_terminals = effect.removed_terminals;
-                                state.publish_layout_change(client_id, &outbound)
-                            }
-                            Err(message) => {
-                                queue_message(&outbound, ServerMessage::Error { message })
+                    let probes = {
+                        let state = state.lock().expect("server state lock poisoned");
+                        if let Some(message) = layout_authority_error(
+                            &state,
+                            client_id,
+                            server_id,
+                            session_id,
+                            lifecycle.is_stopping(),
+                        ) {
+                            Err(message)
+                        } else {
+                            Ok(state.terminal_cwd_probes_for_layout(&command))
+                        }
+                    };
+                    match probes {
+                        Err(message) => queue_message(&outbound, message),
+                        Ok(probes) => {
+                            let observations = observe_terminal_cwds(probes);
+                            let mut state = state.lock().expect("server state lock poisoned");
+                            if let Some(message) = layout_authority_error(
+                                &state,
+                                client_id,
+                                server_id,
+                                session_id,
+                                lifecycle.is_stopping(),
+                            ) {
+                                queue_message(&outbound, message)
+                            } else {
+                                state.record_terminal_cwd_observations(observations);
+                                match apply_layout_command(&mut state, command) {
+                                    Ok(effect) => {
+                                        started_terminals.extend(effect.started_terminals);
+                                        removed_terminals = effect.removed_terminals;
+                                        state.publish_layout_change(client_id, &outbound)
+                                    }
+                                    Err(message) => {
+                                        queue_message(&outbound, ServerMessage::Error { message })
+                                    }
+                                }
                             }
                         }
                     }
@@ -2670,7 +2840,7 @@ fn monitor_terminal(monitor: TerminalMonitor) {
                     let Some(_operation) = lifecycle.begin_terminal_operation() else {
                         break;
                     };
-                    let cwd_before_shutdown = cwd_probe.cwd();
+                    let cwd_before_shutdown = cwd_probe.observe();
                     let runtime = {
                         let mut state = state.lock().expect("server state lock poisoned");
                         if !state.terminal_is_current(pane_id, instance_id) {
@@ -2690,7 +2860,7 @@ fn monitor_terminal(monitor: TerminalMonitor) {
                             pane_id.as_u64()
                         );
                     }
-                    let cwd = shutdown_cwd(cwd_before_shutdown, cwd_probe.cwd());
+                    let cwd = shutdown_cwd(cwd_before_shutdown, cwd_probe.observe());
                     let final_view = view_source.view();
                     let clients = {
                         let mut state = state.lock().expect("server state lock poisoned");
@@ -3522,7 +3692,7 @@ mod tests {
     }
 
     #[test]
-    fn only_layout_commands_that_inherit_cwd_refresh_terminal_processes() {
+    fn only_cwd_inheriting_layout_commands_require_process_observation() {
         let mut session = Session::new();
         let workspace_id = session
             .create_workspace(std::env::temp_dir())
@@ -3535,24 +3705,61 @@ mod tests {
             .focused_pane()
             .id();
 
-        assert!(layout_command_needs_cwd_refresh(
+        assert!(layout_command_needs_cwd_observation(
             &LayoutCommand::CreateTab { workspace_id }
         ));
-        assert!(layout_command_needs_cwd_refresh(
+        assert!(layout_command_needs_cwd_observation(
             &LayoutCommand::SplitPane {
                 pane_id,
                 direction: murmur_core::SplitDirection::Horizontal,
             }
         ));
-        assert!(!layout_command_needs_cwd_refresh(
+        assert!(!layout_command_needs_cwd_observation(
             &LayoutCommand::SetSplitRatios {
                 tab_id,
                 ratios: Vec::new(),
             }
         ));
-        assert!(!layout_command_needs_cwd_refresh(
+        assert!(!layout_command_needs_cwd_observation(
             &LayoutCommand::FocusPane { pane_id }
         ));
+    }
+
+    #[test]
+    fn shutdown_cwd_uses_a_report_committed_while_the_reader_is_joining() {
+        let before = PathBuf::from("before");
+        let after = PathBuf::from("after");
+
+        assert_eq!(
+            shutdown_cwd((Some(before), 4), (Some(after.clone()), 5)),
+            Some(after)
+        );
+    }
+
+    #[test]
+    fn shutdown_cwd_keeps_the_platform_probe_priority_without_a_new_report() {
+        let before = PathBuf::from("before");
+        let after = PathBuf::from("after");
+        let selected = shutdown_cwd((Some(before.clone()), 4), (Some(after.clone()), 4));
+
+        #[cfg(windows)]
+        assert_eq!(selected, Some(after));
+        #[cfg(not(windows))]
+        assert_eq!(selected, Some(before));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_cwd_rejects_a_non_utf8_tail_report() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let before = PathBuf::from("before");
+        let invalid = PathBuf::from(std::ffi::OsString::from_vec(vec![0xff]));
+
+        assert_eq!(
+            shutdown_cwd((Some(before.clone()), 4), (Some(invalid), 5)),
+            Some(before)
+        );
     }
 
     fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
@@ -3725,6 +3932,47 @@ mod tests {
             }
         ));
         assert!(!state.subscribers[&7].bootstrap_pending);
+    }
+
+    #[test]
+    fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
+        let endpoint = test_endpoint();
+        let mut state = RuntimeState::new(&endpoint);
+        state
+            .session
+            .create_workspace(std::env::temp_dir())
+            .expect("Workspace capacity");
+        let pane_id = state
+            .session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        let baseline = Arc::new(terminal_test_view(7, "baseline"));
+        let (writer, _receiver) = ClientWriter::channel();
+        state.subscribers.insert(
+            7,
+            ClientSubscriber {
+                writer,
+                terminal_baselines: std::collections::HashMap::from([(
+                    pane_id,
+                    Arc::clone(&baseline),
+                )]),
+                pending_terminals: std::collections::HashSet::new(),
+                render_generation: 11,
+                bootstrap_pending: false,
+                deferred_reliable: std::collections::VecDeque::new(),
+            },
+        );
+        let (replacement_writer, _replacement_receiver) = ClientWriter::channel();
+
+        assert!(!state.ensure_subscriber(7, replacement_writer));
+
+        let subscriber = &state.subscribers[&7];
+        assert_eq!(subscriber.terminal_baselines[&pane_id].revision, 7);
+        assert!(subscriber.pending_terminals.is_empty());
+        assert_eq!(subscriber.render_generation, 11);
     }
 
     #[test]
@@ -4102,6 +4350,66 @@ mod tests {
         assert!(state.session.snapshot().to_bytes().is_ok());
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
+        let directory = std::env::temp_dir().join(format!(
+            "murmur-server-stale-cwd-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let initial = directory.join("initial");
+        let stale = directory.join("stale");
+        std::fs::create_dir_all(&initial).unwrap();
+        std::fs::create_dir_all(&stale).unwrap();
+
+        let endpoint = test_endpoint();
+        let mut state = RuntimeState::new(&endpoint);
+        state
+            .session
+            .create_workspace(initial.clone())
+            .expect("Workspace capacity");
+        let pane_id = state
+            .session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        let mut runtime =
+            TerminalRuntime::spawn_shell(&initial, TerminalSize::new(24, 80)).unwrap();
+        let updates = runtime.take_updates().unwrap();
+        let (_, stale_instance, ..) = state.install_terminal(pane_id, runtime, updates);
+        state
+            .terminal_instances
+            .insert(pane_id, stale_instance.wrapping_add(1));
+
+        assert!(!state.record_terminal_cwd_observations(vec![(
+            pane_id,
+            stale_instance,
+            Some(stale),
+        )]));
+        assert_eq!(
+            state.session.pane(pane_id).and_then(|pane| pane.cwd()),
+            Some(initial.as_path())
+        );
+
+        state.terminal_instances.insert(pane_id, stale_instance);
+        state.exited_terminals.insert(pane_id);
+        assert!(!state.record_terminal_cwd_observations(vec![(
+            pane_id,
+            stale_instance,
+            Some(directory.join("exited-stale")),
+        )]));
+        assert_eq!(
+            state.session.pane(pane_id).and_then(|pane| pane.cwd()),
+            Some(initial.as_path())
+        );
+
+        drop(state);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
     fn test_endpoint() -> Endpoint {
         Endpoint::local(std::env::temp_dir().join(format!(
             "murmur-server-{}-{}.sock",
@@ -4262,6 +4570,71 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
+    fn restart_falls_back_from_a_missing_pane_cwd_and_persists_the_repair() {
+        let directory = std::env::temp_dir().join(format!(
+            "murmur-server-cwd-fallback-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let workspace_root = directory.join("workspace");
+        let missing_cwd = workspace_root.join("missing");
+        let snapshot_path = directory.join("session.snapshot");
+        std::fs::create_dir_all(&workspace_root).unwrap();
+
+        let mut session = Session::new();
+        session
+            .create_workspace(workspace_root.clone())
+            .expect("Workspace capacity");
+        let pane_id = session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        assert!(session.set_pane_cwd(pane_id, Some(missing_cwd)));
+        let absent_cwd_pane = session
+            .split_pane(pane_id, murmur_core::SplitDirection::Horizontal, 0.5)
+            .unwrap();
+        assert!(session.set_pane_cwd(absent_cwd_pane, None));
+        persist_snapshot(snapshot_path.clone(), session.snapshot());
+
+        let endpoint = test_endpoint();
+        let server = BoundServer::bind(
+            ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        )
+        .unwrap();
+        assert_eq!(server.startup_terminals.len(), 2);
+        let recovered_before_runtime = Session::restore(server.handle().snapshot()).unwrap();
+        assert_eq!(
+            recovered_before_runtime
+                .pane(absent_cwd_pane)
+                .and_then(|pane| pane.cwd()),
+            None
+        );
+        let handle = server.handle();
+        let thread = thread::spawn(move || server.run());
+        wait_for_connection(&endpoint);
+        let connection = ClientConnection::connect(&endpoint, "cwd-fallback").unwrap();
+        let repaired_session = Session::restore(connection.bootstrap().snapshot.clone()).unwrap();
+        assert_eq!(
+            repaired_session.pane(pane_id).and_then(|pane| pane.cwd()),
+            Some(workspace_root.as_path())
+        );
+        assert_eq!(connection.bootstrap().terminals.len(), 2);
+        let repaired_snapshot = connection.bootstrap().snapshot.clone();
+
+        drop(connection);
+        handle.stop();
+        thread.join().unwrap().unwrap();
+        let persisted =
+            murmur_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
+                .unwrap();
+        assert_eq!(persisted, repaired_snapshot);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
     fn restart_prunes_only_failed_panes_and_persists_the_repair() {
         use murmur_core::SplitDirection;
 
@@ -4270,14 +4643,15 @@ mod tests {
             std::process::id(),
             unique_suffix()
         ));
+        let workspace_root = directory.join("missing-root");
         let valid_cwd = directory.join("valid");
-        let missing_cwd = directory.join("missing");
+        let missing_cwd = directory.join("missing-pane");
         let snapshot_path = directory.join("session.snapshot");
         std::fs::create_dir_all(&valid_cwd).unwrap();
 
         let mut session = Session::new();
         let workspace_id = session
-            .create_workspace(valid_cwd.clone())
+            .create_workspace(workspace_root)
             .expect("Workspace capacity");
         assert!(session.rename_workspace(workspace_id, "Recovered Workspace"));
         let tab_id = session.active_workspace().unwrap().active_tab().id();
@@ -4288,6 +4662,7 @@ mod tests {
             .active_tab()
             .focused_pane()
             .id();
+        assert!(session.set_pane_cwd(surviving_pane, Some(valid_cwd.clone())));
         let failed_pane = session
             .split_pane(surviving_pane, SplitDirection::Vertical, 0.65)
             .unwrap();
@@ -4375,6 +4750,120 @@ mod tests {
             murmur_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
                 .unwrap();
         assert_eq!(repaired, Session::new().snapshot());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn restart_revalidates_worktree_authority_against_the_git_topology() {
+        let directory = std::env::temp_dir().join(format!(
+            "murmur-server-worktree-restore-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let repository = directory.join("repository");
+        let parent_workspace_root = repository.join("workspace-root");
+        let child_root = directory.join("child");
+        let snapshot_path = directory.join("session.snapshot");
+        std::fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, &["init"]);
+        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(
+            &repository,
+            &["config", "user.email", "murmur@example.invalid"],
+        );
+        std::fs::create_dir_all(&parent_workspace_root).unwrap();
+        std::fs::write(parent_workspace_root.join("README.md"), "murmur\n").unwrap();
+        run_git(&repository, &["add", "workspace-root/README.md"]);
+        run_git(&repository, &["commit", "-m", "initial"]);
+        run_git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature/recovered",
+                child_root.to_str().unwrap(),
+            ],
+        );
+
+        let mut session = Session::new();
+        let parent_workspace_id = session
+            .create_workspace(parent_workspace_root.clone())
+            .expect("Workspace capacity");
+        let child_workspace_id = session
+            .create_workspace(child_root.clone())
+            .expect("Workspace capacity");
+        assert!(session.associate_worktree(
+            child_workspace_id,
+            parent_workspace_id,
+            parent_workspace_root,
+            true,
+        ));
+        session
+            .close_workspace(parent_workspace_id)
+            .expect("historical parent Workspace exists");
+        persist_snapshot(snapshot_path.clone(), session.snapshot());
+
+        let first_endpoint = test_endpoint();
+        let first_server = BoundServer::bind(
+            ServerConfig::new(first_endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        )
+        .unwrap();
+        let first_handle = first_server.handle();
+        let first_thread = thread::spawn(move || first_server.run());
+        wait_for_connection(&first_endpoint);
+        let first = ClientConnection::connect(&first_endpoint, "valid-worktree-restore").unwrap();
+        let first_session = Session::restore(first.bootstrap().snapshot.clone()).unwrap();
+        assert!(
+            first_session
+                .workspace(child_workspace_id)
+                .and_then(|workspace| workspace.worktree())
+                .is_some_and(|association| association.is_managed())
+        );
+        drop(first);
+        first_handle.stop();
+        first_thread.join().unwrap().unwrap();
+
+        run_git(
+            &repository,
+            &["worktree", "remove", child_root.to_str().unwrap()],
+        );
+        std::fs::create_dir_all(&child_root).unwrap();
+
+        let second_endpoint = test_endpoint();
+        let second_server = BoundServer::bind(
+            ServerConfig::new(second_endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        )
+        .unwrap();
+        let second_handle = second_server.handle();
+        let second_thread = thread::spawn(move || second_server.run());
+        wait_for_connection(&second_endpoint);
+        let second = ClientConnection::connect(&second_endpoint, "stale-worktree-restore").unwrap();
+        let repaired = Session::restore(second.bootstrap().snapshot.clone()).unwrap();
+        assert!(
+            repaired
+                .workspace(child_workspace_id)
+                .expect("child Workspace survives")
+                .worktree()
+                .is_none()
+        );
+        drop(second);
+        second_handle.stop();
+        second_thread.join().unwrap().unwrap();
+
+        let persisted = murmur_core::SessionSnapshot::from_bytes(
+            &std::fs::read(&snapshot_path).expect("repaired Snapshot exists"),
+        )
+        .unwrap();
+        assert!(
+            Session::restore(persisted)
+                .unwrap()
+                .workspace(child_workspace_id)
+                .expect("child Workspace remains persisted")
+                .worktree()
+                .is_none()
+        );
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -4665,6 +5154,15 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn terminal_tail_cwd_survives_exit_and_shutdown() {
+        #[cfg(target_os = "linux")]
+        if std::path::Path::new(&murmur_core::CommandBuilder::new_default_prog().get_shell())
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some("bash")
+        {
+            return;
+        }
+
         let directory = std::env::temp_dir().join(format!(
             "murmur-server-exit-cwd-{}-{}",
             std::process::id(),
@@ -4715,7 +5213,7 @@ mod tests {
         #[cfg(target_os = "linux")]
         {
             let change_cwd_and_exit = format!(
-                "cd '{}' && printf '\\033]9;9;%s\\007' \"$PWD\"; exit",
+                "cd '{}'; exit",
                 final_cwd.to_string_lossy().replace('\'', "'\\''")
             );
             send_terminal(
@@ -5940,6 +6438,99 @@ mod tests {
             response,
             ServerMessage::Error { message }
                 if message.contains("exceeds maximum")
+        ));
+
+        handle.stop();
+        drop(stream);
+        thread.join().unwrap().unwrap();
+        let _ = endpoint.cleanup();
+    }
+
+    #[test]
+    fn rejected_subscription_is_typed_and_removes_the_previous_subscriber() {
+        let (handle, endpoint, thread) = start();
+        let mut stream = connect_and_bootstrap(&endpoint);
+        let (server_id, session_id) = {
+            let state = handle.state.lock().unwrap();
+            (state.server_id, state.session_id)
+        };
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Subscribe {
+                session_id,
+                after_sequence: 0,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            ServerMessage::Subscribed { .. }
+        ));
+        assert_eq!(handle.state.lock().unwrap().subscribers.len(), 1);
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Subscribe {
+                session_id,
+                after_sequence: u64::MAX,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            ServerMessage::SubscriptionRejected {
+                server_id: rejected_server,
+                session_id: rejected_session,
+                reason,
+            } if rejected_server == server_id
+                && rejected_session == session_id
+                && reason == "event cursor is ahead of the server"
+        ));
+        assert!(handle.state.lock().unwrap().subscribers.is_empty());
+
+        {
+            let mut state = handle.state.lock().unwrap();
+            for _ in 0..=EVENT_HISTORY_LIMIT {
+                state.publish_background(SessionEvent::LayoutChanged);
+            }
+        }
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Subscribe {
+                session_id: SessionId(session_id.0.wrapping_add(1)),
+                after_sequence: 0,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            ServerMessage::SubscriptionRejected {
+                server_id: rejected_server,
+                session_id: authoritative_session,
+                reason,
+            } if rejected_server == server_id
+                && authoritative_session == session_id
+                && reason == "unknown Session"
+        ));
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Subscribe {
+                session_id,
+                after_sequence: 0,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            ServerMessage::SubscriptionRejected {
+                server_id: rejected_server,
+                session_id: rejected_session,
+                reason,
+            } if rejected_server == server_id
+                && rejected_session == session_id
+                && reason == "event cursor expired"
         ));
 
         handle.stop();

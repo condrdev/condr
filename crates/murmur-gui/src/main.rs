@@ -726,10 +726,18 @@ struct ServerConnection {
     io: Option<ClientIo>,
     connect_generation: u64,
     controlling: bool,
+    subscribed: bool,
+    subscription_pending: bool,
     control_retry_attempts: u8,
     control_retry_scheduled: bool,
-    terminal_resync_pending: bool,
+    bootstrap_resync_session_id: Option<SessionId>,
     error: Option<String>,
+}
+
+struct BootstrapApplication {
+    rebuild: bool,
+    resubscribe: bool,
+    reacquire_control: bool,
 }
 
 impl ServerConnection {
@@ -752,19 +760,38 @@ impl ServerConnection {
             io: None,
             connect_generation: 0,
             controlling: false,
+            subscribed: false,
+            subscription_pending: false,
             control_retry_attempts: 0,
             control_retry_scheduled: false,
-            terminal_resync_pending: false,
+            bootstrap_resync_session_id: None,
             error: None,
         }
     }
 
     fn can_mutate(&self) -> bool {
-        self.status == ConnectionStatus::Connected && self.controlling
+        self.is_synchronized() && self.controlling
     }
 
-    fn apply_bootstrap(&mut self, bootstrap: SessionBootstrap) -> bool {
+    fn is_synchronized(&self) -> bool {
+        self.status == ConnectionStatus::Connected
+            && self.subscribed
+            && self.bootstrap_resync_session_id.is_none()
+    }
+
+    fn apply_bootstrap(&mut self, bootstrap: SessionBootstrap) -> BootstrapApplication {
         let previous_layout = self.dock_projection();
+        let authority_changed = self.server_id != Some(bootstrap.server_id)
+            || self.runtime_epoch != Some(bootstrap.runtime_epoch)
+            || self.session_id != Some(bootstrap.session_id);
+        let resubscribe = self.bootstrap_resync_session_id.is_some() && !self.subscribed;
+        if authority_changed {
+            self.controlling = false;
+            self.subscribed = false;
+            self.subscription_pending = false;
+            self.control_retry_attempts = 0;
+            self.control_retry_scheduled = false;
+        }
         self.server_id = Some(bootstrap.server_id);
         self.runtime_epoch = Some(bootstrap.runtime_epoch);
         self.session_id = Some(bootstrap.session_id);
@@ -795,9 +822,13 @@ impl ServerConnection {
             .collect();
         self.zoomed_panes = bootstrap.zoomed_panes.into_iter().collect();
         self.status = ConnectionStatus::Connected;
-        self.terminal_resync_pending = false;
+        self.bootstrap_resync_session_id = None;
         self.error = None;
-        previous_layout != self.dock_projection()
+        BootstrapApplication {
+            rebuild: previous_layout != self.dock_projection(),
+            resubscribe: resubscribe || authority_changed,
+            reacquire_control: authority_changed,
+        }
     }
 
     fn dock_projection(&self) -> Option<PaneLayout> {
@@ -819,20 +850,57 @@ impl ServerConnection {
         if failed {
             self.status = ConnectionStatus::Disconnected;
             self.controlling = false;
+            self.subscribed = false;
+            self.subscription_pending = false;
+            self.bootstrap_resync_session_id = None;
             self.error = Some("Disconnected from murmur-server".into());
             self.io = None;
         }
     }
 
-    fn request_snapshot(&mut self) {
-        if self.terminal_resync_pending {
+    fn subscribe(&mut self) {
+        if self.subscription_pending {
             return;
         }
         let Some(session_id) = self.session_id else {
             return;
         };
-        self.terminal_resync_pending = true;
+        self.subscribed = false;
+        self.subscription_pending = true;
+        self.send(ClientMessage::Subscribe {
+            session_id,
+            after_sequence: self.sequence,
+        });
+    }
+
+    fn request_snapshot(&mut self) -> bool {
+        let Some(session_id) = self.session_id else {
+            return false;
+        };
+        self.request_snapshot_for(session_id)
+    }
+
+    fn request_snapshot_for(&mut self, session_id: SessionId) -> bool {
+        if self.bootstrap_resync_session_id == Some(session_id) {
+            return false;
+        }
+        self.bootstrap_resync_session_id = Some(session_id);
         self.send(ClientMessage::SnapshotRequest { session_id });
+        true
+    }
+
+    fn recover_rejected_subscription(
+        &mut self,
+        server_id: ServerId,
+        authoritative_session_id: SessionId,
+    ) -> bool {
+        if !self.subscription_pending || self.server_id != Some(server_id) {
+            return false;
+        }
+        self.subscription_pending = false;
+        self.subscribed = false;
+        self.request_snapshot_for(authoritative_session_id);
+        true
     }
 }
 
@@ -1207,9 +1275,12 @@ impl Murmur {
             cx,
         )
         .map_err(|error| error.to_string())?;
-        connection.apply_bootstrap(bootstrap);
+        _ = connection.apply_bootstrap(bootstrap);
         connection.io = Some(io);
         connection.controlling = false;
+        connection.subscribed = false;
+        connection.subscription_pending = false;
+        connection.bootstrap_resync_session_id = None;
         connection.control_retry_attempts = 0;
         connection.control_retry_scheduled = false;
         Ok(())
@@ -1251,10 +1322,7 @@ impl Murmur {
             return;
         };
         connection.send(ClientMessage::AcquireControl { session_id });
-        connection.send(ClientMessage::Subscribe {
-            session_id,
-            after_sequence: connection.sequence,
-        });
+        connection.subscribe();
     }
 
     fn schedule_control_retry(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
@@ -1313,11 +1381,15 @@ impl Murmur {
         let generation = connection.connect_generation;
         connection.status = ConnectionStatus::Connecting;
         connection.controlling = false;
+        connection.subscribed = false;
+        connection.subscription_pending = false;
+        connection.bootstrap_resync_session_id = None;
         connection.control_retry_attempts = 0;
         connection.control_retry_scheduled = false;
         connection.error = None;
         let endpoint = connection.endpoint.clone();
         let sender = self.connect_results_tx.clone();
+        clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         thread::spawn(move || {
             let connected_endpoint = if endpoint == ServerConfig::default().endpoint {
                 murmur_server::ensure_local_server().unwrap_or(endpoint)
@@ -1345,9 +1417,13 @@ impl Murmur {
         connection.connect_generation = connection.connect_generation.wrapping_add(1);
         connection.status = ConnectionStatus::Disconnected;
         connection.controlling = false;
+        connection.subscribed = false;
+        connection.subscription_pending = false;
+        connection.bootstrap_resync_session_id = None;
         connection.control_retry_attempts = 0;
         connection.control_retry_scheduled = false;
         connection.error = None;
+        clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
     }
 
     fn remove_server(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
@@ -1417,6 +1493,7 @@ impl Murmur {
             false
         };
         if installed {
+            clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
             self.acquire_and_subscribe(key);
             self.refresh_target_pane(key);
             if key == self.active_connection {
@@ -1444,28 +1521,40 @@ impl Murmur {
         }
         let message = match incoming {
             Incoming::Bootstrap(bootstrap) => {
-                let rebuild = self.connections[index].apply_bootstrap(bootstrap);
+                let application = self.connections[index].apply_bootstrap(bootstrap);
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+                if application.reacquire_control {
+                    self.acquire_and_subscribe(key);
+                } else if application.resubscribe {
+                    self.connections[index].subscribe();
+                }
                 self.refresh_target_pane(key);
                 return IncomingEffect {
-                    rebuild,
+                    rebuild: application.rebuild,
                     notify: true,
                 };
             }
             Incoming::Message(message) => message,
             Incoming::TerminalResync => {
-                self.connections[index].request_snapshot();
-                return IncomingEffect::default();
+                let notify = self.connections[index].request_snapshot();
+                return IncomingEffect {
+                    rebuild: false,
+                    notify,
+                };
             }
             Incoming::VisualReady(_) => return IncomingEffect::default(),
             Incoming::Disconnected(error) => {
                 let connection = &mut self.connections[index];
                 connection.status = ConnectionStatus::Disconnected;
                 connection.controlling = false;
+                connection.subscribed = false;
+                connection.subscription_pending = false;
+                connection.bootstrap_resync_session_id = None;
                 connection.control_retry_attempts = 0;
                 connection.control_retry_scheduled = false;
                 connection.error = Some(format!("Server connection closed: {error}"));
                 connection.io = None;
+                clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
                 return IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -1477,8 +1566,11 @@ impl Murmur {
             ServerMessage::Bootstrap(_)
             | ServerMessage::BootstrapBatch(_)
             | ServerMessage::TerminalFrameChunk(_) => {
-                self.connections[index].request_snapshot();
-                IncomingEffect::default()
+                let notify = self.connections[index].request_snapshot();
+                IncomingEffect {
+                    rebuild: false,
+                    notify,
+                }
             }
             ServerMessage::Event {
                 server_id,
@@ -1494,15 +1586,21 @@ impl Murmur {
                 }
                 if sequence != connection.sequence.saturating_add(1) {
                     if sequence > connection.sequence {
+                        connection.subscribed = false;
+                        connection.subscription_pending = false;
                         connection.request_snapshot();
+                        return IncomingEffect {
+                            rebuild: false,
+                            notify: true,
+                        };
                     }
                     return IncomingEffect::default();
                 }
                 self.connections[index].sequence = sequence;
-                let mut notify = false;
+                let notify;
                 match event {
                     SessionEvent::LayoutChanged => {
-                        self.connections[index].request_snapshot();
+                        notify = self.connections[index].request_snapshot();
                     }
                     SessionEvent::TerminalExited { pane_id } => {
                         if let Some(terminal) = self.connections[index].terminals.get_mut(&pane_id)
@@ -1510,7 +1608,7 @@ impl Murmur {
                             terminal.exited = true;
                             notify = true;
                         } else {
-                            self.connections[index].request_snapshot();
+                            notify = self.connections[index].request_snapshot();
                         }
                     }
                     SessionEvent::AgentChanged { pane_id, agent } => {
@@ -1558,8 +1656,11 @@ impl Murmur {
                 ) {
                     Ok(pane_ids) => pane_ids,
                     Err(()) => {
-                        self.connections[index].request_snapshot();
-                        return IncomingEffect::default();
+                        let notify = self.connections[index].request_snapshot();
+                        return IncomingEffect {
+                            rebuild: false,
+                            notify,
+                        };
                     }
                 };
                 for pane_id in &pane_ids {
@@ -1579,7 +1680,15 @@ impl Murmur {
                     notify: !pane_ids.is_empty(),
                 }
             }
-            ServerMessage::ControlGranted { .. } => {
+            ServerMessage::ControlGranted {
+                server_id,
+                session_id,
+            } => {
+                if self.connections[index].server_id != Some(server_id)
+                    || self.connections[index].session_id != Some(session_id)
+                {
+                    return IncomingEffect::default();
+                }
                 self.connections[index].controlling = true;
                 self.connections[index].control_retry_attempts = 0;
                 self.connections[index].control_retry_scheduled = false;
@@ -1589,7 +1698,15 @@ impl Murmur {
                     ..IncomingEffect::default()
                 }
             }
-            ServerMessage::ControlReleased { .. } => {
+            ServerMessage::ControlReleased {
+                server_id,
+                session_id,
+            } => {
+                if self.connections[index].server_id != Some(server_id)
+                    || self.connections[index].session_id != Some(session_id)
+                {
+                    return IncomingEffect::default();
+                }
                 self.connections[index].controlling = false;
                 self.connections[index].control_retry_attempts = 0;
                 self.connections[index].control_retry_scheduled = false;
@@ -1598,13 +1715,37 @@ impl Murmur {
                     ..IncomingEffect::default()
                 }
             }
-            ServerMessage::ControlDenied { reason, .. } => {
+            ServerMessage::ControlDenied {
+                server_id,
+                session_id,
+                reason,
+            } => {
+                if self.connections[index].server_id != Some(server_id)
+                    || self.connections[index].session_id != Some(session_id)
+                {
+                    return IncomingEffect::default();
+                }
                 let retry_control = reason == CONTROL_BUSY_REASON;
                 self.connections[index].controlling = false;
                 self.connections[index].error = Some(reason);
                 if retry_control {
                     self.schedule_control_retry(key, cx);
                 }
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::SubscriptionRejected {
+                server_id,
+                session_id,
+                reason,
+            } => {
+                let connection = &mut self.connections[index];
+                if !connection.recover_rejected_subscription(server_id, session_id) {
+                    return IncomingEffect::default();
+                }
+                connection.error = Some(reason);
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -1627,18 +1768,46 @@ impl Murmur {
                 let connection = &mut self.connections[index];
                 connection.status = ConnectionStatus::Disconnected;
                 connection.controlling = false;
+                connection.subscribed = false;
+                connection.subscription_pending = false;
+                connection.bootstrap_resync_session_id = None;
                 connection.control_retry_attempts = 0;
                 connection.control_retry_scheduled = false;
                 connection.error = Some("murmur-server stopped".into());
                 connection.io = None;
+                clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
                 }
             }
-            ServerMessage::Welcome { .. }
-            | ServerMessage::Subscribed { .. }
-            | ServerMessage::Pong { .. } => IncomingEffect::default(),
+            ServerMessage::Subscribed {
+                server_id,
+                session_id,
+                sequence,
+            } => {
+                let connection = &mut self.connections[index];
+                if !connection.subscription_pending {
+                    return IncomingEffect::default();
+                }
+                connection.subscription_pending = false;
+                if connection.server_id == Some(server_id)
+                    && connection.session_id == Some(session_id)
+                    && connection.sequence == sequence
+                {
+                    connection.subscribed = true;
+                } else {
+                    connection.subscribed = false;
+                    connection.error =
+                        Some("subscription cursor did not match client state".into());
+                    connection.request_snapshot();
+                }
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::Welcome { .. } | ServerMessage::Pong { .. } => IncomingEffect::default(),
         }
     }
 
@@ -1739,16 +1908,21 @@ impl Murmur {
         }
     }
 
-    fn terminal_command(&mut self, key: ConnectionKey, pane_id: PaneId, command: TerminalCommand) {
+    fn terminal_command(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        command: TerminalCommand,
+    ) -> bool {
         let Some(connection) = self.connection_mut(key) else {
-            return;
+            return false;
         };
         let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
         else {
-            return;
+            return false;
         };
         let read_only = matches!(&command, TerminalCommand::Copy { .. });
-        if (read_only || connection.can_mutate())
+        if ((read_only && connection.is_synchronized()) || connection.can_mutate())
             && !connection
                 .terminals
                 .get(&pane_id)
@@ -1760,6 +1934,9 @@ impl Murmur {
                 pane_id,
                 command,
             });
+            connection.status == ConnectionStatus::Connected
+        } else {
+            false
         }
     }
 
@@ -2704,9 +2881,10 @@ impl Murmur {
         {
             return;
         }
-        self.pending_sizes.insert(pending_key, size);
-        self.terminal_command(key, pane_id, TerminalCommand::Resize(size));
-        cx.notify();
+        if self.terminal_command(key, pane_id, TerminalCommand::Resize(size)) {
+            self.pending_sizes.insert(pending_key, size);
+            cx.notify();
+        }
     }
 
     pub(crate) fn update_terminal_geometry(
@@ -2832,9 +3010,12 @@ impl Murmur {
             return false;
         }
 
-        self.terminal_command(key, pane_id, TerminalCommand::Copy { selection });
-        self.clear_selection(cx);
-        true
+        if self.terminal_command(key, pane_id, TerminalCommand::Copy { selection }) {
+            self.clear_selection(cx);
+            true
+        } else {
+            false
+        }
     }
 
     fn paste_into_terminal(&mut self, key: ConnectionKey, pane_id: PaneId, cx: &mut Context<Self>) {
@@ -2977,6 +3158,9 @@ impl Murmur {
             let connected = connection.can_mutate();
             let label = match connection.status {
                 ConnectionStatus::Connecting => format!("{} (connecting)", connection.label),
+                ConnectionStatus::Connected if !connection.is_synchronized() => {
+                    format!("{} (syncing)", connection.label)
+                }
                 ConnectionStatus::Connected => connection.label.clone(),
                 ConnectionStatus::Disconnected => format!("{} (offline)", connection.label),
             };
@@ -3701,20 +3885,21 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use gpui::Keystroke;
+    use gpui::{Keystroke, Task};
     use murmur_core::protocol::{
         BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
-        RuntimeEpoch, ServerId, ServerMessage, SessionId, TerminalFrameBatch, TerminalFrameChunk,
-        encode_bootstrap_record, encode_pane_terminal_frame,
+        RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionId, TerminalFrameBatch,
+        TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
     };
     use murmur_core::{
         Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize, TerminalView,
         TerminalViewDelta, TerminalViewFrame,
     };
+    use murmur_server::Endpoint;
 
     use super::{
-        FocusLeft, NextTab, PreviousTab, SplitDown, SplitRight, TerminalVisualSlot,
-        apply_terminal_frame_batch, assemble_terminal_frame_chunk,
+        ClientIo, ConnectionStatus, FocusLeft, NextTab, PreviousTab, ServerConnection, SplitDown,
+        SplitRight, TerminalVisualSlot, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
         clear_pending_sizes_for_bootstrap, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
         merge_terminal_deltas, read_bootstrap_batches, terminal_chunk_identity_matches,
     };
@@ -3753,6 +3938,115 @@ mod tests {
             .active_tab()
             .focused_pane()
             .id()
+    }
+
+    #[test]
+    fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubscribes() {
+        let mut connection = ServerConnection::new(
+            1,
+            "test".into(),
+            Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+        );
+        connection.status = ConnectionStatus::Connected;
+        connection.server_id = Some(ServerId(1));
+        connection.runtime_epoch = Some(RuntimeEpoch(2));
+        connection.session_id = Some(SessionId(3));
+        connection.sequence = 7;
+        connection.controlling = true;
+        let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+        connection.io = Some(ClientIo {
+            outgoing,
+            _incoming_task: Task::ready(()),
+        });
+
+        connection.subscribe();
+        assert_eq!(
+            outgoing_rx.recv().unwrap(),
+            murmur_core::protocol::ClientMessage::Subscribe {
+                session_id: SessionId(3),
+                after_sequence: 7,
+            }
+        );
+        connection.bootstrap_resync_session_id = Some(SessionId(3));
+        assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(30)));
+        assert_eq!(
+            outgoing_rx.recv().unwrap(),
+            murmur_core::protocol::ClientMessage::SnapshotRequest {
+                session_id: SessionId(30),
+            }
+        );
+        assert!(!connection.recover_rejected_subscription(ServerId(1), SessionId(30)));
+        assert!(matches!(
+            outgoing_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        let application = connection.apply_bootstrap(SessionBootstrap {
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(30),
+            sequence: 11,
+            snapshot: Session::new().snapshot(),
+            terminals: Vec::new(),
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        });
+        assert!(application.resubscribe);
+        assert!(application.reacquire_control);
+        assert!(!connection.controlling);
+        assert!(connection.bootstrap_resync_session_id.is_none());
+        connection.send(murmur_core::protocol::ClientMessage::AcquireControl {
+            session_id: SessionId(30),
+        });
+        connection.subscribe();
+        assert_eq!(
+            outgoing_rx.recv().unwrap(),
+            murmur_core::protocol::ClientMessage::AcquireControl {
+                session_id: SessionId(30),
+            }
+        );
+        assert_eq!(
+            outgoing_rx.recv().unwrap(),
+            murmur_core::protocol::ClientMessage::Subscribe {
+                session_id: SessionId(30),
+                after_sequence: 11,
+            }
+        );
+    }
+
+    #[test]
+    fn ordinary_runtime_bootstrap_keeps_the_existing_subscription_and_baseline() {
+        let mut connection = ServerConnection::new(
+            1,
+            "test".into(),
+            Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+        );
+        connection.status = ConnectionStatus::Connected;
+        connection.server_id = Some(ServerId(1));
+        connection.runtime_epoch = Some(RuntimeEpoch(2));
+        connection.session_id = Some(SessionId(3));
+        connection.sequence = 7;
+        connection.controlling = true;
+        connection.subscribed = true;
+        connection.bootstrap_resync_session_id = Some(SessionId(3));
+
+        let application = connection.apply_bootstrap(SessionBootstrap {
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(3),
+            sequence: 8,
+            snapshot: Session::new().snapshot(),
+            terminals: Vec::new(),
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        });
+
+        assert!(!application.resubscribe);
+        assert!(!application.reacquire_control);
+        assert!(connection.subscribed);
+        assert!(connection.can_mutate());
     }
 
     #[test]
@@ -4134,13 +4428,13 @@ mod tests {
         use gpui_component::{Root, WindowExt as _};
         #[cfg(target_os = "linux")]
         use murmur_core::SplitDirection;
-        use murmur_core::protocol::{ClientMessage, LayoutCommand, ServerMessage};
+        use murmur_core::protocol::{ClientMessage, LayoutCommand, ServerMessage, SessionEvent};
         use murmur_core::{PaneId, TabId, TerminalCommand, WorkspaceId};
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{
-            CONTROL_BUSY_REASON, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE, Murmur,
-            ServerConnection, default_window_options,
+            CONTROL_BUSY_REASON, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE, Incoming,
+            Murmur, ServerConnection, default_window_options,
         };
 
         const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -4472,6 +4766,64 @@ mod tests {
         }
 
         #[test]
+        fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            let original_sequence =
+                window.read(|app| view.read(app).connection(1).unwrap().sequence);
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    let connection = this.connection(1).unwrap();
+                    let generation = connection.connect_generation;
+                    let server_id = connection.server_id.unwrap();
+                    let session_id = connection.session_id.unwrap();
+                    assert!(connection.subscribed);
+
+                    for sequence in [
+                        original_sequence.saturating_add(2),
+                        original_sequence.saturating_add(3),
+                    ] {
+                        this.handle_incoming(
+                            1,
+                            generation,
+                            Incoming::Message(ServerMessage::Event {
+                                server_id,
+                                session_id,
+                                sequence,
+                                event: SessionEvent::LayoutChanged,
+                            }),
+                            cx,
+                        );
+                    }
+
+                    let connection = this.connection(1).unwrap();
+                    assert_eq!(
+                        connection.bootstrap_resync_session_id,
+                        connection.session_id
+                    );
+                    assert!(!connection.subscribed);
+                    assert!(!connection.can_mutate());
+                });
+            });
+
+            assert!(
+                wait_until_event_driven(window, |window| {
+                    window.read(|app| {
+                        view.read(app).connection(1).is_some_and(|connection| {
+                            connection.subscribed
+                                && !connection.subscription_pending
+                                && connection.bootstrap_resync_session_id.is_none()
+                                && connection.can_mutate()
+                        })
+                    })
+                }),
+                "GUI did not restore its reliable subscription after a sequence gap"
+            );
+        }
+
+        #[test]
         fn denied_replacement_connection_retries_after_the_controller_releases() {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -4564,10 +4916,25 @@ mod tests {
                     connection.session_id,
                 )
             });
+            let pane_id = {
+                let mut session = murmur_core::Session::new();
+                session
+                    .create_workspace(std::env::temp_dir())
+                    .expect("Workspace capacity");
+                session
+                    .active_workspace()
+                    .unwrap()
+                    .active_tab()
+                    .focused_pane()
+                    .id()
+            };
 
             window.update(|_, cx| {
                 view.update(cx, |this, cx| {
+                    this.pending_sizes
+                        .insert((1, pane_id), murmur_core::TerminalSize::new(99, 199));
                     this.disconnect_server(1);
+                    assert!(!this.pending_sizes.contains_key(&(1, pane_id)));
                     cx.notify();
                 });
             });
@@ -5028,6 +5395,25 @@ mod tests {
                 column + u16::try_from(word_chars.len()).unwrap() - 1
             );
 
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    let connection = this.connection_mut(1).unwrap();
+                    connection.subscribed = false;
+                    connection.bootstrap_resync_session_id = connection.session_id;
+                });
+            });
+            window.simulate_keystrokes("ctrl-c");
+            assert!(
+                window.read(|app| view.read(app).terminal_selection.is_some()),
+                "a rejected Copy must preserve the local selection"
+            );
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    let connection = this.connection_mut(1).unwrap();
+                    connection.subscribed = true;
+                    connection.bootstrap_resync_session_id = None;
+                });
+            });
             window.simulate_keystrokes("ctrl-c");
             assert!(window.read(|app| view.read(app).terminal_selection.is_none()));
             assert!(wait_until_event_driven(window, |window| {
@@ -5604,6 +5990,16 @@ mod tests {
                 })
             });
             assert!(split_right, "Pane context menu did not split right");
+            assert!(
+                wait_until_event_driven(window, |window| {
+                    window.read(|app| {
+                        view.read(app)
+                            .connection(1)
+                            .is_some_and(ServerConnection::can_mutate)
+                    })
+                }),
+                "GUI did not finish synchronizing the split"
+            );
 
             let (pane_to_focus, rebuilds_before_focus) = window.read(|app| {
                 let murmur = view.read(app);

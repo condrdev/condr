@@ -5,6 +5,8 @@ use murmur_core::{
     AgentKind, AgentState, TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
 };
 use murmur_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
+#[cfg(target_os = "windows")]
+use sysinfo::{Pid, System};
 
 #[test]
 fn shell_spawn_rejects_a_missing_working_directory() {
@@ -50,6 +52,72 @@ fn runtime_cwd_follows_a_real_shell_directory_change() {
         .execute(TerminalCommand::Text("cd next\r".into()))
         .unwrap();
     wait_for_cwd(|| cwd_probe.cwd(), &expected_target);
+
+    runtime.shutdown().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn bash_shell_reports_the_final_cwd_before_normal_exit() {
+    let default = CommandBuilder::new_default_prog();
+    let shell = default.get_shell();
+    if std::path::Path::new(&shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some("bash")
+    {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!(
+        "murmur-terminal-exit-cwd-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let target = root.join("final");
+    std::fs::create_dir_all(&target).unwrap();
+    let expected_target = target.canonicalize().unwrap();
+    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60)).unwrap();
+    let cwd_probe = runtime.cwd_probe();
+    runtime
+        .execute(TerminalCommand::Text(format!(
+            "cd '{}'; exit 7\r",
+            target.to_string_lossy().replace('\'', "'\\''")
+        )))
+        .unwrap();
+
+    let status = runtime.wait().unwrap();
+    assert_eq!(status.exit_code(), 7);
+    let (observed_cwd, reported_generation) = cwd_probe.observe();
+    assert_eq!(observed_cwd.as_deref(), Some(expected_target.as_path()));
+    assert!(reported_generation > 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn runtime_cwd_uses_a_foreground_group_member_when_the_leader_matches_the_shell() {
+    let root = std::env::temp_dir().join(format!(
+        "murmur-terminal-member-cwd-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let target = root.join("member");
+    std::fs::create_dir_all(&target).unwrap();
+    let expected_target = target.canonicalize().unwrap();
+    let mut command = CommandBuilder::new("/bin/bash");
+    command.args(["-c", "true | (cd member && sleep 30)"]);
+    command.cwd(&root);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 20)).unwrap();
+
+    wait_for_cwd(|| runtime.cwd(), &expected_target);
 
     runtime.shutdown().unwrap();
     std::fs::remove_dir_all(root).unwrap();
@@ -134,6 +202,82 @@ fn close_cancels_a_reader_when_a_descendant_keeps_the_slave_open() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn close_keeps_reading_until_a_delayed_hangup_tail_is_published() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        r#"trap 'sleep 0.1; printf "shutdown-tail\r\n"; exit 0' HUP; printf 'ready\r\n'; while :; do sleep 5; done"#,
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    wait_for_text(&runtime, "ready");
+
+    runtime.close().unwrap();
+
+    assert!(
+        runtime.visible_text().contains("shutdown-tail"),
+        "shutdown output was not merged into the final Terminal view: {:?}",
+        runtime.visible_text()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn close_terminates_the_entire_pty_session() {
+    let pid_file = std::env::temp_dir().join(format!(
+        "murmur-terminal-descendant-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        &format!(
+            "trap '' HUP TERM; /bin/sh -c 'trap \"\" HUP TERM; while :; do sleep 1; done' & printf '%s' \"$!\" > '{}'; wait",
+            pid_file.display()
+        ),
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 20)).unwrap();
+    let descendant = wait_for_pid_file(&pid_file);
+    assert!(std::path::Path::new(&format!("/proc/{descendant}")).exists());
+
+    runtime.close().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while std::path::Path::new(&format!("/proc/{descendant}")).exists() && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !std::path::Path::new(&format!("/proc/{descendant}")).exists(),
+        "PTY descendant {descendant} survived Terminal close"
+    );
+    let _ = std::fs::remove_file(pid_file);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn closing_one_pty_session_does_not_signal_another() {
+    let mut first_command = CommandBuilder::new("/bin/sh");
+    first_command.args(["-c", "trap '' HUP TERM; sleep 30"]);
+    let mut first = TerminalRuntime::spawn(first_command, TerminalSize::new(5, 20)).unwrap();
+
+    let mut second_command = CommandBuilder::new("/bin/sh");
+    second_command.args([
+        "-c",
+        "trap '' HUP TERM; IFS= read -r line; printf 'second=%s\\r\\n' \"$line\"; sleep 30",
+    ]);
+    let mut second = TerminalRuntime::spawn(second_command, TerminalSize::new(5, 40)).unwrap();
+
+    first.close().unwrap();
+    second.write(b"alive\r".to_vec()).unwrap();
+    wait_for_text(&second, "second=alive");
+    second.close().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn close_cancels_a_blocked_terminal_writer() {
     let mut command = CommandBuilder::new("/bin/sh");
     command.args(["-c", "stty raw -echo; trap '' HUP; sleep 2"]);
@@ -151,12 +295,34 @@ fn close_cancels_a_blocked_terminal_writer() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn queued_resizes_keep_the_last_requested_size_under_pty_backpressure() {
+fn blocked_terminal_input_applies_bounded_backpressure() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args(["-c", "stty raw -echo; trap '' HUP TERM; sleep 30"]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 20)).unwrap();
+
+    let mut accepted = 0;
+    let error = loop {
+        match runtime.write(vec![b'x'; 1024 * 1024]) {
+            Ok(()) => accepted += 1,
+            Err(error) => break error,
+        }
+        assert!(
+            accepted <= 8,
+            "Terminal accepted more than its input budget"
+        );
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    runtime.close().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn final_resize_bypasses_pty_input_backpressure() {
     let initial_size = TerminalSize::new(5, 20);
     let mut command = CommandBuilder::new("/bin/sh");
     command.args([
         "-c",
-        "stty raw -echo; sleep 0.5; dd of=/dev/null bs=65536 2>/dev/null",
+        "stty raw -echo; sleep 2; dd of=/dev/null bs=65536 2>/dev/null",
     ]);
     let mut runtime = TerminalRuntime::spawn(command, initial_size).unwrap();
     std::thread::sleep(Duration::from_millis(100));
@@ -165,17 +331,18 @@ fn queued_resizes_keep_the_last_requested_size_under_pty_backpressure() {
     let revision = runtime.revision();
 
     runtime.request_resize(TerminalSize::new(10, 40)).unwrap();
-    runtime.request_resize(initial_size).unwrap();
+    let final_size = TerminalSize::new(12, 42);
+    runtime.request_resize(final_size).unwrap();
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while runtime.revision() < revision + 2 && Instant::now() < deadline {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while runtime.size() != final_size && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        runtime.revision() >= revision + 2,
-        "both queued resizes must be applied"
+        runtime.revision() > revision,
+        "the final resize must be applied while PTY input is blocked"
     );
-    assert_eq!(runtime.size(), initial_size);
+    assert_eq!(runtime.size(), final_size);
     runtime.close().unwrap();
 }
 
@@ -366,6 +533,39 @@ fn conpty_round_trip_resizes_unicode_and_eof() {
     assert!(runtime.visible_text().contains("final-before-exit"));
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn conpty_close_terminates_descendant_processes() {
+    let pid_file = std::env::temp_dir().join(format!(
+        "murmur-conpty-descendant-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let escaped_pid_file = pid_file.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$child = Start-Process pwsh.exe -ArgumentList @('-NoLogo','-NoProfile','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{escaped_pid_file}' -Value $child.Id; Start-Sleep -Seconds 30"
+    );
+    let mut command = CommandBuilder::new("pwsh.exe");
+    command.args(["-NoLogo", "-NoProfile", "-Command", &script]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    let descendant = wait_for_pid_file(&pid_file);
+    assert!(windows_process_exists(descendant));
+
+    runtime.close().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while windows_process_exists(descendant) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !windows_process_exists(descendant),
+        "ConPTY descendant {descendant} survived Terminal close"
+    );
+    let _ = std::fs::remove_file(pid_file);
+}
+
 fn wait_for_text(runtime: &TerminalRuntime, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -378,6 +578,25 @@ fn wait_for_text(runtime: &TerminalRuntime, needle: &str) {
         "terminal never displayed {needle:?}: {:?}",
         runtime.visible_text()
     );
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn wait_for_pid_file(path: &std::path::Path) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Ok(contents) = std::fs::read_to_string(path)
+            && let Ok(pid) = contents.parse()
+        {
+            return pid;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("Terminal never reported its descendant PID");
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_exists(pid: u32) -> bool {
+    System::new_all().process(Pid::from_u32(pid)).is_some()
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

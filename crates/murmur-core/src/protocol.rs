@@ -274,6 +274,11 @@ pub enum ServerMessage {
         session_id: SessionId,
         sequence: u64,
     },
+    SubscriptionRejected {
+        server_id: ServerId,
+        session_id: SessionId,
+        reason: String,
+    },
     Event {
         server_id: ServerId,
         session_id: SessionId,
@@ -736,6 +741,22 @@ mod tests {
         write_message(&mut bytes, &message).unwrap();
         assert_eq!(
             read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+        assert_eq!(PROTOCOL_VERSION, 1);
+    }
+
+    #[test]
+    fn subscription_rejection_round_trip_keeps_protocol_version_one() {
+        let message = ServerMessage::SubscriptionRejected {
+            server_id: ServerId(4),
+            session_id: SessionId(7),
+            reason: "event cursor expired".into(),
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
         assert_eq!(PROTOCOL_VERSION, 1);
