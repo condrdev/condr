@@ -3,15 +3,17 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use murmur_core::protocol::{
-    ClientMessage, FramingError, Hello, LayoutCommand, PROTOCOL_VERSION, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, VersionCheck,
-    check_version,
+    ClientMessage, FramingError, Hello, LayoutCommand, PROTOCOL_VERSION, PaneAgentSnapshot,
+    PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent,
+    SessionId, VersionCheck, WorkspaceGitSnapshot, check_version,
 };
 use murmur_core::{
-    PaneId, Session, TerminalCommand, TerminalRuntime, TerminalSize, TerminalUpdate,
+    AgentSnapshot, GitRepository, PaneId, Session, TerminalCommand, TerminalRuntime, TerminalSize,
+    TerminalUpdate, WorkspaceId, create_worktree, default_worktree_root, discover_repository,
+    open_worktree, remove_worktree, validate_worktree_removal,
 };
 
 use crate::endpoint::{Endpoint, EndpointListener, EndpointStream, default_socket_path};
@@ -19,6 +21,8 @@ use crate::endpoint::{Endpoint, EndpointListener, EndpointStream, default_socket
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const EVENT_HISTORY_LIMIT: usize = 256;
+const AGENT_SCAN_INTERVAL: Duration = Duration::from_millis(500);
+const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -209,6 +213,9 @@ struct RuntimeState {
     session: Session,
     terminals: std::collections::HashMap<PaneId, TerminalRuntime>,
     exited_terminals: std::collections::HashSet<PaneId>,
+    agents: std::collections::HashMap<PaneId, AgentSnapshot>,
+    workspace_git: std::collections::HashMap<WorkspaceId, GitRepository>,
+    worktree_root: Option<PathBuf>,
     active_controller: Option<u64>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, mpsc::Sender<ServerMessage>>,
@@ -229,6 +236,9 @@ impl RuntimeState {
             session: Session::new(),
             terminals: std::collections::HashMap::new(),
             exited_terminals: std::collections::HashSet::new(),
+            agents: std::collections::HashMap::new(),
+            workspace_git: std::collections::HashMap::new(),
+            worktree_root: default_worktree_root().ok(),
             active_controller: None,
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
@@ -257,6 +267,16 @@ impl RuntimeState {
             sequence: self.sequence,
             snapshot: self.session.snapshot(),
             terminals,
+            agents: self
+                .agents
+                .iter()
+                .map(|(&pane_id, &agent)| PaneAgentSnapshot { pane_id, agent })
+                .collect(),
+            workspace_git: self
+                .workspace_git
+                .iter()
+                .map(|(&workspace_id, repository)| workspace_git_snapshot(workspace_id, repository))
+                .collect(),
             zoomed_panes: self
                 .session
                 .workspaces()
@@ -264,6 +284,21 @@ impl RuntimeState {
                 .flat_map(|workspace| workspace.tabs())
                 .filter_map(|tab| tab.zoomed_pane_id())
                 .collect(),
+        }
+    }
+
+    fn refresh_workspace_git(&mut self) {
+        self.workspace_git
+            .retain(|workspace_id, _| self.session.workspace(*workspace_id).is_some());
+        for workspace in self.session.workspaces() {
+            match discover_repository(workspace.root_directory()) {
+                Ok(Some(repository)) => {
+                    self.workspace_git.insert(workspace.id(), repository);
+                }
+                _ => {
+                    self.workspace_git.remove(&workspace.id());
+                }
+            }
         }
     }
 
@@ -324,6 +359,7 @@ fn apply_layout_command(
     let mut candidate = state.session.clone();
     let mut new_pane = None;
     let mut closed = None;
+    let mut created_worktree = None;
 
     match command {
         LayoutCommand::CreateWorkspace { root_directory } => {
@@ -335,6 +371,107 @@ fn apply_layout_command(
                     .active_tab()
                     .focused_pane()
                     .id(),
+            );
+        }
+        LayoutCommand::CreateWorktree {
+            parent_workspace_id,
+            branch,
+        } => {
+            let parent_root = candidate
+                .workspace(parent_workspace_id)
+                .ok_or_else(|| "unknown parent Workspace".to_string())?
+                .root_directory()
+                .to_path_buf();
+            let parent = discover_repository(&parent_root)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
+            let worktree_root = state.worktree_root.as_ref().ok_or_else(|| {
+                "cannot determine the managed worktree directory for this user".to_string()
+            })?;
+            let child = create_worktree(&parent, &branch, worktree_root)
+                .map_err(|error| error.to_string())?;
+            let workspace_id = candidate.create_workspace(child.root().to_path_buf());
+            if !candidate.associate_worktree(workspace_id, parent_workspace_id, parent_root, true) {
+                let _ = remove_worktree(&parent, &child);
+                return Err("failed to associate the created worktree".into());
+            }
+            new_pane = Some(
+                candidate
+                    .workspace(workspace_id)
+                    .expect("new Workspace exists")
+                    .active_tab()
+                    .focused_pane()
+                    .id(),
+            );
+            created_worktree = Some((parent, child));
+        }
+        LayoutCommand::OpenWorktree {
+            parent_workspace_id,
+            root_directory,
+        } => {
+            let parent_root = candidate
+                .workspace(parent_workspace_id)
+                .ok_or_else(|| "unknown parent Workspace".to_string())?
+                .root_directory()
+                .to_path_buf();
+            let parent = discover_repository(&parent_root)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
+            let child =
+                open_worktree(&parent, root_directory).map_err(|error| error.to_string())?;
+            if let Some(workspace_id) = candidate
+                .workspace_by_root(child.root())
+                .map(|workspace| workspace.id())
+            {
+                candidate.activate_workspace(workspace_id);
+            } else {
+                let workspace_id = candidate.create_workspace(child.root().to_path_buf());
+                candidate.associate_worktree(workspace_id, parent_workspace_id, parent_root, false);
+                new_pane = Some(
+                    candidate
+                        .workspace(workspace_id)
+                        .expect("new Workspace exists")
+                        .active_tab()
+                        .focused_pane()
+                        .id(),
+                );
+            }
+        }
+        LayoutCommand::RemoveWorktree { workspace_id } => {
+            let workspace = candidate
+                .workspace(workspace_id)
+                .ok_or_else(|| "unknown Workspace".to_string())?;
+            let root_directory = workspace.root_directory().to_path_buf();
+            #[cfg(windows)]
+            let pane_ids = workspace
+                .tabs()
+                .iter()
+                .flat_map(|tab| tab.panes())
+                .map(|pane| pane.id())
+                .collect::<Vec<_>>();
+            let association = workspace
+                .worktree()
+                .filter(|association| association.is_managed())
+                .cloned()
+                .ok_or_else(|| "Murmur can only remove worktrees it created".to_string())?;
+            let parent = discover_repository(association.parent_root_directory())
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
+            let child = discover_repository(root_directory)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "Workspace is not a Git worktree".to_string())?;
+            validate_worktree_removal(&parent, &child).map_err(|error| error.to_string())?;
+            #[cfg(windows)]
+            for pane_id in pane_ids {
+                if let Some(runtime) = state.terminals.get_mut(&pane_id) {
+                    let _ = runtime.shutdown();
+                }
+            }
+            remove_worktree(&parent, &child).map_err(|error| error.to_string())?;
+            closed = Some(
+                candidate
+                    .close_workspace(workspace_id)
+                    .expect("validated Workspace exists"),
             );
         }
         LayoutCommand::CreateTab { workspace_id } => {
@@ -480,8 +617,15 @@ fn apply_layout_command(
             .pane(pane_id)
             .and_then(|pane| pane.cwd())
             .ok_or_else(|| "new Pane has no working directory".to_string())?;
-        let mut runtime = TerminalRuntime::spawn_shell(cwd, TerminalSize::new(24, 80))
-            .map_err(|error| format!("failed to start terminal: {error}"))?;
+        let mut runtime = match TerminalRuntime::spawn_shell(cwd, TerminalSize::new(24, 80)) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                if let Some((parent, child)) = &created_worktree {
+                    let _ = remove_worktree(parent, child);
+                }
+                return Err(format!("failed to start terminal: {error}"));
+            }
+        };
         let updates = runtime
             .take_updates()
             .expect("new Terminal update receiver exists");
@@ -495,6 +639,7 @@ fn apply_layout_command(
     if let Some(closed) = closed {
         for pane_id in closed.panes() {
             state.exited_terminals.remove(pane_id);
+            state.agents.remove(pane_id);
             if let Some(runtime) = state.terminals.remove(pane_id) {
                 removed_terminals.push(runtime);
             }
@@ -504,6 +649,7 @@ fn apply_layout_command(
         state.terminals.insert(pane_id, runtime);
         (pane_id, updates)
     });
+    state.refresh_workspace_git();
     Ok(LayoutEffect {
         started_terminal,
         removed_terminals,
@@ -896,17 +1042,35 @@ fn monitor_terminal(
     state: Arc<Mutex<RuntimeState>>,
 ) {
     thread::spawn(move || {
-        while let Ok(update) = updates.recv() {
+        let mut last_agent_scan = Instant::now();
+        let mut last_git_scan = Instant::now();
+        let mut agent_scan_pending = false;
+        let mut git_scan_pending = false;
+        loop {
+            let update = if agent_scan_pending || git_scan_pending {
+                match updates.recv_timeout(AGENT_SCAN_INTERVAL) {
+                    Ok(update) => Some(update),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                match updates.recv() {
+                    Ok(update) => Some(update),
+                    Err(_) => break,
+                }
+            };
             let mut state = state.lock().expect("server state lock poisoned");
             match update {
-                TerminalUpdate::View(_) => {
+                Some(TerminalUpdate::View(_)) => {
+                    agent_scan_pending = true;
+                    git_scan_pending = true;
                     let Some(view) = state.terminals.get(&pane_id).map(TerminalRuntime::view)
                     else {
                         break;
                     };
                     state.publish_background(SessionEvent::TerminalChanged { pane_id, view });
                 }
-                TerminalUpdate::Exited => {
+                Some(TerminalUpdate::Exited) => {
                     let Some(view) = state.terminals.get_mut(&pane_id).map(|runtime| {
                         let _ = runtime.wait();
                         runtime.view()
@@ -915,11 +1079,100 @@ fn monitor_terminal(
                     };
                     state.exited_terminals.insert(pane_id);
                     state.publish_background(SessionEvent::TerminalExited { pane_id, view });
+                    if state.agents.remove(&pane_id).is_some() {
+                        state.publish_background(SessionEvent::AgentChanged {
+                            pane_id,
+                            agent: None,
+                        });
+                    }
                     break;
                 }
+                None => {}
+            }
+
+            let now = Instant::now();
+            if agent_scan_pending && now.duration_since(last_agent_scan) >= AGENT_SCAN_INTERVAL {
+                refresh_agent(&mut state, pane_id);
+                last_agent_scan = now;
+                agent_scan_pending = false;
+            }
+            if git_scan_pending && now.duration_since(last_git_scan) >= GIT_SCAN_INTERVAL {
+                refresh_workspace_git_for_pane(&mut state, pane_id);
+                last_git_scan = now;
+                git_scan_pending = false;
             }
         }
     });
+}
+
+fn refresh_agent(state: &mut RuntimeState, pane_id: PaneId) {
+    let previous = state.agents.get(&pane_id).copied();
+    let next = state
+        .terminals
+        .get(&pane_id)
+        .and_then(|runtime| runtime.agent_snapshot(previous));
+    if previous == next {
+        return;
+    }
+    match next {
+        Some(agent) => {
+            state.agents.insert(pane_id, agent);
+        }
+        None => {
+            state.agents.remove(&pane_id);
+        }
+    }
+    state.publish_background(SessionEvent::AgentChanged {
+        pane_id,
+        agent: next,
+    });
+}
+
+fn refresh_workspace_git_for_pane(state: &mut RuntimeState, pane_id: PaneId) {
+    let Some(workspace) = state.session.workspace_for_pane(pane_id) else {
+        return;
+    };
+    let first_pane = workspace
+        .tabs()
+        .iter()
+        .flat_map(|tab| tab.panes())
+        .next()
+        .map(|pane| pane.id());
+    if first_pane != Some(pane_id) {
+        return;
+    }
+    let workspace_id = workspace.id();
+    let root = workspace.root_directory().to_path_buf();
+    let next = match discover_repository(root) {
+        Ok(repository) => repository,
+        Err(_) => return,
+    };
+    if state.workspace_git.get(&workspace_id) == next.as_ref() {
+        return;
+    }
+    let git = match next {
+        Some(repository) => {
+            let snapshot = workspace_git_snapshot(workspace_id, &repository);
+            state.workspace_git.insert(workspace_id, repository);
+            Some(snapshot)
+        }
+        None => {
+            state.workspace_git.remove(&workspace_id);
+            None
+        }
+    };
+    state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
+}
+
+fn workspace_git_snapshot(
+    workspace_id: WorkspaceId,
+    repository: &GitRepository,
+) -> WorkspaceGitSnapshot {
+    WorkspaceGitSnapshot {
+        workspace_id,
+        branch: repository.branch().map(str::to_owned),
+        linked_worktree: repository.is_linked_worktree(),
+    }
 }
 
 fn queue_message(outbound: &mpsc::Sender<ServerMessage>, message: ServerMessage) -> bool {
@@ -1091,6 +1344,20 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos()
+    }
+
+    fn run_git(cwd: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "Git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     fn start() -> (ServerHandle, Endpoint, thread::JoinHandle<io::Result<()>>) {
@@ -1356,6 +1623,86 @@ mod tests {
         assert!(state.terminals.is_empty());
         assert!(state.bootstrap().zoomed_panes.is_empty());
         assert!(state.session.tab(tab_one).is_none());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_branch() {
+        let temp = std::env::temp_dir().join(format!(
+            "murmur-server-worktree-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let repository = temp.join("repository");
+        std::fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, &["init"]);
+        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(
+            &repository,
+            &["config", "user.email", "murmur@example.invalid"],
+        );
+        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        run_git(&repository, &["add", "README.md"]);
+        run_git(&repository, &["commit", "-m", "initial"]);
+
+        let mut state = RuntimeState::new(&test_endpoint());
+        state.worktree_root = Some(temp.join("worktrees"));
+        let mut updates = Vec::new();
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::CreateWorkspace {
+                root_directory: repository.clone(),
+            },
+        );
+        let parent_workspace_id = state.session.active_workspace_id().unwrap();
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::CreateWorktree {
+                parent_workspace_id,
+                branch: "feature/server-flow".into(),
+            },
+        );
+
+        let child_workspace_id = state.session.active_workspace_id().unwrap();
+        let child = state.session.workspace(child_workspace_id).unwrap();
+        let child_root = child.root_directory().to_path_buf();
+        assert!(child.worktree().unwrap().is_managed());
+        assert_eq!(
+            state
+                .workspace_git
+                .get(&child_workspace_id)
+                .and_then(GitRepository::branch),
+            Some("feature/server-flow")
+        );
+
+        assert_eq!(
+            apply_for_test(
+                &mut state,
+                &mut updates,
+                LayoutCommand::RemoveWorktree {
+                    workspace_id: child_workspace_id,
+                },
+            ),
+            1
+        );
+        assert!(!child_root.exists());
+        run_git(
+            &repository,
+            &["show-ref", "--verify", "refs/heads/feature/server-flow"],
+        );
+
+        apply_for_test(
+            &mut state,
+            &mut updates,
+            LayoutCommand::CloseWorkspace {
+                workspace_id: parent_workspace_id,
+            },
+        );
+        drop(state);
+        drop(updates);
+        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -2043,5 +2390,129 @@ mod tests {
         );
         drop(stream);
         thread.join().unwrap().unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
+        let temp = std::env::temp_dir().join(format!(
+            "murmur-server-tcp-state-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        let repository = temp.join("repository");
+        std::fs::create_dir_all(&repository).unwrap();
+        run_git(&repository, &["init"]);
+        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(
+            &repository,
+            &["config", "user.email", "murmur@example.invalid"],
+        );
+        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        run_git(&repository, &["add", "README.md"]);
+        run_git(&repository, &["commit", "-m", "initial"]);
+        run_git(&repository, &["branch", "-M", "main"]);
+
+        let server = BoundServer::bind(ServerConfig {
+            endpoint: Endpoint::tcp("127.0.0.1:0".parse().unwrap()),
+        })
+        .unwrap();
+        let handle = server.handle();
+        let endpoint = Endpoint::tcp(server.local_addr().unwrap().unwrap());
+        let thread = thread::spawn(move || server.run());
+
+        let connection = ClientConnection::connect(&endpoint, "tcp-controller").unwrap();
+        let bootstrap = connection.bootstrap().clone();
+        let server_id = bootstrap.server_id;
+        let session_id = bootstrap.session_id;
+        let mut stream = connection.into_stream();
+        stream
+            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::AcquireControl { session_id },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_server(&mut stream),
+            ServerMessage::ControlGranted { .. }
+        ));
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Subscribe {
+                session_id,
+                after_sequence: bootstrap.sequence,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_server(&mut stream),
+            ServerMessage::Subscribed { .. }
+        ));
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Layout {
+                server_id,
+                session_id,
+                command: LayoutCommand::CreateWorkspace {
+                    root_directory: repository.clone(),
+                },
+            },
+        )
+        .unwrap();
+        wait_for_message(&mut stream, |message| {
+            matches!(
+                message,
+                ServerMessage::Event {
+                    event: SessionEvent::LayoutChanged,
+                    ..
+                }
+            )
+        });
+        let (workspace_id, pane_id) = {
+            let state = handle.state.lock().unwrap();
+            let workspace = state.session.active_workspace().unwrap();
+            (workspace.id(), workspace.active_tab().focused_pane().id())
+        };
+        send_terminal(
+            &mut stream,
+            server_id,
+            session_id,
+            pane_id,
+            TerminalCommand::Text(
+                "exec -a codex /bin/bash -c \"echo 'Working - esc to interrupt'; sleep 30 & wait\"\r"
+                    .into(),
+            ),
+        );
+        wait_for_message(&mut stream, |message| {
+            matches!(
+                message,
+                ServerMessage::Event {
+                    event: SessionEvent::AgentChanged {
+                        pane_id: event_pane,
+                        agent: Some(AgentSnapshot {
+                            kind: murmur_core::AgentKind::Codex,
+                            state: murmur_core::AgentState::Working,
+                        }),
+                    },
+                    ..
+                } if *event_pane == pane_id
+            )
+        });
+
+        let reconnect = ClientConnection::connect(&endpoint, "tcp-reconnect").unwrap();
+        assert!(reconnect.bootstrap().agents.iter().any(|agent| {
+            agent.pane_id == pane_id && agent.agent.kind == murmur_core::AgentKind::Codex
+        }));
+        assert!(reconnect.bootstrap().workspace_git.iter().any(|git| {
+            git.workspace_id == workspace_id && git.branch.as_deref() == Some("main")
+        }));
+
+        handle.stop();
+        drop(reconnect);
+        drop(stream);
+        thread.join().unwrap().unwrap();
+        let _ = std::fs::remove_dir_all(temp);
     }
 }

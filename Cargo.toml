@@ -14,6 +14,7 @@ alacritty_terminal = { version = "0.26.0", default-features = false }
 async-channel = "2.5"
 bincode = "1.3"
 interprocess = "2.4.2"
+nix = { version = "0.28.0", features = ["process"] }
 # gpui-component follows Zed main; Cargo.lock pins this source to its reviewed commit.
 gpui = { version = "=0.2.2", git = "https://github.com/zed-industries/zed" }
 gpui_platform = { version = "=0.1.0", git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
@@ -21,6 +22,7 @@ gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "9890a77c2d427f05b2512f05ddc6cce84686f9a6" }
 serde = { version = "1.0", features = ["derive"] }
 portable-pty = "0.9.0"
+sysinfo = "0.31.4"
 tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
 widestring = "1.2"
 

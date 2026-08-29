@@ -12,6 +12,10 @@ alacritty_terminal.workspace = true
 bincode.workspace = true
 portable-pty.workspace = true
 serde.workspace = true
+sysinfo.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
 
 [lints]
 workspace = true

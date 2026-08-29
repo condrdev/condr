@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalCommand, TerminalView,
-    WorkspaceId,
+    AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalCommand,
+    TerminalView, WorkspaceId,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -74,6 +74,17 @@ pub enum ClientMessage {
 pub enum LayoutCommand {
     CreateWorkspace {
         root_directory: PathBuf,
+    },
+    CreateWorktree {
+        parent_workspace_id: WorkspaceId,
+        branch: String,
+    },
+    OpenWorktree {
+        parent_workspace_id: WorkspaceId,
+        root_directory: PathBuf,
+    },
+    RemoveWorktree {
+        workspace_id: WorkspaceId,
     },
     CreateTab {
         workspace_id: WorkspaceId,
@@ -146,6 +157,8 @@ pub struct SessionBootstrap {
     pub sequence: u64,
     pub snapshot: SessionSnapshot,
     pub terminals: Vec<PaneTerminalSnapshot>,
+    pub agents: Vec<PaneAgentSnapshot>,
+    pub workspace_git: Vec<WorkspaceGitSnapshot>,
     pub zoomed_panes: Vec<PaneId>,
 }
 
@@ -157,10 +170,37 @@ pub struct PaneTerminalSnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PaneAgentSnapshot {
+    pub pane_id: PaneId,
+    pub agent: AgentSnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceGitSnapshot {
+    pub workspace_id: WorkspaceId,
+    pub branch: Option<String>,
+    pub linked_worktree: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SessionEvent {
     LayoutChanged,
-    TerminalChanged { pane_id: PaneId, view: TerminalView },
-    TerminalExited { pane_id: PaneId, view: TerminalView },
+    TerminalChanged {
+        pane_id: PaneId,
+        view: TerminalView,
+    },
+    TerminalExited {
+        pane_id: PaneId,
+        view: TerminalView,
+    },
+    AgentChanged {
+        pane_id: PaneId,
+        agent: Option<AgentSnapshot>,
+    },
+    WorkspaceGitChanged {
+        workspace_id: WorkspaceId,
+        git: Option<WorkspaceGitSnapshot>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -351,6 +391,27 @@ mod tests {
             session_id: SessionId(1),
             command: LayoutCommand::CreateWorkspace {
                 root_directory: PathBuf::from("projects/murmur"),
+            },
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+        assert_eq!(PROTOCOL_VERSION, 1);
+    }
+
+    #[test]
+    fn worktree_command_round_trip_keeps_protocol_version_one() {
+        let mut session = crate::Session::new();
+        let parent_workspace_id = session.create_workspace(PathBuf::from("projects/murmur"));
+        let message = ClientMessage::Layout {
+            server_id: ServerId(4),
+            session_id: SessionId(1),
+            command: LayoutCommand::CreateWorktree {
+                parent_workspace_id,
+                branch: "feature/phase-five".into(),
             },
         };
         let mut bytes = Vec::new();

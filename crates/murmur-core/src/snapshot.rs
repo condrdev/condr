@@ -2,7 +2,7 @@ use std::{fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{PaneId, PaneLayout, TabId, WorkspaceId};
+use crate::{PaneId, PaneLayout, TabId, WorkspaceId, WorktreeAssociation};
 
 pub(crate) const SNAPSHOT_VERSION: u32 = 1;
 
@@ -18,6 +18,7 @@ pub(crate) struct WorkspaceSnapshot {
     pub(crate) id: WorkspaceId,
     pub(crate) name: String,
     pub(crate) root_directory: PathBuf,
+    pub(crate) worktree: Option<WorktreeAssociation>,
     pub(crate) tabs: Vec<TabSnapshot>,
     pub(crate) active_tab: TabId,
     pub(crate) next_tab_number: u64,

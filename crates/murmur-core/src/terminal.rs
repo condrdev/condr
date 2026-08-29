@@ -15,6 +15,12 @@ use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
 pub use portable_pty::CommandBuilder;
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+#[cfg(unix)]
+use nix::unistd::{Pid as UnixPid, getpgid};
+
+use crate::{AgentKind, AgentSnapshot, AgentState, classify_agent, identify_agent_process};
 
 const MAX_TERMINAL_CELLS: usize = 65_536;
 
@@ -412,6 +418,8 @@ type Terminal = Term<TerminalEventProxy>;
 
 pub struct TerminalRuntime {
     terminal: Arc<Mutex<Terminal>>,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    processes: Mutex<ProcessProbe>,
     size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
     update_sender: mpsc::Sender<TerminalUpdate>,
@@ -447,7 +455,9 @@ impl TerminalRuntime {
         let reader = pair.master.try_clone_reader().map_err(other_error)?;
         let writer = pair.master.take_writer().map_err(other_error)?;
         let mut child = pair.slave.spawn_command(command).map_err(other_error)?;
+        let shell_pid = child.process_id();
         drop(pair.slave);
+        let master = Arc::new(Mutex::new(pair.master));
 
         // ponytail: unbounded per-Terminal input; add backpressure if sustained input outpaces PTY writes.
         let (io, commands) = mpsc::channel();
@@ -461,6 +471,7 @@ impl TerminalRuntime {
         let (update_sender, updates) = mpsc::channel();
 
         let writer_terminal = Arc::clone(&terminal);
+        let writer_master = Arc::clone(&master);
         let writer_size = Arc::clone(&current_size);
         let writer_revision = Arc::clone(&revision);
         let writer_updates = update_sender.clone();
@@ -468,7 +479,7 @@ impl TerminalRuntime {
             .name("murmur-pty-writer".into())
             .spawn(move || {
                 io_loop(
-                    pair.master,
+                    writer_master,
                     writer,
                     commands,
                     writer_terminal,
@@ -504,6 +515,8 @@ impl TerminalRuntime {
 
         Ok(Self {
             terminal,
+            master,
+            processes: Mutex::new(ProcessProbe::new(shell_pid)),
             size: current_size,
             revision,
             update_sender,
@@ -668,6 +681,53 @@ impl TerminalRuntime {
         lines.join("\n")
     }
 
+    pub fn bottom_text(&self) -> String {
+        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let mut lines = Vec::with_capacity(terminal.screen_lines());
+        for row in 0..terminal.screen_lines() {
+            let row = &terminal.grid()[Line(row as i32)];
+            let mut line = String::new();
+            for column in 0..terminal.columns() {
+                let cell = &row[Column(column)];
+                if cell
+                    .flags
+                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+                if cell.flags.contains(Flags::HIDDEN) {
+                    line.push(' ');
+                } else {
+                    line.push(cell.c);
+                    if let Some(zerowidth) = cell.zerowidth() {
+                        line.extend(zerowidth);
+                    }
+                }
+            }
+            line.truncate(line.trim_end_matches(' ').len());
+            lines.push(line);
+        }
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+
+    pub fn agent_snapshot(&self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
+        let kind = self
+            .processes
+            .lock()
+            .expect("terminal process probe lock poisoned")
+            .agent_kind(&self.master)?;
+        let previous = previous
+            .filter(|snapshot| snapshot.kind == kind)
+            .map_or(AgentState::Unknown, |snapshot| snapshot.state);
+        Some(AgentSnapshot {
+            kind,
+            state: classify_agent(kind, &self.bottom_text(), previous),
+        })
+    }
+
     pub fn scroll(&self, scroll: TerminalScroll) {
         let scroll = match scroll {
             TerminalScroll::Lines(lines) => Scroll::Delta(lines),
@@ -791,7 +851,7 @@ fn read_loop(
 }
 
 fn io_loop(
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     mut writer: Box<dyn Write + Send>,
     commands: mpsc::Receiver<IoCommand>,
     terminal: Arc<Mutex<Terminal>>,
@@ -807,17 +867,107 @@ fn io_loop(
             }
             IoCommand::Resize(size, response) => {
                 let mut terminal = terminal.lock().expect("terminal state lock poisoned");
-                let result = master.resize(size.into()).map_err(other_error).map(|()| {
-                    terminal.resize(size);
-                    *current_size.lock().expect("terminal size lock poisoned") = size;
-                    publish_view(&revision, &updates);
-                });
+                let result = master
+                    .lock()
+                    .expect("PTY master lock poisoned")
+                    .resize(size.into())
+                    .map_err(other_error)
+                    .map(|()| {
+                        terminal.resize(size);
+                        *current_size.lock().expect("terminal size lock poisoned") = size;
+                        publish_view(&revision, &updates);
+                    });
                 let _ = response.send(result);
             }
             IoCommand::Shutdown => return Ok(()),
         }
     }
     Ok(())
+}
+
+struct ProcessProbe {
+    system: System,
+    refresh_kind: ProcessRefreshKind,
+    shell_pid: Option<u32>,
+}
+
+impl ProcessProbe {
+    fn new(shell_pid: Option<u32>) -> Self {
+        Self {
+            system: System::new(),
+            refresh_kind: ProcessRefreshKind::new()
+                .with_cmd(UpdateKind::Always)
+                .with_exe(UpdateKind::Always),
+            shell_pid,
+        }
+    }
+
+    #[cfg(unix)]
+    fn agent_kind(&mut self, master: &Mutex<Box<dyn MasterPty + Send>>) -> Option<AgentKind> {
+        let foreground_pid = master
+            .lock()
+            .expect("PTY master lock poisoned")
+            .process_group_leader()
+            .and_then(|pid| u32::try_from(pid).ok())
+            .or(self.shell_pid)?;
+        let process_group =
+            getpgid(Some(UnixPid::from_raw(i32::try_from(foreground_pid).ok()?))).ok()?;
+        self.system
+            .refresh_processes_specifics(ProcessesToUpdate::All, self.refresh_kind);
+
+        let leader = Pid::from_u32(u32::try_from(process_group.as_raw()).ok()?);
+        if let Some(kind) = self.system.process(leader).and_then(|process| {
+            identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
+        }) {
+            return Some(kind);
+        }
+
+        self.system.processes().iter().find_map(|(pid, process)| {
+            let pid = i32::try_from(pid.as_u32()).ok()?;
+            (getpgid(Some(UnixPid::from_raw(pid))).ok()? == process_group).then(|| {
+                identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
+            })?
+        })
+    }
+
+    #[cfg(windows)]
+    fn agent_kind(&mut self, _: &Mutex<Box<dyn MasterPty + Send>>) -> Option<AgentKind> {
+        let shell_pid = Pid::from_u32(self.shell_pid?);
+        self.system
+            .refresh_processes_specifics(ProcessesToUpdate::All, self.refresh_kind);
+        let mut candidates = self
+            .system
+            .processes()
+            .iter()
+            .filter_map(|(pid, process)| {
+                descendant_depth(&self.system, *pid, shell_pid).and_then(|depth| {
+                    identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
+                        .map(|kind| (depth, kind))
+                })
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|(depth, _)| *depth);
+        candidates.last().map(|(_, kind)| *kind)
+    }
+}
+
+fn identify_process(name: &str, argv: &[std::ffi::OsString]) -> Option<AgentKind> {
+    let argv = argv
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    identify_agent_process(name, &argv)
+}
+
+#[cfg(windows)]
+fn descendant_depth(system: &System, mut pid: Pid, ancestor: Pid) -> Option<usize> {
+    for depth in 0..32 {
+        if pid == ancestor {
+            return Some(depth);
+        }
+        pid = system.process(pid)?.parent()?;
+    }
+    None
 }
 
 fn publish_view(revision: &AtomicU64, updates: &mpsc::Sender<TerminalUpdate>) {

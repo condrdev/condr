@@ -79,6 +79,7 @@ pub struct Workspace {
     id: WorkspaceId,
     name: String,
     root_directory: PathBuf,
+    worktree: Option<WorktreeAssociation>,
     tabs: Vec<Tab>,
     active_tab: TabId,
     next_tab_number: u64,
@@ -99,6 +100,13 @@ pub struct Tab {
 pub struct Pane {
     id: PaneId,
     cwd: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeAssociation {
+    parent_workspace_id: WorkspaceId,
+    parent_root_directory: PathBuf,
+    managed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -183,6 +191,7 @@ impl Session {
             id: workspace_id,
             name: workspace_name(&root_directory),
             root_directory: root_directory.clone(),
+            worktree: None,
             tabs: vec![Tab {
                 id: tab_id,
                 name: "Tab 1".into(),
@@ -274,6 +283,47 @@ impl Session {
         workspace.active_tab = tab_id;
         self.active_workspace = Some(workspace_id);
         Some(new_pane_id)
+    }
+
+    pub fn associate_worktree(
+        &mut self,
+        workspace_id: WorkspaceId,
+        parent_workspace_id: WorkspaceId,
+        parent_root_directory: PathBuf,
+        managed: bool,
+    ) -> bool {
+        if workspace_id == parent_workspace_id || parent_root_directory.as_os_str().is_empty() {
+            return false;
+        }
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return false;
+        };
+        workspace.worktree = Some(WorktreeAssociation {
+            parent_workspace_id,
+            parent_root_directory,
+            managed,
+        });
+        true
+    }
+
+    pub fn workspace_for_pane(&self, pane_id: PaneId) -> Option<&Workspace> {
+        self.workspaces.iter().find(|workspace| {
+            workspace
+                .tabs
+                .iter()
+                .flat_map(Tab::panes)
+                .any(|pane| pane.id == pane_id)
+        })
+    }
+
+    pub fn workspace_by_root(&self, root_directory: &Path) -> Option<&Workspace> {
+        self.workspaces
+            .iter()
+            .find(|workspace| workspace.root_directory == root_directory)
     }
 
     pub fn set_pane_cwd(&mut self, pane_id: PaneId, cwd: Option<PathBuf>) -> bool {
@@ -568,6 +618,7 @@ impl Session {
                     id: workspace.id,
                     name: workspace.name.clone(),
                     root_directory: workspace.root_directory.clone(),
+                    worktree: workspace.worktree.clone(),
                     tabs: workspace
                         .tabs
                         .iter()
@@ -607,6 +658,7 @@ impl Session {
                     id: workspace.id,
                     name: workspace.name,
                     root_directory: workspace.root_directory,
+                    worktree: workspace.worktree,
                     tabs: workspace
                         .tabs
                         .into_iter()
@@ -662,6 +714,12 @@ impl Session {
             }
             if workspace.name.is_empty() || workspace.tabs.is_empty() {
                 return Err(SnapshotError::Invalid("invalid Workspace"));
+            }
+            if workspace.worktree.as_ref().is_some_and(|worktree| {
+                worktree.parent_workspace_id == workspace.id
+                    || worktree.parent_root_directory.as_os_str().is_empty()
+            }) {
+                return Err(SnapshotError::Invalid("invalid Worktree association"));
             }
             if !workspace
                 .tabs
@@ -749,6 +807,10 @@ impl Workspace {
         &self.root_directory
     }
 
+    pub fn worktree(&self) -> Option<&WorktreeAssociation> {
+        self.worktree.as_ref()
+    }
+
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
     }
@@ -801,6 +863,20 @@ impl Pane {
 
     pub fn cwd(&self) -> Option<&Path> {
         self.cwd.as_deref()
+    }
+}
+
+impl WorktreeAssociation {
+    pub fn parent_workspace_id(&self) -> WorkspaceId {
+        self.parent_workspace_id
+    }
+
+    pub fn parent_root_directory(&self) -> &Path {
+        &self.parent_root_directory
+    }
+
+    pub fn is_managed(&self) -> bool {
+        self.managed
     }
 }
 

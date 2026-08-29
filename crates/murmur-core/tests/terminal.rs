@@ -1,8 +1,10 @@
 use std::time::{Duration, Instant};
 
-use murmur_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
 #[cfg(target_os = "linux")]
-use murmur_core::{TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate};
+use murmur_core::{
+    AgentKind, AgentState, TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
+};
+use murmur_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
 
 #[cfg(target_os = "linux")]
 #[test]
@@ -123,6 +125,49 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
     assert!(saw_view);
     assert!(runtime.wait().unwrap().success());
     assert!(runtime.visible_text().contains("final"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn detection_text_uses_the_live_bottom_while_the_viewport_is_scrolled() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        "for i in $(seq 1 40); do printf 'line-%02d\\n' \"$i\"; done; sleep 1",
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    wait_for_text(&runtime, "line-40");
+    let bottom = runtime.bottom_text();
+    assert!(bottom.contains("line-40"));
+
+    runtime.scroll(TerminalScroll::Top);
+    assert!(!runtime.visible_text().contains("line-40"));
+    assert_eq!(runtime.bottom_text(), bottom);
+    runtime.shutdown().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn foreground_agent_process_and_terminal_text_produce_a_snapshot() {
+    let mut command = CommandBuilder::new("/bin/bash");
+    command.args([
+        "-c",
+        "printf 'Working (1s - esc to interrupt)\\n'; bash -c 'exec -a codex sleep 30' & wait",
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 50)).unwrap();
+    wait_for_text(&runtime, "esc to interrupt");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let snapshot = loop {
+        if let Some(snapshot) = runtime.agent_snapshot(None) {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline, "agent process was not detected");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(snapshot.kind, AgentKind::Codex);
+    assert_eq!(snapshot.state, AgentState::Working);
+    runtime.shutdown().unwrap();
 }
 
 #[cfg(target_os = "windows")]
