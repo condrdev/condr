@@ -170,6 +170,39 @@ fn foreground_agent_process_and_terminal_text_produce_a_snapshot() {
     runtime.shutdown().unwrap();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn foreground_agent_survives_its_process_group_leader_exiting() {
+    let mut command = CommandBuilder::new("/bin/bash");
+    command.args(["--noprofile", "--norc", "-i"]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(8, 60)).unwrap();
+    runtime
+        .write(
+            b"printf 'Working - esc to interrupt\\n'; true | bash -c 'exec -a codex sleep 30'\r"
+                .to_vec(),
+        )
+        .unwrap();
+    wait_for_text(&runtime, "esc to interrupt");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let snapshot = loop {
+        if let Some(snapshot) = runtime.agent_snapshot(None) {
+            break snapshot;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "agent process was not detected after the pipeline leader exited"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(snapshot.kind, AgentKind::Codex);
+    assert_eq!(snapshot.state, AgentState::Working);
+
+    runtime.write(vec![3]).unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    runtime.shutdown().unwrap();
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn conpty_round_trip_resizes_unicode_and_eof() {

@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -110,16 +108,18 @@ pub fn identify_agent_process(name: &str, argv: &[String]) -> Option<AgentKind> 
         .or_else(|| argv.first().and_then(|argument| identify_name(argument)))
         .or_else(|| {
             let runtime = normalized_name(name);
-            matches!(
+            if runtime == "cmd" {
+                cmd_command(argv).and_then(identify_command_name)
+            } else if matches!(
                 runtime.as_str(),
-                "node" | "bun" | "python" | "python3" | "pwsh" | "powershell" | "cmd"
-            )
-            .then(|| {
+                "node" | "bun" | "python" | "python3" | "pwsh" | "powershell"
+            ) {
                 argv.iter()
                     .skip(1)
                     .find_map(|argument| identify_name(argument))
-            })
-            .flatten()
+            } else {
+                None
+            }
         })
 }
 
@@ -146,16 +146,37 @@ fn identify_name(value: &str) -> Option<AgentKind> {
 }
 
 fn normalized_name(value: &str) -> String {
-    let file_name = Path::new(value)
-        .file_name()
-        .and_then(|name| name.to_str())
+    let file_name = value
+        .rsplit(['/', '\\'])
+        .find(|component| !component.is_empty())
         .unwrap_or(value)
+        .trim_matches('"')
         .to_ascii_lowercase();
     let without_script = [".exe", ".cmd", ".bat", ".ps1", ".js"]
         .into_iter()
         .find_map(|suffix| file_name.strip_suffix(suffix))
         .unwrap_or(&file_name);
     without_script.to_owned()
+}
+
+fn cmd_command(argv: &[String]) -> Option<&str> {
+    let mut arguments = argv.iter().skip(1);
+    while let Some(argument) = arguments.next() {
+        if matches!(argument.to_ascii_lowercase().as_str(), "/c" | "/k") {
+            return arguments.next().map(String::as_str);
+        }
+    }
+    None
+}
+
+fn identify_command_name(command: &str) -> Option<AgentKind> {
+    let command = command.trim_start();
+    let executable = if let Some(quoted) = command.strip_prefix('"') {
+        quoted.split_once('"').map(|(executable, _)| executable)?
+    } else {
+        command.split_whitespace().next()?
+    };
+    identify_name(executable)
 }
 
 fn is_transcript_viewer(kind: AgentKind, text: &str) -> bool {
@@ -208,6 +229,18 @@ mod tests {
             Some(AgentKind::Codex)
         );
         assert_eq!(identify_agent_process("pwsh", &["pwsh".into()]), None);
+        assert_eq!(
+            identify_agent_process(
+                "cmd.exe",
+                &[
+                    "cmd.exe".into(),
+                    "/D".into(),
+                    "/C".into(),
+                    r#"C:\Users\murmur\AppData\Roaming\npm\codex.cmd --model gpt-5"#.into(),
+                ],
+            ),
+            Some(AgentKind::Codex)
+        );
         assert_eq!(
             identify_agent_process("sleep", &["codex".into(), "10".into()]),
             Some(AgentKind::Codex)

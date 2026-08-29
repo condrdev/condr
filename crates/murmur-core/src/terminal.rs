@@ -904,18 +904,19 @@ impl ProcessProbe {
 
     #[cfg(unix)]
     fn agent_kind(&mut self, master: &Mutex<Box<dyn MasterPty + Send>>) -> Option<AgentKind> {
-        let foreground_pid = master
+        let foreground_group = master
             .lock()
             .expect("PTY master lock poisoned")
             .process_group_leader()
-            .and_then(|pid| u32::try_from(pid).ok())
-            .or(self.shell_pid)?;
-        let process_group =
-            getpgid(Some(UnixPid::from_raw(i32::try_from(foreground_pid).ok()?))).ok()?;
+            .map(UnixPid::from_raw)
+            .or_else(|| {
+                let shell_pid = i32::try_from(self.shell_pid?).ok()?;
+                getpgid(Some(UnixPid::from_raw(shell_pid))).ok()
+            })?;
         self.system
             .refresh_processes_specifics(ProcessesToUpdate::All, self.refresh_kind);
 
-        let leader = Pid::from_u32(u32::try_from(process_group.as_raw()).ok()?);
+        let leader = Pid::from_u32(u32::try_from(foreground_group.as_raw()).ok()?);
         if let Some(kind) = self.system.process(leader).and_then(|process| {
             identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
         }) {
@@ -924,7 +925,7 @@ impl ProcessProbe {
 
         self.system.processes().iter().find_map(|(pid, process)| {
             let pid = i32::try_from(pid.as_u32()).ok()?;
-            (getpgid(Some(UnixPid::from_raw(pid))).ok()? == process_group).then(|| {
+            (getpgid(Some(UnixPid::from_raw(pid))).ok()? == foreground_group).then(|| {
                 identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
             })?
         })

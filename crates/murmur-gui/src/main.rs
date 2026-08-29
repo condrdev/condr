@@ -3703,6 +3703,11 @@ mod tests {
             let temp = TestDirectory::new("worktree-ui");
             let repository = temp.0.join("repository");
             let worktree = temp.0.join("existing-worktree");
+            let created_branch = format!(
+                "feature/ui-created-{}-{}",
+                std::process::id(),
+                NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed)
+            );
             std::fs::create_dir_all(&repository).unwrap();
             run_git(&repository, ["init"]);
             run_git(&repository, ["config", "user.name", "Murmur Tests"]);
@@ -3765,8 +3770,86 @@ mod tests {
                 window.update(|window, cx| window.has_active_dialog(cx)),
                 "Create Worktree should open its branch dialog"
             );
-            window.update(|window, cx| window.close_dialog(cx));
+            submit_text_dialog(window, &created_branch);
 
+            let mut managed_workspace = None;
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    managed_workspace = murmur.active_session().and_then(|session| {
+                        session.workspaces().iter().find_map(|workspace| {
+                            workspace
+                                .worktree()
+                                .is_some_and(|association| association.is_managed())
+                                .then(|| (workspace.id(), workspace.root_directory().to_path_buf()))
+                        })
+                    });
+                    managed_workspace.as_ref().is_some_and(|(workspace_id, _)| {
+                        murmur
+                            .connection(1)
+                            .and_then(|connection| connection.workspace_git.get(workspace_id))
+                            .and_then(|git| git.branch.as_deref())
+                            == Some(created_branch.as_str())
+                    })
+                })
+            }));
+            let (managed_workspace_id, managed_root) = managed_workspace.unwrap();
+            std::fs::write(managed_root.join("untracked.txt"), "keep me\n").unwrap();
+
+            window.update(|window, cx| _ = window.draw(cx));
+            let managed = window
+                .debug_bounds(sidebar_workspace_selector(managed_workspace_id))
+                .expect("managed worktree branch should render in the sidebar");
+            window.simulate_mouse_down(managed.center(), MouseButton::Right, Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            window.simulate_keystrokes("down down enter");
+            window.run_until_parked();
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            window.simulate_keystrokes("enter");
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .and_then(|connection| connection.error.as_deref())
+                        .is_some_and(|error| error.contains("modified or untracked"))
+                })
+            }));
+            assert!(managed_root.exists());
+
+            std::fs::remove_file(managed_root.join("untracked.txt")).unwrap();
+            window.update(|window, cx| _ = window.draw(cx));
+            let managed = window
+                .debug_bounds(sidebar_workspace_selector(managed_workspace_id))
+                .unwrap();
+            window.simulate_mouse_down(managed.center(), MouseButton::Right, Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            window.simulate_keystrokes("down down enter");
+            window.run_until_parked();
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            window.simulate_keystrokes("enter");
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .is_some_and(|session| session.workspace(managed_workspace_id).is_none())
+                })
+            }));
+            assert!(!managed_root.exists());
+            run_git(
+                &repository,
+                [
+                    std::ffi::OsString::from("show-ref"),
+                    std::ffi::OsString::from("--verify"),
+                    std::ffi::OsString::from(format!("refs/heads/{created_branch}")),
+                ],
+            );
+
+            window.update(|window, cx| _ = window.draw(cx));
+            let workspace = window
+                .debug_bounds(sidebar_workspace_selector(parent_workspace_id.unwrap()))
+                .unwrap();
             window.simulate_mouse_down(
                 workspace.center(),
                 MouseButton::Right,
@@ -3855,22 +3938,23 @@ mod tests {
                         1,
                         agent_pane,
                         TerminalCommand::Text(
-                            "exec -a codex /bin/bash -c \"echo 'Working - esc to interrupt'; sleep 30 & wait\"\r"
+                            "exec -a codex /bin/bash -c \"echo 'Working - esc to interrupt'; sleep 1; printf '\\033[2J\\033[H›\\n'; sleep 30 & wait\"\r"
                                 .into(),
                         ),
                     );
                 });
             });
-            let detected = wait_until(window, |window| {
+            let working = wait_until(window, |window| {
                 window.read(|app| {
                     view.read(app)
                         .connection(1)
-                        .is_some_and(|connection| connection.agents.contains_key(&agent_pane))
+                        .and_then(|connection| connection.agents.get(&agent_pane))
+                        .is_some_and(|agent| agent.state == murmur_core::AgentState::Working)
                 })
             });
             assert!(
-                detected,
-                "agent was not detected; terminal={:?}; error={:?}",
+                working,
+                "working Agent was not detected; terminal={:?}; error={:?}",
                 window.read(|app| {
                     view.read(app).terminal(1, agent_pane).map(|terminal| {
                         terminal
@@ -3883,6 +3967,14 @@ mod tests {
                 }),
                 window.read(|app| view.read(app).connection(1).unwrap().error.clone()),
             );
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .and_then(|connection| connection.agent_trackers.get(&agent_pane))
+                        .is_some_and(|tracker| tracker.display_state().label() == "done")
+                })
+            }));
             window.update(|window, cx| _ = window.draw(cx));
             let agent = window
                 .debug_bounds(sidebar_agent_selector(agent_pane))
@@ -3898,6 +3990,19 @@ mod tests {
                     })
                 })
             }));
+            assert_eq!(
+                window.read(|app| {
+                    view.read(app)
+                        .connection(1)
+                        .unwrap()
+                        .agent_trackers
+                        .get(&agent_pane)
+                        .unwrap()
+                        .display_state()
+                        .label()
+                }),
+                "idle"
+            );
         }
 
         #[test]
