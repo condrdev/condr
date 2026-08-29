@@ -689,20 +689,17 @@ impl TerminalRuntime {
     }
 
     pub fn agent_snapshot(&self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
-        self.agent_probe().snapshot(previous)
+        self.agent_probe()?.snapshot(previous)
     }
 
-    pub fn agent_probe(&self) -> TerminalAgentProbe {
-        TerminalAgentProbe {
+    pub fn agent_probe(&self) -> Option<TerminalAgentProbe> {
+        self.master.as_ref()?;
+        Some(TerminalAgentProbe {
             terminal: Arc::clone(&self.terminal),
             #[cfg(unix)]
-            master: Arc::clone(
-                self.master
-                    .as_ref()
-                    .expect("live Terminal has a PTY master"),
-            ),
+            master: Arc::clone(self.master.as_ref().expect("checked Terminal PTY master")),
             process: self.process,
-        }
+        })
     }
 
     pub fn scroll(&self, scroll: TerminalScroll) {

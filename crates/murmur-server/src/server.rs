@@ -919,7 +919,9 @@ fn commit_layout_candidate(
         }
     }
     let started_terminal = started.map(|(pane_id, runtime, updates)| {
-        let probe = runtime.agent_probe();
+        let probe = runtime
+            .agent_probe()
+            .expect("new Terminal has an agent probe");
         state.terminals.insert(pane_id, runtime);
         (pane_id, updates, probe)
     });

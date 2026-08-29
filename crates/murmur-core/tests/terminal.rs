@@ -39,6 +39,8 @@ stty size"#,
     let status = runtime.wait().unwrap();
     assert!(status.success());
     assert!(runtime.wait().is_err());
+    assert!(runtime.agent_probe().is_none());
+    assert!(runtime.agent_snapshot(None).is_none());
     assert!(runtime.revision() > 0);
     let text = runtime.visible_text();
     assert!(text.contains("ready \u{4e16}\u{754c} e\u{301}"), "{text:?}");
@@ -235,6 +237,8 @@ fn conpty_round_trip_resizes_unicode_and_eof() {
         .unwrap();
     wait_for_text(&runtime, "final-before-exit");
     assert!(runtime.wait().unwrap().success());
+    assert!(runtime.agent_probe().is_none());
+    assert!(runtime.agent_snapshot(None).is_none());
     assert!(runtime.visible_text().contains("final-before-exit"));
 }
 
