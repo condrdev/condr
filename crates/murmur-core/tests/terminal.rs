@@ -126,7 +126,7 @@ fn close_cancels_a_reader_when_a_descendant_keeps_the_slave_open() {
 #[test]
 fn close_cancels_a_blocked_terminal_writer() {
     let mut command = CommandBuilder::new("/bin/sh");
-    command.args(["-c", "trap '' HUP; sleep 2"]);
+    command.args(["-c", "stty raw -echo; trap '' HUP; sleep 2"]);
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 20)).unwrap();
     runtime.write(vec![b'x'; 4 * 1024 * 1024]).unwrap();
     std::thread::sleep(Duration::from_millis(50));
@@ -144,7 +144,10 @@ fn close_cancels_a_blocked_terminal_writer() {
 fn queued_resizes_keep_the_last_requested_size_under_pty_backpressure() {
     let initial_size = TerminalSize::new(5, 20);
     let mut command = CommandBuilder::new("/bin/sh");
-    command.args(["-c", "stty -echo; sleep 0.5; cat >/dev/null"]);
+    command.args([
+        "-c",
+        "stty raw -echo; sleep 0.5; dd of=/dev/null bs=65536 2>/dev/null",
+    ]);
     let mut runtime = TerminalRuntime::spawn(command, initial_size).unwrap();
     std::thread::sleep(Duration::from_millis(100));
     runtime.write(vec![b'x'; 4 * 1024 * 1024]).unwrap();

@@ -6279,7 +6279,9 @@ mod tests {
             server_id,
             session_id,
             pane_id,
-            TerminalCommand::Text("printf 'murmur-writer-blocked\\n'; sleep 30\r".into()),
+            TerminalCommand::Text(
+                "stty raw -echo; printf 'murmur-writer-blocked\\r\\n'; sleep 30\r".into(),
+            ),
         );
         let mut views = std::collections::HashMap::new();
         wait_for_terminal_text(
