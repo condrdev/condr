@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+#[cfg(windows)]
+use atomicwrites::{AtomicFile, DisallowOverwrite};
 use interprocess::local_socket::traits::Listener as _;
 
 pub type LocalListener = interprocess::local_socket::Listener;
@@ -426,8 +428,12 @@ fn local_endpoint_marker() -> Vec<u8> {
 
 #[cfg(windows)]
 fn write_local_endpoint_marker(path: &Path, marker: &[u8]) -> io::Result<()> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    std::io::Write::write_all(&mut file, marker)
+    AtomicFile::new(path, DisallowOverwrite)
+        .write(|file| {
+            std::io::Write::write_all(file, marker)?;
+            file.sync_all()
+        })
+        .map_err(Into::into)
 }
 
 #[cfg(windows)]
@@ -568,6 +574,23 @@ mod tests {
         drop(listener);
         assert!(!path.exists());
         assert!(local_bind_lock_path(&path).exists());
+        cleanup_test_artifacts(&path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_is_published_complete_without_overwriting() {
+        let path = test_path("atomic-marker");
+        cleanup_test_artifacts(&path);
+        let marker = local_endpoint_marker();
+
+        write_local_endpoint_marker(&path, &marker).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), marker);
+
+        let replacement = local_endpoint_marker();
+        let error = write_local_endpoint_marker(&path, &replacement).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&path).unwrap(), marker);
         cleanup_test_artifacts(&path);
     }
 

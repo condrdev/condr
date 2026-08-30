@@ -2167,13 +2167,7 @@ impl Murmur {
         let sender = self.connect_results_tx.clone();
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         thread::spawn(move || {
-            let connected_endpoint = if endpoint == ServerConfig::default().endpoint {
-                murmur_server::ensure_local_server().unwrap_or(endpoint)
-            } else {
-                endpoint
-            };
-            let result = ClientConnection::connect(&connected_endpoint, "murmur-gui")
-                .map_err(|error| error.to_string());
+            let (connected_endpoint, result) = connect_to_server(endpoint, "murmur-gui");
             let _ = sender.send_blocking(ConnectionResult {
                 key,
                 generation,
@@ -5608,11 +5602,41 @@ fn bind_keys(cx: &mut App) {
     ]);
 }
 
+fn connect_to_server_with<T>(
+    endpoint: Endpoint,
+    ensure_local_server: impl FnOnce() -> std::io::Result<Endpoint>,
+    connect: impl FnOnce(&Endpoint) -> Result<T, String>,
+) -> (Endpoint, Result<T, String>) {
+    if endpoint != ServerConfig::default().endpoint {
+        let result = connect(&endpoint);
+        return (endpoint, result);
+    }
+
+    match ensure_local_server() {
+        Ok(connected_endpoint) => {
+            let result = connect(&connected_endpoint);
+            (connected_endpoint, result)
+        }
+        Err(error) => {
+            let discovery_error =
+                format!("Failed to start or discover local murmur-server: {error}");
+            let result = connect(&endpoint).map_err(|_| discovery_error);
+            (endpoint, result)
+        }
+    }
+}
+
+fn connect_to_server(
+    endpoint: Endpoint,
+    client_name: &'static str,
+) -> (Endpoint, Result<ClientConnection, String>) {
+    connect_to_server_with(endpoint, murmur_server::ensure_local_server, |endpoint| {
+        ClientConnection::connect(endpoint, client_name).map_err(|error| error.to_string())
+    })
+}
+
 fn main() {
-    let endpoint =
-        murmur_server::ensure_local_server().unwrap_or_else(|_| ServerConfig::default().endpoint);
-    let initial =
-        ClientConnection::connect(&endpoint, "murmur-gui").map_err(|error| error.to_string());
+    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "murmur-gui");
     let app = gpui_platform::application().with_assets(MurmurAssets::new());
 
     app.run(move |cx| {
@@ -5651,9 +5675,9 @@ mod tests {
         PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual,
         SplitDown, SplitRight, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
         apply_terminal_frame_batch, assemble_terminal_frame_chunk,
-        clear_pending_sizes_for_bootstrap, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
-        merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
-        terminal_chunk_identity_matches,
+        clear_pending_sizes_for_bootstrap, connect_to_server_with,
+        enforce_terminal_chunk_reliable_fence, fixed_shortcut, merge_terminal_deltas,
+        read_bootstrap_batches, server_sidebar_status, terminal_chunk_identity_matches,
     };
 
     fn terminal_cell(text: &str) -> TerminalCell {
@@ -5676,6 +5700,41 @@ mod tests {
             Some("branch-name".into())
         );
         assert_eq!(accepted_text_input(" \t ".into(), false), None);
+    }
+
+    #[test]
+    fn server_connection_preserves_start_error_and_final_concurrent_probe() {
+        let local = murmur_server::ServerConfig::default().endpoint;
+        let (_, failed) = connect_to_server_with(
+            local.clone(),
+            || {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid endpoint marker",
+                ))
+            },
+            |_| Err::<(), String>("named pipe was not found".into()),
+        );
+        assert_eq!(
+            failed.unwrap_err(),
+            "Failed to start or discover local murmur-server: invalid endpoint marker"
+        );
+
+        let (_, concurrent) = connect_to_server_with(
+            local,
+            || Err(std::io::Error::other("concurrent launcher won")),
+            |_| Ok("connected concurrently"),
+        );
+        assert_eq!(concurrent.unwrap(), "connected concurrently");
+
+        let remote = Endpoint::tcp("127.0.0.1:4242".parse().unwrap());
+        let (connected_endpoint, connected) = connect_to_server_with(
+            remote.clone(),
+            || panic!("remote endpoints must not start the local server"),
+            |_| Ok(()),
+        );
+        assert_eq!(connected_endpoint, remote);
+        connected.unwrap();
     }
 
     fn terminal_view(revision: u64, text: &str) -> TerminalView {
