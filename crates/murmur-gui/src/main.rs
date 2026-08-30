@@ -91,6 +91,7 @@ const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
 const CONTROL_RETRY_DELAY: Duration = Duration::from_millis(50);
 const MAX_CONTROL_RETRY_ATTEMPTS: u8 = 20;
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
+const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
 const MURMUR_ICON_PATHS: [&str; 2] = ["icons/circle.svg", "icons/circle-alert.svg"];
@@ -1731,7 +1732,7 @@ impl Render for TerminalPanel {
             .line_height(relative(1.35))
             .border_1()
             .border_color(if active {
-                cx.theme().ring
+                rgb(ACTIVE_PANE_BORDER_RGB).into()
             } else {
                 cx.theme().border
             })
@@ -5457,12 +5458,13 @@ mod tests {
     use murmur_server::Endpoint;
 
     use super::{
-        ClientIo, ConnectionStatus, FocusLeft, MurmurAssets, NextTab, PreviousTab,
-        ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown,
-        SplitRight, TerminalVisualSlot, agent_sidebar_status, apply_terminal_frame_batch,
-        assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
-        enforce_terminal_chunk_reliable_fence, fixed_shortcut, merge_terminal_deltas,
-        read_bootstrap_batches, server_sidebar_status, terminal_chunk_identity_matches,
+        ACTIVE_PANE_BORDER_RGB, ClientIo, ConnectionStatus, FocusLeft, MurmurAssets, NextTab,
+        PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual,
+        SplitDown, SplitRight, TerminalVisualSlot, agent_sidebar_status,
+        apply_terminal_frame_batch, assemble_terminal_frame_chunk,
+        clear_pending_sizes_for_bootstrap, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
+        merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
+        terminal_chunk_identity_matches,
     };
 
     fn terminal_cell(text: &str) -> TerminalCell {
@@ -5499,6 +5501,11 @@ mod tests {
             .active_tab()
             .focused_pane()
             .id()
+    }
+
+    #[test]
+    fn active_pane_border_uses_the_requested_blue() {
+        assert_eq!(ACTIVE_PANE_BORDER_RGB, 0x0078d4);
     }
 
     #[test]
