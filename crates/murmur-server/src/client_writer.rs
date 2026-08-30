@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::mpsc::{SendError, TrySendError};
+use std::sync::mpsc::{Receiver, SendError, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 #[derive(Debug)]
 pub(crate) struct ClientWriter {
@@ -11,11 +12,22 @@ pub(crate) struct ClientWriterReceiver {
     queue: Arc<ClientWriterQueue>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum ClientWriteItem {
     Reliable(Vec<u8>),
     ReliableBatch(Vec<Vec<u8>>),
-    Render { data: Vec<u8>, slot_drained: bool },
+    ClosingReliable {
+        data: Vec<u8>,
+        delivered: SyncSender<bool>,
+    },
+    Render {
+        data: Vec<u8>,
+        slot_drained: bool,
+    },
+}
+
+pub(crate) struct ClientWriteReceipt {
+    delivered: Receiver<bool>,
 }
 
 #[derive(Debug)]
@@ -77,6 +89,25 @@ impl ClientWriter {
         Ok(())
     }
 
+    /// Queues the final reliable frame after earlier reliable work and closes this sender.
+    pub(crate) fn send_closing_reliable(
+        &self,
+        data: Vec<u8>,
+    ) -> Result<ClientWriteReceipt, SendError<Vec<u8>>> {
+        let mut state = self.queue.lock_state();
+        if !state.writer_alive {
+            return Err(SendError(data));
+        }
+        let (delivered, receipt) = sync_channel(1);
+        state
+            .reliable
+            .push_back(ClientWriteItem::ClosingReliable { data, delivered });
+        state.render = None;
+        state.writer_alive = false;
+        self.queue.ready.notify_one();
+        Ok(ClientWriteReceipt { delivered: receipt })
+    }
+
     pub(crate) fn try_send_render(
         &self,
         frames: Vec<Vec<u8>>,
@@ -99,6 +130,12 @@ impl ClientWriter {
 
     pub(crate) fn clear_render(&self) {
         self.queue.lock_state().render = None;
+    }
+}
+
+impl ClientWriteReceipt {
+    pub(crate) fn wait(self, timeout: Duration) -> bool {
+        matches!(self.delivered.recv_timeout(timeout), Ok(true))
     }
 }
 
@@ -170,6 +207,28 @@ impl ClientWriterQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl PartialEq for ClientWriteItem {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (Self::Reliable(left), Self::Reliable(right)) => left == right,
+                (Self::ReliableBatch(left), Self::ReliableBatch(right)) => left == right,
+                (
+                    Self::Render {
+                        data: left_data,
+                        slot_drained: left_drained,
+                    },
+                    Self::Render {
+                        data: right_data,
+                        slot_drained: right_drained,
+                    },
+                ) => left_data == right_data && left_drained == right_drained,
+                _ => false,
+            }
+        }
+    }
+
+    impl Eq for ClientWriteItem {}
 
     #[test]
     fn reliable_messages_take_priority_over_the_single_render_slot() {
@@ -289,5 +348,25 @@ mod tests {
             receiver.recv(),
             Some(ClientWriteItem::Reliable(b"event".to_vec()))
         );
+    }
+
+    #[test]
+    fn closing_reliable_preserves_order_returns_a_receipt_and_ends_the_queue() {
+        let (writer, receiver) = ClientWriter::channel();
+        writer.send_reliable(b"queued".to_vec()).unwrap();
+        let receipt = writer.send_closing_reliable(b"stopping".to_vec()).unwrap();
+
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"queued".to_vec()))
+        );
+        let Some(ClientWriteItem::ClosingReliable { data, delivered }) = receiver.recv() else {
+            panic!("closing lifecycle response should follow queued reliable work");
+        };
+        assert_eq!(data, b"stopping");
+        delivered.send(true).unwrap();
+        assert!(receipt.wait(Duration::from_millis(10)));
+        assert!(receiver.recv().is_none());
+        assert!(writer.send_reliable(b"late".to_vec()).is_err());
     }
 }

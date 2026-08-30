@@ -3,7 +3,7 @@
 //! The server owns the runtime. A client starts with [`ClientMessage::Hello`],
 //! receives a [`ServerMessage::Bootstrap`], and then consumes ordered reliable
 //! events plus coalesced terminal visual frames. The same framing works over
-//! local IPC and a future TCP/SSH transport.
+//! local IPC and trusted TCP/SSH-tunnel transports.
 
 use std::collections::HashSet;
 use std::fmt;

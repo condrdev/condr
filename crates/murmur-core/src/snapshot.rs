@@ -1,4 +1,8 @@
-use std::{fmt, marker::PhantomData, path::PathBuf};
+use std::{
+    fmt,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+};
 
 use bincode::Options as _;
 use serde::{
@@ -110,6 +114,17 @@ impl LayoutSnapshot {
 }
 
 impl SessionSnapshot {
+    pub fn root_paths(&self) -> impl Iterator<Item = &Path> {
+        self.workspaces.iter().flat_map(|workspace| {
+            std::iter::once(workspace.root_directory.as_path()).chain(
+                workspace
+                    .worktree
+                    .iter()
+                    .map(|worktree| worktree.parent_root_directory()),
+            )
+        })
+    }
+
     pub fn to_bytes(&self) -> bincode::Result<Vec<u8>> {
         bincode::DefaultOptions::new()
             .with_fixint_encoding()

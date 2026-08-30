@@ -26,6 +26,7 @@ use crate::persistence::{SnapshotLoad, SnapshotPersistence};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+const STOP_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 const EVENT_HISTORY_LIMIT: usize = 256;
 const AGENT_SCAN_INTERVAL: Duration = Duration::from_millis(500);
 const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
@@ -212,7 +213,6 @@ impl ServerHandle {
 }
 
 pub struct BoundServer {
-    endpoint: Endpoint,
     listener: EndpointListener,
     stop: Arc<AtomicBool>,
     lifecycle: Arc<ServerLifecycle>,
@@ -229,12 +229,11 @@ impl BoundServer {
             match RuntimeState::recover(&config.endpoint, config.snapshot_path) {
                 Ok(restored) => restored,
                 Err(error) => {
-                    let _ = config.endpoint.cleanup();
+                    let _ = listener.cleanup();
                     return Err(error);
                 }
             };
         Ok(Self {
-            endpoint: config.endpoint,
             listener,
             stop: Arc::new(AtomicBool::new(false)),
             lifecycle: Arc::new(ServerLifecycle::default()),
@@ -348,7 +347,7 @@ impl BoundServer {
         }
         drop(persistence);
         drop(terminals);
-        let cleanup_result = self.endpoint.cleanup();
+        let cleanup_result = self.listener.cleanup();
         if let Err(error) = &cleanup_result {
             eprintln!("murmur-server: endpoint cleanup failed: {error}");
         }
@@ -714,7 +713,9 @@ impl RuntimeState {
         if let Some(persistence) = persistence.as_ref() {
             match persistence.load() {
                 SnapshotLoad::Missing => {}
-                SnapshotLoad::Loaded(snapshot) => match validate_persistable_snapshot(&snapshot) {
+                SnapshotLoad::Loaded(snapshot) => match validate_persistable_snapshot(&snapshot)
+                    .and_then(|()| validate_snapshot_root_paths(&snapshot))
+                {
                     Ok(()) => match Session::restore(snapshot) {
                         Ok(loaded) => {
                             session = loaded;
@@ -1445,6 +1446,7 @@ fn external_layout_plan(
 fn prepare_external_layout(plan: ExternalLayoutPlan) -> Result<PreparedExternalLayout, String> {
     match plan {
         ExternalLayoutPlan::CreateWorkspace { root } => {
+            validate_root_directory(&root)?;
             Ok(PreparedExternalLayout::CreateWorkspace {
                 git: discover_repository(&root).ok().flatten(),
                 root,
@@ -1492,6 +1494,7 @@ fn prepare_external_layout(plan: ExternalLayoutPlan) -> Result<PreparedExternalL
             parent_root,
             root,
         } => {
+            validate_root_directory(&root)?;
             let parent = discover_repository(&parent_root)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
@@ -1523,6 +1526,24 @@ fn prepare_external_layout(plan: ExternalLayoutPlan) -> Result<PreparedExternalL
             })
         }
     }
+}
+
+fn validate_root_directory(root: &std::path::Path) -> Result<(), String> {
+    if !root.is_absolute() {
+        return Err(format!(
+            "root directory must be an absolute path: {}",
+            root.display()
+        ));
+    }
+    let metadata = std::fs::metadata(root)
+        .map_err(|error| format!("cannot access root directory {}: {error}", root.display()))?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "root directory is not a directory: {}",
+            root.display()
+        ));
+    }
+    Ok(())
 }
 
 fn approve_external_layout(
@@ -2270,6 +2291,11 @@ fn handle_client(
                 ClientWriteItem::ReliableBatch(frames) => frames
                     .into_iter()
                     .try_for_each(|data| send_framed(&mut writer_stream, &data)),
+                ClientWriteItem::ClosingReliable { data, delivered } => {
+                    let result = send_framed(&mut writer_stream, &data);
+                    let _ = delivered.send(result.is_ok());
+                    break;
+                }
                 ClientWriteItem::Render { data, slot_drained } => {
                     if slot_drained && let Some(state) = writer_state.upgrade() {
                         flush_terminal_render(&state, client_id);
@@ -2813,7 +2839,11 @@ fn handle_client(
                     )
                 } else {
                     lifecycle.begin_stop();
-                    let _ = queue_message(&outbound, ServerMessage::ServerStopping);
+                    if let Ok(data) = frame_message(&ServerMessage::ServerStopping)
+                        && let Ok(receipt) = outbound.send_closing_reliable(data)
+                    {
+                        let _ = receipt.wait(STOP_ACK_TIMEOUT);
+                    }
                     stopping_server = true;
                     true
                 }
@@ -3384,6 +3414,16 @@ fn validate_persistable_snapshot(snapshot: &murmur_core::SessionSnapshot) -> Res
         return Err(format!(
             "Session Snapshot is {} bytes; Server limit is {MAX_PERSISTED_SNAPSHOT_BYTES} bytes",
             bytes.len()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_snapshot_root_paths(snapshot: &murmur_core::SessionSnapshot) -> Result<(), String> {
+    if let Some(root) = snapshot.root_paths().find(|root| !root.is_absolute()) {
+        return Err(format!(
+            "Workspace root is not absolute on this Server: {}",
+            root.display()
         ));
     }
     Ok(())
@@ -4590,6 +4630,38 @@ mod tests {
         let mut unsupported = valid_empty.clone();
         unsupported[..std::mem::size_of::<u32>()].copy_from_slice(&3u32.to_le_bytes());
         let structurally_invalid = structurally_invalid_snapshot(directory.clone());
+        let relative_root = {
+            let mut session = Session::new();
+            session
+                .create_workspace(PathBuf::from("relative/root"))
+                .expect("Workspace capacity");
+            session.snapshot().to_bytes().unwrap()
+        };
+        let relative_parent_root = {
+            let parent_root = directory.join("parent");
+            let child_root = directory.join("child");
+            let mut session = Session::new();
+            let parent_id = session
+                .create_workspace(parent_root)
+                .expect("Workspace capacity");
+            let child_id = session
+                .create_workspace(child_root)
+                .expect("Workspace capacity");
+            assert!(session.associate_worktree(
+                child_id,
+                parent_id,
+                PathBuf::from("relative/parent"),
+                false,
+            ));
+            session.snapshot().to_bytes().unwrap()
+        };
+        let absolute_file_root = {
+            let root = directory.join("regular-file-root");
+            std::fs::write(&root, b"not a directory").unwrap();
+            let mut session = Session::new();
+            session.create_workspace(root).expect("Workspace capacity");
+            session.snapshot().to_bytes().unwrap()
+        };
         let transport_oversized = {
             let mut session = Session::new();
             let workspace_id = session
@@ -4621,6 +4693,9 @@ mod tests {
             ),
             ("unsupported", Some(unsupported)),
             ("structurally-invalid", Some(structurally_invalid)),
+            ("relative-root", Some(relative_root)),
+            ("relative-parent-root", Some(relative_parent_root)),
+            ("absolute-file-root", Some(absolute_file_root)),
             ("transport-oversized", Some(transport_oversized)),
             ("valid-empty", Some(valid_empty)),
         ];
@@ -6243,7 +6318,6 @@ mod tests {
             handle.stop();
             drop(second);
             thread.join().unwrap().unwrap();
-            let _ = endpoint.cleanup();
             return;
         }
 
@@ -6334,7 +6408,6 @@ mod tests {
         handle.stop();
         drop(second);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -6512,7 +6585,25 @@ mod tests {
         handle.stop();
         drop(second);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
+    }
+
+    #[test]
+    fn non_hello_first_frame_is_rejected_with_a_clear_error() {
+        let (handle, endpoint, thread) = start();
+        let mut stream = endpoint.connect().unwrap();
+        murmur_core::protocol::write_message(&mut stream, &ClientMessage::Detach).unwrap();
+
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            ServerMessage::Welcome {
+                error: Some(message),
+                ..
+            } if message == "expected Hello as first message"
+        ));
+
+        handle.stop();
+        drop(stream);
+        thread.join().unwrap().unwrap();
     }
 
     #[test]
@@ -6535,7 +6626,6 @@ mod tests {
         handle.stop();
         drop(stream);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[test]
@@ -6555,7 +6645,169 @@ mod tests {
         handle.stop();
         drop(stream);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
+        let (handle, endpoint, thread) = start();
+        let connection = ClientConnection::connect(&endpoint, "failed-workspace").unwrap();
+        let bootstrap = connection.bootstrap().clone();
+        let server_id = bootstrap.server_id;
+        let session_id = bootstrap.session_id;
+        let mut stream = connection.into_stream();
+        stream
+            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::AcquireControl { session_id },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_server(&mut stream),
+            ServerMessage::ControlGranted { .. }
+        ));
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Layout {
+                server_id,
+                session_id,
+                request_id: 1,
+                command: LayoutCommand::CreateWorkspace {
+                    root_directory: std::env::temp_dir(),
+                },
+            },
+        )
+        .unwrap();
+        let message = wait_for_message(&mut stream, |message| {
+            matches!(
+                message,
+                ServerMessage::Event {
+                    event: SessionEvent::LayoutChanged,
+                    ..
+                }
+            )
+        });
+        let ServerMessage::Event { sequence, .. } = message else {
+            unreachable!("predicate only accepts LayoutChanged events");
+        };
+        assert_layout_applied(&mut stream, server_id, session_id, 1, sequence);
+
+        let (snapshot_before, sequence_before, focus_before, terminal_instances_before) = {
+            let state = handle.state.lock().unwrap();
+            let workspace = state.session.active_workspace().unwrap();
+            let tab = workspace.active_tab();
+            (
+                state.session.snapshot(),
+                state.sequence,
+                (workspace.id(), tab.id(), tab.focused_pane().id()),
+                state.terminal_instances.clone(),
+            )
+        };
+        assert_eq!(terminal_instances_before.len(), 1);
+
+        let missing_root = std::env::temp_dir().join(format!(
+            "murmur-missing-workspace-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        assert!(!missing_root.exists());
+        let regular_file = std::env::temp_dir().join(format!(
+            "murmur-file-workspace-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        std::fs::write(&regular_file, b"not a directory").unwrap();
+        let rejected_commands = [
+            (
+                42,
+                LayoutCommand::CreateWorkspace {
+                    root_directory: missing_root,
+                },
+                "cannot access root directory",
+            ),
+            (
+                43,
+                LayoutCommand::CreateWorkspace {
+                    root_directory: PathBuf::from("relative-workspace-root"),
+                },
+                "must be an absolute path",
+            ),
+            (
+                44,
+                LayoutCommand::CreateWorkspace {
+                    root_directory: regular_file.clone(),
+                },
+                "is not a directory",
+            ),
+            (
+                45,
+                LayoutCommand::OpenWorktree {
+                    parent_workspace_id: focus_before.0,
+                    root_directory: PathBuf::from("relative-worktree-root"),
+                },
+                "must be an absolute path",
+            ),
+        ];
+
+        for (request_id, command, expected_reason) in rejected_commands {
+            murmur_core::protocol::write_message(
+                &mut stream,
+                &ClientMessage::Layout {
+                    server_id,
+                    session_id,
+                    request_id,
+                    command,
+                },
+            )
+            .unwrap();
+
+            let rejection = wait_for_message(&mut stream, |message| {
+                matches!(
+                    message,
+                    ServerMessage::LayoutRejected {
+                        request_id: rejected_request,
+                        ..
+                    } if *rejected_request == request_id
+                )
+            });
+            let ServerMessage::LayoutRejected {
+                server_id: rejected_server,
+                session_id: rejected_session,
+                request_id: rejected_request,
+                reason,
+            } = rejection
+            else {
+                unreachable!("predicate only accepts LayoutRejected");
+            };
+            assert_eq!(rejected_server, server_id);
+            assert_eq!(rejected_session, session_id);
+            assert_eq!(rejected_request, request_id);
+            assert!(
+                reason.contains(expected_reason),
+                "unexpected rejection reason: {reason}"
+            );
+
+            let state = handle.state.lock().unwrap();
+            let workspace = state.session.active_workspace().unwrap();
+            let tab = workspace.active_tab();
+            assert_eq!(state.session.snapshot(), snapshot_before);
+            assert_eq!(state.sequence, sequence_before);
+            assert_eq!(
+                (workspace.id(), tab.id(), tab.focused_pane().id()),
+                focus_before
+            );
+            assert_eq!(state.terminal_instances, terminal_instances_before);
+            assert_eq!(state.terminals.len(), terminal_instances_before.len());
+        }
+        let _ = std::fs::remove_file(regular_file);
+
+        handle.stop();
+        drop(stream);
+        thread.join().unwrap().unwrap();
     }
 
     #[test]
@@ -6648,7 +6900,6 @@ mod tests {
         handle.stop();
         drop(stream);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[test]
@@ -6695,7 +6946,6 @@ mod tests {
         handle.stop();
         drop(stream);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[test]
@@ -6760,7 +7010,6 @@ mod tests {
         handle.stop();
         drop(second);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[test]
@@ -6865,7 +7114,6 @@ mod tests {
         drop(first);
         drop(second);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[test]
@@ -6962,7 +7210,6 @@ mod tests {
         drop(controller);
         drop(subscriber);
         thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[test]
@@ -6983,7 +7230,61 @@ mod tests {
         drop(stream);
         thread.join().unwrap().unwrap();
         assert_eq!(handle.snapshot(), Session::new().snapshot());
-        let _ = endpoint.cleanup();
+    }
+
+    #[test]
+    fn stop_message_ends_server_when_the_requesting_client_is_not_reading() {
+        let (handle, endpoint, server_thread) = start();
+        let connection = ClientConnection::connect(&endpoint, "blocked-stop-writer").unwrap();
+        let session_id = connection.bootstrap().session_id;
+        let mut stream = connection.into_stream();
+        stream
+            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Subscribe {
+                session_id,
+                after_sequence: 0,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_server(&mut stream),
+            ServerMessage::Subscribed { .. }
+        ));
+
+        let subscriber_writer = {
+            let state = handle.state.lock().unwrap();
+            assert_eq!(state.subscribers.len(), 1);
+            state.subscribers.values().next().unwrap().writer.clone()
+        };
+        subscriber_writer
+            .send_reliable(vec![0; 32 * 1024 * 1024])
+            .unwrap();
+        subscriber_writer.send_reliable(vec![0]).unwrap();
+        thread::sleep(Duration::from_millis(30));
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::StopServer {
+                server_id: handle.server_id(),
+            },
+        )
+        .unwrap();
+
+        let (finished_tx, finished_rx) = mpsc::sync_channel(1);
+        let joiner = thread::spawn(move || {
+            let _ = finished_tx.send(server_thread.join().unwrap());
+        });
+        let result = finished_rx
+            .recv_timeout(STOP_ACK_TIMEOUT + Duration::from_secs(2))
+            .expect("Server stop waited indefinitely for a non-reading client");
+        result.unwrap();
+
+        drop(stream);
+        drop(subscriber_writer);
+        joiner.join().unwrap();
     }
 
     #[cfg(target_os = "linux")]
@@ -7113,7 +7414,6 @@ mod tests {
             "Server stop waited for a blocked Terminal resize"
         );
         server_thread.join().unwrap().unwrap();
-        let _ = endpoint.cleanup();
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -7257,7 +7557,6 @@ mod tests {
             .join("feature-stopping");
         assert!(!child_root.exists());
         assert_eq!(handle.state.lock().unwrap().session.workspaces().len(), 1);
-        let _ = endpoint.cleanup();
         let _ = std::fs::remove_dir_all(temp);
     }
 

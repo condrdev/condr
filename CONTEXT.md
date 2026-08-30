@@ -25,7 +25,7 @@ A project- or task-level container with a stable identity and Root Directory. It
 _Avoid_: Project, space
 
 **Root Directory**:
-The directory selected when a Workspace is created or opened. It is the fallback cwd for new terminals and remains stable when a shell changes directory.
+An absolute directory on the owning Server, selected when a Workspace is created or opened. It is the fallback cwd for new terminals and remains stable when a shell changes directory. A local Client can choose it with the native directory picker; a Client connected through TCP or an SSH tunnel enters the path in the Server's filesystem namespace.
 _Avoid_: Current directory, identity cwd
 
 **Tab**:

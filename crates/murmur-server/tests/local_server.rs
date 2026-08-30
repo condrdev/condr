@@ -242,7 +242,6 @@ fn local_server_helper() {
     stop_server(&empty_endpoint).unwrap();
     wait_for_stop(&empty_endpoint);
     empty_guard.disarm();
-    let _ = empty_endpoint.cleanup();
 }
 
 struct ServerGuard(Endpoint);
@@ -256,7 +255,6 @@ impl ServerGuard {
 impl Drop for ServerGuard {
     fn drop(&mut self) {
         let _ = stop_server(&self.0);
-        let _ = self.0.cleanup();
     }
 }
 

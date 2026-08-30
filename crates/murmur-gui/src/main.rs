@@ -1802,6 +1802,17 @@ pub(crate) struct Murmur {
     app_error: Option<String>,
 }
 
+fn accepted_text_input(value: String, trim_value: bool) -> Option<String> {
+    if value.trim().is_empty() {
+        return None;
+    }
+    Some(if trim_value {
+        value.trim().to_owned()
+    } else {
+        value
+    })
+}
+
 impl Murmur {
     fn new(
         endpoint: Endpoint,
@@ -3568,12 +3579,26 @@ impl Murmur {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(label) = self
-            .connection(key)
-            .map(|connection| connection.label.clone())
-        else {
+        let Some((label, local_endpoint)) = self.connection(key).map(|connection| {
+            (
+                connection.label.clone(),
+                connection.endpoint.as_local_path().is_some(),
+            )
+        }) else {
             return;
         };
+        if !local_endpoint {
+            self.prompt_server_path(
+                format!("New Workspace on {label}"),
+                "Create",
+                move |this, path, window, cx| {
+                    this.new_workspace_on(key, PathBuf::from(path), window, cx)
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -3823,7 +3848,61 @@ impl Murmur {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
+        self.prompt_text_input(
+            title.into(),
+            ok_text,
+            initial,
+            None,
+            None,
+            true,
+            apply,
+            window,
+            cx,
+        );
+    }
+
+    fn prompt_server_path(
+        &mut self,
+        title: String,
+        ok_text: &'static str,
+        apply: impl Fn(&mut Murmur, String, &mut Window, &mut Context<Murmur>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_text_input(
+            title.into(),
+            ok_text,
+            String::new(),
+            Some("Root directory".into()),
+            Some("Absolute path on Server".into()),
+            false,
+            apply,
+            window,
+            cx,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prompt_text_input(
+        &mut self,
+        title: SharedString,
+        ok_text: &'static str,
+        initial: String,
+        field_label: Option<SharedString>,
+        placeholder: Option<SharedString>,
+        trim_value: bool,
+        apply: impl Fn(&mut Murmur, String, &mut Window, &mut Context<Murmur>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = cx.new(|cx| {
+            let input = InputState::new(window, cx).default_value(initial);
+            if let Some(placeholder) = placeholder {
+                input.placeholder(placeholder)
+            } else {
+                input
+            }
+        });
         let owner = cx.weak_entity();
         let apply = Rc::new(apply);
         window.defer(cx, move |window, cx| {
@@ -3836,10 +3915,18 @@ impl Murmur {
                 let input_for_ok = input_for_ok.clone();
                 let owner = owner.clone();
                 let apply = apply.clone();
+                let field_label = field_label.clone();
                 dialog
-                    .title(title)
+                    .title(title.clone())
                     .content(move |content, _, _| {
-                        content.child(Input::new(&input_for_content).w_full())
+                        content.child(
+                            v_flex()
+                                .gap_1()
+                                .when_some(field_label.clone(), |field, label| {
+                                    field.child(div().text_sm().child(label))
+                                })
+                                .child(Input::new(&input_for_content).w_full()),
+                        )
                     })
                     .footer(
                         DialogFooter::new()
@@ -3865,10 +3952,10 @@ impl Murmur {
                             ),
                     )
                     .on_ok(move |_, window, cx| {
-                        let value = input_for_ok.read(cx).value().trim().to_owned();
-                        if value.is_empty() {
+                        let value = input_for_ok.read(cx).value().to_string();
+                        let Some(value) = accepted_text_input(value, trim_value) else {
                             return false;
-                        }
+                        };
                         let apply = apply.clone();
                         let _ = owner.update(cx, |this, cx| {
                             apply(this, value, window, cx);
@@ -4038,6 +4125,32 @@ impl Murmur {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(local_endpoint) = self
+            .connection(key)
+            .map(|connection| connection.endpoint.as_local_path().is_some())
+        else {
+            return;
+        };
+        if !local_endpoint {
+            self.prompt_server_path(
+                format!("Open Existing Worktree from {workspace_name}"),
+                "Open",
+                move |this, path, window, cx| {
+                    this.send_presenting_layout_to(
+                        key,
+                        LayoutCommand::OpenWorktree {
+                            parent_workspace_id,
+                            root_directory: PathBuf::from(path),
+                        },
+                        window,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -4642,10 +4755,12 @@ impl Murmur {
                 .ok()
                 .map(|session| {
                     let active_workspace = self.presented_workspace_id(key, &session);
+                    let workspace_count = session.workspaces().len();
                     session
                         .workspaces()
                         .iter()
-                        .map(|workspace| {
+                        .enumerate()
+                        .map(|(workspace_index, workspace)| {
                             let workspace_id = workspace.id();
                             let workspace_name = workspace.name().to_owned();
                             let git = connection.workspace_git.get(&workspace_id);
@@ -4728,6 +4843,8 @@ impl Murmur {
                                 let create_owner = menu_owner.clone();
                                 let open_owner = menu_owner.clone();
                                 let remove_owner = menu_owner.clone();
+                                let move_up_owner = menu_owner.clone();
+                                let move_down_owner = menu_owner.clone();
                                 let close_owner = menu_owner.clone();
                                 let rename_name = workspace_name.clone();
                                 let create_name = workspace_name.clone();
@@ -4806,6 +4923,44 @@ impl Murmur {
                                 } else {
                                     menu
                                 };
+                                let menu = menu
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("Move Up")
+                                            .disabled(!connected || workspace_index == 0)
+                                            .on_click(move |_, _, cx| {
+                                                let _ = move_up_owner.update(cx, |this, _| {
+                                                    this.send_layout_to(
+                                                        key,
+                                                        LayoutCommand::MoveWorkspace {
+                                                            workspace_id,
+                                                            target_index: workspace_index
+                                                                .saturating_sub(1)
+                                                                as u32,
+                                                        },
+                                                    );
+                                                });
+                                            }),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new("Move Down")
+                                            .disabled(
+                                                !connected
+                                                    || workspace_index + 1 >= workspace_count,
+                                            )
+                                            .on_click(move |_, _, cx| {
+                                                let _ = move_down_owner.update(cx, |this, _| {
+                                                    this.send_layout_to(
+                                                        key,
+                                                        LayoutCommand::MoveWorkspace {
+                                                            workspace_id,
+                                                            target_index: (workspace_index + 1)
+                                                                as u32,
+                                                        },
+                                                    );
+                                                });
+                                            }),
+                                    );
                                 menu.separator().item(
                                     PopupMenuItem::new("Close Workspace")
                                         .disabled(!connected)
@@ -5045,7 +5200,8 @@ impl Murmur {
             .flatten()
             .map(|surface| surface.area.clone());
         let closes_workspace = workspace.tabs().len() == 1;
-        let tab_buttons = workspace.tabs().iter().map(|tab| {
+        let tab_count = workspace.tabs().len();
+        let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
             let activate_owner = cx.weak_entity();
@@ -5068,6 +5224,8 @@ impl Murmur {
                 )
                 .context_menu(move |menu, _, _| {
                     let rename_owner = menu_owner.clone();
+                    let move_left_owner = menu_owner.clone();
+                    let move_right_owner = menu_owner.clone();
                     let close_owner = menu_owner.clone();
                     let rename_name = tab_name.clone();
                     menu.item(
@@ -5077,6 +5235,37 @@ impl Murmur {
                                 let name = rename_name.clone();
                                 let _ = rename_owner.update(cx, |this, cx| {
                                     this.prompt_rename_tab_on(key, tab_id, name, window, cx)
+                                });
+                            }),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("Move Left")
+                            .disabled(!can_mutate || tab_index == 0)
+                            .on_click(move |_, _, cx| {
+                                let _ = move_left_owner.update(cx, |this, _| {
+                                    this.send_layout_to(
+                                        key,
+                                        LayoutCommand::MoveTab {
+                                            tab_id,
+                                            target_index: tab_index.saturating_sub(1) as u32,
+                                        },
+                                    );
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Move Right")
+                            .disabled(!can_mutate || tab_index + 1 >= tab_count)
+                            .on_click(move |_, _, cx| {
+                                let _ = move_right_owner.update(cx, |this, _| {
+                                    this.send_layout_to(
+                                        key,
+                                        LayoutCommand::MoveTab {
+                                            tab_id,
+                                            target_index: (tab_index + 1) as u32,
+                                        },
+                                    );
                                 });
                             }),
                     )
@@ -5459,7 +5648,7 @@ mod tests {
     use super::{
         ACTIVE_PANE_BORDER_RGB, ClientIo, ConnectionStatus, FocusLeft, MurmurAssets, NextTab,
         PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual,
-        SplitDown, SplitRight, TerminalVisualSlot, agent_sidebar_status,
+        SplitDown, SplitRight, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
         apply_terminal_frame_batch, assemble_terminal_frame_chunk,
         clear_pending_sizes_for_bootstrap, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
         merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
@@ -5473,6 +5662,19 @@ mod tests {
             background: TerminalColor::Named(0),
             flags: 0,
         }
+    }
+
+    #[test]
+    fn server_path_input_preserves_valid_whitespace() {
+        assert_eq!(
+            accepted_text_input("/srv/worktree ".into(), false),
+            Some("/srv/worktree ".into())
+        );
+        assert_eq!(
+            accepted_text_input("  branch-name  ".into(), true),
+            Some("branch-name".into())
+        );
+        assert_eq!(accepted_text_input(" \t ".into(), false), None);
     }
 
     fn terminal_view(revision: u64, text: &str) -> TerminalView {
@@ -6149,6 +6351,9 @@ mod tests {
             default_window_options,
         };
 
+        #[cfg(windows)]
+        const TEST_TIMEOUT: Duration = Duration::from_secs(15);
+        #[cfg(not(windows))]
         const TEST_TIMEOUT: Duration = Duration::from_secs(5);
         const TEST_POLL_INTERVAL: Duration = Duration::from_millis(2);
         static NEXT_TEST_SERVER_ID: AtomicU64 = AtomicU64::new(1);
@@ -6184,6 +6389,23 @@ mod tests {
             )));
             let server = start_server_with_config(ServerConfig::ephemeral(endpoint.clone()));
             (server, endpoint)
+        }
+
+        fn start_tcp_server() -> (TestServer, Endpoint) {
+            let server = BoundServer::bind(ServerConfig::ephemeral(Endpoint::tcp(
+                "127.0.0.1:0".parse().unwrap(),
+            )))
+            .unwrap();
+            let endpoint = Endpoint::tcp(server.local_addr().unwrap().unwrap());
+            let handle = server.handle();
+            let thread = std::thread::spawn(move || server.run());
+            (
+                TestServer {
+                    handle,
+                    thread: Some(thread),
+                },
+                endpoint,
+            )
         }
 
         fn start_server_with_config(config: ServerConfig) -> TestServer {
@@ -9007,6 +9229,225 @@ mod tests {
                 leaked_selector(format!("agent-status-1-{}-idle", agent_pane.as_u64()));
             assert!(window.debug_bounds(done_status).is_none());
             assert!(window.debug_bounds(idle_status).is_some());
+        }
+
+        #[test]
+        fn tcp_paths_use_server_side_text_dialogs() {
+            let temp = TestDirectory::new("tcp-path-dialogs");
+            let repository = temp.0.join("repository");
+            let worktree = temp.0.join("existing-worktree");
+            std::fs::create_dir_all(&repository).unwrap();
+            run_git(&repository, ["init"]);
+            run_git(&repository, ["config", "user.name", "Murmur Tests"]);
+            run_git(
+                &repository,
+                ["config", "user.email", "murmur@example.invalid"],
+            );
+            std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+            run_git(&repository, ["add", "README.md"]);
+            run_git(&repository, ["commit", "-m", "initial"]);
+            run_git(
+                &repository,
+                [
+                    std::ffi::OsString::from("worktree"),
+                    std::ffi::OsString::from("add"),
+                    std::ffi::OsString::from("-b"),
+                    std::ffi::OsString::from("feature/tcp-path"),
+                    worktree.as_os_str().to_os_string(),
+                ],
+            );
+
+            let (server, endpoint) = start_tcp_server();
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            window.update(|window, cx| _ = window.draw(cx));
+            let new_workspace = window
+                .debug_bounds("new-terminal-workspace")
+                .expect("TCP Start Page should offer New Workspace");
+            window.simulate_click(new_workspace.center(), Modifiers::default());
+            window.run_until_parked();
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            assert!(
+                !window.did_prompt_for_paths(),
+                "a TCP Server path must not use the client filesystem picker"
+            );
+            submit_text_dialog(window, &repository.to_string_lossy());
+
+            let mut parent_workspace_id = None;
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    parent_workspace_id = murmur
+                        .active_session()
+                        .and_then(|session| session.active_workspace_id());
+                    parent_workspace_id.is_some()
+                        && murmur
+                            .connection(1)
+                            .is_some_and(|connection| !connection.workspace_git.is_empty())
+                })
+            }));
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.choose_worktree_directory_on(
+                        1,
+                        parent_workspace_id.unwrap(),
+                        "repository".into(),
+                        window,
+                        cx,
+                    )
+                });
+            });
+            window.run_until_parked();
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            assert!(
+                !window.did_prompt_for_paths(),
+                "a TCP worktree path must not use the client filesystem picker"
+            );
+            submit_text_dialog(window, &worktree.to_string_lossy());
+
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session.workspaces().iter().any(|workspace| {
+                            workspace.root_directory() == worktree
+                                && workspace
+                                    .worktree()
+                                    .is_some_and(|association| !association.is_managed())
+                        })
+                    })
+                })
+            }));
+        }
+
+        #[test]
+        fn context_menus_reorder_the_target_items_without_changing_focus() {
+            let first_root = TestDirectory::new("reorder-first");
+            let second_root = TestDirectory::new("reorder-second");
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, server) = connected_murmur(&mut cx);
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: first_root.0.clone(),
+                    });
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .is_some_and(|session| session.workspaces().len() == 1)
+                })
+            }));
+            let first_workspace =
+                window.read(|app| view.read(app).active_session().unwrap().workspaces()[0].id());
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: second_root.0.clone(),
+                    });
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .is_some_and(|session| session.workspaces().len() == 2)
+                })
+            }));
+            let second_workspace = window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .unwrap()
+                    .active_workspace_id()
+                    .unwrap()
+            });
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateTab {
+                        workspace_id: second_workspace,
+                    });
+                });
+            });
+            let mut tab_state = None;
+            assert!(wait_until(window, |window| {
+                tab_state = window.read(|app| {
+                    let session = view.read(app).active_session()?;
+                    let workspace = session.workspace(second_workspace)?;
+                    (workspace.tabs().len() == 2).then(|| {
+                        (
+                            workspace.tabs()[0].id(),
+                            workspace.active_tab().id(),
+                            workspace.active_tab().focused_pane().id(),
+                        )
+                    })
+                });
+                tab_state.is_some()
+            }));
+            let (first_tab, active_tab, focused_pane) = tab_state.unwrap();
+
+            window.update(|window, cx| _ = window.draw(cx));
+            let workspace = window
+                .debug_bounds(sidebar_workspace_selector(first_workspace))
+                .expect("the non-active Workspace should render in the sidebar");
+            window.simulate_mouse_down(
+                workspace.center(),
+                MouseButton::Right,
+                Modifiers::default(),
+            );
+            window.run_until_parked();
+            window.simulate_keystrokes("down down enter");
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session.workspaces()[0].id() == second_workspace
+                            && session.workspaces()[1].id() == first_workspace
+                    })
+                })
+            }));
+
+            window.update(|window, cx| _ = window.draw(cx));
+            let tab = window
+                .debug_bounds(tab_selector(first_tab))
+                .expect("the non-active Tab should render");
+            window.simulate_mouse_down(tab.center(), MouseButton::Right, Modifiers::default());
+            window.run_until_parked();
+            window.simulate_keystrokes("down down enter");
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        let workspace = session.workspace(second_workspace).unwrap();
+                        workspace.tabs()[0].id() == active_tab
+                            && workspace.tabs()[1].id() == first_tab
+                    })
+                })
+            }));
+
+            let assert_identity = |session: &Session| {
+                assert_eq!(session.active_workspace_id(), Some(second_workspace));
+                let workspace = session.workspace(second_workspace).unwrap();
+                assert_eq!(workspace.active_tab().id(), active_tab);
+                assert_eq!(workspace.active_tab().focused_pane().id(), focused_pane);
+            };
+            window.read(|app| assert_identity(&view.read(app).active_session().unwrap()));
+            let authoritative = Session::restore(server.handle.snapshot()).unwrap();
+            assert_eq!(authoritative.workspaces()[0].id(), second_workspace);
+            assert_eq!(authoritative.workspaces()[1].id(), first_workspace);
+            assert_eq!(
+                authoritative.workspace(second_workspace).unwrap().tabs()[0].id(),
+                active_tab
+            );
+            assert_eq!(
+                authoritative.workspace(second_workspace).unwrap().tabs()[1].id(),
+                first_tab
+            );
+            assert_identity(&authoritative);
         }
 
         #[test]
