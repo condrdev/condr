@@ -1730,7 +1730,7 @@ impl Render for TerminalPanel {
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(cx.theme().mono_font_size)
             .line_height(relative(1.35))
-            .border_1()
+            .border_2()
             .border_color(if active {
                 rgb(ACTIVE_PANE_BORDER_RGB).into()
             } else {
