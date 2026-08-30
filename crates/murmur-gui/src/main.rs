@@ -4646,24 +4646,31 @@ impl Murmur {
             cx.stop_propagation();
             return;
         }
-        let modifiers = stroke.modifiers;
-        let explicit_copy_paste = modifiers.platform || (modifiers.control && modifiers.shift);
-        let retained_selection_copy = modifiers.control
-            && !modifiers.alt
-            && self
-                .selection_for(key, pane_id)
-                .and_then(|selection| {
-                    let columns = self.terminal(key, pane_id)?.view.size.columns;
-                    selection.selected_cell_range(columns)
-                })
-                .is_some();
-        if stroke.key == "c" && (explicit_copy_paste || retained_selection_copy) {
-            self.copy_terminal_selection(key, pane_id, cx);
-            cx.stop_propagation();
+        let terminal_focused = self
+            .panels
+            .get(&(key, pane_id))
+            .map(|panel| panel.read(cx).focus_handle.clone())
+            .is_some_and(|focus| focus.is_focused(window));
+        if !terminal_focused {
             return;
         }
-        if explicit_copy_paste && stroke.key == "v" {
-            self.paste_into_terminal(key, pane_id, cx);
+        let modifiers = stroke.modifiers;
+        let has_selection = self
+            .selection_for(key, pane_id)
+            .and_then(|selection| {
+                let columns = self.terminal(key, pane_id)?.view.size.columns;
+                selection.selected_cell_range(columns)
+            })
+            .is_some();
+        if let Some(shortcut) = terminal_clipboard_shortcut(stroke, has_selection) {
+            match shortcut {
+                TerminalClipboardShortcut::Copy => {
+                    self.copy_terminal_selection(key, pane_id, cx);
+                }
+                TerminalClipboardShortcut::Paste => {
+                    self.paste_into_terminal(key, pane_id, cx);
+                }
+            }
             cx.stop_propagation();
             return;
         }
@@ -5546,6 +5553,40 @@ fn collect_dock_ratios(state: &PanelState, ratios: &mut Vec<f32>) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalClipboardShortcut {
+    Copy,
+    Paste,
+}
+
+fn terminal_clipboard_shortcut(
+    stroke: &Keystroke,
+    has_selection: bool,
+) -> Option<TerminalClipboardShortcut> {
+    let modifiers = stroke.modifiers;
+    if modifiers.alt || modifiers.function {
+        return None;
+    }
+
+    let command_only =
+        cfg!(target_os = "macos") && modifiers.platform && !modifiers.control && !modifiers.shift;
+    let control_only = modifiers.control && !modifiers.platform && !modifiers.shift;
+    let control_shift = modifiers.control && !modifiers.platform && modifiers.shift;
+    let shift_only = modifiers.shift && !modifiers.control && !modifiers.platform;
+
+    match stroke.key.as_str() {
+        "c" if command_only || control_shift || (control_only && has_selection) => {
+            Some(TerminalClipboardShortcut::Copy)
+        }
+        "v" if command_only || control_shift || (cfg!(windows) && control_only) => {
+            Some(TerminalClipboardShortcut::Paste)
+        }
+        "insert" if control_only => Some(TerminalClipboardShortcut::Copy),
+        "insert" if shift_only => Some(TerminalClipboardShortcut::Paste),
+        _ => None,
+    }
+}
+
 fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
     let modifiers = stroke.modifiers;
     if modifiers.platform || modifiers.function {
@@ -5673,11 +5714,12 @@ mod tests {
     use super::{
         ACTIVE_PANE_BORDER_RGB, ClientIo, ConnectionStatus, FocusLeft, MurmurAssets, NextTab,
         PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual,
-        SplitDown, SplitRight, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
-        apply_terminal_frame_batch, assemble_terminal_frame_chunk,
+        SplitDown, SplitRight, TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input,
+        agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
         clear_pending_sizes_for_bootstrap, connect_to_server_with,
         enforce_terminal_chunk_reliable_fence, fixed_shortcut, merge_terminal_deltas,
         read_bootstrap_batches, server_sidebar_status, terminal_chunk_identity_matches,
+        terminal_clipboard_shortcut,
     };
 
     fn terminal_cell(text: &str) -> TerminalCell {
@@ -6275,6 +6317,44 @@ mod tests {
     }
 
     #[test]
+    fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
+        let shortcut = |keys: &str, has_selection| {
+            terminal_clipboard_shortcut(&Keystroke::parse(keys).unwrap(), has_selection)
+        };
+
+        assert_eq!(
+            shortcut("ctrl-shift-c", false),
+            Some(TerminalClipboardShortcut::Copy)
+        );
+        assert_eq!(
+            shortcut("ctrl-shift-v", false),
+            Some(TerminalClipboardShortcut::Paste)
+        );
+        assert_eq!(
+            shortcut("ctrl-insert", false),
+            Some(TerminalClipboardShortcut::Copy)
+        );
+        assert_eq!(
+            shortcut("shift-insert", false),
+            Some(TerminalClipboardShortcut::Paste)
+        );
+        assert_eq!(shortcut("ctrl-c", false), None);
+        assert_eq!(
+            shortcut("ctrl-c", true),
+            Some(TerminalClipboardShortcut::Copy)
+        );
+        assert_eq!(shortcut("ctrl-alt-v", false), None);
+
+        #[cfg(windows)]
+        assert_eq!(
+            shortcut("ctrl-v", false),
+            Some(TerminalClipboardShortcut::Paste)
+        );
+        #[cfg(not(windows))]
+        assert_eq!(shortcut("ctrl-v", false), None);
+    }
+
+    #[test]
     fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         let pane_id = pane_id();
         let slot = TerminalVisualSlot::default();
@@ -6391,8 +6471,8 @@ mod tests {
         use std::time::{Duration, Instant};
 
         use gpui::{
-            AppContext as _, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
-            TestAppContext, VisualTestContext, point, px, size,
+            AppContext as _, ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent,
+            MouseUpEvent, TestAppContext, VisualTestContext, point, px, size,
         };
         use gpui_component::dialog::Confirm;
         use gpui_component::{Root, WindowExt as _};
@@ -6537,6 +6617,29 @@ mod tests {
 
         fn terminal_selector(pane_id: PaneId) -> &'static str {
             Box::leak(format!("terminal-pane-{}", pane_id.as_u64()).into_boxed_str())
+        }
+
+        fn terminal_contains(
+            window: &mut VisualTestContext,
+            view: &Entity<Murmur>,
+            connection_key: u64,
+            pane_id: PaneId,
+            expected: &str,
+        ) -> bool {
+            window.read(|app| {
+                view.read(app)
+                    .connection(connection_key)
+                    .and_then(|connection| connection.terminals.get(&pane_id))
+                    .is_some_and(|terminal| {
+                        terminal
+                            .view
+                            .cells
+                            .iter()
+                            .map(|cell| cell.text.as_str())
+                            .collect::<String>()
+                            .contains(expected)
+                    })
+            })
         }
 
         fn bootstrap_for_session(
@@ -8955,6 +9058,86 @@ mod tests {
                     .and_then(|item| item.text())
                     .is_some_and(|text| text == word)
             }));
+        }
+
+        #[test]
+        fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
+            let _serial_guard = acquire_visual_test_lock();
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (server, endpoint) = start_tcp_server();
+            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    });
+                });
+            });
+
+            let mut pane_id = None;
+            assert!(wait_until(window, |window| {
+                pane_id = window.read(|app| {
+                    view.read(app)
+                        .active_session()?
+                        .active_workspace()
+                        .map(|workspace| workspace.active_tab().focused_pane().id())
+                });
+                let Some(pane_id) = pane_id else {
+                    return false;
+                };
+                let (terminal_ready, focus) = window.read(|app| {
+                    let murmur = view.read(app);
+                    (
+                        murmur
+                            .connection(1)
+                            .and_then(|connection| connection.terminals.get(&pane_id))
+                            .is_some_and(|terminal| !terminal.exited),
+                        murmur
+                            .panels
+                            .get(&(1, pane_id))
+                            .map(|panel| panel.read(app).focus_handle.clone()),
+                    )
+                });
+                terminal_ready
+                    && window.debug_bounds(terminal_selector(pane_id)).is_some()
+                    && focus
+                        .is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+            }));
+            let pane_id = pane_id.unwrap();
+
+            let shift_insert_marker = "MURMUR_SHIFT_INSERT_PASTE";
+            window.write_to_clipboard(ClipboardItem::new_string(shift_insert_marker.into()));
+            window.simulate_keystrokes("shift-insert");
+            assert!(wait_until_event_driven(window, |window| {
+                terminal_contains(window, &view, 1, pane_id, shift_insert_marker)
+            }));
+
+            #[cfg(windows)]
+            {
+                let ctrl_v_marker = "MURMUR_CTRL_V_PASTE";
+                window.write_to_clipboard(ClipboardItem::new_string(ctrl_v_marker.into()));
+                window.simulate_keystrokes("ctrl-v");
+                assert!(wait_until_event_driven(window, |window| {
+                    terminal_contains(window, &view, 1, pane_id, ctrl_v_marker)
+                }));
+            }
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.prompt_rename_server_on(1, "Local".into(), window, cx)
+                });
+            });
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(window.update(|window, cx| window.has_focused_input(cx)));
+
+            let dialog_marker = "MURMUR_DIALOG_MUST_NOT_PASTE_INTO_TERMINAL";
+            window.write_to_clipboard(ClipboardItem::new_string(dialog_marker.into()));
+            window.simulate_keystrokes("shift-insert");
+            window.run_until_parked();
+            assert!(!terminal_contains(window, &view, 1, pane_id, dialog_marker));
         }
 
         #[test]
