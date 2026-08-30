@@ -1,5 +1,6 @@
 mod terminal_element;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
@@ -10,7 +11,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use gpui::prelude::FluentBuilder as _;
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
@@ -19,15 +20,15 @@ use gpui_component::dock::{
     PanelState, TabGroupRenderer, TilesRenderer,
 };
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::sidebar::{
-    Sidebar, SidebarCollapsible, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu,
-    SidebarMenuItem,
+    Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarItem,
 };
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, Root, Selectable as _,
-    Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName, IconNamed,
+    Root, Selectable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_component_assets::Assets;
 use murmur_core::protocol::{
@@ -37,10 +38,10 @@ use murmur_core::protocol::{
     TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
 };
 use murmur_core::{
-    AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot,
-    SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalKey, TerminalModifiers,
-    TerminalPosition, TerminalScroll, TerminalSelection, TerminalSize, TerminalViewDelta,
-    TerminalViewFrame, WorkspaceId,
+    AgentDisplayState, AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session,
+    SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalKey,
+    TerminalModifiers, TerminalPosition, TerminalScroll, TerminalSelection, TerminalSize,
+    TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
 use murmur_server::{ClientConnection, Endpoint, ServerConfig};
 
@@ -92,6 +93,44 @@ const MAX_CONTROL_RETRY_ATTEMPTS: u8 = 20;
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
+const MURMUR_ICON_PATHS: [&str; 2] = ["icons/circle.svg", "icons/circle-alert.svg"];
+
+struct MurmurAssets {
+    base: Assets,
+}
+
+impl MurmurAssets {
+    fn new() -> Self {
+        Self {
+            base: Assets::new(""),
+        }
+    }
+}
+
+impl AssetSource for MurmurAssets {
+    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        match path {
+            "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/circle.svg"
+            )))),
+            "icons/circle-alert.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/circle-alert.svg"
+            )))),
+            _ => self.base.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        let mut assets = self.base.list(path)?;
+        assets.extend(
+            MURMUR_ICON_PATHS
+                .into_iter()
+                .filter(|asset| asset.starts_with(path))
+                .map(SharedString::from),
+        );
+        Ok(assets)
+    }
+}
 
 fn default_worktree_branch(workspace_name: &str) -> String {
     let slug = workspace_name
@@ -712,6 +751,512 @@ enum ConnectionStatus {
     Connecting,
     Connected,
     Disconnected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarIconTone {
+    Default,
+    Muted,
+    Success,
+    Warning,
+    Danger,
+}
+
+impl SidebarIconTone {
+    fn color(self, cx: &App) -> Hsla {
+        match self {
+            Self::Default => cx.theme().sidebar_foreground,
+            Self::Muted => cx.theme().muted_foreground,
+            Self::Success => cx.theme().success,
+            Self::Warning => cx.theme().warning,
+            Self::Danger => cx.theme().danger,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MurmurIconName {
+    Circle,
+    CircleAlert,
+}
+
+impl IconNamed for MurmurIconName {
+    fn path(self) -> SharedString {
+        match self {
+            Self::Circle => "icons/circle.svg",
+            Self::CircleAlert => "icons/circle-alert.svg",
+        }
+        .into()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarGlyph {
+    Folder,
+    HardDrive,
+    Info,
+    Circle,
+    LoaderCircle,
+    CircleAlert,
+    CircleCheck,
+}
+
+impl SidebarGlyph {
+    fn icon(self) -> Icon {
+        match self {
+            Self::Folder => Icon::new(IconName::Folder),
+            Self::HardDrive => Icon::new(IconName::HardDrive),
+            Self::Info => Icon::new(IconName::Info),
+            Self::Circle => Icon::new(MurmurIconName::Circle),
+            Self::LoaderCircle => Icon::new(IconName::LoaderCircle),
+            Self::CircleAlert => Icon::new(MurmurIconName::CircleAlert),
+            Self::CircleCheck => Icon::new(IconName::CircleCheck),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SidebarStatusVisual {
+    glyph: SidebarGlyph,
+    tone: SidebarIconTone,
+    key: &'static str,
+    label: &'static str,
+}
+
+fn server_sidebar_status(status: ConnectionStatus, synchronized: bool) -> SidebarStatusVisual {
+    match (status, synchronized) {
+        (ConnectionStatus::Connected, true) => SidebarStatusVisual {
+            glyph: SidebarGlyph::HardDrive,
+            tone: SidebarIconTone::Success,
+            key: "connected",
+            label: "Connected",
+        },
+        (ConnectionStatus::Connected, false) => SidebarStatusVisual {
+            glyph: SidebarGlyph::HardDrive,
+            tone: SidebarIconTone::Warning,
+            key: "syncing",
+            label: "Syncing",
+        },
+        (ConnectionStatus::Connecting, _) => SidebarStatusVisual {
+            glyph: SidebarGlyph::HardDrive,
+            tone: SidebarIconTone::Warning,
+            key: "connecting",
+            label: "Connecting",
+        },
+        (ConnectionStatus::Disconnected, _) => SidebarStatusVisual {
+            glyph: SidebarGlyph::HardDrive,
+            tone: SidebarIconTone::Danger,
+            key: "offline",
+            label: "Offline",
+        },
+    }
+}
+
+fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
+    match state {
+        AgentDisplayState::Unknown => SidebarStatusVisual {
+            glyph: SidebarGlyph::Info,
+            tone: SidebarIconTone::Muted,
+            key: "unknown",
+            label: "Unknown",
+        },
+        AgentDisplayState::Idle => SidebarStatusVisual {
+            glyph: SidebarGlyph::Circle,
+            tone: SidebarIconTone::Muted,
+            key: "idle",
+            label: "Idle",
+        },
+        AgentDisplayState::Working => SidebarStatusVisual {
+            glyph: SidebarGlyph::LoaderCircle,
+            tone: SidebarIconTone::Warning,
+            key: "working",
+            label: "Working",
+        },
+        AgentDisplayState::Blocked => SidebarStatusVisual {
+            glyph: SidebarGlyph::CircleAlert,
+            tone: SidebarIconTone::Danger,
+            key: "blocked",
+            label: "Blocked",
+        },
+        AgentDisplayState::Done => SidebarStatusVisual {
+            glyph: SidebarGlyph::CircleCheck,
+            tone: SidebarIconTone::Success,
+            key: "done",
+            label: "Done",
+        },
+    }
+}
+
+#[derive(Clone)]
+struct MurmurSidebarIcon {
+    glyph: SidebarGlyph,
+    tone: SidebarIconTone,
+    selector: SharedString,
+    tooltip: Option<SharedString>,
+}
+
+impl MurmurSidebarIcon {
+    fn new(glyph: SidebarGlyph, selector: impl Into<SharedString>) -> Self {
+        Self {
+            glyph,
+            tone: SidebarIconTone::Default,
+            selector: selector.into(),
+            tooltip: None,
+        }
+    }
+
+    fn status(
+        visual: SidebarStatusVisual,
+        selector: impl Into<SharedString>,
+        tooltip: impl Into<SharedString>,
+    ) -> Self {
+        Self {
+            glyph: visual.glyph,
+            tone: visual.tone,
+            selector: selector.into(),
+            tooltip: Some(tooltip.into()),
+        }
+    }
+
+    fn render(self, cx: &mut App) -> AnyElement {
+        let color = self.tone.color(cx);
+        let graphic = self
+            .glyph
+            .icon()
+            .size_4()
+            .text_color(color)
+            .into_any_element();
+        let id = self.selector.clone();
+        let debug_selector = self.selector;
+
+        div()
+            .id(id)
+            .debug_selector(move || debug_selector.to_string())
+            .size_4()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .when_some(self.tooltip, |this, tooltip| {
+                this.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            })
+            .child(graphic)
+            .into_any_element()
+    }
+}
+
+type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type SidebarSuffixBuilder = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
+type SidebarContextMenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut App) -> PopupMenu>;
+
+#[derive(Clone)]
+struct MurmurSidebarTreeItem {
+    id: SharedString,
+    row_selector: SharedString,
+    label_selector: SharedString,
+    toggle_selector: Option<SharedString>,
+    label: SharedString,
+    icon: MurmurSidebarIcon,
+    handler: SidebarClickHandler,
+    active: bool,
+    default_open: bool,
+    reserve_toggle_space: bool,
+    children: Vec<Self>,
+    suffix: Option<SidebarSuffixBuilder>,
+    disabled: bool,
+    context_menu: Option<SidebarContextMenuBuilder>,
+}
+
+impl FluentBuilder for MurmurSidebarTreeItem {}
+
+impl MurmurSidebarTreeItem {
+    fn new(
+        id: impl Into<SharedString>,
+        row_selector: impl Into<SharedString>,
+        label_selector: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        icon: MurmurSidebarIcon,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            row_selector: row_selector.into(),
+            label_selector: label_selector.into(),
+            toggle_selector: None,
+            label: label.into(),
+            icon,
+            handler: Rc::new(|_, _, _| {}),
+            active: false,
+            default_open: false,
+            reserve_toggle_space: false,
+            children: Vec::new(),
+            suffix: None,
+            disabled: false,
+            context_menu: None,
+        }
+    }
+
+    fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
+    }
+
+    fn tree_parent(mut self, toggle_selector: impl Into<SharedString>) -> Self {
+        self.toggle_selector = Some(toggle_selector.into());
+        self.reserve_toggle_space = true;
+        self
+    }
+
+    fn default_open(mut self, open: bool) -> Self {
+        self.default_open = open;
+        self
+    }
+
+    fn children(mut self, children: impl IntoIterator<Item = Self>) -> Self {
+        self.children = children.into_iter().collect();
+        self
+    }
+
+    fn suffix<F, E>(mut self, builder: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.suffix = Some(Rc::new(move |window, cx| {
+            builder(window, cx).into_any_element()
+        }));
+        self
+    }
+
+    fn disable(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    fn context_menu(
+        mut self,
+        builder: impl Fn(PopupMenu, &mut Window, &mut App) -> PopupMenu + 'static,
+    ) -> Self {
+        self.context_menu = Some(Rc::new(builder));
+        self
+    }
+
+    fn on_click(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.handler = Rc::new(handler);
+        self
+    }
+
+    fn render(self, window: &mut Window, cx: &mut App) -> AnyElement {
+        let Self {
+            id,
+            row_selector,
+            label_selector,
+            toggle_selector,
+            label,
+            icon,
+            handler,
+            active,
+            default_open,
+            reserve_toggle_space,
+            children,
+            suffix,
+            disabled,
+            context_menu,
+        } = self;
+        let is_submenu = !children.is_empty();
+        let open_state = reserve_toggle_space.then(|| {
+            window.use_keyed_state(
+                SharedString::from(format!("murmur-sidebar-open-{id}")),
+                cx,
+                |_, _| default_open,
+            )
+        });
+        let is_open = open_state.as_ref().is_some_and(|state| *state.read(cx));
+        let show_children = is_open && is_submenu;
+        let rendered_children = if show_children {
+            children
+                .into_iter()
+                .map(|child| child.render(window, cx))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let row_debug_selector = row_selector.clone();
+        let label_debug_selector = label_selector;
+        let row = h_flex()
+            .id(id.clone())
+            .debug_selector(move || row_debug_selector.to_string())
+            .w_full()
+            .h_8()
+            .min_w_0()
+            .overflow_x_hidden()
+            .flex_shrink_0()
+            .px_1()
+            .gap_x_2()
+            .rounded(cx.theme().radius)
+            .text_sm()
+            .when(!active && !disabled, |this| {
+                this.hover(|this| {
+                    this.bg(cx.theme().sidebar_accent.opacity(0.8))
+                        .text_color(cx.theme().sidebar_accent_foreground)
+                })
+            })
+            .when(active, |this| {
+                this.font_medium()
+                    .bg(cx.theme().tokens.sidebar_accent)
+                    .text_color(cx.theme().sidebar_accent_foreground)
+            })
+            .when(reserve_toggle_space, |this| {
+                let toggle_debug_selector = toggle_selector
+                    .clone()
+                    .unwrap_or_else(|| format!("{id}-toggle").into());
+                let button = Button::new(format!("{id}-toggle"))
+                    .debug_selector(move || toggle_debug_selector.to_string())
+                    .xsmall()
+                    .ghost()
+                    .icon(
+                        Icon::new(IconName::ChevronRight)
+                            .size_3p5()
+                            .when(is_open, |icon| icon.rotate(percentage(90. / 360.))),
+                    );
+                let toggle_tooltip = if is_open {
+                    format!("Collapse {label}")
+                } else {
+                    format!("Expand {label}")
+                };
+                let open_state = open_state
+                    .clone()
+                    .expect("tree parents always own disclosure state");
+                this.child(button.tooltip(toggle_tooltip).on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    open_state.update(cx, |open, cx| {
+                        *open = !*open;
+                        cx.notify();
+                    });
+                }))
+            })
+            .child(icon.render(cx))
+            .child(
+                div()
+                    .debug_selector(move || label_debug_selector.to_string())
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(label),
+            )
+            .when_some(suffix, |this, suffix| {
+                this.child(suffix(window, cx).into_any_element())
+            })
+            .when(disabled, |this| {
+                this.text_color(cx.theme().muted_foreground)
+            })
+            .when(!disabled, |this| {
+                this.on_click(move |event, window, cx| handler(event, window, cx))
+            });
+        let row = if let Some(context_menu) = context_menu {
+            row.context_menu(move |menu, window, cx| context_menu(menu, window, cx))
+                .into_any_element()
+        } else {
+            row.into_any_element()
+        };
+
+        v_flex()
+            .w_full()
+            .child(row)
+            .when(show_children, |this| {
+                this.child(
+                    v_flex()
+                        .border_l_1()
+                        .border_color(cx.theme().sidebar_border)
+                        .gap_1()
+                        .ml_3p5()
+                        .pl_2p5()
+                        .py_0p5()
+                        .children(rendered_children),
+                )
+            })
+            .into_any_element()
+    }
+}
+
+#[derive(Clone)]
+struct MurmurSidebarSection {
+    label: SharedString,
+    heading_selector: SharedString,
+    action: SidebarSuffixBuilder,
+    items: Vec<MurmurSidebarTreeItem>,
+    collapsed: bool,
+}
+
+impl MurmurSidebarSection {
+    fn new(
+        label: impl Into<SharedString>,
+        heading_selector: impl Into<SharedString>,
+        action: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+        items: impl IntoIterator<Item = MurmurSidebarTreeItem>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            heading_selector: heading_selector.into(),
+            action: Rc::new(action),
+            items: items.into_iter().collect(),
+            collapsed: false,
+        }
+    }
+}
+
+impl Collapsible for MurmurSidebarSection {
+    fn collapsed(mut self, collapsed: bool) -> Self {
+        self.collapsed = collapsed;
+        self
+    }
+
+    fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+}
+
+impl SidebarItem for MurmurSidebarSection {
+    fn render(
+        self,
+        _id: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
+        let heading_row_debug_selector =
+            SharedString::from(format!("{}-row", self.heading_selector));
+        let heading_debug_selector = self.heading_selector;
+        let rendered_items = self
+            .items
+            .into_iter()
+            .map(|item| item.render(window, cx))
+            .collect::<Vec<_>>();
+
+        v_flex()
+            .relative()
+            .when(!self.collapsed, |this| {
+                this.child(
+                    h_flex()
+                        .debug_selector(move || heading_row_debug_selector.to_string())
+                        .h_9()
+                        .w_full()
+                        .flex_shrink_0()
+                        .items_center()
+                        .justify_between()
+                        .pl_1()
+                        .text_xs()
+                        .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                        .child(
+                            div()
+                                .debug_selector(move || heading_debug_selector.to_string())
+                                .child(self.label),
+                        )
+                        .child((self.action)(window, cx)),
+                )
+            })
+            .when(!self.collapsed, |this| {
+                this.child(v_flex().w_full().gap_1().children(rendered_items))
+            })
+    }
 }
 
 struct ServerConnection {
@@ -4091,14 +4636,8 @@ impl Murmur {
             let key = connection.key;
             let active_server = key == self.active_connection;
             let connected = connection.can_mutate();
-            let label = match connection.status {
-                ConnectionStatus::Connecting => format!("{} (connecting)", connection.label),
-                ConnectionStatus::Connected if !connection.is_synchronized() => {
-                    format!("{} (syncing)", connection.label)
-                }
-                ConnectionStatus::Connected => connection.label.clone(),
-                ConnectionStatus::Disconnected => format!("{} (offline)", connection.label),
-            };
+            let server_status =
+                server_sidebar_status(connection.status, connection.is_synchronized());
             let workspaces = Session::restore(connection.snapshot.clone())
                 .ok()
                 .map(|session| {
@@ -4126,115 +4665,99 @@ impl Murmur {
                                     let state = connection
                                         .agent_trackers
                                         .get(&pane_id)
-                                        .map(|tracker| tracker.display_state().label())
-                                        .unwrap_or_else(|| agent.state.label());
+                                        .map(|tracker| tracker.display_state())
+                                        .unwrap_or_else(|| {
+                                            AgentTracker::new(agent.state).display_state()
+                                        });
+                                    let status = agent_sidebar_status(state);
+                                    let agent_label = agent.kind.label();
                                     let agent_owner = owner.clone();
                                     Some(
-                                        SidebarMenuItem::new(agent.kind.label())
-                                            .icon(IconName::Bot)
-                                            .active(
-                                                active_server
-                                                    && self.target_pane == Some((key, pane_id)),
-                                            )
-                                            .suffix(move |_, cx| {
-                                                div()
-                                                    .debug_selector(move || {
-                                                        format!("agent-{key}-{}", pane_id.as_u64())
-                                                    })
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(state)
-                                            })
-                                            .disable(!connected)
-                                            .on_click(move |_, window, cx| {
+                                        MurmurSidebarTreeItem::new(
+                                            format!("sidebar-agent-{key}-{}", pane_id.as_u64()),
+                                            format!("agent-{key}-{}", pane_id.as_u64()),
+                                            format!("agent-label-{key}-{}", pane_id.as_u64()),
+                                            agent_label,
+                                            MurmurSidebarIcon::status(
+                                                status,
+                                                format!(
+                                                    "agent-status-{key}-{}-{}",
+                                                    pane_id.as_u64(),
+                                                    status.key
+                                                ),
+                                                format!("{agent_label}: {}", status.label),
+                                            ),
+                                        )
+                                        .active(
+                                            active_server
+                                                && self.target_pane == Some((key, pane_id)),
+                                        )
+                                        .disable(!connected)
+                                        .on_click(
+                                            move |_, window, cx| {
                                                 let _ = agent_owner.update(cx, |this, cx| {
                                                     this.select_pane(key, pane_id, window, cx)
                                                 });
-                                            }),
+                                            },
+                                        ),
                                     )
                                 })
                                 .collect::<Vec<_>>();
                             let owner = owner.clone();
                             let menu_owner = owner.clone();
-                            SidebarMenuItem::new(workspace_name.clone())
-                                .icon(IconName::Folder)
-                                .active(active_server && active_workspace == Some(workspace_id))
-                                .default_open(true)
-                                .children(agents)
-                                .disable(!connected)
-                                .context_menu(move |menu, _, _| {
-                                    let rename_owner = menu_owner.clone();
-                                    let create_owner = menu_owner.clone();
-                                    let open_owner = menu_owner.clone();
-                                    let remove_owner = menu_owner.clone();
-                                    let close_owner = menu_owner.clone();
-                                    let rename_name = workspace_name.clone();
-                                    let create_name = workspace_name.clone();
-                                    let open_name = workspace_name.clone();
-                                    let remove_name = workspace_name.clone();
-                                    let menu = menu.item(
-                                        PopupMenuItem::new("Rename Workspace…")
-                                            .disabled(!connected)
-                                            .on_click(move |_, window, cx| {
-                                                let name = rename_name.clone();
-                                                let _ = rename_owner.update(cx, |this, cx| {
-                                                    this.prompt_rename_workspace_on(
-                                                        key,
-                                                        workspace_id,
-                                                        name,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                });
-                                            }),
-                                    );
-                                    let menu = if supports_worktrees {
-                                        menu.separator()
-                                            .item(
-                                                PopupMenuItem::new("Create Worktree…")
-                                                    .disabled(!connected)
-                                                    .on_click(move |_, window, cx| {
-                                                        let name = create_name.clone();
-                                                        let _ =
-                                                            create_owner.update(cx, |this, cx| {
-                                                                this.prompt_create_worktree_on(
-                                                                    key,
-                                                                    workspace_id,
-                                                                    name,
-                                                                    window,
-                                                                    cx,
-                                                                )
-                                                            });
-                                                    }),
-                                            )
-                                            .item(
-                                                PopupMenuItem::new("Open Existing Worktree…")
-                                                    .disabled(!connected)
-                                                    .on_click(move |_, window, cx| {
-                                                        let name = open_name.clone();
-                                                        let _ =
-                                                            open_owner.update(cx, |this, cx| {
-                                                                this.choose_worktree_directory_on(
-                                                                    key,
-                                                                    workspace_id,
-                                                                    name,
-                                                                    window,
-                                                                    cx,
-                                                                )
-                                                            });
-                                                    }),
-                                            )
-                                    } else {
-                                        menu
-                                    };
-                                    let menu = if managed_worktree {
-                                        menu.separator().item(
-                                            PopupMenuItem::new("Remove Worktree…")
+                            MurmurSidebarTreeItem::new(
+                                format!("sidebar-workspace-{key}-{}", workspace_id.as_u64()),
+                                format!("workspace-{key}-{}", workspace_id.as_u64()),
+                                format!("workspace-label-{key}-{}", workspace_id.as_u64()),
+                                workspace_name.clone(),
+                                MurmurSidebarIcon::new(
+                                    SidebarGlyph::Folder,
+                                    format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
+                                ),
+                            )
+                            .active(active_server && active_workspace == Some(workspace_id))
+                            .tree_parent(format!(
+                                "workspace-toggle-{key}-{}",
+                                workspace_id.as_u64()
+                            ))
+                            .default_open(active_server && active_workspace == Some(workspace_id))
+                            .children(agents)
+                            .disable(!connected)
+                            .context_menu(move |menu, _, _| {
+                                let rename_owner = menu_owner.clone();
+                                let create_owner = menu_owner.clone();
+                                let open_owner = menu_owner.clone();
+                                let remove_owner = menu_owner.clone();
+                                let close_owner = menu_owner.clone();
+                                let rename_name = workspace_name.clone();
+                                let create_name = workspace_name.clone();
+                                let open_name = workspace_name.clone();
+                                let remove_name = workspace_name.clone();
+                                let menu = menu.item(
+                                    PopupMenuItem::new("Rename Workspace…")
+                                        .disabled(!connected)
+                                        .on_click(move |_, window, cx| {
+                                            let name = rename_name.clone();
+                                            let _ = rename_owner.update(cx, |this, cx| {
+                                                this.prompt_rename_workspace_on(
+                                                    key,
+                                                    workspace_id,
+                                                    name,
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        }),
+                                );
+                                let menu = if supports_worktrees {
+                                    menu.separator()
+                                        .item(
+                                            PopupMenuItem::new("Create Worktree…")
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
-                                                    let name = remove_name.clone();
-                                                    let _ = remove_owner.update(cx, |this, cx| {
-                                                        this.confirm_remove_worktree_on(
+                                                    let name = create_name.clone();
+                                                    let _ = create_owner.update(cx, |this, cx| {
+                                                        this.prompt_create_worktree_on(
                                                             key,
                                                             workspace_id,
                                                             name,
@@ -4244,42 +4767,75 @@ impl Murmur {
                                                     });
                                                 }),
                                         )
-                                    } else {
-                                        menu
-                                    };
+                                        .item(
+                                            PopupMenuItem::new("Open Existing Worktree…")
+                                                .disabled(!connected)
+                                                .on_click(move |_, window, cx| {
+                                                    let name = open_name.clone();
+                                                    let _ = open_owner.update(cx, |this, cx| {
+                                                        this.choose_worktree_directory_on(
+                                                            key,
+                                                            workspace_id,
+                                                            name,
+                                                            window,
+                                                            cx,
+                                                        )
+                                                    });
+                                                }),
+                                        )
+                                } else {
+                                    menu
+                                };
+                                let menu = if managed_worktree {
                                     menu.separator().item(
-                                        PopupMenuItem::new("Close Workspace")
+                                        PopupMenuItem::new("Remove Worktree…")
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
-                                                let _ = close_owner.update(cx, |this, cx| {
-                                                    this.close_workspace_id(
+                                                let name = remove_name.clone();
+                                                let _ = remove_owner.update(cx, |this, cx| {
+                                                    this.confirm_remove_worktree_on(
                                                         key,
                                                         workspace_id,
+                                                        name,
                                                         window,
                                                         cx,
                                                     )
                                                 });
                                             }),
                                     )
+                                } else {
+                                    menu
+                                };
+                                menu.separator().item(
+                                    PopupMenuItem::new("Close Workspace")
+                                        .disabled(!connected)
+                                        .on_click(move |_, window, cx| {
+                                            let _ = close_owner.update(cx, |this, cx| {
+                                                this.close_workspace_id(
+                                                    key,
+                                                    workspace_id,
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        }),
+                                )
+                            })
+                            .when_some(branch, |item, branch| {
+                                item.suffix(move |_, cx| {
+                                    div()
+                                        .max_w(px(84.0))
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(branch.clone())
                                 })
-                                .when_some(branch, |item, branch| {
-                                    item.suffix(move |_, cx| {
-                                        div()
-                                            .debug_selector(move || {
-                                                format!("workspace-{key}-{}", workspace_id.as_u64())
-                                            })
-                                            .max_w(px(84.0))
-                                            .truncate()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(branch.clone())
-                                    })
-                                })
-                                .on_click(move |_, window, cx| {
-                                    let _ = owner.update(cx, |this, cx| {
-                                        this.select_workspace(key, workspace_id, window, cx)
-                                    });
-                                })
+                            })
+                            .on_click(move |_, window, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.select_workspace(key, workspace_id, window, cx)
+                                });
+                            })
                         })
                         .collect::<Vec<_>>()
                 })
@@ -4290,84 +4846,94 @@ impl Murmur {
             let server_name = connection.label.clone();
             let status = connection.status;
             let new_workspace_label = connection.label.clone();
-            SidebarMenuItem::new(label)
-                .icon(IconName::HardDrive)
-                .active(active_server)
-                .default_open(true)
-                .children(workspaces)
-                .context_menu(move |menu, _, _| {
-                    let rename_owner = server_menu_owner.clone();
-                    let connection_owner = server_menu_owner.clone();
-                    let delete_owner = server_menu_owner.clone();
-                    let rename_name = server_name.clone();
-                    let delete_name = server_name.clone();
-                    let (connection_label, connection_disabled) = match status {
-                        ConnectionStatus::Connected => ("Disconnect", false),
-                        ConnectionStatus::Disconnected => ("Connect", false),
-                        ConnectionStatus::Connecting => ("Connecting…", true),
-                    };
-                    menu.item(PopupMenuItem::new("Rename Server…").on_click(
-                        move |_, window, cx| {
-                            let name = rename_name.clone();
-                            let _ = rename_owner.update(cx, |this, cx| {
-                                this.prompt_rename_server_on(key, name, window, cx)
-                            });
-                        },
-                    ))
-                    .item(
-                        PopupMenuItem::new(connection_label)
-                            .disabled(connection_disabled)
-                            .on_click(move |_, window, cx| {
-                                let _ = connection_owner.update(cx, |this, cx| {
-                                    match status {
-                                        ConnectionStatus::Connected => {
-                                            if this.disconnect_server(key) {
-                                                this.refresh_target_pane(this.active_connection);
-                                                this.rebuild_dock(window, cx);
-                                            }
+            MurmurSidebarTreeItem::new(
+                format!("sidebar-server-{key}"),
+                format!("server-{key}"),
+                format!("server-label-{key}"),
+                connection.label.clone(),
+                MurmurSidebarIcon::status(
+                    server_status,
+                    format!("server-status-{key}-{}", server_status.key),
+                    format!("{}: {}", connection.label, server_status.label),
+                ),
+            )
+            .active(active_server)
+            .tree_parent(format!("server-toggle-{key}"))
+            .default_open(active_server)
+            .children(workspaces)
+            .context_menu(move |menu, _, _| {
+                let rename_owner = server_menu_owner.clone();
+                let connection_owner = server_menu_owner.clone();
+                let delete_owner = server_menu_owner.clone();
+                let rename_name = server_name.clone();
+                let delete_name = server_name.clone();
+                let (connection_label, connection_disabled) = match status {
+                    ConnectionStatus::Connected => ("Disconnect", false),
+                    ConnectionStatus::Disconnected => ("Connect", false),
+                    ConnectionStatus::Connecting => ("Connecting…", true),
+                };
+                menu.item(
+                    PopupMenuItem::new("Rename Server…").on_click(move |_, window, cx| {
+                        let name = rename_name.clone();
+                        let _ = rename_owner.update(cx, |this, cx| {
+                            this.prompt_rename_server_on(key, name, window, cx)
+                        });
+                    }),
+                )
+                .item(
+                    PopupMenuItem::new(connection_label)
+                        .disabled(connection_disabled)
+                        .on_click(move |_, window, cx| {
+                            let _ = connection_owner.update(cx, |this, cx| {
+                                match status {
+                                    ConnectionStatus::Connected => {
+                                        if this.disconnect_server(key) {
+                                            this.refresh_target_pane(this.active_connection);
+                                            this.rebuild_dock(window, cx);
                                         }
-                                        ConnectionStatus::Disconnected => {
-                                            if this.start_connect(key) {
-                                                this.refresh_target_pane(this.active_connection);
-                                                this.rebuild_dock(window, cx);
-                                            }
-                                        }
-                                        ConnectionStatus::Connecting => {}
                                     }
-                                    cx.notify();
-                                });
-                            }),
-                    )
-                    .separator()
-                    .item(
-                        PopupMenuItem::new("Delete Server").on_click(move |_, window, cx| {
-                            let name = delete_name.clone();
-                            let _ = delete_owner.update(cx, |this, cx| {
-                                this.confirm_delete_server_on(key, name, window, cx)
+                                    ConnectionStatus::Disconnected => {
+                                        if this.start_connect(key) {
+                                            this.refresh_target_pane(this.active_connection);
+                                            this.rebuild_dock(window, cx);
+                                        }
+                                    }
+                                    ConnectionStatus::Connecting => {}
+                                }
+                                cx.notify();
                             });
                         }),
-                    )
-                })
-                .suffix(move |_, _| {
-                    let owner = new_workspace_owner.clone();
-                    let tooltip = format!("New Workspace on {new_workspace_label}…");
-                    Button::new(("new-workspace", key))
-                        .debug_selector(move || format!("new-workspace-server-{key}"))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Plus)
-                        .tooltip(tooltip)
-                        .disabled(!connected)
-                        .on_click(move |_, window, cx| {
-                            cx.stop_propagation();
-                            let _ = owner.update(cx, |this, cx| {
-                                this.choose_workspace_directory_on(key, window, cx)
-                            });
-                        })
-                })
-                .on_click(move |_, window, cx| {
-                    let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
-                })
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new("Delete Server").on_click(move |_, window, cx| {
+                        let name = delete_name.clone();
+                        let _ = delete_owner.update(cx, |this, cx| {
+                            this.confirm_delete_server_on(key, name, window, cx)
+                        });
+                    }),
+                )
+            })
+            .suffix(move |_, _| {
+                let owner = new_workspace_owner.clone();
+                let tooltip = format!("New Workspace on {new_workspace_label}…");
+                Button::new(("new-workspace", key))
+                    .debug_selector(move || format!("new-workspace-server-{key}"))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Plus)
+                    .tooltip(tooltip)
+                    .disabled(!connected)
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        let _ = owner.update(cx, |this, cx| {
+                            this.choose_workspace_directory_on(key, window, cx)
+                        });
+                    })
+            })
+            .on_click(move |_, window, cx| {
+                let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
+            })
         });
 
         let add_owner = cx.weak_entity();
@@ -4375,6 +4941,24 @@ impl Murmur {
         let reconnect_visible = self
             .active_connection()
             .is_some_and(|connection| connection.status == ConnectionStatus::Disconnected);
+        let servers = MurmurSidebarSection::new(
+            "Servers",
+            "servers-heading",
+            move |_, _| {
+                let owner = add_owner.clone();
+                Button::new("add-server")
+                    .debug_selector(|| "add-server".into())
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Plus)
+                    .tooltip("Add Server")
+                    .on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| this.prompt_add_server(window, cx));
+                    })
+                    .into_any_element()
+            },
+            items,
+        );
         Sidebar::new("murmur-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
@@ -4383,37 +4967,24 @@ impl Murmur {
                     .child(Icon::new(IconName::SquareTerminal))
                     .child(div().flex_1().font_semibold().child(murmur_core::APP_NAME)),
             )
-            .child(SidebarGroup::new("Servers").child(SidebarMenu::new().children(items)))
-            .footer(
-                SidebarFooter::new()
-                    .child(
-                        Button::new("add-server")
-                            .debug_selector(|| "add-server".into())
+            .child(servers)
+            .when(reconnect_visible, |sidebar| {
+                sidebar.footer(
+                    SidebarFooter::new().child(
+                        Button::new("reconnect-server")
                             .ghost()
                             .small()
-                            .icon(IconName::Plus)
-                            .tooltip("Add Server")
+                            .icon(IconName::LoaderCircle)
+                            .tooltip("Reconnect")
                             .on_click(move |_, window, cx| {
-                                let _ = add_owner
-                                    .update(cx, |this, cx| this.prompt_add_server(window, cx));
+                                let _ = reconnect_owner.update(cx, |this, cx| {
+                                    this.reconnect_active(window, cx);
+                                    cx.notify();
+                                });
                             }),
-                    )
-                    .when(reconnect_visible, |footer| {
-                        footer.child(
-                            Button::new("reconnect-server")
-                                .ghost()
-                                .small()
-                                .icon(IconName::LoaderCircle)
-                                .tooltip("Reconnect")
-                                .on_click(move |_, window, cx| {
-                                    let _ = reconnect_owner.update(cx, |this, cx| {
-                                        this.reconnect_active(window, cx);
-                                        cx.notify();
-                                    });
-                                }),
-                        )
-                    }),
-            )
+                    ),
+                )
+            })
     }
 
     fn render_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -4852,7 +5423,7 @@ fn main() {
         murmur_server::ensure_local_server().unwrap_or_else(|_| ServerConfig::default().endpoint);
     let initial =
         ClientConnection::connect(&endpoint, "murmur-gui").map_err(|error| error.to_string());
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_platform::application().with_assets(MurmurAssets::new());
 
     app.run(move |cx| {
         gpui_component::init(cx);
@@ -4873,23 +5444,25 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Keystroke, Task};
+    use gpui::{AssetSource as _, Keystroke, Task};
     use murmur_core::protocol::{
         BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
         RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionId, TerminalFrameBatch,
         TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
     };
     use murmur_core::{
-        Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize, TerminalView,
-        TerminalViewDelta, TerminalViewFrame,
+        AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize,
+        TerminalView, TerminalViewDelta, TerminalViewFrame,
     };
     use murmur_server::Endpoint;
 
     use super::{
-        ClientIo, ConnectionStatus, FocusLeft, NextTab, PreviousTab, ServerConnection, SplitDown,
-        SplitRight, TerminalVisualSlot, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
-        clear_pending_sizes_for_bootstrap, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
-        merge_terminal_deltas, read_bootstrap_batches, terminal_chunk_identity_matches,
+        ClientIo, ConnectionStatus, FocusLeft, MurmurAssets, NextTab, PreviousTab,
+        ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown,
+        SplitRight, TerminalVisualSlot, agent_sidebar_status, apply_terminal_frame_batch,
+        assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
+        enforce_terminal_chunk_reliable_fence, fixed_shortcut, merge_terminal_deltas,
+        read_bootstrap_batches, server_sidebar_status, terminal_chunk_identity_matches,
     };
 
     fn terminal_cell(text: &str) -> TerminalCell {
@@ -4926,6 +5499,106 @@ mod tests {
             .active_tab()
             .focused_pane()
             .id()
+    }
+
+    #[test]
+    fn sidebar_status_visuals_follow_the_prototype_semantics() {
+        assert_eq!(
+            server_sidebar_status(ConnectionStatus::Connected, true),
+            SidebarStatusVisual {
+                glyph: SidebarGlyph::HardDrive,
+                tone: SidebarIconTone::Success,
+                key: "connected",
+                label: "Connected",
+            }
+        );
+        assert_eq!(
+            server_sidebar_status(ConnectionStatus::Connected, false),
+            SidebarStatusVisual {
+                glyph: SidebarGlyph::HardDrive,
+                tone: SidebarIconTone::Warning,
+                key: "syncing",
+                label: "Syncing",
+            }
+        );
+        assert_eq!(
+            server_sidebar_status(ConnectionStatus::Connecting, false),
+            SidebarStatusVisual {
+                glyph: SidebarGlyph::HardDrive,
+                tone: SidebarIconTone::Warning,
+                key: "connecting",
+                label: "Connecting",
+            }
+        );
+        assert_eq!(
+            server_sidebar_status(ConnectionStatus::Disconnected, false),
+            SidebarStatusVisual {
+                glyph: SidebarGlyph::HardDrive,
+                tone: SidebarIconTone::Danger,
+                key: "offline",
+                label: "Offline",
+            }
+        );
+
+        let agent_cases = [
+            (
+                AgentDisplayState::Unknown,
+                SidebarGlyph::Info,
+                SidebarIconTone::Muted,
+                "unknown",
+            ),
+            (
+                AgentDisplayState::Idle,
+                SidebarGlyph::Circle,
+                SidebarIconTone::Muted,
+                "idle",
+            ),
+            (
+                AgentDisplayState::Working,
+                SidebarGlyph::LoaderCircle,
+                SidebarIconTone::Warning,
+                "working",
+            ),
+            (
+                AgentDisplayState::Blocked,
+                SidebarGlyph::CircleAlert,
+                SidebarIconTone::Danger,
+                "blocked",
+            ),
+            (
+                AgentDisplayState::Done,
+                SidebarGlyph::CircleCheck,
+                SidebarIconTone::Success,
+                "done",
+            ),
+        ];
+        for (state, glyph, tone, key) in agent_cases {
+            let visual = agent_sidebar_status(state);
+            assert_eq!((visual.glyph, visual.tone, visual.key), (glyph, tone, key));
+        }
+    }
+
+    #[test]
+    fn murmur_assets_include_the_prototype_agent_status_icons() {
+        let assets = MurmurAssets::new();
+        for path in ["icons/circle.svg", "icons/circle-alert.svg"] {
+            let bytes = assets
+                .load(path)
+                .unwrap()
+                .expect("Murmur status icon should be embedded");
+            assert!(bytes.starts_with(b"<svg"));
+        }
+        let listed = assets.list("icons/circle").unwrap();
+        assert!(
+            listed
+                .iter()
+                .any(|path| path.as_ref() == "icons/circle.svg")
+        );
+        assert!(
+            listed
+                .iter()
+                .any(|path| path.as_ref() == "icons/circle-alert.svg")
+        );
     }
 
     #[test]
@@ -5459,7 +6132,8 @@ mod tests {
             ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
         };
         use murmur_core::{
-            PaneId, PaneLayout, Session, TabId, TerminalCommand, TerminalViewFrame, WorkspaceId,
+            AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneId, PaneLayout, Session, TabId,
+            TerminalCommand, TerminalViewFrame, WorkspaceId,
         };
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
@@ -5600,13 +6274,17 @@ mod tests {
             Box::leak(format!("tab-{}", tab_id.as_u64()).into_boxed_str())
         }
 
+        fn leaked_selector(selector: String) -> &'static str {
+            Box::leak(selector.into_boxed_str())
+        }
+
         fn sidebar_workspace_selector(workspace_id: WorkspaceId) -> &'static str {
-            Box::leak(format!("workspace-1-{}", workspace_id.as_u64()).into_boxed_str())
+            leaked_selector(format!("workspace-1-{}", workspace_id.as_u64()))
         }
 
         #[cfg(target_os = "linux")]
         fn sidebar_agent_selector(pane_id: PaneId) -> &'static str {
-            Box::leak(format!("agent-1-{}", pane_id.as_u64()).into_boxed_str())
+            leaked_selector(format!("agent-1-{}", pane_id.as_u64()))
         }
 
         struct TestDirectory(std::path::PathBuf);
@@ -5892,6 +6570,217 @@ mod tests {
             let second = window.debug_bounds(terminal_selector(panes[1])).unwrap();
             let width = first.size.width + second.size.width;
             assert!((first.size.width / width - 0.5).abs() < 0.03);
+        }
+
+        #[test]
+        fn sidebar_header_and_tree_controls_match_the_prototype() {
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+            window.update(|window, cx| _ = window.draw(cx));
+
+            let heading_row = window
+                .debug_bounds("servers-heading-row")
+                .expect("Servers heading row should render");
+            let heading = window
+                .debug_bounds("servers-heading")
+                .expect("Servers heading should render");
+            let add_server = window
+                .debug_bounds("add-server")
+                .expect("Add Server should render in the Servers heading");
+            assert!(
+                (heading.center().y - add_server.center().y).abs() <= px(1.),
+                "Servers and Add Server should share a row"
+            );
+            assert!(
+                heading.right() <= add_server.left(),
+                "Add Server should sit to the right of Servers"
+            );
+            assert!(
+                (heading_row.right() - add_server.right()).abs() <= px(1.),
+                "Add Server should align with the heading's right edge"
+            );
+
+            let empty_server_toggle = window
+                .debug_bounds("server-toggle-1")
+                .expect("an empty Server should retain its left disclosure control");
+            let empty_server_status = window.debug_bounds("server-status-1-connected").unwrap();
+            assert!(empty_server_toggle.right() <= empty_server_status.left());
+            window.simulate_click(empty_server_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                    });
+                });
+            });
+
+            let mut tree_ids = None;
+            assert!(wait_until(window, |window| {
+                tree_ids = window.read(|app| {
+                    let session = view.read(app).active_session()?;
+                    let workspace = session.active_workspace()?;
+                    Some((workspace.id(), workspace.active_tab().focused_pane().id()))
+                });
+                tree_ids.is_some()
+            }));
+            let (workspace_id, pane_id) = tree_ids.unwrap();
+            window.update(|window, cx| _ = window.draw(cx));
+
+            let workspace_toggle_selector =
+                leaked_selector(format!("workspace-toggle-1-{}", workspace_id.as_u64()));
+            let workspace_icon_selector =
+                leaked_selector(format!("workspace-icon-1-{}", workspace_id.as_u64()));
+            let workspace_label_selector =
+                leaked_selector(format!("workspace-label-1-{}", workspace_id.as_u64()));
+            let workspace_selector = sidebar_workspace_selector(workspace_id);
+            assert!(
+                window.debug_bounds(workspace_selector).is_none(),
+                "a Server collapsed while empty should stay collapsed when its first Workspace appears"
+            );
+            let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
+            window.simulate_click(server_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+
+            let empty_workspace_toggle = window
+                .debug_bounds(workspace_toggle_selector)
+                .expect("a Workspace without Agents should retain its disclosure control");
+            let empty_workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
+            assert!(empty_workspace_toggle.right() <= empty_workspace_icon.left());
+            let server_status_with_workspace =
+                window.debug_bounds("server-status-1-connected").unwrap();
+            assert!(
+                (server_status_with_workspace.left() - empty_server_status.left()).abs() <= px(1.),
+                "the status column must not move when the first child appears"
+            );
+            window.simulate_click(empty_workspace_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    let connection = this.connection_mut(1).unwrap();
+                    connection.agents.insert(
+                        pane_id,
+                        AgentSnapshot {
+                            kind: AgentKind::Codex,
+                            state: AgentState::Idle,
+                        },
+                    );
+                    connection
+                        .agent_trackers
+                        .insert(pane_id, AgentTracker::new(AgentState::Idle));
+                    cx.notify();
+                });
+            });
+            window.update(|window, cx| _ = window.draw(cx));
+            let agent_selector = leaked_selector(format!("agent-1-{}", pane_id.as_u64()));
+            assert!(
+                window.debug_bounds(agent_selector).is_none(),
+                "a Workspace collapsed while empty should stay collapsed when its first Agent appears"
+            );
+            let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
+            window.simulate_click(workspace_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+
+            let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
+            let server_status = window.debug_bounds("server-status-1-connected").unwrap();
+            let server_label = window.debug_bounds("server-label-1").unwrap();
+            let new_workspace = window.debug_bounds("new-workspace-server-1").unwrap();
+            assert!(server_toggle.right() <= server_status.left());
+            assert!(server_status.right() <= server_label.left());
+            assert!(server_label.right() <= new_workspace.left());
+
+            let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
+            let workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
+            let workspace_label = window.debug_bounds(workspace_label_selector).unwrap();
+            assert!(workspace_toggle.right() <= workspace_icon.left());
+            assert!(workspace_icon.right() <= workspace_label.left());
+            assert!(
+                (workspace_icon.left() - empty_workspace_icon.left()).abs() <= px(1.),
+                "the Workspace icon must not move when the first Agent appears"
+            );
+
+            let agent_status_selector =
+                leaked_selector(format!("agent-status-1-{}-idle", pane_id.as_u64()));
+            let agent_label_selector =
+                leaked_selector(format!("agent-label-1-{}", pane_id.as_u64()));
+            let agent_status = window.debug_bounds(agent_status_selector).unwrap();
+            let agent_label = window.debug_bounds(agent_label_selector).unwrap();
+            assert!(agent_status.right() <= agent_label.left());
+
+            let selection_before = window.read(|app| {
+                let murmur = view.read(app);
+                (
+                    murmur.active_connection,
+                    murmur
+                        .active_session()
+                        .and_then(|session| session.active_workspace_id()),
+                    murmur.target_pane,
+                )
+            });
+            window.simulate_click(workspace_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(window.debug_bounds(workspace_selector).is_some());
+            assert!(
+                window.debug_bounds(agent_selector).is_none(),
+                "collapsing a Workspace should hide its Agents"
+            );
+            assert_eq!(
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    (
+                        murmur.active_connection,
+                        murmur
+                            .active_session()
+                            .and_then(|session| session.active_workspace_id()),
+                        murmur.target_pane,
+                    )
+                }),
+                selection_before,
+                "the Workspace disclosure button must not change selection"
+            );
+
+            let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
+            window.simulate_click(workspace_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(window.debug_bounds(agent_selector).is_some());
+
+            let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
+            window.simulate_click(server_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(
+                window.debug_bounds(workspace_selector).is_none(),
+                "collapsing a Server should hide its Workspaces"
+            );
+            assert_eq!(
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    (
+                        murmur.active_connection,
+                        murmur
+                            .active_session()
+                            .and_then(|session| session.active_workspace_id()),
+                        murmur.target_pane,
+                    )
+                }),
+                selection_before,
+                "the disclosure button must not select a different tree item"
+            );
+
+            let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
+            window.simulate_click(server_toggle.center(), Modifiers::default());
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(window.debug_bounds(workspace_selector).is_some());
         }
 
         #[test]
@@ -8074,6 +8963,12 @@ mod tests {
                 })
             }));
             window.update(|window, cx| _ = window.draw(cx));
+            let done_status =
+                leaked_selector(format!("agent-status-1-{}-done", agent_pane.as_u64()));
+            assert!(
+                window.debug_bounds(done_status).is_some(),
+                "an unseen completion should render the done status icon"
+            );
             let agent = window
                 .debug_bounds(sidebar_agent_selector(agent_pane))
                 .expect("detected Agent should render below its Workspace");
@@ -8101,6 +8996,11 @@ mod tests {
                 }),
                 "idle"
             );
+            window.update(|window, cx| _ = window.draw(cx));
+            let idle_status =
+                leaked_selector(format!("agent-status-1-{}-idle", agent_pane.as_u64()));
+            assert!(window.debug_bounds(done_status).is_none());
+            assert!(window.debug_bounds(idle_status).is_some());
         }
 
         #[test]
