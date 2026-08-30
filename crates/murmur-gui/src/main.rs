@@ -4202,13 +4202,14 @@ impl Murmur {
                             .ok_variant(ButtonVariant::Danger)
                             .show_cancel(true)
                             .on_ok(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, _| {
-                                    this.send_layout_to(
-                                        key,
-                                        LayoutCommand::RemoveWorktree { workspace_id },
-                                    )
-                                });
-                                true
+                                owner
+                                    .update(cx, |this, _| {
+                                        this.send_layout_to(
+                                            key,
+                                            LayoutCommand::RemoveWorktree { workspace_id },
+                                        )
+                                    })
+                                    .is_ok_and(|request_id| request_id.is_some())
                             }),
                     )
             });
@@ -6326,6 +6327,7 @@ mod tests {
         use std::ops::Deref;
         use std::rc::Rc;
         use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::{Mutex, MutexGuard, PoisonError};
         use std::thread::JoinHandle;
         use std::time::{Duration, Instant};
 
@@ -6333,6 +6335,7 @@ mod tests {
             AppContext as _, Entity, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
             TestAppContext, VisualTestContext, point, px, size,
         };
+        use gpui_component::dialog::Confirm;
         use gpui_component::{Root, WindowExt as _};
         use murmur_core::SplitDirection;
         use murmur_core::protocol::{
@@ -6357,6 +6360,7 @@ mod tests {
         const TEST_TIMEOUT: Duration = Duration::from_secs(5);
         const TEST_POLL_INTERVAL: Duration = Duration::from_millis(2);
         static NEXT_TEST_SERVER_ID: AtomicU64 = AtomicU64::new(1);
+        static VISUAL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
         struct TestServer {
             handle: ServerHandle,
@@ -6379,6 +6383,12 @@ mod tests {
                     let _ = thread.join();
                 }
             }
+        }
+
+        fn acquire_visual_test_lock() -> MutexGuard<'static, ()> {
+            VISUAL_TEST_LOCK
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
         }
 
         fn start_server() -> (TestServer, Endpoint) {
@@ -6540,15 +6550,21 @@ mod tests {
             I: IntoIterator<Item = S>,
             S: AsRef<std::ffi::OsStr>,
         {
+            let args = args
+                .into_iter()
+                .map(|argument| argument.as_ref().to_os_string())
+                .collect::<Vec<_>>();
             let output = std::process::Command::new("git")
                 .arg("-C")
                 .arg(cwd)
-                .args(args)
+                .args(&args)
                 .output()
                 .unwrap();
             assert!(
                 output.status.success(),
-                "Git failed: {}",
+                "Git {args:?} failed with {}\nstdout: {}\nstderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
         }
@@ -6575,6 +6591,28 @@ mod tests {
                 "keep text dialog actions compact"
             );
             window.simulate_click(primary.center(), Modifiers::default());
+        }
+
+        fn confirm_alert_dialog(window: &mut VisualTestContext) {
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+            let deadline = Instant::now() + TEST_TIMEOUT;
+            loop {
+                window.update(|window, cx| {
+                    window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
+                });
+                window.run_until_parked();
+                if !window.update(|window, cx| window.has_active_dialog(cx)) {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "confirming the alert should eventually close it"
+                );
+                window.executor().advance_clock(Duration::from_millis(20));
+                std::thread::sleep(TEST_POLL_INTERVAL);
+            }
         }
 
         fn wait_until(
@@ -6610,6 +6648,7 @@ mod tests {
 
         #[test]
         fn default_window_options_create_1280_by_720_window() {
+            let _serial_guard = acquire_visual_test_lock();
             let app = TestAppContext::single();
             let handle = app.update(|cx| {
                 cx.open_window(default_window_options(cx), |_, cx| cx.new(|_| gpui::Empty))
@@ -6624,6 +6663,7 @@ mod tests {
 
         #[test]
         fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
+            let _serial_guard = acquire_visual_test_lock();
             let workspace_root = TestDirectory::new("cold-split-workspace");
             let snapshot_root = TestDirectory::new("cold-split-snapshot");
             let mut session = Session::new();
@@ -6690,6 +6730,7 @@ mod tests {
 
         #[test]
         fn readonly_dock_resize_restores_the_authoritative_projection() {
+            let _serial_guard = acquire_visual_test_lock();
             let workspace_root = TestDirectory::new("readonly-dock-resize");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -6802,6 +6843,7 @@ mod tests {
 
         #[test]
         fn sidebar_header_and_tree_controls_match_the_prototype() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -7013,6 +7055,7 @@ mod tests {
 
         #[test]
         fn server_workspace_button_and_only_tab_close_round_trip() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -7087,6 +7130,7 @@ mod tests {
 
         #[test]
         fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
+            let _serial_guard = acquire_visual_test_lock();
             let first_root = TestDirectory::new("cached-dock-first");
             let second_root = TestDirectory::new("cached-dock-second");
             let mut cx = TestAppContext::single();
@@ -8042,6 +8086,7 @@ mod tests {
 
         #[test]
         fn stale_connection_result_cannot_replace_the_current_attempt() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8077,6 +8122,7 @@ mod tests {
 
         #[test]
         fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8135,6 +8181,7 @@ mod tests {
 
         #[test]
         fn denied_replacement_connection_retries_after_the_controller_releases() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8215,6 +8262,7 @@ mod tests {
 
         #[test]
         fn server_disconnect_reconnect_and_remove_preserve_runtime() {
+            let _serial_guard = acquire_visual_test_lock();
             let workspace_root = TestDirectory::new("reconnect-cached-dock");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -8391,6 +8439,7 @@ mod tests {
 
         #[test]
         fn replacement_server_restores_structure_with_fresh_terminal_state() {
+            let _serial_guard = acquire_visual_test_lock();
             let directory = TestDirectory::new("persistent-restart");
             let workspace_root = directory.0.join("workspace");
             std::fs::create_dir_all(&workspace_root).unwrap();
@@ -8483,7 +8532,7 @@ mod tests {
             }));
             server.stop();
 
-            let _replacement = start_server_with_config(
+            let mut replacement = start_server_with_config(
                 ServerConfig::new(endpoint).with_snapshot_path(snapshot_path),
             );
             window.update(|_, cx| {
@@ -8532,11 +8581,28 @@ mod tests {
                 window.debug_bounds(terminal_selector(pane_id)).is_some(),
                 "restored Pane should remain visible after reconnecting to the replacement Server"
             );
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    let connection = this.connection_mut(1).unwrap();
+                    connection.send(ClientMessage::StopServer {
+                        server_id: connection.server_id.unwrap(),
+                    });
+                });
+            });
+            assert!(wait_until_event_driven(window, |window| {
+                window.read(|app| {
+                    view.read(app).connection(1).is_some_and(|connection| {
+                        connection.status == ConnectionStatus::Disconnected
+                    })
+                })
+            }));
+            replacement.stop();
             window.quit();
         }
 
         #[test]
         fn corrupt_snapshot_connects_to_an_operable_start_page() {
+            let _serial_guard = acquire_visual_test_lock();
             let directory = TestDirectory::new("corrupt-snapshot");
             let endpoint = Endpoint::local(directory.0.join("server.sock"));
             let snapshot_path = directory.0.join("session.snapshot");
@@ -8570,6 +8636,7 @@ mod tests {
 
         #[test]
         fn text_dialog_actions_are_compact_and_submit() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8589,6 +8656,7 @@ mod tests {
 
         #[test]
         fn server_events_wake_gui_without_polling_clock() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8615,6 +8683,7 @@ mod tests {
 
         #[test]
         fn terminal_drag_selection_updates_locally() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8700,6 +8769,7 @@ mod tests {
 
         #[test]
         fn terminal_double_click_and_ctrl_c_copy_a_word() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8830,6 +8900,7 @@ mod tests {
 
         #[test]
         fn rename_dialogs_commit_server_workspace_and_tab_names() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -8915,6 +8986,7 @@ mod tests {
 
         #[test]
         fn worktree_actions_use_the_workspace_context_and_real_server() {
+            let _serial_guard = acquire_visual_test_lock();
             let temp = TestDirectory::new("worktree-ui");
             let repository = temp.0.join("repository");
             let worktree = temp.0.join("existing-worktree");
@@ -8946,7 +9018,7 @@ mod tests {
 
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, server) = connected_murmur(&mut cx);
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.send_layout(LayoutCommand::CreateWorkspace {
@@ -9020,37 +9092,77 @@ mod tests {
             window.update(|window, cx| _ = window.draw(cx));
             window.simulate_keystrokes("down down enter");
             window.run_until_parked();
-            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
-            window.simulate_keystrokes("enter");
-            assert!(wait_until(window, |window| {
+            confirm_alert_dialog(window);
+            let dirty_rejected = wait_until(window, |window| {
                 window.read(|app| {
                     view.read(app)
                         .connection(1)
                         .and_then(|connection| connection.error.as_deref())
                         .is_some_and(|error| error.contains("modified or untracked"))
                 })
-            }));
+            });
+            let (sequence, error) = window.read(|app| {
+                let connection = view.read(app).connection(1).unwrap();
+                (connection.sequence, connection.error.clone())
+            });
+            assert!(
+                dirty_rejected,
+                "dirty worktree removal did not reach the GUI; checkout exists: {}, client sequence: {sequence}, client error: {error:?}",
+                managed_root.exists(),
+            );
             assert!(managed_root.exists());
 
             std::fs::remove_file(managed_root.join("untracked.txt")).unwrap();
-            window.update(|window, cx| _ = window.draw(cx));
-            let managed = window
-                .debug_bounds(sidebar_workspace_selector(managed_workspace_id))
-                .unwrap();
-            window.simulate_mouse_down(managed.center(), MouseButton::Right, Modifiers::default());
+            let managed_name = window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .and_then(|session| {
+                        session
+                            .workspace(managed_workspace_id)
+                            .map(|workspace| workspace.name().to_owned())
+                    })
+                    .unwrap()
+            });
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.confirm_remove_worktree_on(
+                        1,
+                        managed_workspace_id,
+                        managed_name.clone(),
+                        window,
+                        cx,
+                    );
+                });
+            });
             window.run_until_parked();
-            window.update(|window, cx| _ = window.draw(cx));
-            window.simulate_keystrokes("down down enter");
-            window.run_until_parked();
-            assert!(window.update(|window, cx| window.has_active_dialog(cx)));
-            window.simulate_keystrokes("enter");
-            assert!(wait_until(window, |window| {
+            confirm_alert_dialog(window);
+            let removed = wait_until(window, |window| {
                 window.read(|app| {
                     view.read(app)
                         .active_session()
                         .is_some_and(|session| session.workspace(managed_workspace_id).is_none())
                 })
-            }));
+            });
+            let (client_has_workspace, sequence, error) = window.read(|app| {
+                let murmur = view.read(app);
+                let connection = murmur.connection(1).unwrap();
+                (
+                    murmur
+                        .active_session()
+                        .is_some_and(|session| session.workspace(managed_workspace_id).is_some()),
+                    connection.sequence,
+                    connection.error.clone(),
+                )
+            });
+            let server_has_workspace = Session::restore(server.handle.snapshot())
+                .unwrap()
+                .workspace(managed_workspace_id)
+                .is_some();
+            assert!(
+                removed,
+                "clean worktree removal did not complete; checkout exists: {}, client Workspace exists: {client_has_workspace}, Server Workspace exists: {server_has_workspace}, client sequence: {sequence}, client error: {error:?}",
+                managed_root.exists(),
+            );
             assert!(!managed_root.exists());
             run_git(
                 &repository,
@@ -9108,6 +9220,7 @@ mod tests {
         #[cfg(target_os = "linux")]
         #[test]
         fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
@@ -9233,6 +9346,7 @@ mod tests {
 
         #[test]
         fn tcp_paths_use_server_side_text_dialogs() {
+            let _serial_guard = acquire_visual_test_lock();
             let temp = TestDirectory::new("tcp-path-dialogs");
             let repository = temp.0.join("repository");
             let worktree = temp.0.join("existing-worktree");
@@ -9323,6 +9437,7 @@ mod tests {
 
         #[test]
         fn context_menus_reorder_the_target_items_without_changing_focus() {
+            let _serial_guard = acquire_visual_test_lock();
             let first_root = TestDirectory::new("reorder-first");
             let second_root = TestDirectory::new("reorder-second");
             let mut cx = TestAppContext::single();
@@ -9452,6 +9567,7 @@ mod tests {
 
         #[test]
         fn new_workspace_round_trip_updates_gui_from_real_server() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, server) = connected_murmur(&mut cx);
@@ -9527,17 +9643,31 @@ mod tests {
                 })
                 .unwrap();
             let new_tab_focused = wait_until(window, |window| {
-                let focus = window.read(|app| {
-                    view.read(app)
-                        .panels
-                        .get(&(1, new_pane))
-                        .map(|panel| panel.read(app).focus_handle.clone())
+                let (terminal_ready, focus) = window.read(|app| {
+                    let murmur = view.read(app);
+                    (
+                        murmur
+                            .connection(1)
+                            .and_then(|connection| connection.terminals.get(&new_pane))
+                            .is_some_and(|terminal| !terminal.exited),
+                        murmur
+                            .panels
+                            .get(&(1, new_pane))
+                            .map(|panel| panel.read(app).focus_handle.clone()),
+                    )
                 });
-                focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+                terminal_ready
+                    && focus
+                        .is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
             });
             assert!(
                 new_tab_focused,
                 "the terminal in a newly created Tab did not receive keyboard focus"
+            );
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(
+                window.debug_bounds(terminal_selector(new_pane)).is_some(),
+                "the terminal in a newly created Tab was not painted before text input"
             );
             window.simulate_input("MURMUR_NEW_TAB_FOCUS");
             let new_tab_received_input = wait_until(window, |window| {
@@ -9729,6 +9859,7 @@ mod tests {
 
         #[test]
         fn visual_context_can_resize_murmur_window() {
+            let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (_, window, _server) = connected_murmur(&mut cx);

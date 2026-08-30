@@ -817,6 +817,7 @@ pub struct TerminalRuntime {
     input: TerminalInput,
     resize: Arc<ResizeControl>,
     child: Option<Box<dyn Child + Send + Sync>>,
+    process_shutdown: ProcessShutdownState,
     reader: Option<JoinHandle<io::Result<()>>>,
     writer: Option<JoinHandle<io::Result<()>>>,
     resizer: Option<JoinHandle<io::Result<()>>>,
@@ -1006,6 +1007,7 @@ impl TerminalRuntime {
             input,
             resize,
             child: Some(child),
+            process_shutdown: ProcessShutdownState::default(),
             reader: Some(reader_thread),
             writer: Some(writer_thread),
             resizer: Some(resize_thread),
@@ -1224,11 +1226,7 @@ impl TerminalRuntime {
             .child
             .take()
             .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?;
-        self.request_write_stop();
-        let process_result = shutdown_process_tree(self.process, Some(&mut *child));
-        self.request_reader_stop();
-        let io_result = self.finish_io();
-        let status = combine_cleanup_results(process_result, io_result, "stop terminal I/O")?;
+        let status = self.stop_process_and_io(Some(&mut *child))?;
         status.ok_or_else(|| io::Error::other("terminal child could not be reaped"))
     }
 
@@ -1237,12 +1235,43 @@ impl TerminalRuntime {
         if self.child.is_some() {
             self.shutdown().map(drop)
         } else {
-            self.request_write_stop();
-            let process_result = shutdown_process_tree(self.process, None).map(drop);
-            self.request_reader_stop();
-            let io_result = self.finish_io();
-            combine_cleanup_results(process_result, io_result, "stop terminal I/O")
+            self.stop_process_and_io(None).map(drop)
         }
+    }
+
+    fn stop_process_and_io(
+        &mut self,
+        child: Option<&mut (dyn Child + Send + Sync)>,
+    ) -> io::Result<Option<ExitStatus>> {
+        let process = self.process;
+        let requires_child_status = child.is_some();
+        let mut child = child;
+        self.request_write_stop();
+        let initial_process_result = attempt_process_tree_shutdown(
+            process,
+            &mut child,
+            requires_child_status,
+            &mut self.process_shutdown,
+        );
+        self.request_reader_stop();
+        let io_result = self.finish_io();
+        #[cfg(windows)]
+        let process_result = if initial_process_result.is_err() {
+            // Releasing ConPTY can be the final exit trigger. Reuse the first attempt's
+            // process identities so descendants remain visible after the shell exits.
+            attempt_process_tree_shutdown(
+                process,
+                &mut child,
+                requires_child_status,
+                &mut self.process_shutdown,
+            )
+        } else {
+            initial_process_result
+        };
+        #[cfg(not(windows))]
+        let process_result = initial_process_result;
+        combine_cleanup_results(process_result, io_result, "stop terminal I/O")?;
+        Ok(self.process_shutdown.status.take())
     }
 
     fn request_write_stop(&mut self) {
@@ -1875,65 +1904,69 @@ struct OwnedProcess {
     started_at: u64,
 }
 
-fn shutdown_process_tree(
+#[derive(Default)]
+struct ProcessShutdownState {
+    owned: Vec<OwnedProcess>,
+    status: Option<ExitStatus>,
+    child_error: Option<io::Error>,
+}
+
+fn attempt_process_tree_shutdown(
     process: ProcessProbe,
-    child: Option<&mut (dyn Child + Send + Sync)>,
-) -> io::Result<Option<ExitStatus>> {
-    let requires_child_status = child.is_some();
-    let mut child = child;
-    let mut status = None;
-    let mut child_error = None;
-    poll_child_exit(&mut child, &mut status, &mut child_error);
-    let mut owned = Vec::new();
-    refresh_owned_processes(process, &mut owned);
+    child: &mut Option<&mut (dyn Child + Send + Sync)>,
+    requires_child_status: bool,
+    state: &mut ProcessShutdownState,
+) -> io::Result<()> {
+    poll_child_exit(child, &mut state.status, &mut state.child_error);
+    refresh_owned_processes(process, &mut state.owned);
     if process_tree_exited(
-        &owned,
+        &state.owned,
         process.shell_pid,
-        status.is_some(),
+        state.status.is_some(),
         requires_child_status,
     ) {
-        return Ok(status);
+        return Ok(());
     }
 
     for signal in [Signal::Hangup, Signal::Term, Signal::Kill]
         .into_iter()
         .filter(|signal| sysinfo::SUPPORTED_SIGNALS.contains(signal))
     {
-        let system = refresh_owned_processes(process, &mut owned);
-        signal_processes(&system, &owned, signal);
+        let system = refresh_owned_processes(process, &mut state.owned);
+        signal_processes(&system, &state.owned, signal);
         if wait_for_process_tree(
             process,
-            &mut owned,
-            &mut child,
-            &mut status,
-            &mut child_error,
+            &mut state.owned,
+            child,
+            &mut state.status,
+            &mut state.child_error,
             requires_child_status,
             PROCESS_SHUTDOWN_GRACE,
         ) {
-            return Ok(status);
+            return Ok(());
         }
     }
 
-    if status.is_none() {
+    if state.status.is_none() {
         if let Some(child) = child.as_deref_mut()
             && let Err(error) = child.kill()
         {
-            record_process_error(&mut child_error, error);
+            record_process_error(&mut state.child_error, error);
         }
         if wait_for_process_tree(
             process,
-            &mut owned,
-            &mut child,
-            &mut status,
-            &mut child_error,
+            &mut state.owned,
+            child,
+            &mut state.status,
+            &mut state.child_error,
             requires_child_status,
             PROCESS_SHUTDOWN_GRACE,
         ) {
-            return Ok(status);
+            return Ok(());
         }
     }
 
-    let message = child_error.map_or_else(
+    let message = state.child_error.as_ref().map_or_else(
         || "terminal process tree did not exit after forced shutdown".into(),
         |error| {
             format!(
@@ -1942,6 +1975,17 @@ fn shutdown_process_tree(
         },
     );
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
+}
+
+fn shutdown_process_tree(
+    process: ProcessProbe,
+    child: Option<&mut (dyn Child + Send + Sync)>,
+) -> io::Result<Option<ExitStatus>> {
+    let requires_child_status = child.is_some();
+    let mut child = child;
+    let mut state = ProcessShutdownState::default();
+    attempt_process_tree_shutdown(process, &mut child, requires_child_status, &mut state)?;
+    Ok(state.status)
 }
 
 fn poll_child_exit(
@@ -2712,6 +2756,22 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn process_refresh_keeps_retained_identity_after_shell_disappears() {
+        let system = System::new_all();
+        let pid = Pid::from_u32(std::process::id());
+        let identity = OwnedProcess {
+            pid,
+            started_at: system.process(pid).unwrap().start_time(),
+        };
+        let mut owned = vec![identity];
+
+        refresh_owned_processes(ProcessProbe::new(None), &mut owned);
+
+        assert_eq!(owned, [identity]);
+        assert!(!process_tree_exited(&owned, None, false, false));
     }
 
     #[test]
