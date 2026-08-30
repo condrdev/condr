@@ -5427,7 +5427,8 @@ mod tests {
                 },
             );
 
-            let probe_deadline = Instant::now() + Duration::from_secs(5);
+            // Parallel Windows tests can heavily contend on ConPTY and process scans.
+            let probe_deadline = Instant::now() + Duration::from_secs(15);
             loop {
                 let state = handle.state.lock().unwrap();
                 let probed = state.terminals.get(&pane_id).and_then(TerminalRuntime::cwd);
