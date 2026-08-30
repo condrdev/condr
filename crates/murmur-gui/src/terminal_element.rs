@@ -595,12 +595,22 @@ impl Element for TerminalElement {
         let focus_handle = self.props.focus_handle.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase.bubble() && event.button == MouseButton::Left && hitbox.is_hovered(window) {
-                focus_handle.focus(window, cx);
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                view.update(cx, |view, cx| {
-                    view.select_pane(connection_key, pane_id, cx);
-                    view.begin_selection(connection_key, pane_id, position, event.click_count, cx);
+                let accepted = view.update(cx, |view, cx| {
+                    view.select_pane(connection_key, pane_id, window, cx)
                 });
+                if accepted {
+                    focus_handle.focus(window, cx);
+                    view.update(cx, |view, cx| {
+                        view.begin_selection(
+                            connection_key,
+                            pane_id,
+                            position,
+                            event.click_count,
+                            cx,
+                        );
+                    });
+                }
                 cx.stop_propagation();
             }
         });

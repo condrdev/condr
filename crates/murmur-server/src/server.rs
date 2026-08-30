@@ -1102,9 +1102,25 @@ impl RuntimeState {
         self.capture_bootstrap().materialize()
     }
 
-    fn publish_layout_change(&mut self, origin_client_id: u64, origin: &ClientWriter) -> bool {
+    fn publish_layout_change(
+        &mut self,
+        origin_client_id: u64,
+        origin: &ClientWriter,
+        request_id: u64,
+    ) -> bool {
         let event = SessionEvent::LayoutChanged;
-        self.publish_event(event, Some((origin_client_id, origin)))
+        if self.publish_event(event, Some((origin_client_id, origin))) {
+            return true;
+        }
+        queue_message(
+            origin,
+            ServerMessage::LayoutApplied {
+                server_id: self.server_id,
+                session_id: self.session_id,
+                request_id,
+                sequence: self.sequence,
+            },
+        )
     }
 
     fn publish_background(&mut self, event: SessionEvent) {
@@ -2126,29 +2142,26 @@ fn layout_authority_error(
     client_id: u64,
     server_id: ServerId,
     session_id: SessionId,
+    request_id: u64,
     stopping: bool,
 ) -> Option<ServerMessage> {
-    if stopping {
-        Some(ServerMessage::Error {
-            message: "Server is stopping".into(),
-        })
+    let reason = if stopping {
+        Some("Server is stopping")
     } else if server_id != state.server_id {
-        Some(ServerMessage::Error {
-            message: "unknown Server".into(),
-        })
+        Some("unknown Server")
     } else if session_id != state.session_id {
-        Some(ServerMessage::Error {
-            message: "unknown Session".into(),
-        })
+        Some("unknown Session")
     } else if state.active_controller != Some(client_id) {
-        Some(ServerMessage::ControlDenied {
-            server_id: state.server_id,
-            session_id,
-            reason: "acquire Session control before mutating layout".into(),
-        })
+        Some("acquire Session control before mutating layout")
     } else {
         None
-    }
+    };
+    reason.map(|reason| ServerMessage::LayoutRejected {
+        server_id: state.server_id,
+        session_id: state.session_id,
+        request_id,
+        reason: reason.into(),
+    })
 }
 
 fn plan_client_external_layout(
@@ -2156,14 +2169,24 @@ fn plan_client_external_layout(
     client_id: u64,
     server_id: ServerId,
     session_id: SessionId,
+    request_id: u64,
     stopping: bool,
     command: &LayoutCommand,
 ) -> Result<ExternalLayoutPlan, Box<ServerMessage>> {
-    if let Some(error) = layout_authority_error(state, client_id, server_id, session_id, stopping) {
+    if let Some(error) = layout_authority_error(
+        state, client_id, server_id, session_id, request_id, stopping,
+    ) {
         return Err(Box::new(error));
     }
     let plan = external_layout_plan(state, command)
-        .map_err(|message| Box::new(ServerMessage::Error { message }))?
+        .map_err(|reason| {
+            Box::new(ServerMessage::LayoutRejected {
+                server_id: state.server_id,
+                session_id: state.session_id,
+                request_id,
+                reason,
+            })
+        })?
         .expect("external Layout command has a plan");
     Ok(plan)
 }
@@ -2431,6 +2454,7 @@ fn handle_client(
             ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id,
                 command,
             } => {
                 let external = matches!(
@@ -2449,17 +2473,28 @@ fn handle_client(
                             client_id,
                             server_id,
                             session_id,
+                            request_id,
                             lifecycle.is_stopping(),
                             &command,
                         )
                     } else {
-                        Err(Box::new(ServerMessage::Error {
-                            message: "Server is stopping".into(),
+                        let state = state.lock().expect("server state lock poisoned");
+                        Err(Box::new(ServerMessage::LayoutRejected {
+                            server_id: state.server_id,
+                            session_id: state.session_id,
+                            request_id,
+                            reason: "Server is stopping".into(),
                         }))
                     };
                     match plan.and_then(|plan| {
-                        prepare_external_layout(plan)
-                            .map_err(|message| Box::new(ServerMessage::Error { message }))
+                        prepare_external_layout(plan).map_err(|reason| {
+                            Box::new(ServerMessage::LayoutRejected {
+                                server_id,
+                                session_id,
+                                request_id,
+                                reason,
+                            })
+                        })
                     }) {
                         Err(message) => queue_message(&outbound, *message),
                         Ok(mut prepared) => {
@@ -2470,6 +2505,7 @@ fn handle_client(
                                     client_id,
                                     server_id,
                                     session_id,
+                                    request_id,
                                     lifecycle.is_stopping(),
                                 ) {
                                     Err(Box::new(message))
@@ -2491,13 +2527,21 @@ fn handle_client(
                                     client_id,
                                     server_id,
                                     session_id,
+                                    request_id,
                                     lifecycle.is_stopping(),
                                 ) {
                                     Err(Box::new(message))
                                 } else {
                                     state.record_terminal_cwd_observations(observations);
                                     approve_external_layout(&mut state, &mut prepared).map_err(
-                                        |message| Box::new(ServerMessage::Error { message }),
+                                        |reason| {
+                                            Box::new(ServerMessage::LayoutRejected {
+                                                server_id: state.server_id,
+                                                session_id: state.session_id,
+                                                request_id,
+                                                reason,
+                                            })
+                                        },
                                     )
                                 }
                             });
@@ -2567,7 +2611,15 @@ fn handle_client(
                                         for client_id in clients {
                                             flush_terminal_render(&state, client_id);
                                         }
-                                        queue_message(&outbound, ServerMessage::Error { message })
+                                        queue_message(
+                                            &outbound,
+                                            ServerMessage::LayoutRejected {
+                                                server_id,
+                                                session_id,
+                                                request_id,
+                                                reason: message,
+                                            },
+                                        )
                                     }
                                     Ok(prepared) => {
                                         let mut state =
@@ -2580,7 +2632,8 @@ fn handle_client(
                                                 PreparedExternalLayout::RemoveWorktree { .. }
                                             );
                                         if let Some(message) = layout_authority_error(
-                                            &state, client_id, server_id, session_id, stopping,
+                                            &state, client_id, server_id, session_id, request_id,
+                                            stopping,
                                         ) {
                                             drop(state);
                                             let failed = queue_message(&outbound, message);
@@ -2602,12 +2655,18 @@ fn handle_client(
                                                     started_terminals
                                                         .extend(effect.started_terminals);
                                                     removed_terminals = effect.removed_terminals;
-                                                    state
-                                                        .publish_layout_change(client_id, &outbound)
+                                                    state.publish_layout_change(
+                                                        client_id, &outbound, request_id,
+                                                    )
                                                 }
-                                                Err(message) => queue_message(
+                                                Err(reason) => queue_message(
                                                     &outbound,
-                                                    ServerMessage::Error { message },
+                                                    ServerMessage::LayoutRejected {
+                                                        server_id: state.server_id,
+                                                        session_id: state.session_id,
+                                                        request_id,
+                                                        reason,
+                                                    },
                                                 ),
                                             }
                                         }
@@ -2624,6 +2683,7 @@ fn handle_client(
                             client_id,
                             server_id,
                             session_id,
+                            request_id,
                             lifecycle.is_stopping(),
                         ) {
                             Err(message)
@@ -2641,6 +2701,7 @@ fn handle_client(
                                 client_id,
                                 server_id,
                                 session_id,
+                                request_id,
                                 lifecycle.is_stopping(),
                             ) {
                                 queue_message(&outbound, message)
@@ -2650,11 +2711,18 @@ fn handle_client(
                                     Ok(effect) => {
                                         started_terminals.extend(effect.started_terminals);
                                         removed_terminals = effect.removed_terminals;
-                                        state.publish_layout_change(client_id, &outbound)
+                                        state
+                                            .publish_layout_change(client_id, &outbound, request_id)
                                     }
-                                    Err(message) => {
-                                        queue_message(&outbound, ServerMessage::Error { message })
-                                    }
+                                    Err(reason) => queue_message(
+                                        &outbound,
+                                        ServerMessage::LayoutRejected {
+                                            server_id: state.server_id,
+                                            session_id: state.session_id,
+                                            request_id,
+                                            reason,
+                                        },
+                                    ),
                                 }
                             }
                         }
@@ -3136,8 +3204,10 @@ fn queue_runtime_bootstrap(
         if session_id != state.session_id {
             return queue_message(
                 outbound,
-                ServerMessage::Error {
-                    message: "unknown Session".into(),
+                ServerMessage::SnapshotRejected {
+                    server_id: state.server_id,
+                    session_id: state.session_id,
+                    reason: "unknown Session".into(),
                 },
             );
         }
@@ -3149,8 +3219,10 @@ fn queue_runtime_bootstrap(
         if session_id != state.session_id {
             return queue_message(
                 outbound,
-                ServerMessage::Error {
-                    message: "unknown Session".into(),
+                ServerMessage::SnapshotRejected {
+                    server_id: state.server_id,
+                    session_id: state.session_id,
+                    reason: "unknown Session".into(),
                 },
             );
         }
@@ -3163,6 +3235,8 @@ fn queue_runtime_bootstrap(
         (capture, fenced)
     };
 
+    let bootstrap_server_id = capture.server_id;
+    let bootstrap_session_id = capture.session_id;
     let framed = match frame_bootstrap_messages(capture.materialize()) {
         Ok(framed) => framed,
         Err(error) => {
@@ -3174,8 +3248,10 @@ fn queue_runtime_bootstrap(
             }
             let _ = queue_message(
                 outbound,
-                ServerMessage::Error {
-                    message: format!("cannot encode Session Bootstrap: {error}"),
+                ServerMessage::SnapshotRejected {
+                    server_id: bootstrap_server_id,
+                    session_id: bootstrap_session_id,
+                    reason: format!("cannot encode Session Bootstrap: {error}"),
                 },
             );
             return true;
@@ -4938,11 +5014,12 @@ mod tests {
                     &ClientMessage::Layout {
                         server_id: first_server_id,
                         session_id,
+                        request_id: 1,
                         command,
                     },
                 )
                 .unwrap();
-                wait_for_message(&mut stream, |message| {
+                let message = wait_for_message(&mut stream, |message| {
                     matches!(
                         message,
                         ServerMessage::Event {
@@ -4951,6 +5028,10 @@ mod tests {
                         }
                     )
                 });
+                let ServerMessage::Event { sequence, .. } = message else {
+                    unreachable!("predicate only accepts LayoutChanged events");
+                };
+                assert_layout_applied(&mut stream, first_server_id, session_id, 1, sequence);
             };
             mutate(LayoutCommand::CreateWorkspace {
                 root_directory: workspace_root.clone(),
@@ -5840,8 +5921,12 @@ mod tests {
         };
         assert!(child_root.exists());
         assert!(matches!(
-            layout_authority_error(&state, 7, state.server_id, state.session_id, true),
-            Some(ServerMessage::Error { message }) if message == "Server is stopping"
+            layout_authority_error(&state, 7, state.server_id, state.session_id, 17, true),
+            Some(ServerMessage::LayoutRejected {
+                request_id: 17,
+                reason,
+                ..
+            }) if reason == "Server is stopping"
         ));
 
         cancel_prepared_external_layout(prepared).unwrap();
@@ -6037,13 +6122,14 @@ mod tests {
             &ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id: 1,
                 command: LayoutCommand::CreateWorkspace {
                     root_directory: std::env::temp_dir(),
                 },
             },
         )
         .unwrap();
-        wait_for_message(&mut first, |message| {
+        let message = wait_for_message(&mut first, |message| {
             matches!(
                 message,
                 ServerMessage::Event {
@@ -6052,6 +6138,10 @@ mod tests {
                 }
             )
         });
+        let ServerMessage::Event { sequence, .. } = message else {
+            unreachable!("predicate only accepts LayoutChanged events");
+        };
+        assert_layout_applied(&mut first, server_id, session_id, 1, sequence);
         let pane_id = handle
             .state
             .lock()
@@ -6332,6 +6422,28 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn assert_layout_applied(
+        stream: &mut EndpointStream,
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        sequence: u64,
+    ) {
+        assert!(matches!(
+            read_server(stream),
+            ServerMessage::LayoutApplied {
+                server_id: applied_server,
+                session_id: applied_session,
+                request_id: applied_request,
+                sequence: applied_sequence,
+            } if applied_server == server_id
+                && applied_session == session_id
+                && applied_request == request_id
+                && applied_sequence == sequence
+        ));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn view_text(view: &murmur_core::TerminalView) -> String {
         (0..view.size.rows)
             .map(|row| {
@@ -6540,10 +6652,58 @@ mod tests {
     }
 
     #[test]
+    fn rejected_snapshot_is_typed_and_keeps_the_connection_usable() {
+        let (handle, endpoint, thread) = start();
+        let mut stream = connect_and_bootstrap(&endpoint);
+        let (server_id, session_id) = {
+            let state = handle.state.lock().unwrap();
+            (state.server_id, state.session_id)
+        };
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::SnapshotRequest {
+                session_id: SessionId(session_id.0.wrapping_add(1)),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_server(&mut stream),
+            ServerMessage::SnapshotRejected {
+                server_id: rejected_server,
+                session_id: authoritative_session,
+                reason,
+            } if rejected_server == server_id
+                && authoritative_session == session_id
+                && reason == "unknown Session"
+        ));
+
+        murmur_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::SnapshotRequest { session_id },
+        )
+        .unwrap();
+        assert!(matches!(
+            read_server(&mut stream),
+            ServerMessage::Bootstrap(BootstrapHeader {
+                server_id: bootstrap_server,
+                session_id: bootstrap_session,
+                ..
+            }) if bootstrap_server == server_id && bootstrap_session == session_id
+        ));
+
+        handle.stop();
+        drop(stream);
+        thread.join().unwrap().unwrap();
+        let _ = endpoint.cleanup();
+    }
+
+    #[test]
     fn controller_is_exclusive_and_released_on_disconnect() {
         let (handle, endpoint, thread) = start();
         let mut first = connect_and_bootstrap(&endpoint);
         let mut second = connect_and_bootstrap(&endpoint);
+        let server_id = handle.server_id();
         let session_id = handle.state.lock().unwrap().session_id;
         murmur_core::protocol::write_message(
             &mut first,
@@ -6562,6 +6722,29 @@ mod tests {
         assert!(matches!(
             murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
             ServerMessage::ControlDenied { .. }
+        ));
+        murmur_core::protocol::write_message(
+            &mut second,
+            &ClientMessage::Layout {
+                server_id,
+                session_id,
+                request_id: 73,
+                command: LayoutCommand::CreateWorkspace {
+                    root_directory: std::env::temp_dir(),
+                },
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
+            ServerMessage::LayoutRejected {
+                server_id: rejected_server,
+                session_id: rejected_session,
+                request_id: 73,
+                reason,
+            } if rejected_server == server_id
+                && rejected_session == session_id
+                && reason == "acquire Session control before mutating layout"
         ));
         drop(first);
         thread::sleep(Duration::from_millis(20));
@@ -6602,6 +6785,7 @@ mod tests {
             &ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id: 1,
                 command: LayoutCommand::CreateWorkspace {
                     root_directory: std::env::temp_dir(),
                 },
@@ -6617,6 +6801,7 @@ mod tests {
                 event: SessionEvent::LayoutChanged,
             } if event_server == server_id && event_session == session_id
         ));
+        assert_layout_applied(&mut first, server_id, session_id, 1, 1);
         murmur_core::protocol::write_message(
             &mut first,
             &ClientMessage::ReleaseControl { session_id },
@@ -6715,12 +6900,13 @@ mod tests {
         ));
 
         let mut snapshot_sequences = Vec::new();
-        for _ in 0..2 {
+        for request_id in 1..=2 {
             murmur_core::protocol::write_message(
                 &mut controller,
                 &ClientMessage::Layout {
                     server_id,
                     session_id,
+                    request_id,
                     command: LayoutCommand::CreateWorkspace {
                         root_directory: std::env::temp_dir(),
                     },
@@ -6737,6 +6923,13 @@ mod tests {
                         ..
                     } => {
                         snapshot_sequences.push(sequence);
+                        assert_layout_applied(
+                            &mut controller,
+                            server_id,
+                            session_id,
+                            request_id,
+                            sequence,
+                        );
                         break;
                     }
                     ServerMessage::TerminalFrame(_) => {}
@@ -6832,13 +7025,14 @@ mod tests {
             &ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id: 1,
                 command: LayoutCommand::CreateWorkspace {
                     root_directory: std::env::temp_dir(),
                 },
             },
         )
         .unwrap();
-        wait_for_message(&mut controller, |message| {
+        let message = wait_for_message(&mut controller, |message| {
             matches!(
                 message,
                 ServerMessage::Event {
@@ -6847,6 +7041,10 @@ mod tests {
                 }
             )
         });
+        let ServerMessage::Event { sequence, .. } = message else {
+            unreachable!("predicate only accepts LayoutChanged events");
+        };
+        assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
         let pane_id = handle
             .state
             .lock()
@@ -6978,6 +7176,7 @@ mod tests {
             &ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id: 1,
                 command: LayoutCommand::CreateWorkspace {
                     root_directory: repository.clone(),
                 },
@@ -6991,6 +7190,8 @@ mod tests {
                 ..
             }
         ));
+        let sequence = handle.state.lock().unwrap().sequence;
+        assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
         let parent_workspace_id = handle
             .state
             .lock()
@@ -7003,6 +7204,7 @@ mod tests {
             &ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id: 2,
                 command: LayoutCommand::CreateWorktree {
                     parent_workspace_id,
                     branch: "feature/stopping".into(),
@@ -7148,13 +7350,14 @@ mod tests {
             &ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id: 1,
                 command: LayoutCommand::CreateWorkspace {
                     root_directory: repository.clone(),
                 },
             },
         )
         .unwrap();
-        wait_for_message(&mut stream, |message| {
+        let message = wait_for_message(&mut stream, |message| {
             matches!(
                 message,
                 ServerMessage::Event {
@@ -7163,6 +7366,10 @@ mod tests {
                 }
             )
         });
+        let ServerMessage::Event { sequence, .. } = message else {
+            unreachable!("predicate only accepts LayoutChanged events");
+        };
+        assert_layout_applied(&mut stream, server_id, session_id, 1, sequence);
         let (workspace_id, pane_id) = {
             let state = handle.state.lock().unwrap();
             let workspace = state.session.active_workspace().unwrap();

@@ -63,6 +63,7 @@ pub enum ClientMessage {
     Layout {
         server_id: ServerId,
         session_id: SessionId,
+        request_id: u64,
         command: LayoutCommand,
     },
     Terminal {
@@ -274,6 +275,11 @@ pub enum ServerMessage {
         session_id: SessionId,
         sequence: u64,
     },
+    SnapshotRejected {
+        server_id: ServerId,
+        session_id: SessionId,
+        reason: String,
+    },
     SubscriptionRejected {
         server_id: ServerId,
         session_id: SessionId,
@@ -304,6 +310,18 @@ pub enum ServerMessage {
         server_id: ServerId,
         session_id: SessionId,
         reason: String,
+    },
+    LayoutRejected {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        reason: String,
+    },
+    LayoutApplied {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        sequence: u64,
     },
     TerminalCopied {
         pane_id: PaneId,
@@ -710,6 +728,7 @@ mod tests {
         let message = ClientMessage::Layout {
             server_id: ServerId(4),
             session_id: SessionId(1),
+            request_id: 9,
             command: LayoutCommand::CreateWorkspace {
                 root_directory: PathBuf::from("projects/murmur"),
             },
@@ -732,6 +751,7 @@ mod tests {
         let message = ClientMessage::Layout {
             server_id: ServerId(4),
             session_id: SessionId(1),
+            request_id: 10,
             command: LayoutCommand::CreateWorktree {
                 parent_workspace_id,
                 branch: "feature/phase-five".into(),
@@ -752,6 +772,56 @@ mod tests {
             server_id: ServerId(4),
             session_id: SessionId(7),
             reason: "event cursor expired".into(),
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+        assert_eq!(PROTOCOL_VERSION, 1);
+    }
+
+    #[test]
+    fn snapshot_rejection_round_trip_keeps_protocol_version_one() {
+        let message = ServerMessage::SnapshotRejected {
+            server_id: ServerId(4),
+            session_id: SessionId(7),
+            reason: "unknown Session".into(),
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+        assert_eq!(PROTOCOL_VERSION, 1);
+    }
+
+    #[test]
+    fn layout_rejection_round_trip_keeps_request_correlation() {
+        let message = ServerMessage::LayoutRejected {
+            server_id: ServerId(4),
+            session_id: SessionId(7),
+            request_id: 11,
+            reason: "unknown Workspace".into(),
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+        assert_eq!(PROTOCOL_VERSION, 1);
+    }
+
+    #[test]
+    fn layout_applied_round_trip_keeps_request_and_sequence_correlation() {
+        let message = ServerMessage::LayoutApplied {
+            server_id: ServerId(4),
+            session_id: SessionId(7),
+            request_id: 12,
+            sequence: 31,
         };
         let mut bytes = Vec::new();
         write_message(&mut bytes, &message).unwrap();

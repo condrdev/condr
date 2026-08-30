@@ -106,23 +106,32 @@ fn local_server_helper() {
         &ClientMessage::Layout {
             server_id,
             session_id,
+            request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 root_directory: workspace_root.clone(),
             },
         },
     )
     .unwrap();
-    loop {
-        if matches!(
-            read_server(&mut first_stream),
-            ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
-                ..
-            }
-        ) {
-            break;
+    let sequence = loop {
+        if let ServerMessage::Event {
+            sequence,
+            event: SessionEvent::LayoutChanged,
+            ..
+        } = read_server(&mut first_stream)
+        {
+            break sequence;
         }
-    }
+    };
+    assert_eq!(
+        read_server(&mut first_stream),
+        ServerMessage::LayoutApplied {
+            server_id,
+            session_id,
+            request_id: 1,
+            sequence,
+        }
+    );
     let authoritative = ClientConnection::connect(&first_endpoint, "snapshot-reader").unwrap();
     let expected_snapshot = authoritative.bootstrap().snapshot.clone();
     let expected_session = Session::restore(expected_snapshot.clone()).unwrap();
@@ -194,21 +203,30 @@ fn local_server_helper() {
         &ClientMessage::Layout {
             server_id,
             session_id: restarted_session_id,
+            request_id: 2,
             command: LayoutCommand::CloseWorkspace { workspace_id },
         },
     )
     .unwrap();
-    loop {
-        if matches!(
-            read_server(&mut restarted_stream),
-            ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
-                ..
-            }
-        ) {
-            break;
+    let sequence = loop {
+        if let ServerMessage::Event {
+            sequence,
+            event: SessionEvent::LayoutChanged,
+            ..
+        } = read_server(&mut restarted_stream)
+        {
+            break sequence;
         }
-    }
+    };
+    assert_eq!(
+        read_server(&mut restarted_stream),
+        ServerMessage::LayoutApplied {
+            server_id,
+            session_id: restarted_session_id,
+            request_id: 2,
+            sequence,
+        }
+    );
     drop(restarted_stream);
 
     stop_server(&restarted_endpoint).unwrap();

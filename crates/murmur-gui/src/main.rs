@@ -26,8 +26,8 @@ use gpui_component::sidebar::{
     SidebarMenuItem,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Root, Selectable as _, Sizable as _,
-    StyledExt as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, Root, Selectable as _,
+    Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_component_assets::Assets;
 use murmur_core::protocol::{
@@ -90,6 +90,8 @@ const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
 const CONTROL_RETRY_DELAY: Duration = Duration::from_millis(50);
 const MAX_CONTROL_RETRY_ATTEMPTS: u8 = 20;
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
+const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
+const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
 
 fn default_worktree_branch(workspace_name: &str) -> String {
     let slug = workspace_name
@@ -442,6 +444,7 @@ fn merge_terminal_deltas(
 #[derive(Default)]
 struct IncomingEffect {
     rebuild: bool,
+    rebuild_active: bool,
     notify: bool,
 }
 
@@ -671,12 +674,15 @@ impl ClientIo {
                             let next =
                                 this.handle_incoming(key, connection_generation, incoming, cx);
                             effect.rebuild |= next.rebuild;
+                            effect.rebuild_active |= next.rebuild_active;
                             effect.notify |= next.notify;
                         }
-                        if effect.rebuild && key == this.active_connection {
+                        if effect.rebuild_active
+                            || (effect.rebuild && key == this.active_connection)
+                        {
                             this.rebuild_dock(window, cx);
                         }
-                        if effect.notify || effect.rebuild {
+                        if effect.notify || effect.rebuild || effect.rebuild_active {
                             cx.notify();
                         }
                     })
@@ -732,12 +738,54 @@ struct ServerConnection {
     control_retry_scheduled: bool,
     bootstrap_resync_session_id: Option<SessionId>,
     error: Option<String>,
+    next_layout_request_id: u64,
 }
 
 struct BootstrapApplication {
     rebuild: bool,
     resubscribe: bool,
     reacquire_control: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct DockSurfaceKey {
+    connection_key: ConnectionKey,
+    tab_id: TabId,
+}
+
+struct DockSurface {
+    area: Entity<DockArea>,
+    _subscription: Subscription,
+    pane_ids: HashSet<PaneId>,
+    projection: Option<PaneLayout>,
+    programmatic_layout_events: usize,
+    pending_projection_request: Option<u64>,
+    pending_projection_applied_sequence: Option<u64>,
+    #[cfg(feature = "test-support")]
+    layout_size: Option<Size<Pixels>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingWorkspaceSelection {
+    connection_key: ConnectionKey,
+    workspace_id: WorkspaceId,
+    pane_id: Option<PaneId>,
+    connect_generation: u64,
+    server_id: ServerId,
+    runtime_epoch: RuntimeEpoch,
+    session_id: SessionId,
+    request_id: u64,
+    applied_sequence: Option<u64>,
+}
+
+impl PendingWorkspaceSelection {
+    fn belongs_to(self, connection: &ServerConnection) -> bool {
+        self.connection_key == connection.key
+            && self.connect_generation == connection.connect_generation
+            && Some(self.server_id) == connection.server_id
+            && Some(self.runtime_epoch) == connection.runtime_epoch
+            && Some(self.session_id) == connection.session_id
+    }
 }
 
 impl ServerConnection {
@@ -766,6 +814,7 @@ impl ServerConnection {
             control_retry_scheduled: false,
             bootstrap_resync_session_id: None,
             error: None,
+            next_layout_request_id: 1,
         }
     }
 
@@ -791,6 +840,7 @@ impl ServerConnection {
             self.subscription_pending = false;
             self.control_retry_attempts = 0;
             self.control_retry_scheduled = false;
+            self.agent_trackers.clear();
         }
         self.server_id = Some(bootstrap.server_id);
         self.runtime_epoch = Some(bootstrap.runtime_epoch);
@@ -887,6 +937,22 @@ impl ServerConnection {
         self.bootstrap_resync_session_id = Some(session_id);
         self.send(ClientMessage::SnapshotRequest { session_id });
         true
+    }
+
+    fn recover_rejected_snapshot(
+        &mut self,
+        server_id: ServerId,
+        authoritative_session_id: SessionId,
+        reason: String,
+    ) -> bool {
+        if self.server_id != Some(server_id) || self.bootstrap_resync_session_id.is_none() {
+            return false;
+        }
+        self.bootstrap_resync_session_id = None;
+        self.subscribed = false;
+        self.subscription_pending = false;
+        self.error = Some(reason);
+        self.request_snapshot_for(authoritative_session_id)
     }
 
     fn recover_rejected_subscription(
@@ -1100,8 +1166,12 @@ impl Render for TerminalPanel {
             .key_context("Murmur")
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                focus.focus(window, cx);
-                let _ = click_owner.update(cx, |app, cx| app.select_pane(key, pane_id, cx));
+                let accepted = click_owner
+                    .update(cx, |app, cx| app.select_pane(key, pane_id, window, cx))
+                    .unwrap_or(false);
+                if accepted {
+                    focus.focus(window, cx);
+                }
             })
             .on_mouse_down(MouseButton::Right, move |_, _, cx| {
                 let _ = right_click_owner.update(cx, |app, cx| {
@@ -1170,13 +1240,15 @@ pub(crate) struct Murmur {
     next_connection_key: ConnectionKey,
     connect_results_tx: async_channel::Sender<ConnectionResult>,
     _connect_results_task: Task<()>,
-    dock_area: Entity<DockArea>,
-    _dock_subscription: Subscription,
-    rebuilding_dock: bool,
+    dock_surfaces: HashMap<DockSurfaceKey, DockSurface>,
+    active_dock_surface: Option<DockSurfaceKey>,
     #[cfg(feature = "test-support")]
     dock_rebuild_count: usize,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     target_pane: Option<(ConnectionKey, PaneId)>,
+    pending_workspace_selections: HashMap<ConnectionKey, PendingWorkspaceSelection>,
+    pending_presentation_request: Option<(ConnectionKey, u64)>,
+    workspace_size: Size<Pixels>,
     focus_handle: FocusHandle,
     terminal_selection: Option<LocalTerminalSelection>,
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
@@ -1192,19 +1264,6 @@ impl Murmur {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let dock_area = cx.new(|cx| {
-            DockArea::new("murmur-workspace", None, window, cx)
-                .with_renderer(Rc::new(MurmurDockRenderer))
-        });
-        let dock_subscription = cx.subscribe_in(
-            &dock_area,
-            window,
-            |this, dock, event: &DockEvent, _, cx| {
-                if matches!(event, DockEvent::LayoutChanged) {
-                    this.on_dock_layout_changed(dock, cx);
-                }
-            },
-        );
         let (connect_results_tx, connect_results_rx) =
             async_channel::bounded(CONNECTION_RESULT_BUFFER_CAPACITY);
         let mut connection = ServerConnection::new(1, "Local".into(), endpoint);
@@ -1219,13 +1278,18 @@ impl Murmur {
             next_connection_key: 2,
             connect_results_tx,
             _connect_results_task: Task::ready(()),
-            dock_area,
-            _dock_subscription: dock_subscription,
-            rebuilding_dock: false,
+            dock_surfaces: HashMap::new(),
+            active_dock_surface: None,
             #[cfg(feature = "test-support")]
             dock_rebuild_count: 0,
             panels: HashMap::new(),
             target_pane: None,
+            pending_workspace_selections: HashMap::new(),
+            pending_presentation_request: None,
+            workspace_size: size(
+                (window.viewport_size().width - INITIAL_SIDEBAR_WIDTH).max(px(0.)),
+                window.viewport_size().height,
+            ),
             focus_handle: cx.focus_handle(),
             terminal_selection: None,
             pending_sizes: HashMap::new(),
@@ -1262,7 +1326,7 @@ impl Murmur {
         result: Result<ClientConnection, String>,
         window: &Window,
         cx: &Context<Self>,
-    ) -> Result<(), String> {
+    ) -> Result<BootstrapApplication, String> {
         let client = result?;
         let bootstrap = client.bootstrap().clone();
         let io = ClientIo::start(
@@ -1275,7 +1339,7 @@ impl Murmur {
             cx,
         )
         .map_err(|error| error.to_string())?;
-        _ = connection.apply_bootstrap(bootstrap);
+        let application = connection.apply_bootstrap(bootstrap);
         connection.io = Some(io);
         connection.controlling = false;
         connection.subscribed = false;
@@ -1283,7 +1347,7 @@ impl Murmur {
         connection.bootstrap_resync_session_id = None;
         connection.control_retry_attempts = 0;
         connection.control_retry_scheduled = false;
-        Ok(())
+        Ok(application)
     }
 
     fn connection(&self, key: ConnectionKey) -> Option<&ServerConnection> {
@@ -1303,7 +1367,158 @@ impl Murmur {
     }
 
     fn active_session(&self) -> Option<Session> {
-        Session::restore(self.active_connection()?.snapshot.clone()).ok()
+        let connection = self.active_connection()?;
+        let mut session = Session::restore(connection.snapshot.clone()).ok()?;
+        if let Some(surface) = self
+            .active_dock_surface
+            .filter(|surface| surface.connection_key == connection.key)
+        {
+            session.activate_tab(surface.tab_id);
+        }
+        Some(session)
+    }
+
+    fn pending_workspace_selection_for(
+        &self,
+        key: ConnectionKey,
+    ) -> Option<PendingWorkspaceSelection> {
+        let pending = *self.pending_workspace_selections.get(&key)?;
+        let connection = self.connection(key)?;
+        pending.belongs_to(connection).then_some(pending)
+    }
+
+    fn has_pending_presentation(&self) -> bool {
+        self.pending_presentation_request
+            .and_then(|(key, request_id)| {
+                self.pending_workspace_selection_for(key)
+                    .filter(|pending| pending.request_id == request_id)
+            })
+            .is_some()
+    }
+
+    fn should_hold_active_surface(&self) -> bool {
+        self.pending_workspace_selection_for(self.active_connection)
+            .is_some()
+            || self.has_pending_presentation()
+    }
+
+    fn workspace_id_for_surface(session: &Session, surface: DockSurfaceKey) -> Option<WorkspaceId> {
+        session
+            .workspaces()
+            .iter()
+            .find(|workspace| {
+                workspace
+                    .tabs()
+                    .iter()
+                    .any(|tab| tab.id() == surface.tab_id)
+            })
+            .map(|workspace| workspace.id())
+    }
+
+    fn presented_workspace_id(&self, key: ConnectionKey, session: &Session) -> Option<WorkspaceId> {
+        if self.active_connection == key
+            && let Some(surface) = self
+                .active_dock_surface
+                .filter(|surface| surface.connection_key == key)
+            && let Some(workspace_id) = Self::workspace_id_for_surface(session, surface)
+        {
+            return Some(workspace_id);
+        }
+        session.active_workspace_id()
+    }
+
+    fn presented_tab_id(
+        &self,
+        key: ConnectionKey,
+        session: &Session,
+        workspace_id: WorkspaceId,
+    ) -> Option<TabId> {
+        let workspace = session.workspace(workspace_id)?;
+        if self.active_connection == key
+            && let Some(surface) = self
+                .active_dock_surface
+                .filter(|surface| surface.connection_key == key)
+            && workspace
+                .tabs()
+                .iter()
+                .any(|tab| tab.id() == surface.tab_id)
+        {
+            return Some(surface.tab_id);
+        }
+        Some(workspace.active_tab().id())
+    }
+
+    fn clear_pending_workspace_selection_for(&mut self, key: ConnectionKey) -> bool {
+        let removed = self.pending_workspace_selections.remove(&key);
+        if removed.is_some_and(|pending| {
+            self.pending_presentation_request == Some((key, pending.request_id))
+        }) {
+            self.pending_presentation_request = None;
+        }
+        removed.is_some()
+    }
+
+    fn cancel_pending_presentation(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let was_holding = self.should_hold_active_surface();
+        let cancelled = self.pending_presentation_request.take().is_some();
+        if cancelled && was_holding && !self.should_hold_active_surface() {
+            self.refresh_target_pane(self.active_connection);
+            self.rebuild_dock(window, cx);
+        }
+        if cancelled {
+            cx.notify();
+        }
+        cancelled
+    }
+
+    fn has_pending_projection_for(&self, key: ConnectionKey) -> bool {
+        self.dock_surfaces.iter().any(|(surface_key, surface)| {
+            surface_key.connection_key == key && surface.pending_projection_request.is_some()
+        })
+    }
+
+    fn clear_pending_projections_for(&mut self, key: ConnectionKey) -> bool {
+        let active_surface = self.active_dock_surface;
+        let mut active_projection_cleared = false;
+        for (surface_key, surface) in &mut self.dock_surfaces {
+            if surface_key.connection_key == key && surface.pending_projection_request.is_some() {
+                surface.pending_projection_request = None;
+                surface.pending_projection_applied_sequence = None;
+                surface.projection = None;
+                active_projection_cleared |= active_surface == Some(*surface_key);
+            }
+        }
+        active_projection_cleared
+    }
+
+    fn clear_connection_gui_state(&mut self, key: ConnectionKey) {
+        self.dock_surfaces
+            .retain(|surface, _| surface.connection_key != key);
+        if self
+            .active_dock_surface
+            .is_some_and(|surface| surface.connection_key == key)
+        {
+            self.active_dock_surface = None;
+        }
+        self.panels
+            .retain(|(connection_key, _), _| *connection_key != key);
+        self.pending_sizes
+            .retain(|(connection_key, _), _| *connection_key != key);
+        self.terminal_geometry
+            .retain(|(connection_key, _), _| *connection_key != key);
+        if self
+            .terminal_selection
+            .is_some_and(|selection| selection.connection_key == key)
+        {
+            self.terminal_selection = None;
+        }
+        if self
+            .target_pane
+            .is_some_and(|(connection_key, _)| connection_key == key)
+        {
+            self.target_pane = None;
+            self.marked_text = None;
+        }
     }
 
     fn terminal(
@@ -1367,12 +1582,17 @@ impl Murmur {
         .detach();
     }
 
-    fn start_connect(&mut self, key: ConnectionKey) {
+    fn start_connect(&mut self, key: ConnectionKey) -> bool {
+        let was_holding = self.should_hold_active_surface();
+        self.clear_pending_workspace_selection_for(key);
+        let active_projection_cleared = self.clear_pending_projections_for(key);
+        let needs_active_rebuild =
+            active_projection_cleared || (was_holding && !self.should_hold_active_surface());
         let Some(connection) = self.connection_mut(key) else {
-            return;
+            return needs_active_rebuild;
         };
         if connection.status == ConnectionStatus::Connecting {
-            return;
+            return needs_active_rebuild;
         }
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
@@ -1405,11 +1625,14 @@ impl Murmur {
                 result,
             });
         });
+        needs_active_rebuild
     }
 
-    fn disconnect_server(&mut self, key: ConnectionKey) {
+    fn disconnect_server(&mut self, key: ConnectionKey) -> bool {
+        let was_holding = self.should_hold_active_surface();
+        let active_projection_cleared = self.clear_pending_projections_for(key);
         let Some(connection) = self.connection_mut(key) else {
-            return;
+            return active_projection_cleared;
         };
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
@@ -1423,11 +1646,13 @@ impl Murmur {
         connection.control_retry_attempts = 0;
         connection.control_retry_scheduled = false;
         connection.error = None;
+        self.clear_pending_workspace_selection_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+        active_projection_cleared || (was_holding && !self.should_hold_active_surface())
     }
 
     fn remove_server(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
-        self.disconnect_server(key);
+        let released_presentation = self.disconnect_server(key);
         let Some(index) = self
             .connections
             .iter()
@@ -1437,24 +1662,17 @@ impl Murmur {
         };
         let was_active = self.active_connection == key;
         self.connections.remove(index);
-        self.panels
-            .retain(|(connection_key, _), _| *connection_key != key);
-        self.pending_sizes
-            .retain(|(connection_key, _), _| *connection_key != key);
-        self.terminal_geometry
-            .retain(|(connection_key, _), _| *connection_key != key);
-        if self
-            .terminal_selection
-            .is_some_and(|selection| selection.connection_key == key)
-        {
-            self.terminal_selection = None;
-        }
+        self.clear_connection_gui_state(key);
+        self.clear_pending_workspace_selection_for(key);
         if was_active {
             self.active_connection = self
                 .connections
                 .get(index)
                 .or_else(|| self.connections.last())
                 .map_or(0, |connection| connection.key);
+            self.refresh_target_pane(self.active_connection);
+            self.rebuild_dock(window, cx);
+        } else if released_presentation {
             self.refresh_target_pane(self.active_connection);
             self.rebuild_dock(window, cx);
         }
@@ -1479,24 +1697,34 @@ impl Murmur {
         }) {
             return;
         }
-        let installed = if let Some(connection) = self.connection_mut(key) {
+        let application = if let Some(connection) = self.connection_mut(key) {
             connection.endpoint = endpoint;
             match Self::install_connection(connection, result, window, cx) {
-                Ok(()) => true,
+                Ok(application) => Some(application),
                 Err(error) => {
                     connection.status = ConnectionStatus::Disconnected;
                     connection.error = Some(error);
-                    false
+                    None
                 }
             }
         } else {
-            false
+            None
         };
-        if installed {
+        if let Some(application) = application {
+            let presentation_before = self.pending_presentation_request;
+            _ = self.clear_pending_projections_for(key);
             clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+            if application.reacquire_control {
+                self.clear_connection_gui_state(key);
+                self.clear_pending_workspace_selection_for(key);
+            } else {
+                self.prune_dock_cache(key);
+            }
             self.acquire_and_subscribe(key);
             self.refresh_target_pane(key);
-            if key == self.active_connection {
+            let released_presentation = presentation_before.is_some()
+                && self.pending_presentation_request != presentation_before;
+            if key == self.active_connection || released_presentation {
                 self.rebuild_dock(window, cx);
             }
         }
@@ -1521,16 +1749,88 @@ impl Murmur {
         }
         let message = match incoming {
             Incoming::Bootstrap(bootstrap) => {
+                let presentation_before = self.pending_presentation_request;
                 let application = self.connections[index].apply_bootstrap(bootstrap);
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+                if application.reacquire_control {
+                    self.clear_connection_gui_state(key);
+                    self.clear_pending_workspace_selection_for(key);
+                } else {
+                    self.prune_dock_cache(key);
+                }
+
+                let bootstrap_sequence = self.connections[index].sequence;
+                let active_surface = self.active_dock_surface;
+                let mut active_projection_resolved = false;
+                for (surface_key, surface) in &mut self.dock_surfaces {
+                    if surface_key.connection_key == key
+                        && surface
+                            .pending_projection_applied_sequence
+                            .is_some_and(|sequence| sequence <= bootstrap_sequence)
+                    {
+                        surface.pending_projection_request = None;
+                        surface.pending_projection_applied_sequence = None;
+                        active_projection_resolved |= active_surface == Some(*surface_key);
+                    }
+                }
+                let session = Session::restore(self.connections[index].snapshot.clone()).ok();
+                let mut pending_workspace_ready = false;
+                let mut pending_workspace_failed = false;
+                if let (Some(pending), Some(session)) =
+                    (self.pending_workspace_selection_for(key), session.as_ref())
+                    && pending
+                        .applied_sequence
+                        .is_some_and(|sequence| sequence <= bootstrap_sequence)
+                {
+                    self.pending_workspace_selections.remove(&key);
+                    let should_present =
+                        self.pending_presentation_request == Some((key, pending.request_id));
+                    if should_present {
+                        self.pending_presentation_request = None;
+                    }
+                    let target_is_active = session.active_workspace_id()
+                        == Some(pending.workspace_id)
+                        && pending.pane_id.is_none_or(|pane_id| {
+                            session.active_workspace().is_some_and(|workspace| {
+                                workspace.active_tab().focused_pane().id() == pane_id
+                            })
+                        });
+                    if target_is_active {
+                        if should_present {
+                            self.active_connection = key;
+                        }
+                        pending_workspace_ready = self.active_connection == key;
+                    } else {
+                        pending_workspace_failed = self.active_connection == key;
+                    }
+                }
+                let preserve_visible_workspace = self.active_connection == key
+                    && self.should_hold_active_surface()
+                    && self
+                        .active_dock_surface
+                        .is_some_and(|surface| surface.connection_key == key);
+                let target_before_refresh = self.target_pane;
                 if application.reacquire_control {
                     self.acquire_and_subscribe(key);
                 } else if application.resubscribe {
                     self.connections[index].subscribe();
                 }
-                self.refresh_target_pane(key);
+                if !preserve_visible_workspace {
+                    self.refresh_target_pane(key);
+                }
+                let target_changed =
+                    self.active_connection == key && self.target_pane != target_before_refresh;
+                let released_presentation = presentation_before.is_some()
+                    && self.pending_presentation_request != presentation_before;
                 return IncomingEffect {
-                    rebuild: application.rebuild,
+                    rebuild: !preserve_visible_workspace
+                        && (application.rebuild
+                            || application.reacquire_control
+                            || pending_workspace_ready
+                            || pending_workspace_failed
+                            || active_projection_resolved
+                            || target_changed),
+                    rebuild_active: released_presentation && self.active_connection != key,
                     notify: true,
                 };
             }
@@ -1540,6 +1840,7 @@ impl Murmur {
                 return IncomingEffect {
                     rebuild: false,
                     notify,
+                    ..IncomingEffect::default()
                 };
             }
             Incoming::VisualReady(_) => return IncomingEffect::default(),
@@ -1554,10 +1855,17 @@ impl Murmur {
                 connection.control_retry_scheduled = false;
                 connection.error = Some(format!("Server connection closed: {error}"));
                 connection.io = None;
+                let active_projection_cleared = self.clear_pending_projections_for(key);
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+                let released_presentation = self
+                    .pending_presentation_request
+                    .is_some_and(|(pending_key, _)| pending_key == key);
+                let pending_cleared = self.clear_pending_workspace_selection_for(key);
                 return IncomingEffect {
+                    rebuild: self.active_connection == key
+                        && (pending_cleared || active_projection_cleared),
+                    rebuild_active: released_presentation,
                     notify: true,
-                    ..IncomingEffect::default()
                 };
             }
         };
@@ -1570,6 +1878,19 @@ impl Murmur {
                 IncomingEffect {
                     rebuild: false,
                     notify,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::SnapshotRejected {
+                server_id,
+                session_id,
+                reason,
+            } => {
+                let notify = self.connections[index]
+                    .recover_rejected_snapshot(server_id, session_id, reason);
+                IncomingEffect {
+                    notify,
+                    ..IncomingEffect::default()
                 }
             }
             ServerMessage::Event {
@@ -1592,6 +1913,7 @@ impl Murmur {
                         return IncomingEffect {
                             rebuild: false,
                             notify: true,
+                            ..IncomingEffect::default()
                         };
                     }
                     return IncomingEffect::default();
@@ -1641,6 +1963,7 @@ impl Murmur {
                 IncomingEffect {
                     rebuild: false,
                     notify,
+                    ..IncomingEffect::default()
                 }
             }
             ServerMessage::TerminalFrame(batch) => {
@@ -1660,6 +1983,7 @@ impl Murmur {
                         return IncomingEffect {
                             rebuild: false,
                             notify,
+                            ..IncomingEffect::default()
                         };
                     }
                 };
@@ -1675,9 +1999,20 @@ impl Murmur {
                         self.pending_sizes.remove(&pending_key);
                     }
                 }
+                let active_surface = self
+                    .active_dock_surface
+                    .filter(|surface_key| surface_key.connection_key == key)
+                    .and_then(|surface_key| self.dock_surfaces.get(&surface_key));
+                let notify = self.active_connection == key
+                    && active_surface.is_none_or(|surface| {
+                        pane_ids
+                            .iter()
+                            .any(|pane_id| surface.pane_ids.contains(pane_id))
+                    });
                 IncomingEffect {
                     rebuild: false,
-                    notify: !pane_ids.is_empty(),
+                    notify,
+                    ..IncomingEffect::default()
                 }
             }
             ServerMessage::ControlGranted {
@@ -1751,6 +2086,74 @@ impl Murmur {
                     ..IncomingEffect::default()
                 }
             }
+            ServerMessage::LayoutApplied {
+                server_id,
+                session_id,
+                request_id,
+                sequence,
+            } => {
+                if self.connections[index].server_id != Some(server_id)
+                    || self.connections[index].session_id != Some(session_id)
+                {
+                    return IncomingEffect::default();
+                }
+                if let Some(mut pending) = self.pending_workspace_selection_for(key)
+                    && pending.request_id == request_id
+                {
+                    pending.applied_sequence = Some(sequence);
+                    self.pending_workspace_selections.insert(key, pending);
+                }
+                for (surface_key, surface) in &mut self.dock_surfaces {
+                    if surface_key.connection_key == key
+                        && surface.pending_projection_request == Some(request_id)
+                    {
+                        surface.pending_projection_applied_sequence = Some(sequence);
+                    }
+                }
+                IncomingEffect::default()
+            }
+            ServerMessage::LayoutRejected {
+                server_id,
+                session_id,
+                request_id,
+                reason,
+            } => {
+                if self.connections[index].server_id != Some(server_id)
+                    || self.connections[index].session_id != Some(session_id)
+                {
+                    return IncomingEffect::default();
+                }
+                self.connections[index].error = Some(reason);
+                let workspace_rejected = self
+                    .pending_workspace_selection_for(key)
+                    .is_some_and(|pending| pending.request_id == request_id);
+                let presentation_rejected =
+                    self.pending_presentation_request == Some((key, request_id));
+                if workspace_rejected {
+                    self.pending_workspace_selections.remove(&key);
+                    if presentation_rejected {
+                        self.pending_presentation_request = None;
+                    }
+                }
+                let mut active_projection_rejected = false;
+                for (surface_key, surface) in &mut self.dock_surfaces {
+                    if surface_key.connection_key == key
+                        && surface.pending_projection_request == Some(request_id)
+                    {
+                        surface.pending_projection_request = None;
+                        surface.pending_projection_applied_sequence = None;
+                        surface.projection = None;
+                        active_projection_rejected |=
+                            self.active_dock_surface == Some(*surface_key);
+                    }
+                }
+                IncomingEffect {
+                    rebuild: self.active_connection == key
+                        && (workspace_rejected || active_projection_rejected),
+                    rebuild_active: presentation_rejected,
+                    notify: true,
+                }
+            }
             ServerMessage::Error { message } => {
                 self.connections[index].error = Some(message);
                 IncomingEffect {
@@ -1775,10 +2178,17 @@ impl Murmur {
                 connection.control_retry_scheduled = false;
                 connection.error = Some("murmur-server stopped".into());
                 connection.io = None;
+                let active_projection_cleared = self.clear_pending_projections_for(key);
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+                let released_presentation = self
+                    .pending_presentation_request
+                    .is_some_and(|(pending_key, _)| pending_key == key);
+                let pending_cleared = self.clear_pending_workspace_selection_for(key);
                 IncomingEffect {
+                    rebuild: self.active_connection == key
+                        && (pending_cleared || active_projection_cleared),
+                    rebuild_active: released_presentation,
                     notify: true,
-                    ..IncomingEffect::default()
                 }
             }
             ServerMessage::Subscribed {
@@ -1821,6 +2231,52 @@ impl Murmur {
         }
     }
 
+    fn prune_dock_cache(&mut self, key: ConnectionKey) {
+        let Some(session) = self
+            .connection(key)
+            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
+        else {
+            return;
+        };
+        let tab_ids = session
+            .workspaces()
+            .iter()
+            .flat_map(|workspace| workspace.tabs())
+            .map(|tab| tab.id())
+            .collect::<HashSet<_>>();
+        let pane_ids = session
+            .workspaces()
+            .iter()
+            .flat_map(|workspace| workspace.tabs())
+            .flat_map(|tab| tab.panes())
+            .map(|pane| pane.id())
+            .collect::<HashSet<_>>();
+
+        self.dock_surfaces.retain(|surface, _| {
+            surface.connection_key != key || tab_ids.contains(&surface.tab_id)
+        });
+        self.panels.retain(|(connection_key, pane_id), _| {
+            *connection_key != key || pane_ids.contains(pane_id)
+        });
+        self.pending_sizes.retain(|(connection_key, pane_id), _| {
+            *connection_key != key || pane_ids.contains(pane_id)
+        });
+        self.terminal_geometry
+            .retain(|(connection_key, pane_id), _| {
+                *connection_key != key || pane_ids.contains(pane_id)
+            });
+        if self.active_dock_surface.is_some_and(|surface| {
+            surface.connection_key == key && !tab_ids.contains(&surface.tab_id)
+        }) {
+            self.active_dock_surface = None;
+        }
+        if self.terminal_selection.is_some_and(|selection| {
+            selection.connection_key == key && !pane_ids.contains(&selection.pane_id)
+        }) {
+            self.terminal_selection = None;
+        }
+    }
+
     fn mark_agent_seen(&mut self, key: ConnectionKey, pane_id: PaneId) {
         if let Some(tracker) = self
             .connection_mut(key)
@@ -1837,32 +2293,225 @@ impl Murmur {
     }
 
     fn select_server(&mut self, key: ConnectionKey, window: &mut Window, cx: &mut Context<Self>) {
-        if self.connection(key).is_none() {
+        let Some(session) = self
+            .connection(key)
+            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
+        else {
+            return;
+        };
+        if self.pending_workspace_selection_for(key).is_some() {
+            let workspace_id = self
+                .active_dock_surface
+                .filter(|surface| surface.connection_key == key)
+                .and_then(|surface| Self::workspace_id_for_surface(&session, surface))
+                .or_else(|| session.active_workspace_id());
+            if let Some(workspace_id) = workspace_id {
+                self.select_workspace(key, workspace_id, window, cx);
+                return;
+            }
+        }
+        if self.active_connection == key {
+            self.cancel_pending_presentation(window, cx);
             return;
         }
+        self.pending_presentation_request = None;
         self.active_connection = key;
         self.refresh_target_pane(key);
         self.rebuild_dock(window, cx);
         cx.notify();
     }
 
-    fn select_workspace(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
-        self.active_connection = key;
-        self.send_layout_to(key, LayoutCommand::ActivateWorkspace { workspace_id });
+    fn select_workspace(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active_surface = self.active_dock_surface;
+        let Some((
+            active_workspace_id,
+            displayed_workspace_id,
+            workspace_exists,
+            can_mutate,
+            mut pending,
+        )) = self.connection(key).and_then(|connection| {
+            let session = Session::restore(connection.snapshot.clone()).ok()?;
+            let (Some(server_id), Some(runtime_epoch), Some(session_id)) = (
+                connection.server_id,
+                connection.runtime_epoch,
+                connection.session_id,
+            ) else {
+                return None;
+            };
+            Some((
+                session.active_workspace_id(),
+                active_surface
+                    .filter(|surface| surface.connection_key == key)
+                    .and_then(|surface| Self::workspace_id_for_surface(&session, surface)),
+                session.workspace(workspace_id).is_some(),
+                connection.can_mutate(),
+                PendingWorkspaceSelection {
+                    connection_key: key,
+                    workspace_id,
+                    pane_id: None,
+                    connect_generation: connection.connect_generation,
+                    server_id,
+                    runtime_epoch,
+                    session_id,
+                    request_id: 0,
+                    applied_sequence: None,
+                },
+            ))
+        })
+        else {
+            return;
+        };
+        if !workspace_exists || !can_mutate {
+            return;
+        }
+        if self
+            .pending_workspace_selection_for(key)
+            .is_some_and(|existing| {
+                existing.workspace_id == workspace_id && existing.pane_id.is_none()
+            })
+        {
+            let existing = self.pending_workspace_selection_for(key).unwrap();
+            self.pending_presentation_request = Some((key, existing.request_id));
+            return;
+        }
+        if self.active_connection == key
+            && displayed_workspace_id == Some(workspace_id)
+            && active_workspace_id == Some(workspace_id)
+            && self.pending_workspace_selection_for(key).is_none()
+        {
+            self.cancel_pending_presentation(window, cx);
+            return;
+        }
+        if active_workspace_id == Some(workspace_id)
+            && self.pending_workspace_selection_for(key).is_none()
+        {
+            self.pending_presentation_request = None;
+            self.active_connection = key;
+            self.refresh_target_pane(key);
+            self.rebuild_dock(window, cx);
+            cx.notify();
+            return;
+        }
+
+        let Some(request_id) =
+            self.send_layout_to(key, LayoutCommand::ActivateWorkspace { workspace_id })
+        else {
+            return;
+        };
+        pending.request_id = request_id;
+        self.pending_workspace_selections.insert(key, pending);
+        self.pending_presentation_request = Some((key, request_id));
     }
 
     pub(crate) fn select_pane(
         &mut self,
         key: ConnectionKey,
         pane_id: PaneId,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        if self.set_target_pane(key, pane_id, cx).is_none()
-            || self.connection_focused_pane(key) == Some(pane_id)
-        {
-            return;
+    ) -> bool {
+        let Some((workspace_id, tab_id, authoritative_target, can_mutate, mut pending)) =
+            self.connection(key).and_then(|connection| {
+                let session = Session::restore(connection.snapshot.clone()).ok()?;
+                let (workspace_id, tab_id) = session.workspaces().iter().find_map(|workspace| {
+                    workspace.tabs().iter().find_map(|tab| {
+                        tab.panes()
+                            .iter()
+                            .any(|pane| pane.id() == pane_id)
+                            .then_some((workspace.id(), tab.id()))
+                    })
+                })?;
+                let authoritative_target = session.active_workspace().is_some_and(|workspace| {
+                    workspace.id() == workspace_id
+                        && workspace.active_tab().id() == tab_id
+                        && workspace.active_tab().focused_pane().id() == pane_id
+                });
+                let (Some(server_id), Some(runtime_epoch), Some(session_id)) = (
+                    connection.server_id,
+                    connection.runtime_epoch,
+                    connection.session_id,
+                ) else {
+                    return None;
+                };
+                Some((
+                    workspace_id,
+                    tab_id,
+                    authoritative_target,
+                    connection.can_mutate(),
+                    PendingWorkspaceSelection {
+                        connection_key: key,
+                        workspace_id,
+                        pane_id: Some(pane_id),
+                        connect_generation: connection.connect_generation,
+                        server_id,
+                        runtime_epoch,
+                        session_id,
+                        request_id: 0,
+                        applied_sequence: None,
+                    },
+                ))
+            })
+        else {
+            return false;
+        };
+        let target_surface = DockSurfaceKey {
+            connection_key: key,
+            tab_id,
+        };
+        let target_is_displayed =
+            self.active_connection == key && self.active_dock_surface == Some(target_surface);
+        if !can_mutate {
+            if target_is_displayed {
+                self.target_pane = Some((key, pane_id));
+                self.mark_agent_seen(key, pane_id);
+                self.focus_pane_panel(target_surface, pane_id, window, cx);
+                cx.notify();
+                return true;
+            }
+            return false;
         }
-        self.send_layout_to(key, LayoutCommand::FocusPane { pane_id });
+        if self
+            .pending_workspace_selection_for(key)
+            .is_some_and(|selection| {
+                selection.workspace_id == workspace_id && selection.pane_id == Some(pane_id)
+            })
+        {
+            let selection = self.pending_workspace_selection_for(key).unwrap();
+            self.pending_presentation_request = Some((key, selection.request_id));
+            return true;
+        }
+
+        let supersedes_same_connection = self.pending_workspace_selection_for(key).is_some();
+        if authoritative_target && !supersedes_same_connection {
+            self.pending_presentation_request = None;
+            self.active_connection = key;
+            self.target_pane = Some((key, pane_id));
+            self.mark_agent_seen(key, pane_id);
+            self.rebuild_dock(window, cx);
+            cx.notify();
+            return true;
+        }
+
+        let Some(request_id) = self.send_layout_to(key, LayoutCommand::FocusPane { pane_id })
+        else {
+            return false;
+        };
+        pending.request_id = request_id;
+        self.pending_workspace_selections.insert(key, pending);
+        self.pending_presentation_request = Some((key, request_id));
+        self.mark_agent_seen(key, pane_id);
+        if target_is_displayed {
+            self.target_pane = Some((key, pane_id));
+            self.focus_pane_panel(target_surface, pane_id, window, cx);
+        }
+        cx.notify();
+        true
     }
 
     fn set_target_pane(
@@ -1871,6 +2520,9 @@ impl Murmur {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<bool> {
+        if self.pending_workspace_selection_for(key).is_some() {
+            return None;
+        }
         if !self
             .connection(key)
             .is_some_and(ServerConnection::can_mutate)
@@ -1891,20 +2543,75 @@ impl Murmur {
         self.send_layout_to(self.active_connection, command);
     }
 
-    fn send_layout_to(&mut self, key: ConnectionKey, command: LayoutCommand) {
-        let Some(connection) = self.connection_mut(key) else {
-            return;
-        };
+    fn activate_tab_on(
+        &mut self,
+        key: ConnectionKey,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .send_layout_to(key, LayoutCommand::ActivateTab { tab_id })
+            .is_some()
+        {
+            self.cancel_pending_presentation(window, cx);
+        }
+    }
+
+    fn send_presenting_layout_to(
+        &mut self,
+        key: ConnectionKey,
+        command: LayoutCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
+        let request_id = self.send_layout_to(key, command)?;
+        self.pending_presentation_request = None;
+        self.active_connection = key;
+        self.target_pane = None;
+        self.rebuild_dock(window, cx);
+        cx.notify();
+        Some(request_id)
+    }
+
+    fn send_layout_to(&mut self, key: ConnectionKey, command: LayoutCommand) -> Option<u64> {
+        if self.has_pending_projection_for(key)
+            && !matches!(
+                &command,
+                LayoutCommand::ActivateWorkspace { .. }
+                    | LayoutCommand::FocusPane { .. }
+                    | LayoutCommand::SetSplitRatios { .. }
+            )
+        {
+            return None;
+        }
+        if self.pending_workspace_selection_for(key).is_some()
+            && !matches!(
+                &command,
+                LayoutCommand::ActivateWorkspace { .. }
+                    | LayoutCommand::FocusPane { .. }
+                    | LayoutCommand::SetSplitRatios { .. }
+            )
+        {
+            return None;
+        }
+        let connection = self.connection_mut(key)?;
         let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
         else {
-            return;
+            return None;
         };
         if connection.can_mutate() {
+            let request_id = connection.next_layout_request_id;
+            connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
             connection.send(ClientMessage::Layout {
                 server_id,
                 session_id,
+                request_id,
                 command,
             });
+            (connection.status == ConnectionStatus::Connected).then_some(request_id)
+        } else {
+            None
         }
     }
 
@@ -1955,51 +2662,28 @@ impl Murmur {
             })
     }
 
-    fn rebuild_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        #[cfg(feature = "test-support")]
-        {
-            self.dock_rebuild_count += 1;
-        }
-        let Some(connection) = self.active_connection() else {
-            return;
-        };
-        let Ok(session) = Session::restore(connection.snapshot.clone()) else {
-            return;
-        };
-        let Some(workspace) = session.active_workspace() else {
-            self.target_pane = None;
-            return;
-        };
-        let tab = workspace.active_tab();
-        let focused = tab.focused_pane().id();
-        let layout = connection
-            .zoomed_panes
-            .iter()
-            .copied()
-            .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
-            .map(PaneLayout::Pane)
-            .unwrap_or_else(|| tab.layout().clone());
-        let key = connection.key;
-        self.target_pane = Some((key, focused));
-        let dock_layout = self.build_dock_layout(key, &layout, cx);
-        let focus = self
+    fn focus_pane_panel(
+        &self,
+        surface_key: DockSurfaceKey,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = surface_key.connection_key;
+        let Some(focus) = self
             .panels
-            .get(&(key, focused))
-            .expect("focused terminal Panel exists in the rebuilt Dock")
-            .read(cx)
-            .focus_handle
-            .clone();
-        self.rebuilding_dock = true;
-        self.dock_area.update(cx, |dock, cx| {
-            dock.set_locked(true, window, cx);
-            dock.set_center(dock_layout, window, cx);
-        });
+            .get(&(key, pane_id))
+            .map(|panel| panel.read(cx).focus_handle.clone())
+        else {
+            return;
+        };
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let should_focus = owner
                 .update(cx, |this, _| {
-                    this.rebuilding_dock = false;
-                    this.active_connection == key && this.target_pane == Some((key, focused))
+                    this.active_connection == key
+                        && this.target_pane == Some((key, pane_id))
+                        && this.active_dock_surface == Some(surface_key)
                 })
                 .unwrap_or(false);
             if should_focus && !window.has_active_dialog(cx) {
@@ -2008,10 +2692,175 @@ impl Murmur {
         });
     }
 
+    fn rebuild_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.active_connection() else {
+            self.active_dock_surface = None;
+            return;
+        };
+        let Ok(session) = Session::restore(connection.snapshot.clone()) else {
+            self.active_dock_surface = None;
+            return;
+        };
+        let key = connection.key;
+        let held_target = self
+            .active_dock_surface
+            .filter(|surface| surface.connection_key == key)
+            .and_then(|surface| {
+                Self::workspace_id_for_surface(&session, surface)
+                    .map(|workspace_id| (workspace_id, surface.tab_id))
+            });
+        let authoritative_target = session
+            .active_workspace()
+            .map(|workspace| (workspace.id(), workspace.active_tab().id()));
+        let Some((_workspace_id, tab_id)) = self
+            .should_hold_active_surface()
+            .then_some(held_target)
+            .flatten()
+            .or(authoritative_target)
+        else {
+            self.target_pane = None;
+            self.active_dock_surface = None;
+            return;
+        };
+        let tab = session
+            .tab(tab_id)
+            .expect("presented Tab belongs to the restored Session");
+        let focused = self
+            .pending_workspace_selection_for(key)
+            .and_then(|pending| pending.pane_id)
+            .filter(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
+            .unwrap_or_else(|| tab.focused_pane().id());
+        let authoritative_layout = connection
+            .zoomed_panes
+            .iter()
+            .copied()
+            .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
+            .map(PaneLayout::Pane)
+            .unwrap_or_else(|| tab.layout().clone());
+        let surface_key = DockSurfaceKey {
+            connection_key: key,
+            tab_id,
+        };
+        let layout = self
+            .dock_surfaces
+            .get(&surface_key)
+            .filter(|surface| surface.pending_projection_request.is_some())
+            .and_then(|surface| surface.projection.clone())
+            .unwrap_or(authoritative_layout);
+        let target_size = self
+            .dock_surfaces
+            .get(&surface_key)
+            .map(|surface| surface.area.read(cx).bounds().size)
+            .filter(|size| size.width > px(0.) && size.height > px(0.));
+        let active_size = self
+            .active_dock_surface
+            .and_then(|active| self.dock_surfaces.get(&active))
+            .map(|surface| surface.area.read(cx).bounds().size)
+            .filter(|size| size.width > px(0.) && size.height > px(0.));
+        let measured_size = {
+            let size = size(
+                self.workspace_size.width.max(px(0.)),
+                (self.workspace_size.height - WORKSPACE_TAB_BAR_HEIGHT).max(px(0.)),
+            );
+            (size.width > px(0.) && size.height > px(0.)).then_some(size)
+        };
+        let available_size = if self.active_dock_surface == Some(surface_key) {
+            target_size.or(measured_size).or(active_size)
+        } else {
+            active_size.or(measured_size).or(target_size)
+        }
+        .unwrap_or_else(|| {
+            size(
+                (window.viewport_size().width - INITIAL_SIDEBAR_WIDTH).max(px(1.)),
+                (window.viewport_size().height - WORKSPACE_TAB_BAR_HEIGHT).max(px(1.)),
+            )
+        });
+
+        self.dock_surfaces.entry(surface_key).or_insert_with(|| {
+            let area = cx.new(|cx| {
+                DockArea::new(
+                    format!("murmur-workspace-{key}-{}", tab_id.as_u64()),
+                    None,
+                    window,
+                    cx,
+                )
+                .with_renderer(Rc::new(MurmurDockRenderer))
+            });
+            let subscription = cx.subscribe_in(
+                &area,
+                window,
+                move |this, dock, event: &DockEvent, window, cx| {
+                    if matches!(event, DockEvent::LayoutChanged) {
+                        this.on_dock_layout_changed(surface_key, dock, window, cx);
+                    }
+                },
+            );
+            DockSurface {
+                area,
+                _subscription: subscription,
+                pane_ids: HashSet::new(),
+                projection: None,
+                programmatic_layout_events: 0,
+                pending_projection_request: None,
+                pending_projection_applied_sequence: None,
+                #[cfg(feature = "test-support")]
+                layout_size: None,
+            }
+        });
+        {
+            let surface = self
+                .dock_surfaces
+                .get_mut(&surface_key)
+                .expect("Dock surface was installed");
+            surface.pane_ids.clear();
+            collect_layout_pane_ids(&layout, &mut surface.pane_ids);
+        }
+
+        self.target_pane = Some((key, focused));
+        self.active_dock_surface = Some(surface_key);
+        let needs_rebuild = self.dock_surfaces.get(&surface_key).is_none_or(|surface| {
+            surface.projection.as_ref() != Some(&layout)
+                || target_size.is_some_and(|target_size| {
+                    (target_size.width - available_size.width).abs() > px(1.)
+                        || (target_size.height - available_size.height).abs() > px(1.)
+                })
+        });
+        if needs_rebuild {
+            let dock_layout = self.build_dock_layout(key, &layout, available_size, cx);
+            let area = {
+                let surface = self
+                    .dock_surfaces
+                    .get_mut(&surface_key)
+                    .expect("Dock surface was installed");
+                surface.programmatic_layout_events =
+                    surface.programmatic_layout_events.saturating_add(1);
+                surface.area.clone()
+            };
+            area.update(cx, |dock, cx| {
+                dock.set_locked(true, window, cx);
+                dock.set_center(dock_layout, window, cx);
+            });
+            self.dock_surfaces
+                .get_mut(&surface_key)
+                .expect("Dock surface was installed")
+                .projection = Some(layout);
+            #[cfg(feature = "test-support")]
+            {
+                self.dock_surfaces
+                    .get_mut(&surface_key)
+                    .expect("Dock surface was installed")
+                    .layout_size = Some(available_size);
+                self.dock_rebuild_count += 1;
+            }
+        }
+        self.focus_pane_panel(surface_key, focused, window, cx);
+    }
+
     fn build_dock_layout(
         &mut self,
         key: ConnectionKey,
         layout: &PaneLayout,
+        available_size: Size<Pixels>,
         cx: &mut Context<Self>,
     ) -> DockLayout {
         match layout {
@@ -2032,63 +2881,140 @@ impl Murmur {
                 first,
                 second,
             } => {
-                let first = self.build_dock_layout(key, first, cx);
-                let second = self.build_dock_layout(key, second, cx);
+                let extent = match direction {
+                    SplitDirection::Horizontal => available_size.width,
+                    SplitDirection::Vertical => available_size.height,
+                };
+                let extent = if extent > px(0.) { extent } else { px(1000.) };
+                let first_extent = extent * *ratio;
+                let second_extent = extent - first_extent;
+                let (first_size, second_size) = match direction {
+                    SplitDirection::Horizontal => (
+                        size(first_extent, available_size.height),
+                        size(second_extent, available_size.height),
+                    ),
+                    SplitDirection::Vertical => (
+                        size(available_size.width, first_extent),
+                        size(available_size.width, second_extent),
+                    ),
+                };
+                let first = self.build_dock_layout(key, first, first_size, cx);
+                let second = self.build_dock_layout(key, second, second_size, cx);
                 let split = match direction {
                     SplitDirection::Horizontal => DockLayout::h_split(),
                     SplitDirection::Vertical => DockLayout::v_split(),
                 };
                 split
-                    .child(first, Some(px(1000. * ratio)))
-                    .child(second, Some(px(1000. * (1. - ratio))))
+                    .child(first, Some(first_extent))
+                    .child(second, Some(second_extent))
             }
         }
     }
 
-    fn on_dock_layout_changed(&mut self, dock: &Entity<DockArea>, cx: &mut Context<Self>) {
-        if self.rebuilding_dock {
+    fn on_dock_layout_changed(
+        &mut self,
+        surface_key: DockSurfaceKey,
+        dock: &Entity<DockArea>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(surface) = self.dock_surfaces.get_mut(&surface_key) else {
+            return;
+        };
+        if surface.programmatic_layout_events > 0 {
+            surface.programmatic_layout_events -= 1;
             return;
         }
-        let Some(session) = self.active_session() else {
+        if self.active_dock_surface != Some(surface_key) {
+            return;
+        }
+        let Some(connection) = self.connection(surface_key.connection_key) else {
             return;
         };
-        let Some(tab) = session
-            .active_workspace()
-            .map(|workspace| workspace.active_tab())
-        else {
+        let Ok(mut session) = Session::restore(connection.snapshot.clone()) else {
             return;
         };
-        if self
-            .active_connection()
-            .is_some_and(|connection| !connection.zoomed_panes.is_empty())
-        {
+        let Some(tab) = session.tab(surface_key.tab_id) else {
+            return;
+        };
+        let layout = tab.layout().clone();
+        let zoomed = connection
+            .zoomed_panes
+            .iter()
+            .any(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id));
+        if zoomed {
             return;
         }
         let mut ratios = Vec::new();
         collect_dock_ratios(&dock.read(cx).dump(cx).center, &mut ratios);
         let mut expected = Vec::new();
-        collect_layout_ratios(tab.layout(), &mut expected);
+        collect_layout_ratios(&layout, &mut expected);
         if ratios.len() == expected.len()
             && ratios
                 .iter()
                 .zip(expected)
                 .any(|(actual, expected)| (actual - expected).abs() > 0.001)
         {
-            self.send_layout(LayoutCommand::SetSplitRatios {
-                tab_id: tab.id(),
-                ratios,
-            });
+            let projection = session
+                .set_tab_split_ratios(surface_key.tab_id, &ratios)
+                .then(|| {
+                    session
+                        .tab(surface_key.tab_id)
+                        .expect("resized Tab remains in the Session")
+                        .layout()
+                        .clone()
+                });
+            let sent = self.send_layout_to(
+                surface_key.connection_key,
+                LayoutCommand::SetSplitRatios {
+                    tab_id: surface_key.tab_id,
+                    ratios,
+                },
+            );
+            if let Some(request_id) = sent
+                && let Some(projection) = projection
+                && let Some(surface) = self.dock_surfaces.get_mut(&surface_key)
+            {
+                surface.projection = Some(projection);
+                surface.pending_projection_request = Some(request_id);
+                surface.pending_projection_applied_sequence = None;
+            } else if sent.is_none() {
+                if let Some(surface) = self.dock_surfaces.get_mut(&surface_key) {
+                    surface.projection = None;
+                }
+                let owner = cx.weak_entity();
+                window.defer(cx, move |window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        if this.active_dock_surface == Some(surface_key) {
+                            this.rebuild_dock(window, cx);
+                            cx.notify();
+                        }
+                    });
+                });
+            }
         }
     }
 
-    fn reconnect_active(&mut self) {
-        self.start_connect(self.active_connection);
+    fn reconnect_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.start_connect(self.active_connection) {
+            self.refresh_target_pane(self.active_connection);
+            self.rebuild_dock(window, cx);
+        }
     }
 
-    fn new_workspace_on(&mut self, key: ConnectionKey, root_directory: PathBuf) {
-        self.active_connection = key;
-        self.target_pane = None;
-        self.send_layout_to(key, LayoutCommand::CreateWorkspace { root_directory });
+    fn new_workspace_on(
+        &mut self,
+        key: ConnectionKey,
+        root_directory: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_presenting_layout_to(
+            key,
+            LayoutCommand::CreateWorkspace { root_directory },
+            window,
+            cx,
+        );
     }
 
     fn choose_workspace_directory_on(
@@ -2114,30 +3040,36 @@ impl Murmur {
             .spawn(cx, async move |cx| {
                 let path = paths.await.ok()?.ok()??.into_iter().next()?;
                 owner
-                    .update(cx, |this, _| this.new_workspace_on(key, path))
+                    .update_in(cx, |this, window, cx| {
+                        this.new_workspace_on(key, path, window, cx)
+                    })
                     .ok()?;
                 Some(())
             })
             .detach();
     }
 
-    fn new_tab(&mut self) {
+    fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace_id) = self
             .active_session()
             .and_then(|session| session.active_workspace_id())
         else {
             return;
         };
-        self.new_tab_on(self.active_connection, workspace_id);
+        self.new_tab_on(self.active_connection, workspace_id, window, cx);
     }
 
-    fn new_tab_on(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
-        self.active_connection = key;
-        self.target_pane = None;
-        self.send_layout_to(key, LayoutCommand::CreateTab { workspace_id });
+    fn new_tab_on(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_presenting_layout_to(key, LayoutCommand::CreateTab { workspace_id }, window, cx);
     }
 
-    fn cycle_tab(&mut self, step: isize) {
+    fn cycle_tab(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.active_session() else {
             return;
         };
@@ -2152,9 +3084,7 @@ impl Murmur {
             return;
         };
         let target_ix = (active_ix as isize + step).rem_euclid(tabs.len() as isize) as usize;
-        self.send_layout(LayoutCommand::ActivateTab {
-            tab_id: tabs[target_ix].id(),
-        });
+        self.activate_tab_on(self.active_connection, tabs[target_ix].id(), window, cx);
     }
 
     fn move_workspace(&mut self, step: isize) {
@@ -2344,7 +3274,7 @@ impl Murmur {
         title: &'static str,
         ok_text: &'static str,
         initial: String,
-        apply: impl Fn(&mut Murmur, String) + 'static,
+        apply: impl Fn(&mut Murmur, String, &mut Window, &mut Context<Murmur>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2389,14 +3319,14 @@ impl Murmur {
                                     }),
                             ),
                     )
-                    .on_ok(move |_, _, cx| {
+                    .on_ok(move |_, window, cx| {
                         let value = input_for_ok.read(cx).value().trim().to_owned();
                         if value.is_empty() {
                             return false;
                         }
                         let apply = apply.clone();
                         let _ = owner.update(cx, |this, cx| {
-                            apply(this, value);
+                            apply(this, value, window, cx);
                             cx.notify();
                         });
                         true
@@ -2414,7 +3344,7 @@ impl Murmur {
             "Add Server",
             "Add",
             "127.0.0.1:7341".into(),
-            |this, value| {
+            |this, value, _, _| {
                 if let Ok(address) = value.parse::<SocketAddr>() {
                     let endpoint = Endpoint::tcp(address);
                     if this.connections.iter().any(|c| c.endpoint == endpoint) {
@@ -2428,9 +3358,10 @@ impl Murmur {
                         address.to_string(),
                         endpoint,
                     ));
+                    this.pending_presentation_request = None;
                     this.active_connection = key;
                     this.target_pane = None;
-                    this.start_connect(key);
+                    _ = this.start_connect(key);
                 } else {
                     this.app_error = Some("Invalid server address".into());
                 }
@@ -2451,7 +3382,7 @@ impl Murmur {
             "Rename Server",
             "Save",
             name,
-            move |this, name| {
+            move |this, name, _, _| {
                 if let Some(connection) = this.connection_mut(key) {
                     connection.label = name;
                 }
@@ -2518,7 +3449,7 @@ impl Murmur {
             "Rename Workspace",
             "Save",
             name,
-            move |this, name| {
+            move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
             },
             window,
@@ -2538,13 +3469,15 @@ impl Murmur {
             "Create Worktree",
             "Create",
             default_worktree_branch(&workspace_name),
-            move |this, branch| {
-                this.send_layout_to(
+            move |this, branch, window, cx| {
+                this.send_presenting_layout_to(
                     key,
                     LayoutCommand::CreateWorktree {
                         parent_workspace_id,
                         branch,
                     },
+                    window,
+                    cx,
                 );
             },
             window,
@@ -2571,13 +3504,15 @@ impl Murmur {
             .spawn(cx, async move |cx| {
                 let root_directory = paths.await.ok()?.ok()??.into_iter().next()?;
                 owner
-                    .update(cx, |this, _| {
-                        this.send_layout_to(
+                    .update_in(cx, |this, window, cx| {
+                        this.send_presenting_layout_to(
                             key,
                             LayoutCommand::OpenWorktree {
                                 parent_workspace_id,
                                 root_directory,
                             },
+                            window,
+                            cx,
                         )
                     })
                     .ok()?;
@@ -2651,7 +3586,7 @@ impl Murmur {
             "Rename Tab",
             "Save",
             name,
-            move |this, name| {
+            move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });
             },
             window,
@@ -2677,7 +3612,7 @@ impl Murmur {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_dialog(window, cx);
-        self.reconnect_active();
+        self.reconnect_active(window, cx);
         cx.notify();
     }
 
@@ -2693,7 +3628,7 @@ impl Murmur {
 
     fn action_new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_dialog(window, cx);
-        self.new_tab();
+        self.new_tab(window, cx);
     }
 
     fn action_rename_workspace(
@@ -2773,7 +3708,7 @@ impl Murmur {
 
     fn action_next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_dialog(window, cx);
-        self.cycle_tab(1);
+        self.cycle_tab(1, window, cx);
     }
 
     fn action_previous_tab(
@@ -2783,7 +3718,7 @@ impl Murmur {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_dialog(window, cx);
-        self.cycle_tab(-1);
+        self.cycle_tab(-1, window, cx);
     }
 
     fn action_split_right(&mut self, _: &SplitRight, window: &mut Window, cx: &mut Context<Self>) {
@@ -3167,7 +4102,7 @@ impl Murmur {
             let workspaces = Session::restore(connection.snapshot.clone())
                 .ok()
                 .map(|session| {
-                    let active_workspace = session.active_workspace_id();
+                    let active_workspace = self.presented_workspace_id(key, &session);
                     session
                         .workspaces()
                         .iter()
@@ -3211,9 +4146,9 @@ impl Murmur {
                                                     .child(state)
                                             })
                                             .disable(!connected)
-                                            .on_click(move |_, _, cx| {
+                                            .on_click(move |_, window, cx| {
                                                 let _ = agent_owner.update(cx, |this, cx| {
-                                                    this.select_pane(key, pane_id, cx)
+                                                    this.select_pane(key, pane_id, window, cx)
                                                 });
                                             }),
                                     )
@@ -3340,9 +4275,9 @@ impl Murmur {
                                             .child(branch.clone())
                                     })
                                 })
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner.update(cx, |this, _| {
-                                        this.select_workspace(key, workspace_id)
+                                .on_click(move |_, window, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.select_workspace(key, workspace_id, window, cx)
                                     });
                                 })
                         })
@@ -3382,11 +4317,21 @@ impl Murmur {
                     .item(
                         PopupMenuItem::new(connection_label)
                             .disabled(connection_disabled)
-                            .on_click(move |_, _, cx| {
+                            .on_click(move |_, window, cx| {
                                 let _ = connection_owner.update(cx, |this, cx| {
                                     match status {
-                                        ConnectionStatus::Connected => this.disconnect_server(key),
-                                        ConnectionStatus::Disconnected => this.start_connect(key),
+                                        ConnectionStatus::Connected => {
+                                            if this.disconnect_server(key) {
+                                                this.refresh_target_pane(this.active_connection);
+                                                this.rebuild_dock(window, cx);
+                                            }
+                                        }
+                                        ConnectionStatus::Disconnected => {
+                                            if this.start_connect(key) {
+                                                this.refresh_target_pane(this.active_connection);
+                                                this.rebuild_dock(window, cx);
+                                            }
+                                        }
                                         ConnectionStatus::Connecting => {}
                                     }
                                     cx.notify();
@@ -3460,9 +4405,9 @@ impl Murmur {
                                 .small()
                                 .icon(IconName::LoaderCircle)
                                 .tooltip("Reconnect")
-                                .on_click(move |_, _, cx| {
+                                .on_click(move |_, window, cx| {
                                     let _ = reconnect_owner.update(cx, |this, cx| {
-                                        this.reconnect_active();
+                                        this.reconnect_active(window, cx);
                                         cx.notify();
                                     });
                                 }),
@@ -3476,16 +4421,20 @@ impl Murmur {
             return div().size_full().into_any_element();
         };
         let error = self.app_error.clone().or_else(|| connection.error.clone());
-        let can_mutate = connection.can_mutate();
+        let can_mutate = connection.can_mutate()
+            && self
+                .pending_workspace_selection_for(connection.key)
+                .is_none()
+            && !self.has_pending_projection_for(connection.key);
         let Ok(session) = Session::restore(connection.snapshot.clone()) else {
             return div()
                 .size_full()
                 .child("Invalid Session state")
                 .into_any_element();
         };
-        let Some(workspace) = session.active_workspace() else {
+        let key = connection.key;
+        let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
             let new_owner = cx.weak_entity();
-            let key = connection.key;
             return v_flex()
                 .size_full()
                 .items_center()
@@ -3509,10 +4458,21 @@ impl Murmur {
                 )
                 .into_any_element();
         };
+        let workspace = session
+            .workspace(workspace_id)
+            .expect("presented Workspace belongs to the restored Session");
 
-        let key = connection.key;
-        let workspace_id = workspace.id();
-        let active_tab = workspace.active_tab().id();
+        let active_tab = self
+            .presented_tab_id(key, &session, workspace_id)
+            .expect("presented Workspace has an active Tab");
+        let surface_key = DockSurfaceKey {
+            connection_key: key,
+            tab_id: active_tab,
+        };
+        let dock_area = (self.active_dock_surface == Some(surface_key))
+            .then(|| self.dock_surfaces.get(&surface_key))
+            .flatten()
+            .map(|surface| surface.area.clone());
         let closes_workspace = workspace.tabs().len() == 1;
         let tab_buttons = workspace.tabs().iter().map(|tab| {
             let tab_id = tab.id();
@@ -3529,9 +4489,9 @@ impl Murmur {
                         .selected(tab_id == active_tab)
                         .label(tab.name().to_owned())
                         .disabled(!can_mutate)
-                        .on_click(move |_, _, cx| {
-                            let _ = activate_owner.update(cx, |this, _| {
-                                this.send_layout_to(key, LayoutCommand::ActivateTab { tab_id })
+                        .on_click(move |_, window, cx| {
+                            let _ = activate_owner.update(cx, |this, cx| {
+                                this.activate_tab_on(key, tab_id, window, cx)
                             });
                         }),
                 )
@@ -3567,7 +4527,7 @@ impl Murmur {
             .size_full()
             .child(
                 h_flex()
-                    .h(px(36.))
+                    .h(WORKSPACE_TAB_BAR_HEIGHT)
                     .flex_shrink_0()
                     .gap_1()
                     .px_2()
@@ -3583,9 +4543,10 @@ impl Murmur {
                             .icon(IconName::Plus)
                             .tooltip("New Tab")
                             .disabled(!can_mutate)
-                            .on_click(move |_, _, cx| {
-                                let _ = new_tab_owner
-                                    .update(cx, |this, _| this.new_tab_on(key, workspace_id));
+                            .on_click(move |_, window, cx| {
+                                let _ = new_tab_owner.update(cx, |this, cx| {
+                                    this.new_tab_on(key, workspace_id, window, cx)
+                                });
                             }),
                     )
                     .when_some(error, |row, error| {
@@ -3600,7 +4561,12 @@ impl Murmur {
                         )
                     }),
             )
-            .child(div().min_h_0().flex_1().child(self.dock_area.clone()))
+            .child(
+                div()
+                    .min_h_0()
+                    .flex_1()
+                    .when_some(dock_area, |view, dock_area| view.child(dock_area)),
+            )
             .into_any_element()
     }
 }
@@ -3718,6 +4684,16 @@ impl EntityInputHandler for Murmur {
 impl Render for Murmur {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dialog_layer = Root::render_dialog_layer(window, cx);
+        let workspace_owner = cx.weak_entity();
+        let workspace = div()
+            .size_full()
+            .on_prepaint(move |bounds, _, cx| {
+                let _ = workspace_owner.update(cx, |this, _| {
+                    this.workspace_size = bounds.size;
+                });
+            })
+            .child(self.render_workspace(cx))
+            .into_any_element();
         div()
             .key_context("Murmur")
             .track_focus(&self.focus_handle)
@@ -3759,7 +4735,7 @@ impl Render for Murmur {
                 h_resizable("murmur-shell")
                     .child(
                         resizable_panel()
-                            .size(px(240.))
+                            .size(INITIAL_SIDEBAR_WIDTH)
                             .size_range(px(180.)..px(360.))
                             .flex_none()
                             .child(
@@ -3769,7 +4745,7 @@ impl Render for Murmur {
                                     .child(self.render_sidebar(cx)),
                             ),
                     )
-                    .child(self.render_workspace(cx)),
+                    .child(workspace),
             )
             .children(dialog_layer)
     }
@@ -3786,6 +4762,18 @@ fn collect_layout_ratios(layout: &PaneLayout, ratios: &mut Vec<f32>) {
         ratios.push(*ratio);
         collect_layout_ratios(first, ratios);
         collect_layout_ratios(second, ratios);
+    }
+}
+
+fn collect_layout_pane_ids(layout: &PaneLayout, pane_ids: &mut HashSet<PaneId>) {
+    match layout {
+        PaneLayout::Pane(pane_id) => {
+            pane_ids.insert(*pane_id);
+        }
+        PaneLayout::Split { first, second, .. } => {
+            collect_layout_pane_ids(first, pane_ids);
+            collect_layout_pane_ids(second, pane_ids);
+        }
     }
 }
 
@@ -4013,6 +5001,45 @@ mod tests {
                 after_sequence: 11,
             }
         );
+    }
+
+    #[test]
+    fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
+        let mut connection = ServerConnection::new(
+            1,
+            "test".into(),
+            Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+        );
+        connection.status = ConnectionStatus::Connected;
+        connection.server_id = Some(ServerId(1));
+        connection.runtime_epoch = Some(RuntimeEpoch(2));
+        connection.session_id = Some(SessionId(3));
+        connection.sequence = 7;
+        connection.controlling = true;
+        connection.subscribed = true;
+        connection.bootstrap_resync_session_id = Some(SessionId(3));
+        let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+        connection.io = Some(ClientIo {
+            outgoing,
+            _incoming_task: Task::ready(()),
+        });
+
+        assert!(connection.recover_rejected_snapshot(
+            ServerId(1),
+            SessionId(30),
+            "unknown Session".into(),
+        ));
+        assert_eq!(
+            outgoing_rx.recv().unwrap(),
+            murmur_core::protocol::ClientMessage::SnapshotRequest {
+                session_id: SessionId(30),
+            }
+        );
+        assert_eq!(connection.bootstrap_resync_session_id, Some(SessionId(30)));
+        assert!(!connection.subscribed);
+        assert!(!connection.subscription_pending);
+        assert!(!connection.can_mutate());
+        assert_eq!(connection.error.as_deref(), Some("unknown Session"));
     }
 
     #[test]
@@ -4426,15 +5453,20 @@ mod tests {
             TestAppContext, VisualTestContext, point, px, size,
         };
         use gpui_component::{Root, WindowExt as _};
-        #[cfg(target_os = "linux")]
         use murmur_core::SplitDirection;
-        use murmur_core::protocol::{ClientMessage, LayoutCommand, ServerMessage, SessionEvent};
-        use murmur_core::{PaneId, TabId, TerminalCommand, WorkspaceId};
+        use murmur_core::protocol::{
+            ClientMessage, LayoutCommand, PaneAgentSnapshot, PaneTerminalFrame, RuntimeEpoch,
+            ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+        };
+        use murmur_core::{
+            PaneId, PaneLayout, Session, TabId, TerminalCommand, TerminalViewFrame, WorkspaceId,
+        };
         use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{
-            CONTROL_BUSY_REASON, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE, Incoming,
-            Murmur, ServerConnection, default_window_options,
+            CONTROL_BUSY_REASON, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE,
+            DockSurfaceKey, Incoming, Murmur, PendingWorkspaceSelection, ServerConnection,
+            default_window_options,
         };
 
         const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -4534,6 +5566,34 @@ mod tests {
 
         fn terminal_selector(pane_id: PaneId) -> &'static str {
             Box::leak(format!("terminal-pane-{}", pane_id.as_u64()).into_boxed_str())
+        }
+
+        fn bootstrap_for_session(
+            connection: &ServerConnection,
+            session: &Session,
+        ) -> SessionBootstrap {
+            SessionBootstrap {
+                server_id: connection.server_id.expect("connected Server has an ID"),
+                runtime_epoch: connection
+                    .runtime_epoch
+                    .expect("connected Server has a runtime epoch"),
+                session_id: connection
+                    .session_id
+                    .expect("connected Server has a Session ID"),
+                sequence: connection.sequence,
+                snapshot: session.snapshot(),
+                terminals: connection.terminals.values().cloned().collect(),
+                agents: connection
+                    .agents
+                    .iter()
+                    .map(|(&pane_id, agent)| PaneAgentSnapshot {
+                        pane_id,
+                        agent: *agent,
+                    })
+                    .collect(),
+                workspace_git: connection.workspace_git.values().cloned().collect(),
+                zoomed_panes: connection.zoomed_panes.iter().copied().collect(),
+            }
         }
 
         fn tab_selector(tab_id: TabId) -> &'static str {
@@ -4657,6 +5717,184 @@ mod tests {
         }
 
         #[test]
+        fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
+            let workspace_root = TestDirectory::new("cold-split-workspace");
+            let snapshot_root = TestDirectory::new("cold-split-snapshot");
+            let mut session = Session::new();
+            let workspace_id = session
+                .create_workspace(workspace_root.0.clone())
+                .expect("test Workspace capacity");
+            let workspace = session.workspace(workspace_id).unwrap();
+            let tab_id = workspace.active_tab().id();
+            let first_pane = workspace.active_tab().focused_pane().id();
+            let second_pane = session
+                .split_pane(first_pane, SplitDirection::Horizontal, 0.3)
+                .expect("test Pane capacity");
+            let snapshot_path = snapshot_root.0.join("session.bin");
+            std::fs::write(&snapshot_path, session.snapshot().to_bytes().unwrap()).unwrap();
+
+            let endpoint = Endpoint::local(snapshot_root.0.join("server.sock"));
+            let server = start_server_with_config(
+                ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path),
+            );
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            window.update(|window, cx| _ = window.draw(cx));
+
+            let surface_key = DockSurfaceKey {
+                connection_key: 1,
+                tab_id,
+            };
+            let (layout_size, dock_bounds, rebuilds) = window.read(|app| {
+                let murmur = view.read(app);
+                let surface = murmur
+                    .dock_surfaces
+                    .get(&surface_key)
+                    .expect("cold Bootstrap should build its Dock surface");
+                (
+                    surface
+                        .layout_size
+                        .expect("initial layout size is recorded"),
+                    surface.area.read(app).bounds(),
+                    murmur.dock_rebuild_count,
+                )
+            });
+            assert!((layout_size.width - dock_bounds.size.width).abs() <= px(1.));
+            assert!((layout_size.height - dock_bounds.size.height).abs() <= px(1.));
+            assert_eq!(rebuilds, 1, "cold startup must install the Dock once");
+
+            let first = window
+                .debug_bounds(terminal_selector(first_pane))
+                .expect("first cold Pane should be visible");
+            let second = window
+                .debug_bounds(terminal_selector(second_pane))
+                .expect("second cold Pane should be visible");
+            let pane_width = first.size.width + second.size.width;
+            assert!((first.size.width / pane_width - 0.3).abs() < 0.03);
+            assert!(first.right() <= second.left());
+            assert!(second.left() - first.right() <= px(8.));
+            window.run_until_parked();
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                1,
+                "the first paint must not trigger a corrective Dock replacement"
+            );
+        }
+
+        #[test]
+        fn readonly_dock_resize_restores_the_authoritative_projection() {
+            let workspace_root = TestDirectory::new("readonly-dock-resize");
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: workspace_root.0.clone(),
+                    });
+                });
+            });
+            let mut initial = None;
+            assert!(wait_until_event_driven(window, |window| {
+                initial = window.read(|app| {
+                    let murmur = view.read(app);
+                    let session = murmur.active_session()?;
+                    let tab = session.active_workspace()?.active_tab();
+                    let surface_key = DockSurfaceKey {
+                        connection_key: 1,
+                        tab_id: tab.id(),
+                    };
+                    murmur.dock_surfaces.contains_key(&surface_key).then_some((
+                        tab.id(),
+                        tab.focused_pane().id(),
+                        surface_key,
+                    ))
+                });
+                initial.is_some()
+            }));
+            let (tab_id, pane_id, surface_key) = initial.unwrap();
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::SplitPane {
+                        pane_id,
+                        direction: SplitDirection::Horizontal,
+                    });
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    let session = murmur.active_session().unwrap();
+                    session.tab(tab_id).is_some_and(|tab| {
+                        tab.panes().len() == 2
+                            && murmur.dock_surfaces[&surface_key].projection.as_ref()
+                                == Some(tab.layout())
+                    })
+                })
+            }));
+            window.update(|window, cx| _ = window.draw(cx));
+            window.run_until_parked();
+
+            let (sequence, rebuilds) = window.read(|app| {
+                let murmur = view.read(app);
+                (
+                    murmur.connection(1).unwrap().sequence,
+                    murmur.dock_rebuild_count,
+                )
+            });
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    let mut local =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+                    assert!(local.set_tab_split_ratios(tab_id, &[0.72]));
+                    let local_layout = local.tab(tab_id).unwrap().layout().clone();
+                    let surface = this.dock_surfaces.get(&surface_key).unwrap();
+                    assert_eq!(surface.programmatic_layout_events, 0);
+                    let available_size = surface.area.read(cx).bounds().size;
+                    let area = surface.area.clone();
+                    let dock_layout = this.build_dock_layout(1, &local_layout, available_size, cx);
+                    this.connection_mut(1).unwrap().controlling = false;
+                    area.update(cx, |dock, cx| {
+                        dock.set_center(dock_layout, window, cx);
+                    });
+                });
+            });
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+
+            let (authoritative_layout, panes) = window.read(|app| {
+                let murmur = view.read(app);
+                let session = murmur.active_session().unwrap();
+                let tab = session.tab(tab_id).unwrap();
+                (
+                    tab.layout().clone(),
+                    tab.panes().iter().map(|pane| pane.id()).collect::<Vec<_>>(),
+                )
+            });
+            assert_eq!(
+                window.read(|app| view.read(app).connection(1).unwrap().sequence),
+                sequence,
+                "a read-only Dock resize must not send a Layout command"
+            );
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds + 1,
+                "the rejected local resize should be restored once"
+            );
+            assert!(window.read(|app| {
+                let surface = &view.read(app).dock_surfaces[&surface_key];
+                surface.pending_projection_request.is_none()
+                    && surface.pending_projection_applied_sequence.is_none()
+                    && surface.projection.as_ref() == Some(&authoritative_layout)
+            }));
+            let first = window.debug_bounds(terminal_selector(panes[0])).unwrap();
+            let second = window.debug_bounds(terminal_selector(panes[1])).unwrap();
+            let width = first.size.width + second.size.width;
+            assert!((first.size.width / width - 0.5).abs() < 0.03);
+        }
+
+        #[test]
         fn server_workspace_button_and_only_tab_close_round_trip() {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
@@ -4728,6 +5966,961 @@ mod tests {
                 })
             });
             assert!(empty, "closing the only Tab should close its Workspace");
+        }
+
+        #[test]
+        fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
+            let first_root = TestDirectory::new("cached-dock-first");
+            let second_root = TestDirectory::new("cached-dock-second");
+            let mut cx = TestAppContext::single();
+            cx.update(gpui_component::init);
+            let (view, window, _server) = connected_murmur(&mut cx);
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: first_root.0.clone(),
+                    });
+                });
+            });
+            let mut first = None;
+            assert!(wait_until(window, |window| {
+                first = window.read(|app| {
+                    let murmur = view.read(app);
+                    let session = murmur.active_session()?;
+                    let workspace = session.active_workspace()?;
+                    let tab = workspace.active_tab();
+                    let surface = DockSurfaceKey {
+                        connection_key: 1,
+                        tab_id: tab.id(),
+                    };
+                    (murmur.active_dock_surface == Some(surface)
+                        && murmur.dock_surfaces.contains_key(&surface))
+                    .then(|| (workspace.id(), tab.id(), tab.focused_pane().id(), surface))
+                });
+                first.is_some()
+            }));
+            let (first_workspace, first_tab, first_pane, first_surface) = first.unwrap();
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::SplitPane {
+                        pane_id: first_pane,
+                        direction: SplitDirection::Horizontal,
+                    });
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    let Some(session) = murmur.active_session() else {
+                        return false;
+                    };
+                    session.tab(first_tab).is_some_and(|tab| {
+                        tab.panes().len() == 2
+                            && murmur
+                                .dock_surfaces
+                                .get(&first_surface)
+                                .and_then(|surface| surface.projection.as_ref())
+                                == Some(tab.layout())
+                    })
+                })
+            }));
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: second_root.0.clone(),
+                    });
+                });
+            });
+            let mut second = None;
+            assert!(wait_until(window, |window| {
+                second = window.read(|app| {
+                    let murmur = view.read(app);
+                    let session = murmur.active_session()?;
+                    let workspace = session.active_workspace()?;
+                    (workspace.id() != first_workspace).then(|| {
+                        let tab = workspace.active_tab();
+                        let surface = DockSurfaceKey {
+                            connection_key: 1,
+                            tab_id: tab.id(),
+                        };
+                        (workspace.id(), tab.id(), tab.focused_pane().id(), surface)
+                    })
+                });
+                second.is_some_and(|(_, _, _, surface)| {
+                    window.read(|app| view.read(app).dock_surfaces.contains_key(&surface))
+                })
+            }));
+            let (second_workspace, second_tab, second_pane, second_surface) = second.unwrap();
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::SplitPane {
+                        pane_id: second_pane,
+                        direction: SplitDirection::Horizontal,
+                    });
+                });
+            });
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::SetSplitRatios {
+                        tab_id: second_tab,
+                        ratios: vec![0.35],
+                    });
+                });
+            });
+            let mut second_panes = Vec::new();
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    let Some(session) = murmur.active_session() else {
+                        return false;
+                    };
+                    let Some(tab) = session.tab(second_tab) else {
+                        return false;
+                    };
+                    second_panes = tab.panes().iter().map(|pane| pane.id()).collect();
+                    second_panes.len() == 2
+                        && matches!(
+                            tab.layout(),
+                            PaneLayout::Split { ratio, .. } if (*ratio - 0.35).abs() < 0.001
+                        )
+                        && murmur
+                            .dock_surfaces
+                            .get(&second_surface)
+                            .and_then(|surface| surface.projection.as_ref())
+                            == Some(tab.layout())
+                })
+            }));
+
+            let focused_before = window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .unwrap()
+                    .tab(second_tab)
+                    .unwrap()
+                    .focused_pane()
+                    .id()
+            });
+            let same_surface_target = *second_panes
+                .iter()
+                .find(|pane_id| **pane_id != focused_before)
+                .unwrap();
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    assert!(this.select_pane(1, same_surface_target, window, cx));
+                    let first_request = this.pending_workspace_selection_for(1).unwrap().request_id;
+                    assert_eq!(this.target_pane, Some((1, same_surface_target)));
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+
+                    assert!(this.select_pane(1, focused_before, window, cx));
+                    let corrective = this.pending_workspace_selection_for(1).unwrap();
+                    assert_eq!(corrective.pane_id, Some(focused_before));
+                    assert_ne!(corrective.request_id, first_request);
+                    assert_eq!(this.target_pane, Some((1, focused_before)));
+                });
+            });
+            window.run_until_parked();
+            let focused_handle = window.read(|app| {
+                view.read(app).panels[&(1, focused_before)]
+                    .read(app)
+                    .focus_handle
+                    .clone()
+            });
+            assert!(window.update(|window, _| focused_handle.is_focused(window)));
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur.pending_workspace_selection_for(1).is_none()
+                        && murmur.active_session().is_some_and(|session| {
+                            session
+                                .tab(second_tab)
+                                .is_some_and(|tab| tab.focused_pane().id() == focused_before)
+                        })
+                })
+            }));
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    assert!(this.select_pane(1, same_surface_target, window, cx));
+                    assert_eq!(this.target_pane, Some((1, same_surface_target)));
+                });
+            });
+            window.run_until_parked();
+            let target_handle = window.read(|app| {
+                view.read(app).panels[&(1, same_surface_target)]
+                    .read(app)
+                    .focus_handle
+                    .clone()
+            });
+            assert!(window.update(|window, _| target_handle.is_focused(window)));
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur.pending_workspace_selection_for(1).is_none()
+                        && murmur.target_pane == Some((1, same_surface_target))
+                        && murmur.active_session().is_some_and(|session| {
+                            session
+                                .tab(second_tab)
+                                .is_some_and(|tab| tab.focused_pane().id() == same_surface_target)
+                        })
+                })
+            }));
+
+            let rebuilds = window.read(|app| view.read(app).dock_rebuild_count);
+            let sequence = window.read(|app| view.read(app).connection(1).unwrap().sequence);
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.select_workspace(1, second_workspace, window, cx);
+                });
+            });
+            window.run_until_parked();
+            assert!(
+                window.read(|app| { view.read(app).pending_workspace_selection_for(1).is_none() })
+            );
+            assert_eq!(
+                window.read(|app| view.read(app).connection(1).unwrap().sequence),
+                sequence,
+                "reselecting the visible Workspace must not send a Layout command"
+            );
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "reselecting the visible Workspace must not replace the Dock tree"
+            );
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| this.select_server(1, window, cx));
+            });
+            window.run_until_parked();
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "reselecting the active Server must not replace the Dock tree"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.select_workspace(1, first_workspace, window, cx);
+                    assert_eq!(
+                        this.pending_workspace_selection_for(1)
+                            .map(|pending| pending.workspace_id),
+                        Some(first_workspace)
+                    );
+                    let visible_target = this.target_pane;
+                    this.select_pane(1, first_pane, window, cx);
+                    assert_eq!(this.target_pane, visible_target);
+                    assert!(
+                        this.send_layout_to(1, LayoutCommand::ActivateTab { tab_id: second_tab })
+                            .is_none(),
+                        "other Layout commands must not supersede Workspace navigation"
+                    );
+                    this.select_workspace(1, second_workspace, window, cx);
+                    assert_eq!(
+                        this.pending_workspace_selection_for(1)
+                            .map(|pending| pending.workspace_id),
+                        Some(second_workspace),
+                        "the last click must replace an in-flight navigation intent"
+                    );
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur.pending_workspace_selection_for(1).is_none()
+                        && murmur
+                            .active_session()
+                            .and_then(|session| session.active_workspace_id())
+                            == Some(second_workspace)
+                        && murmur.active_dock_surface == Some(second_surface)
+                })
+            }));
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "a superseded Workspace must never replace the visible Dock"
+            );
+
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    let (
+                        intermediate,
+                        bootstrap,
+                        generation,
+                        server_id,
+                        runtime_epoch,
+                        session_id,
+                    ) = {
+                        let connection = this.connection(1).unwrap();
+                        let mut intermediate =
+                            Session::restore(connection.snapshot.clone()).unwrap();
+                        assert!(intermediate.activate_workspace(first_workspace));
+                        (
+                            intermediate.clone(),
+                            bootstrap_for_session(connection, &intermediate),
+                            connection.connect_generation,
+                            connection.server_id.unwrap(),
+                            connection.runtime_epoch.unwrap(),
+                            connection.session_id.unwrap(),
+                        )
+                    };
+                    this.pending_workspace_selections.insert(
+                        1,
+                        PendingWorkspaceSelection {
+                            connection_key: 1,
+                            workspace_id: second_workspace,
+                            pane_id: None,
+                            connect_generation: generation,
+                            server_id,
+                            runtime_epoch,
+                            session_id,
+                            request_id: u64::MAX,
+                            applied_sequence: None,
+                        },
+                    );
+                    let effect = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Bootstrap(bootstrap),
+                        cx,
+                    );
+                    assert!(
+                        !effect.rebuild,
+                        "an intermediate Bootstrap must not replace the visible Dock"
+                    );
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+                    assert_eq!(
+                        this.presented_workspace_id(1, &intermediate),
+                        Some(second_workspace)
+                    );
+                    if effect.notify {
+                        cx.notify();
+                    }
+                });
+            });
+            window.update(|window, cx| _ = window.draw(cx));
+            for pane_id in &second_panes {
+                assert!(window.debug_bounds(terminal_selector(*pane_id)).is_some());
+            }
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "rendering an intermediate Bootstrap must keep the cached surface intact"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    let (bootstrap, generation, server_id, session_id, sequence) = {
+                        let connection = this.connection(1).unwrap();
+                        let mut final_session =
+                            Session::restore(connection.snapshot.clone()).unwrap();
+                        assert!(final_session.activate_workspace(second_workspace));
+                        (
+                            bootstrap_for_session(connection, &final_session),
+                            connection.connect_generation,
+                            connection.server_id.unwrap(),
+                            connection.session_id.unwrap(),
+                            connection.sequence,
+                        )
+                    };
+                    this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Message(ServerMessage::LayoutApplied {
+                            server_id,
+                            session_id,
+                            request_id: u64::MAX,
+                            sequence,
+                        }),
+                        cx,
+                    );
+                    let effect =
+                        this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);
+                    assert!(effect.rebuild);
+                    assert!(this.pending_workspace_selection_for(1).is_none());
+                    if effect.rebuild {
+                        this.rebuild_dock(window, cx);
+                    }
+                    if effect.notify {
+                        cx.notify();
+                    }
+                });
+            });
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "confirming the already-visible target must only switch presentation state"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    const STALE_RATIO_REQUEST: u64 = u64::MAX - 2;
+                    const LATEST_RATIO_REQUEST: u64 = u64::MAX - 1;
+                    let (
+                        generation,
+                        server_id,
+                        session_id,
+                        sequence,
+                        intermediate_bootstrap,
+                        final_bootstrap,
+                        final_projection,
+                    ) = {
+                        let connection = this.connection(1).unwrap();
+                        let mut intermediate =
+                            Session::restore(connection.snapshot.clone()).unwrap();
+                        assert!(intermediate.set_tab_split_ratios(second_tab, &[0.45]));
+                        let mut final_session = intermediate.clone();
+                        assert!(final_session.set_tab_split_ratios(second_tab, &[0.35]));
+                        let final_projection =
+                            final_session.tab(second_tab).unwrap().layout().clone();
+                        (
+                            connection.connect_generation,
+                            connection.server_id.unwrap(),
+                            connection.session_id.unwrap(),
+                            connection.sequence,
+                            bootstrap_for_session(connection, &intermediate),
+                            bootstrap_for_session(connection, &final_session),
+                            final_projection,
+                        )
+                    };
+                    let surface = this.dock_surfaces.get_mut(&second_surface).unwrap();
+                    surface.projection = Some(final_projection.clone());
+                    surface.pending_projection_request = Some(LATEST_RATIO_REQUEST);
+                    surface.pending_projection_applied_sequence = None;
+
+                    this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Message(ServerMessage::LayoutApplied {
+                            server_id,
+                            session_id,
+                            request_id: STALE_RATIO_REQUEST,
+                            sequence,
+                        }),
+                        cx,
+                    );
+                    let effect = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Bootstrap(intermediate_bootstrap),
+                        cx,
+                    );
+                    assert!(effect.rebuild);
+                    this.rebuild_dock(window, cx);
+                    let surface = this.dock_surfaces.get(&second_surface).unwrap();
+                    assert_eq!(
+                        surface.pending_projection_request,
+                        Some(LATEST_RATIO_REQUEST)
+                    );
+                    assert_eq!(surface.projection.as_ref(), Some(&final_projection));
+
+                    this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Message(ServerMessage::LayoutApplied {
+                            server_id,
+                            session_id,
+                            request_id: LATEST_RATIO_REQUEST,
+                            sequence,
+                        }),
+                        cx,
+                    );
+                    let effect = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Bootstrap(final_bootstrap),
+                        cx,
+                    );
+                    assert!(effect.rebuild);
+                    this.rebuild_dock(window, cx);
+                    let surface = this.dock_surfaces.get(&second_surface).unwrap();
+                    assert!(surface.pending_projection_request.is_none());
+                    assert!(surface.pending_projection_applied_sequence.is_none());
+                    assert_eq!(surface.projection.as_ref(), Some(&final_projection));
+                });
+            });
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "stale ratio acknowledgements must not replace the latest Dock projection"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.select_pane(1, first_pane, window, cx);
+                    assert_eq!(
+                        this.pending_workspace_selection_for(1)
+                            .and_then(|pending| pending.pane_id),
+                        Some(first_pane)
+                    );
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+                });
+            });
+            window.update(|window, cx| _ = window.draw(cx));
+            for pane_id in &second_panes {
+                assert!(window.debug_bounds(terminal_selector(*pane_id)).is_some());
+            }
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur.pending_workspace_selection_for(1).is_none()
+                        && murmur.active_dock_surface == Some(first_surface)
+                        && murmur.target_pane == Some((1, first_pane))
+                })
+            }));
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.select_pane(1, second_panes[0], window, cx);
+                    assert_eq!(this.active_dock_surface, Some(first_surface));
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur.pending_workspace_selection_for(1).is_none()
+                        && murmur.active_dock_surface == Some(second_surface)
+                        && murmur.target_pane == Some((1, second_panes[0]))
+                })
+            }));
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "cross-Workspace Pane navigation must swap cached surfaces without rebuilding"
+            );
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    let (endpoint, snapshot, terminals) = {
+                        let connection = this.connection(1).unwrap();
+                        let mut remote_session =
+                            Session::restore(connection.snapshot.clone()).unwrap();
+                        assert!(remote_session.focus_pane(second_panes[0]));
+                        (
+                            connection.endpoint.clone(),
+                            remote_session.snapshot(),
+                            connection.terminals.clone(),
+                        )
+                    };
+                    let mut remote = ServerConnection::new(2, "Remote".into(), endpoint);
+                    remote.status = ConnectionStatus::Connected;
+                    remote.server_id = Some(ServerId(200));
+                    remote.runtime_epoch = Some(RuntimeEpoch(201));
+                    remote.session_id = Some(SessionId(202));
+                    remote.snapshot = snapshot;
+                    remote.terminals = terminals;
+                    remote.subscribed = true;
+                    remote.controlling = true;
+                    this.connections.push(remote);
+
+                    const A_REQUEST: u64 = u64::MAX - 10;
+                    const B_REQUEST: u64 = u64::MAX - 11;
+                    let (a_generation, a_server_id, a_runtime_epoch, a_session_id, sequence) = {
+                        let connection = this.connection(1).unwrap();
+                        (
+                            connection.connect_generation,
+                            connection.server_id.unwrap(),
+                            connection.runtime_epoch.unwrap(),
+                            connection.session_id.unwrap(),
+                            connection.sequence,
+                        )
+                    };
+                    let (b_generation, b_server_id, b_runtime_epoch, b_session_id) = {
+                        let connection = this.connection(2).unwrap();
+                        (
+                            connection.connect_generation,
+                            connection.server_id.unwrap(),
+                            connection.runtime_epoch.unwrap(),
+                            connection.session_id.unwrap(),
+                        )
+                    };
+                    let mut a_final =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+                    assert!(a_final.activate_workspace(first_workspace));
+                    let a_bootstrap = bootstrap_for_session(this.connection(1).unwrap(), &a_final);
+                    this.pending_workspace_selections.insert(
+                        1,
+                        PendingWorkspaceSelection {
+                            connection_key: 1,
+                            workspace_id: first_workspace,
+                            pane_id: None,
+                            connect_generation: a_generation,
+                            server_id: a_server_id,
+                            runtime_epoch: a_runtime_epoch,
+                            session_id: a_session_id,
+                            request_id: A_REQUEST,
+                            applied_sequence: None,
+                        },
+                    );
+                    this.pending_workspace_selections.insert(
+                        2,
+                        PendingWorkspaceSelection {
+                            connection_key: 2,
+                            workspace_id: first_workspace,
+                            pane_id: None,
+                            connect_generation: b_generation,
+                            server_id: b_server_id,
+                            runtime_epoch: b_runtime_epoch,
+                            session_id: b_session_id,
+                            request_id: B_REQUEST,
+                            applied_sequence: None,
+                        },
+                    );
+                    this.pending_presentation_request = Some((2, B_REQUEST));
+                    this.handle_incoming(
+                        1,
+                        a_generation,
+                        Incoming::Message(ServerMessage::LayoutApplied {
+                            server_id: a_server_id,
+                            session_id: a_session_id,
+                            request_id: A_REQUEST,
+                            sequence,
+                        }),
+                        cx,
+                    );
+                    let a_effect =
+                        this.handle_incoming(1, a_generation, Incoming::Bootstrap(a_bootstrap), cx);
+                    assert!(!a_effect.rebuild);
+                    assert!(!a_effect.rebuild_active);
+                    assert_eq!(this.active_connection, 1);
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+
+                    let rejection = this.handle_incoming(
+                        2,
+                        b_generation,
+                        Incoming::Message(ServerMessage::LayoutRejected {
+                            server_id: b_server_id,
+                            session_id: b_session_id,
+                            request_id: B_REQUEST,
+                            reason: "synthetic rejection".into(),
+                        }),
+                        cx,
+                    );
+                    assert!(rejection.rebuild_active);
+                    this.rebuild_dock(window, cx);
+                    assert_eq!(this.active_connection, 1);
+                    assert_eq!(this.active_dock_surface, Some(first_surface));
+                    assert!(this.pending_workspace_selections.is_empty());
+                    assert!(this.pending_presentation_request.is_none());
+
+                    let mut reset =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+                    assert!(reset.activate_workspace(second_workspace));
+                    let reset_bootstrap =
+                        bootstrap_for_session(this.connection(1).unwrap(), &reset);
+                    let reset_effect = this.handle_incoming(
+                        1,
+                        a_generation,
+                        Incoming::Bootstrap(reset_bootstrap),
+                        cx,
+                    );
+                    assert!(reset_effect.rebuild);
+                    this.rebuild_dock(window, cx);
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+
+                    this.select_pane(2, second_panes[0], window, cx);
+                    assert_eq!(this.active_connection, 2);
+                    assert_eq!(
+                        this.active_dock_surface,
+                        Some(DockSurfaceKey {
+                            connection_key: 2,
+                            tab_id: second_tab,
+                        })
+                    );
+                    assert!(this.pending_workspace_selections.is_empty());
+                });
+            });
+            window.update(|window, cx| _ = window.draw(cx));
+            assert!(
+                window
+                    .debug_bounds(terminal_selector(second_panes[0]))
+                    .is_some(),
+                "an already-focused Pane on another Server must render in the same update"
+            );
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.select_server(1, window, cx);
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+
+                    const REMOVE_REQUEST: u64 = u64::MAX - 12;
+                    let (remote_generation, remote_server, remote_epoch, remote_session) = {
+                        let remote = this.connection(2).unwrap();
+                        (
+                            remote.connect_generation,
+                            remote.server_id.unwrap(),
+                            remote.runtime_epoch.unwrap(),
+                            remote.session_id.unwrap(),
+                        )
+                    };
+                    this.pending_workspace_selections.insert(
+                        2,
+                        PendingWorkspaceSelection {
+                            connection_key: 2,
+                            workspace_id: first_workspace,
+                            pane_id: None,
+                            connect_generation: remote_generation,
+                            server_id: remote_server,
+                            runtime_epoch: remote_epoch,
+                            session_id: remote_session,
+                            request_id: REMOVE_REQUEST,
+                            applied_sequence: None,
+                        },
+                    );
+                    this.pending_presentation_request = Some((2, REMOVE_REQUEST));
+                    this.select_workspace(1, second_workspace, window, cx);
+                    assert!(this.pending_presentation_request.is_none());
+                    assert!(this.pending_workspace_selection_for(2).is_some());
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+
+                    this.pending_presentation_request = Some((2, REMOVE_REQUEST));
+                    let generation = this.connection(1).unwrap().connect_generation;
+                    let mut changed_authority =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+                    assert!(changed_authority.activate_workspace(first_workspace));
+                    let changed_bootstrap =
+                        bootstrap_for_session(this.connection(1).unwrap(), &changed_authority);
+                    let held = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Bootstrap(changed_bootstrap),
+                        cx,
+                    );
+                    assert!(!held.rebuild);
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+
+                    this.remove_server(2, window, cx);
+                    assert!(this.connection(2).is_none());
+                    assert!(this.pending_presentation_request.is_none());
+                    assert_eq!(this.active_dock_surface, Some(first_surface));
+
+                    let mut reset =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+                    assert!(reset.activate_workspace(second_workspace));
+                    let reset_bootstrap =
+                        bootstrap_for_session(this.connection(1).unwrap(), &reset);
+                    let reset = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Bootstrap(reset_bootstrap),
+                        cx,
+                    );
+                    assert!(reset.rebuild);
+                    this.rebuild_dock(window, cx);
+                    assert_eq!(this.active_dock_surface, Some(second_surface));
+                });
+            });
+            let rebuilds = window.read(|app| view.read(app).dock_rebuild_count);
+
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    this.select_workspace(1, first_workspace, window, cx)
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur
+                        .active_session()
+                        .and_then(|session| session.active_workspace_id())
+                        == Some(first_workspace)
+                        && murmur.active_dock_surface == Some(first_surface)
+                })
+            }));
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds,
+                "returning to a cached Dock at the same size must only switch Entities"
+            );
+
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| {
+                    let (generation, server_id, session_id, mut active_view) = {
+                        let connection = this.connection(1).unwrap();
+                        (
+                            connection.connect_generation,
+                            connection.server_id.unwrap(),
+                            connection.session_id.unwrap(),
+                            connection.terminals[&first_pane].view.clone(),
+                        )
+                    };
+                    active_view.revision += 1;
+                    let active = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Message(ServerMessage::TerminalFrame(TerminalFrameBatch {
+                            server_id,
+                            session_id,
+                            panes: vec![PaneTerminalFrame {
+                                pane_id: first_pane,
+                                frame: TerminalViewFrame::Full(active_view),
+                            }],
+                        })),
+                        cx,
+                    );
+                    assert!(active.notify, "the mounted Dock must repaint for its Pane");
+
+                    let inactive_pane = second_panes[0];
+                    let mut inactive_view = this.connection(1).unwrap().terminals[&inactive_pane]
+                        .view
+                        .clone();
+                    inactive_view.revision += 1;
+                    let inactive = this.handle_incoming(
+                        1,
+                        generation,
+                        Incoming::Message(ServerMessage::TerminalFrame(TerminalFrameBatch {
+                            server_id,
+                            session_id,
+                            panes: vec![PaneTerminalFrame {
+                                pane_id: inactive_pane,
+                                frame: TerminalViewFrame::Full(inactive_view),
+                            }],
+                        })),
+                        cx,
+                    );
+                    assert!(
+                        !inactive.notify,
+                        "an inactive cached Dock must absorb Terminal state without repainting"
+                    );
+                });
+            });
+
+            window.update(|window, cx| _ = window.draw(cx));
+            let inactive_bounds = window.read(|app| {
+                view.read(app).dock_surfaces[&second_surface]
+                    .area
+                    .read(app)
+                    .bounds()
+            });
+            let inactive_geometry = window.read(|app| {
+                let murmur = view.read(app);
+                second_panes
+                    .iter()
+                    .map(|pane_id| {
+                        murmur
+                            .terminal_geometry
+                            .get(&(1, *pane_id))
+                            .map(|geometry| (geometry.bounds, geometry.cell_size))
+                    })
+                    .collect::<Vec<_>>()
+            });
+            assert!(inactive_geometry.iter().all(Option::is_some));
+            let active_bounds = window.read(|app| {
+                view.read(app).dock_surfaces[&first_surface]
+                    .area
+                    .read(app)
+                    .bounds()
+            });
+            window.simulate_resize(size(px(1560.), px(860.)));
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app).dock_surfaces[&first_surface]
+                        .area
+                        .read(app)
+                        .bounds()
+                        .size
+                        .width
+                        != active_bounds.size.width
+                })
+            }));
+            assert_eq!(
+                window.read(|app| {
+                    view.read(app).dock_surfaces[&second_surface]
+                        .area
+                        .read(app)
+                        .bounds()
+                }),
+                inactive_bounds,
+                "an inactive cached Dock must not participate in layout"
+            );
+            assert_eq!(
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    second_panes
+                        .iter()
+                        .map(|pane_id| {
+                            murmur
+                                .terminal_geometry
+                                .get(&(1, *pane_id))
+                                .map(|geometry| (geometry.bounds, geometry.cell_size))
+                        })
+                        .collect::<Vec<_>>()
+                }),
+                inactive_geometry,
+                "inactive TerminalElements must not prepaint or request a resize"
+            );
+
+            let rebuilds_before_resized_switch =
+                window.read(|app| view.read(app).dock_rebuild_count);
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    let mut session =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone())
+                            .expect("client Session should restore");
+                    assert!(session.activate_workspace(second_workspace));
+                    this.connection_mut(1).unwrap().snapshot = session.snapshot();
+                    this.refresh_target_pane(1);
+                    this.rebuild_dock(window, cx);
+                    cx.notify();
+                });
+            });
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds_before_resized_switch + 1,
+                "a stale inactive Dock should be prepared at the current size before it is shown"
+            );
+
+            window.update(|window, cx| _ = window.draw(cx));
+            let first_frame = second_panes
+                .iter()
+                .map(|pane_id| {
+                    window
+                        .debug_bounds(terminal_selector(*pane_id))
+                        .expect("target Pane should render on the first frame")
+                })
+                .collect::<Vec<_>>();
+            let pane_width = first_frame[0].size.width + first_frame[1].size.width;
+            assert!(
+                (first_frame[0].size.width / pane_width - 0.35).abs() < 0.03,
+                "the target Dock must use its authoritative split ratio before it is shown"
+            );
+            assert!(first_frame[0].right() <= first_frame[1].left());
+            assert!(first_frame[1].left() - first_frame[0].right() <= px(8.));
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            let settled_frame = second_panes
+                .iter()
+                .map(|pane_id| {
+                    window
+                        .debug_bounds(terminal_selector(*pane_id))
+                        .expect("target Pane should remain rendered")
+                })
+                .collect::<Vec<_>>();
+            for (first, settled) in first_frame.iter().zip(&settled_frame) {
+                assert!((first.origin.x - settled.origin.x).abs() <= px(1.));
+                assert!((first.origin.y - settled.origin.y).abs() <= px(1.));
+                assert!((first.size.width - settled.size.width).abs() <= px(1.));
+                assert!((first.size.height - settled.size.height).abs() <= px(1.));
+            }
+            assert_eq!(
+                window.read(|app| view.read(app).dock_rebuild_count),
+                rebuilds_before_resized_switch + 1,
+                "settling the first frame must not replace the Dock a second time"
+            );
+
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CloseWorkspace {
+                        workspace_id: first_workspace,
+                    });
+                });
+            });
+            assert!(wait_until(window, |window| {
+                window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur
+                        .active_session()
+                        .is_some_and(|session| session.workspace(first_workspace).is_none())
+                        && !murmur.dock_surfaces.contains_key(&first_surface)
+                })
+            }));
         }
 
         #[test]
@@ -4905,9 +7098,83 @@ mod tests {
 
         #[test]
         fn server_disconnect_reconnect_and_remove_preserve_runtime() {
+            let workspace_root = TestDirectory::new("reconnect-cached-dock");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, _server) = connected_murmur(&mut cx);
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::CreateWorkspace {
+                        root_directory: workspace_root.0.clone(),
+                    });
+                });
+            });
+            let mut active_surface = None;
+            assert!(wait_until_event_driven(window, |window| {
+                active_surface = window.read(|app| {
+                    let murmur = view.read(app);
+                    let session = murmur.active_session()?;
+                    let tab = session.active_workspace()?.active_tab();
+                    let surface_key = DockSurfaceKey {
+                        connection_key: 1,
+                        tab_id: tab.id(),
+                    };
+                    murmur
+                        .dock_surfaces
+                        .contains_key(&surface_key)
+                        .then_some((surface_key, tab.focused_pane().id()))
+                });
+                active_surface.is_some()
+            }));
+            let (surface_key, pane_id) = active_surface.unwrap();
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.send_layout(LayoutCommand::SplitPane {
+                        pane_id,
+                        direction: SplitDirection::Horizontal,
+                    });
+                });
+            });
+            let mut pane_ids = Vec::new();
+            assert!(wait_until(window, |window| {
+                pane_ids = window.read(|app| {
+                    let murmur = view.read(app);
+                    murmur
+                        .active_session()
+                        .and_then(|session| session.tab(surface_key.tab_id).cloned())
+                        .map(|tab| tab.panes().iter().map(|pane| pane.id()).collect())
+                        .unwrap_or_default()
+                });
+                pane_ids.len() == 2
+            }));
+            window.update(|window, cx| {
+                view.update(cx, |this, cx| {
+                    let mut local =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+                    assert!(local.set_tab_split_ratios(surface_key.tab_id, &[0.72]));
+                    let local_layout = local.tab(surface_key.tab_id).unwrap().layout().clone();
+                    let surface = this.dock_surfaces.get(&surface_key).unwrap();
+                    let available_size = surface.area.read(cx).bounds().size;
+                    let area = surface.area.clone();
+                    let dock_layout = this.build_dock_layout(1, &local_layout, available_size, cx);
+                    let surface = this.dock_surfaces.get_mut(&surface_key).unwrap();
+                    surface.programmatic_layout_events =
+                        surface.programmatic_layout_events.saturating_add(1);
+                    surface.projection = Some(local_layout);
+                    surface.pending_projection_request = Some(u64::MAX);
+                    surface.pending_projection_applied_sequence = None;
+                    area.update(cx, |dock, cx| {
+                        dock.set_center(dock_layout, window, cx);
+                    });
+                });
+            });
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            let optimistic_first = window.debug_bounds(terminal_selector(pane_ids[0])).unwrap();
+            let optimistic_second = window.debug_bounds(terminal_selector(pane_ids[1])).unwrap();
+            let optimistic_width = optimistic_first.size.width + optimistic_second.size.width;
+            assert!((optimistic_first.size.width / optimistic_width - 0.72).abs() < 0.03);
+
             let identity = window.read(|app| {
                 let connection = view.read(app).connection(1).unwrap();
                 (
@@ -4916,28 +7183,39 @@ mod tests {
                     connection.session_id,
                 )
             });
-            let pane_id = {
-                let mut session = murmur_core::Session::new();
-                session
-                    .create_workspace(std::env::temp_dir())
-                    .expect("Workspace capacity");
-                session
-                    .active_workspace()
-                    .unwrap()
-                    .active_tab()
-                    .focused_pane()
-                    .id()
-            };
 
-            window.update(|_, cx| {
+            window.update(|window, cx| {
                 view.update(cx, |this, cx| {
+                    let authoritative =
+                        Session::restore(this.connection(1).unwrap().snapshot.clone())
+                            .unwrap()
+                            .tab(surface_key.tab_id)
+                            .unwrap()
+                            .layout()
+                            .clone();
+                    let rebuilds = this.dock_rebuild_count;
                     this.pending_sizes
                         .insert((1, pane_id), murmur_core::TerminalSize::new(99, 199));
-                    this.disconnect_server(1);
+                    assert!(this.disconnect_server(1));
+                    this.refresh_target_pane(1);
+                    this.rebuild_dock(window, cx);
                     assert!(!this.pending_sizes.contains_key(&(1, pane_id)));
+                    let surface = this.dock_surfaces.get(&surface_key).unwrap();
+                    assert!(surface.pending_projection_request.is_none());
+                    assert!(surface.pending_projection_applied_sequence.is_none());
+                    assert_eq!(surface.projection.as_ref(), Some(&authoritative));
+                    assert_eq!(this.dock_rebuild_count, rebuilds + 1);
                     cx.notify();
                 });
             });
+            window.update(|window, cx| _ = window.draw(cx));
+            let restored_first = window.debug_bounds(terminal_selector(pane_ids[0])).unwrap();
+            let restored_second = window.debug_bounds(terminal_selector(pane_ids[1])).unwrap();
+            let restored_width = restored_first.size.width + restored_second.size.width;
+            assert!(
+                (restored_first.size.width / restored_width - 0.5).abs() < 0.03,
+                "disconnect must restore the authoritative split before reconnect"
+            );
             assert!(window.read(|app| {
                 view.read(app).connection(1).is_some_and(|connection| {
                     connection.status == ConnectionStatus::Disconnected && !connection.can_mutate()
@@ -4977,6 +7255,15 @@ mod tests {
                 identity,
                 "reconnect should retain the Server runtime"
             );
+            assert!(window.read(|app| {
+                let murmur = view.read(app);
+                let session = murmur.active_session().unwrap();
+                let surface = murmur.dock_surfaces.get(&surface_key).unwrap();
+                surface.pending_projection_request.is_none()
+                    && surface.pending_projection_applied_sequence.is_none()
+                    && surface.projection.as_ref()
+                        == Some(session.tab(surface_key.tab_id).unwrap().layout())
+            }));
 
             window.update(|window, cx| {
                 view.update(cx, |this, cx| this.remove_server(1, window, cx));
