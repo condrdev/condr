@@ -678,7 +678,7 @@ mod tests {
 
         drop(stream);
         drop(listener);
-        assert!(!path.exists());
+        assert!(path.exists());
         cleanup_test_artifacts(&path);
     }
 

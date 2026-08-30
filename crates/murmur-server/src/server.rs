@@ -763,7 +763,10 @@ impl RuntimeState {
         let mut failed_panes = Vec::new();
         let mut repaired_cwds = 0;
         for (pane_id, saved_cwd, workspace_root) in launch_specs {
-            let requested_cwd = saved_cwd.as_deref().unwrap_or(workspace_root.as_path());
+            let requested_cwd = saved_cwd
+                .as_deref()
+                .filter(|cwd| cwd.is_absolute())
+                .unwrap_or(workspace_root.as_path());
             let started = match TerminalRuntime::spawn_shell(
                 requested_cwd,
                 TerminalSize::new(24, 80),
@@ -4747,6 +4750,10 @@ mod tests {
             .split_pane(pane_id, murmur_core::SplitDirection::Horizontal, 0.5)
             .unwrap();
         assert!(session.set_pane_cwd(absent_cwd_pane, None));
+        let relative_cwd_pane = session
+            .split_pane(absent_cwd_pane, murmur_core::SplitDirection::Vertical, 0.5)
+            .unwrap();
+        assert!(session.set_pane_cwd(relative_cwd_pane, Some(PathBuf::from("."))));
         persist_snapshot(snapshot_path.clone(), session.snapshot());
 
         let endpoint = test_endpoint();
@@ -4754,13 +4761,19 @@ mod tests {
             ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
         )
         .unwrap();
-        assert_eq!(server.startup_terminals.len(), 2);
+        assert_eq!(server.startup_terminals.len(), 3);
         let recovered_before_runtime = Session::restore(server.handle().snapshot()).unwrap();
         assert_eq!(
             recovered_before_runtime
                 .pane(absent_cwd_pane)
                 .and_then(|pane| pane.cwd()),
             None
+        );
+        assert_eq!(
+            recovered_before_runtime
+                .pane(relative_cwd_pane)
+                .and_then(|pane| pane.cwd()),
+            Some(workspace_root.as_path())
         );
         let handle = server.handle();
         let thread = thread::spawn(move || server.run());
@@ -4771,7 +4784,7 @@ mod tests {
             repaired_session.pane(pane_id).and_then(|pane| pane.cwd()),
             Some(workspace_root.as_path())
         );
-        assert_eq!(connection.bootstrap().terminals.len(), 2);
+        assert_eq!(connection.bootstrap().terminals.len(), 3);
         let repaired_snapshot = connection.bootstrap().snapshot.clone();
 
         drop(connection);
