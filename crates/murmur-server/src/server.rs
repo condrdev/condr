@@ -4572,11 +4572,11 @@ mod tests {
         panic!("server did not start");
     }
 
-    fn persist_snapshot(path: PathBuf, snapshot: murmur_core::SessionSnapshot) {
-        let mut persistence =
-            SnapshotPersistence::open_with_debounce(path, Duration::from_millis(10)).unwrap();
-        persistence.schedule(snapshot);
-        persistence.shutdown().unwrap();
+    fn write_snapshot_fixture(path: PathBuf, snapshot: murmur_core::SessionSnapshot) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, snapshot.to_bytes().unwrap()).unwrap();
     }
 
     fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
@@ -4754,7 +4754,7 @@ mod tests {
             .split_pane(absent_cwd_pane, murmur_core::SplitDirection::Vertical, 0.5)
             .unwrap();
         assert!(session.set_pane_cwd(relative_cwd_pane, Some(PathBuf::from("."))));
-        persist_snapshot(snapshot_path.clone(), session.snapshot());
+        write_snapshot_fixture(snapshot_path.clone(), session.snapshot());
 
         let endpoint = test_endpoint();
         let server = BoundServer::bind(
@@ -4832,7 +4832,7 @@ mod tests {
             .unwrap();
         assert!(session.set_pane_cwd(failed_pane, Some(missing_cwd)));
         let persisted = session.snapshot();
-        persist_snapshot(snapshot_path.clone(), persisted);
+        write_snapshot_fixture(snapshot_path.clone(), persisted);
 
         let endpoint = test_endpoint();
         let server = BoundServer::bind(
@@ -4892,7 +4892,7 @@ mod tests {
         session
             .create_workspace(directory.join("missing"))
             .expect("Workspace capacity");
-        persist_snapshot(snapshot_path.clone(), session.snapshot());
+        write_snapshot_fixture(snapshot_path.clone(), session.snapshot());
 
         let endpoint = test_endpoint();
         let server = BoundServer::bind(
@@ -4967,7 +4967,7 @@ mod tests {
         session
             .close_workspace(parent_workspace_id)
             .expect("historical parent Workspace exists");
-        persist_snapshot(snapshot_path.clone(), session.snapshot());
+        write_snapshot_fixture(snapshot_path.clone(), session.snapshot());
 
         let first_endpoint = test_endpoint();
         let first_server = BoundServer::bind(
@@ -5352,7 +5352,7 @@ mod tests {
             .active_tab()
             .focused_pane()
             .id();
-        persist_snapshot(snapshot_path.clone(), session.snapshot());
+        write_snapshot_fixture(snapshot_path.clone(), session.snapshot());
 
         let endpoint = test_endpoint();
         let server = BoundServer::bind(
