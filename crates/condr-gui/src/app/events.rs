@@ -21,12 +21,7 @@ impl Condr {
         .map_err(|error| error.to_string())?;
         let application = connection.apply_bootstrap(bootstrap);
         connection.io = Some(io);
-        connection.controlling = false;
-        connection.subscribed = false;
-        connection.subscription_pending = false;
-        connection.bootstrap_resync_session_id = None;
-        connection.control_retry_attempts = 0;
-        connection.control_retry_scheduled = false;
+        connection.reset_sync_state();
         Ok(application)
     }
 
@@ -291,12 +286,7 @@ impl Condr {
         connection.connect_generation = connection.connect_generation.wrapping_add(1);
         let generation = connection.connect_generation;
         connection.status = ConnectionStatus::Connecting;
-        connection.controlling = false;
-        connection.subscribed = false;
-        connection.subscription_pending = false;
-        connection.bootstrap_resync_session_id = None;
-        connection.control_retry_attempts = 0;
-        connection.control_retry_scheduled = false;
+        connection.reset_sync_state();
         connection.error = None;
         let endpoint = connection.endpoint.clone();
         let sender = self.connect_results_tx.clone();
@@ -324,12 +314,7 @@ impl Condr {
         }
         connection.connect_generation = connection.connect_generation.wrapping_add(1);
         connection.status = ConnectionStatus::Disconnected;
-        connection.controlling = false;
-        connection.subscribed = false;
-        connection.subscription_pending = false;
-        connection.bootstrap_resync_session_id = None;
-        connection.control_retry_attempts = 0;
-        connection.control_retry_scheduled = false;
+        connection.reset_sync_state();
         connection.error = None;
         self.clear_pending_workspace_selection_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
@@ -528,35 +513,17 @@ impl Condr {
             Incoming::TerminalResync => {
                 let notify = self.connections[index].request_snapshot();
                 return IncomingEffect {
-                    rebuild: false,
                     notify,
                     ..IncomingEffect::default()
                 };
             }
             Incoming::VisualReady(_) => return IncomingEffect::default(),
             Incoming::Disconnected(error) => {
-                let connection = &mut self.connections[index];
-                connection.status = ConnectionStatus::Disconnected;
-                connection.controlling = false;
-                connection.subscribed = false;
-                connection.subscription_pending = false;
-                connection.bootstrap_resync_session_id = None;
-                connection.control_retry_attempts = 0;
-                connection.control_retry_scheduled = false;
-                connection.error = Some(format!("Server connection closed: {error}"));
-                connection.io = None;
-                let active_projection_cleared = self.clear_pending_projections_for(key);
-                clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
-                let released_presentation = self
-                    .pending_presentation_request
-                    .is_some_and(|(pending_key, _)| pending_key == key);
-                let pending_cleared = self.clear_pending_workspace_selection_for(key);
-                return IncomingEffect {
-                    rebuild: self.active_connection == key
-                        && (pending_cleared || active_projection_cleared),
-                    rebuild_active: released_presentation,
-                    notify: true,
-                };
+                return self.mark_disconnected(
+                    key,
+                    index,
+                    format!("Server connection closed: {error}"),
+                );
             }
         };
 
@@ -566,7 +533,6 @@ impl Condr {
             | ServerMessage::TerminalFrameChunk(_) => {
                 let notify = self.connections[index].request_snapshot();
                 IncomingEffect {
-                    rebuild: false,
                     notify,
                     ..IncomingEffect::default()
                 }
@@ -601,7 +567,6 @@ impl Condr {
                         connection.subscription_pending = false;
                         connection.request_snapshot();
                         return IncomingEffect {
-                            rebuild: false,
                             notify: true,
                             ..IncomingEffect::default()
                         };
@@ -651,7 +616,6 @@ impl Condr {
                     }
                 }
                 IncomingEffect {
-                    rebuild: false,
                     notify,
                     ..IncomingEffect::default()
                 }
@@ -671,7 +635,6 @@ impl Condr {
                     Err(()) => {
                         let notify = self.connections[index].request_snapshot();
                         return IncomingEffect {
-                            rebuild: false,
                             notify,
                             ..IncomingEffect::default()
                         };
@@ -700,7 +663,6 @@ impl Condr {
                             .any(|pane_id| surface.pane_ids.contains(pane_id))
                     });
                 IncomingEffect {
-                    rebuild: false,
                     notify,
                     ..IncomingEffect::default()
                 }
@@ -858,28 +820,7 @@ impl Condr {
                 IncomingEffect::default()
             }
             ServerMessage::ServerStopping => {
-                let connection = &mut self.connections[index];
-                connection.status = ConnectionStatus::Disconnected;
-                connection.controlling = false;
-                connection.subscribed = false;
-                connection.subscription_pending = false;
-                connection.bootstrap_resync_session_id = None;
-                connection.control_retry_attempts = 0;
-                connection.control_retry_scheduled = false;
-                connection.error = Some("condr-server stopped".into());
-                connection.io = None;
-                let active_projection_cleared = self.clear_pending_projections_for(key);
-                clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
-                let released_presentation = self
-                    .pending_presentation_request
-                    .is_some_and(|(pending_key, _)| pending_key == key);
-                let pending_cleared = self.clear_pending_workspace_selection_for(key);
-                IncomingEffect {
-                    rebuild: self.active_connection == key
-                        && (pending_cleared || active_projection_cleared),
-                    rebuild_active: released_presentation,
-                    notify: true,
-                }
+                self.mark_disconnected(key, index, "condr-server stopped".into())
             }
             ServerMessage::Subscribed {
                 server_id,
@@ -908,6 +849,31 @@ impl Condr {
                 }
             }
             ServerMessage::Welcome { .. } | ServerMessage::Pong { .. } => IncomingEffect::default(),
+        }
+    }
+
+    fn mark_disconnected(
+        &mut self,
+        key: ConnectionKey,
+        index: usize,
+        message: String,
+    ) -> IncomingEffect {
+        let connection = &mut self.connections[index];
+        connection.status = ConnectionStatus::Disconnected;
+        connection.reset_sync_state();
+        connection.error = Some(message);
+        connection.io = None;
+        let active_projection_cleared = self.clear_pending_projections_for(key);
+        clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+        let released_presentation = self
+            .pending_presentation_request
+            .is_some_and(|(pending_key, _)| pending_key == key);
+        let pending_cleared = self.clear_pending_workspace_selection_for(key);
+        IncomingEffect {
+            rebuild: self.active_connection == key
+                && (pending_cleared || active_projection_cleared),
+            rebuild_active: released_presentation,
+            notify: true,
         }
     }
 }

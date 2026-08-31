@@ -61,15 +61,14 @@ impl SnapshotPersistence {
                     "Snapshot path has no parent directory",
                 )
             })?;
-        if path.file_name().is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Snapshot path must name a file",
-            ));
-        }
         let file_name = path
             .file_name()
-            .expect("Snapshot file name was checked")
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Snapshot path must name a file",
+                )
+            })?
             .to_os_string();
         fs::create_dir_all(parent)?;
         let path = fs::canonicalize(parent)?.join(file_name);
@@ -106,7 +105,7 @@ impl SnapshotPersistence {
         let worker_path = path.clone();
         let worker = thread::Builder::new()
             .name("condr-snapshot".into())
-            .spawn(move || run_worker(worker_path, worker_shared))?;
+            .spawn(move || run_worker_with(worker_path, worker_shared, write_snapshot))?;
 
         Ok(Self {
             path,
@@ -208,10 +207,6 @@ impl Drop for SnapshotPersistence {
     }
 }
 
-fn run_worker(path: PathBuf, shared: Arc<Shared>) -> io::Result<()> {
-    run_worker_with(path, shared, write_snapshot)
-}
-
 fn run_worker_with(
     path: PathBuf,
     shared: Arc<Shared>,
@@ -287,7 +282,12 @@ fn wait_for_snapshot(shared: &Shared) -> Option<SessionSnapshot> {
 }
 
 fn write_snapshot(path: &Path, snapshot: &SessionSnapshot) -> io::Result<()> {
-    let bytes = snapshot.to_bytes().map_err(snapshot_encoding_error)?;
+    let bytes = snapshot.to_bytes().map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("cannot encode Session Snapshot: {error}"),
+        )
+    })?;
     if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -316,13 +316,6 @@ fn atomic_replace(
     AtomicFile::new(path, AllowOverwrite)
         .write_with_options(write, options)
         .map_err(io::Error::from)
-}
-
-fn snapshot_encoding_error(error: Box<bincode::ErrorKind>) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("cannot encode Session Snapshot: {error}"),
-    )
 }
 
 fn adjacent_lock_path(path: &Path) -> PathBuf {

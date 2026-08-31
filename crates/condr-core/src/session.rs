@@ -203,16 +203,8 @@ impl Session {
         }
         let first_id = reserve_ids(3)?;
         let workspace_id = WorkspaceId(first_id);
-        let tab_id = TabId(
-            first_id
-                .checked_add(1)
-                .expect("three stable IDs were reserved"),
-        );
-        let pane_id = PaneId(
-            first_id
-                .checked_add(2)
-                .expect("three stable IDs were reserved"),
-        );
+        let tab_id = TabId(first_id + 1);
+        let pane_id = PaneId(first_id + 2);
         let workspace = Workspace {
             id: workspace_id,
             name: workspace_name(&root_directory),
@@ -260,11 +252,7 @@ impl Session {
             .filter(|next| *next < MAX_NEXT_TAB_NUMBER_EXCLUSIVE)?;
         let first_id = reserve_ids(2)?;
         let tab_id = TabId(first_id);
-        let pane_id = PaneId(
-            first_id
-                .checked_add(1)
-                .expect("two stable IDs were reserved"),
-        );
+        let pane_id = PaneId(first_id + 1);
         workspace.next_tab_number = next_tab_number;
         workspace.tabs.push(Tab {
             id: tab_id,

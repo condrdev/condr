@@ -242,7 +242,7 @@ where
     S: AsRef<std::ffi::OsStr>,
 {
     let output = checked(cwd, args)?;
-    let bytes = trim_ascii(&output.stdout);
+    let bytes = output.stdout.trim_ascii_end();
     if bytes.is_empty() {
         return Err(GitError("Git returned an empty path".into()));
     }
@@ -268,13 +268,6 @@ fn command_error(error: std::io::Error) -> GitError {
 
 fn text(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
-    while bytes.last().is_some_and(u8::is_ascii_whitespace) {
-        bytes = &bytes[..bytes.len() - 1];
-    }
-    bytes
 }
 
 #[cfg(unix)]

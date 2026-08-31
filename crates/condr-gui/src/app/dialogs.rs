@@ -44,6 +44,49 @@ impl Condr {
         );
     }
 
+    pub(super) fn prompt_directory_on(
+        &mut self,
+        key: ConnectionKey,
+        title: String,
+        ok_text: &'static str,
+        apply: impl Fn(&mut Condr, PathBuf, &mut Window, &mut Context<Condr>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(local_endpoint) = self
+            .connection(key)
+            .map(|connection| connection.endpoint.as_local_path().is_some())
+        else {
+            return;
+        };
+        if !local_endpoint {
+            self.prompt_server_path(
+                title,
+                ok_text,
+                move |this, path, window, cx| apply(this, PathBuf::from(path), window, cx),
+                window,
+                cx,
+            );
+            return;
+        }
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(title.into()),
+        });
+        let owner = cx.weak_entity();
+        window
+            .spawn(cx, async move |cx| {
+                let path = paths.await.ok()?.ok()??.into_iter().next()?;
+                owner
+                    .update_in(cx, |this, window, cx| apply(this, path, window, cx))
+                    .ok()?;
+                Some(())
+            })
+            .detach();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn prompt_text_input(
         &mut self,
@@ -287,58 +330,24 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(local_endpoint) = self
-            .connection(key)
-            .map(|connection| connection.endpoint.as_local_path().is_some())
-        else {
-            return;
-        };
-        if !local_endpoint {
-            self.prompt_server_path(
-                format!("Open Existing Worktree from {workspace_name}"),
-                "Open",
-                move |this, path, window, cx| {
-                    this.send_presenting_layout_to(
-                        key,
-                        LayoutCommand::OpenWorktree {
-                            parent_workspace_id,
-                            root_directory: PathBuf::from(path),
-                        },
-                        window,
-                        cx,
-                    );
-                },
-                window,
-                cx,
-            );
-            return;
-        }
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(format!("Open Existing Worktree from {workspace_name}").into()),
-        });
-        let owner = cx.weak_entity();
-        window
-            .spawn(cx, async move |cx| {
-                let root_directory = paths.await.ok()?.ok()??.into_iter().next()?;
-                owner
-                    .update_in(cx, |this, window, cx| {
-                        this.send_presenting_layout_to(
-                            key,
-                            LayoutCommand::OpenWorktree {
-                                parent_workspace_id,
-                                root_directory,
-                            },
-                            window,
-                            cx,
-                        )
-                    })
-                    .ok()?;
-                Some(())
-            })
-            .detach();
+        self.prompt_directory_on(
+            key,
+            format!("Open Existing Worktree from {workspace_name}"),
+            "Open",
+            move |this, root_directory, window, cx| {
+                this.send_presenting_layout_to(
+                    key,
+                    LayoutCommand::OpenWorktree {
+                        parent_workspace_id,
+                        root_directory,
+                    },
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
     }
 
     pub(super) fn confirm_remove_worktree_on(

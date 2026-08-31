@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -218,13 +218,6 @@ impl ServerHandle {
             .expect("server state lock poisoned")
             .server_id
     }
-
-    pub fn runtime_epoch(&self) -> RuntimeEpoch {
-        self.state
-            .lock()
-            .expect("server state lock poisoned")
-            .runtime_epoch
-    }
 }
 
 pub struct BoundServer {
@@ -232,7 +225,6 @@ pub struct BoundServer {
     stop: Arc<AtomicBool>,
     lifecycle: Arc<ServerLifecycle>,
     state: Arc<Mutex<RuntimeState>>,
-    next_client_id: Arc<AtomicU64>,
     startup_terminals: Vec<StartedTerminal>,
 }
 
@@ -253,7 +245,6 @@ impl BoundServer {
             stop: Arc::new(AtomicBool::new(false)),
             lifecycle: Arc::new(ServerLifecycle::default()),
             state: Arc::new(Mutex::new(state)),
-            next_client_id: Arc::new(AtomicU64::new(1)),
             startup_terminals,
         })
     }
@@ -301,10 +292,12 @@ impl BoundServer {
         }
 
         let mut run_result = Ok(());
+        let mut next_client_id = 1_u64;
         while !self.stop.load(Ordering::Acquire) {
             match self.listener.accept() {
                 Ok(stream) => {
-                    let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+                    let client_id = next_client_id;
+                    next_client_id = next_client_id.wrapping_add(1);
                     let state = Arc::clone(&self.state);
                     let stop = Arc::clone(&self.stop);
                     let lifecycle = Arc::clone(&self.lifecycle);
@@ -382,18 +375,17 @@ struct ServerLifecycle {
 #[derive(Default)]
 struct ServerLifecycleState {
     stopping: bool,
-    external_operations: usize,
-    terminal_operations: usize,
+    operations: usize,
 }
 
 impl ServerLifecycle {
-    fn begin_external(self: &Arc<Self>) -> Option<ExternalOperationGuard> {
+    fn begin_operation(self: &Arc<Self>) -> Option<OperationGuard> {
         let mut state = self.state.lock().expect("server lifecycle lock poisoned");
         if state.stopping {
             return None;
         }
-        state.external_operations += 1;
-        Some(ExternalOperationGuard {
+        state.operations += 1;
+        Some(OperationGuard {
             lifecycle: Arc::clone(self),
         })
     }
@@ -403,17 +395,6 @@ impl ServerLifecycle {
             .lock()
             .expect("server lifecycle lock poisoned")
             .stopping = true;
-    }
-
-    fn begin_terminal_operation(self: &Arc<Self>) -> Option<TerminalOperationGuard> {
-        let mut state = self.state.lock().expect("server lifecycle lock poisoned");
-        if state.stopping {
-            return None;
-        }
-        state.terminal_operations += 1;
-        Some(TerminalOperationGuard {
-            lifecycle: Arc::clone(self),
-        })
     }
 
     fn is_stopping(&self) -> bool {
@@ -427,9 +408,7 @@ impl ServerLifecycle {
         let state = self.state.lock().expect("server lifecycle lock poisoned");
         let _state = self
             .idle
-            .wait_while(state, |state| {
-                state.external_operations != 0 || state.terminal_operations != 0
-            })
+            .wait_while(state, |state| state.operations != 0)
             .expect("server lifecycle lock poisoned");
     }
 }
@@ -506,37 +485,19 @@ fn clear_invalid_restored_worktrees(session: &mut Session) -> usize {
     cleared
 }
 
-struct ExternalOperationGuard {
+struct OperationGuard {
     lifecycle: Arc<ServerLifecycle>,
 }
 
-struct TerminalOperationGuard {
-    lifecycle: Arc<ServerLifecycle>,
-}
-
-impl Drop for ExternalOperationGuard {
+impl Drop for OperationGuard {
     fn drop(&mut self) {
         let mut state = self
             .lifecycle
             .state
             .lock()
             .expect("server lifecycle lock poisoned");
-        state.external_operations -= 1;
-        if state.external_operations == 0 {
-            self.lifecycle.idle.notify_all();
-        }
-    }
-}
-
-impl Drop for TerminalOperationGuard {
-    fn drop(&mut self) {
-        let mut state = self
-            .lifecycle
-            .state
-            .lock()
-            .expect("server lifecycle lock poisoned");
-        state.terminal_operations -= 1;
-        if state.external_operations == 0 && state.terminal_operations == 0 {
+        state.operations -= 1;
+        if state.operations == 0 {
             self.lifecycle.idle.notify_all();
         }
     }
@@ -1147,11 +1108,11 @@ impl RuntimeState {
     }
 
     fn publish_event(&mut self, event: SessionEvent, origin: Option<(u64, &ClientWriter)>) -> bool {
+        self.sequence = self.sequence.saturating_add(1);
         self.events.push_back(SequencedEvent {
-            sequence: self.sequence.saturating_add(1),
+            sequence: self.sequence,
             event: event.clone(),
         });
-        self.sequence = self.sequence.saturating_add(1);
         while self.events.len() > EVENT_HISTORY_LIMIT {
             self.events.pop_front();
         }
@@ -1178,26 +1139,24 @@ impl RuntimeState {
     }
 
     fn publish_terminal(&mut self, pane_id: PaneId, frame: TerminalViewFrame) -> Option<Vec<u64>> {
-        let latest = match frame {
-            TerminalViewFrame::Full(view) => LatestTerminalView {
-                view: Arc::new(view),
-                producer_frame: None,
-            },
+        match frame {
+            TerminalViewFrame::Full(view) => {
+                self.terminal_views.insert(
+                    pane_id,
+                    LatestTerminalView {
+                        view: Arc::new(view),
+                        producer_frame: None,
+                    },
+                );
+            }
             TerminalViewFrame::Delta(delta) => {
                 let latest = self.terminal_views.get_mut(&pane_id)?;
                 Arc::make_mut(&mut latest.view)
                     .apply_frame(TerminalViewFrame::Delta(delta.clone()))
                     .ok()?;
                 latest.producer_frame = Some(TerminalViewFrame::Delta(delta));
-                let client_ids = self.subscribers.keys().copied().collect::<Vec<_>>();
-                for subscriber in self.subscribers.values_mut() {
-                    subscriber.pending_terminals.insert(pane_id);
-                    subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
-                }
-                return Some(client_ids);
             }
-        };
-        self.terminal_views.insert(pane_id, latest);
+        }
         let client_ids = self.subscribers.keys().copied().collect::<Vec<_>>();
         for subscriber in self.subscribers.values_mut() {
             subscriber.pending_terminals.insert(pane_id);

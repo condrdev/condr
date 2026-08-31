@@ -225,10 +225,6 @@ impl TerminalRuntime {
         self.updates.take()
     }
 
-    pub fn cwd(&self) -> Option<PathBuf> {
-        self.cwd_probe().cwd()
-    }
-
     pub fn cwd_probe(&self) -> TerminalCwdProbe {
         TerminalCwdProbe {
             #[cfg(unix)]
@@ -374,7 +370,7 @@ impl TerminalRuntime {
         terminal.scroll_display(scroll);
         if terminal.grid().display_offset() != before {
             drop(terminal);
-            self.notify_view();
+            publish_view(&self.revision, &self.update_sender);
         }
     }
 
@@ -398,13 +394,8 @@ impl TerminalRuntime {
         if terminal.grid().display_offset() != 0 {
             terminal.scroll_display(Scroll::Bottom);
             drop(terminal);
-            self.notify_view();
+            publish_view(&self.revision, &self.update_sender);
         }
-    }
-
-    fn notify_view(&self) {
-        let revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
-        let _ = self.update_sender.send(TerminalUpdate::View(revision));
     }
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
@@ -647,9 +638,7 @@ impl TerminalCwdProbe {
 
         #[cfg(unix)]
         let observed = foreground.or(reported_cwd).or_else(|| self.process.cwd());
-        #[cfg(windows)]
-        let observed = reported_cwd.or_else(|| self.process.cwd());
-        #[cfg(not(any(unix, windows)))]
+        #[cfg(not(unix))]
         let observed = reported_cwd.or_else(|| self.process.cwd());
         let cwd = if let Some(cwd) = observed {
             *last_known = Some(cwd.clone());

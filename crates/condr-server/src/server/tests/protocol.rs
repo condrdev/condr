@@ -122,12 +122,7 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
 
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut stream, session_id);
 
     condr_core::protocol::write_message(
         &mut stream,
@@ -278,18 +273,7 @@ fn rejected_subscription_is_typed_and_removes_the_previous_subscriber() {
         (state.server_id, state.session_id)
     };
 
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientMessage::Subscribe {
-            session_id,
-            after_sequence: 0,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
-        ServerMessage::Subscribed { .. }
-    ));
+    subscribe(&mut stream, session_id, 0);
     assert_eq!(handle.state.lock().unwrap().subscribers.len(), 1);
 
     condr_core::protocol::write_message(
@@ -414,12 +398,7 @@ fn controller_is_exclusive_and_released_on_disconnect() {
     let mut second = connect_and_bootstrap(&endpoint);
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
-    condr_core::protocol::write_message(&mut first, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut first, session_id);
     condr_core::protocol::write_message(&mut second, &ClientMessage::AcquireControl { session_id })
         .unwrap();
     assert!(matches!(
@@ -451,12 +430,7 @@ fn controller_is_exclusive_and_released_on_disconnect() {
     ));
     drop(first);
     thread::sleep(Duration::from_millis(20));
-    condr_core::protocol::write_message(&mut second, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut second, session_id);
     handle.stop();
     drop(second);
     thread.join().unwrap().unwrap();
@@ -470,12 +444,7 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
 
-    condr_core::protocol::write_message(&mut first, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut first, session_id);
     condr_core::protocol::write_message(
         &mut first,
         &ClientMessage::Layout {
@@ -581,15 +550,7 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
         ServerMessage::Subscribed { sequence: 0, .. }
     ));
 
-    condr_core::protocol::write_message(
-        &mut controller,
-        &ClientMessage::AcquireControl { session_id },
-    )
-    .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut controller, session_id);
 
     let mut snapshot_sequences = Vec::new();
     for request_id in 1..=2 {
@@ -682,18 +643,7 @@ fn stop_message_ends_server_when_the_requesting_client_is_not_reading() {
     stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientMessage::Subscribe {
-            session_id,
-            after_sequence: 0,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::Subscribed { .. }
-    ));
+    subscribe(&mut stream, session_id, 0);
 
     let subscriber_writer = {
         let state = handle.state.lock().unwrap();
@@ -741,27 +691,8 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
 
-    condr_core::protocol::write_message(
-        &mut controller,
-        &ClientMessage::AcquireControl { session_id },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut controller),
-        ServerMessage::ControlGranted { .. }
-    ));
-    condr_core::protocol::write_message(
-        &mut controller,
-        &ClientMessage::Subscribe {
-            session_id,
-            after_sequence: bootstrap.sequence,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut controller),
-        ServerMessage::Subscribed { .. }
-    ));
+    acquire_control(&mut controller, session_id);
+    subscribe(&mut controller, session_id, bootstrap.sequence);
     condr_core::protocol::write_message(
         &mut controller,
         &ClientMessage::Layout {
@@ -894,15 +825,7 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
     let mut controller = connect_and_bootstrap(&endpoint);
-    condr_core::protocol::write_message(
-        &mut controller,
-        &ClientMessage::AcquireControl { session_id },
-    )
-    .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut controller, session_id);
     condr_core::protocol::write_message(
         &mut controller,
         &ClientMessage::Layout {
@@ -1052,24 +975,8 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::ControlGranted { .. }
-    ));
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientMessage::Subscribe {
-            session_id,
-            after_sequence: bootstrap.sequence,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::Subscribed { .. }
-    ));
+    acquire_control(&mut stream, session_id);
+    subscribe(&mut stream, session_id, bootstrap.sequence);
     condr_core::protocol::write_message(
         &mut stream,
         &ClientMessage::Layout {

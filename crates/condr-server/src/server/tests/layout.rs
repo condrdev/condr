@@ -623,24 +623,8 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     first
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(&mut first, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        read_server(&mut first),
-        ServerMessage::ControlGranted { .. }
-    ));
-    condr_core::protocol::write_message(
-        &mut first,
-        &ClientMessage::Subscribe {
-            session_id,
-            after_sequence: first_bootstrap.sequence,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut first),
-        ServerMessage::Subscribed { .. }
-    ));
+    acquire_control(&mut first, session_id);
+    subscribe(&mut first, session_id, first_bootstrap.sequence);
     let mut first_terminal_views = std::collections::HashMap::new();
     condr_core::protocol::write_message(
         &mut first,
@@ -711,12 +695,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     second
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(&mut second, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        read_server(&mut second),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut second, session_id);
     condr_core::protocol::write_message(
         &mut second,
         &ClientMessage::Subscribe {

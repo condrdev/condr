@@ -165,12 +165,9 @@ impl ClientWriterReceiver {
             if let Some(item) = state.reliable.pop_front() {
                 return Some(item);
             }
-            if state.render.is_some() {
-                let (data, slot_drained) = {
-                    let frames = state.render.as_mut().expect("render slot must exist");
-                    let data = frames.pop_front().expect("render slot must not be empty");
-                    (data, frames.is_empty())
-                };
+            if let Some(frames) = state.render.as_mut() {
+                let data = frames.pop_front().expect("render slot must not be empty");
+                let slot_drained = frames.is_empty();
                 if slot_drained {
                     state.render = None;
                 }

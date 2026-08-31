@@ -51,7 +51,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                     last_view_publish = Instant::now();
                 }
                 Some(TerminalUpdate::Exited) => {
-                    let Some(_operation) = lifecycle.begin_terminal_operation() else {
+                    let Some(_operation) = lifecycle.begin_operation() else {
                         break;
                     };
                     let cwd_before_shutdown = cwd_probe.observe();

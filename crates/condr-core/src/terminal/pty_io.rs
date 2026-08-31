@@ -28,11 +28,8 @@ pub(super) struct TerminalInput {
 
 impl TerminalInput {
     pub(super) fn channel() -> (Self, mpsc::Receiver<QueuedInput>) {
-        let (sender, receiver) = mpsc::sync_channel(
-            INPUT_QUEUE_CAPACITY
-                .checked_add(TERMINAL_REPLY_QUEUE_RESERVE)
-                .expect("terminal input queue capacity fits usize"),
-        );
+        let (sender, receiver) =
+            mpsc::sync_channel(INPUT_QUEUE_CAPACITY + TERMINAL_REPLY_QUEUE_RESERVE);
         (
             Self {
                 sender,

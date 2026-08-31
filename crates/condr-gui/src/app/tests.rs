@@ -11,14 +11,13 @@ use condr_server::Endpoint;
 use gpui::{AssetSource as _, Keystroke, Task};
 
 use super::{
-    ACTIVE_PANE_BORDER_RGB, ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab,
-    PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown,
-    SplitRight, TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input,
-    agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
-    clear_pending_sizes_for_bootstrap, connect_to_server_with,
-    enforce_terminal_chunk_reliable_fence, fixed_shortcut, merge_terminal_deltas,
-    read_bootstrap_batches, server_sidebar_status, terminal_chunk_identity_matches,
-    terminal_clipboard_shortcut,
+    ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, PreviousTab, ServerConnection,
+    SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown, SplitRight,
+    TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
+    apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
+    connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
+    merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
+    terminal_chunk_identity_matches, terminal_clipboard_shortcut,
 };
 
 fn terminal_cell(text: &str) -> TerminalCell {
@@ -103,11 +102,6 @@ fn pane_id() -> condr_core::PaneId {
         .active_tab()
         .focused_pane()
         .id()
-}
-
-#[test]
-fn active_pane_border_uses_the_requested_blue() {
-    assert_eq!(ACTIVE_PANE_BORDER_RGB, 0x0078d4);
 }
 
 #[test]

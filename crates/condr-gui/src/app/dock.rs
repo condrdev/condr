@@ -475,16 +475,14 @@ impl Condr {
                 dock.set_locked(true, window, cx);
                 dock.set_center(dock_layout, window, cx);
             });
-            self.dock_surfaces
+            let surface = self
+                .dock_surfaces
                 .get_mut(&surface_key)
-                .expect("Dock surface was installed")
-                .projection = Some(layout);
+                .expect("Dock surface was installed");
+            surface.projection = Some(layout);
             #[cfg(feature = "test-support")]
             {
-                self.dock_surfaces
-                    .get_mut(&surface_key)
-                    .expect("Dock surface was installed")
-                    .layout_size = Some(available_size);
+                surface.layout_size = Some(available_size);
                 self.dock_rebuild_count += 1;
             }
         }

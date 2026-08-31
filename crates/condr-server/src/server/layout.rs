@@ -451,15 +451,9 @@ pub(super) fn apply_layout_command(
                     .id(),
             );
         }
-        LayoutCommand::CreateWorktree {
-            parent_workspace_id: _,
-            branch: _,
-        } => return Err("worktree command was not prepared".into()),
-        LayoutCommand::OpenWorktree {
-            parent_workspace_id: _,
-            root_directory: _,
-        }
-        | LayoutCommand::RemoveWorktree { workspace_id: _ } => {
+        LayoutCommand::CreateWorktree { .. }
+        | LayoutCommand::OpenWorktree { .. }
+        | LayoutCommand::RemoveWorktree { .. } => {
             return Err("worktree command was not prepared".into());
         }
         LayoutCommand::CreateTab { workspace_id } => {
@@ -809,7 +803,7 @@ pub(super) fn apply_prepared_external_layout(
         }
         PreparedExternalLayout::RemoveWorktree { workspace_id } => {
             let mut candidate = state.session.clone();
-            let workspace = candidate
+            candidate
                 .workspace(workspace_id)
                 .filter(|workspace| {
                     workspace
@@ -819,7 +813,6 @@ pub(super) fn apply_prepared_external_layout(
                 .ok_or_else(|| {
                     "managed Workspace changed while removing its worktree".to_string()
                 })?;
-            let _ = workspace;
             let closed = candidate
                 .close_workspace(workspace_id)
                 .expect("validated Workspace exists");

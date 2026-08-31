@@ -235,23 +235,14 @@ impl Condr {
             cx.stop_propagation();
             return;
         }
-        if modifiers.shift && stroke.key == "pageup" {
+        let scroll = match stroke.key.as_str() {
+            "pageup" if modifiers.shift => Some(TerminalScroll::PageUp),
+            "pagedown" if modifiers.shift => Some(TerminalScroll::PageDown),
+            _ => None,
+        };
+        if let Some(scroll) = scroll {
             self.clear_selection(cx);
-            self.terminal_command(
-                key,
-                pane_id,
-                TerminalCommand::Scroll(TerminalScroll::PageUp),
-            );
-            cx.stop_propagation();
-            return;
-        }
-        if modifiers.shift && stroke.key == "pagedown" {
-            self.clear_selection(cx);
-            self.terminal_command(
-                key,
-                pane_id,
-                TerminalCommand::Scroll(TerminalScroll::PageDown),
-            );
+            self.terminal_command(key, pane_id, TerminalCommand::Scroll(scroll));
             cx.stop_propagation();
             return;
         }

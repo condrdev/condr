@@ -484,31 +484,27 @@ impl SidebarItem for CondrSidebarSection {
             .map(|item| item.render(window, cx))
             .collect::<Vec<_>>();
 
-        v_flex()
-            .relative()
-            .when(!self.collapsed, |this| {
-                this.child(
-                    h_flex()
-                        .debug_selector(move || heading_row_debug_selector.to_string())
-                        .h_9()
-                        .w_full()
-                        .flex_shrink_0()
-                        .items_center()
-                        .justify_between()
-                        .pl_1()
-                        .text_xs()
-                        .text_color(cx.theme().sidebar_foreground.opacity(0.7))
-                        .child(
-                            div()
-                                .debug_selector(move || heading_debug_selector.to_string())
-                                .child(self.label),
-                        )
-                        .child((self.action)(window, cx)),
-                )
-            })
-            .when(!self.collapsed, |this| {
-                this.child(v_flex().w_full().gap_1().children(rendered_items))
-            })
+        v_flex().relative().when(!self.collapsed, |this| {
+            this.child(
+                h_flex()
+                    .debug_selector(move || heading_row_debug_selector.to_string())
+                    .h_9()
+                    .w_full()
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_between()
+                    .pl_1()
+                    .text_xs()
+                    .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                    .child(
+                        div()
+                            .debug_selector(move || heading_debug_selector.to_string())
+                            .child(self.label),
+                    )
+                    .child((self.action)(window, cx)),
+            )
+            .child(v_flex().w_full().gap_1().children(rendered_items))
+        })
     }
 }
 

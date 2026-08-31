@@ -279,7 +279,7 @@ pub(super) fn handle_client(
                         | LayoutCommand::RemoveWorktree { .. }
                 );
                 if external {
-                    let operation = lifecycle.begin_external();
+                    let operation = lifecycle.begin_operation();
                     let plan = if operation.is_some() {
                         let mut state = state.lock().expect("server state lock poisoned");
                         plan_client_external_layout(
@@ -399,10 +399,9 @@ pub(super) fn handle_client(
                                                     if state.agents.remove(&pane_id).is_some() {
                                                         cleared_agents.push(pane_id);
                                                     }
-                                                    started_terminals
-                                                        .extend([state.install_terminal(
-                                                            pane_id, runtime, updates,
-                                                        )]);
+                                                    started_terminals.push(state.install_terminal(
+                                                        pane_id, runtime, updates,
+                                                    ));
                                                 }
                                                 for pane_id in cleared_agents {
                                                     state.publish_background(

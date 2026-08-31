@@ -23,17 +23,6 @@ pub enum AgentState {
     Blocked,
 }
 
-impl AgentState {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Idle => "idle",
-            Self::Working => "working",
-            Self::Blocked => "blocked",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentSnapshot {
     pub kind: AgentKind,

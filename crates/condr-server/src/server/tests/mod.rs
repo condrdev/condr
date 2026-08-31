@@ -123,6 +123,30 @@ fn connect_and_bootstrap(endpoint: &Endpoint) -> EndpointStream {
     stream
 }
 
+fn acquire_control(stream: &mut EndpointStream, session_id: SessionId) {
+    condr_core::protocol::write_message(stream, &ClientMessage::AcquireControl { session_id })
+        .unwrap();
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(stream).unwrap(),
+        ServerMessage::ControlGranted { .. }
+    ));
+}
+
+fn subscribe(stream: &mut EndpointStream, session_id: SessionId, after_sequence: u64) {
+    condr_core::protocol::write_message(
+        stream,
+        &ClientMessage::Subscribe {
+            session_id,
+            after_sequence,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(stream).unwrap(),
+        ServerMessage::Subscribed { .. }
+    ));
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn send_terminal(
     stream: &mut EndpointStream,

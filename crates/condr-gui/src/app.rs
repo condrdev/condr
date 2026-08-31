@@ -279,6 +279,15 @@ impl ServerConnection {
         self.is_synchronized() && self.controlling
     }
 
+    fn reset_sync_state(&mut self) {
+        self.controlling = false;
+        self.subscribed = false;
+        self.subscription_pending = false;
+        self.control_retry_attempts = 0;
+        self.control_retry_scheduled = false;
+        self.bootstrap_resync_session_id = None;
+    }
+
     fn is_synchronized(&self) -> bool {
         self.status == ConnectionStatus::Connected
             && self.subscribed

@@ -23,7 +23,6 @@ use crate::{Condr, ConnectionKey};
 const INVERSE: u16 = 1 << 0;
 const BOLD: u16 = 1 << 1;
 const ITALIC: u16 = 1 << 2;
-const UNDERLINE: u16 = 1 << 3;
 const WIDE_CHAR_SPACER: u16 = 1 << 6;
 const DIM: u16 = 1 << 7;
 const HIDDEN: u16 = 1 << 8;
@@ -436,13 +435,12 @@ impl Element for TerminalElement {
                         if cell.flags & ITALIC != 0 {
                             font = font.italic();
                         }
-                        let underline = (cell.flags & (UNDERLINE | ALL_UNDERLINES) != 0).then_some(
-                            UnderlineStyle {
+                        let underline =
+                            (cell.flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
                                 thickness: px(1.),
                                 color: Some(foreground),
                                 wavy: false,
-                            },
-                        );
+                            });
                         let strikethrough =
                             (cell.flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
                                 thickness: px(1.),

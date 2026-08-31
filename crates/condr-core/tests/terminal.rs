@@ -117,7 +117,7 @@ fn runtime_cwd_uses_a_foreground_group_member_when_the_leader_matches_the_shell(
     command.cwd(&root);
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 20)).unwrap();
 
-    wait_for_cwd(|| runtime.cwd(), &expected_target);
+    wait_for_cwd(|| runtime.cwd_probe().cwd(), &expected_target);
 
     runtime.shutdown().unwrap();
     std::fs::remove_dir_all(root).unwrap();

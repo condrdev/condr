@@ -155,13 +155,10 @@ impl Condr {
         if !workspace_exists || !can_mutate {
             return;
         }
-        if self
+        if let Some(existing) = self
             .pending_workspace_selection_for(key)
-            .is_some_and(|existing| {
-                existing.workspace_id == workspace_id && existing.pane_id.is_none()
-            })
+            .filter(|existing| existing.workspace_id == workspace_id && existing.pane_id.is_none())
         {
-            let existing = self.pending_workspace_selection_for(key).unwrap();
             self.pending_presentation_request = Some((key, existing.request_id));
             return;
         }
@@ -261,13 +258,12 @@ impl Condr {
             }
             return false;
         }
-        if self
+        if let Some(selection) = self
             .pending_workspace_selection_for(key)
-            .is_some_and(|selection| {
+            .filter(|selection| {
                 selection.workspace_id == workspace_id && selection.pane_id == Some(pane_id)
             })
         {
-            let selection = self.pending_workspace_selection_for(key).unwrap();
             self.pending_presentation_request = Some((key, selection.request_id));
             return true;
         }
@@ -364,17 +360,8 @@ impl Condr {
         key: ConnectionKey,
         command: LayoutCommand,
     ) -> Option<u64> {
-        if self.has_pending_projection_for(key)
-            && !matches!(
-                &command,
-                LayoutCommand::ActivateWorkspace { .. }
-                    | LayoutCommand::FocusPane { .. }
-                    | LayoutCommand::SetSplitRatios { .. }
-            )
-        {
-            return None;
-        }
-        if self.pending_workspace_selection_for(key).is_some()
+        if (self.has_pending_projection_for(key)
+            || self.pending_workspace_selection_for(key).is_some())
             && !matches!(
                 &command,
                 LayoutCommand::ActivateWorkspace { .. }
@@ -464,44 +451,20 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((label, local_endpoint)) = self.connection(key).map(|connection| {
-            (
-                connection.label.clone(),
-                connection.endpoint.as_local_path().is_some(),
-            )
-        }) else {
+        let Some(label) = self
+            .connection(key)
+            .map(|connection| connection.label.clone())
+        else {
             return;
         };
-        if !local_endpoint {
-            self.prompt_server_path(
-                format!("New Workspace on {label}"),
-                "Create",
-                move |this, path, window, cx| {
-                    this.new_workspace_on(key, PathBuf::from(path), window, cx)
-                },
-                window,
-                cx,
-            );
-            return;
-        }
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(format!("New Workspace on {label}").into()),
-        });
-        let owner = cx.weak_entity();
-        window
-            .spawn(cx, async move |cx| {
-                let path = paths.await.ok()?.ok()??.into_iter().next()?;
-                owner
-                    .update_in(cx, |this, window, cx| {
-                        this.new_workspace_on(key, path, window, cx)
-                    })
-                    .ok()?;
-                Some(())
-            })
-            .detach();
+        self.prompt_directory_on(
+            key,
+            format!("New Workspace on {label}"),
+            "Create",
+            move |this, path, window, cx| this.new_workspace_on(key, path, window, cx),
+            window,
+            cx,
+        );
     }
 
     pub(super) fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {

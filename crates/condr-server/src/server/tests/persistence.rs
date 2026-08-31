@@ -446,24 +446,8 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::ControlGranted { .. }
-    ));
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientMessage::Subscribe {
-            session_id,
-            after_sequence: initial.sequence,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::Subscribed { .. }
-    ));
+    acquire_control(&mut stream, session_id);
+    subscribe(&mut stream, session_id, initial.sequence);
 
     let (restored_workspace_id, first_pane) = {
         let mut mutate = |command| {
@@ -631,15 +615,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     restored_stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(
-        &mut restored_stream,
-        &ClientMessage::AcquireControl { session_id },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut restored_stream),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut restored_stream, session_id);
     let cwd_check = if cfg!(windows) {
         format!(
             "if ((Get-Location).Path -eq '{}') {{ Write-Output ('CONDR_RESTORED_' + 'CWD_OK') }} else {{ Write-Output ('CONDR_RESTORED_' + 'CWD_BAD') }}\r",
@@ -738,12 +714,7 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
     stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        read_server(&mut stream),
-        ServerMessage::ControlGranted { .. }
-    ));
+    acquire_control(&mut stream, session_id);
 
     #[cfg(target_os = "linux")]
     {

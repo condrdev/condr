@@ -37,10 +37,10 @@ fn main() {
             std::process::id()
         );
     }
-    let config = snapshot_path.map_or_else(
-        || ServerConfig::new(endpoint.clone()),
-        |path| ServerConfig::new(endpoint.clone()).with_snapshot_path(path),
-    );
+    let mut config = ServerConfig::new(endpoint);
+    if let Some(path) = snapshot_path {
+        config = config.with_snapshot_path(path);
+    }
     if let Err(error) = run(config) {
         eprintln!("condr-server: {error}");
         std::process::exit(1);
