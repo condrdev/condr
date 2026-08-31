@@ -34,6 +34,8 @@ jobs:
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal
           rustup default "$RUST_VERSION"
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       - name: Build server
         run: cargo build --release --locked -p condr-server
       - name: Smoke test server
@@ -64,6 +66,8 @@ jobs:
         run: |
           rustup toolchain install $env:RUST_VERSION --profile minimal
           rustup default $env:RUST_VERSION
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
       - name: Build GUI and server
         run: cargo build --release --locked -p condr-gui -p condr-server
       - name: Smoke test server
