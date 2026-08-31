@@ -1,17 +1,17 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "linux")]
-use murmur_core::{
+use condr_core::{
     AgentKind, AgentState, TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
 };
-use murmur_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
+use condr_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
 #[cfg(target_os = "windows")]
 use sysinfo::{Pid, System};
 
 #[test]
 fn shell_spawn_rejects_a_missing_working_directory() {
     let missing = std::env::temp_dir().join(format!(
-        "murmur-missing-cwd-{}-{}",
+        "condr-missing-cwd-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -31,7 +31,7 @@ fn shell_spawn_rejects_a_missing_working_directory() {
 #[test]
 fn runtime_cwd_follows_a_real_shell_directory_change() {
     let root = std::env::temp_dir().join(format!(
-        "murmur-terminal-cwd-{}-{}",
+        "condr-terminal-cwd-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -71,7 +71,7 @@ fn bash_shell_reports_the_final_cwd_before_normal_exit() {
     }
 
     let root = std::env::temp_dir().join(format!(
-        "murmur-terminal-exit-cwd-{}-{}",
+        "condr-terminal-exit-cwd-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -102,7 +102,7 @@ fn bash_shell_reports_the_final_cwd_before_normal_exit() {
 #[test]
 fn runtime_cwd_uses_a_foreground_group_member_when_the_leader_matches_the_shell() {
     let root = std::env::temp_dir().join(format!(
-        "murmur-terminal-member-cwd-{}-{}",
+        "condr-terminal-member-cwd-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -224,7 +224,7 @@ fn close_keeps_reading_until_a_delayed_hangup_tail_is_published() {
 #[test]
 fn close_terminates_the_entire_pty_session() {
     let pid_file = std::env::temp_dir().join(format!(
-        "murmur-terminal-descendant-{}-{}",
+        "condr-terminal-descendant-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -368,7 +368,7 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
     assert_eq!(
         runtime
             .execute(TerminalCommand::Copy {
-                selection: murmur_core::TerminalSelection {
+                selection: condr_core::TerminalSelection {
                     start: TerminalPosition {
                         row: 0,
                         column: 0,
@@ -537,7 +537,7 @@ fn conpty_round_trip_resizes_unicode_and_eof() {
 #[test]
 fn conpty_close_terminates_descendant_processes() {
     let pid_file = std::env::temp_dir().join(format!(
-        "murmur-conpty-descendant-{}-{}",
+        "condr-conpty-descendant-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -640,7 +640,7 @@ fn wait_for_revision_after(runtime: &TerminalRuntime, revision: u64) {
 }
 
 #[cfg(target_os = "linux")]
-fn visible_rows(view: &murmur_core::TerminalView) -> Vec<String> {
+fn visible_rows(view: &condr_core::TerminalView) -> Vec<String> {
     (0..view.size.rows)
         .map(|row| {
             (0..view.size.columns)

@@ -1,4 +1,4 @@
-//! The standalone Murmur runtime and its local client endpoint.
+//! The standalone Condr runtime and its local client endpoint.
 
 mod client_writer;
 mod endpoint;

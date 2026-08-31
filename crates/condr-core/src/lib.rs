@@ -26,4 +26,4 @@ pub use terminal::{
     TerminalViewFrame, TerminalViewSource,
 };
 
-pub const APP_NAME: &str = "Murmur";
+pub const APP_NAME: &str = "Condr";

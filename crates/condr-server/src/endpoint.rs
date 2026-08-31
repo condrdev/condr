@@ -183,7 +183,7 @@ impl EndpointStream {
 }
 
 pub fn default_socket_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("MURMUR_SOCKET_PATH") {
+    if let Some(path) = std::env::var_os("CONDR_SOCKET_PATH") {
         return PathBuf::from(path);
     }
 
@@ -192,16 +192,16 @@ pub fn default_socket_path() -> PathBuf {
         .or_else(|| std::env::var_os("APPDATA"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("murmur");
+        .join("condr");
 
     #[cfg(not(windows))]
     let config_dir = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("murmur");
+        .join("condr");
 
-    config_dir.join("murmur.sock")
+    config_dir.join("condr.sock")
 }
 
 fn connect_local(path: &Path) -> io::Result<LocalStream> {
@@ -301,7 +301,7 @@ fn acquire_local_bind_lock(path: &Path) -> io::Result<File> {
         Err(std::fs::TryLockError::WouldBlock) => Err(io::Error::new(
             io::ErrorKind::AddrInUse,
             format!(
-                "Murmur server is already starting or running at {}",
+                "Condr server is already starting or running at {}",
                 path.display()
             ),
         )),
@@ -323,7 +323,7 @@ fn prepare_local_path(path: &Path) -> io::Result<()> {
     match connect_local(path) {
         Ok(_) => Err(io::Error::new(
             io::ErrorKind::AddrInUse,
-            format!("Murmur server is already running at {}", path.display()),
+            format!("Condr server is already running at {}", path.display()),
         )),
         Err(error) if stale_local_endpoint_error(&error) => {
             if remove_local_path_if_owned(path, &ownership)? {
@@ -419,7 +419,7 @@ fn unix_socket_identity_if_present(path: &Path) -> io::Result<Option<(u64, u64)>
 fn local_endpoint_marker() -> Vec<u8> {
     static NEXT_MARKER: AtomicU64 = AtomicU64::new(1);
     format!(
-        "murmur-local-endpoint\n{}\n{}\n",
+        "condr-local-endpoint\n{}\n{}\n",
         std::process::id(),
         NEXT_MARKER.fetch_add(1, Ordering::Relaxed)
     )
@@ -440,7 +440,7 @@ fn write_local_endpoint_marker(path: &Path, marker: &[u8]) -> io::Result<()> {
 fn validate_local_endpoint_marker(path: &Path, marker: &[u8]) -> io::Result<()> {
     let text = std::str::from_utf8(marker).map_err(|_| invalid_local_endpoint_marker(path))?;
     let mut lines = text.lines();
-    let valid = lines.next() == Some("murmur-local-endpoint")
+    let valid = lines.next() == Some("condr-local-endpoint")
         && lines.next().is_some_and(|pid| pid.parse::<u32>().is_ok())
         && lines
             .next()
@@ -458,7 +458,7 @@ fn invalid_local_endpoint_marker(path: &Path) -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
         format!(
-            "refusing to replace non-Murmur local endpoint marker {}",
+            "refusing to replace non-Condr local endpoint marker {}",
             path.display()
         ),
     )
@@ -474,8 +474,8 @@ fn restrict_permissions(path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    const CHILD_ENDPOINT_ENV: &str = "MURMUR_ENDPOINT_BIND_CHILD_PATH";
-    const CHILD_READY_ENV: &str = "MURMUR_ENDPOINT_BIND_CHILD_READY";
+    const CHILD_ENDPOINT_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_PATH";
+    const CHILD_READY_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_READY";
 
     #[test]
     fn local_endpoint_bind_child_process() {
@@ -609,7 +609,7 @@ mod tests {
         fs::write(&file_path, b"keep me").unwrap();
         let file_endpoint = Endpoint::local(&file_path);
         let error = match file_endpoint.bind() {
-            Ok(_) => panic!("a non-Murmur marker was unexpectedly replaced"),
+            Ok(_) => panic!("a non-Condr marker was unexpectedly replaced"),
             Err(error) => error,
         };
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
@@ -788,7 +788,7 @@ mod tests {
 
     fn test_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "murmur-endpoint-{label}-{}-{}.sock",
+            "condr-endpoint-{label}-{}-{}.sock",
             std::process::id(),
             unique_suffix()
         ))

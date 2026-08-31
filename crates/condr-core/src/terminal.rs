@@ -50,21 +50,21 @@ const PROCESS_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
 const MAX_CANCEL_DRAIN_READS: u8 = 4;
 
 #[cfg(any(windows, test))]
-const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__MurmurOriginalPrompt) { $global:__MurmurOriginalPrompt = $function:prompt; function global:prompt { $out = @(& $global:__MurmurOriginalPrompt) -join ' '; $loc = $ExecutionContext.SessionState.Path.CurrentLocation; if ($loc.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}; $esc = [string][char]27; $out += $esc + ']9;9;' + $loc.ProviderPath + $esc + '\' }; $out } }";
+const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__CondrOriginalPrompt) { $global:__CondrOriginalPrompt = $function:prompt; function global:prompt { $out = @(& $global:__CondrOriginalPrompt) -join ' '; $loc = $ExecutionContext.SessionState.Path.CurrentLocation; if ($loc.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}; $esc = [string][char]27; $out += $esc + ']9;9;' + $loc.ProviderPath + $esc + '\' }; $out } }";
 
 #[cfg(target_os = "linux")]
-const LINUX_BASH_CWD_WRAPPER: &str = r#"exec 3<<'__MURMUR_BASHRC__'
+const LINUX_BASH_CWD_WRAPPER: &str = r#"exec 3<<'__CONDR_BASHRC__'
 if [[ -r "$HOME/.bashrc" ]]; then source "$HOME/.bashrc"; fi
-__murmur_user_exit=
-__murmur_trap=$(trap -p EXIT)
-if [[ -n $__murmur_trap ]]; then
-  __murmur_trap=${__murmur_trap% EXIT}
-  eval "__murmur_user_exit=${__murmur_trap#trap -- }"
+__condr_user_exit=
+__condr_trap=$(trap -p EXIT)
+if [[ -n $__condr_trap ]]; then
+  __condr_trap=${__condr_trap% EXIT}
+  eval "__condr_user_exit=${__condr_trap#trap -- }"
 fi
-__murmur_return_status(){ return "$1"; }
-trap '__murmur_status=$?; printf "\033]9;9;%s\033\\" "$PWD"; if [[ -n $__murmur_user_exit ]]; then __murmur_return_status "$__murmur_status"; eval "$__murmur_user_exit"; fi; __murmur_return_status "$__murmur_status"' EXIT
-unset __murmur_trap
-__MURMUR_BASHRC__
+__condr_return_status(){ return "$1"; }
+trap '__condr_status=$?; printf "\033]9;9;%s\033\\" "$PWD"; if [[ -n $__condr_user_exit ]]; then __condr_return_status "$__condr_status"; eval "$__condr_user_exit"; fi; __condr_return_status "$__condr_status"' EXIT
+unset __condr_trap
+__CONDR_BASHRC__
 exec "$1" --rcfile /dev/fd/3 -i
 "#;
 
@@ -918,7 +918,7 @@ impl TerminalRuntime {
         let writer_stopping = Arc::new(AtomicBool::new(false));
         let writer_stop = Arc::clone(&writer_stopping);
         let writer_thread = match thread::Builder::new()
-            .name("murmur-pty-writer".into())
+            .name("condr-pty-writer".into())
             .spawn(move || {
                 io_loop(TerminalIoLoop {
                     writer,
@@ -941,7 +941,7 @@ impl TerminalRuntime {
         let resize_revision = Arc::clone(&revision);
         let resize_updates = update_sender.clone();
         let resize_thread = match thread::Builder::new()
-            .name("murmur-pty-resizer".into())
+            .name("condr-pty-resizer".into())
             .spawn(move || {
                 resize_loop(
                     resize_control,
@@ -969,7 +969,7 @@ impl TerminalRuntime {
         let reader_updates = update_sender.clone();
         let reader_reported_cwd = Arc::clone(&reported_cwd);
         let reader_thread = match thread::Builder::new()
-            .name("murmur-pty-reader".into())
+            .name("condr-pty-reader".into())
             .spawn(move || {
                 read_loop(
                     reader,
@@ -1315,7 +1315,7 @@ fn default_shell_command() -> CommandBuilder {
         let shell = default.get_shell();
         if Path::new(&shell).file_name().and_then(|name| name.to_str()) == Some("bash") {
             let mut command = CommandBuilder::new("/bin/sh");
-            command.args(["-c", LINUX_BASH_CWD_WRAPPER, "murmur-shell", shell.as_str()]);
+            command.args(["-c", LINUX_BASH_CWD_WRAPPER, "condr-shell", shell.as_str()]);
             return command;
         }
     }
@@ -2935,7 +2935,7 @@ mod tests {
     #[test]
     fn parsed_cwd_reports_advance_the_observation_generation() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-terminal-cwd-generation-{}-{}",
+            "condr-terminal-cwd-generation-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2976,7 +2976,7 @@ mod tests {
     #[test]
     fn cwd_probe_keeps_the_last_successful_observation_when_sources_disappear() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-terminal-cwd-cache-{}-{}",
+            "condr-terminal-cwd-cache-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

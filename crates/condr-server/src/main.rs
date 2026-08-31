@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use murmur_server::{Endpoint, ServerConfig, run};
+use condr_server::{Endpoint, ServerConfig, run};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -9,19 +9,19 @@ fn main() {
         .iter()
         .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
     {
-        println!("murmur-server [--endpoint PATH | --listen ADDR] [--snapshot PATH] [--stop]");
+        println!("condr-server [--endpoint PATH | --listen ADDR] [--snapshot PATH] [--stop]");
         return;
     }
     let (endpoint, snapshot_path, stop) = match parse_args(&args) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("murmur-server: {error}");
+            eprintln!("condr-server: {error}");
             std::process::exit(2);
         }
     };
     if stop {
-        if let Err(error) = murmur_server::stop_server(&endpoint) {
-            eprintln!("murmur-server: {error}");
+        if let Err(error) = condr_server::stop_server(&endpoint) {
+            eprintln!("condr-server: {error}");
             std::process::exit(1);
         }
         return;
@@ -31,7 +31,7 @@ fn main() {
         |path| ServerConfig::new(endpoint.clone()).with_snapshot_path(path),
     );
     if let Err(error) = run(config) {
-        eprintln!("murmur-server: {error}");
+        eprintln!("condr-server: {error}");
         std::process::exit(1);
     }
 }
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn snapshot_path_can_be_overridden_for_a_local_server() {
         let args = [
-            "murmur-server".into(),
+            "condr-server".into(),
             "--endpoint".into(),
             "test.sock".into(),
             "--snapshot".into(),
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn snapshot_flag_requires_a_path() {
-        let args = ["murmur-server".into(), "--snapshot".into()];
+        let args = ["condr-server".into(), "--snapshot".into()];
 
         assert_eq!(parse_args(&args).unwrap_err(), "--snapshot requires a path");
     }

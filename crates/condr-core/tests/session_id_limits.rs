@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use murmur_core::{Session, SessionSnapshot, SplitDirection};
+use condr_core::{Session, SessionSnapshot, SplitDirection};
 use serde::Serialize;
 
 const MAX_STABLE_ID: u64 = u64::MAX / 2;

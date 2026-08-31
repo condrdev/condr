@@ -5,7 +5,7 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use murmur_core::protocol::{
+use condr_core::protocol::{
     BootstrapAssembler, BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage,
     FramingError, Hello, LayoutCommand, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
@@ -13,7 +13,7 @@ use murmur_core::protocol::{
     SessionId, TerminalFrameBatch, TerminalFrameChunk, VersionCheck, WorkspaceGitSnapshot,
     check_version, encode_bootstrap_record, encode_pane_terminal_frame,
 };
-use murmur_core::{
+use condr_core::{
     AgentSnapshot, GitRepository, PaneId, Session, TerminalAgentProbe, TerminalCommand,
     TerminalCwdProbe, TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView,
     TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, default_worktree_root,
@@ -115,7 +115,7 @@ impl ClientConnection {
 
     fn handshake(mut stream: EndpointStream, client_name: impl Into<String>) -> io::Result<Self> {
         stream.set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))?;
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Hello(Hello {
                 version: PROTOCOL_VERSION,
@@ -123,7 +123,7 @@ impl ClientConnection {
             }),
         )
         .map_err(|error| io::Error::other(error.to_string()))?;
-        let welcome: ServerMessage = murmur_core::protocol::read_message(&mut stream)
+        let welcome: ServerMessage = condr_core::protocol::read_message(&mut stream)
             .map_err(|error| io::Error::other(error.to_string()))?;
         match welcome {
             ServerMessage::Welcome { error: None, .. } => {}
@@ -137,7 +137,7 @@ impl ClientConnection {
                 ));
             }
         }
-        let bootstrap = match murmur_core::protocol::read_message(&mut stream)
+        let bootstrap = match condr_core::protocol::read_message(&mut stream)
             .map_err(|error| io::Error::other(error.to_string()))?
         {
             ServerMessage::Bootstrap(bootstrap) => bootstrap,
@@ -152,7 +152,7 @@ impl ClientConnection {
         let mut assembler = BootstrapAssembler::new(bootstrap)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         for _ in 0..batch_count {
-            let batch = match murmur_core::protocol::read_message(&mut stream)
+            let batch = match condr_core::protocol::read_message(&mut stream)
                 .map_err(|error| io::Error::other(error.to_string()))?
             {
                 ServerMessage::BootstrapBatch(batch) => batch,
@@ -189,7 +189,7 @@ impl ServerHandle {
         self.stop.store(true, Ordering::Release);
     }
 
-    pub fn snapshot(&self) -> murmur_core::SessionSnapshot {
+    pub fn snapshot(&self) -> condr_core::SessionSnapshot {
         self.state
             .lock()
             .expect("server state lock poisoned")
@@ -320,7 +320,7 @@ impl BoundServer {
             let before_close = cwd_probe.observe();
             if let Err(error) = runtime.close() {
                 eprintln!(
-                    "murmur-server: failed to close Terminal for Pane {}: {error}",
+                    "condr-server: failed to close Terminal for Pane {}: {error}",
                     pane_id.as_u64()
                 );
                 if terminal_result.is_ok() {
@@ -343,13 +343,13 @@ impl BoundServer {
             .as_mut()
             .map_or(Ok(()), SnapshotPersistence::shutdown);
         if let Err(error) = &persistence_result {
-            eprintln!("murmur-server: final Session Snapshot flush failed: {error}");
+            eprintln!("condr-server: final Session Snapshot flush failed: {error}");
         }
         drop(persistence);
         drop(terminals);
         let cleanup_result = self.listener.cleanup();
         if let Err(error) = &cleanup_result {
-            eprintln!("murmur-server: endpoint cleanup failed: {error}");
+            eprintln!("condr-server: endpoint cleanup failed: {error}");
         }
         run_result
             .and(terminal_result)
@@ -481,7 +481,7 @@ fn clear_invalid_restored_worktrees(session: &mut Session) -> usize {
         }
         if session.clear_worktree_association(workspace_id) {
             eprintln!(
-                "murmur-server: clearing stale worktree association for Workspace {} at {}",
+                "condr-server: clearing stale worktree association for Workspace {} at {}",
                 workspace_id.as_u64(),
                 root.display()
             );
@@ -564,7 +564,7 @@ struct BootstrapCapture {
     runtime_epoch: RuntimeEpoch,
     session_id: SessionId,
     sequence: u64,
-    snapshot: murmur_core::SessionSnapshot,
+    snapshot: condr_core::SessionSnapshot,
     terminals: Vec<BootstrapTerminalCapture>,
     agents: Vec<PaneAgentSnapshot>,
     workspace_git: Vec<WorkspaceGitSnapshot>,
@@ -722,17 +722,17 @@ impl RuntimeState {
                             restored = true;
                         }
                         Err(error) => eprintln!(
-                            "murmur-server: ignoring invalid Session Snapshot at {}: {error}",
+                            "condr-server: ignoring invalid Session Snapshot at {}: {error}",
                             persistence.path().display()
                         ),
                     },
                     Err(error) => eprintln!(
-                        "murmur-server: ignoring invalid Session Snapshot at {}: {error}",
+                        "condr-server: ignoring invalid Session Snapshot at {}: {error}",
                         persistence.path().display()
                     ),
                 },
                 SnapshotLoad::Rejected(reason) => eprintln!(
-                    "murmur-server: ignoring invalid Session Snapshot at {}: {reason}",
+                    "condr-server: ignoring invalid Session Snapshot at {}: {reason}",
                     persistence.path().display()
                 ),
             }
@@ -774,7 +774,7 @@ impl RuntimeState {
                 Ok(runtime) => Some((runtime, requested_cwd.to_path_buf())),
                 Err(error) if requested_cwd != workspace_root.as_path() => {
                     eprintln!(
-                        "murmur-server: fresh shell failed for Pane {} in saved cwd {}; retrying Workspace Root {}: {error}",
+                        "condr-server: fresh shell failed for Pane {} in saved cwd {}; retrying Workspace Root {}: {error}",
                         pane_id.as_u64(),
                         requested_cwd.display(),
                         workspace_root.display()
@@ -783,7 +783,7 @@ impl RuntimeState {
                         Ok(runtime) => Some((runtime, workspace_root)),
                         Err(fallback_error) => {
                             eprintln!(
-                                "murmur-server: pruning Pane {} after fresh shell also failed in Workspace Root: {fallback_error}",
+                                "condr-server: pruning Pane {} after fresh shell also failed in Workspace Root: {fallback_error}",
                                 pane_id.as_u64()
                             );
                             None
@@ -792,7 +792,7 @@ impl RuntimeState {
                 }
                 Err(error) => {
                     eprintln!(
-                        "murmur-server: pruning Pane {} after fresh shell failed in {}: {error}",
+                        "condr-server: pruning Pane {} after fresh shell failed in {}: {error}",
                         pane_id.as_u64(),
                         requested_cwd.display()
                     );
@@ -900,7 +900,7 @@ impl RuntimeState {
         self.terminal_instances.get(&pane_id) == Some(&instance_id)
     }
 
-    fn schedule_snapshot(&self, snapshot: murmur_core::SessionSnapshot) {
+    fn schedule_snapshot(&self, snapshot: condr_core::SessionSnapshot) {
         if let Some(persistence) = &self.persistence {
             persistence.schedule(snapshot);
         }
@@ -918,7 +918,7 @@ impl RuntimeState {
             }
             if cwd.to_str().is_none() {
                 eprintln!(
-                    "murmur-server: ignoring unpersistable Terminal cwd update for Pane {}: path is not valid UTF-8",
+                    "condr-server: ignoring unpersistable Terminal cwd update for Pane {}: path is not valid UTF-8",
                     pane_id.as_u64()
                 );
                 continue;
@@ -955,7 +955,7 @@ impl RuntimeState {
                 Err(error) => {
                     candidate.set_pane_cwd(pane_id, previous);
                     eprintln!(
-                        "murmur-server: ignoring unpersistable Terminal cwd update for Pane {}: {error}",
+                        "condr-server: ignoring unpersistable Terminal cwd update for Pane {}: {error}",
                         pane_id.as_u64()
                     );
                 }
@@ -1434,7 +1434,7 @@ fn external_layout_plan(
             let association = workspace
                 .worktree()
                 .filter(|association| association.is_managed())
-                .ok_or_else(|| "Murmur can only remove worktrees it created".to_string())?;
+                .ok_or_else(|| "Condr can only remove worktrees it created".to_string())?;
             ExternalLayoutPlan::RemoveWorktree {
                 workspace_id: *workspace_id,
                 parent_root: association.parent_root_directory().to_path_buf(),
@@ -1945,7 +1945,7 @@ fn layout_command_needs_cwd_observation(command: &LayoutCommand) -> bool {
 fn commit_layout_candidate(
     state: &mut RuntimeState,
     candidate: Session,
-    closed: Option<murmur_core::CloseOutcome>,
+    closed: Option<condr_core::CloseOutcome>,
     started: Option<(PaneId, TerminalRuntime, mpsc::Receiver<TerminalUpdate>)>,
 ) -> Result<LayoutEffect, String> {
     let next_snapshot = candidate.snapshot();
@@ -2228,7 +2228,7 @@ fn handle_client(
     {
         return;
     }
-    let hello = match murmur_core::protocol::read_message::<_, ClientMessage>(&mut stream) {
+    let hello = match condr_core::protocol::read_message::<_, ClientMessage>(&mut stream) {
         Ok(ClientMessage::Hello(hello)) => hello,
         Ok(_) => {
             let _ = send_error(&mut stream, &state, "expected Hello as first message");
@@ -2315,7 +2315,7 @@ fn handle_client(
 
     let mut stopping_server = false;
     loop {
-        let message = match murmur_core::protocol::read_message(&mut stream) {
+        let message = match condr_core::protocol::read_message(&mut stream) {
             Ok(message) => message,
             Err(error @ (FramingError::Oversized { .. } | FramingError::Codec(_))) => {
                 let _ = queue_message(
@@ -2579,7 +2579,7 @@ fn handle_client(
                                     let failed = queue_message(&outbound, *message);
                                     let cleanup_failed = cancel_prepared_external_layout(prepared)
                                         .is_err_and(|message| {
-                                            eprintln!("murmur-server: {message}");
+                                            eprintln!("condr-server: {message}");
                                             queue_message(
                                                 &outbound,
                                                 ServerMessage::Error { message },
@@ -2669,7 +2669,7 @@ fn handle_client(
                                             let cleanup_failed =
                                                 cancel_prepared_external_layout(prepared)
                                                     .is_err_and(|message| {
-                                                        eprintln!("murmur-server: {message}");
+                                                        eprintln!("condr-server: {message}");
                                                         queue_message(
                                                             &outbound,
                                                             ServerMessage::Error { message },
@@ -2957,7 +2957,7 @@ fn monitor_terminal(monitor: TerminalMonitor) {
                     };
                     if let Err(error) = runtime.close() {
                         eprintln!(
-                            "murmur-server: failed to reap Terminal for Pane {} after PTY EOF: {error}",
+                            "condr-server: failed to reap Terminal for Pane {} after PTY EOF: {error}",
                             pane_id.as_u64()
                         );
                     }
@@ -3326,7 +3326,7 @@ fn send_error(
 }
 
 fn send_message(stream: &mut EndpointStream, message: &ServerMessage) -> io::Result<()> {
-    murmur_core::protocol::write_message(stream, message)
+    condr_core::protocol::write_message(stream, message)
         .map_err(|error| io::Error::other(error.to_string()))
 }
 
@@ -3404,12 +3404,12 @@ fn prepare_terminal_render(snapshot: TerminalRenderSnapshot) -> PreparedTerminal
 
 fn frame_message(message: &ServerMessage) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
-    murmur_core::protocol::write_message(&mut data, message)
+    condr_core::protocol::write_message(&mut data, message)
         .map_err(|error| io::Error::other(error.to_string()))?;
     Ok(data)
 }
 
-fn validate_persistable_snapshot(snapshot: &murmur_core::SessionSnapshot) -> Result<(), String> {
+fn validate_persistable_snapshot(snapshot: &condr_core::SessionSnapshot) -> Result<(), String> {
     let bytes = snapshot
         .to_bytes()
         .map_err(|error| format!("Session Snapshot cannot be encoded: {error}"))?;
@@ -3422,7 +3422,7 @@ fn validate_persistable_snapshot(snapshot: &murmur_core::SessionSnapshot) -> Res
     Ok(())
 }
 
-fn validate_snapshot_root_paths(snapshot: &murmur_core::SessionSnapshot) -> Result<(), String> {
+fn validate_snapshot_root_paths(snapshot: &condr_core::SessionSnapshot) -> Result<(), String> {
     if let Some(root) = snapshot.root_paths().find(|root| !root.is_absolute()) {
         return Err(format!(
             "Workspace root is not absolute on this Server: {}",
@@ -3640,7 +3640,7 @@ fn send_framed(stream: &mut EndpointStream, data: &[u8]) -> io::Result<()> {
 }
 
 fn default_snapshot_path(endpoint: &Endpoint) -> PathBuf {
-    if let Some(path) = std::env::var_os("MURMUR_SNAPSHOT_PATH")
+    if let Some(path) = std::env::var_os("CONDR_SNAPSHOT_PATH")
         && !path.is_empty()
     {
         return PathBuf::from(path);
@@ -3656,7 +3656,7 @@ fn snapshot_path_for_endpoint(endpoint: &Endpoint) -> PathBuf {
             PathBuf::from(snapshot)
         }
         Endpoint::Tcp(_) => default_socket_path().with_file_name(format!(
-            "murmur-server-{:016x}.snapshot",
+            "condr-server-{:016x}.snapshot",
             stable_endpoint_id(endpoint)
         )),
     }
@@ -3708,7 +3708,7 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
         io::Error::new(
             error.kind(),
             format!(
-                "failed to start murmur-server at {}: {error}",
+                "failed to start condr-server at {}: {error}",
                 server_executable.display()
             ),
         )
@@ -3724,26 +3724,26 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
     }
     Err(io::Error::new(
         io::ErrorKind::TimedOut,
-        "murmur-server did not become ready",
+        "condr-server did not become ready",
     ))
 }
 
 fn resolve_server_executable() -> io::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("MURMUR_SERVER_EXECUTABLE") {
+    if let Some(path) = std::env::var_os("CONDR_SERVER_EXECUTABLE") {
         let path = PathBuf::from(path);
         return path.is_file().then_some(path).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                "MURMUR_SERVER_EXECUTABLE does not name a file",
+                "CONDR_SERVER_EXECUTABLE does not name a file",
             )
         });
     }
 
     let current_executable = std::env::current_exe()?;
     let server_name = if cfg!(windows) {
-        "murmur-server.exe"
+        "condr-server.exe"
     } else {
-        "murmur-server"
+        "condr-server"
     };
     let sibling = current_executable
         .parent()
@@ -3752,23 +3752,23 @@ fn resolve_server_executable() -> io::Result<PathBuf> {
     sibling.is_file().then_some(sibling).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "murmur-server is not installed beside the GUI; build or install the standalone server",
+            "condr-server is not installed beside the GUI; build or install the standalone server",
         )
     })
 }
 
 fn probe_protocol(stream: EndpointStream) -> io::Result<()> {
-    let _ = ClientConnection::handshake(stream, "murmur-probe")?;
+    let _ = ClientConnection::handshake(stream, "condr-probe")?;
     Ok(())
 }
 
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {
-    let client = ClientConnection::connect(endpoint, "murmur-stop")?;
+    let client = ClientConnection::connect(endpoint, "condr-stop")?;
     let server_id = client.bootstrap.server_id;
     let mut stream = client.into_stream();
-    murmur_core::protocol::write_message(&mut stream, &ClientMessage::StopServer { server_id })
+    condr_core::protocol::write_message(&mut stream, &ClientMessage::StopServer { server_id })
         .map_err(|error| io::Error::other(error.to_string()))?;
-    match murmur_core::protocol::read_message(&mut stream)
+    match condr_core::protocol::read_message(&mut stream)
         .map_err(|error| io::Error::other(error.to_string()))?
     {
         ServerMessage::ServerStopping => Ok(()),
@@ -3785,11 +3785,11 @@ mod tests {
 
     #[test]
     fn snapshot_paths_preserve_the_complete_local_endpoint_name() {
-        let socket = snapshot_path_for_endpoint(&Endpoint::local("murmur.sock"));
-        let pipe = snapshot_path_for_endpoint(&Endpoint::local("murmur.pipe"));
+        let socket = snapshot_path_for_endpoint(&Endpoint::local("condr.sock"));
+        let pipe = snapshot_path_for_endpoint(&Endpoint::local("condr.pipe"));
 
-        assert_eq!(socket, PathBuf::from("murmur.sock.snapshot"));
-        assert_eq!(pipe, PathBuf::from("murmur.pipe.snapshot"));
+        assert_eq!(socket, PathBuf::from("condr.sock.snapshot"));
+        assert_eq!(pipe, PathBuf::from("condr.pipe.snapshot"));
         assert_ne!(socket, pipe);
     }
 
@@ -3830,7 +3830,7 @@ mod tests {
         assert!(layout_command_needs_cwd_observation(
             &LayoutCommand::SplitPane {
                 pane_id,
-                direction: murmur_core::SplitDirection::Horizontal,
+                direction: condr_core::SplitDirection::Horizontal,
             }
         ));
         assert!(!layout_command_needs_cwd_observation(
@@ -3884,10 +3884,10 @@ mod tests {
     fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
         let cells = text
             .chars()
-            .map(|character| murmur_core::TerminalCell {
+            .map(|character| condr_core::TerminalCell {
                 text: character.to_string().into(),
-                foreground: murmur_core::TerminalColor::Named(0),
-                background: murmur_core::TerminalColor::Named(0),
+                foreground: condr_core::TerminalColor::Named(0),
+                background: condr_core::TerminalColor::Named(0),
                 flags: 0,
             })
             .collect::<Vec<_>>();
@@ -4041,7 +4041,7 @@ mod tests {
             panic!("event raised during Bootstrap must follow its batch");
         };
         let event =
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut event_frame.as_slice())
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut event_frame.as_slice())
                 .unwrap();
         assert!(matches!(
             event,
@@ -4156,7 +4156,7 @@ mod tests {
             panic!("latest terminal tail was not regenerated");
         };
         let message: ServerMessage =
-            murmur_core::protocol::read_message(&mut data.as_slice()).unwrap();
+            condr_core::protocol::read_message(&mut data.as_slice()).unwrap();
         assert!(matches!(
             message,
             ServerMessage::TerminalFrame(TerminalFrameBatch { panes, .. })
@@ -4189,10 +4189,10 @@ mod tests {
             revision,
             size: TerminalSize::new(1, 1),
             display_offset: 0,
-            cells: vec![murmur_core::TerminalCell {
+            cells: vec![condr_core::TerminalCell {
                 text: "x".repeat(MAX_FRAME_SIZE / 2 + 1024).into(),
-                foreground: murmur_core::TerminalColor::Named(0),
-                background: murmur_core::TerminalColor::Named(0),
+                foreground: condr_core::TerminalColor::Named(0),
+                background: condr_core::TerminalColor::Named(0),
                 flags: 0,
             }],
             cursor: None,
@@ -4216,7 +4216,7 @@ mod tests {
         for (revision, frame) in [1, 2].into_iter().zip(frames) {
             assert!(frame.len() <= MAX_FRAME_SIZE + size_of::<u32>());
             let mut frame = frame.as_slice();
-            let message: ServerMessage = murmur_core::protocol::read_message(&mut frame).unwrap();
+            let message: ServerMessage = condr_core::protocol::read_message(&mut frame).unwrap();
             assert!(matches!(
                 message,
                 ServerMessage::TerminalFrame(TerminalFrameBatch { panes, .. })
@@ -4248,10 +4248,10 @@ mod tests {
                 revision: 9,
                 size: TerminalSize::new(1, 1),
                 display_offset: 0,
-                cells: vec![murmur_core::TerminalCell {
+                cells: vec![condr_core::TerminalCell {
                     text: "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024).into(),
-                    foreground: murmur_core::TerminalColor::Named(0),
-                    background: murmur_core::TerminalColor::Named(0),
+                    foreground: condr_core::TerminalColor::Named(0),
+                    background: condr_core::TerminalColor::Named(0),
                     flags: 0,
                 }],
                 cursor: None,
@@ -4264,7 +4264,7 @@ mod tests {
         for frame in frames {
             assert!(frame.len() <= MAX_FRAME_SIZE + size_of::<u32>());
             let mut frame = frame.as_slice();
-            let message: ServerMessage = murmur_core::protocol::read_message(&mut frame).unwrap();
+            let message: ServerMessage = condr_core::protocol::read_message(&mut frame).unwrap();
             let ServerMessage::TerminalFrameChunk(chunk) = message else {
                 panic!("oversized terminal frame should use chunk messages");
             };
@@ -4278,7 +4278,7 @@ mod tests {
         }
         assert_eq!(chunks, 2);
         assert_eq!(
-            murmur_core::protocol::decode_pane_terminal_frame(&payload).unwrap(),
+            condr_core::protocol::decode_pane_terminal_frame(&payload).unwrap(),
             expected
         );
     }
@@ -4296,16 +4296,16 @@ mod tests {
             .focused_pane()
             .id();
         let second_pane = session
-            .split_pane(first_pane, murmur_core::SplitDirection::Horizontal, 0.5)
+            .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
             .unwrap();
         let large_view = |revision| TerminalView {
             revision,
             size: TerminalSize::new(1, 1),
             display_offset: 0,
-            cells: vec![murmur_core::TerminalCell {
+            cells: vec![condr_core::TerminalCell {
                 text: "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024).into(),
-                foreground: murmur_core::TerminalColor::Named(0),
-                background: murmur_core::TerminalColor::Named(0),
+                foreground: condr_core::TerminalColor::Named(0),
+                background: condr_core::TerminalColor::Named(0),
                 flags: 0,
             }],
             cursor: None,
@@ -4341,7 +4341,7 @@ mod tests {
         assert!(frames.len() >= 7, "three large records should be chunked");
         assert!(frames.iter().all(|frame| frame.len() <= MAX_FRAME_SIZE + 4));
         let header: ServerMessage =
-            murmur_core::protocol::read_message(&mut frames[0].as_slice()).unwrap();
+            condr_core::protocol::read_message(&mut frames[0].as_slice()).unwrap();
         let ServerMessage::Bootstrap(header) = header else {
             panic!("first frame should be a Bootstrap header");
         };
@@ -4350,7 +4350,7 @@ mod tests {
         let mut assembler = BootstrapAssembler::new(header).unwrap();
         for frame in &frames[1..] {
             let message: ServerMessage =
-                murmur_core::protocol::read_message(&mut frame.as_slice()).unwrap();
+                condr_core::protocol::read_message(&mut frame.as_slice()).unwrap();
             let ServerMessage::BootstrapBatch(batch) = message else {
                 panic!("Bootstrap payload should contain only batch frames");
             };
@@ -4443,14 +4443,14 @@ mod tests {
             .id();
         let second_pane = state
             .session
-            .split_pane(first_pane, murmur_core::SplitDirection::Horizontal, 0.5)
+            .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
             .unwrap();
         let first_before = state
             .session
             .pane(first_pane)
             .and_then(|pane| pane.cwd())
             .map(PathBuf::from);
-        let valid = std::env::temp_dir().join("murmur-valid-cwd");
+        let valid = std::env::temp_dir().join("condr-valid-cwd");
         let invalid = PathBuf::from(OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0xff]));
 
         assert!(state.record_terminal_cwds([(first_pane, invalid), (second_pane, valid.clone()),]));
@@ -4473,7 +4473,7 @@ mod tests {
     #[test]
     fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-stale-cwd-{}-{}",
+            "condr-server-stale-cwd-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -4531,7 +4531,7 @@ mod tests {
 
     fn test_endpoint() -> Endpoint {
         Endpoint::local(std::env::temp_dir().join(format!(
-            "murmur-server-{}-{}.sock",
+            "condr-server-{}-{}.sock",
             std::process::id(),
             unique_suffix()
         )))
@@ -4572,7 +4572,7 @@ mod tests {
         panic!("server did not start");
     }
 
-    fn write_snapshot_fixture(path: PathBuf, snapshot: murmur_core::SessionSnapshot) {
+    fn write_snapshot_fixture(path: PathBuf, snapshot: condr_core::SessionSnapshot) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
@@ -4593,7 +4593,7 @@ mod tests {
                 workspace_id,
                 "invalid".to_string(),
                 root.clone(),
-                Option::<murmur_core::WorktreeAssociation>::None,
+                Option::<condr_core::WorktreeAssociation>::None,
                 vec![(
                     tab_id,
                     "Tab 1".to_string(),
@@ -4623,7 +4623,7 @@ mod tests {
     #[test]
     fn invalid_snapshot_inputs_yield_an_empty_session() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-invalid-snapshots-{}-{}",
+            "condr-server-invalid-snapshots-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -4679,7 +4679,7 @@ mod tests {
         };
         assert!(
             Session::restore(
-                murmur_core::SessionSnapshot::from_bytes(&structurally_invalid).unwrap()
+                condr_core::SessionSnapshot::from_bytes(&structurally_invalid).unwrap()
             )
             .is_err()
         );
@@ -4726,7 +4726,7 @@ mod tests {
     #[test]
     fn restart_falls_back_from_a_missing_pane_cwd_and_persists_the_repair() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-cwd-fallback-{}-{}",
+            "condr-server-cwd-fallback-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -4747,11 +4747,11 @@ mod tests {
             .id();
         assert!(session.set_pane_cwd(pane_id, Some(missing_cwd)));
         let absent_cwd_pane = session
-            .split_pane(pane_id, murmur_core::SplitDirection::Horizontal, 0.5)
+            .split_pane(pane_id, condr_core::SplitDirection::Horizontal, 0.5)
             .unwrap();
         assert!(session.set_pane_cwd(absent_cwd_pane, None));
         let relative_cwd_pane = session
-            .split_pane(absent_cwd_pane, murmur_core::SplitDirection::Vertical, 0.5)
+            .split_pane(absent_cwd_pane, condr_core::SplitDirection::Vertical, 0.5)
             .unwrap();
         assert!(session.set_pane_cwd(relative_cwd_pane, Some(PathBuf::from("."))));
         write_snapshot_fixture(snapshot_path.clone(), session.snapshot());
@@ -4791,7 +4791,7 @@ mod tests {
         handle.stop();
         thread.join().unwrap().unwrap();
         let persisted =
-            murmur_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
+            condr_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
                 .unwrap();
         assert_eq!(persisted, repaired_snapshot);
         let _ = std::fs::remove_dir_all(directory);
@@ -4800,10 +4800,10 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn restart_prunes_only_failed_panes_and_persists_the_repair() {
-        use murmur_core::SplitDirection;
+        use condr_core::SplitDirection;
 
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-partial-restore-{}-{}",
+            "condr-server-partial-restore-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -4860,7 +4860,7 @@ mod tests {
         assert_eq!(workspace.active_tab().focused_pane().id(), surviving_pane);
         assert_eq!(
             workspace.active_tab().layout(),
-            &murmur_core::PaneLayout::Pane(surviving_pane)
+            &condr_core::PaneLayout::Pane(surviving_pane)
         );
         assert_eq!(
             workspace.active_tab().focused_pane().cwd(),
@@ -4872,7 +4872,7 @@ mod tests {
         handle.stop();
         thread.join().unwrap().unwrap();
         let repaired =
-            murmur_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
+            condr_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
                 .unwrap();
         assert_eq!(repaired, repaired_snapshot);
         let _ = std::fs::remove_dir_all(directory);
@@ -4882,7 +4882,7 @@ mod tests {
     #[test]
     fn wholly_unrestorable_snapshot_persists_start_page_state() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-empty-restore-{}-{}",
+            "condr-server-empty-restore-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -4911,7 +4911,7 @@ mod tests {
         handle.stop();
         thread.join().unwrap().unwrap();
         let repaired =
-            murmur_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
+            condr_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
                 .unwrap();
         assert_eq!(repaired, Session::new().snapshot());
         let _ = std::fs::remove_dir_all(directory);
@@ -4921,7 +4921,7 @@ mod tests {
     #[test]
     fn restart_revalidates_worktree_authority_against_the_git_topology() {
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-worktree-restore-{}-{}",
+            "condr-server-worktree-restore-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -4931,13 +4931,13 @@ mod tests {
         let snapshot_path = directory.join("session.snapshot");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
         std::fs::create_dir_all(&parent_workspace_root).unwrap();
-        std::fs::write(parent_workspace_root.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(parent_workspace_root.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "workspace-root/README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
         run_git(
@@ -5016,7 +5016,7 @@ mod tests {
         second_handle.stop();
         second_thread.join().unwrap().unwrap();
 
-        let persisted = murmur_core::SessionSnapshot::from_bytes(
+        let persisted = condr_core::SessionSnapshot::from_bytes(
             &std::fs::read(&snapshot_path).expect("repaired Snapshot exists"),
         )
         .unwrap();
@@ -5034,10 +5034,10 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn server_restart_restores_structure_with_fresh_terminal_state() {
-        use murmur_core::SplitDirection;
+        use condr_core::SplitDirection;
 
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-restart-{}-{}",
+            "condr-server-restart-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -5046,12 +5046,12 @@ mod tests {
         let snapshot_path = directory.join("session.snapshot");
         std::fs::create_dir_all(&workspace_cwd).unwrap();
         run_git(&workspace_root, &["init"]);
-        run_git(&workspace_root, &["config", "user.name", "Murmur Tests"]);
+        run_git(&workspace_root, &["config", "user.name", "Condr Tests"]);
         run_git(
             &workspace_root,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(workspace_root.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(workspace_root.join("README.md"), "condr\n").unwrap();
         run_git(&workspace_root, &["add", "README.md"]);
         run_git(&workspace_root, &["commit", "-m", "initial"]);
         run_git(&workspace_root, &["checkout", "-b", "ph6-restore"]);
@@ -5073,7 +5073,7 @@ mod tests {
         stream
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -5082,7 +5082,7 @@ mod tests {
             read_server(&mut stream),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id,
@@ -5097,7 +5097,7 @@ mod tests {
 
         let (restored_workspace_id, first_pane) = {
             let mut mutate = |command| {
-                murmur_core::protocol::write_message(
+                condr_core::protocol::write_message(
                     &mut stream,
                     &ClientMessage::Layout {
                         server_id: first_server_id,
@@ -5157,12 +5157,12 @@ mod tests {
         let sequence_after_layout = first_handle.state.lock().unwrap().sequence;
         let cwd_command = if cfg!(windows) {
             format!(
-                "Set-Location -LiteralPath '{}'; Write-Output ('MURMUR_' + 'CWD_CHANGED')\r",
+                "Set-Location -LiteralPath '{}'; Write-Output ('CONDR_' + 'CWD_CHANGED')\r",
                 workspace_cwd.to_string_lossy().replace('\'', "''")
             )
         } else {
             format!(
-                "cd '{}' && printf 'MURMUR_%s\\n' CWD_CHANGED\r",
+                "cd '{}' && printf 'CONDR_%s\\n' CWD_CHANGED\r",
                 workspace_cwd.to_string_lossy().replace('\'', "'\\''")
             )
         };
@@ -5196,14 +5196,14 @@ mod tests {
             first_server_id,
             session_id,
             first_pane,
-            TerminalCommand::Text("echo MURMUR_OLD_RUNTIME_MARKER\r".into()),
+            TerminalCommand::Text("echo CONDR_OLD_RUNTIME_MARKER\r".into()),
         );
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let contains_marker = {
                 let state = first_handle.state.lock().unwrap();
                 state.terminals.get(&first_pane).is_some_and(|runtime| {
-                    view_text(&runtime.view()).contains("MURMUR_OLD_RUNTIME_MARKER")
+                    view_text(&runtime.view()).contains("CONDR_OLD_RUNTIME_MARKER")
                 })
             };
             if contains_marker {
@@ -5220,7 +5220,7 @@ mod tests {
         drop(stream);
         first_thread.join().unwrap().unwrap();
         assert_eq!(
-            murmur_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
+            condr_core::SessionSnapshot::from_bytes(&std::fs::read(&snapshot_path).unwrap())
                 .unwrap(),
             expected
         );
@@ -5247,7 +5247,7 @@ mod tests {
         }));
         assert!(
             bootstrap.terminals.iter().all(|terminal| {
-                !view_text(&terminal.view).contains("MURMUR_OLD_RUNTIME_MARKER")
+                !view_text(&terminal.view).contains("CONDR_OLD_RUNTIME_MARKER")
             })
         );
         let restored_session = Session::restore(bootstrap.snapshot.clone()).unwrap();
@@ -5262,7 +5262,7 @@ mod tests {
         restored_stream
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut restored_stream,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -5273,12 +5273,12 @@ mod tests {
         ));
         let cwd_check = if cfg!(windows) {
             format!(
-                "if ((Get-Location).Path -eq '{}') {{ Write-Output ('MURMUR_RESTORED_' + 'CWD_OK') }} else {{ Write-Output ('MURMUR_RESTORED_' + 'CWD_BAD') }}\r",
+                "if ((Get-Location).Path -eq '{}') {{ Write-Output ('CONDR_RESTORED_' + 'CWD_OK') }} else {{ Write-Output ('CONDR_RESTORED_' + 'CWD_BAD') }}\r",
                 workspace_cwd.to_string_lossy().replace('\'', "''")
             )
         } else {
             format!(
-                "if [ \"$PWD\" = '{}' ]; then printf 'MURMUR_RESTORED_%s\\n' CWD_OK; else printf 'MURMUR_RESTORED_%s\\n' CWD_BAD; fi\r",
+                "if [ \"$PWD\" = '{}' ]; then printf 'CONDR_RESTORED_%s\\n' CWD_OK; else printf 'CONDR_RESTORED_%s\\n' CWD_BAD; fi\r",
                 workspace_cwd.to_string_lossy().replace('\'', "'\\''")
             )
         };
@@ -5299,7 +5299,7 @@ mod tests {
                     .map(|runtime| view_text(&runtime.view()))
                     .unwrap()
             };
-            if text.contains("MURMUR_RESTORED_CWD_") {
+            if text.contains("CONDR_RESTORED_CWD_") {
                 break text;
             }
             assert!(
@@ -5309,7 +5309,7 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         };
         assert!(
-            restored_text.contains("MURMUR_RESTORED_CWD_OK"),
+            restored_text.contains("CONDR_RESTORED_CWD_OK"),
             "fresh shell did not start in {}",
             workspace_cwd.display()
         );
@@ -5324,7 +5324,7 @@ mod tests {
     #[test]
     fn terminal_tail_cwd_survives_exit_and_shutdown() {
         #[cfg(target_os = "linux")]
-        if std::path::Path::new(&murmur_core::CommandBuilder::new_default_prog().get_shell())
+        if std::path::Path::new(&condr_core::CommandBuilder::new_default_prog().get_shell())
             .file_name()
             .and_then(|name| name.to_str())
             != Some("bash")
@@ -5333,7 +5333,7 @@ mod tests {
         }
 
         let directory = std::env::temp_dir().join(format!(
-            "murmur-server-exit-cwd-{}-{}",
+            "condr-server-exit-cwd-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -5369,7 +5369,7 @@ mod tests {
         stream
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -5398,8 +5398,8 @@ mod tests {
                 session_id,
                 pane_id,
                 TerminalCommand::Key {
-                    key: murmur_core::TerminalKey::Enter,
-                    modifiers: murmur_core::TerminalModifiers::default(),
+                    key: condr_core::TerminalKey::Enter,
+                    modifiers: condr_core::TerminalModifiers::default(),
                 },
             );
         }
@@ -5422,8 +5422,8 @@ mod tests {
                 session_id,
                 pane_id,
                 TerminalCommand::Key {
-                    key: murmur_core::TerminalKey::Enter,
-                    modifiers: murmur_core::TerminalModifiers::default(),
+                    key: condr_core::TerminalKey::Enter,
+                    modifiers: condr_core::TerminalModifiers::default(),
                 },
             );
 
@@ -5461,8 +5461,8 @@ mod tests {
                 session_id,
                 pane_id,
                 TerminalCommand::Key {
-                    key: murmur_core::TerminalKey::Enter,
-                    modifiers: murmur_core::TerminalModifiers::default(),
+                    key: condr_core::TerminalKey::Enter,
+                    modifiers: condr_core::TerminalModifiers::default(),
                 },
             );
         }
@@ -5517,7 +5517,7 @@ mod tests {
         drop(stream);
         thread.join().unwrap().unwrap();
         let persisted =
-            murmur_core::SessionSnapshot::from_bytes(&std::fs::read(snapshot_path).unwrap())
+            condr_core::SessionSnapshot::from_bytes(&std::fs::read(snapshot_path).unwrap())
                 .unwrap();
         assert_eq!(
             Session::restore(persisted)
@@ -5531,7 +5531,7 @@ mod tests {
 
     fn connect_and_bootstrap(endpoint: &Endpoint) -> EndpointStream {
         let mut stream = endpoint.connect().unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Hello(Hello {
                 version: PROTOCOL_VERSION,
@@ -5539,19 +5539,19 @@ mod tests {
             }),
         )
         .unwrap();
-        let welcome: ServerMessage = murmur_core::protocol::read_message(&mut stream).unwrap();
+        let welcome: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
         assert!(matches!(
             welcome,
             ServerMessage::Welcome { error: None, .. }
         ));
-        let bootstrap: ServerMessage = murmur_core::protocol::read_message(&mut stream).unwrap();
+        let bootstrap: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
         let ServerMessage::Bootstrap(header) = bootstrap else {
             panic!("expected Bootstrap header");
         };
         let batch_count = header.batch_count;
         let mut assembler = BootstrapAssembler::new(header).unwrap();
         for _ in 0..batch_count {
-            let message: ServerMessage = murmur_core::protocol::read_message(&mut stream).unwrap();
+            let message: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
             let ServerMessage::BootstrapBatch(batch) = message else {
                 panic!("expected Bootstrap batch");
             };
@@ -5590,7 +5590,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
-        use murmur_core::{PaneDirection, PaneLayout, SplitDirection};
+        use condr_core::{PaneDirection, PaneLayout, SplitDirection};
 
         let mut state = RuntimeState::new(&test_endpoint());
         let mut updates = Vec::new();
@@ -5806,19 +5806,19 @@ mod tests {
     #[test]
     fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_branch() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-worktree-{}-{}",
+            "condr-server-worktree-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
         let repository = temp.join("repository");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
 
@@ -5886,19 +5886,19 @@ mod tests {
     #[test]
     fn failed_managed_worktree_removal_restarts_its_live_terminals() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-worktree-recovery-{}-{}",
+            "condr-server-worktree-recovery-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
         let repository = temp.join("repository");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
 
@@ -5975,19 +5975,19 @@ mod tests {
     #[test]
     fn stopping_server_rolls_back_a_prepared_worktree() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-worktree-cancel-{}-{}",
+            "condr-server-worktree-cancel-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
         let repository = temp.join("repository");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
 
@@ -6032,19 +6032,19 @@ mod tests {
     #[test]
     fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-branch-refresh-{}-{}",
+            "condr-server-branch-refresh-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
         let repository = temp.join("repository");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
 
@@ -6062,7 +6062,7 @@ mod tests {
             .id();
         let second_pane = state
             .session
-            .split_pane(first_pane, murmur_core::SplitDirection::Horizontal, 0.5)
+            .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
             .unwrap();
         let git = discover_repository(&repository).unwrap();
         set_workspace_git(&mut state, workspace_id, git);
@@ -6102,7 +6102,7 @@ mod tests {
     #[test]
     fn opening_an_already_open_worktree_records_parent_membership() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-open-worktree-{}-{}",
+            "condr-server-open-worktree-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -6110,12 +6110,12 @@ mod tests {
         let worktree = temp.join("worktree");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
         run_git(
@@ -6173,7 +6173,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
-        use murmur_core::{TerminalPosition, TerminalScroll, TerminalSide};
+        use condr_core::{TerminalPosition, TerminalScroll, TerminalSide};
 
         let (handle, endpoint, thread) = start();
         let first_connection = ClientConnection::connect(&endpoint, "first-terminal").unwrap();
@@ -6184,7 +6184,7 @@ mod tests {
         first
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -6193,7 +6193,7 @@ mod tests {
             read_server(&mut first),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::Subscribe {
                 session_id,
@@ -6206,7 +6206,7 @@ mod tests {
             ServerMessage::Subscribed { .. }
         ));
         let mut first_terminal_views = std::collections::HashMap::new();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::Layout {
                 server_id,
@@ -6242,9 +6242,9 @@ mod tests {
             .focused_pane()
             .id();
         let pid_command = if cfg!(windows) {
-            "Write-Output ('murmur-' + 'pid=' + $PID)\r"
+            "Write-Output ('condr-' + 'pid=' + $PID)\r"
         } else {
-            "printf 'murmur-%s=%s\\n' pid $$\r"
+            "printf 'condr-%s=%s\\n' pid $$\r"
         };
         send_terminal(
             &mut first,
@@ -6253,13 +6253,9 @@ mod tests {
             pane_id,
             TerminalCommand::Text(pid_command.into()),
         );
-        let first_view = wait_for_terminal_text(
-            &mut first,
-            &mut first_terminal_views,
-            pane_id,
-            "murmur-pid=",
-        );
-        let first_pid = marker_value(&view_text(&first_view), "murmur-pid=");
+        let first_view =
+            wait_for_terminal_text(&mut first, &mut first_terminal_views, pane_id, "condr-pid=");
+        let first_pid = marker_value(&view_text(&first_view), "condr-pid=");
         let snapshot_before_disconnect = handle.snapshot();
         drop(first);
         thread::sleep(Duration::from_millis(30));
@@ -6273,13 +6269,13 @@ mod tests {
             .find(|terminal| terminal.pane_id == pane_id)
             .expect("reconnect bootstrap contains the live Pane");
         assert!(!terminal.exited);
-        assert!(view_text(&terminal.view).contains("murmur-pid="));
+        assert!(view_text(&terminal.view).contains("condr-pid="));
 
         let mut second = second_connection.into_stream();
         second
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -6288,7 +6284,7 @@ mod tests {
             read_server(&mut second),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::Subscribe {
                 session_id,
@@ -6395,7 +6391,7 @@ mod tests {
             session_id,
             pane_id,
             TerminalCommand::Copy {
-                selection: murmur_core::TerminalSelection {
+                selection: condr_core::TerminalSelection {
                     start: TerminalPosition {
                         row: 0,
                         column: 0,
@@ -6432,7 +6428,7 @@ mod tests {
         pane_id: PaneId,
         command: TerminalCommand,
     ) {
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             stream,
             &ClientMessage::Terminal {
                 server_id,
@@ -6447,10 +6443,10 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_terminal_text(
         stream: &mut EndpointStream,
-        views: &mut std::collections::HashMap<PaneId, murmur_core::TerminalView>,
+        views: &mut std::collections::HashMap<PaneId, condr_core::TerminalView>,
         pane_id: PaneId,
         needle: &str,
-    ) -> murmur_core::TerminalView {
+    ) -> condr_core::TerminalView {
         wait_for_terminal(stream, views, pane_id, |view| {
             view_text(view).contains(needle)
         })
@@ -6459,10 +6455,10 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn wait_for_terminal(
         stream: &mut EndpointStream,
-        views: &mut std::collections::HashMap<PaneId, murmur_core::TerminalView>,
+        views: &mut std::collections::HashMap<PaneId, condr_core::TerminalView>,
         pane_id: PaneId,
-        predicate: impl Fn(&murmur_core::TerminalView) -> bool,
-    ) -> murmur_core::TerminalView {
+        predicate: impl Fn(&condr_core::TerminalView) -> bool,
+    ) -> condr_core::TerminalView {
         loop {
             let message = read_server(stream);
             if let ServerMessage::Error { message } = &message {
@@ -6474,7 +6470,7 @@ mod tests {
             for pane in batch.panes {
                 if let Some(view) = views.get_mut(&pane.pane_id) {
                     view.apply_frame(pane.frame).unwrap();
-                } else if let murmur_core::TerminalViewFrame::Full(view) = pane.frame {
+                } else if let condr_core::TerminalViewFrame::Full(view) = pane.frame {
                     views.insert(pane.pane_id, view);
                 } else {
                     panic!("first terminal frame for a Pane must be full");
@@ -6505,7 +6501,7 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn read_server(stream: &mut EndpointStream) -> ServerMessage {
-        murmur_core::protocol::read_message(stream).unwrap()
+        condr_core::protocol::read_message(stream).unwrap()
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -6531,7 +6527,7 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
-    fn view_text(view: &murmur_core::TerminalView) -> String {
+    fn view_text(view: &condr_core::TerminalView) -> String {
         (0..view.size.rows)
             .map(|row| {
                 (0..view.size.columns)
@@ -6558,7 +6554,7 @@ mod tests {
         let first = connect_and_bootstrap(&endpoint);
         let first_message: ServerMessage = {
             let mut stream = endpoint.connect().unwrap();
-            murmur_core::protocol::write_message(
+            condr_core::protocol::write_message(
                 &mut stream,
                 &ClientMessage::Hello(Hello {
                     version: PROTOCOL_VERSION,
@@ -6566,7 +6562,7 @@ mod tests {
                 }),
             )
             .unwrap();
-            murmur_core::protocol::read_message(&mut stream).unwrap()
+            condr_core::protocol::read_message(&mut stream).unwrap()
         };
         let (first_id, first_epoch) = match first_message {
             ServerMessage::Welcome {
@@ -6578,7 +6574,7 @@ mod tests {
         };
         drop(first);
         let mut second = endpoint.connect().unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::Hello(Hello {
                 version: PROTOCOL_VERSION,
@@ -6586,7 +6582,7 @@ mod tests {
             }),
         )
         .unwrap();
-        let welcome: ServerMessage = murmur_core::protocol::read_message(&mut second).unwrap();
+        let welcome: ServerMessage = condr_core::protocol::read_message(&mut second).unwrap();
         assert!(matches!(
             welcome,
             ServerMessage::Welcome {
@@ -6605,10 +6601,10 @@ mod tests {
     fn non_hello_first_frame_is_rejected_with_a_clear_error() {
         let (handle, endpoint, thread) = start();
         let mut stream = endpoint.connect().unwrap();
-        murmur_core::protocol::write_message(&mut stream, &ClientMessage::Detach).unwrap();
+        condr_core::protocol::write_message(&mut stream, &ClientMessage::Detach).unwrap();
 
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::Welcome {
                 error: Some(message),
                 ..
@@ -6624,7 +6620,7 @@ mod tests {
     fn incompatible_client_is_rejected() {
         let (handle, endpoint, thread) = start();
         let mut stream = endpoint.connect().unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Hello(Hello {
                 version: PROTOCOL_VERSION + 1,
@@ -6632,7 +6628,7 @@ mod tests {
             }),
         )
         .unwrap();
-        let response: ServerMessage = murmur_core::protocol::read_message(&mut stream).unwrap();
+        let response: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
         assert!(matches!(
             response,
             ServerMessage::Welcome { error: Some(_), .. }
@@ -6646,10 +6642,10 @@ mod tests {
     fn oversized_client_frame_is_rejected_with_a_clear_error() {
         let (handle, endpoint, thread) = start();
         let mut stream = connect_and_bootstrap(&endpoint);
-        let claimed = (murmur_core::protocol::MAX_FRAME_SIZE as u32) + 1;
+        let claimed = (condr_core::protocol::MAX_FRAME_SIZE as u32) + 1;
         std::io::Write::write_all(&mut stream, &claimed.to_le_bytes()).unwrap();
 
-        let response: ServerMessage = murmur_core::protocol::read_message(&mut stream).unwrap();
+        let response: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
         assert!(matches!(
             response,
             ServerMessage::Error { message }
@@ -6674,7 +6670,7 @@ mod tests {
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -6684,7 +6680,7 @@ mod tests {
             ServerMessage::ControlGranted { .. }
         ));
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Layout {
                 server_id,
@@ -6724,13 +6720,13 @@ mod tests {
         assert_eq!(terminal_instances_before.len(), 1);
 
         let missing_root = std::env::temp_dir().join(format!(
-            "murmur-missing-workspace-{}-{}",
+            "condr-missing-workspace-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
         assert!(!missing_root.exists());
         let regular_file = std::env::temp_dir().join(format!(
-            "murmur-file-workspace-{}-{}",
+            "condr-file-workspace-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -6768,7 +6764,7 @@ mod tests {
         ];
 
         for (request_id, command, expected_reason) in rejected_commands {
-            murmur_core::protocol::write_message(
+            condr_core::protocol::write_message(
                 &mut stream,
                 &ClientMessage::Layout {
                     server_id,
@@ -6833,7 +6829,7 @@ mod tests {
             (state.server_id, state.session_id)
         };
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id,
@@ -6842,12 +6838,12 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::Subscribed { .. }
         ));
         assert_eq!(handle.state.lock().unwrap().subscribers.len(), 1);
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id,
@@ -6856,7 +6852,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::SubscriptionRejected {
                 server_id: rejected_server,
                 session_id: rejected_session,
@@ -6873,7 +6869,7 @@ mod tests {
                 state.publish_background(SessionEvent::LayoutChanged);
             }
         }
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id: SessionId(session_id.0.wrapping_add(1)),
@@ -6882,7 +6878,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::SubscriptionRejected {
                 server_id: rejected_server,
                 session_id: authoritative_session,
@@ -6892,7 +6888,7 @@ mod tests {
                 && reason == "unknown Session"
         ));
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id,
@@ -6901,7 +6897,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::SubscriptionRejected {
                 server_id: rejected_server,
                 session_id: rejected_session,
@@ -6925,7 +6921,7 @@ mod tests {
             (state.server_id, state.session_id)
         };
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::SnapshotRequest {
                 session_id: SessionId(session_id.0.wrapping_add(1)),
@@ -6943,7 +6939,7 @@ mod tests {
                 && reason == "unknown Session"
         ));
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::SnapshotRequest { session_id },
         )
@@ -6969,25 +6965,25 @@ mod tests {
         let mut second = connect_and_bootstrap(&endpoint);
         let server_id = handle.server_id();
         let session_id = handle.state.lock().unwrap().session_id;
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::AcquireControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::AcquireControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
             ServerMessage::ControlDenied { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::Layout {
                 server_id,
@@ -7000,7 +6996,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
             ServerMessage::LayoutRejected {
                 server_id: rejected_server,
                 session_id: rejected_session,
@@ -7012,13 +7008,13 @@ mod tests {
         ));
         drop(first);
         thread::sleep(Duration::from_millis(20));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::AcquireControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
             ServerMessage::ControlGranted { .. }
         ));
         handle.stop();
@@ -7034,16 +7030,16 @@ mod tests {
         let server_id = handle.server_id();
         let session_id = handle.state.lock().unwrap().session_id;
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::AcquireControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::Layout {
                 server_id,
@@ -7056,7 +7052,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
             ServerMessage::Event {
                 server_id: event_server,
                 session_id: event_session,
@@ -7065,20 +7061,20 @@ mod tests {
             } if event_server == server_id && event_session == session_id
         ));
         assert_layout_applied(&mut first, server_id, session_id, 1, 1);
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut first,
             &ClientMessage::ReleaseControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
             ServerMessage::ControlReleased {
                 server_id: released_server,
                 session_id: released_session,
             } if released_server == server_id && released_session == session_id
         ));
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::Subscribe {
                 session_id,
@@ -7087,7 +7083,7 @@ mod tests {
         )
         .unwrap();
         let subscribed_sequence = loop {
-            match murmur_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap() {
+            match condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap() {
                 ServerMessage::Event {
                     sequence: 1,
                     event: SessionEvent::LayoutChanged,
@@ -7106,13 +7102,13 @@ mod tests {
                 other => panic!("unexpected replay response: {other:?}"),
             }
         };
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut second,
             &ClientMessage::SnapshotRequest { session_id },
         )
         .unwrap();
         let bootstrap = loop {
-            let message = murmur_core::protocol::read_message(&mut second).unwrap();
+            let message = condr_core::protocol::read_message(&mut second).unwrap();
             if matches!(message, ServerMessage::Bootstrap(_)) {
                 break message;
             }
@@ -7138,7 +7134,7 @@ mod tests {
         let server_id = handle.server_id();
         let session_id = handle.state.lock().unwrap().session_id;
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut subscriber,
             &ClientMessage::Subscribe {
                 session_id,
@@ -7147,23 +7143,23 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap(),
             ServerMessage::Subscribed { sequence: 0, .. }
         ));
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::AcquireControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
             ServerMessage::ControlGranted { .. }
         ));
 
         let mut snapshot_sequences = Vec::new();
         for request_id in 1..=2 {
-            murmur_core::protocol::write_message(
+            condr_core::protocol::write_message(
                 &mut controller,
                 &ClientMessage::Layout {
                     server_id,
@@ -7176,7 +7172,7 @@ mod tests {
             )
             .unwrap();
             loop {
-                match murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller)
+                match condr_core::protocol::read_message::<_, ServerMessage>(&mut controller)
                     .unwrap()
                 {
                     ServerMessage::Event {
@@ -7203,8 +7199,7 @@ mod tests {
         let mut previous_sequence = 0;
         let mut replayed_snapshots = Vec::new();
         while replayed_snapshots.len() < snapshot_sequences.len() {
-            match murmur_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap()
-            {
+            match condr_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap() {
                 ServerMessage::Event {
                     sequence, event, ..
                 } => {
@@ -7230,7 +7225,7 @@ mod tests {
     fn stop_message_ends_server_and_preserves_session_handle() {
         let (handle, endpoint, thread) = start();
         let mut stream = connect_and_bootstrap(&endpoint);
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::StopServer {
                 server_id: handle.server_id(),
@@ -7238,7 +7233,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::ServerStopping
         );
         drop(stream);
@@ -7255,7 +7250,7 @@ mod tests {
         stream
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id,
@@ -7279,7 +7274,7 @@ mod tests {
         subscriber_writer.send_reliable(vec![0]).unwrap();
         thread::sleep(Duration::from_millis(30));
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::StopServer {
                 server_id: handle.server_id(),
@@ -7314,7 +7309,7 @@ mod tests {
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
 
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -7323,7 +7318,7 @@ mod tests {
             read_server(&mut controller),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::Subscribe {
                 session_id,
@@ -7335,7 +7330,7 @@ mod tests {
             read_server(&mut controller),
             ServerMessage::Subscribed { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::Layout {
                 server_id,
@@ -7384,16 +7379,11 @@ mod tests {
             session_id,
             pane_id,
             TerminalCommand::Text(
-                "stty raw -echo; printf 'murmur-writer-blocked\\r\\n'; sleep 30\r".into(),
+                "stty raw -echo; printf 'condr-writer-blocked\\r\\n'; sleep 30\r".into(),
             ),
         );
         let mut views = std::collections::HashMap::new();
-        wait_for_terminal_text(
-            &mut controller,
-            &mut views,
-            pane_id,
-            "murmur-writer-blocked",
-        );
+        wait_for_terminal_text(&mut controller, &mut views, pane_id, "condr-writer-blocked");
         send_terminal(
             &mut controller,
             server_id,
@@ -7410,11 +7400,8 @@ mod tests {
         );
         thread::sleep(Duration::from_millis(100));
 
-        murmur_core::protocol::write_message(
-            &mut stopper,
-            &ClientMessage::StopServer { server_id },
-        )
-        .unwrap();
+        condr_core::protocol::write_message(&mut stopper, &ClientMessage::StopServer { server_id })
+            .unwrap();
         assert_eq!(read_server(&mut stopper), ServerMessage::ServerStopping);
         drop(controller);
         drop(stopper);
@@ -7434,7 +7421,7 @@ mod tests {
     #[test]
     fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-stop-worktree-{}-{}",
+            "condr-server-stop-worktree-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
@@ -7443,12 +7430,12 @@ mod tests {
         let release = temp.join("release-checkout");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
 
@@ -7476,16 +7463,16 @@ mod tests {
         let server_id = handle.server_id();
         let session_id = handle.state.lock().unwrap().session_id;
         let mut controller = connect_and_bootstrap(&endpoint);
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::AcquireControl { session_id },
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::Layout {
                 server_id,
@@ -7498,7 +7485,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
             ServerMessage::Event {
                 event: SessionEvent::LayoutChanged,
                 ..
@@ -7513,7 +7500,7 @@ mod tests {
             .session
             .active_workspace_id()
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut controller,
             &ClientMessage::Layout {
                 server_id,
@@ -7540,13 +7527,10 @@ mod tests {
         assert!(checkout_started, "Git checkout hook did not start");
 
         let mut stopper = connect_and_bootstrap(&endpoint);
-        murmur_core::protocol::write_message(
-            &mut stopper,
-            &ClientMessage::StopServer { server_id },
-        )
-        .unwrap();
+        condr_core::protocol::write_message(&mut stopper, &ClientMessage::StopServer { server_id })
+            .unwrap();
         assert_eq!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stopper).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stopper).unwrap(),
             ServerMessage::ServerStopping
         );
         let stop_signalled = (0..100).any(|_| {
@@ -7585,7 +7569,7 @@ mod tests {
         let endpoint = Endpoint::tcp(address);
         let thread = thread::spawn(move || server.run());
         let mut stream = connect_and_bootstrap(&endpoint);
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::StopServer {
                 server_id: handle.server_id(),
@@ -7593,7 +7577,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            murmur_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
             ServerMessage::ServerStopping
         );
         drop(stream);
@@ -7604,19 +7588,19 @@ mod tests {
     #[test]
     fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
         let temp = std::env::temp_dir().join(format!(
-            "murmur-server-tcp-state-{}-{}",
+            "condr-server-tcp-state-{}-{}",
             std::process::id(),
             unique_suffix()
         ));
         let repository = temp.join("repository");
         std::fs::create_dir_all(&repository).unwrap();
         run_git(&repository, &["init"]);
-        run_git(&repository, &["config", "user.name", "Murmur Tests"]);
+        run_git(&repository, &["config", "user.name", "Condr Tests"]);
         run_git(
             &repository,
-            &["config", "user.email", "murmur@example.invalid"],
+            &["config", "user.email", "condr@example.invalid"],
         );
-        std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+        std::fs::write(repository.join("README.md"), "condr\n").unwrap();
         run_git(&repository, &["add", "README.md"]);
         run_git(&repository, &["commit", "-m", "initial"]);
         run_git(&repository, &["branch", "-M", "main"]);
@@ -7637,7 +7621,7 @@ mod tests {
         stream
             .set_handshake_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::AcquireControl { session_id },
         )
@@ -7646,7 +7630,7 @@ mod tests {
             read_server(&mut stream),
             ServerMessage::ControlGranted { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Subscribe {
                 session_id,
@@ -7658,7 +7642,7 @@ mod tests {
             read_server(&mut stream),
             ServerMessage::Subscribed { .. }
         ));
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Layout {
                 server_id,
@@ -7705,8 +7689,8 @@ mod tests {
                     event: SessionEvent::AgentChanged {
                         pane_id: event_pane,
                         agent: Some(AgentSnapshot {
-                            kind: murmur_core::AgentKind::Codex,
-                            state: murmur_core::AgentState::Working,
+                            kind: condr_core::AgentKind::Codex,
+                            state: condr_core::AgentState::Working,
                         }),
                     },
                     ..
@@ -7716,7 +7700,7 @@ mod tests {
 
         let reconnect = ClientConnection::connect(&endpoint, "tcp-reconnect").unwrap();
         assert!(reconnect.bootstrap().agents.iter().any(|agent| {
-            agent.pane_id == pane_id && agent.agent.kind == murmur_core::AgentKind::Codex
+            agent.pane_id == pane_id && agent.agent.kind == condr_core::AgentKind::Codex
         }));
         assert!(reconnect.bootstrap().workspace_git.iter().any(|git| {
             git.workspace_id == workspace_id && git.branch.as_deref() == Some("main")

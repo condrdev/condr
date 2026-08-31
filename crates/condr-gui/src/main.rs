@@ -11,6 +11,19 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+use condr_core::protocol::{
+    BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand, MAX_CHUNK_PAYLOAD_SIZE,
+    MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId,
+    ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
+};
+use condr_core::{
+    AgentDisplayState, AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session,
+    SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalKey,
+    TerminalModifiers, TerminalPosition, TerminalScroll, TerminalSelection, TerminalSize,
+    TerminalViewDelta, TerminalViewFrame, WorkspaceId,
+};
+use condr_server::{ClientConnection, Endpoint, ServerConfig};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -31,24 +44,11 @@ use gpui_component::{
     Root, Selectable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_component_assets::Assets;
-use murmur_core::protocol::{
-    BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand, MAX_CHUNK_PAYLOAD_SIZE,
-    MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId,
-    ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
-    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
-};
-use murmur_core::{
-    AgentDisplayState, AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session,
-    SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalKey,
-    TerminalModifiers, TerminalPosition, TerminalScroll, TerminalSelection, TerminalSize,
-    TerminalViewDelta, TerminalViewFrame, WorkspaceId,
-};
-use murmur_server::{ClientConnection, Endpoint, ServerConfig};
 
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 
 actions!(
-    murmur,
+    condr,
     [
         AddServer,
         ReconnectServer,
@@ -94,13 +94,13 @@ const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
-const MURMUR_ICON_PATHS: [&str; 2] = ["icons/circle.svg", "icons/circle-alert.svg"];
+const CONDR_ICON_PATHS: [&str; 2] = ["icons/circle.svg", "icons/circle-alert.svg"];
 
-struct MurmurAssets {
+struct CondrAssets {
     base: Assets,
 }
 
-impl MurmurAssets {
+impl CondrAssets {
     fn new() -> Self {
         Self {
             base: Assets::new(""),
@@ -108,7 +108,7 @@ impl MurmurAssets {
     }
 }
 
-impl AssetSource for MurmurAssets {
+impl AssetSource for CondrAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         match path {
             "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
@@ -124,7 +124,7 @@ impl AssetSource for MurmurAssets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut assets = self.base.list(path)?;
         assets.extend(
-            MURMUR_ICON_PATHS
+            CONDR_ICON_PATHS
                 .into_iter()
                 .filter(|asset| asset.starts_with(path))
                 .map(SharedString::from),
@@ -255,7 +255,7 @@ fn read_bootstrap_batches(
     let batch_count = header.batch_count;
     let mut assembler = BootstrapAssembler::new(header)?;
     for _ in 0..batch_count {
-        let message: ServerMessage = murmur_core::protocol::read_message(reader)
+        let message: ServerMessage = condr_core::protocol::read_message(reader)
             .map_err(|error| format!("cannot read Bootstrap batch: {error}"))?;
         let ServerMessage::BootstrapBatch(batch) = message else {
             return Err(format!("expected Bootstrap batch, received {message:?}"));
@@ -501,7 +501,7 @@ impl ClientIo {
         initial_server_id: ServerId,
         initial_session_id: SessionId,
         window: &Window,
-        cx: &Context<Murmur>,
+        cx: &Context<Condr>,
     ) -> std::io::Result<Self> {
         let mut reader = connection.into_stream();
         let mut writer = reader.try_clone()?;
@@ -511,11 +511,10 @@ impl ClientIo {
         let visual_slot = Arc::new(TerminalVisualSlot::default());
 
         thread::Builder::new()
-            .name("murmur-client-writer".into())
+            .name("condr-client-writer".into())
             .spawn(move || {
                 while let Ok(message) = outgoing_rx.recv() {
-                    if let Err(error) = murmur_core::protocol::write_message(&mut writer, &message)
-                    {
+                    if let Err(error) = condr_core::protocol::write_message(&mut writer, &message) {
                         let _ =
                             writer_events.send_blocking(Incoming::Disconnected(error.to_string()));
                         break;
@@ -524,14 +523,14 @@ impl ClientIo {
             })?;
         let reader_visual_slot = Arc::clone(&visual_slot);
         thread::Builder::new()
-            .name("murmur-client-reader".into())
+            .name("condr-client-reader".into())
             .spawn(move || {
                 let mut server_id = initial_server_id;
                 let mut session_id = initial_session_id;
                 let mut resync_pending = false;
                 let mut terminal_chunk_assembly = None;
                 loop {
-                    let message = match murmur_core::protocol::read_message(&mut reader) {
+                    let message = match condr_core::protocol::read_message(&mut reader) {
                         Ok(message) => message,
                         Err(error) => {
                             let _ = incoming_tx
@@ -776,12 +775,12 @@ impl SidebarIconTone {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MurmurIconName {
+enum CondrIconName {
     Circle,
     CircleAlert,
 }
 
-impl IconNamed for MurmurIconName {
+impl IconNamed for CondrIconName {
     fn path(self) -> SharedString {
         match self {
             Self::Circle => "icons/circle.svg",
@@ -808,9 +807,9 @@ impl SidebarGlyph {
             Self::Folder => Icon::new(IconName::Folder),
             Self::HardDrive => Icon::new(IconName::HardDrive),
             Self::Info => Icon::new(IconName::Info),
-            Self::Circle => Icon::new(MurmurIconName::Circle),
+            Self::Circle => Icon::new(CondrIconName::Circle),
             Self::LoaderCircle => Icon::new(IconName::LoaderCircle),
-            Self::CircleAlert => Icon::new(MurmurIconName::CircleAlert),
+            Self::CircleAlert => Icon::new(CondrIconName::CircleAlert),
             Self::CircleCheck => Icon::new(IconName::CircleCheck),
         }
     }
@@ -889,14 +888,14 @@ fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
 }
 
 #[derive(Clone)]
-struct MurmurSidebarIcon {
+struct CondrSidebarIcon {
     glyph: SidebarGlyph,
     tone: SidebarIconTone,
     selector: SharedString,
     tooltip: Option<SharedString>,
 }
 
-impl MurmurSidebarIcon {
+impl CondrSidebarIcon {
     fn new(glyph: SidebarGlyph, selector: impl Into<SharedString>) -> Self {
         Self {
             glyph,
@@ -951,13 +950,13 @@ type SidebarSuffixBuilder = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 type SidebarContextMenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut App) -> PopupMenu>;
 
 #[derive(Clone)]
-struct MurmurSidebarTreeItem {
+struct CondrSidebarTreeItem {
     id: SharedString,
     row_selector: SharedString,
     label_selector: SharedString,
     toggle_selector: Option<SharedString>,
     label: SharedString,
-    icon: MurmurSidebarIcon,
+    icon: CondrSidebarIcon,
     handler: SidebarClickHandler,
     active: bool,
     default_open: bool,
@@ -968,15 +967,15 @@ struct MurmurSidebarTreeItem {
     context_menu: Option<SidebarContextMenuBuilder>,
 }
 
-impl FluentBuilder for MurmurSidebarTreeItem {}
+impl FluentBuilder for CondrSidebarTreeItem {}
 
-impl MurmurSidebarTreeItem {
+impl CondrSidebarTreeItem {
     fn new(
         id: impl Into<SharedString>,
         row_selector: impl Into<SharedString>,
         label_selector: impl Into<SharedString>,
         label: impl Into<SharedString>,
-        icon: MurmurSidebarIcon,
+        icon: CondrSidebarIcon,
     ) -> Self {
         Self {
             id: id.into(),
@@ -1066,7 +1065,7 @@ impl MurmurSidebarTreeItem {
         let is_submenu = !children.is_empty();
         let open_state = reserve_toggle_space.then(|| {
             window.use_keyed_state(
-                SharedString::from(format!("murmur-sidebar-open-{id}")),
+                SharedString::from(format!("condr-sidebar-open-{id}")),
                 cx,
                 |_, _| default_open,
             )
@@ -1180,20 +1179,20 @@ impl MurmurSidebarTreeItem {
 }
 
 #[derive(Clone)]
-struct MurmurSidebarSection {
+struct CondrSidebarSection {
     label: SharedString,
     heading_selector: SharedString,
     action: SidebarSuffixBuilder,
-    items: Vec<MurmurSidebarTreeItem>,
+    items: Vec<CondrSidebarTreeItem>,
     collapsed: bool,
 }
 
-impl MurmurSidebarSection {
+impl CondrSidebarSection {
     fn new(
         label: impl Into<SharedString>,
         heading_selector: impl Into<SharedString>,
         action: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
-        items: impl IntoIterator<Item = MurmurSidebarTreeItem>,
+        items: impl IntoIterator<Item = CondrSidebarTreeItem>,
     ) -> Self {
         Self {
             label: label.into(),
@@ -1205,7 +1204,7 @@ impl MurmurSidebarSection {
     }
 }
 
-impl Collapsible for MurmurSidebarSection {
+impl Collapsible for CondrSidebarSection {
     fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -1216,7 +1215,7 @@ impl Collapsible for MurmurSidebarSection {
     }
 }
 
-impl SidebarItem for MurmurSidebarSection {
+impl SidebarItem for CondrSidebarSection {
     fn render(
         self,
         _id: impl Into<ElementId>,
@@ -1449,7 +1448,7 @@ impl ServerConnection {
             self.subscribed = false;
             self.subscription_pending = false;
             self.bootstrap_resync_session_id = None;
-            self.error = Some("Disconnected from murmur-server".into());
+            self.error = Some("Disconnected from condr-server".into());
             self.io = None;
         }
     }
@@ -1533,17 +1532,17 @@ struct LocalTerminalSelection {
 struct TerminalPanel {
     connection_key: ConnectionKey,
     pane_id: PaneId,
-    owner: WeakEntity<Murmur>,
+    owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
     render_cache: Rc<RefCell<TerminalRenderCache>>,
 }
 
-struct MurmurDockRenderer;
+struct CondrDockRenderer;
 
-impl DockAreaRenderer for MurmurDockRenderer {
+impl DockAreaRenderer for CondrDockRenderer {
     fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
         div()
-            .id("murmur-dock-area")
+            .id("condr-dock-area")
             .size_full()
             .overflow_hidden()
             .flex()
@@ -1552,7 +1551,7 @@ impl DockAreaRenderer for MurmurDockRenderer {
 
     fn center_frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
         div()
-            .id("murmur-dock-center")
+            .id("condr-dock-center")
             .flex()
             .flex_1()
             .flex_col()
@@ -1567,7 +1566,7 @@ impl DockAreaRenderer for MurmurDockRenderer {
         _: &mut App,
     ) -> Stateful<Div> {
         div()
-            .id(("murmur-dock-split", node.as_u64()))
+            .id(("condr-dock-split", node.as_u64()))
             .size_full()
             .flex_1()
             .min_h(px(0.))
@@ -1575,17 +1574,17 @@ impl DockAreaRenderer for MurmurDockRenderer {
     }
 
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
-        Rc::new(MurmurTabGroupRenderer)
+        Rc::new(CondrTabGroupRenderer)
     }
 
     fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
-        Rc::new(MurmurTilesRenderer)
+        Rc::new(CondrTilesRenderer)
     }
 }
 
-struct MurmurTabGroupRenderer;
+struct CondrTabGroupRenderer;
 
-impl TabGroupRenderer for MurmurTabGroupRenderer {
+impl TabGroupRenderer for CondrTabGroupRenderer {
     fn frame(
         &self,
         _: &gpui_component::dock::TabGroupContext,
@@ -1593,7 +1592,7 @@ impl TabGroupRenderer for MurmurTabGroupRenderer {
         _: &mut App,
     ) -> Stateful<Div> {
         div()
-            .id("murmur-tab-group")
+            .id("condr-tab-group")
             .size_full()
             .flex()
             .flex_col()
@@ -1607,7 +1606,7 @@ impl TabGroupRenderer for MurmurTabGroupRenderer {
         _: &mut App,
     ) -> Stateful<Div> {
         div()
-            .id("murmur-tab-content")
+            .id("condr-tab-content")
             .size_full()
             .flex_1()
             .min_h(px(0.))
@@ -1624,11 +1623,11 @@ impl TabGroupRenderer for MurmurTabGroupRenderer {
     }
 }
 
-struct MurmurTilesRenderer;
+struct CondrTilesRenderer;
 
-impl TilesRenderer for MurmurTilesRenderer {
+impl TilesRenderer for CondrTilesRenderer {
     fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
-        div().id("murmur-tiles").size_full().overflow_hidden()
+        div().id("condr-tiles").size_full().overflow_hidden()
     }
 
     fn render_drag_bar(
@@ -1645,7 +1644,7 @@ impl TerminalPanel {
     fn new(
         connection_key: ConnectionKey,
         pane_id: PaneId,
-        owner: WeakEntity<Murmur>,
+        owner: WeakEntity<Condr>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
@@ -1668,7 +1667,7 @@ impl Focusable for TerminalPanel {
 
 impl BasePanel for TerminalPanel {
     fn panel_name(&self) -> &'static str {
-        "MurmurTerminal"
+        "CondrTerminal"
     }
 
     fn closable(&self, _: &App) -> bool {
@@ -1709,7 +1708,7 @@ impl Render for TerminalPanel {
         let body = div()
             .id(format!("terminal-pane-{key}-{}", pane_id.as_u64()))
             .debug_selector(move || format!("terminal-pane-{}", pane_id.as_u64()))
-            .key_context("Murmur")
+            .key_context("Condr")
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 let accepted = click_owner
@@ -1779,7 +1778,7 @@ impl Render for TerminalPanel {
     }
 }
 
-pub(crate) struct Murmur {
+pub(crate) struct Condr {
     connections: Vec<ServerConnection>,
     active_connection: ConnectionKey,
     next_connection_key: ConnectionKey,
@@ -1813,7 +1812,7 @@ fn accepted_text_input(value: String, trim_value: bool) -> Option<String> {
     })
 }
 
-impl Murmur {
+impl Condr {
     fn new(
         endpoint: Endpoint,
         initial: Result<ClientConnection, String>,
@@ -2167,7 +2166,7 @@ impl Murmur {
         let sender = self.connect_results_tx.clone();
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         thread::spawn(move || {
-            let (connected_endpoint, result) = connect_to_server(endpoint, "murmur-gui");
+            let (connected_endpoint, result) = connect_to_server(endpoint, "condr-gui");
             let _ = sender.send_blocking(ConnectionResult {
                 key,
                 generation,
@@ -2726,7 +2725,7 @@ impl Murmur {
                 connection.bootstrap_resync_session_id = None;
                 connection.control_retry_attempts = 0;
                 connection.control_retry_scheduled = false;
-                connection.error = Some("murmur-server stopped".into());
+                connection.error = Some("condr-server stopped".into());
                 connection.io = None;
                 let active_projection_cleared = self.clear_pending_projections_for(key);
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
@@ -3329,12 +3328,12 @@ impl Murmur {
         self.dock_surfaces.entry(surface_key).or_insert_with(|| {
             let area = cx.new(|cx| {
                 DockArea::new(
-                    format!("murmur-workspace-{key}-{}", tab_id.as_u64()),
+                    format!("condr-workspace-{key}-{}", tab_id.as_u64()),
                     None,
                     window,
                     cx,
                 )
-                .with_renderer(Rc::new(MurmurDockRenderer))
+                .with_renderer(Rc::new(CondrDockRenderer))
             });
             let subscription = cx.subscribe_in(
                 &area,
@@ -3838,7 +3837,7 @@ impl Murmur {
         title: &'static str,
         ok_text: &'static str,
         initial: String,
-        apply: impl Fn(&mut Murmur, String, &mut Window, &mut Context<Murmur>) + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3859,7 +3858,7 @@ impl Murmur {
         &mut self,
         title: String,
         ok_text: &'static str,
-        apply: impl Fn(&mut Murmur, String, &mut Window, &mut Context<Murmur>) + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3885,7 +3884,7 @@ impl Murmur {
         field_label: Option<SharedString>,
         placeholder: Option<SharedString>,
         trim_value: bool,
-        apply: impl Fn(&mut Murmur, String, &mut Window, &mut Context<Murmur>) + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -4031,7 +4030,7 @@ impl Murmur {
                 let owner = owner.clone();
                 alert
                     .title(format!("Delete \"{name}\"?"))
-                    .description("This removes the Server from Murmur. Its terminals keep running.")
+                    .description("This removes the Server from Condr. Its terminals keep running.")
                     .button_props(
                         DialogButtonProps::default()
                             .ok_text("Delete")
@@ -4790,12 +4789,12 @@ impl Murmur {
                                     let agent_label = agent.kind.label();
                                     let agent_owner = owner.clone();
                                     Some(
-                                        MurmurSidebarTreeItem::new(
+                                        CondrSidebarTreeItem::new(
                                             format!("sidebar-agent-{key}-{}", pane_id.as_u64()),
                                             format!("agent-{key}-{}", pane_id.as_u64()),
                                             format!("agent-label-{key}-{}", pane_id.as_u64()),
                                             agent_label,
-                                            MurmurSidebarIcon::status(
+                                            CondrSidebarIcon::status(
                                                 status,
                                                 format!(
                                                     "agent-status-{key}-{}-{}",
@@ -4822,12 +4821,12 @@ impl Murmur {
                                 .collect::<Vec<_>>();
                             let owner = owner.clone();
                             let menu_owner = owner.clone();
-                            MurmurSidebarTreeItem::new(
+                            CondrSidebarTreeItem::new(
                                 format!("sidebar-workspace-{key}-{}", workspace_id.as_u64()),
                                 format!("workspace-{key}-{}", workspace_id.as_u64()),
                                 format!("workspace-label-{key}-{}", workspace_id.as_u64()),
                                 workspace_name.clone(),
-                                MurmurSidebarIcon::new(
+                                CondrSidebarIcon::new(
                                     SidebarGlyph::Folder,
                                     format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
                                 ),
@@ -5003,12 +5002,12 @@ impl Murmur {
             let server_name = connection.label.clone();
             let status = connection.status;
             let new_workspace_label = connection.label.clone();
-            MurmurSidebarTreeItem::new(
+            CondrSidebarTreeItem::new(
                 format!("sidebar-server-{key}"),
                 format!("server-{key}"),
                 format!("server-label-{key}"),
                 connection.label.clone(),
-                MurmurSidebarIcon::status(
+                CondrSidebarIcon::status(
                     server_status,
                     format!("server-status-{key}-{}", server_status.key),
                     format!("{}: {}", connection.label, server_status.label),
@@ -5098,7 +5097,7 @@ impl Murmur {
         let reconnect_visible = self
             .active_connection()
             .is_some_and(|connection| connection.status == ConnectionStatus::Disconnected);
-        let servers = MurmurSidebarSection::new(
+        let servers = CondrSidebarSection::new(
             "Servers",
             "servers-heading",
             move |_, _| {
@@ -5116,13 +5115,13 @@ impl Murmur {
             },
             items,
         );
-        Sidebar::new("murmur-sidebar")
+        Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
             .header(
                 SidebarHeader::new()
                     .child(Icon::new(IconName::SquareTerminal))
-                    .child(div().flex_1().font_semibold().child(murmur_core::APP_NAME)),
+                    .child(div().flex_1().font_semibold().child(condr_core::APP_NAME)),
             )
             .child(servers)
             .when(reconnect_visible, |sidebar| {
@@ -5333,13 +5332,13 @@ impl Murmur {
     }
 }
 
-impl Focusable for Murmur {
+impl Focusable for Condr {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl EntityInputHandler for Murmur {
+impl EntityInputHandler for Condr {
     fn text_for_range(
         &mut self,
         _: Range<usize>,
@@ -5443,7 +5442,7 @@ impl EntityInputHandler for Murmur {
     }
 }
 
-impl Render for Murmur {
+impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let workspace_owner = cx.weak_entity();
@@ -5457,7 +5456,7 @@ impl Render for Murmur {
             .child(self.render_workspace(cx))
             .into_any_element();
         div()
-            .key_context("Murmur")
+            .key_context("Condr")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::action_add_server))
@@ -5494,7 +5493,7 @@ impl Render for Murmur {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
-                h_resizable("murmur-shell")
+                h_resizable("condr-shell")
                     .child(
                         resizable_panel()
                             .size(INITIAL_SIDEBAR_WIDTH)
@@ -5502,7 +5501,7 @@ impl Render for Murmur {
                             .flex_none()
                             .child(
                                 div()
-                                    .debug_selector(|| "murmur-sidebar".into())
+                                    .debug_selector(|| "condr-sidebar".into())
                                     .size_full()
                                     .child(self.render_sidebar(cx)),
                             ),
@@ -5626,20 +5625,20 @@ fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
 
 fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("ctrl-shift-t", NewTab, Some("Murmur")),
-        KeyBinding::new("ctrl-shift-w", ClosePane, Some("Murmur")),
-        KeyBinding::new("ctrl-tab", NextTab, Some("Murmur")),
-        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Murmur")),
-        KeyBinding::new("alt-shift-=", SplitRight, Some("Murmur")),
-        KeyBinding::new("alt-shift--", SplitDown, Some("Murmur")),
-        KeyBinding::new("alt-left", FocusLeft, Some("Murmur")),
-        KeyBinding::new("alt-right", FocusRight, Some("Murmur")),
-        KeyBinding::new("alt-up", FocusUp, Some("Murmur")),
-        KeyBinding::new("alt-down", FocusDown, Some("Murmur")),
-        KeyBinding::new("alt-shift-left", ResizeLeft, Some("Murmur")),
-        KeyBinding::new("alt-shift-right", ResizeRight, Some("Murmur")),
-        KeyBinding::new("alt-shift-up", ResizeUp, Some("Murmur")),
-        KeyBinding::new("alt-shift-down", ResizeDown, Some("Murmur")),
+        KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
+        KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
+        KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
+        KeyBinding::new("alt-shift-=", SplitRight, Some("Condr")),
+        KeyBinding::new("alt-shift--", SplitDown, Some("Condr")),
+        KeyBinding::new("alt-left", FocusLeft, Some("Condr")),
+        KeyBinding::new("alt-right", FocusRight, Some("Condr")),
+        KeyBinding::new("alt-up", FocusUp, Some("Condr")),
+        KeyBinding::new("alt-down", FocusDown, Some("Condr")),
+        KeyBinding::new("alt-shift-left", ResizeLeft, Some("Condr")),
+        KeyBinding::new("alt-shift-right", ResizeRight, Some("Condr")),
+        KeyBinding::new("alt-shift-up", ResizeUp, Some("Condr")),
+        KeyBinding::new("alt-shift-down", ResizeDown, Some("Condr")),
     ]);
 }
 
@@ -5660,7 +5659,7 @@ fn connect_to_server_with<T>(
         }
         Err(error) => {
             let discovery_error =
-                format!("Failed to start or discover local murmur-server: {error}");
+                format!("Failed to start or discover local condr-server: {error}");
             let result = connect(&endpoint).map_err(|_| discovery_error);
             (endpoint, result)
         }
@@ -5671,14 +5670,14 @@ fn connect_to_server(
     endpoint: Endpoint,
     client_name: &'static str,
 ) -> (Endpoint, Result<ClientConnection, String>) {
-    connect_to_server_with(endpoint, murmur_server::ensure_local_server, |endpoint| {
+    connect_to_server_with(endpoint, condr_server::ensure_local_server, |endpoint| {
         ClientConnection::connect(endpoint, client_name).map_err(|error| error.to_string())
     })
 }
 
 fn main() {
-    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "murmur-gui");
-    let app = gpui_platform::application().with_assets(MurmurAssets::new());
+    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr-gui");
+    let app = gpui_platform::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {
         gpui_component::init(cx);
@@ -5686,12 +5685,12 @@ fn main() {
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|cx| Murmur::new(endpoint, initial, window, cx));
+                let view = cx.new(|cx| Condr::new(endpoint, initial, window, cx));
                 let root = cx.new(|cx| Root::new(view, window, cx));
                 window.resize(DEFAULT_WINDOW_SIZE);
                 root
             })
-            .expect("failed to open Murmur window");
+            .expect("failed to open Condr window");
         })
         .detach();
     });
@@ -5699,20 +5698,20 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AssetSource as _, Keystroke, Task};
-    use murmur_core::protocol::{
+    use condr_core::protocol::{
         BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
         RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionId, TerminalFrameBatch,
         TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
     };
-    use murmur_core::{
+    use condr_core::{
         AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize,
         TerminalView, TerminalViewDelta, TerminalViewFrame,
     };
-    use murmur_server::Endpoint;
+    use condr_server::Endpoint;
+    use gpui::{AssetSource as _, Keystroke, Task};
 
     use super::{
-        ACTIVE_PANE_BORDER_RGB, ClientIo, ConnectionStatus, FocusLeft, MurmurAssets, NextTab,
+        ACTIVE_PANE_BORDER_RGB, ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab,
         PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual,
         SplitDown, SplitRight, TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input,
         agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
@@ -5746,7 +5745,7 @@ mod tests {
 
     #[test]
     fn server_connection_preserves_start_error_and_final_concurrent_probe() {
-        let local = murmur_server::ServerConfig::default().endpoint;
+        let local = condr_server::ServerConfig::default().endpoint;
         let (_, failed) = connect_to_server_with(
             local.clone(),
             || {
@@ -5759,7 +5758,7 @@ mod tests {
         );
         assert_eq!(
             failed.unwrap_err(),
-            "Failed to start or discover local murmur-server: invalid endpoint marker"
+            "Failed to start or discover local condr-server: invalid endpoint marker"
         );
 
         let (_, concurrent) = connect_to_server_with(
@@ -5793,7 +5792,7 @@ mod tests {
         }
     }
 
-    fn pane_id() -> murmur_core::PaneId {
+    fn pane_id() -> condr_core::PaneId {
         let mut session = Session::new();
         session
             .create_workspace(std::env::temp_dir())
@@ -5889,13 +5888,13 @@ mod tests {
     }
 
     #[test]
-    fn murmur_assets_include_the_prototype_agent_status_icons() {
-        let assets = MurmurAssets::new();
+    fn condr_assets_include_the_prototype_agent_status_icons() {
+        let assets = CondrAssets::new();
         for path in ["icons/circle.svg", "icons/circle-alert.svg"] {
             let bytes = assets
                 .load(path)
                 .unwrap()
-                .expect("Murmur status icon should be embedded");
+                .expect("Condr status icon should be embedded");
             assert!(bytes.starts_with(b"<svg"));
         }
         let listed = assets.list("icons/circle").unwrap();
@@ -5933,7 +5932,7 @@ mod tests {
         connection.subscribe();
         assert_eq!(
             outgoing_rx.recv().unwrap(),
-            murmur_core::protocol::ClientMessage::Subscribe {
+            condr_core::protocol::ClientMessage::Subscribe {
                 session_id: SessionId(3),
                 after_sequence: 7,
             }
@@ -5942,7 +5941,7 @@ mod tests {
         assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(30)));
         assert_eq!(
             outgoing_rx.recv().unwrap(),
-            murmur_core::protocol::ClientMessage::SnapshotRequest {
+            condr_core::protocol::ClientMessage::SnapshotRequest {
                 session_id: SessionId(30),
             }
         );
@@ -5967,19 +5966,19 @@ mod tests {
         assert!(application.reacquire_control);
         assert!(!connection.controlling);
         assert!(connection.bootstrap_resync_session_id.is_none());
-        connection.send(murmur_core::protocol::ClientMessage::AcquireControl {
+        connection.send(condr_core::protocol::ClientMessage::AcquireControl {
             session_id: SessionId(30),
         });
         connection.subscribe();
         assert_eq!(
             outgoing_rx.recv().unwrap(),
-            murmur_core::protocol::ClientMessage::AcquireControl {
+            condr_core::protocol::ClientMessage::AcquireControl {
                 session_id: SessionId(30),
             }
         );
         assert_eq!(
             outgoing_rx.recv().unwrap(),
-            murmur_core::protocol::ClientMessage::Subscribe {
+            condr_core::protocol::ClientMessage::Subscribe {
                 session_id: SessionId(30),
                 after_sequence: 11,
             }
@@ -6014,7 +6013,7 @@ mod tests {
         ));
         assert_eq!(
             outgoing_rx.recv().unwrap(),
-            murmur_core::protocol::ClientMessage::SnapshotRequest {
+            condr_core::protocol::ClientMessage::SnapshotRequest {
                 session_id: SessionId(30),
             }
         );
@@ -6279,7 +6278,7 @@ mod tests {
         ];
         let mut complete = Vec::new();
         for batch in &batches {
-            murmur_core::protocol::write_message(
+            condr_core::protocol::write_message(
                 &mut complete,
                 &ServerMessage::BootstrapBatch(batch.clone()),
             )
@@ -6289,7 +6288,7 @@ mod tests {
         assert_eq!(assembled.terminals, vec![terminal]);
 
         let mut incomplete = Vec::new();
-        murmur_core::protocol::write_message(
+        condr_core::protocol::write_message(
             &mut incomplete,
             &ServerMessage::BootstrapBatch(batches[0].clone()),
         )
@@ -6470,26 +6469,26 @@ mod tests {
         use std::thread::JoinHandle;
         use std::time::{Duration, Instant};
 
+        use condr_core::SplitDirection;
+        use condr_core::protocol::{
+            ClientMessage, LayoutCommand, PaneAgentSnapshot, PaneTerminalFrame, RuntimeEpoch,
+            ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+        };
+        use condr_core::{
+            AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneId, PaneLayout, Session, TabId,
+            TerminalCommand, TerminalViewFrame, WorkspaceId,
+        };
+        use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
         use gpui::{
             AppContext as _, ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent,
             MouseUpEvent, TestAppContext, VisualTestContext, point, px, size,
         };
         use gpui_component::dialog::Confirm;
         use gpui_component::{Root, WindowExt as _};
-        use murmur_core::SplitDirection;
-        use murmur_core::protocol::{
-            ClientMessage, LayoutCommand, PaneAgentSnapshot, PaneTerminalFrame, RuntimeEpoch,
-            ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
-        };
-        use murmur_core::{
-            AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneId, PaneLayout, Session, TabId,
-            TerminalCommand, TerminalViewFrame, WorkspaceId,
-        };
-        use murmur_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 
         use super::super::{
-            CONTROL_BUSY_REASON, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE,
-            DockSurfaceKey, Incoming, Murmur, PendingWorkspaceSelection, ServerConnection,
+            CONTROL_BUSY_REASON, Condr, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE,
+            DockSurfaceKey, Incoming, PendingWorkspaceSelection, ServerConnection,
             default_window_options,
         };
 
@@ -6532,7 +6531,7 @@ mod tests {
 
         fn start_server() -> (TestServer, Endpoint) {
             let endpoint = Endpoint::local(std::env::temp_dir().join(format!(
-                "murmur-gui-{}-{}.sock",
+                "condr-gui-{}-{}.sock",
                 std::process::id(),
                 NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
             )));
@@ -6567,22 +6566,22 @@ mod tests {
             }
         }
 
-        fn connected_murmur(
+        fn connected_condr(
             cx: &mut TestAppContext,
-        ) -> (Entity<Murmur>, &mut VisualTestContext, TestServer) {
+        ) -> (Entity<Condr>, &mut VisualTestContext, TestServer) {
             let (server, endpoint) = start_server();
-            connected_murmur_with(cx, server, endpoint)
+            connected_condr_with(cx, server, endpoint)
         }
 
-        fn connected_murmur_with(
+        fn connected_condr_with(
             cx: &mut TestAppContext,
             server: TestServer,
             endpoint: Endpoint,
-        ) -> (Entity<Murmur>, &mut VisualTestContext, TestServer) {
+        ) -> (Entity<Condr>, &mut VisualTestContext, TestServer) {
             let mut initial = None;
             let deadline = Instant::now() + TEST_TIMEOUT;
             while Instant::now() < deadline {
-                if let Ok(connection) = ClientConnection::connect(&endpoint, "murmur-gui-test") {
+                if let Ok(connection) = ClientConnection::connect(&endpoint, "condr-gui-test") {
                     initial = Some(connection);
                     break;
                 }
@@ -6595,14 +6594,14 @@ mod tests {
             let view_holder = Rc::new(RefCell::new(None));
             let view_holder_for_window = view_holder.clone();
             let (_root, window) = cx.add_window_view(move |window, cx| {
-                let view = cx.new(|cx| Murmur::new(endpoint, initial, window, cx));
+                let view = cx.new(|cx| Condr::new(endpoint, initial, window, cx));
                 view_holder_for_window.borrow_mut().replace(view.clone());
                 Root::new(view, window, cx)
             });
             let view = view_holder
                 .borrow_mut()
                 .take()
-                .expect("Murmur view should be created with the Root");
+                .expect("Condr view should be created with the Root");
             if wait_until(window, |window| {
                 window.read(|app| {
                     view.read(app)
@@ -6621,7 +6620,7 @@ mod tests {
 
         fn terminal_contains(
             window: &mut VisualTestContext,
-            view: &Entity<Murmur>,
+            view: &Entity<Condr>,
             connection_key: u64,
             pane_id: PaneId,
             expected: &str,
@@ -6692,7 +6691,7 @@ mod tests {
         impl TestDirectory {
             fn new(label: &str) -> Self {
                 let path = std::env::temp_dir().join(format!(
-                    "murmur-gui-{label}-{}-{}",
+                    "condr-gui-{label}-{}-{}",
                     std::process::id(),
                     NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
                 ));
@@ -6847,7 +6846,7 @@ mod tests {
             );
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
             window.update(|window, cx| _ = window.draw(cx));
 
             let surface_key = DockSurfaceKey {
@@ -6855,8 +6854,8 @@ mod tests {
                 tab_id,
             };
             let (layout_size, dock_bounds, rebuilds) = window.read(|app| {
-                let murmur = view.read(app);
-                let surface = murmur
+                let condr = view.read(app);
+                let surface = condr
                     .dock_surfaces
                     .get(&surface_key)
                     .expect("cold Bootstrap should build its Dock surface");
@@ -6865,7 +6864,7 @@ mod tests {
                         .layout_size
                         .expect("initial layout size is recorded"),
                     surface.area.read(app).bounds(),
-                    murmur.dock_rebuild_count,
+                    condr.dock_rebuild_count,
                 )
             });
             assert!((layout_size.width - dock_bounds.size.width).abs() <= px(1.));
@@ -6896,7 +6895,7 @@ mod tests {
             let workspace_root = TestDirectory::new("readonly-dock-resize");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.send_layout(LayoutCommand::CreateWorkspace {
@@ -6907,14 +6906,14 @@ mod tests {
             let mut initial = None;
             assert!(wait_until_event_driven(window, |window| {
                 initial = window.read(|app| {
-                    let murmur = view.read(app);
-                    let session = murmur.active_session()?;
+                    let condr = view.read(app);
+                    let session = condr.active_session()?;
                     let tab = session.active_workspace()?.active_tab();
                     let surface_key = DockSurfaceKey {
                         connection_key: 1,
                         tab_id: tab.id(),
                     };
-                    murmur.dock_surfaces.contains_key(&surface_key).then_some((
+                    condr.dock_surfaces.contains_key(&surface_key).then_some((
                         tab.id(),
                         tab.focused_pane().id(),
                         surface_key,
@@ -6933,11 +6932,11 @@ mod tests {
             });
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    let session = murmur.active_session().unwrap();
+                    let condr = view.read(app);
+                    let session = condr.active_session().unwrap();
                     session.tab(tab_id).is_some_and(|tab| {
                         tab.panes().len() == 2
-                            && murmur.dock_surfaces[&surface_key].projection.as_ref()
+                            && condr.dock_surfaces[&surface_key].projection.as_ref()
                                 == Some(tab.layout())
                     })
                 })
@@ -6946,10 +6945,10 @@ mod tests {
             window.run_until_parked();
 
             let (sequence, rebuilds) = window.read(|app| {
-                let murmur = view.read(app);
+                let condr = view.read(app);
                 (
-                    murmur.connection(1).unwrap().sequence,
-                    murmur.dock_rebuild_count,
+                    condr.connection(1).unwrap().sequence,
+                    condr.dock_rebuild_count,
                 )
             });
             window.update(|window, cx| {
@@ -6973,8 +6972,8 @@ mod tests {
             window.update(|window, cx| _ = window.draw(cx));
 
             let (authoritative_layout, panes) = window.read(|app| {
-                let murmur = view.read(app);
-                let session = murmur.active_session().unwrap();
+                let condr = view.read(app);
+                let session = condr.active_session().unwrap();
                 let tab = session.tab(tab_id).unwrap();
                 (
                     tab.layout().clone(),
@@ -7008,7 +7007,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
             window.update(|window, cx| _ = window.draw(cx));
 
             let heading_row = window
@@ -7147,13 +7146,13 @@ mod tests {
             assert!(agent_status.right() <= agent_label.left());
 
             let selection_before = window.read(|app| {
-                let murmur = view.read(app);
+                let condr = view.read(app);
                 (
-                    murmur.active_connection,
-                    murmur
+                    condr.active_connection,
+                    condr
                         .active_session()
                         .and_then(|session| session.active_workspace_id()),
-                    murmur.target_pane,
+                    condr.target_pane,
                 )
             });
             window.simulate_click(workspace_toggle.center(), Modifiers::default());
@@ -7166,13 +7165,13 @@ mod tests {
             );
             assert_eq!(
                 window.read(|app| {
-                    let murmur = view.read(app);
+                    let condr = view.read(app);
                     (
-                        murmur.active_connection,
-                        murmur
+                        condr.active_connection,
+                        condr
                             .active_session()
                             .and_then(|session| session.active_workspace_id()),
-                        murmur.target_pane,
+                        condr.target_pane,
                     )
                 }),
                 selection_before,
@@ -7195,13 +7194,13 @@ mod tests {
             );
             assert_eq!(
                 window.read(|app| {
-                    let murmur = view.read(app);
+                    let condr = view.read(app);
                     (
-                        murmur.active_connection,
-                        murmur
+                        condr.active_connection,
+                        condr
                             .active_session()
                             .and_then(|session| session.active_workspace_id()),
-                        murmur.target_pane,
+                        condr.target_pane,
                     )
                 }),
                 selection_before,
@@ -7220,7 +7219,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             let add_server = window
                 .debug_bounds("add-server")
@@ -7297,7 +7296,7 @@ mod tests {
             let second_root = TestDirectory::new("cached-dock-second");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
@@ -7309,16 +7308,16 @@ mod tests {
             let mut first = None;
             assert!(wait_until(window, |window| {
                 first = window.read(|app| {
-                    let murmur = view.read(app);
-                    let session = murmur.active_session()?;
+                    let condr = view.read(app);
+                    let session = condr.active_session()?;
                     let workspace = session.active_workspace()?;
                     let tab = workspace.active_tab();
                     let surface = DockSurfaceKey {
                         connection_key: 1,
                         tab_id: tab.id(),
                     };
-                    (murmur.active_dock_surface == Some(surface)
-                        && murmur.dock_surfaces.contains_key(&surface))
+                    (condr.active_dock_surface == Some(surface)
+                        && condr.dock_surfaces.contains_key(&surface))
                     .then(|| (workspace.id(), tab.id(), tab.focused_pane().id(), surface))
                 });
                 first.is_some()
@@ -7335,13 +7334,13 @@ mod tests {
             });
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    let Some(session) = murmur.active_session() else {
+                    let condr = view.read(app);
+                    let Some(session) = condr.active_session() else {
                         return false;
                     };
                     session.tab(first_tab).is_some_and(|tab| {
                         tab.panes().len() == 2
-                            && murmur
+                            && condr
                                 .dock_surfaces
                                 .get(&first_surface)
                                 .and_then(|surface| surface.projection.as_ref())
@@ -7360,8 +7359,8 @@ mod tests {
             let mut second = None;
             assert!(wait_until(window, |window| {
                 second = window.read(|app| {
-                    let murmur = view.read(app);
-                    let session = murmur.active_session()?;
+                    let condr = view.read(app);
+                    let session = condr.active_session()?;
                     let workspace = session.active_workspace()?;
                     (workspace.id() != first_workspace).then(|| {
                         let tab = workspace.active_tab();
@@ -7396,8 +7395,8 @@ mod tests {
             let mut second_panes = Vec::new();
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    let Some(session) = murmur.active_session() else {
+                    let condr = view.read(app);
+                    let Some(session) = condr.active_session() else {
                         return false;
                     };
                     let Some(tab) = session.tab(second_tab) else {
@@ -7409,7 +7408,7 @@ mod tests {
                             tab.layout(),
                             PaneLayout::Split { ratio, .. } if (*ratio - 0.35).abs() < 0.001
                         )
-                        && murmur
+                        && condr
                             .dock_surfaces
                             .get(&second_surface)
                             .and_then(|surface| surface.projection.as_ref())
@@ -7454,9 +7453,9 @@ mod tests {
             assert!(window.update(|window, _| focused_handle.is_focused(window)));
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur.pending_workspace_selection_for(1).is_none()
-                        && murmur.active_session().is_some_and(|session| {
+                    let condr = view.read(app);
+                    condr.pending_workspace_selection_for(1).is_none()
+                        && condr.active_session().is_some_and(|session| {
                             session
                                 .tab(second_tab)
                                 .is_some_and(|tab| tab.focused_pane().id() == focused_before)
@@ -7479,10 +7478,10 @@ mod tests {
             assert!(window.update(|window, _| target_handle.is_focused(window)));
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur.pending_workspace_selection_for(1).is_none()
-                        && murmur.target_pane == Some((1, same_surface_target))
-                        && murmur.active_session().is_some_and(|session| {
+                    let condr = view.read(app);
+                    condr.pending_workspace_selection_for(1).is_none()
+                        && condr.target_pane == Some((1, same_surface_target))
+                        && condr.active_session().is_some_and(|session| {
                             session
                                 .tab(second_tab)
                                 .is_some_and(|tab| tab.focused_pane().id() == same_surface_target)
@@ -7548,13 +7547,13 @@ mod tests {
             });
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur.pending_workspace_selection_for(1).is_none()
-                        && murmur
+                    let condr = view.read(app);
+                    condr.pending_workspace_selection_for(1).is_none()
+                        && condr
                             .active_session()
                             .and_then(|session| session.active_workspace_id())
                             == Some(second_workspace)
-                        && murmur.active_dock_surface == Some(second_surface)
+                        && condr.active_dock_surface == Some(second_surface)
                 })
             }));
             assert_eq!(
@@ -7784,10 +7783,10 @@ mod tests {
             }
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur.pending_workspace_selection_for(1).is_none()
-                        && murmur.active_dock_surface == Some(first_surface)
-                        && murmur.target_pane == Some((1, first_pane))
+                    let condr = view.read(app);
+                    condr.pending_workspace_selection_for(1).is_none()
+                        && condr.active_dock_surface == Some(first_surface)
+                        && condr.target_pane == Some((1, first_pane))
                 })
             }));
             window.update(|window, cx| {
@@ -7798,10 +7797,10 @@ mod tests {
             });
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur.pending_workspace_selection_for(1).is_none()
-                        && murmur.active_dock_surface == Some(second_surface)
-                        && murmur.target_pane == Some((1, second_panes[0]))
+                    let condr = view.read(app);
+                    condr.pending_workspace_selection_for(1).is_none()
+                        && condr.active_dock_surface == Some(second_surface)
+                        && condr.target_pane == Some((1, second_panes[0]))
                 })
             }));
             assert_eq!(
@@ -8039,12 +8038,12 @@ mod tests {
             });
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur
+                    let condr = view.read(app);
+                    condr
                         .active_session()
                         .and_then(|session| session.active_workspace_id())
                         == Some(first_workspace)
-                        && murmur.active_dock_surface == Some(first_surface)
+                        && condr.active_dock_surface == Some(first_surface)
                 })
             }));
             assert_eq!(
@@ -8113,11 +8112,11 @@ mod tests {
                     .bounds()
             });
             let inactive_geometry = window.read(|app| {
-                let murmur = view.read(app);
+                let condr = view.read(app);
                 second_panes
                     .iter()
                     .map(|pane_id| {
-                        murmur
+                        condr
                             .terminal_geometry
                             .get(&(1, *pane_id))
                             .map(|geometry| (geometry.bounds, geometry.cell_size))
@@ -8155,11 +8154,11 @@ mod tests {
             );
             assert_eq!(
                 window.read(|app| {
-                    let murmur = view.read(app);
+                    let condr = view.read(app);
                     second_panes
                         .iter()
                         .map(|pane_id| {
-                            murmur
+                            condr
                                 .terminal_geometry
                                 .get(&(1, *pane_id))
                                 .map(|geometry| (geometry.bounds, geometry.cell_size))
@@ -8237,11 +8236,11 @@ mod tests {
             });
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur
+                    let condr = view.read(app);
+                    condr
                         .active_session()
                         .is_some_and(|session| session.workspace(first_workspace).is_none())
-                        && !murmur.dock_surfaces.contains_key(&first_surface)
+                        && !condr.dock_surfaces.contains_key(&first_surface)
                 })
             }));
         }
@@ -8251,7 +8250,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|window, cx| {
                 view.update(cx, |this, cx| {
@@ -8287,7 +8286,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             let original_sequence =
                 window.read(|app| view.read(app).connection(1).unwrap().sequence);
@@ -8346,7 +8345,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
             let endpoint = window.read(|app| {
                 view.read(app)
                     .connection(1)
@@ -8367,12 +8366,12 @@ mod tests {
             let mut contender_stream = contender.into_stream();
             let deadline = Instant::now() + TEST_TIMEOUT;
             loop {
-                murmur_core::protocol::write_message(
+                condr_core::protocol::write_message(
                     &mut contender_stream,
                     &ClientMessage::AcquireControl { session_id },
                 )
                 .unwrap();
-                match murmur_core::protocol::read_message(&mut contender_stream).unwrap() {
+                match condr_core::protocol::read_message(&mut contender_stream).unwrap() {
                     ServerMessage::ControlGranted { .. } => break,
                     ServerMessage::ControlDenied { .. } => {
                         assert!(
@@ -8401,13 +8400,13 @@ mod tests {
                 })
             }));
 
-            murmur_core::protocol::write_message(
+            condr_core::protocol::write_message(
                 &mut contender_stream,
                 &ClientMessage::ReleaseControl { session_id },
             )
             .unwrap();
             assert!(matches!(
-                murmur_core::protocol::read_message(&mut contender_stream).unwrap(),
+                condr_core::protocol::read_message(&mut contender_stream).unwrap(),
                 ServerMessage::ControlReleased { .. }
             ));
             assert!(
@@ -8428,7 +8427,7 @@ mod tests {
             let workspace_root = TestDirectory::new("reconnect-cached-dock");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.send_layout(LayoutCommand::CreateWorkspace {
@@ -8439,14 +8438,14 @@ mod tests {
             let mut active_surface = None;
             assert!(wait_until_event_driven(window, |window| {
                 active_surface = window.read(|app| {
-                    let murmur = view.read(app);
-                    let session = murmur.active_session()?;
+                    let condr = view.read(app);
+                    let session = condr.active_session()?;
                     let tab = session.active_workspace()?.active_tab();
                     let surface_key = DockSurfaceKey {
                         connection_key: 1,
                         tab_id: tab.id(),
                     };
-                    murmur
+                    condr
                         .dock_surfaces
                         .contains_key(&surface_key)
                         .then_some((surface_key, tab.focused_pane().id()))
@@ -8465,8 +8464,8 @@ mod tests {
             let mut pane_ids = Vec::new();
             assert!(wait_until(window, |window| {
                 pane_ids = window.read(|app| {
-                    let murmur = view.read(app);
-                    murmur
+                    let condr = view.read(app);
+                    condr
                         .active_session()
                         .and_then(|session| session.tab(surface_key.tab_id).cloned())
                         .map(|tab| tab.panes().iter().map(|pane| pane.id()).collect())
@@ -8522,7 +8521,7 @@ mod tests {
                             .clone();
                     let rebuilds = this.dock_rebuild_count;
                     this.pending_sizes
-                        .insert((1, pane_id), murmur_core::TerminalSize::new(99, 199));
+                        .insert((1, pane_id), condr_core::TerminalSize::new(99, 199));
                     assert!(this.disconnect_server(1));
                     this.refresh_target_pane(1);
                     this.rebuild_dock(window, cx);
@@ -8583,9 +8582,9 @@ mod tests {
                 "reconnect should retain the Server runtime"
             );
             assert!(window.read(|app| {
-                let murmur = view.read(app);
-                let session = murmur.active_session().unwrap();
-                let surface = murmur.dock_surfaces.get(&surface_key).unwrap();
+                let condr = view.read(app);
+                let session = condr.active_session().unwrap();
+                let surface = condr.dock_surfaces.get(&surface_key).unwrap();
                 surface.pending_projection_request.is_none()
                     && surface.pending_projection_applied_sequence.is_none()
                     && surface.projection.as_ref()
@@ -8614,7 +8613,7 @@ mod tests {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (view, window, mut server) =
-                connected_murmur_with(&mut cx, server, endpoint.clone());
+                connected_condr_with(&mut cx, server, endpoint.clone());
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.send_layout(LayoutCommand::CreateWorkspace {
@@ -8633,9 +8632,9 @@ mod tests {
             }));
 
             let (server_id, runtime_epoch, expected_snapshot, pane_id) = window.read(|app| {
-                let murmur = view.read(app);
-                let connection = murmur.connection(1).unwrap();
-                let pane_id = murmur
+                let condr = view.read(app);
+                let connection = condr.connection(1).unwrap();
+                let pane_id = condr
                     .active_session()
                     .unwrap()
                     .active_workspace()
@@ -8650,7 +8649,7 @@ mod tests {
                     pane_id,
                 )
             });
-            let old_terminal_marker = "MURMUR_PH6_OLD_TERMINAL_STATE";
+            let old_terminal_marker = "CONDR_PH6_OLD_TERMINAL_STATE";
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.terminal_command(
@@ -8712,8 +8711,8 @@ mod tests {
             }));
 
             window.read(|app| {
-                let murmur = view.read(app);
-                let connection = murmur.connection(1).unwrap();
+                let condr = view.read(app);
+                let connection = condr.connection(1).unwrap();
                 assert_eq!(connection.server_id, server_id);
                 assert_ne!(connection.runtime_epoch, runtime_epoch);
                 assert_eq!(connection.snapshot, expected_snapshot);
@@ -8729,7 +8728,7 @@ mod tests {
                         .contains(old_terminal_marker)
                 );
                 assert_eq!(
-                    murmur
+                    condr
                         .active_session()
                         .unwrap()
                         .active_workspace()
@@ -8768,14 +8767,14 @@ mod tests {
             let directory = TestDirectory::new("corrupt-snapshot");
             let endpoint = Endpoint::local(directory.0.join("server.sock"));
             let snapshot_path = directory.0.join("session.snapshot");
-            std::fs::write(&snapshot_path, b"not a Murmur snapshot").unwrap();
+            std::fs::write(&snapshot_path, b"not a Condr snapshot").unwrap();
             let server = start_server_with_config(
                 ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path),
             );
 
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
             assert!(window.read(|app| {
                 view.read(app)
                     .active_session()
@@ -8801,7 +8800,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|window, cx| {
                 view.update(cx, |this, cx| {
@@ -8821,7 +8820,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
@@ -8848,7 +8847,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
@@ -8885,10 +8884,10 @@ mod tests {
             assert!(wait_until(window, |window| {
                 window.update(|window, cx| _ = window.draw(cx));
                 let (revision, resize_pending) = window.read(|app| {
-                    let murmur = view.read(app);
+                    let condr = view.read(app);
                     (
-                        murmur.terminal(1, pane_id).unwrap().view.revision,
-                        murmur.pending_sizes.contains_key(&(1, pane_id)),
+                        condr.terminal(1, pane_id).unwrap().view.revision,
+                        condr.pending_sizes.contains_key(&(1, pane_id)),
                     )
                 });
                 if last_revision != Some(revision) {
@@ -8934,7 +8933,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
@@ -8963,12 +8962,12 @@ mod tests {
                     this.terminal_command(
                         1,
                         pane_id,
-                        TerminalCommand::Text("echo MURMUR_COPY_WORD\r".into()),
+                        TerminalCommand::Text("echo CONDR_COPY_WORD\r".into()),
                     );
                 });
             });
 
-            let word = "MURMUR_COPY_WORD";
+            let word = "CONDR_COPY_WORD";
             let word_chars = word.chars().collect::<Vec<_>>();
             let mut word_cell = None;
             assert!(wait_until_event_driven(window, |window| {
@@ -9066,7 +9065,7 @@ mod tests {
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
             let (server, endpoint) = start_tcp_server();
-            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
 
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
@@ -9088,13 +9087,13 @@ mod tests {
                     return false;
                 };
                 let (terminal_ready, focus) = window.read(|app| {
-                    let murmur = view.read(app);
+                    let condr = view.read(app);
                     (
-                        murmur
+                        condr
                             .connection(1)
                             .and_then(|connection| connection.terminals.get(&pane_id))
                             .is_some_and(|terminal| !terminal.exited),
-                        murmur
+                        condr
                             .panels
                             .get(&(1, pane_id))
                             .map(|panel| panel.read(app).focus_handle.clone()),
@@ -9107,7 +9106,7 @@ mod tests {
             }));
             let pane_id = pane_id.unwrap();
 
-            let shift_insert_marker = "MURMUR_SHIFT_INSERT_PASTE";
+            let shift_insert_marker = "CONDR_SHIFT_INSERT_PASTE";
             window.write_to_clipboard(ClipboardItem::new_string(shift_insert_marker.into()));
             window.simulate_keystrokes("shift-insert");
             assert!(wait_until_event_driven(window, |window| {
@@ -9116,7 +9115,7 @@ mod tests {
 
             #[cfg(windows)]
             {
-                let ctrl_v_marker = "MURMUR_CTRL_V_PASTE";
+                let ctrl_v_marker = "CONDR_CTRL_V_PASTE";
                 window.write_to_clipboard(ClipboardItem::new_string(ctrl_v_marker.into()));
                 window.simulate_keystrokes("ctrl-v");
                 assert!(wait_until_event_driven(window, |window| {
@@ -9133,7 +9132,7 @@ mod tests {
             window.update(|window, cx| _ = window.draw(cx));
             assert!(window.update(|window, cx| window.has_focused_input(cx)));
 
-            let dialog_marker = "MURMUR_DIALOG_MUST_NOT_PASTE_INTO_TERMINAL";
+            let dialog_marker = "CONDR_DIALOG_MUST_NOT_PASTE_INTO_TERMINAL";
             window.write_to_clipboard(ClipboardItem::new_string(dialog_marker.into()));
             window.simulate_keystrokes("shift-insert");
             window.run_until_parked();
@@ -9145,7 +9144,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
 
             window.update(|window, cx| {
                 view.update(cx, |this, cx| {
@@ -9239,12 +9238,12 @@ mod tests {
             );
             std::fs::create_dir_all(&repository).unwrap();
             run_git(&repository, ["init"]);
-            run_git(&repository, ["config", "user.name", "Murmur Tests"]);
+            run_git(&repository, ["config", "user.name", "Condr Tests"]);
             run_git(
                 &repository,
-                ["config", "user.email", "murmur@example.invalid"],
+                ["config", "user.email", "condr@example.invalid"],
             );
-            std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+            std::fs::write(repository.join("README.md"), "condr\n").unwrap();
             run_git(&repository, ["add", "README.md"]);
             run_git(&repository, ["commit", "-m", "initial"]);
             run_git(
@@ -9260,7 +9259,7 @@ mod tests {
 
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, server) = connected_murmur(&mut cx);
+            let (view, window, server) = connected_condr(&mut cx);
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.send_layout(LayoutCommand::CreateWorkspace {
@@ -9271,12 +9270,12 @@ mod tests {
             let mut parent_workspace_id = None;
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    parent_workspace_id = murmur
+                    let condr = view.read(app);
+                    parent_workspace_id = condr
                         .active_session()
                         .and_then(|session| session.active_workspace_id());
                     parent_workspace_id.is_some()
-                        && murmur
+                        && condr
                             .connection(1)
                             .is_some_and(|connection| !connection.workspace_git.is_empty())
                 })
@@ -9304,8 +9303,8 @@ mod tests {
             let mut managed_workspace = None;
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    managed_workspace = murmur.active_session().and_then(|session| {
+                    let condr = view.read(app);
+                    managed_workspace = condr.active_session().and_then(|session| {
                         session.workspaces().iter().find_map(|workspace| {
                             workspace
                                 .worktree()
@@ -9314,7 +9313,7 @@ mod tests {
                         })
                     });
                     managed_workspace.as_ref().is_some_and(|(workspace_id, _)| {
-                        murmur
+                        condr
                             .connection(1)
                             .and_then(|connection| connection.workspace_git.get(workspace_id))
                             .and_then(|git| git.branch.as_deref())
@@ -9386,10 +9385,10 @@ mod tests {
                 })
             });
             let (client_has_workspace, sequence, error) = window.read(|app| {
-                let murmur = view.read(app);
-                let connection = murmur.connection(1).unwrap();
+                let condr = view.read(app);
+                let connection = condr.connection(1).unwrap();
                 (
-                    murmur
+                    condr
                         .active_session()
                         .is_some_and(|session| session.workspace(managed_workspace_id).is_some()),
                     connection.sequence,
@@ -9465,7 +9464,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur(&mut cx);
+            let (view, window, _server) = connected_condr(&mut cx);
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
                     this.send_layout(LayoutCommand::CreateWorkspace {
@@ -9519,7 +9518,7 @@ mod tests {
                     view.read(app)
                         .connection(1)
                         .and_then(|connection| connection.agents.get(&agent_pane))
-                        .is_some_and(|agent| agent.state == murmur_core::AgentState::Working)
+                        .is_some_and(|agent| agent.state == condr_core::AgentState::Working)
                 })
             });
             assert!(
@@ -9594,12 +9593,12 @@ mod tests {
             let worktree = temp.0.join("existing-worktree");
             std::fs::create_dir_all(&repository).unwrap();
             run_git(&repository, ["init"]);
-            run_git(&repository, ["config", "user.name", "Murmur Tests"]);
+            run_git(&repository, ["config", "user.name", "Condr Tests"]);
             run_git(
                 &repository,
-                ["config", "user.email", "murmur@example.invalid"],
+                ["config", "user.email", "condr@example.invalid"],
             );
-            std::fs::write(repository.join("README.md"), "murmur\n").unwrap();
+            std::fs::write(repository.join("README.md"), "condr\n").unwrap();
             run_git(&repository, ["add", "README.md"]);
             run_git(&repository, ["commit", "-m", "initial"]);
             run_git(
@@ -9616,7 +9615,7 @@ mod tests {
             let (server, endpoint) = start_tcp_server();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, _server) = connected_murmur_with(&mut cx, server, endpoint);
+            let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
             window.update(|window, cx| _ = window.draw(cx));
             let new_workspace = window
                 .debug_bounds("new-terminal-workspace")
@@ -9633,12 +9632,12 @@ mod tests {
             let mut parent_workspace_id = None;
             assert!(wait_until(window, |window| {
                 window.read(|app| {
-                    let murmur = view.read(app);
-                    parent_workspace_id = murmur
+                    let condr = view.read(app);
+                    parent_workspace_id = condr
                         .active_session()
                         .and_then(|session| session.active_workspace_id());
                     parent_workspace_id.is_some()
-                        && murmur
+                        && condr
                             .connection(1)
                             .is_some_and(|connection| !connection.workspace_git.is_empty())
                 })
@@ -9684,7 +9683,7 @@ mod tests {
             let second_root = TestDirectory::new("reorder-second");
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, server) = connected_murmur(&mut cx);
+            let (view, window, server) = connected_condr(&mut cx);
 
             window.update(|_, cx| {
                 view.update(cx, |this, _| {
@@ -9812,7 +9811,7 @@ mod tests {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (view, window, server) = connected_murmur(&mut cx);
+            let (view, window, server) = connected_condr(&mut cx);
             let button = window
                 .debug_bounds("new-terminal-workspace")
                 .expect("new workspace button should be rendered");
@@ -9832,11 +9831,11 @@ mod tests {
             assert!(
                 received,
                 "GUI did not render the workspace created by the real server; server workspaces: {}, client workspaces: {}, client sequence: {}, connection error: {:?}",
-                murmur_core::Session::restore(server.handle.snapshot())
+                condr_core::Session::restore(server.handle.snapshot())
                     .unwrap()
                     .workspaces()
                     .len(),
-                window.read(|app| murmur_core::Session::restore(
+                window.read(|app| condr_core::Session::restore(
                     view.read(app).connection(1).unwrap().snapshot.clone()
                 )
                 .unwrap()
@@ -9886,13 +9885,13 @@ mod tests {
                 .unwrap();
             let new_tab_focused = wait_until(window, |window| {
                 let (terminal_ready, focus) = window.read(|app| {
-                    let murmur = view.read(app);
+                    let condr = view.read(app);
                     (
-                        murmur
+                        condr
                             .connection(1)
                             .and_then(|connection| connection.terminals.get(&new_pane))
                             .is_some_and(|terminal| !terminal.exited),
-                        murmur
+                        condr
                             .panels
                             .get(&(1, new_pane))
                             .map(|panel| panel.read(app).focus_handle.clone()),
@@ -9911,7 +9910,7 @@ mod tests {
                 window.debug_bounds(terminal_selector(new_pane)).is_some(),
                 "the terminal in a newly created Tab was not painted before text input"
             );
-            window.simulate_input("MURMUR_NEW_TAB_FOCUS");
+            window.simulate_input("CONDR_NEW_TAB_FOCUS");
             let new_tab_received_input = wait_until(window, |window| {
                 window.read(|app| {
                     view.read(app)
@@ -9924,7 +9923,7 @@ mod tests {
                                 .iter()
                                 .map(|cell| cell.text.as_str())
                                 .collect::<String>()
-                                .contains("MURMUR_NEW_TAB_FOCUS")
+                                .contains("CONDR_NEW_TAB_FOCUS")
                         })
                 })
             });
@@ -10008,8 +10007,8 @@ mod tests {
             );
 
             let (pane_to_focus, rebuilds_before_focus) = window.read(|app| {
-                let murmur = view.read(app);
-                let workspace = murmur.active_session().unwrap();
+                let condr = view.read(app);
+                let workspace = condr.active_session().unwrap();
                 let tab = workspace.active_workspace().unwrap().active_tab();
                 let focused = tab.focused_pane().id();
                 let other = tab
@@ -10018,7 +10017,7 @@ mod tests {
                     .find(|pane| pane.id() != focused)
                     .unwrap()
                     .id();
-                (other, murmur.dock_rebuild_count)
+                (other, condr.dock_rebuild_count)
             });
             let other_terminal = window
                 .debug_bounds(terminal_selector(pane_to_focus))
@@ -10052,7 +10051,7 @@ mod tests {
             });
             assert!(split_down, "Alt+Shift+- did not split down");
 
-            window.simulate_input("printf MURMUR_E2E");
+            window.simulate_input("printf CONDR_E2E");
             window.simulate_keystrokes("enter");
 
             let output_received = wait_until(window, |window| {
@@ -10065,7 +10064,7 @@ mod tests {
                                 .iter()
                                 .map(|cell| cell.text.as_str())
                                 .collect::<String>()
-                                .contains("MURMUR_E2E")
+                                .contains("CONDR_E2E")
                         })
                     })
                 })
@@ -10100,14 +10099,14 @@ mod tests {
         }
 
         #[test]
-        fn visual_context_can_resize_murmur_window() {
+        fn visual_context_can_resize_condr_window() {
             let _serial_guard = acquire_visual_test_lock();
             let mut cx = TestAppContext::single();
             cx.update(gpui_component::init);
-            let (_, window, _server) = connected_murmur(&mut cx);
+            let (_, window, _server) = connected_condr(&mut cx);
             window.simulate_resize(size(px(1280.), px(720.)));
             let bounds = window
-                .debug_bounds("murmur-sidebar")
+                .debug_bounds("condr-sidebar")
                 .expect("sidebar should remain rendered");
             assert!(bounds.size.width > px(0.));
             assert!(bounds.size.height > px(0.));

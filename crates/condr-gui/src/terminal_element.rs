@@ -2,6 +2,11 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
+use condr_core::protocol::RuntimeEpoch;
+use condr_core::{
+    PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSelection, TerminalSide,
+    TerminalSize, TerminalView,
+};
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
@@ -11,14 +16,9 @@ use gpui::{
     TextStyle, UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb,
     size,
 };
-use murmur_core::protocol::RuntimeEpoch;
-use murmur_core::{
-    PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSelection, TerminalSide,
-    TerminalSize, TerminalView,
-};
 use smol_str::SmolStr;
 
-use crate::{ConnectionKey, Murmur};
+use crate::{Condr, ConnectionKey};
 
 const INVERSE: u16 = 1 << 0;
 const BOLD: u16 = 1 << 1;
@@ -74,7 +74,7 @@ impl TerminalPalette {
 }
 
 pub(crate) struct TerminalElement {
-    view: Entity<Murmur>,
+    view: Entity<Condr>,
     props: TerminalElementProps,
 }
 
@@ -169,11 +169,11 @@ impl TerminalRenderCache {
 
 // Terminals accept IME text, but printable chords must reach keybindings first.
 struct TerminalInputHandler {
-    inner: ElementInputHandler<Murmur>,
+    inner: ElementInputHandler<Condr>,
 }
 
 impl TerminalInputHandler {
-    fn new(bounds: Bounds<Pixels>, view: Entity<Murmur>) -> Self {
+    fn new(bounds: Bounds<Pixels>, view: Entity<Condr>) -> Self {
         Self {
             inner: ElementInputHandler::new(bounds, view),
         }
@@ -287,7 +287,7 @@ pub(crate) struct PrepaintState {
 }
 
 impl TerminalElement {
-    pub(crate) fn new(view: Entity<Murmur>, props: TerminalElementProps) -> Self {
+    pub(crate) fn new(view: Entity<Condr>, props: TerminalElementProps) -> Self {
         Self { view, props }
     }
 }

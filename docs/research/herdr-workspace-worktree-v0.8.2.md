@@ -1,6 +1,6 @@
 # Herdr v0.8.2: Workspace cwd and Git worktrees
 
-Scope: Herdr tag [`v0.8.2`](https://github.com/herdrdev/herdr/tree/v0.8.2) (commit `9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c`) and the official Git worktree manual. Facts and Murmur recommendations are separated below.
+Scope: Herdr tag [`v0.8.2`](https://github.com/herdrdev/herdr/tree/v0.8.2) (commit `9eb521456ac0d19d3ab3d9d7cea3cca10baa8a4c`) and the official Git worktree manual. Facts and Condr recommendations are separated below.
 
 ## Verified Herdr behavior
 
@@ -32,17 +32,17 @@ Scope: Herdr tag [`v0.8.2`](https://github.com/herdrdev/herdr/tree/v0.8.2) (comm
 - This follows Git's contract: `worktree remove` accepts only clean worktrees unless `--force` is supplied; the main worktree cannot be removed. ([official Git manual](https://git-scm.com/docs/git-worktree#Documentation/git-worktree.txt-remove))
 - The session snapshot stores Workspace identity cwd, explicit worktree membership, and each Pane cwd. On restore Herdr rediscovers branch/Git metadata and retains membership only if the checkout still exists and maps to the same repo key. ([snapshot fields and capture](https://github.com/herdrdev/herdr/blob/v0.8.2/src/persist/snapshot.rs#L49-L69), [Workspace capture](https://github.com/herdrdev/herdr/blob/v0.8.2/src/persist/snapshot.rs#L279-L307), [Pane cwd capture](https://github.com/herdrdev/herdr/blob/v0.8.2/src/persist/snapshot.rs#L311-L381), [restore validation](https://github.com/herdrdev/herdr/blob/v0.8.2/src/persist/restore.rs#L405-L443))
 
-## Recommended Murmur MVP interpretation
+## Recommended Condr MVP interpretation
 
-1. Keep `Workspace.root_cwd` stable at creation/open time; do not copy Herdr's dynamic “first root Pane cwd becomes Workspace identity” behavior. Pane cwd remains runtime state. This matches Murmur's folder-oriented GUI and avoids a shell `cd` silently changing Workspace identity/grouping.
+1. Keep `Workspace.root_cwd` stable at creation/open time; do not copy Herdr's dynamic “first root Pane cwd becomes Workspace identity” behavior. Pane cwd remains runtime state. This matches Condr's folder-oriented GUI and avoids a shell `cd` silently changing Workspace identity/grouping.
 2. Support arbitrary directories. `Open Folder` sets `root_cwd` to the chosen folder; `New Terminal Workspace` uses the user home. New Tabs and Splits follow the focused/target Pane's current cwd when available, then fall back to `root_cwd`.
 3. Treat Git as optional derived metadata. For MVP show only the current branch; defer dirty and ahead/behind status until it drives a concrete workflow.
 4. Keep first-class create/open worktree because isolated checkouts are central to multi-agent work, but model explicit managed membership as Herdr does. Ordinary `Open Folder` must never grant delete authority merely because Git reports a linked worktree.
 5. `Close Workspace` closes only the selected Workspace and never touches disk. Do not copy Herdr's parent-close cascade.
-6. `Remove Worktree` is a separate action only for a Murmur-created linked worktree. MVP should attempt clean `git worktree remove` only and surface Git's dirty/untracked refusal; omit force deletion and branch deletion until users explicitly require them.
-7. Use one fixed default checkout root, `~/.murmur/worktrees/<repo>/<branch-slug>`, for MVP. Add a TOML override only when a real portability or storage-location need appears.
+6. `Remove Worktree` is a separate action only for a Condr-created linked worktree. MVP should attempt clean `git worktree remove` only and surface Git's dirty/untracked refusal; omit force deletion and branch deletion until users explicitly require them.
+7. Use one fixed default checkout root, `~/.condr/worktrees/<repo>/<branch-slug>`, for MVP. Add a TOML override only when a real portability or storage-location need appears.
 
 ## Unresolved by this research
 
-- Herdr supports bare-repository discovery, but Murmur's MVP need for bare repositories is not established; defer it unless a target workflow requires it.
-- Windows foreground-process cwd fidelity is limited to Herdr's shell/reported-cwd fallback. Murmur must validate the corresponding ConPTY cwd signal on Windows rather than assume Unix foreground-process behavior.
+- Herdr supports bare-repository discovery, but Condr's MVP need for bare repositories is not established; defer it unless a target workflow requires it.
+- Windows foreground-process cwd fidelity is limited to Herdr's shell/reported-cwd fallback. Condr must validate the corresponding ConPTY cwd signal on Windows rather than assume Unix foreground-process behavior.

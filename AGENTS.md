@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository.
 
 ## 项目定位
 
-**Murmur**(取自 murmuration)— 一个 multi-agent GUI 应用,参考原型是 [herdr](https://github.com/herdrdev/herdr)(纯 TUI 的 multi-agent 编排工具)。
+**Condr**(由 conductor 缩写而来)— 一个 multi-agent GUI 应用,参考原型是 [herdr](https://github.com/herdrdev/herdr)(纯 TUI 的 multi-agent 编排工具)。
 
 核心定位:**Orca 的易上手 + herdr 的架构(嵌入原生 CLI 作为 agent 后端)− 两者的缺点**。
 
@@ -12,7 +12,7 @@ Guidance for coding agents working in this repository.
 - paseo:需要自己维护对话 GUI,负担重
 - orca:webview 实现,卡、重
 
-Murmur 用原生 GUI 解决:跨端、轻量、快。
+Condr 用原生 GUI 解决:跨端、轻量、快。
 
 ## 技术栈
 
@@ -37,19 +37,19 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 
 ### 架构与工程结构
 
-Murmur 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `murmur-server` 后连接:
+Condr 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `condr-server` 后连接:
 
 ```
-crates/murmur-core    # 领域、协议、PTY、VT、agent 检测、Git — 无 GUI 依赖,headless 可测
-crates/murmur-server  # 独立进程,拥有 Session、Terminal runtime、持久化与连接
-crates/murmur-gui     # 纯 client,连接一个或多个 server,负责 GPUI 渲染
+crates/condr-core    # 领域、协议、PTY、VT、agent 检测、Git — 无 GUI 依赖,headless 可测
+crates/condr-server  # 独立进程,拥有 Session、Terminal runtime、持久化与连接
+crates/condr-gui     # 纯 client,连接一个或多个 server,负责 GPUI 渲染
 ```
 
 GUI 关闭只断开连接。server、PTY、agent 与 Session 继续运行;重新打开 GUI 时优先连接已有本地 server。停止 server 是显式操作。
 
 ### 开发环境(双机)
 
-- **Linux server(arm64,headless)**:murmur-core 的全部开发与测试(`cargo test/clippy` 无需显示器)。GUI 无法在此运行。
+- **Linux server(arm64,headless)**:condr-core 的全部开发与测试(`cargo test/clippy` 无需显示器)。GUI 无法在此运行。
 - **Windows 笔记本**:GUI 原生构建与手动验证(GPUI 不做交叉编译),同时验证 ConPTY 路径。
 
 ### 开发阶段兼容性
@@ -77,14 +77,14 @@ cargo fmt              # 格式化
 
 ### 终端渲染性能要求
 
-终端是 Murmur 的核心交互面,流畅度必须接近 herdr/原生终端,不能把卡顿视为可推迟的视觉问题。代表性 agent CLI(尤其 Codex)持续输出、spinner/动画刷新时,鼠标拖选、键盘输入、滚动和 Pane 操作仍需跟手,目标显示节奏为 60 Hz 且不能积压过期帧。
+终端是 Condr 的核心交互面,流畅度必须接近 herdr/原生终端,不能把卡顿视为可推迟的视觉问题。代表性 agent CLI(尤其 Codex)持续输出、spinner/动画刷新时,鼠标拖选、键盘输入、滚动和 Pane 操作仍需跟手,目标显示节奏为 60 Hz 且不能积压过期帧。
 
 - PTY read chunk 只是终端状态 wakeup,不是必须逐条展示的 GUI frame。Server 必须合并连续 wakeup、发布最新状态并保证尾帧/退出帧不丢;不得让无界旧 `TerminalView` 队列增加输入延迟。
 - GUI 消费终端事件时应批量处理并丢弃或覆盖已过期的中间视觉状态;控制、生命周期和布局事件仍必须可靠、有序。
 - 终端视觉更新使用独立于可靠 Session event cursor 的 per-client stream:每个 client writer 只有一个可丢弃的批量视觉槽,可靠消息优先。只有视觉帧成功入槽后才能推进该 client 的 baseline;槽满时只记录待刷新的 Pane,writer drain 后必须从 Server 权威 VT 状态重新生成最新帧。Bootstrap 必须清空排队视觉帧并重置 baseline;GUI 检测到 revision gap 时只请求一次新 Bootstrap。
 - 小范围终端变化不得使整屏 shaping cache 失效。缓存按 cell/row/run 的实际内容与样式失效;避免逐帧整屏字符串分配、整屏 shaping 和不必要的逐 cell paint。全量 view 成为瓶颈时,优先引入 per-client baseline/damage 增量,同时保持 reconnect bootstrap 正确。
 - selection 等纯 GUI 交互必须留在 Client 本地;持续终端输出时也要复用未变化的渲染缓存,不能只优化静止画面。
-- 普通开发命令 `cargo run -p murmur-gui` 也必须具备可用帧率。不要移除根 `Cargo.toml` 中 GPUI、文本 shaping、VT 和 Murmur 热路径的 dev profile 优化,除非有等效替代并完成 Windows 实测。
+- 普通开发命令 `cargo run -p condr-gui` 也必须具备可用帧率。不要移除根 `Cargo.toml` 中 GPUI、文本 shaping、VT 和 Condr 热路径的 dev profile 优化,除非有等效替代并完成 Windows 实测。
 - 性能相关变更至少覆盖:burst wakeup 合并到最新 revision、尾帧不丢、跨 revision 未变化 cell 不重复 shaping、真实 GPUI 拖选。静止终端上的单次拖选测试不足以证明性能;Windows 验收还需在代表性 agent 动画/高频输出下手动观察交互和帧率。
 - 优化前先定位 parse、snapshot/serialization、事件队列、prepaint/shaping、paint 中的实际热点。可以参考 herdr 的 render baseline/frame coalescing;Zed `terminal`/`terminal_view` 仅可参考思路,继续遵守 GPL-3.0 代码禁止复制的许可证边界。
 

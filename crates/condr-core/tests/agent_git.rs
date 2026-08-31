@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use murmur_core::{Session, create_worktree, discover_repository, open_worktree, remove_worktree};
+use condr_core::{Session, create_worktree, discover_repository, open_worktree, remove_worktree};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 
@@ -12,7 +12,7 @@ struct TempDirectory(PathBuf);
 impl TempDirectory {
     fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "murmur-{label}-{}-{}",
+            "condr-{label}-{}-{}",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
@@ -37,12 +37,12 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     let repository = temp.path().join("repository");
     fs::create_dir_all(&repository).unwrap();
     git(&repository, ["init"]);
-    git(&repository, ["config", "user.name", "Murmur Tests"]);
+    git(&repository, ["config", "user.name", "Condr Tests"]);
     git(
         &repository,
-        ["config", "user.email", "murmur@example.invalid"],
+        ["config", "user.email", "condr@example.invalid"],
     );
-    fs::write(repository.join("README.md"), "murmur\n").unwrap();
+    fs::write(repository.join("README.md"), "condr\n").unwrap();
     git(&repository, ["add", "README.md"]);
     git(&repository, ["commit", "-m", "initial"]);
     git(&repository, ["branch", "-M", "main"]);
@@ -81,12 +81,12 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
 #[test]
 fn worktree_association_survives_parent_workspace_close() {
     let mut session = Session::new();
-    let parent_root = PathBuf::from("/tmp/murmur-parent");
+    let parent_root = PathBuf::from("/tmp/condr-parent");
     let parent = session
         .create_workspace(parent_root.clone())
         .expect("Workspace capacity");
     let child = session
-        .create_workspace(PathBuf::from("/tmp/murmur-child"))
+        .create_workspace(PathBuf::from("/tmp/condr-child"))
         .expect("Workspace capacity");
     assert!(session.associate_worktree(child, parent, parent_root.clone(), true));
 

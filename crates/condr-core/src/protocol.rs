@@ -730,7 +730,7 @@ mod tests {
             session_id: SessionId(1),
             request_id: 9,
             command: LayoutCommand::CreateWorkspace {
-                root_directory: PathBuf::from("projects/murmur"),
+                root_directory: PathBuf::from("projects/condr"),
             },
         };
         let mut bytes = Vec::new();
@@ -746,7 +746,7 @@ mod tests {
     fn worktree_command_round_trip_keeps_protocol_version_one() {
         let mut session = crate::Session::new();
         let parent_workspace_id = session
-            .create_workspace(PathBuf::from("projects/murmur"))
+            .create_workspace(PathBuf::from("projects/condr"))
             .expect("Workspace capacity");
         let message = ClientMessage::Layout {
             server_id: ServerId(4),
@@ -836,7 +836,7 @@ mod tests {
     fn bootstrap_header_round_trip_uses_the_flat_snapshot_schema() {
         let mut session = crate::Session::new();
         session
-            .create_workspace(PathBuf::from("projects/murmur"))
+            .create_workspace(PathBuf::from("projects/condr"))
             .expect("Workspace capacity");
         let pane_id = session
             .active_workspace()
@@ -1138,7 +1138,7 @@ mod tests {
     fn bootstrap_header(batch_count: u32) -> (BootstrapHeader, PaneId, WorkspaceId) {
         let mut session = crate::Session::new();
         let workspace_id = session
-            .create_workspace(PathBuf::from("projects/murmur"))
+            .create_workspace(PathBuf::from("projects/condr"))
             .expect("Workspace capacity");
         let pane_id = session
             .active_workspace()

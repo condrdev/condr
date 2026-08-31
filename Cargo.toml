@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/murmur-core", "crates/murmur-server", "crates/murmur-gui"]
+members = ["crates/condr-core", "crates/condr-server", "crates/condr-gui"]
 resolver = "2"
 
 [workspace.package]
@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 license = "Apache-2.0"
-repository = "https://github.com/bcl-dev/murmur"
+repository = "https://github.com/condrdev/condr"
 
 [workspace.dependencies]
 alacritty_terminal = { version = "0.26.0", default-features = false }
@@ -38,9 +38,9 @@ alacritty_terminal = { opt-level = 3 }
 bincode = { opt-level = 3 }
 gpui = { opt-level = 3 }
 gpui_platform = { opt-level = 3 }
-murmur-core = { opt-level = 2 }
-murmur-gui = { opt-level = 2 }
-murmur-server = { opt-level = 2 }
+condr-core = { opt-level = 2 }
+condr-gui = { opt-level = 2 }
+condr-server = { opt-level = 2 }
 rustybuzz = { opt-level = 3 }
 smol_str = { opt-level = 3 }
 taffy = { opt-level = 3 }

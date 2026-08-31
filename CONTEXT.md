@@ -1,11 +1,11 @@
-# Murmur
+# Condr
 
-Murmur organizes terminal-first work across projects while recognizing agent CLI processes as optional occupants of terminals.
+Condr organizes terminal-first work across projects while recognizing agent CLI processes as optional occupants of terminals.
 
 ## Language
 
 **Server**:
-A long-lived Murmur runtime that owns one or more Sessions and their Terminals. A local Server is the same Server started on the GUI machine; closing a Client does not stop it or its work.
+A long-lived Condr runtime that owns one or more Sessions and their Terminals. A local Server is the same Server started on the GUI machine; closing a Client does not stop it or its work.
 _Avoid_: Local backend, GUI runtime
 
 **Client**:
@@ -43,7 +43,7 @@ A recognized agent CLI process running inside a Terminal. It does not own or cre
 _Avoid_: Pane
 
 **Managed Worktree**:
-A linked Git worktree created by Murmur and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact.
+A linked Git worktree created by Condr and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact.
 _Avoid_: Git Workspace, any detected worktree
 
 **Session Snapshot**:

@@ -2,12 +2,12 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use murmur_core::Session;
-use murmur_core::protocol::{ClientMessage, LayoutCommand, ServerMessage, SessionEvent};
-use murmur_server::{ClientConnection, Endpoint, ServerConfig, ensure_local_server, stop_server};
+use condr_core::Session;
+use condr_core::protocol::{ClientMessage, LayoutCommand, ServerMessage, SessionEvent};
+use condr_server::{ClientConnection, Endpoint, ServerConfig, ensure_local_server, stop_server};
 
-const HELPER_ENV: &str = "MURMUR_LOCAL_SERVER_TEST_HELPER";
-const WORKSPACE_ENV: &str = "MURMUR_LOCAL_SERVER_TEST_WORKSPACE";
+const HELPER_ENV: &str = "CONDR_LOCAL_SERVER_TEST_HELPER";
+const WORKSPACE_ENV: &str = "CONDR_LOCAL_SERVER_TEST_WORKSPACE";
 
 #[test]
 fn default_server_endpoint_is_private_and_local() {
@@ -20,7 +20,7 @@ fn default_server_endpoint_is_private_and_local() {
 #[test]
 fn ensure_local_server_reuses_a_live_standalone_process() {
     let endpoint_path = std::env::temp_dir().join(format!(
-        "murmur-process-test-{}-{}.sock",
+        "condr-process-test-{}-{}.sock",
         std::process::id(),
         unique_suffix()
     ));
@@ -32,11 +32,11 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
         .arg("--nocapture")
         .env(HELPER_ENV, "1")
         .env(WORKSPACE_ENV, &workspace_path)
-        .env("MURMUR_SOCKET_PATH", &endpoint_path)
-        .env("MURMUR_SNAPSHOT_PATH", &snapshot_path)
+        .env("CONDR_SOCKET_PATH", &endpoint_path)
+        .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env(
-            "MURMUR_SERVER_EXECUTABLE",
-            env!("CARGO_BIN_EXE_murmur-server"),
+            "CONDR_SERVER_EXECUTABLE",
+            env!("CARGO_BIN_EXE_condr-server"),
         )
         .output()
         .unwrap();
@@ -76,7 +76,7 @@ fn local_server_helper() {
     first_stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    murmur_core::protocol::write_message(
+    condr_core::protocol::write_message(
         &mut first_stream,
         &ClientMessage::AcquireControl { session_id },
     )
@@ -85,7 +85,7 @@ fn local_server_helper() {
         read_server(&mut first_stream),
         ServerMessage::ControlGranted { .. }
     ));
-    murmur_core::protocol::write_message(
+    condr_core::protocol::write_message(
         &mut first_stream,
         &ClientMessage::Subscribe {
             session_id,
@@ -101,7 +101,7 @@ fn local_server_helper() {
         .map(std::path::PathBuf::from)
         .expect("helper Workspace path is configured");
     std::fs::create_dir_all(&workspace_root).unwrap();
-    murmur_core::protocol::write_message(
+    condr_core::protocol::write_message(
         &mut first_stream,
         &ClientMessage::Layout {
             server_id,
@@ -175,7 +175,7 @@ fn local_server_helper() {
     restarted_stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    murmur_core::protocol::write_message(
+    condr_core::protocol::write_message(
         &mut restarted_stream,
         &ClientMessage::AcquireControl {
             session_id: restarted_session_id,
@@ -186,7 +186,7 @@ fn local_server_helper() {
         read_server(&mut restarted_stream),
         ServerMessage::ControlGranted { .. }
     ));
-    murmur_core::protocol::write_message(
+    condr_core::protocol::write_message(
         &mut restarted_stream,
         &ClientMessage::Subscribe {
             session_id: restarted_session_id,
@@ -198,7 +198,7 @@ fn local_server_helper() {
         read_server(&mut restarted_stream),
         ServerMessage::Subscribed { .. }
     ));
-    murmur_core::protocol::write_message(
+    condr_core::protocol::write_message(
         &mut restarted_stream,
         &ClientMessage::Layout {
             server_id,
@@ -268,8 +268,8 @@ fn wait_for_stop(endpoint: &Endpoint) {
     panic!("standalone server did not stop");
 }
 
-fn read_server(stream: &mut murmur_server::EndpointStream) -> ServerMessage {
-    murmur_core::protocol::read_message(stream).unwrap()
+fn read_server(stream: &mut condr_server::EndpointStream) -> ServerMessage {
+    condr_core::protocol::read_message(stream).unwrap()
 }
 
 fn unique_suffix() -> u128 {

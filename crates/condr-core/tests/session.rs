@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use murmur_core::{
+use condr_core::{
     PaneDirection, PaneLayout, Session, SessionSnapshot, SnapshotError, SplitDirection, WorkspaceId,
 };
 
@@ -9,7 +9,7 @@ fn creating_workspace_commits_a_complete_initial_tree() {
     let mut session = Session::new();
     assert!(session.is_empty());
 
-    let root_directory = PathBuf::from("projects/murmur");
+    let root_directory = PathBuf::from("projects/condr");
     let workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
@@ -20,7 +20,7 @@ fn creating_workspace_commits_a_complete_initial_tree() {
 
     let workspace = session.active_workspace().expect("workspace is active");
     assert_eq!(workspace.id(), workspace_id);
-    assert_eq!(workspace.name(), "murmur");
+    assert_eq!(workspace.name(), "condr");
     assert_eq!(workspace.root_directory(), root_directory.as_path());
     assert_eq!(workspace.tabs().len(), 1);
 
@@ -35,7 +35,7 @@ fn creating_workspace_commits_a_complete_initial_tree() {
 #[test]
 fn new_tab_follows_focused_pane_cwd_without_changing_workspace_root() {
     let mut session = Session::new();
-    let root_directory = PathBuf::from("projects/murmur");
+    let root_directory = PathBuf::from("projects/condr");
     let workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
@@ -45,7 +45,7 @@ fn new_tab_follows_focused_pane_cwd_without_changing_workspace_root() {
         .active_tab()
         .focused_pane()
         .id();
-    let pane_cwd = PathBuf::from("projects/murmur/crates/murmur-core");
+    let pane_cwd = PathBuf::from("projects/condr/crates/condr-core");
 
     assert!(session.set_pane_cwd(first_pane_id, Some(pane_cwd.clone())));
     let tab_id = session.create_tab(workspace_id).expect("workspace exists");
@@ -64,7 +64,7 @@ fn new_tab_follows_focused_pane_cwd_without_changing_workspace_root() {
 fn splitting_a_pane_records_layout_cwd_and_focus_history() {
     let mut session = Session::new();
     session
-        .create_workspace(PathBuf::from("projects/murmur"))
+        .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
     let first_pane_id = session
         .active_workspace()
@@ -72,7 +72,7 @@ fn splitting_a_pane_records_layout_cwd_and_focus_history() {
         .active_tab()
         .focused_pane()
         .id();
-    let pane_cwd = PathBuf::from("projects/murmur/crates/murmur-gui");
+    let pane_cwd = PathBuf::from("projects/condr/crates/condr-gui");
     session.set_pane_cwd(first_pane_id, Some(pane_cwd.clone()));
 
     let second_pane_id = session
@@ -107,7 +107,7 @@ fn splitting_a_pane_records_layout_cwd_and_focus_history() {
 fn closing_panes_uses_focus_history_and_cascades_to_an_empty_session() {
     let mut session = Session::new();
     let workspace_id = session
-        .create_workspace(PathBuf::from("projects/murmur"))
+        .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
     let tab_id = session
         .active_workspace()
@@ -208,7 +208,7 @@ fn reordering_workspaces_and_tabs_preserves_active_identity() {
 #[test]
 fn snapshot_round_trip_preserves_structural_domain_state() {
     let mut session = Session::new();
-    let root_directory = PathBuf::from("projects/murmur");
+    let root_directory = PathBuf::from("projects/condr");
     let first_workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
@@ -220,7 +220,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
     let second_tab_id = session
         .create_tab(first_workspace_id)
         .expect("workspace exists");
-    assert!(session.rename_workspace(first_workspace_id, "Murmur Core"));
+    assert!(session.rename_workspace(first_workspace_id, "Condr Core"));
     assert!(session.rename_tab(first_tab_id, "Overview"));
     assert!(session.rename_tab(second_tab_id, "Runtime"));
     assert!(session.move_tab(second_tab_id, 0));
@@ -230,7 +230,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
         .active_tab()
         .focused_pane()
         .id();
-    let pane_cwd = PathBuf::from("projects/murmur/crates/murmur-core");
+    let pane_cwd = PathBuf::from("projects/condr/crates/condr-core");
     session.set_pane_cwd(second_tab_root, Some(pane_cwd.clone()));
     let split_pane_id = session
         .split_pane(second_tab_root, SplitDirection::Vertical, 0.65)
@@ -267,7 +267,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
     let workspace = restored
         .workspace(first_workspace_id)
         .expect("first workspace restores");
-    assert_eq!(workspace.name(), "Murmur Core");
+    assert_eq!(workspace.name(), "Condr Core");
     assert_eq!(workspace.root_directory(), root_directory.as_path());
     assert_eq!(
         workspace
@@ -473,7 +473,7 @@ fn splitting_a_pane_activates_its_workspace_and_tab() {
 #[test]
 fn unknown_pane_cwd_falls_back_to_the_stable_workspace_root() {
     let mut session = Session::new();
-    let root_directory = PathBuf::from("projects/murmur");
+    let root_directory = PathBuf::from("projects/condr");
     let workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
@@ -521,7 +521,7 @@ fn unknown_pane_cwd_falls_back_to_the_stable_workspace_root() {
 fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
     let mut session = Session::new();
     session
-        .create_workspace(PathBuf::from("projects/murmur"))
+        .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
     let first = session
         .active_workspace()
@@ -615,7 +615,7 @@ fn snapshot_codec_enforces_the_eight_mebibyte_limit_in_both_directions() {
 
     let mut session = Session::new();
     session
-        .create_workspace(PathBuf::from("projects/murmur"))
+        .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
     let pane_id = session
         .active_workspace()
@@ -631,7 +631,7 @@ fn snapshot_codec_enforces_the_eight_mebibyte_limit_in_both_directions() {
 fn restore_rejects_exhausted_tab_numbers_and_stable_ids() {
     let mut session = Session::new();
     let workspace_id = session
-        .create_workspace(PathBuf::from("projects/murmur"))
+        .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
     let tab = session.active_workspace().unwrap().active_tab();
     let tab_id = tab.id().as_u64();
@@ -962,12 +962,12 @@ fn restore_enforces_a_64_level_layout_depth_limit() {
 }
 
 fn encoded_snapshot(workspace_id: u64, tab_id: u64, pane_id: u64, next_tab_number: u64) -> Vec<u8> {
-    let root = PathBuf::from("projects/murmur");
+    let root = PathBuf::from("projects/condr");
     bincode::serialize(&EncodedSession {
         version: 1,
         workspaces: vec![EncodedWorkspace {
             id: workspace_id,
-            name: "murmur".into(),
+            name: "condr".into(),
             root_directory: root.clone(),
             worktree: None,
             tabs: vec![EncodedTab {

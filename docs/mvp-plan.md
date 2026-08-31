@@ -1,20 +1,20 @@
-# Murmur MVP Implementation and Acceptance Plan
+# Condr MVP Implementation and Acceptance Plan
 
 ## Outcome
 
-Murmur MVP is a native GUI client for organizing ordinary shell terminals across one or more connected Servers, Workspaces, Tabs, and split Panes. An agent CLI is an optional process that the user starts inside a Terminal; Murmur never selects or launches one automatically.
+Condr MVP is a native GUI client for organizing ordinary shell terminals across one or more connected Servers, Workspaces, Tabs, and split Panes. An agent CLI is an optional process that the user starts inside a Terminal; Condr never selects or launches one automatically.
 
-The GUI discovers an existing local `murmur-server` or starts the same standalone server used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Workspace…`, which prompts for an absolute Root Directory in that Server's filesystem namespace; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
+The GUI discovers an existing local `condr-server` or starts the same standalone server used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Workspace…`, which prompts for an absolute Root Directory in that Server's filesystem namespace; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
 
 ## Architecture Boundary
 
 | Crate | Owns | Must not own |
 | --- | --- | --- |
-| `murmur-core` | Stable domain IDs and split layout, versioned protocol types, PTY and VT components, terminal I/O, agent detection, Git/worktree operations, Session Snapshot schema | GPUI entities, Dock runtime IDs, network listeners, GUI state |
-| `murmur-server` | Stable Server identity, Session registry, live Terminal runtimes, protocol endpoint, client synchronization, Session Snapshot persistence | GPUI rendering, window focus, local-only behavior |
-| `murmur-gui` | Connections to one or more Servers, local Server discovery/start, GPUI window and terminal element, input routing, Start Page, sidebar, Tab row, Dock projection | Authoritative domain state, PTY ownership, implicit Server shutdown |
+| `condr-core` | Stable domain IDs and split layout, versioned protocol types, PTY and VT components, terminal I/O, agent detection, Git/worktree operations, Session Snapshot schema | GPUI entities, Dock runtime IDs, network listeners, GUI state |
+| `condr-server` | Stable Server identity, Session registry, live Terminal runtimes, protocol endpoint, client synchronization, Session Snapshot persistence | GPUI rendering, window focus, local-only behavior |
+| `condr-gui` | Connections to one or more Servers, local Server discovery/start, GPUI window and terminal element, input routing, Start Page, sidebar, Tab row, Dock projection | Authoritative domain state, PTY ownership, implicit Server shutdown |
 
-`murmur-core` and `murmur-server` run Tokio; `murmur-gui` uses the GPUI executor. The wire protocol is transport-independent: length-prefixed `bincode + serde` frames, a `Hello`/`Welcome` handshake, strict protocol-version rejection, and bounded frame sizes. Local connections use a private `interprocess` endpoint (Unix domain socket or Windows named pipe); remote MVP connections use an explicitly configured trusted TCP endpoint, normally a Server loopback listener forwarded through an external SSH TCP tunnel. Both paths carry the same protocol and server behavior; the local Server does not expose a public listener, and application authentication/authorization is deferred.
+`condr-core` and `condr-server` run Tokio; `condr-gui` uses the GPUI executor. The wire protocol is transport-independent: length-prefixed `bincode + serde` frames, a `Hello`/`Welcome` handshake, strict protocol-version rejection, and bounded frame sizes. Local connections use a private `interprocess` endpoint (Unix domain socket or Windows named pipe); remote MVP connections use an explicitly configured trusted TCP endpoint, normally a Server loopback listener forwarded through an external SSH TCP tunnel. Both paths carry the same protocol and server behavior; the local Server does not expose a public listener, and application authentication/authorization is deferred.
 
 The Server continues consuming PTY output and updating VT state with no clients connected. Reconnecting to a running Server first receives a one-shot authoritative bootstrap (stable Server identity plus runtime epoch, Session/layout state, active selections, focus, cwd, each Pane's live terminal view, foreground shell/Agent identity and status), then subscribes to ordered reliable events and a coalesced terminal visual stream; no shell or Agent is recreated. The identity/epoch pair lets the GUI distinguish a live reconnect from a replacement Server after restart. The server owns the event order and is the only authority for layout mutations. MVP has one active controller per Server/Session; a newly attached controller may supersede the previous one, while collaborative multi-client control is not guaranteed. This connection synchronization is distinct from durable Session Snapshot restore after a Server restart.
 
@@ -24,9 +24,9 @@ Each phase starts only after the preceding exit condition holds.
 
 | Phase | Deliverable | Exit condition |
 | --- | --- | --- |
-| 0. Build baseline | Cargo workspace, Apache-2.0 metadata, dependencies locked to reviewed revisions | `murmur-core` checks on Linux/arm64 and an empty `murmur-gui` window builds on Windows; no copied GPL Zed terminal code |
+| 0. Build baseline | Cargo workspace, Apache-2.0 metadata, dependencies locked to reviewed revisions | `condr-core` checks on Linux/arm64 and an empty `condr-gui` window builds on Windows; no copied GPL Zed terminal code |
 | 1. Core domain | Session, Workspace, Tab, Pane, stable Root Directory, split tree, focus/order, Pane-to-Tab-to-Workspace close cascade, durable snapshot schema | Headless tests prove domain invariants without GPUI or a real shell |
-| 2. Server/client foundation | Standalone `murmur-server`, stable Server/Session addressing, transport-independent versioned command/event protocol, private local IPC, local discovery/start, trusted TCP/SSH-tunnel configuration, disconnect/reconnect | Headless integration proves the same framed client protocol reaches local IPC and remote-style SSH/TCP endpoints, rejects incompatible versions and oversized frames, preserves Sessions with zero clients, bootstraps authoritative structure plus Server identity/epoch before ordered reliable events and coalesced terminal visual frames on reconnect, distinguishes a live reconnect from a replacement Server, enforces one active controller, and never exposes a non-loopback listener by default |
+| 2. Server/client foundation | Standalone `condr-server`, stable Server/Session addressing, transport-independent versioned command/event protocol, private local IPC, local discovery/start, trusted TCP/SSH-tunnel configuration, disconnect/reconnect | Headless integration proves the same framed client protocol reaches local IPC and remote-style SSH/TCP endpoints, rejects incompatible versions and oversized frames, preserves Sessions with zero clients, bootstraps authoritative structure plus Server identity/epoch before ordered reliable events and coalesced terminal visual frames on reconnect, distinguishes a live reconnect from a replacement Server, enforces one active controller, and never exposes a non-loopback listener by default |
 | 3. Terminal vertical slice | Server-owned `portable-pty` shell runtime, persistent `alacritty_terminal` state, ordered I/O, resize, input encoding, paste, scrollback, GUI-local selection with Server-side copy extraction, terminal synchronization | A real PTY integration test passes on Linux; one Windows shell/Agent Pane survives GUI disconnect/reconnect with its process, layout, and terminal state intact |
 | 4. Native orchestration UI | Multi-Server navigation, Start Page, sidebar, Tab row, Dock projection, split/focus/resize/swap/zoom/close, and fixed shortcuts | One GUI controls the complete Workspace/Tab/Pane workflow across local and remote Servers; Dock cannot mutate Server state independently |
 | 5. Agent and Git workflows | Foreground agent recognition, bottom-buffer status rules, unseen `done`, branch display, create/open worktree, clean managed removal | State transitions and Git safety rules pass core/server tests and are visible for local and remote Sessions |
@@ -49,13 +49,13 @@ Run:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy -p murmur-core -p murmur-server --all-targets -- -D warnings
-cargo test -p murmur-core -p murmur-server
-cargo test -p murmur-gui --features test-support
+cargo clippy -p condr-core -p condr-server --all-targets -- -D warnings
+cargo test -p condr-core -p condr-server
+cargo test -p condr-gui --features test-support
 ```
 
 The GUI test-support suite runs headless with GPUI's `TestPlatform`, but starts a real
-`murmur-server` over a local IPC endpoint. It drives the same Root, buttons, keyboard
+`condr-server` over a local IPC endpoint. It drives the same Root, buttons, keyboard
 shortcuts, Session/Layout protocol, PTY, and terminal rendering path as the desktop client;
 it does not replace the small Windows ConPTY/window-manager smoke test.
 
@@ -73,7 +73,7 @@ The core/server suite must prove:
 - Output coalescing cannot lose the final terminal update notification.
 - Agent detection distinguishes `unknown`, `idle`, `working`, and `blocked`; presentation derives `done` only from `idle + unseen`, and viewing the Pane clears `done`.
 - Non-Git directories remain valid. Git discovery derives only metadata. Tests using temporary repositories cover branch display, new and existing branch worktree creation, opening an existing worktree, and explicit parent association.
-- `Close Workspace` never invokes Git or deletes a checkout. Only a Murmur-created Managed Worktree can be removed; dirty or untracked files refuse removal; clean removal leaves the branch. Restoring a saved worktree association revalidates the exact parent and child checkout roots against their current Git topology before retaining it; a stale association is cleared and cannot grant deletion authority. If removal fails after live terminals are stopped, fresh terminal instances are restored in the unchanged Workspace; a Pane whose replacement shell cannot start remains coherently exited with its final view. Prepared-checkout rollback failures are reported.
+- `Close Workspace` never invokes Git or deletes a checkout. Only a Condr-created Managed Worktree can be removed; dirty or untracked files refuse removal; clean removal leaves the branch. Restoring a saved worktree association revalidates the exact parent and child checkout roots against their current Git topology before retaining it; a stale association is cleared and cannot grant deletion authority. If removal fails after live terminals are stopped, fresh terminal instances are restored in the unchanged Workspace; a Pane whose replacement shell cannot start remains coherently exited with its final view. Prepared-checkout rollback failures are reported.
 - Durable Snapshot persistence uses atomic replacement. The bounded flat codec rejects payloads over 8 MiB, while the Server enforces a frame-safe durable budget of 2 MiB minus 64 KiB because the structural Snapshot occupies one Bootstrap header. Missing, empty, corrupt, over-budget, or wholly unrestorable snapshots yield Start Page state. Server-restart recovery tries a Pane's saved cwd, falls back to its stable Workspace Root Directory when that saved cwd is unusable, persists the repair, and prunes only when neither can start a fresh shell. Restorable siblings survive. Recovery never restores grid, scrollback, commands, live processes, Agent status, or conversations. The unreleased format is replaced in place without a legacy migration or compatibility path.
 
 ## Windows Manual Gate
@@ -84,7 +84,7 @@ Record the Windows version, commit, Rust toolchain, shell, GPU, Server endpoint,
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace
-cargo run -p murmur-gui
+cargo run -p condr-gui
 ```
 
 - First launch discovers or starts one detached local Server, shows Start Page, and starts no shell. `New Workspace…` uses the native directory picker for Local and a Server-path text field for TCP/SSH-tunnel connections, then opens a shell in the validated absolute Root Directory. It does not launch an agent CLI.
@@ -115,7 +115,7 @@ The release candidate must include:
 
 - One native GUI window can connect to multiple independently running Servers. Simultaneous collaborative control of one Session by multiple GUI clients is not guaranteed.
 - Local and remote Servers have identical product behavior and wire semantics. The MVP remote path uses an explicitly trusted TCP endpoint, normally through an external SSH TCP tunnel; application authentication, authorization, encryption, account management, and public Internet exposure are deferred. Transport protection depends on the external tunnel. Servers use private local endpoints by default.
-- The GUI accepts remote Servers as socket addresses. SSH tunneling is configured outside Murmur, and additional Server entries are not persisted across GUI process restarts in the MVP.
+- The GUI accepts remote Servers as socket addresses. SSH tunneling is configured outside Condr, and additional Server entries are not persisted across GUI process restarts in the MVP.
 - GUI reconnect preserves the authoritative Session/layout plus live processes and terminal state held by a running Server, including a running Agent and its visible Pane. Server restart performs structural Session restore with fresh shells and does not preserve terminal history, process, command, Agent conversation, or live Agent state.
 - No automatic agent launch, agent-specific terminal path, hook installer, or agent session resume. Status remains heuristic and unsupported CLIs may stay `unknown`.
 - No multi-window Pane undock, Pane Stack, free Pane drag/drop, or cross-Workspace live Pane move.

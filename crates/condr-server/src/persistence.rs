@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
-use murmur_core::SessionSnapshot;
+use condr_core::SessionSnapshot;
 
 const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(250);
 const RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -105,7 +105,7 @@ impl SnapshotPersistence {
         let worker_shared = Arc::clone(&shared);
         let worker_path = path.clone();
         let worker = thread::Builder::new()
-            .name("murmur-snapshot".into())
+            .name("condr-snapshot".into())
             .spawn(move || run_worker(worker_path, worker_shared))?;
 
         Ok(Self {
@@ -201,7 +201,7 @@ impl Drop for SnapshotPersistence {
     fn drop(&mut self) {
         if let Err(error) = self.shutdown() {
             eprintln!(
-                "murmur-server: failed to flush Session Snapshot {}: {error}",
+                "condr-server: failed to flush Session Snapshot {}: {error}",
                 self.path.display()
             );
         }
@@ -242,7 +242,7 @@ fn run_worker_with(
                     continue;
                 }
                 eprintln!(
-                    "murmur-server: failed to persist Session Snapshot {}: {error}",
+                    "condr-server: failed to persist Session Snapshot {}: {error}",
                     path.display()
                 );
                 if state.pending.is_none() {
@@ -335,7 +335,7 @@ fn adjacent_lock_path(path: &Path) -> PathBuf {
 mod tests {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-    use murmur_core::Session;
+    use condr_core::Session;
 
     use super::*;
 
@@ -553,7 +553,7 @@ mod tests {
     impl TestDirectory {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "murmur-persistence-{}-{}",
+                "condr-persistence-{}-{}",
                 std::process::id(),
                 NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed)
             ));

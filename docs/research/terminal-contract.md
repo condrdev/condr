@@ -1,14 +1,14 @@
 # `alacritty_terminal` + `portable-pty` 的最小终端契约
 
-上下文：[研究：alacritty_terminal 相对 libghostty-vt 的最小终端契约](https://github.com/bcl-dev/murmur/issues/7)
+上下文：[研究：alacritty_terminal 相对 libghostty-vt 的最小终端契约](https://github.com/condrdev/condr/issues/7)
 
 ## 结论
 
-Murmur 不需要为每种 agent CLI 编写启动或终端适配器。窗口启动默认 shell；用户在其中运行任意 agent CLI。MVP 的边界是做成一个行为自洽的 `xterm-256color` 终端：PTY 输出进入同一个 VT 状态机，VT 产生的回复和用户输入有序写回同一个 PTY，GUI 从该状态机渲染、滚动和复制。
+Condr 不需要为每种 agent CLI 编写启动或终端适配器。窗口启动默认 shell；用户在其中运行任意 agent CLI。MVP 的边界是做成一个行为自洽的 `xterm-256color` 终端：PTY 输出进入同一个 VT 状态机，VT 产生的回复和用户输入有序写回同一个 PTY，GUI 从该状态机渲染、滚动和复制。
 
 `alacritty_terminal` 已覆盖这条路径里最重的 ANSI/VT 状态机。官方支持表包括常用 ESC、CSI 光标/擦除/插删/滚动、SGR、设备状态回复、备用屏幕、应用光标、焦点、鼠标、括号粘贴、同步更新、OSC 标题/颜色/超链接/剪贴板，以及 CSI-u 键盘模式；它不是完整的“所有历史终端协议”实现，也无需为了 agent CLI 补成完整兼容层。[Alacritty escape support](https://github.com/alacritty/alacritty/blob/ede2ac144da4dec4c075bfa803aacf3b3739bce6/extra/man/alacritty-escapes.7.scd#L18-L265)
 
-真正需要 Murmur 自己保证的是外围契约。`alacritty_terminal` 的 `Event` 明确把 PTY 回复、尺寸/颜色/剪贴板请求和 redraw wakeup 交给宿主；Alacritty 自己的按键编码则位于 GUI crate，而不在 `alacritty_terminal` crate 内。因此不能把“解析能工作”等同于“终端已经完成”。[terminal events](https://github.com/alacritty/alacritty/blob/ede2ac144da4dec4c075bfa803aacf3b3739bce6/alacritty_terminal/src/event.rs#L9-L58) [frontend keyboard encoder](https://github.com/alacritty/alacritty/blob/ede2ac144da4dec4c075bfa803aacf3b3739bce6/alacritty/src/input/keyboard.rs#L20-L172)
+真正需要 Condr 自己保证的是外围契约。`alacritty_terminal` 的 `Event` 明确把 PTY 回复、尺寸/颜色/剪贴板请求和 redraw wakeup 交给宿主；Alacritty 自己的按键编码则位于 GUI crate，而不在 `alacritty_terminal` crate 内。因此不能把“解析能工作”等同于“终端已经完成”。[terminal events](https://github.com/alacritty/alacritty/blob/ede2ac144da4dec4c075bfa803aacf3b3739bce6/alacritty_terminal/src/event.rs#L9-L58) [frontend keyboard encoder](https://github.com/alacritty/alacritty/blob/ede2ac144da4dec4c075bfa803aacf3b3739bce6/alacritty/src/input/keyboard.rs#L20-L172)
 
 ## MVP 必须满足的契约
 
@@ -41,7 +41,7 @@ Murmur 不需要为每种 agent CLI 编写启动或终端适配器。窗口启�
 
 ## 必须先验证的集成风险
 
-1. **键盘不是库内赠品。** `alacritty_terminal` 维护 mode，但 Alacritty GUI 才把窗口事件编码成 bytes。Murmur 需要一个小而明确的 GPUI-key 到 PTY-byte 层，并用 byte matrix 锁住 legacy、application cursor 与 bracketed paste；启用 CSI-u 时再扩展同一 matrix。
+1. **键盘不是库内赠品。** `alacritty_terminal` 维护 mode，但 Alacritty GUI 才把窗口事件编码成 bytes。Condr 需要一个小而明确的 GPUI-key 到 PTY-byte 层，并用 byte matrix 锁住 legacy、application cursor 与 bracketed paste；启用 CSI-u 时再扩展同一 matrix。
 2. **终端回复必须共享 writer 顺序。** 若解析线程直接写回复、GUI 线程另写用户输入，查询回复可能与输入交错。一个 pane 一个 writer actor/队列即可；无需为每类事件建通道。
 3. **resize 是双写。** 只 resize grid 会让子进程继续按旧尺寸绘制；只 resize PTY 会让 renderer 按旧 grid 截断。herdr 的顺序是先更新 terminal，再把同一尺寸交给 I/O actor。[herdr resize path](https://github.com/herdrdev/herdr/blob/v0.8.2/src/pane.rs#L2608-L2627)
 4. **同步更新优化必须成套实现。** `?2026h/l` 是防撕裂优化，不得成为永久冻结开关。最小版本无条件 repaint 最新 state；以后若抑制中间帧，必须同时实现 timeout 兜底。

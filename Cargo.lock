@@ -1109,6 +1109,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "condr-core"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "bincode",
+ "filedescriptor",
+ "nix",
+ "portable-pty",
+ "serde",
+ "smol_str",
+ "sysinfo",
+]
+
+[[package]]
+name = "condr-gui"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "condr-core",
+ "condr-server",
+ "gpui",
+ "gpui-component",
+ "gpui-component-assets",
+ "gpui_platform",
+ "smol_str",
+]
+
+[[package]]
+name = "condr-server"
+version = "0.1.0"
+dependencies = [
+ "atomicwrites",
+ "bincode",
+ "condr-core",
+ "interprocess",
+ "tokio",
+ "widestring",
+]
+
+[[package]]
 name = "console_error_panic_hook"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3926,46 +3966,6 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
-]
-
-[[package]]
-name = "murmur-core"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "bincode",
- "filedescriptor",
- "nix",
- "portable-pty",
- "serde",
- "smol_str",
- "sysinfo",
-]
-
-[[package]]
-name = "murmur-gui"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "gpui",
- "gpui-component",
- "gpui-component-assets",
- "gpui_platform",
- "murmur-core",
- "murmur-server",
- "smol_str",
-]
-
-[[package]]
-name = "murmur-server"
-version = "0.1.0"
-dependencies = [
- "atomicwrites",
- "bincode",
- "interprocess",
- "murmur-core",
- "tokio",
- "widestring",
 ]
 
 [[package]]

@@ -334,7 +334,7 @@ mod tests {
                     "cmd.exe".into(),
                     "/D".into(),
                     "/C".into(),
-                    r#"C:\Users\murmur\AppData\Roaming\npm\codex.cmd --model gpt-5"#.into(),
+                    r#"C:\Users\condr\AppData\Roaming\npm\codex.cmd --model gpt-5"#.into(),
                 ],
             ),
             Some(AgentKind::Codex)

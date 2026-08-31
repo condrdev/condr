@@ -1,5 +1,5 @@
 [package]
-name = "murmur-gui"
+name = "condr-gui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,8 +16,8 @@ gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
-murmur-core = { path = "../murmur-core" }
-murmur-server = { path = "../murmur-server" }
+condr-core = { path = "../condr-core" }
+condr-server = { path = "../condr-server" }
 smol_str.workspace = true
 
 [lints]

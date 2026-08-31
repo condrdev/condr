@@ -74,7 +74,7 @@ pub fn default_worktree_root() -> Result<PathBuf, GitError> {
         std::env::var_os("HOME")
     }
     .ok_or_else(|| GitError("cannot determine the user home directory".into()))?;
-    Ok(PathBuf::from(home).join(".murmur").join("worktrees"))
+    Ok(PathBuf::from(home).join(".condr").join("worktrees"))
 }
 
 pub fn create_worktree(
