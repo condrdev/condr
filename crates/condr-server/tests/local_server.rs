@@ -1,3 +1,4 @@
+use std::net::TcpListener;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -289,6 +290,77 @@ fn auto_started_server_survives_launcher_exit() {
     snapshot_lock.push(".lock");
     let _ = std::fs::remove_file(snapshot_lock);
     let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
+fn lifecycle_commands_manage_a_detached_server() {
+    let data_directory = std::env::temp_dir().join(format!(
+        "condr-command-test-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&data_directory).unwrap();
+    let socket_path = data_directory.join("condr.sock");
+    let snapshot_path = data_directory.join("state.snapshot");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let server = env!("CARGO_BIN_EXE_condr-server");
+
+    let start = Command::new(server)
+        .arg("start")
+        .arg("--listen")
+        .arg(address.to_string())
+        .arg("--snapshot")
+        .arg(&snapshot_path)
+        .env("CONDR_SOCKET_PATH", &socket_path)
+        .status()
+        .unwrap();
+    assert!(start.success(), "start failed: {start}");
+
+    let endpoint = Endpoint::tcp(address);
+    let guard = ServerGuard(endpoint.clone());
+    let status = Command::new(server)
+        .arg("status")
+        .arg("--listen")
+        .arg(address.to_string())
+        .status()
+        .unwrap();
+    assert!(status.success(), "status failed: {status}");
+
+    let second_start = Command::new(server)
+        .arg("start")
+        .arg("--listen")
+        .arg(address.to_string())
+        .arg("--snapshot")
+        .arg(&snapshot_path)
+        .env("CONDR_SOCKET_PATH", &socket_path)
+        .status()
+        .unwrap();
+    assert!(
+        second_start.success(),
+        "second start failed: {second_start}"
+    );
+
+    let stop = Command::new(server)
+        .arg("stop")
+        .arg("--listen")
+        .arg(address.to_string())
+        .status()
+        .unwrap();
+    assert!(stop.success(), "stop failed: {stop}");
+    wait_for_stop(&endpoint);
+    guard.disarm();
+
+    let stopped_status = Command::new(server)
+        .arg("status")
+        .arg("--listen")
+        .arg(address.to_string())
+        .status()
+        .unwrap();
+    assert_eq!(stopped_status.code(), Some(1));
+
+    std::fs::remove_dir_all(data_directory).unwrap();
 }
 
 #[test]

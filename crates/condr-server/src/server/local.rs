@@ -44,7 +44,17 @@ pub(super) fn runtime_epoch() -> u128 {
 }
 
 pub fn ensure_local_server() -> io::Result<Endpoint> {
-    let endpoint = Endpoint::local(default_socket_path());
+    ensure_server(ServerConfig::default())
+}
+
+pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
+    let endpoint = config.endpoint.clone();
+    if matches!(&endpoint, Endpoint::Tcp(address) if address.port() == 0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a detached TCP server requires a non-zero port",
+        ));
+    }
     if let Ok(stream) = endpoint.connect() {
         match probe_protocol(stream) {
             Ok(()) => return Ok(endpoint),
@@ -75,13 +85,22 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
         )
     })?;
     let stderr = log.try_clone()?;
-    // ponytail: 子进程会继承调用方的可继承句柄(Rust std 无 handle allowlist),
-    // 因此 `condr server start | ...` 的管道要等 server 退出才收到 EOF;
-    // M2 需要脚本化 CLI 时用 PROC_THREAD_ATTRIBUTE_HANDLE_LIST 修复。
+    // ponytail: Windows may inherit unrelated inheritable handles. Use an explicit
+    // handle allowlist if `condr-server start` pipe EOF becomes a real problem.
     let mut command = std::process::Command::new(&server_executable);
+    command.arg("run");
+    match &endpoint {
+        Endpoint::Local(path) => {
+            command.arg("--endpoint").arg(path);
+        }
+        Endpoint::Tcp(address) => {
+            command.arg("--listen").arg(address.to_string());
+        }
+    }
+    if let Some(path) = config.snapshot_path() {
+        command.arg("--snapshot").arg(path);
+    }
     command
-        .arg("--endpoint")
-        .arg(endpoint.as_local_path().expect("local endpoint"))
         .arg("--detached")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log))
@@ -122,13 +141,17 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
 }
 
 fn server_log_path(endpoint: &Endpoint) -> PathBuf {
-    let mut path = endpoint
-        .as_local_path()
-        .expect("local endpoint")
-        .as_os_str()
-        .to_os_string();
-    path.push(".log");
-    PathBuf::from(path)
+    match endpoint {
+        Endpoint::Local(path) => {
+            let mut path = path.as_os_str().to_os_string();
+            path.push(".log");
+            PathBuf::from(path)
+        }
+        Endpoint::Tcp(_) => default_socket_path().with_file_name(format!(
+            "condr-server-{:016x}.log",
+            stable_endpoint_id(endpoint)
+        )),
+    }
 }
 
 pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {

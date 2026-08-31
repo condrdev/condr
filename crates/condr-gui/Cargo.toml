@@ -27,6 +27,5 @@ serde.workspace = true
 smol_str.workspace = true
 toml.workspace = true
 
-[lints.rust]
-# workspace 级别是 forbid;本 crate 降为 deny,唯一豁免是 cli.rs 的 AttachConsole FFI。
-unsafe_code = "deny"
+[lints]
+workspace = true

@@ -60,14 +60,14 @@ M0  Rolling Developer Preview
               |        \
               |         \-- M5  Relay（需求门控）
               |
-              \---- M4  CLI -> Agent Profile -> Skill
+              \---- M4  condr-cli Workflow -> Agent Profile -> Skill
 
 M3 + 稳定语义 API -> M6 Web 只读 -> Mobile Companion -> 受控交互
 
 开发文档从 M0 开始按需维护；面向用户的品牌、社区治理和正式推广在 R0 再启动，不需要等待完整 Mobile。
 ```
 
-M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完成后再决定进入 R0 还是继续 M2；M3 需要 M2 的 Server 发布和协议/客户端边界，M4 的 CLI 需要稳定的语义 API，Skill 再依赖 CLI。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
+M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完成后再决定进入 R0 还是继续 M2；M3 需要 M2 的 Server 发布和协议/客户端边界，M2 才建立独立的 `condr-cli` 只读骨架，M4 再扩展 Agent workflow，Skill 最后依赖 CLI。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
 
 ## 里程碑
 
@@ -147,7 +147,7 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - 明确升级、回滚、备份和 Server identity 的持久化位置。
 - 从当前实现中拆出可复用的 `condr-protocol` 和 `condr-client` 边界；Server 保留 Runtime，GUI 不再反向定义协议。
 - 在 Hello/Welcome 和语义 API 中加入 client kind、capabilities、typed errors、幂等 request ID、event cursor、权限上下文和 controller lease。
-- 先提供 CLI 只读骨架：Server、Session、Workspace、Tab、Pane 的 `list/status`，统一 `--json`、稳定退出码、超时和诊断信息。
+- 发布独立的 `condr-cli` 只读骨架：它是面向 Agent 的纯 Client，不依赖 GPUI、不承载 Server 生命周期；先提供 Session、Workspace、Tab、Pane 的 `list/status`，统一 `--json`、稳定退出码、超时和诊断信息。
 
 **协议原则**
 
@@ -156,7 +156,7 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 **退出条件**
 
 - 一台干净 Linux 机器可以在无 GUI 的情况下安装、启动、重启和恢复 Server。
-- GUI 与 CLI 可以共享同一客户端状态机，并能清楚区分版本不兼容、未授权和运行时错误。
+- GUI 与 `condr-cli` 可以共享同一客户端状态机，并能清楚区分版本不兼容、未授权和运行时错误。
 - Server 断开 GUI 不会停止 Session、PTY 或 Agent。
 
 ### M3：Secure Direct Remote
@@ -182,19 +182,18 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - 未授权客户端无法观察到结构或终端数据；安全失败有明确诊断。
 - 单用户自托管场景的部署和恢复有完整文档。
 
-### M4：CLI 与 Agent Workflow
+### M4：condr-cli Agent Workflow
 
 **实施顺序**
 
-1. CLI 查询和只读观察。
-2. Session/Workspace/Tab/Pane 生命周期。
-3. `send`、`capture`、`wait agent`、`attach`、取消和失败策略。
-4. 多 Pane/worktree 的声明式工作流。
-5. 在 CLI/API 之上提供 Agent Profile 和 Skill。
+1. 在 M2 只读能力之上加入 Session/Workspace/Tab/Pane 生命周期。
+2. 加入 `send`、`capture`、`wait agent`、`attach`、取消和失败策略。
+3. 加入多 Pane/worktree 的声明式工作流。
+4. 在 `condr-cli`/API 之上提供 Agent Profile 和 Skill。
 
 Agent Profile 使用声明式 manifest 描述 executable、argv、环境、启动模板、图标和状态检测规则。先验证 2～3 个代表性 CLI；未知 CLI 仍然可以手动启动和使用。
 
-Skill 是调用 Condr CLI/API 的受限工作流模板，不是新的对话循环。每个 Skill 声明所需 capability，对启动进程、输入、文件和网络操作提供显式确认。
+Skill 是调用 `condr-cli`/API 的受限工作流模板，不是新的对话循环。每个 Skill 声明所需 capability，对启动进程、输入、文件和网络操作提供显式确认。
 
 **退出条件**
 
