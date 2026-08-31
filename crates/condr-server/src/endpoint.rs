@@ -187,21 +187,13 @@ pub fn default_socket_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    #[cfg(windows)]
-    let config_dir = std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("APPDATA"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("condr");
+    portable_socket_path()
+}
 
-    #[cfg(not(windows))]
-    let config_dir = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("condr");
-
-    config_dir.join("condr.sock")
+fn portable_socket_path() -> PathBuf {
+    condr_core::executable_directory()
+        .join("data")
+        .join("condr.sock")
 }
 
 fn connect_local(path: &Path) -> io::Result<LocalStream> {
@@ -476,6 +468,16 @@ mod tests {
 
     const CHILD_ENDPOINT_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_PATH";
     const CHILD_READY_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_READY";
+
+    #[test]
+    fn portable_socket_is_in_the_executable_data_directory() {
+        assert_eq!(
+            portable_socket_path(),
+            condr_core::executable_directory()
+                .join("data")
+                .join("condr.sock")
+        );
+    }
 
     #[test]
     fn local_endpoint_bind_child_process() {

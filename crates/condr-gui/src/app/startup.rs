@@ -91,12 +91,7 @@ pub(super) fn connect_to_server(
 
 pub(crate) fn run() {
     let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr-gui");
-    let config_path = config::default_path()
-        .map_err(|error| {
-            eprintln!("condr-gui: {error}");
-            error
-        })
-        .ok();
+    let config_path = Some(config::default_path());
     let app = gpui_platform::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {

@@ -14,10 +14,8 @@ pub(super) struct SavedServer {
     pub address: SocketAddr,
 }
 
-pub(super) fn default_path() -> Result<PathBuf, String> {
-    dirs::config_dir()
-        .map(|directory| directory.join("condr").join("config.toml"))
-        .ok_or_else(|| "cannot determine the user config directory".to_string())
+pub(super) fn default_path() -> PathBuf {
+    condr_core::executable_directory().join("config.toml")
 }
 
 pub(super) fn load_servers(path: &Path) -> io::Result<Vec<SavedServer>> {
@@ -96,6 +94,14 @@ fn invalid_data(error: impl std::fmt::Display) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_config_is_next_to_the_executable() {
+        assert_eq!(
+            default_path(),
+            condr_core::executable_directory().join("config.toml")
+        );
+    }
 
     #[test]
     fn saving_client_servers_preserves_server_config() {

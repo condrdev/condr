@@ -1130,7 +1130,6 @@ dependencies = [
  "atomicwrites",
  "condr-core",
  "condr-server",
- "dirs",
  "gpui",
  "gpui-component",
  "gpui-component-assets",

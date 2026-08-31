@@ -67,14 +67,8 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
     }))
 }
 
-pub fn default_worktree_root() -> Result<PathBuf, GitError> {
-    let home = if cfg!(windows) {
-        std::env::var_os("USERPROFILE")
-    } else {
-        std::env::var_os("HOME")
-    }
-    .ok_or_else(|| GitError("cannot determine the user home directory".into()))?;
-    Ok(PathBuf::from(home).join(".condr").join("worktrees"))
+pub fn default_worktree_root() -> PathBuf {
+    crate::paths::executable_directory().join("worktrees")
 }
 
 pub fn create_worktree(

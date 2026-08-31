@@ -31,7 +31,9 @@ $archive = Get-ChildItem .\condr-download\condr-windows-x86_64-*.zip | Select-Ob
 Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
 ```
 
-进入解压出的 commit 目录并运行 `condr-gui.exe`。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。
+运行 `condr-dev\condr\condr-gui.exe`。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。
+
+Condr 使用 portable 目录布局：`config.toml` 位于程序目录，Server 的 snapshot、log 和本地 endpoint 文件位于 `data/`，Managed Worktree 位于 `worktrees/`。更新前先停止本地 Server，再将新版覆盖解压到同一个 `condr-dev`；归档内固定的 `condr/` 目录使这些运行数据保留。卸载前同样先停止 Server，再删除整个 `condr/` 目录。
 
 ## Linux Server
 
@@ -48,13 +50,10 @@ archive=$(find "$PWD/condr-download" -name "condr-server-linux-${arch}-*.tar.gz"
 tar -C condr-download -xzf "$archive"
 ```
 
-使用 loopback listener 启动远端 Server，避免暴露未鉴权端口：
+使用 loopback listener 启动远端 Server，避免暴露未鉴权端口。默认 snapshot 会写入程序旁的 `data/`：
 
 ```bash
-mkdir -p "$HOME/.config/condr"
-./condr-download/condr-server-linux-${arch}-*/condr-server \
-  --listen 127.0.0.1:4242 \
-  --snapshot "$HOME/.config/condr/remote.snapshot"
+./condr-download/condr/condr-server --listen 127.0.0.1:4242
 ```
 
 在 Windows 建立 SSH tunnel：
@@ -66,7 +65,7 @@ ssh -N -L 4242:127.0.0.1:4242 <linux-host>
 然后在 Condr 中添加 TCP Server `127.0.0.1:4242`。停止 Server 时，在 Linux 的另一个 shell 运行：
 
 ```bash
-./condr-download/condr-server-linux-${arch}-*/condr-server --listen 127.0.0.1:4242 --stop
+./condr-download/condr/condr-server --listen 127.0.0.1:4242 --stop
 ```
 
 ## 更新检查

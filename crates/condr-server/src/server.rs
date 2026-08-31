@@ -671,7 +671,7 @@ impl RuntimeState {
             agents: std::collections::HashMap::new(),
             workspace_git: std::collections::HashMap::new(),
             workspace_git_scanned_at: std::collections::HashMap::new(),
-            worktree_root: default_worktree_root().ok(),
+            worktree_root: Some(default_worktree_root()),
             active_controller: None,
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),

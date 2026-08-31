@@ -19,7 +19,6 @@ gpui-component.workspace = true
 gpui-component-assets.workspace = true
 condr-core = { path = "../condr-core" }
 condr-server = { path = "../condr-server" }
-dirs.workspace = true
 serde.workspace = true
 smol_str.workspace = true
 toml.workspace = true

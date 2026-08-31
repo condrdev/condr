@@ -40,7 +40,7 @@ Scope: Herdr tag [`v0.8.2`](https://github.com/herdrdev/herdr/tree/v0.8.2) (comm
 4. Keep first-class create/open worktree because isolated checkouts are central to multi-agent work, but model explicit managed membership as Herdr does. Ordinary `Open Folder` must never grant delete authority merely because Git reports a linked worktree.
 5. `Close Workspace` closes only the selected Workspace and never touches disk. Do not copy Herdr's parent-close cascade.
 6. `Remove Worktree` is a separate action only for a Condr-created linked worktree. MVP should attempt clean `git worktree remove` only and surface Git's dirty/untracked refusal; omit force deletion and branch deletion until users explicitly require them.
-7. Use one fixed default checkout root, `~/.condr/worktrees/<repo>/<branch-slug>`, for MVP. Add a TOML override only when a real portability or storage-location need appears.
+7. Use one fixed portable checkout root, `<program>/worktrees/<repo>/<branch-slug>`, for MVP. Add a TOML override only when a real portability or storage-location need appears.
 
 ## Unresolved by this research
 

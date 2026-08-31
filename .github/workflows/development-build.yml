@@ -44,11 +44,11 @@ jobs:
         run: |
           short_sha="${GITHUB_SHA::12}"
           package="condr-server-linux-${{ matrix.arch }}-${short_sha}"
-          mkdir -p "dist/${package}"
-          install -m 755 target/release/condr-server "dist/${package}/condr-server"
-          install -m 644 LICENSE "dist/${package}/LICENSE"
-          printf '%s\n' "$GITHUB_SHA" > "dist/${package}/BUILD-COMMIT"
-          tar -C dist -czf "dist/${package}.tar.gz" "$package"
+          mkdir -p dist/condr
+          install -m 755 target/release/condr-server dist/condr/condr-server
+          install -m 644 LICENSE dist/condr/LICENSE
+          printf '%s\n' "$GITHUB_SHA" > dist/condr/BUILD-COMMIT
+          tar -C dist -czf "dist/${package}.tar.gz" condr
       - uses: actions/upload-artifact@v7
         with:
           name: condr-server-linux-${{ matrix.arch }}
@@ -77,7 +77,7 @@ jobs:
         run: |
           $shortSha = $env:GITHUB_SHA.Substring(0, 12)
           $package = "condr-windows-x86_64-$shortSha"
-          $stage = Join-Path "dist" $package
+          $stage = Join-Path "dist" "condr"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "target\release\condr-gui.exe" $stage
           Copy-Item "target\release\condr-server.exe" $stage
