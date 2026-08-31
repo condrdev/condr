@@ -768,7 +768,10 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
         let probe_deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let state = handle.state.lock().unwrap();
-            let probed = state.terminals.get(&pane_id).and_then(TerminalRuntime::cwd);
+            let probed = state
+                .terminals
+                .get(&pane_id)
+                .and_then(|runtime| runtime.cwd_probe().cwd());
             if probed.as_deref() == Some(final_cwd.as_path()) {
                 assert_ne!(
                     state.session.pane(pane_id).and_then(|pane| pane.cwd()),
