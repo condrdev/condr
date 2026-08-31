@@ -35,6 +35,8 @@ Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Forc
 
 ## Linux Server
 
+Linux artifacts are built on Ubuntu 22.04 and require glibc 2.35 or newer.
+
 根据机器架构下载一个 Server artifact：
 
 ```bash
