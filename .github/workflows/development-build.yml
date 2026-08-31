@@ -78,7 +78,6 @@ jobs:
           Copy-Item "target\release\condr-gui.exe" $stage
           Copy-Item "target\release\condr-server.exe" $stage
           Copy-Item "LICENSE" $stage
-          Copy-Item "crates\condr-gui\assets\LICENSE-LUCIDE" $stage
           Set-Content -Encoding ascii -Path (Join-Path $stage "BUILD-COMMIT") -Value $env:GITHUB_SHA
           Compress-Archive -Path $stage -DestinationPath "dist\$package.zip"
       - uses: actions/upload-artifact@v7
