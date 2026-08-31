@@ -1,6 +1,10 @@
 use super::*;
 
 use std::fs::{self, OpenOptions};
+#[cfg(not(windows))]
+use std::process::{Command, Stdio};
+#[cfg(windows)]
+use windows_spawn::{Command, CreationFlags, SpawnOptions, Stdio};
 
 pub(super) fn default_snapshot_path(endpoint: &Endpoint) -> PathBuf {
     if let Some(path) = std::env::var_os("CONDR_SNAPSHOT_PATH")
@@ -85,9 +89,7 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
         )
     })?;
     let stderr = log.try_clone()?;
-    // ponytail: Windows may inherit unrelated inheritable handles. Use an explicit
-    // handle allowlist if `condr-server start` pipe EOF becomes a real problem.
-    let mut command = std::process::Command::new(&server_executable);
+    let mut command = Command::new(&server_executable);
     command.arg("run");
     match &endpoint {
         Endpoint::Local(path) => {
@@ -102,18 +104,15 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     }
     command
         .arg("--detached")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::from(log))
-        .stderr(std::process::Stdio::from(stderr));
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(stderr));
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        // ponytail: add Herdr's Job Object/WMI escape if Condr must survive
-        // launchers whose kill-on-close Job cannot be broken away from.
-        command.creation_flags(DETACHED_PROCESS);
-    }
-    command.spawn().map_err(|error| {
+    let spawn_result =
+        command.spawn_with(SpawnOptions::new().creation_flags(CreationFlags::DETACHED_PROCESS));
+    #[cfg(not(windows))]
+    let spawn_result = command.spawn();
+    spawn_result.map_err(|error| {
         io::Error::new(
             error.kind(),
             format!(

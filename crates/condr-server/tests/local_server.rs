@@ -1,5 +1,6 @@
 use std::net::TcpListener;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -306,6 +307,8 @@ fn lifecycle_commands_manage_a_detached_server() {
     let address = listener.local_addr().unwrap();
     drop(listener);
     let server = env!("CARGO_BIN_EXE_condr-server");
+    let endpoint = Endpoint::tcp(address);
+    let guard = ServerGuard(endpoint.clone());
 
     let start = Command::new(server)
         .arg("start")
@@ -314,12 +317,26 @@ fn lifecycle_commands_manage_a_detached_server() {
         .arg("--snapshot")
         .arg(&snapshot_path)
         .env("CONDR_SOCKET_PATH", &socket_path)
-        .status()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .unwrap();
-    assert!(start.success(), "start failed: {start}");
+    let (output_sender, output_receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || output_sender.send(start.wait_with_output()).unwrap());
+    let output = output_receiver
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap_or_else(|_| {
+            let _ = stop_server(&endpoint);
+            panic!("start kept its output pipes open after launching the detached server");
+        })
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "start failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    let endpoint = Endpoint::tcp(address);
-    let guard = ServerGuard(endpoint.clone());
     let status = Command::new(server)
         .arg("status")
         .arg("--listen")

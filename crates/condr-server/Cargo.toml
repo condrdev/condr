@@ -19,6 +19,7 @@ nix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 widestring.workspace = true
+windows-spawn.workspace = true
 
 [lints]
 workspace = true
