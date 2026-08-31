@@ -1,8 +1,8 @@
 # Condr Roadmap
 
-> 状态：执行中（2026-08-30）
+> 状态：执行中（2026-08-31）
 >
-> MVP Phase 7 已完成，验收记录见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；当前进入 M0。
+> MVP Phase 7 已完成，验收记录见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；当前进入 M0 Rolling Developer Preview，随后用 M1 完成自举。
 
 本文档描述 MVP 通过 Phase 7 发布门之后的方向。它不修改 [MVP 验收计划](mvp-plan.md) 中已经约定的 Server、Session、Terminal、Agent 和 Git 边界。
 
@@ -24,6 +24,8 @@ Agent 仍然是 Terminal 中的可选进程，Condr 负责编排、呈现和生�
 
 Phase 7 release gate 已在 [GitHub #16](https://github.com/condrdev/condr/issues/16) 完成，Condr 已进入 post-MVP。后续每个发布候选仍需在同一 commit 上通过适用的自动化与人工验证。
 
+当前项目由单个开发者维护，近期没有对外发布计划。现阶段先建立一个可下载、可更新的滚动开发版，再使用 Condr 开发 Condr 本身；完成自举后才重新决定对外发布范围，不提前承担 Private Alpha 的安装、兼容和支持成本。
+
 ## 排序原则
 
 每个候选项目先回答三个问题：
@@ -36,20 +38,23 @@ Phase 7 release gate 已在 [GitHub #16](https://github.com/condrdev/condr/issue
 
 | 优先级 | 方向 | 判断 |
 | --- | --- | --- |
-| P0 | 发布信任 | Ph7、稳定性、诊断、安装/升级、支持矩阵和性能回归 |
+| P0 | 自举与日常体验 | 滚动开发版、真实 dogfood、Pane/Tab 操作、命令可发现性和最小设置 |
+| P0-C | 核心可靠性 | 数据安全、重连、终端性能和真实故障所需的诊断能力 |
 | P0-R | Remote 安全门 | 对外 remote 前必须有鉴权、配对、授权、撤销和加密 |
-| P1 | 日常桌面体验 | Pane/Tab 操作、命令可发现性、最小设置、通知和终端实用功能 |
-| P2 | 自动化与壁垒 | 稳定 Client API、CLI、Agent Profile、Skill |
+| P1 | 自动化与壁垒 | 稳定 Client API、CLI、Agent Profile、Skill |
+| Gate | 对外发布信任 | 有明确发布计划后再做诊断、安装/升级、支持矩阵和兼容策略 |
 | P3 | 分发与扩张 | Relay、Web、Mobile、团队协作和 Hosted 服务，按需求证据推进 |
 
 ## 依赖关系
 
 ```text
-M0  MVP RC / Private Alpha
- |\
- | \-- M1  Desktop Daily Driver
+M0  Rolling Developer Preview
  |
- \---- M2  Protocol/Client API + Headless Server 发布
+ \---- M1  Solo Daily Driver / 自举
+          |\
+          | \-- R0  Release Readiness / Private Alpha（有发布计划后）
+          |
+          \---- M2  Protocol/Client API + Headless Server 发布
               |\
               | \-- M3  Secure Direct Remote / Pairing
               |        \
@@ -59,39 +64,47 @@ M0  MVP RC / Private Alpha
 
 M3 + 稳定语义 API -> M6 Web 只读 -> Mobile Companion -> 受控交互
 
-文档、品牌、社区治理从 M0 开始低强度并行；正式推广不需要等待完整 Mobile。
+开发文档从 M0 开始按需维护；面向用户的品牌、社区治理和正式推广在 R0 再启动，不需要等待完整 Mobile。
 ```
 
-M1 和 M2 可以在 M0 之后并行。M3 需要 M2 的 Server 发布和协议/客户端边界；M4 的 CLI 需要稳定的语义 API，Skill 再依赖 CLI。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
+M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完成后再决定进入 R0 还是继续 M2；M3 需要 M2 的 Server 发布和协议/客户端边界，M4 的 CLI 需要稳定的语义 API，Skill 再依赖 CLI。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
 
 ## 里程碑
 
-### M0：MVP RC / Private Alpha
+### M0：Rolling Developer Preview
 
 **核心交付**
 
-- 以已完成的 Phase 7 验收证据为基线，维护一个可复现的 Private Alpha 候选版本。
-- 增加结构化日志、Server health/status、故障诊断、崩溃/PTY 孤儿排查信息和终端 burst 基准。
-- 冻结 Session、Bootstrap、可靠事件和视觉流语义；定义从当前严格协议版本到公开版本的兼容策略。
-- 固定首发支持矩阵：先覆盖 Windows GUI 与 Linux x64/arm64 Server，不提前承诺所有平台。
-- 建立小规模 dogfood，使用同一个 canonical workflow：多个 worktree/Agent、断开 GUI、重连和 Server 重启。
+- 在私有 GitHub 仓库中只维护一个标记为 Pre-release 的 `Development Build`，由固定的可变 `dev` tag 指向当前选定 commit。
+- 开发中的每个 commit 不自动发布；只有主动移动并推送 `dev` tag 才触发更新。
+- 从同一个 tagged commit 生成 Windows GUI 与同目录 Server bundle，以及 Linux x64/arm64 Server artifacts；asset 名称、release notes 和 artifact 都记录 commit SHA，避免滚动更新后混淆版本。
+- 先手工完成一次构建、打包和解压验证，再把已验证流程做成由 `dev` tag 触发的最小 GitHub Actions 自动化。
+- 提供仅供开发者使用的下载、启动、SSH 连接和更新说明，使日常运行不依赖 `cargo run`。
+
+**非目标**
+
+- 不作为 Private Alpha，不承诺外部用户或 Windows x64、Linux x64/arm64 之外的平台支持。
+- 不做安装器、代码签名、checksums、自动升级、系统服务、遥测、协议兼容层或完整发布流水线。
+- 不为尚未发生的故障预建结构化日志、health/status、诊断包或性能基准；在 M1 的真实使用需要时加入最小工具。
 
 **退出条件**
 
-- 新环境能按文档安装、启动、连接和恢复。
-- 输入延迟、视觉丢帧、重连成功率、Agent 状态误报和 Server 崩溃都有可重复的测量方法。
-- 已知限制和安全边界可被用户理解；诊断默认不采集终端内容，额外数据采用 opt-in。
+- Windows 可以从 `Development Build` 解压并启动 GUI；GUI 能发现同目录 Server，且不需要从源码启动。
+- 同一 release 的 Windows GUI 能通过既有 SSH tunnel 连接 Linux Server，并完成一次断开、重连和恢复；Linux x64/arm64 artifacts 均能独立启动。
+- 所有目标构建成功后才更新 release assets；成功更新后 `dev` tag、release notes 和所有 artifacts 指向同一 commit。
+- Condr 可以用该滚动开发版开始开发 Condr 自身。
 
-### M1：Desktop Daily Driver
+### M1：Solo Daily Driver / Desktop Daily Driver
 
 **核心交付**
 
-- 先建立统一 `Command Registry`，再由它生成快捷键、菜单、Toolbar、右键菜单和命令面板。
-- 完善 Pane/Tab/Workspace 的创建、关闭、移动、聚焦、拆分、交换、缩放和恢复反馈。
-- 加入最小设置：字体/字号、终端主题、默认 Shell、启动行为、连接项、快捷键和通知。
+- 使用 Condr 完成真实的 Condr 开发任务，记录仍需退回其他终端或手工处理的原因，并优先消除最高频摩擦。
+- 先完善实际阻塞自举的 Pane/Tab/Workspace 创建、关闭、移动、聚焦、拆分、交换、缩放和恢复反馈。
+- 当快捷键、菜单、Toolbar、右键菜单或命令面板出现真实的重复与不一致时，再建立覆盖当前命令的最小 `Command Registry`。
+- 按实际需要加入最小设置，候选范围包括字体/字号、终端主题、默认 Shell、启动行为、连接项、快捷键和通知。
 - 明确配置归属：GUI 外观与快捷键属于 Client；Shell、Agent Profile 和 Server 配置属于 Server；GUI 偏好不进入 Session Snapshot。
-- 加入桌面通知：Agent `done/blocked`、Server 离线、重连成功，并提供静默/过滤选项。
-- 优先实现跨平台的搜索、复制路径、Reveal in Explorer/Finder、在 IDE 或自定义命令中打开当前 `pwd` 等 context action。
+- 根据真实使用加入桌面通知：Agent `done/blocked`、Server 离线、重连成功，并提供静默/过滤选项。
+- 根据真实使用加入跨平台的搜索、复制路径、Reveal in Explorer/Finder、在 IDE 或自定义命令中打开当前 `pwd` 等 context action。
 
 **非目标**
 
@@ -100,9 +113,30 @@ M1 和 M2 可以在 M0 之后并行。M3 需要 M2 的 Server 发布和协议/�
 
 **退出条件**
 
+- 已使用 Condr 完成多个真实的 Condr 开发任务，主要回退原因已经记录并处理或明确接受。
 - 新用户可以在几分钟内创建三个 Pane、启动一个代表性 Agent 并完成一次切换/介入流程。
 - 高速 Agent 输出下，拖选、输入、滚动和 Pane 操作仍保持可用帧率。
 - 所有布局变更仍经过 Server 权威状态确认，GUI 缓存不能成为真相来源。
+
+### R0：Release Readiness / Private Alpha（延期）
+
+**进入条件**
+
+- M1 已完成自举，并且已经明确决定邀请外部用户、目标平台和发布范围。
+
+**核心交付**
+
+- 以已完成的 Phase 7 验收证据和后续 dogfood 为基线，维护一个可复现的 Private Alpha 候选版本。
+- 增加结构化日志、Server health/status、故障诊断、崩溃/PTY 孤儿排查信息和终端 burst 基准。
+- 冻结 Session、Bootstrap、可靠事件和视觉流语义；定义从当前严格协议版本到公开版本的兼容策略。
+- 固定首发支持矩阵，不提前承诺所有平台。
+- 建立小规模外部 dogfood，使用同一个 canonical workflow：多个 worktree/Agent、断开 GUI、重连和 Server 重启。
+
+**退出条件**
+
+- 新环境能按文档安装、启动、连接和恢复。
+- 输入延迟、视觉丢帧、重连成功率、Agent 状态误报和 Server 崩溃都有可重复的测量方法。
+- 已知限制和安全边界可被用户理解；诊断默认不采集终端内容，额外数据采用 opt-in。
 
 ### M2：Headless Server 与稳定 Client API
 
@@ -214,9 +248,11 @@ Web 和 Mobile 共享语义 API、鉴权、capability、事件 cursor 和测试�
 
 ## 文档、品牌与社区
 
-这条线从 M0 开始并行，但投入强度随产品成熟度增加：
+这条线按当前阶段控制投入：
 
-- M0：Quickstart、安装、支持矩阵、远程安全边界、已知限制、故障排查和 canonical demo。
+- M0：仅维护滚动开发版的下载、启动、SSH 连接和更新说明。
+- M1：记录实际 dogfood workflow、已知限制和需要回退到其他工具的场景。
+- R0：补齐 Quickstart、安装、支持矩阵、远程安全边界、故障排查和 canonical demo。
 - M2：Server 运维、数据目录、升级/回滚、版本兼容矩阵、录屏和部署示例。
 - 公共 Beta：官网、品牌/图标/截图和文案统一，CHANGELOG、SECURITY.md、贡献指南、Code of Conduct、Issue/Discussion 模板和发布节奏。
 - Hosted Relay、账号体系、团队协作、企业 SSO/RBAC 和云端数据存储不在早期宣传中承诺。
@@ -225,7 +261,7 @@ Web 和 Mobile 共享语义 API、鉴权、capability、事件 cursor 和测试�
 
 ## 持续指标
 
-不只看 GitHub stars，至少记录以下指标。诊断数据默认不包含 Terminal 内容，并采用 opt-in：
+M0/M1 不建设遥测，只记录自举中直接观察到的摩擦与性能问题。进入 R0 后再考虑以下指标；诊断数据默认不包含 Terminal 内容，并采用 opt-in：
 
 - 首次安装到第一个 Agent 的时间。
 - 新用户创建三个 Pane 并完成一次任务的时间。
@@ -245,10 +281,8 @@ Web 和 Mobile 共享语义 API、鉴权、capability、事件 cursor 和测试�
 
 ## 当前第一批工作
 
-1. 完成 M0 发布信任基础：结构化日志、Server health/status、故障诊断、PTY 孤儿排查信息和 terminal burst 基准。
-2. 完成 Quickstart、支持矩阵、已知限制与 canonical dogfood，冻结 Private Alpha 候选版本。
-3. M0 退出后并行启动 M1 的 `Command Registry`、最小设置和高频 Pane 工作流，以及 M2 的 `condr-protocol` / `condr-client` 拆分和 Server 发布包。
-4. 编写 Remote threat model、配对/授权 ADR 和公开协议兼容策略，为 M3 建立安全门。
-5. 为 Relay、Web、Mobile 建立需求验证任务；在达到 Go/No-Go 条件前不进入完整实现。
-
-建议将这些内容拆成带有 deliverable、退出条件和非目标的里程碑 issue，并用依赖关系表达 `protocol/client -> server packaging -> auth -> relay/web` 与 `client API -> CLI -> Skill` 两条链，避免把愿望清单直接变成无边界 backlog。
+1. 从一个明确 commit 手工构建 Windows bundle 和 Linux arm64 Server artifact，验证原生打包内容。
+2. 从解压目录验证 Windows 本地 Server、Windows GUI 到 Linux Server 的 SSH 连接，以及断开和重连。
+3. 将已验证的构建和上传步骤做成最小 GitHub Actions 自动化，同时生成 Linux x64 artifact；只有主动移动并推送滚动 `dev` tag 才触发更新，不按普通 commit 触发。
+4. 用滚动开发版进入 M1，使用 Condr 开发 Condr；只为真实出现的高频摩擦创建和排序任务。
+5. 自举完成后重新评估 R0 与 M2，不在当前阶段展开 Private Alpha、公开协议或远程产品化工作。

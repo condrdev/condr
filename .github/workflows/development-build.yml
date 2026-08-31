@@ -1,0 +1,130 @@
+name: Development Build
+
+on:
+  push:
+    tags:
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-build
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.90.0
+
+jobs:
+  linux-server:
+    name: Linux server (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - name: Build server
+        run: cargo build --release --locked -p condr-server
+      - name: Smoke test server
+        run: target/release/condr-server --help
+      - name: Package server
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          package="condr-server-linux-${{ matrix.arch }}-${short_sha}"
+          mkdir -p "dist/${package}"
+          install -m 755 target/release/condr-server "dist/${package}/condr-server"
+          install -m 644 LICENSE "dist/${package}/LICENSE"
+          printf '%s\n' "$GITHUB_SHA" > "dist/${package}/BUILD-COMMIT"
+          tar -C dist -czf "dist/${package}.tar.gz" "$package"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-server-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  windows-bundle:
+    name: Windows GUI and server (x86_64)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal
+          rustup default $env:RUST_VERSION
+      - name: Build GUI and server
+        run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Smoke test server
+        run: target\release\condr-server.exe --help
+      - name: Package GUI and server
+        shell: pwsh
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          $package = "condr-windows-x86_64-$shortSha"
+          $stage = Join-Path "dist" $package
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target\release\condr-gui.exe" $stage
+          Copy-Item "target\release\condr-server.exe" $stage
+          Copy-Item "LICENSE" $stage
+          Copy-Item "crates\condr-gui\assets\LICENSE-LUCIDE" $stage
+          Set-Content -Encoding ascii -Path (Join-Path $stage "BUILD-COMMIT") -Value $env:GITHUB_SHA
+          Compress-Archive -Path $stage -DestinationPath "dist\$package.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-windows-x86_64
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Update rolling prerelease
+    needs:
+      - linux-server
+      - windows-bundle
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify release assets
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          test -f "dist/condr-windows-x86_64-${short_sha}.zip"
+          test -f "dist/condr-server-linux-x86_64-${short_sha}.tar.gz"
+          test -f "dist/condr-server-linux-aarch64-${short_sha}.tar.gz"
+      - name: Publish Development Build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; update the Windows bundle and Linux server together."
+
+          if gh release view dev >/dev/null 2>&1; then
+            gh release upload dev dist/* --clobber
+            gh release edit dev --title "Development Build" --notes "$notes" --prerelease --latest=false
+          else
+            gh release create dev dist/* --title "Development Build" --notes "$notes" --prerelease --latest=false
+          fi
+
+          while IFS= read -r asset; do
+            case "$asset" in
+              *-"$short_sha".*) ;;
+              *) gh release delete-asset dev "$asset" --yes ;;
+            esac
+          done < <(gh release view dev --json assets --jq '.assets[].name')
