@@ -115,12 +115,8 @@ pub fn create_worktree(
     )?
     .status
     .success();
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(&parent.root)
-        .arg("worktree")
-        .arg("add");
+    let mut command = git_command(&parent.root);
+    command.arg("worktree").arg("add");
     if branch_exists {
         command.arg(&destination).arg(branch);
     } else {
@@ -156,13 +152,8 @@ pub fn open_worktree(
 
 pub fn remove_worktree(parent: &GitRepository, child: &GitRepository) -> Result<(), GitError> {
     validate_worktree_removal(parent, child)?;
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(&parent.root)
-        .arg("worktree")
-        .arg("remove")
-        .arg(&child.root);
+    let mut command = git_command(&parent.root);
+    command.arg("worktree").arg("remove").arg(&child.root);
     checked_output(command.output().map_err(command_error)?)?;
     Ok(())
 }
@@ -209,17 +200,25 @@ fn branch_slug(branch: &str) -> String {
     slug.trim_matches('-').to_owned()
 }
 
+fn git_command(cwd: &Path) -> Command {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // 不带此标志时,每次 git 调用都会在 GUI 进程下闪出一个控制台窗口。
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 fn run_git<I, S>(cwd: &Path, args: I) -> Result<Output, GitError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .output()
-        .map_err(command_error)
+    git_command(cwd).args(args).output().map_err(command_error)
 }
 
 fn checked<I, S>(cwd: &Path, args: I) -> Result<Output, GitError>
