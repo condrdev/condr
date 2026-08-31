@@ -1127,13 +1127,17 @@ name = "condr-gui"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "atomicwrites",
  "condr-core",
  "condr-server",
+ "dirs",
  "gpui",
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "serde",
  "smol_str",
+ "toml 1.1.4+spec-1.1.0",
 ]
 
 [[package]]

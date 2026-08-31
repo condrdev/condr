@@ -128,7 +128,7 @@ fn connected_condr_with(
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(move |window, cx| {
-        let view = cx.new(|cx| Condr::new(endpoint, initial, window, cx));
+        let view = cx.new(|cx| Condr::new(endpoint, initial, None, window, cx));
         view_holder_for_window.borrow_mut().replace(view.clone());
         Root::new(view, window, cx)
     });

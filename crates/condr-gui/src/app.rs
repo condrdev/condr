@@ -46,6 +46,7 @@ use gpui_component_assets::Assets;
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 
 mod actions;
+mod config;
 mod connection;
 mod dialogs;
 mod dock;
@@ -437,6 +438,7 @@ impl ServerConnection {
 }
 
 pub(crate) struct Condr {
+    client_config_path: Option<PathBuf>,
     connections: Vec<ServerConnection>,
     active_connection: ConnectionKey,
     next_connection_key: ConnectionKey,
@@ -474,6 +476,7 @@ impl Condr {
     fn new(
         endpoint: Endpoint,
         initial: Result<ClientConnection, String>,
+        client_config_path: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -485,10 +488,28 @@ impl Condr {
             connection.error = Some(error);
         }
 
+        let (saved_servers, config_error) = client_config_path
+            .as_deref()
+            .map_or_else(|| Ok(Vec::new()), config::load_servers)
+            .map_or_else(
+                |error| (Vec::new(), Some(format!("Failed to load config: {error}"))),
+                |servers| (servers, None),
+            );
+        let mut connections = vec![connection];
+        for (index, server) in saved_servers.into_iter().enumerate() {
+            connections.push(ServerConnection::new(
+                index as u64 + 2,
+                server.name,
+                Endpoint::tcp(server.address),
+            ));
+        }
+        let next_connection_key = connections.len() as u64 + 1;
+
         let mut this = Self {
-            connections: vec![connection],
+            client_config_path,
+            connections,
             active_connection: 1,
-            next_connection_key: 2,
+            next_connection_key,
             connect_results_tx,
             _connect_results_task: Task::ready(()),
             dock_surfaces: HashMap::new(),
@@ -508,7 +529,7 @@ impl Condr {
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
             marked_text: None,
-            app_error: None,
+            app_error: config_error,
         };
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);
@@ -526,6 +547,10 @@ impl Condr {
                 }
             }
         });
+
+        for key in 2..this.next_connection_key {
+            _ = this.start_connect(key);
+        }
 
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {

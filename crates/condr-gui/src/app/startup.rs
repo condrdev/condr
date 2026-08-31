@@ -91,6 +91,12 @@ pub(super) fn connect_to_server(
 
 pub(crate) fn run() {
     let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr-gui");
+    let config_path = config::default_path()
+        .map_err(|error| {
+            eprintln!("condr-gui: {error}");
+            error
+        })
+        .ok();
     let app = gpui_platform::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {
@@ -99,7 +105,7 @@ pub(crate) fn run() {
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|cx| Condr::new(endpoint, initial, window, cx));
+                let view = cx.new(|cx| Condr::new(endpoint, initial, config_path, window, cx));
                 let root = cx.new(|cx| Root::new(view, window, cx));
                 window.resize(DEFAULT_WINDOW_SIZE);
                 root

@@ -14,6 +14,7 @@ alacritty_terminal = { version = "0.26.0", default-features = false }
 async-channel = "2.5"
 atomicwrites = "0.4.4"
 bincode = "1.3"
+dirs = "6.0"
 filedescriptor = "0.8.3"
 interprocess = "2.4.2"
 nix = { version = "0.28.0", features = ["fs", "poll", "process"] }
@@ -24,6 +25,7 @@ gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "9890a77c2d427f05b2512f05ddc6cce84686f9a6" }
 serde = { version = "1.0", features = ["derive"] }
 smol_str = { version = "0.3.6", features = ["serde"] }
+toml = "1.0"
 portable-pty = "0.9.0"
 sysinfo = "0.31.4"
 tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }

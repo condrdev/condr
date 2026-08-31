@@ -337,6 +337,7 @@ impl Condr {
         };
         let was_active = self.active_connection == key;
         self.connections.remove(index);
+        self.save_servers();
         self.clear_connection_gui_state(key);
         self.clear_pending_workspace_selection_for(key);
         if was_active {

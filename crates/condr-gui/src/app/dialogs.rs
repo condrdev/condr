@@ -195,6 +195,7 @@ impl Condr {
                         address.to_string(),
                         endpoint,
                     ));
+                    this.save_servers();
                     this.pending_presentation_request = None;
                     this.active_connection = key;
                     this.target_pane = None;
@@ -222,6 +223,7 @@ impl Condr {
             move |this, name, _, _| {
                 if let Some(connection) = this.connection_mut(key) {
                     connection.label = name;
+                    this.save_servers();
                 }
             },
             window,

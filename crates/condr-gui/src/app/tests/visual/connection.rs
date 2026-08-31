@@ -512,6 +512,64 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
 }
 
 #[test]
+fn added_server_survives_gui_restart() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("client-config");
+    let config_path = directory.0.join("config.toml");
+    let (server, endpoint) = start_server();
+
+    {
+        let mut cx = TestAppContext::single();
+        cx.update(gpui_component::init);
+        let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+        let bootstrap = initial.bootstrap().clone();
+        assert_eq!(bootstrap.server_id, server.handle.server_id());
+        let view_holder = Rc::new(RefCell::new(None));
+        let view_holder_for_window = view_holder.clone();
+        let (_root, window) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| {
+                Condr::new(
+                    endpoint.clone(),
+                    Ok(initial),
+                    Some(config_path.clone()),
+                    window,
+                    cx,
+                )
+            });
+            view_holder_for_window.borrow_mut().replace(view.clone());
+            Root::new(view, window, cx)
+        });
+        let view = view_holder.borrow_mut().take().unwrap();
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| this.prompt_add_server(window, cx));
+        });
+        submit_text_dialog(window, "127.0.0.1:4242");
+        assert!(window.read(|app| {
+            view.read(app).connections.iter().any(|connection| {
+                connection.endpoint == Endpoint::tcp("127.0.0.1:4242".parse().unwrap())
+            })
+        }));
+    }
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let view_holder = Rc::new(RefCell::new(None));
+    let view_holder_for_window = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Condr::new(endpoint, Ok(initial), Some(config_path), window, cx));
+        view_holder_for_window.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    assert!(window.read(|app| {
+        view.read(app).connections.iter().any(|connection| {
+            connection.endpoint == Endpoint::tcp("127.0.0.1:4242".parse().unwrap())
+        })
+    }));
+}
+
+#[test]
 fn corrupt_snapshot_connects_to_an_operable_start_page() {
     let _serial_guard = acquire_visual_test_lock();
     let directory = TestDirectory::new("corrupt-snapshot");
