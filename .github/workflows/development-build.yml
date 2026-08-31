@@ -79,7 +79,7 @@ jobs:
           $package = "condr-windows-x86_64-$shortSha"
           $stage = Join-Path "dist" "condr"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "target\release\condr-gui.exe" $stage
+          Copy-Item "target\release\condr.exe" $stage
           Copy-Item "target\release\condr-server.exe" $stage
           Copy-Item "LICENSE" $stage
           Set-Content -Encoding ascii -Path (Join-Path $stage "BUILD-COMMIT") -Value $env:GITHUB_SHA

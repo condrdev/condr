@@ -31,7 +31,7 @@ $archive = Get-ChildItem .\condr-download\condr-windows-x86_64-*.zip | Select-Ob
 Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
 ```
 
-运行 `condr-dev\condr\condr-gui.exe`。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。
+运行 `condr-dev\condr\condr.exe`。双击直接启动 GUI；在终端中运行时它同时是 CLI，`condr server start|status|stop|run` 用于管理本地 Server。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。
 
 Condr 使用 portable 目录布局：`config.toml` 位于程序目录，Server 的 snapshot、log 和本地 endpoint 文件位于 `data/`，Managed Worktree 位于 `worktrees/`。更新前先停止本地 Server，再将新版覆盖解压到同一个 `condr-dev`；归档内固定的 `condr/` 目录使这些运行数据保留。卸载前同样先停止 Server，再删除整个 `condr/` 目录。
 

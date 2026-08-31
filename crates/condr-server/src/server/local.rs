@@ -75,6 +75,9 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
         )
     })?;
     let stderr = log.try_clone()?;
+    // ponytail: 子进程会继承调用方的可继承句柄(Rust std 无 handle allowlist),
+    // 因此 `condr server start | ...` 的管道要等 server 退出才收到 EOF;
+    // M2 需要脚本化 CLI 时用 PROC_THREAD_ATTRIBUTE_HANDLE_LIST 修复。
     let mut command = std::process::Command::new(&server_executable);
     command
         .arg("--endpoint")
@@ -160,6 +163,11 @@ pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
 pub(super) fn probe_protocol(stream: EndpointStream) -> io::Result<()> {
     let _ = ClientConnection::handshake(stream, "condr-probe")?;
     Ok(())
+}
+
+/// Checks whether a protocol-compatible server is reachable at the endpoint.
+pub fn probe_server(endpoint: &Endpoint) -> io::Result<()> {
+    probe_protocol(endpoint.connect()?)
 }
 
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {

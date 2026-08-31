@@ -7,7 +7,8 @@ mod server;
 
 pub use endpoint::{Endpoint, EndpointStream, default_socket_path};
 pub use server::{
-    BoundServer, ClientConnection, ServerConfig, ServerHandle, ensure_local_server, stop_server,
+    BoundServer, ClientConnection, ServerConfig, ServerHandle, ensure_local_server, probe_server,
+    stop_server,
 };
 
 /// Binds the configured server and runs until an explicit stop request.
