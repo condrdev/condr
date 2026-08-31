@@ -1,5 +1,7 @@
 use super::*;
 
+use std::fs::{self, OpenOptions};
+
 pub(super) fn default_snapshot_path(endpoint: &Endpoint) -> PathBuf {
     if let Some(path) = std::env::var_os("CONDR_SNAPSHOT_PATH")
         && !path.is_empty()
@@ -52,18 +54,42 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
     }
 
     let server_executable = resolve_server_executable()?;
+    let log_path = server_log_path(&endpoint);
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut log_options = OpenOptions::new();
+    log_options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        log_options.mode(0o600);
+    }
+    let log = log_options.open(&log_path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to open condr-server log at {}: {error}",
+                log_path.display()
+            ),
+        )
+    })?;
+    let stderr = log.try_clone()?;
     let mut command = std::process::Command::new(&server_executable);
     command
         .arg("--endpoint")
         .arg(endpoint.as_local_path().expect("local endpoint"))
+        .arg("--detached")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(stderr));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        // ponytail: add Herdr's Job Object/WMI escape if Condr must survive
+        // launchers whose kill-on-close Job cannot be broken away from.
+        command.creation_flags(DETACHED_PROCESS);
     }
     command.spawn().map_err(|error| {
         io::Error::new(
@@ -85,8 +111,21 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
     }
     Err(io::Error::new(
         io::ErrorKind::TimedOut,
-        "condr-server did not become ready",
+        format!(
+            "condr-server did not become ready; see {}",
+            log_path.display()
+        ),
     ))
+}
+
+fn server_log_path(endpoint: &Endpoint) -> PathBuf {
+    let mut path = endpoint
+        .as_local_path()
+        .expect("local endpoint")
+        .as_os_str()
+        .to_os_string();
+    path.push(".log");
+    PathBuf::from(path)
 }
 
 pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {

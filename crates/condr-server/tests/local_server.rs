@@ -8,6 +8,7 @@ use condr_server::{ClientConnection, Endpoint, ServerConfig, ensure_local_server
 
 const HELPER_ENV: &str = "CONDR_LOCAL_SERVER_TEST_HELPER";
 const WORKSPACE_ENV: &str = "CONDR_LOCAL_SERVER_TEST_WORKSPACE";
+const DETACHED_HELPER_ENV: &str = "CONDR_DETACHED_SERVER_TEST_HELPER";
 
 #[test]
 fn default_server_endpoint_is_private_and_local() {
@@ -26,6 +27,7 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
     ));
     let workspace_path = endpoint_path.with_extension("workspace");
     let snapshot_path = endpoint_path.with_extension("snapshot");
+    let log_path = server_log_path(&endpoint_path);
     let output = Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
         .arg("local_server_helper")
@@ -49,6 +51,7 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
     );
     let _ = std::fs::remove_dir_all(workspace_path);
     let _ = std::fs::remove_file(&snapshot_path);
+    let _ = std::fs::remove_file(log_path);
     let mut lock_path = snapshot_path.into_os_string();
     lock_path.push(".lock");
     let _ = std::fs::remove_file(lock_path);
@@ -242,6 +245,70 @@ fn local_server_helper() {
     stop_server(&empty_endpoint).unwrap();
     wait_for_stop(&empty_endpoint);
     empty_guard.disarm();
+}
+
+#[test]
+fn auto_started_server_survives_launcher_exit() {
+    let endpoint_path = std::env::temp_dir().join(format!(
+        "condr-detached-test-{}-{}.sock",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let snapshot_path = endpoint_path.with_extension("snapshot");
+    let log_path = server_log_path(&endpoint_path);
+    let status = Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("detached_server_launcher_helper")
+        .arg("--nocapture")
+        .env(DETACHED_HELPER_ENV, "1")
+        .env("CONDR_SOCKET_PATH", &endpoint_path)
+        .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
+        .env(
+            "CONDR_SERVER_EXECUTABLE",
+            env!("CARGO_BIN_EXE_condr-server"),
+        )
+        .status()
+        .unwrap();
+    assert!(status.success(), "launcher helper failed: {status}");
+
+    let endpoint = Endpoint::local(&endpoint_path);
+    let guard = ServerGuard(endpoint.clone());
+    let client = ClientConnection::connect(&endpoint, "detached-process-check").unwrap();
+    #[cfg(unix)]
+    assert_is_session_leader(client.bootstrap().runtime_epoch);
+    drop(client);
+    stop_server(&endpoint).unwrap();
+    wait_for_stop(&endpoint);
+    guard.disarm();
+
+    let log = std::fs::read_to_string(&log_path).unwrap();
+    assert!(log.contains("condr-server: detached process"));
+
+    let _ = std::fs::remove_file(&snapshot_path);
+    let mut snapshot_lock = snapshot_path.into_os_string();
+    snapshot_lock.push(".lock");
+    let _ = std::fs::remove_file(snapshot_lock);
+    let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
+fn detached_server_launcher_helper() {
+    if std::env::var_os(DETACHED_HELPER_ENV).is_some() {
+        ensure_local_server().unwrap();
+    }
+}
+
+#[cfg(unix)]
+fn assert_is_session_leader(runtime_epoch: condr_core::protocol::RuntimeEpoch) {
+    let pid = i32::try_from(runtime_epoch.0 >> 96).unwrap();
+    let pid = nix::unistd::Pid::from_raw(pid);
+    assert_eq!(nix::unistd::getsid(Some(pid)).unwrap(), pid);
+}
+
+fn server_log_path(endpoint_path: &std::path::Path) -> std::path::PathBuf {
+    let mut log_path = endpoint_path.as_os_str().to_os_string();
+    log_path.push(".log");
+    log_path.into()
 }
 
 struct ServerGuard(Endpoint);

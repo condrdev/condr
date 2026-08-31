@@ -12,7 +12,7 @@ fn main() {
         println!("condr-server [--endpoint PATH | --listen ADDR] [--snapshot PATH] [--stop]");
         return;
     }
-    let (endpoint, snapshot_path, stop) = match parse_args(&args) {
+    let (endpoint, snapshot_path, stop, detached) = match parse_args(&args) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("condr-server: {error}");
@@ -26,6 +26,17 @@ fn main() {
         }
         return;
     }
+    if detached {
+        #[cfg(unix)]
+        if let Err(error) = nix::unistd::setsid() {
+            eprintln!("condr-server: failed to detach from the parent session: {error}");
+            std::process::exit(1);
+        }
+        eprintln!(
+            "condr-server: detached process {} starting",
+            std::process::id()
+        );
+    }
     let config = snapshot_path.map_or_else(
         || ServerConfig::new(endpoint.clone()),
         |path| ServerConfig::new(endpoint.clone()).with_snapshot_path(path),
@@ -36,10 +47,11 @@ fn main() {
     }
 }
 
-fn parse_args(args: &[String]) -> Result<(Endpoint, Option<PathBuf>, bool), String> {
+fn parse_args(args: &[String]) -> Result<(Endpoint, Option<PathBuf>, bool, bool), String> {
     let mut endpoint = None;
     let mut snapshot_path = None;
     let mut stop = false;
+    let mut detached = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -71,6 +83,10 @@ fn parse_args(args: &[String]) -> Result<(Endpoint, Option<PathBuf>, bool), Stri
                 stop = true;
                 index += 1;
             }
+            "--detached" => {
+                detached = true;
+                index += 1;
+            }
             unknown => return Err(format!("unknown argument {unknown}")),
         }
     }
@@ -78,6 +94,7 @@ fn parse_args(args: &[String]) -> Result<(Endpoint, Option<PathBuf>, bool), Stri
         endpoint.unwrap_or_else(|| ServerConfig::default().endpoint),
         snapshot_path,
         stop,
+        detached,
     ))
 }
 
@@ -95,11 +112,12 @@ mod tests {
             "test.snapshot".into(),
         ];
 
-        let (endpoint, snapshot, stop) = parse_args(&args).unwrap();
+        let (endpoint, snapshot, stop, detached) = parse_args(&args).unwrap();
 
         assert_eq!(endpoint, Endpoint::local("test.sock"));
         assert_eq!(snapshot, Some(PathBuf::from("test.snapshot")));
         assert!(!stop);
+        assert!(!detached);
     }
 
     #[test]
@@ -107,5 +125,14 @@ mod tests {
         let args = ["condr-server".into(), "--snapshot".into()];
 
         assert_eq!(parse_args(&args).unwrap_err(), "--snapshot requires a path");
+    }
+
+    #[test]
+    fn detached_flag_is_accepted_for_internal_launches() {
+        let args = ["condr-server".into(), "--detached".into()];
+
+        let (_, _, _, detached) = parse_args(&args).unwrap();
+
+        assert!(detached);
     }
 }
