@@ -202,35 +202,29 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     window.update(|window, cx| _ = window.draw(cx));
 
     let heading_row = window
-        .debug_bounds("servers-heading-row")
-        .expect("Servers heading row should render");
+        .debug_bounds("server-heading-1-row")
+        .expect("the Server heading row should render");
     let heading = window
-        .debug_bounds("servers-heading")
-        .expect("Servers heading should render");
-    let add_server = window
+        .debug_bounds("server-heading-1")
+        .expect("the Server heading should render");
+    let new_workspace = window
+        .debug_bounds("new-workspace-server-1")
+        .expect("New Workspace should render in the Server heading");
+    assert!(
+        (heading.center().y - new_workspace.center().y).abs() <= px(1.),
+        "the Server name and New Workspace should share a row"
+    );
+    assert!(
+        heading.right() <= new_workspace.left(),
+        "New Workspace should sit to the right of the Server name"
+    );
+    assert!(
+        (heading_row.right() - new_workspace.right()).abs() <= px(1.),
+        "New Workspace should align with the heading's right edge"
+    );
+    window
         .debug_bounds("add-server")
-        .expect("Add Server should render in the Servers heading");
-    assert!(
-        (heading.center().y - add_server.center().y).abs() <= px(1.),
-        "Servers and Add Server should share a row"
-    );
-    assert!(
-        heading.right() <= add_server.left(),
-        "Add Server should sit to the right of Servers"
-    );
-    assert!(
-        (heading_row.right() - add_server.right()).abs() <= px(1.),
-        "Add Server should align with the heading's right edge"
-    );
-
-    let empty_server_toggle = window
-        .debug_bounds("server-toggle-1")
-        .expect("an empty Server should retain its left disclosure control");
-    let empty_server_status = window.debug_bounds("server-status-1-connected").unwrap();
-    assert!(empty_server_toggle.right() <= empty_server_status.left());
-    window.simulate_click(empty_server_toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
+        .expect("Add Server should render in the sidebar header");
 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -260,24 +254,15 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         leaked_selector(format!("workspace-label-1-{}", workspace_id.as_u64()));
     let workspace_selector = sidebar_workspace_selector(workspace_id);
     assert!(
-        window.debug_bounds(workspace_selector).is_none(),
-        "a Server collapsed while empty should stay collapsed when its first Workspace appears"
+        window.debug_bounds(workspace_selector).is_some(),
+        "a Server group should always show its Workspaces"
     );
-    let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
-    window.simulate_click(server_toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
 
     let empty_workspace_toggle = window
         .debug_bounds(workspace_toggle_selector)
         .expect("a Workspace without Agents should retain its disclosure control");
     let empty_workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
     assert!(empty_workspace_toggle.right() <= empty_workspace_icon.left());
-    let server_status_with_workspace = window.debug_bounds("server-status-1-connected").unwrap();
-    assert!(
-        (server_status_with_workspace.left() - empty_server_status.left()).abs() <= px(1.),
-        "the status column must not move when the first child appears"
-    );
     window.simulate_click(empty_workspace_toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
@@ -308,14 +293,6 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     window.simulate_click(workspace_toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-
-    let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
-    let server_status = window.debug_bounds("server-status-1-connected").unwrap();
-    let server_label = window.debug_bounds("server-label-1").unwrap();
-    let new_workspace = window.debug_bounds("new-workspace-server-1").unwrap();
-    assert!(server_toggle.right() <= server_status.left());
-    assert!(server_status.right() <= server_label.left());
-    assert!(server_label.right() <= new_workspace.left());
 
     let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
     let workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
@@ -372,35 +349,6 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds(agent_selector).is_some());
-
-    let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
-    window.simulate_click(server_toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    assert!(
-        window.debug_bounds(workspace_selector).is_none(),
-        "collapsing a Server should hide its Workspaces"
-    );
-    assert_eq!(
-        window.read(|app| {
-            let condr = view.read(app);
-            (
-                condr.active_connection,
-                condr
-                    .active_session()
-                    .and_then(|session| session.active_workspace_id()),
-                condr.target_pane,
-            )
-        }),
-        selection_before,
-        "the disclosure button must not select a different tree item"
-    );
-
-    let server_toggle = window.debug_bounds("server-toggle-1").unwrap();
-    window.simulate_click(server_toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds(workspace_selector).is_some());
 }
 
 #[test]

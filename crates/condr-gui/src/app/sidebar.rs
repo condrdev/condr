@@ -40,7 +40,6 @@ impl IconNamed for CondrIconName {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SidebarGlyph {
     Folder,
-    HardDrive,
     Info,
     Circle,
     LoaderCircle,
@@ -52,7 +51,6 @@ impl SidebarGlyph {
     pub(super) fn icon(self) -> Icon {
         match self {
             Self::Folder => Icon::new(IconName::Folder),
-            Self::HardDrive => Icon::new(IconName::HardDrive),
             Self::Info => Icon::new(IconName::Info),
             Self::Circle => Icon::new(CondrIconName::Circle),
             Self::LoaderCircle => Icon::new(IconName::LoaderCircle),
@@ -68,38 +66,6 @@ pub(super) struct SidebarStatusVisual {
     pub(super) tone: SidebarIconTone,
     pub(super) key: &'static str,
     pub(super) label: &'static str,
-}
-
-pub(super) fn server_sidebar_status(
-    status: ConnectionStatus,
-    synchronized: bool,
-) -> SidebarStatusVisual {
-    match (status, synchronized) {
-        (ConnectionStatus::Connected, true) => SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Success,
-            key: "connected",
-            label: "Connected",
-        },
-        (ConnectionStatus::Connected, false) => SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Warning,
-            key: "syncing",
-            label: "Syncing",
-        },
-        (ConnectionStatus::Connecting, _) => SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Warning,
-            key: "connecting",
-            label: "Connecting",
-        },
-        (ConnectionStatus::Disconnected, _) => SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Danger,
-            key: "offline",
-            label: "Offline",
-        },
-    }
 }
 
 pub(super) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
@@ -206,7 +172,7 @@ pub(super) struct CondrSidebarTreeItem {
     label_selector: SharedString,
     toggle_selector: Option<SharedString>,
     label: SharedString,
-    icon: CondrSidebarIcon,
+    icon: Option<CondrSidebarIcon>,
     handler: SidebarClickHandler,
     active: bool,
     default_open: bool,
@@ -225,7 +191,6 @@ impl CondrSidebarTreeItem {
         row_selector: impl Into<SharedString>,
         label_selector: impl Into<SharedString>,
         label: impl Into<SharedString>,
-        icon: CondrSidebarIcon,
     ) -> Self {
         Self {
             id: id.into(),
@@ -233,7 +198,7 @@ impl CondrSidebarTreeItem {
             label_selector: label_selector.into(),
             toggle_selector: None,
             label: label.into(),
-            icon,
+            icon: None,
             handler: Rc::new(|_, _, _| {}),
             active: false,
             default_open: false,
@@ -245,9 +210,18 @@ impl CondrSidebarTreeItem {
         }
     }
 
+    pub(super) fn icon(mut self, icon: CondrSidebarIcon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
     pub(super) fn active(mut self, active: bool) -> Self {
         self.active = active;
         self
+    }
+
+    fn subtree_active(&self) -> bool {
+        self.active || self.children.iter().any(Self::subtree_active)
     }
 
     pub(super) fn tree_parent(mut self, toggle_selector: impl Into<SharedString>) -> Self {
@@ -387,7 +361,7 @@ impl CondrSidebarTreeItem {
                     });
                 }))
             })
-            .child(icon.render(cx))
+            .when_some(icon, |this, icon| this.child(icon.render(cx)))
             .child(
                 div()
                     .debug_selector(move || label_debug_selector.to_string())
@@ -438,6 +412,9 @@ pub(super) struct CondrSidebarSection {
     action: SidebarSuffixBuilder,
     items: Vec<CondrSidebarTreeItem>,
     collapsed: bool,
+    active: bool,
+    on_click: Option<SidebarClickHandler>,
+    context_menu: Option<SidebarContextMenuBuilder>,
 }
 
 impl CondrSidebarSection {
@@ -453,7 +430,31 @@ impl CondrSidebarSection {
             action: Rc::new(action),
             items: items.into_iter().collect(),
             collapsed: false,
+            active: false,
+            on_click: None,
+            context_menu: None,
         }
+    }
+
+    pub(super) fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
+    }
+
+    pub(super) fn on_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_click = Some(Rc::new(handler));
+        self
+    }
+
+    pub(super) fn context_menu(
+        mut self,
+        builder: impl Fn(PopupMenu, &mut Window, &mut App) -> PopupMenu + 'static,
+    ) -> Self {
+        self.context_menu = Some(Rc::new(builder));
+        self
     }
 }
 
@@ -477,33 +478,48 @@ impl SidebarItem for CondrSidebarSection {
     ) -> impl IntoElement {
         let heading_row_debug_selector =
             SharedString::from(format!("{}-row", self.heading_selector));
-        let heading_debug_selector = self.heading_selector;
+        let heading_debug_selector = self.heading_selector.clone();
         let rendered_items = self
             .items
             .into_iter()
             .map(|item| item.render(window, cx))
             .collect::<Vec<_>>();
 
-        v_flex().relative().when(!self.collapsed, |this| {
-            this.child(
-                h_flex()
-                    .debug_selector(move || heading_row_debug_selector.to_string())
-                    .h_9()
-                    .w_full()
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_between()
-                    .pl_1()
-                    .text_xs()
-                    .text_color(cx.theme().sidebar_foreground.opacity(0.7))
-                    .child(
-                        div()
-                            .debug_selector(move || heading_debug_selector.to_string())
-                            .child(self.label),
-                    )
-                    .child((self.action)(window, cx)),
+        let heading = h_flex()
+            .id(self.heading_selector)
+            .debug_selector(move || heading_row_debug_selector.to_string())
+            .h_9()
+            .w_full()
+            .flex_shrink_0()
+            .items_center()
+            .justify_between()
+            .pl_1()
+            .text_xs()
+            .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+            .when(self.active, |this| {
+                this.font_medium()
+                    .text_color(cx.theme().sidebar_foreground)
+            })
+            .child(
+                div()
+                    .debug_selector(move || heading_debug_selector.to_string())
+                    .child(self.label),
             )
-            .child(v_flex().w_full().gap_1().children(rendered_items))
+            .child((self.action)(window, cx))
+            .when_some(self.on_click, |this, handler| {
+                this.on_click(move |event, window, cx| handler(event, window, cx))
+            });
+        let heading = if let Some(context_menu) = self.context_menu {
+            heading
+                .context_menu(move |menu, window, cx| context_menu(menu, window, cx))
+                .into_any_element()
+        } else {
+            heading.into_any_element()
+        };
+
+        v_flex().relative().pb_3().when(!self.collapsed, |this| {
+            this.child(heading)
+                .child(v_flex().w_full().gap_1().children(rendered_items))
         })
     }
 }
@@ -515,8 +531,6 @@ impl Condr {
             let key = connection.key;
             let active_server = key == self.active_connection;
             let connected = connection.can_mutate();
-            let server_status =
-                server_sidebar_status(connection.status, connection.is_synchronized());
             let workspaces = Session::restore(connection.snapshot.clone())
                 .ok()
                 .map(|session| {
@@ -559,16 +573,16 @@ impl Condr {
                                             format!("agent-{key}-{}", pane_id.as_u64()),
                                             format!("agent-label-{key}-{}", pane_id.as_u64()),
                                             agent_label,
-                                            CondrSidebarIcon::status(
-                                                status,
-                                                format!(
-                                                    "agent-status-{key}-{}-{}",
-                                                    pane_id.as_u64(),
-                                                    status.key
-                                                ),
-                                                format!("{agent_label}: {}", status.label),
-                                            ),
                                         )
+                                        .icon(CondrSidebarIcon::status(
+                                            status,
+                                            format!(
+                                                "agent-status-{key}-{}-{}",
+                                                pane_id.as_u64(),
+                                                status.key
+                                            ),
+                                            format!("{agent_label}: {}", status.label),
+                                        ))
                                         .active(
                                             active_server
                                                 && self.target_pane == Some((key, pane_id)),
@@ -586,17 +600,22 @@ impl Condr {
                                 .collect::<Vec<_>>();
                             let owner = owner.clone();
                             let menu_owner = owner.clone();
+                            let agent_selected = agents.iter().any(|agent| agent.active);
                             CondrSidebarTreeItem::new(
                                 format!("sidebar-workspace-{key}-{}", workspace_id.as_u64()),
                                 format!("workspace-{key}-{}", workspace_id.as_u64()),
                                 format!("workspace-label-{key}-{}", workspace_id.as_u64()),
                                 workspace_name.clone(),
-                                CondrSidebarIcon::new(
-                                    SidebarGlyph::Folder,
-                                    format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
-                                ),
                             )
-                            .active(active_server && active_workspace == Some(workspace_id))
+                            .icon(CondrSidebarIcon::new(
+                                SidebarGlyph::Folder,
+                                format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
+                            ))
+                            .active(
+                                active_server
+                                    && active_workspace == Some(workspace_id)
+                                    && !agent_selected,
+                            )
                             .tree_parent(format!(
                                 "workspace-toggle-{key}-{}",
                                 workspace_id.as_u64()
@@ -767,21 +786,33 @@ impl Condr {
             let server_name = connection.label.clone();
             let status = connection.status;
             let new_workspace_label = connection.label.clone();
-            CondrSidebarTreeItem::new(
-                format!("sidebar-server-{key}"),
-                format!("server-{key}"),
-                format!("server-label-{key}"),
+            let descendant_selected = workspaces
+                .iter()
+                .any(CondrSidebarTreeItem::subtree_active);
+            CondrSidebarSection::new(
                 connection.label.clone(),
-                CondrSidebarIcon::status(
-                    server_status,
-                    format!("server-status-{key}-{}", server_status.key),
-                    format!("{}: {}", connection.label, server_status.label),
-                ),
+                format!("server-heading-{key}"),
+                move |_, _| {
+                    let owner = new_workspace_owner.clone();
+                    let tooltip = format!("New Workspace on {new_workspace_label}…");
+                    Button::new(("new-workspace", key))
+                        .debug_selector(move || format!("new-workspace-server-{key}"))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Plus)
+                        .tooltip(tooltip)
+                        .disabled(!connected)
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            let _ = owner.update(cx, |this, cx| {
+                                this.choose_workspace_directory_on(key, window, cx)
+                            });
+                        })
+                        .into_any_element()
+                },
+                workspaces,
             )
-            .active(active_server)
-            .tree_parent(format!("server-toggle-{key}"))
-            .default_open(active_server)
-            .children(workspaces)
+            .active(active_server && !descendant_selected)
             .context_menu(move |menu, _, _| {
                 let rename_owner = server_menu_owner.clone();
                 let connection_owner = server_menu_owner.clone();
@@ -835,23 +866,6 @@ impl Condr {
                     }),
                 )
             })
-            .suffix(move |_, _| {
-                let owner = new_workspace_owner.clone();
-                let tooltip = format!("New Workspace on {new_workspace_label}…");
-                Button::new(("new-workspace", key))
-                    .debug_selector(move || format!("new-workspace-server-{key}"))
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Plus)
-                    .tooltip(tooltip)
-                    .disabled(!connected)
-                    .on_click(move |_, window, cx| {
-                        cx.stop_propagation();
-                        let _ = owner.update(cx, |this, cx| {
-                            this.choose_workspace_directory_on(key, window, cx)
-                        });
-                    })
-            })
             .on_click(move |_, window, cx| {
                 let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));
             })
@@ -862,24 +876,6 @@ impl Condr {
         let reconnect_visible = self
             .active_connection()
             .is_some_and(|connection| connection.status == ConnectionStatus::Disconnected);
-        let servers = CondrSidebarSection::new(
-            "Servers",
-            "servers-heading",
-            move |_, _| {
-                let owner = add_owner.clone();
-                Button::new("add-server")
-                    .debug_selector(|| "add-server".into())
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Plus)
-                    .tooltip("Add Server")
-                    .on_click(move |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| this.prompt_add_server(window, cx));
-                    })
-                    .into_any_element()
-            },
-            items,
-        );
         let settings_owner = cx.weak_entity();
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
@@ -888,6 +884,18 @@ impl Condr {
                 SidebarHeader::new()
                     .child(Icon::new(IconName::SquareTerminal))
                     .child(div().flex_1().font_semibold().child(condr_core::APP_NAME))
+                    .child(
+                        Button::new("add-server")
+                            .debug_selector(|| "add-server".into())
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Plus)
+                            .tooltip("Add Server")
+                            .on_click(move |_, window, cx| {
+                                let _ = add_owner
+                                    .update(cx, |this, cx| this.prompt_add_server(window, cx));
+                            }),
+                    )
                     .child(
                         Button::new("open-settings")
                             .debug_selector(|| "open-settings".into())
@@ -902,7 +910,7 @@ impl Condr {
                             }),
                     ),
             )
-            .child(servers)
+            .children(items)
             .when(reconnect_visible, |sidebar| {
                 sidebar.footer(
                     SidebarFooter::new().child(

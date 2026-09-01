@@ -12,11 +12,11 @@ use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::{
     ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, OpenSettings, PreviousTab,
-    ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown, SplitRight,
+    ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
     TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
     apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
-    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
+    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches,
     should_defer_to_character_input, single_instance_lock_path, terminal_chunk_identity_matches,
     terminal_clipboard_shortcut,
 };
@@ -108,43 +108,6 @@ fn pane_id() -> condr_core::PaneId {
 
 #[test]
 fn sidebar_status_visuals_follow_the_prototype_semantics() {
-    assert_eq!(
-        server_sidebar_status(ConnectionStatus::Connected, true),
-        SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Success,
-            key: "connected",
-            label: "Connected",
-        }
-    );
-    assert_eq!(
-        server_sidebar_status(ConnectionStatus::Connected, false),
-        SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Warning,
-            key: "syncing",
-            label: "Syncing",
-        }
-    );
-    assert_eq!(
-        server_sidebar_status(ConnectionStatus::Connecting, false),
-        SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Warning,
-            key: "connecting",
-            label: "Connecting",
-        }
-    );
-    assert_eq!(
-        server_sidebar_status(ConnectionStatus::Disconnected, false),
-        SidebarStatusVisual {
-            glyph: SidebarGlyph::HardDrive,
-            tone: SidebarIconTone::Danger,
-            key: "offline",
-            label: "Offline",
-        }
-    );
-
     let agent_cases = [
         (
             AgentDisplayState::Unknown,
