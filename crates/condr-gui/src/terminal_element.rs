@@ -29,7 +29,13 @@ const DIM: u16 = 1 << 7;
 const HIDDEN: u16 = 1 << 8;
 const STRIKEOUT: u16 = 1 << 9;
 const LEADING_WIDE_CHAR_SPACER: u16 = 1 << 10;
+const UNDERCURL: u16 = 1 << 12;
 const ALL_UNDERLINES: u16 = 0b0111_1000_0000_1000;
+
+/// Minimum APCA Lc between text and its cell background; Lc 45 is the floor
+/// for large fluent text and the common terminal default. Becomes a setting
+/// once terminal appearance configuration exists.
+const MINIMUM_CONTRAST_LC: f32 = 45.0;
 
 #[derive(Clone, PartialEq)]
 struct TerminalPalette {
@@ -284,6 +290,10 @@ pub(crate) struct PrepaintState {
     hitbox: Hitbox,
     quads: Vec<PaintQuad>,
     cells: Vec<ShapedCell>,
+    /// Painted after `cells`: the cursor block and the character or IME text
+    /// repainted on top of it.
+    overlay_quads: Vec<PaintQuad>,
+    overlay_cells: Vec<ShapedCell>,
     cell_size: Size<Pixels>,
 }
 
@@ -397,6 +407,9 @@ impl Element for TerminalElement {
         };
         let mut render_cache = self.props.render_cache.borrow_mut();
         render_cache.prepare(cache_key, self.props.terminal.cells.len());
+        let mut block_regions = Vec::new();
+        let mut background_regions: Vec<BlockRegion> = Vec::new();
+        let mut contrast_memo = ContrastMemo::default();
 
         // Terminal revisions often change only a cursor or spinner cell.
         for row in 0..self.props.terminal.size.rows {
@@ -416,14 +429,53 @@ impl Element for TerminalElement {
                 if cell.flags & INVERSE != 0 {
                     std::mem::swap(&mut foreground, &mut background);
                 }
+                if background != palette.background {
+                    let start_line = i64::from(row) * BLOCK_SUBLINES;
+                    let start_col = i64::from(column) * BLOCK_SUBCOLUMNS;
+                    let region = BlockRegion {
+                        start_line,
+                        start_col,
+                        end_line: start_line + BLOCK_SUBLINES - 1,
+                        end_col: start_col + BLOCK_SUBCOLUMNS - 1,
+                        color: background,
+                    };
+                    match background_regions.last_mut() {
+                        Some(last) if last.can_merge_with(&region) => last.merge_with(&region),
+                        _ => background_regions.push(region),
+                    }
+                }
+                if cell.flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0
+                    || (cell.text == " " && cell.flags & (ALL_UNDERLINES | STRIKEOUT) == 0)
+                {
+                    continue;
+                }
+
+                let mut characters = cell.text.chars();
+                let single_character = match (characters.next(), characters.next()) {
+                    (Some(character), None) => Some(character),
+                    _ => None,
+                };
+                let foreground_source = if cell.flags & INVERSE != 0 {
+                    cell.background
+                } else {
+                    cell.foreground
+                };
+                if !is_app_chosen_exact_color(foreground_source)
+                    && !single_character.is_some_and(is_decorative_character)
+                {
+                    foreground = contrast_memo.ensure(foreground, background);
+                }
                 if cell.flags & DIM != 0 {
                     foreground = foreground.opacity(0.65);
                 }
-                if background != palette.background {
-                    quads.push(fill(cell_bounds, background));
-                }
-                if cell.flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0
-                    || cell.text == " "
+                if let Some(character) = single_character
+                    && collect_block_element_regions(
+                        &mut block_regions,
+                        character,
+                        row,
+                        column,
+                        foreground,
+                    )
                 {
                     continue;
                 }
@@ -447,7 +499,7 @@ impl Element for TerminalElement {
                             (cell.flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
                                 thickness: px(1.),
                                 color: Some(foreground),
-                                wavy: false,
+                                wavy: cell.flags & UNDERCURL != 0,
                             });
                         let strikethrough =
                             (cell.flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
@@ -476,6 +528,24 @@ impl Element for TerminalElement {
             }
         }
 
+        // Cell backgrounds paint below the block elements.
+        for regions in [background_regions, block_regions] {
+            for region in merge_block_regions(regions) {
+                let left = bounds.left()
+                    + cell_size.width * (region.start_col as f32 / BLOCK_SUBCOLUMNS as f32);
+                let top = bounds.top()
+                    + cell_size.height * (region.start_line as f32 / BLOCK_SUBLINES as f32);
+                let width = cell_size.width
+                    * ((region.end_col - region.start_col + 1) as f32 / BLOCK_SUBCOLUMNS as f32);
+                let height = cell_size.height
+                    * ((region.end_line - region.start_line + 1) as f32 / BLOCK_SUBLINES as f32);
+                quads.push(fill(
+                    Bounds::new(point(left, top), size(width, height)),
+                    region.color,
+                ));
+            }
+        }
+
         if let Some(selection) = self.props.selection {
             push_selection_quads(
                 &mut quads,
@@ -487,27 +557,71 @@ impl Element for TerminalElement {
             );
         }
 
+        let mut overlay_quads = Vec::new();
+        let mut overlay_cells = Vec::new();
         if let Some(cursor) = self.props.terminal.cursor {
-            let cursor_bounds = Bounds::new(
-                point(
-                    bounds.left() + cell_size.width * usize::from(cursor.column),
-                    bounds.top() + cell_size.height * usize::from(cursor.row),
-                ),
-                cell_size,
+            let cursor_origin = point(
+                bounds.left() + cell_size.width * usize::from(cursor.column),
+                bounds.top() + cell_size.height * usize::from(cursor.row),
             );
             let cursor_color = terminal_color(TerminalColor::Named(258), true, &palette);
-            match cursor.shape {
+            // Shape the character under the cursor so a block cursor can
+            // repaint it in the background color, and so the cursor grows to
+            // cover wide characters instead of splitting them.
+            let cursor_cell = self
+                .props
+                .terminal
+                .cell(cursor.row, cursor.column)
+                .filter(|cell| !cell.text.trim().is_empty());
+            let cursor_text = cursor_cell.map(|cell| {
+                window.text_system().shape_line(
+                    cell.text.as_str().into(),
+                    font_size,
+                    &[TextRun {
+                        len: cell.text.len(),
+                        font: style.font(),
+                        color: palette.background,
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                )
+            });
+            let cursor_width = cursor_text
+                .as_ref()
+                .map_or(cell_size.width, |line| line.width.max(cell_size.width));
+            let cursor_bounds = Bounds::new(
+                cursor_origin,
+                size(cursor_width, cell_size.height),
+            );
+            // Only the focused pane shows a filled cursor; unfocused panes
+            // demote every visible shape to a hollow outline.
+            let focused = self.props.focus_handle.is_focused(window);
+            let shape = match cursor.shape {
+                TerminalCursorShape::Hidden => TerminalCursorShape::Hidden,
+                TerminalCursorShape::HollowBlock => TerminalCursorShape::HollowBlock,
+                _ if !focused => TerminalCursorShape::HollowBlock,
+                shape => shape,
+            };
+            match shape {
                 TerminalCursorShape::Block => {
-                    quads.push(fill(cursor_bounds, cursor_color.opacity(0.55)))
+                    overlay_quads.push(fill(cursor_bounds, cursor_color));
+                    if let Some(line) = cursor_text {
+                        overlay_cells.push(ShapedCell {
+                            origin: cursor_origin,
+                            line,
+                        });
+                    }
                 }
-                TerminalCursorShape::Underline => quads.push(fill(
+                TerminalCursorShape::Underline => overlay_quads.push(fill(
                     Bounds::new(
                         point(cursor_bounds.left(), cursor_bounds.bottom() - px(2.)),
                         size(cursor_bounds.size.width, px(2.)),
                     ),
                     cursor_color,
                 )),
-                TerminalCursorShape::Beam => quads.push(fill(
+                TerminalCursorShape::Beam => overlay_quads.push(fill(
                     Bounds::new(
                         cursor_bounds.origin,
                         size(px(2.), cursor_bounds.size.height),
@@ -515,7 +629,7 @@ impl Element for TerminalElement {
                     cursor_color,
                 )),
                 TerminalCursorShape::HollowBlock => {
-                    quads.push(outline(cursor_bounds, cursor_color, BorderStyle::default()))
+                    overlay_quads.push(outline(cursor_bounds, cursor_color, BorderStyle::default()))
                 }
                 TerminalCursorShape::Hidden => {}
             }
@@ -526,8 +640,8 @@ impl Element for TerminalElement {
                 .as_ref()
                 .filter(|text| !text.is_empty())
             {
-                cells.push(ShapedCell {
-                    origin: cursor_bounds.origin,
+                overlay_cells.push(ShapedCell {
+                    origin: cursor_origin,
                     line: window.text_system().shape_line(
                         marked_text.clone().into(),
                         font_size,
@@ -553,6 +667,8 @@ impl Element for TerminalElement {
             hitbox,
             quads,
             cells,
+            overlay_quads,
+            overlay_cells,
             cell_size,
         }
     }
@@ -579,6 +695,21 @@ impl Element for TerminalElement {
                 window.paint_quad(quad);
             }
             for cell in prepaint.cells.drain(..) {
+                cell.line
+                    .paint(
+                        cell.origin,
+                        prepaint.cell_size.height,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+            }
+            for quad in prepaint.overlay_quads.drain(..) {
+                window.paint_quad(quad);
+            }
+            for cell in prepaint.overlay_cells.drain(..) {
                 cell.line
                     .paint(
                         cell.origin,
@@ -860,6 +991,245 @@ impl Element for TerminalElement {
     }
 }
 
+// Block characters are described on an integer subcell grid so that the
+// regions of neighboring cells line up exactly and can merge: 8 subcolumns
+// cover the eighth-width bars and 24 sublines cover eighths, halves and
+// thirds of the cell height.
+const BLOCK_SUBCOLUMNS: i64 = 8;
+const BLOCK_SUBLINES: i64 = 24;
+
+/// A block-element rectangle on the terminal-wide subcell grid, with
+/// inclusive extents.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlockRegion {
+    start_line: i64,
+    start_col: i64,
+    end_line: i64,
+    end_col: i64,
+    color: Hsla,
+}
+
+impl BlockRegion {
+    /// Two regions can merge when their union is again a rectangle of one
+    /// color: equal line extents with touching or overlapping columns, or
+    /// equal column extents with touching or overlapping lines.
+    fn can_merge_with(&self, other: &Self) -> bool {
+        if self.color != other.color {
+            return false;
+        }
+        let same_lines =
+            self.start_line == other.start_line && self.end_line == other.end_line;
+        let same_cols = self.start_col == other.start_col && self.end_col == other.end_col;
+        let cols_touch =
+            self.start_col <= other.end_col + 1 && other.start_col <= self.end_col + 1;
+        let lines_touch =
+            self.start_line <= other.end_line + 1 && other.start_line <= self.end_line + 1;
+        (same_lines && cols_touch) || (same_cols && lines_touch)
+    }
+
+    fn merge_with(&mut self, other: &Self) {
+        self.start_line = self.start_line.min(other.start_line);
+        self.start_col = self.start_col.min(other.start_col);
+        self.end_line = self.end_line.max(other.end_line);
+        self.end_col = self.end_col.max(other.end_col);
+    }
+}
+
+/// Collapses adjacent same-color regions into fewer, larger rectangles so a
+/// logo or QR code drawn from block characters does not cost one quad per
+/// subcell.
+fn merge_block_regions(regions: Vec<BlockRegion>) -> Vec<BlockRegion> {
+    // Cells are visited in row-major order, so one linear pass already
+    // collapses the dominant case of horizontal runs (and vertical stacks
+    // that end up adjacent in the vector).
+    let mut merged: Vec<BlockRegion> = Vec::with_capacity(regions.len());
+    for region in regions {
+        match merged.last_mut() {
+            Some(last) if last.can_merge_with(&region) => last.merge_with(&region),
+            _ => merged.push(region),
+        }
+    }
+    // ponytail: the exhaustive fixpoint is quadratic, so screens that still
+    // hold thousands of unmergeable regions after the linear pass skip it
+    // and just paint more quads; switch to a grid-based merge if profiling
+    // ever shows quad count as the bottleneck.
+    if merged.len() <= 256 {
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let mut i = 0;
+            while i < merged.len() {
+                let mut j = i + 1;
+                while j < merged.len() {
+                    if merged[i].can_merge_with(&merged[j]) {
+                        let other = merged.remove(j);
+                        merged[i].merge_with(&other);
+                        changed = true;
+                    } else {
+                        j += 1;
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+    merged
+}
+
+/// Collects the filled rectangles of a block character into `regions`,
+/// placed on the subcell grid at the given terminal cell. These characters
+/// are painted as quads instead of font glyphs: glyphs only cover the em
+/// box, which is shorter than the line height, so glyph-rendered blocks
+/// leave horizontal seams and pixel art falls apart. Returns false when the
+/// character is not a block element.
+fn collect_block_element_regions(
+    regions: &mut Vec<BlockRegion>,
+    character: char,
+    row: u16,
+    column: u16,
+    color: Hsla,
+) -> bool {
+    const UPPER_LEFT: u8 = 1;
+    const UPPER_RIGHT: u8 = 1 << 1;
+    const LOWER_LEFT: u8 = 1 << 2;
+    const LOWER_RIGHT: u8 = 1 << 3;
+    // U+2596..=U+259F in code point order.
+    const QUADRANTS: [u8; 10] = [
+        LOWER_LEFT,
+        LOWER_RIGHT,
+        UPPER_LEFT,
+        UPPER_LEFT | LOWER_LEFT | LOWER_RIGHT,
+        UPPER_LEFT | LOWER_RIGHT,
+        UPPER_LEFT | UPPER_RIGHT | LOWER_LEFT,
+        UPPER_LEFT | UPPER_RIGHT | LOWER_RIGHT,
+        UPPER_RIGHT,
+        UPPER_RIGHT | LOWER_LEFT,
+        UPPER_RIGHT | LOWER_LEFT | LOWER_RIGHT,
+    ];
+
+    let base_line = i64::from(row) * BLOCK_SUBLINES;
+    let base_col = i64::from(column) * BLOCK_SUBCOLUMNS;
+    let mut push = |x: i64, y: i64, width: i64, height: i64, color: Hsla| {
+        regions.push(BlockRegion {
+            start_line: base_line + y,
+            start_col: base_col + x,
+            end_line: base_line + y + height - 1,
+            end_col: base_col + x + width - 1,
+            color,
+        });
+    };
+    match character {
+        // Upper half.
+        '\u{2580}' => push(0, 0, 8, 12, color),
+        // Lower one eighth through the full block.
+        '\u{2581}'..='\u{2588}' => {
+            let eighths = i64::from(character as u32 - 0x2580);
+            push(0, 24 - eighths * 3, 8, eighths * 3, color);
+        }
+        // Left seven eighths down to the left one eighth.
+        '\u{2589}'..='\u{258F}' => push(0, 0, i64::from(0x2590 - character as u32), 24, color),
+        // Right half.
+        '\u{2590}' => push(4, 0, 4, 24, color),
+        // Light, medium and dark shades, approximated with the foreground
+        // color at reduced opacity instead of the fonts' stipple patterns,
+        // trading pattern fidelity for seamless cell coverage.
+        '\u{2591}' => push(0, 0, 8, 24, color.opacity(0.25)),
+        '\u{2592}' => push(0, 0, 8, 24, color.opacity(0.5)),
+        '\u{2593}' => push(0, 0, 8, 24, color.opacity(0.75)),
+        // Upper one eighth.
+        '\u{2594}' => push(0, 0, 8, 3, color),
+        // Right one eighth.
+        '\u{2595}' => push(7, 0, 1, 24, color),
+        '\u{2596}'..='\u{259F}' => {
+            let mask = QUADRANTS[character as usize - 0x2596];
+            for (bit, x, y) in [
+                (UPPER_LEFT, 0, 0),
+                (UPPER_RIGHT, 4, 0),
+                (LOWER_LEFT, 0, 12),
+                (LOWER_RIGHT, 4, 12),
+            ] {
+                if mask & bit != 0 {
+                    push(x, y, 4, 12, color);
+                }
+            }
+        }
+        // Legacy Computing sextants: a 2x3 grid of subcells, with bit
+        // `row * 2 + column` filled. The code points enumerate every fill
+        // combination in binary order, except the four that already exist
+        // as Block Elements: empty, ▌ (0b010101), ▐ (0b101010) and █, so
+        // the enumeration skips those values.
+        '\u{1FB00}'..='\u{1FB3B}' => {
+            let mut mask = character as u32 - 0x1FB00 + 1;
+            if mask >= 0b010101 {
+                mask += 1;
+            }
+            if mask >= 0b101010 {
+                mask += 1;
+            }
+            for subrow in 0..3i64 {
+                for subcolumn in 0..2i64 {
+                    if mask & (1 << (subrow * 2 + subcolumn)) != 0 {
+                        push(subcolumn * 4, subrow * 8, 4, 8, color);
+                    }
+                }
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Box-like characters used as seamless visual connectors: adjusting their
+/// color for contrast would break the joins with neighboring backgrounds,
+/// so they keep their exact colors.
+fn is_decorative_character(character: char) -> bool {
+    matches!(
+        character as u32,
+        // Box Drawing, Block Elements and Geometric Shapes.
+        0x2500..=0x25FF
+        // Legacy Computing sextants.
+        | 0x1FB00..=0x1FB3B
+        // Powerline separators in the Private Use Area.
+        | 0xE0B0..=0xE0BF | 0xE0C0..=0xE0CA | 0xE0CC..=0xE0D7
+    )
+}
+
+/// Whether the application explicitly picked this color and does not want it
+/// adjusted for contrast: 24-bit true color, or a specific entry in the
+/// 256-color palette outside the 16 theme-defined ANSI colors.
+fn is_app_chosen_exact_color(color: TerminalColor) -> bool {
+    match color {
+        TerminalColor::Rgb { .. } => true,
+        TerminalColor::Indexed(index) => index >= 16,
+        TerminalColor::Named(_) => false,
+    }
+}
+
+/// Per-frame memo for the contrast adjustment: a terminal frame holds few
+/// distinct color pairs, so a linear scan beats hashing float colors.
+#[derive(Default)]
+struct ContrastMemo {
+    entries: Vec<(Hsla, Hsla, Hsla)>,
+}
+
+impl ContrastMemo {
+    fn ensure(&mut self, foreground: Hsla, background: Hsla) -> Hsla {
+        if let Some((_, _, adjusted)) = self
+            .entries
+            .iter()
+            .find(|(fg, bg, _)| *fg == foreground && *bg == background)
+        {
+            return *adjusted;
+        }
+        let adjusted =
+            crate::apca::ensure_minimum_contrast(foreground, background, MINIMUM_CONTRAST_LC);
+        if self.entries.len() < 256 {
+            self.entries.push((foreground, background, adjusted));
+        }
+        adjusted
+    }
+}
+
 fn push_selection_quads(
     quads: &mut Vec<PaintQuad>,
     selection: TerminalSelection,
@@ -1069,6 +1439,128 @@ mod tests {
             ShapedLine::default,
         );
         assert_eq!(cache.shaped_cells(), 2);
+    }
+
+    #[test]
+    fn block_elements_map_to_cell_filling_regions() {
+        let color: Hsla = rgb(0xff7b72).into();
+        let regions_for = |character: char| {
+            let mut regions = Vec::new();
+            assert!(
+                collect_block_element_regions(&mut regions, character, 1, 2, color),
+                "{character} should be handled as a block element"
+            );
+            regions
+        };
+        let region = |start_line: i64, start_col: i64, end_line: i64, end_col: i64| BlockRegion {
+            start_line: 24 + start_line,
+            start_col: 16 + start_col,
+            end_line: 24 + end_line,
+            end_col: 16 + end_col,
+            color,
+        };
+
+        // The full block covers the whole cell, line height included.
+        assert_eq!(regions_for('\u{2588}'), [region(0, 0, 23, 7)]);
+        // The upper half block starts at the cell top, not at the font baseline.
+        assert_eq!(regions_for('\u{2580}'), [region(0, 0, 11, 7)]);
+        // The lower quarter block sits flush with the cell bottom.
+        assert_eq!(regions_for('\u{2582}'), [region(18, 0, 23, 7)]);
+        // The left one-eighth block hugs the left edge.
+        assert_eq!(regions_for('\u{258F}'), [region(0, 0, 23, 0)]);
+        // ▚ fills exactly its upper-left and lower-right quadrants.
+        assert_eq!(
+            regions_for('\u{259A}'),
+            [region(0, 0, 11, 3), region(12, 4, 23, 7)]
+        );
+        // ░ approximates its stipple with a translucent full-cell fill.
+        assert_eq!(regions_for('\u{2591}')[0].color, color.opacity(0.25));
+
+        // U+1FB00 BLOCK SEXTANT-1 fills only the top-left 2x3 subcell.
+        assert_eq!(regions_for('\u{1FB00}'), [region(0, 0, 7, 3)]);
+        // U+1FB14 BLOCK SEXTANT-235 straddles the enumeration gap left by ▌.
+        assert_eq!(
+            regions_for('\u{1FB14}'),
+            [region(0, 4, 7, 7), region(8, 0, 15, 3), region(16, 0, 23, 3)]
+        );
+        // The last sextant fills everything but the top-left subcell.
+        let last = regions_for('\u{1FB3B}');
+        assert_eq!(last.len(), 5);
+        assert!(
+            !last.contains(&region(0, 0, 7, 3)),
+            "the top-left subcell must stay empty"
+        );
+
+        let mut regions = Vec::new();
+        assert!(
+            !collect_block_element_regions(&mut regions, 'x', 0, 0, color),
+            "ordinary text must keep going through font shaping"
+        );
+        assert!(
+            !collect_block_element_regions(&mut regions, '\u{1FB3C}', 0, 0, color),
+            "code points after the sextant range must not be treated as sextants"
+        );
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn adjacent_block_regions_merge_into_larger_rectangles() {
+        let orange: Hsla = rgb(0xff7b72).into();
+        let blue: Hsla = rgb(0x58a6ff).into();
+        let mut regions = Vec::new();
+        // A row of three full blocks, a stacked full block below the first,
+        // and a differently colored block at the end of the row.
+        for column in 0..3 {
+            collect_block_element_regions(&mut regions, '\u{2588}', 0, column, orange);
+        }
+        collect_block_element_regions(&mut regions, '\u{2588}', 0, 3, blue);
+        collect_block_element_regions(&mut regions, '\u{2588}', 1, 0, orange);
+
+        let merged = merge_block_regions(regions);
+        assert_eq!(
+            merged,
+            [
+                BlockRegion {
+                    start_line: 0,
+                    start_col: 0,
+                    end_line: 23,
+                    end_col: 23,
+                    color: orange,
+                },
+                BlockRegion {
+                    start_line: 0,
+                    start_col: 24,
+                    end_line: 23,
+                    end_col: 31,
+                    color: blue,
+                },
+                BlockRegion {
+                    start_line: 24,
+                    start_col: 0,
+                    end_line: 47,
+                    end_col: 7,
+                    color: orange,
+                },
+            ]
+        );
+
+        // Two ▀ over two ▄ of the same color merge into one full-width band
+        // via the quadratic fixpoint pass.
+        let mut regions = Vec::new();
+        collect_block_element_regions(&mut regions, '\u{2584}', 0, 0, orange);
+        collect_block_element_regions(&mut regions, '\u{2584}', 0, 1, orange);
+        collect_block_element_regions(&mut regions, '\u{2580}', 1, 0, orange);
+        collect_block_element_regions(&mut regions, '\u{2580}', 1, 1, orange);
+        assert_eq!(
+            merge_block_regions(regions),
+            [BlockRegion {
+                start_line: 12,
+                start_col: 0,
+                end_line: 35,
+                end_col: 15,
+                color: orange,
+            }]
+        );
     }
 
     #[test]
