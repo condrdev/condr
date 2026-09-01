@@ -101,7 +101,7 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - 使用 Condr 完成真实的 Condr 开发任务，记录仍需退回其他终端或手工处理的原因，并优先消除最高频摩擦。
 - 先完善实际阻塞自举的 Pane/Tab/Workspace 创建、关闭、移动、聚焦、拆分、交换、缩放和恢复反馈。
 - 当快捷键、菜单、Toolbar、右键菜单或命令面板出现真实的重复与不一致时，再建立覆盖当前命令的最小 `Command Registry`。
-- 按实际需要加入最小设置，候选范围包括字体/字号、终端主题、默认 Shell、启动行为、连接项、快捷键和通知。
+- 按实际需要加入最小设置。已落地 `Settings` 弹窗与 Appearance 页（System/Light/Dark，持久化在 Client `config.toml`）；候选范围继续包括字体/字号、终端主题、默认 Shell、启动行为、连接项、快捷键和通知。终端配色目前固定为深色，不随 Appearance 变化。
 - 在既有 SSH tunnel 验证稳定后，增加原生 `SSH` 连接项：Client 通过系统 `ssh` 的 stdio 连接远端 `condr-server bridge`，bridge 只负责连接远端私有 endpoint 并双向转发现有协议；远端 Server 仍独立存活。保留 Local/TCP，首版不做自动安装、升级或 live handoff。设计依据见 [Herdr SSH remote 调查](research/herdr-ssh-v0.8.2.md)。
 - 明确配置归属：GUI 外观与快捷键属于 Client；Shell、Agent Profile 和 Server 配置属于 Server；GUI 偏好不进入 Session Snapshot。
 - 根据真实使用加入桌面通知：Agent `done/blocked`、Server 离线、重连成功，并提供静默/过滤选项。

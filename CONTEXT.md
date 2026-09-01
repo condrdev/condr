@@ -20,6 +20,14 @@ _Avoid_: Agent session, conversation
 The window surface shown when a Session contains no Workspaces. It offers an entry point to choose a Root Directory and create a Workspace, but is not itself a Workspace.
 _Avoid_: Empty Workspace, empty Pane
 
+**Settings**:
+A Client-owned dialog presenting this Client's GUI preferences as pages. Its values live in the Client's `config.toml`, apply to every Server the Client connects to, and never reach a Server or a Session Snapshot.
+_Avoid_: Preferences, options, config
+
+**Appearance**:
+The Settings page owning how the GUI chrome looks, and the `System` / `Light` / `Dark` preference on it. `System` follows the operating system's appearance for as long as it stays selected. It does not change Terminal colors, which are currently fixed.
+_Avoid_: Theme, dark mode
+
 **Workspace**:
 A project- or task-level container with a stable identity and Root Directory. It owns an ordered set of Tabs. Closing it terminates its terminals but never removes files or a Git worktree checkout.
 _Avoid_: Project, space
