@@ -117,9 +117,12 @@ fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
 #[cfg(test)]
 mod tests {
     // Not `use super::*`: it would glob in `gpui::test` and shadow the built-in attribute.
+    #[cfg(feature = "test-support")]
     use gpui_component::ActiveTheme as _;
 
-    use super::{Appearance, apply_appearance};
+    use super::Appearance;
+    #[cfg(feature = "test-support")]
+    use super::apply_appearance;
 
     #[test]
     fn appearance_round_trips_through_its_stored_name() {
@@ -134,6 +137,7 @@ mod tests {
         assert_eq!(Appearance::from_str(""), Appearance::System);
     }
 
+    #[cfg(feature = "test-support")]
     #[gpui::test]
     fn applying_an_appearance_pins_the_theme_mode(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
