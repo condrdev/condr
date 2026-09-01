@@ -208,15 +208,19 @@ impl Render for TerminalPanel {
         if self.focus_subscriptions.is_empty() {
             let focus_owner = self.owner.clone();
             let blur_owner = self.owner.clone();
+            // GPUI leases this Panel while it runs a focus callback, and sync_terminal_focus
+            // reads every Panel, so the owner update has to wait for the lease to be released.
             self.focus_subscriptions = vec![
                 cx.on_focus(&self.focus_handle, window, move |_, window, cx| {
-                    let _ = focus_owner.update(cx, |app, cx| {
-                        app.sync_terminal_focus(window, cx);
+                    let owner = focus_owner.clone();
+                    window.defer(cx, move |window, cx| {
+                        let _ = owner.update(cx, |app, cx| app.sync_terminal_focus(window, cx));
                     });
                 }),
                 cx.on_blur(&self.focus_handle, window, move |_, window, cx| {
-                    let _ = blur_owner.update(cx, |app, cx| {
-                        app.sync_terminal_focus(window, cx);
+                    let owner = blur_owner.clone();
+                    window.defer(cx, move |window, cx| {
+                        let _ = owner.update(cx, |app, cx| app.sync_terminal_focus(window, cx));
                     });
                 }),
             ];
@@ -308,7 +312,7 @@ impl Render for TerminalPanel {
 
         let menu_owner = self.owner.clone();
         let pane_menu = Button::new(format!("terminal-pane-menu-{key}-{}", pane_id.as_u64()))
-            .icon(IconName::Ellipsis)
+            .icon(IconName::EllipsisVertical)
             .xsmall()
             .ghost()
             .tab_stop(false)

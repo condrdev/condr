@@ -678,3 +678,64 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     window.run_until_parked();
     assert!(!terminal_contains(window, &view, 1, pane_id, dialog_marker));
 }
+
+#[test]
+fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            view.read(app)
+                .active_session()?
+                .active_workspace()
+                .map(|workspace| workspace.active_tab().focused_pane().id())
+        });
+        let Some(pane_id) = pane_id else {
+            return false;
+        };
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        window.debug_bounds(terminal_selector(pane_id)).is_some()
+            && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+    }));
+    let pane_id = pane_id.unwrap();
+
+    window.update(|window, _| window.activate_window());
+    window.run_until_parked();
+    assert!(
+        window.update(|window, _| window.is_window_active()),
+        "the test window must be active for terminal focus to be reported"
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        Some((1, pane_id)),
+        "activating the window should report terminal focus to the PTY"
+    );
+
+    // Blurring a Pane runs the Panel's focus callback while GPUI holds its lease.
+    let app_focus = window.read(|app| view.read(app).focus_handle.clone());
+    window.update(|window, cx| app_focus.focus(window, cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        None,
+        "moving focus out of a Pane should report the terminal as unfocused"
+    );
+}
