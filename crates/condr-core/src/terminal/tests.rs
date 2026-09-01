@@ -1,5 +1,50 @@
 use super::*;
 
+struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for RecordingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct BlockingRecordingWriter {
+    writer: RecordingWriter,
+    started: Option<mpsc::Sender<()>>,
+    release: mpsc::Receiver<()>,
+}
+
+impl Write for BlockingRecordingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(started) = self.started.take() {
+            started.send(()).unwrap();
+            self.release.recv().unwrap();
+        }
+        self.writer.write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+struct FailingWriter;
+
+impl Write for FailingWriter {
+    fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+        Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed"))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 fn frame_test_view(revision: u64, text: &str) -> TerminalView {
     let mut cells = text
         .chars()
@@ -73,6 +118,73 @@ fn terminal_control_has_capacity_reserved_from_user_input_and_replies() {
 }
 
 #[test]
+fn terminal_replies_do_not_wait_for_the_writer() {
+    let (input, receiver) = TerminalInput::channel();
+    input.write_terminal_reply(b"first".to_vec()).unwrap();
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let (started, writer_started) = mpsc::channel();
+    let (release_writer, release) = mpsc::channel();
+    let io = thread::spawn({
+        let written = Arc::clone(&written);
+        move || {
+            io_loop(TerminalIoLoop {
+                writer: Box::new(BlockingRecordingWriter {
+                    writer: RecordingWriter(written),
+                    started: Some(started),
+                    release,
+                }),
+                input: receiver,
+                stopping: Arc::new(AtomicBool::new(false)),
+            })
+        }
+    });
+    writer_started.recv_timeout(Duration::from_secs(1)).unwrap();
+
+    let second_input = input.clone();
+    let (completed, completion) = mpsc::channel();
+    let reply = thread::spawn(move || {
+        let result = second_input.write_terminal_reply(b"second".to_vec());
+        completed.send(result).unwrap();
+    });
+
+    let result = completion.recv_timeout(Duration::from_secs(1));
+    release_writer.send(()).unwrap();
+    reply.join().unwrap();
+
+    assert!(
+        matches!(result, Ok(Ok(()))),
+        "terminal reader waited for the PTY writer: {result:?}"
+    );
+    drop(input);
+    io.join().unwrap().unwrap();
+    assert_eq!(*written.lock().unwrap(), b"firstsecond");
+}
+
+#[test]
+fn terminal_reply_writer_failure_disconnects_future_replies() {
+    let (input, receiver) = TerminalInput::channel();
+    input.try_write(b"user input".to_vec()).unwrap();
+    input.write_terminal_reply(b"first".to_vec()).unwrap();
+    input.write_terminal_reply(b"second".to_vec()).unwrap();
+
+    let error = io_loop(TerminalIoLoop {
+        writer: Box::new(FailingWriter),
+        input: receiver,
+        stopping: Arc::new(AtomicBool::new(false)),
+    })
+    .unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(
+        input
+            .write_terminal_reply(b"after failure".to_vec())
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::BrokenPipe
+    );
+}
+
+#[test]
 fn terminal_color_replies_use_the_render_palette_and_preserve_order() {
     let size = TerminalSize::new(4, 12);
     let shared_size = Arc::new(Mutex::new(size));
@@ -85,7 +197,7 @@ fn terminal_color_replies_use_the_render_palette_and_preserve_order() {
         &mut *terminal.lock().expect("terminal state lock poisoned"),
         b"\x1b]11;?\x07\x1b[5n\x1b]4;1;#123456\x07\x1b]4;1;?\x07",
     );
-    flush_terminal_replies(&terminal, &input, &pending_replies);
+    flush_terminal_replies(&terminal, &input, &pending_replies).unwrap();
 
     assert_eq!(
         receiver.recv().unwrap().bytes,
@@ -137,6 +249,77 @@ fn resize_worker_failure_stops_accepting_requests() {
         control.request(requested_size).unwrap_err().kind(),
         io::ErrorKind::BrokenPipe
     );
+}
+
+#[test]
+fn terminal_is_resized_before_the_pty() {
+    let initial_size = TerminalSize::new(5, 20);
+    let requested_size = TerminalSize::new(10, 40);
+    let current_size = Arc::new(Mutex::new(initial_size));
+    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+    let terminal = Arc::new(Mutex::new(Term::new(
+        Config::default(),
+        &initial_size,
+        event_proxy,
+    )));
+    let revision = AtomicU64::new(0);
+    let (updates, _update_receiver) = mpsc::channel();
+    let mut size_seen_by_pty = None;
+
+    resize_terminal_and_pty(
+        &terminal,
+        &current_size,
+        &revision,
+        &updates,
+        requested_size,
+        |terminal, _| {
+            size_seen_by_pty = Some((terminal.screen_lines(), terminal.columns()));
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        size_seen_by_pty,
+        Some((
+            usize::from(requested_size.rows),
+            usize::from(requested_size.columns)
+        ))
+    );
+}
+
+#[test]
+fn failed_pty_resize_still_publishes_the_new_vt_size() {
+    let initial_size = TerminalSize::new(5, 20);
+    let requested_size = TerminalSize::new(10, 40);
+    let current_size = Arc::new(Mutex::new(initial_size));
+    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+    let terminal = Arc::new(Mutex::new(Term::new(
+        Config::default(),
+        &initial_size,
+        event_proxy,
+    )));
+    let revision = AtomicU64::new(0);
+    let (updates, update_receiver) = mpsc::channel();
+
+    let error = resize_terminal_and_pty(
+        &terminal,
+        &current_size,
+        &revision,
+        &updates,
+        requested_size,
+        |_, _| Err(io::Error::other("PTY resize failed")),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.to_string(), "PTY resize failed");
+    assert_eq!(*current_size.lock().unwrap(), requested_size);
+    let terminal = terminal.lock().unwrap();
+    assert_eq!(terminal.screen_lines(), usize::from(requested_size.rows));
+    assert_eq!(terminal.columns(), usize::from(requested_size.columns));
+    drop(terminal);
+    assert_eq!(revision.load(Ordering::Acquire), 1);
+    assert_eq!(update_receiver.recv().unwrap(), TerminalUpdate::View(1));
 }
 
 #[cfg(unix)]

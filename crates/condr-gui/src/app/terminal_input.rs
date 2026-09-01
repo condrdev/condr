@@ -521,7 +521,10 @@ pub(super) fn terminal_clipboard_shortcut(
     let shift_only = modifiers.shift && !modifiers.control && !modifiers.platform;
 
     match stroke.key.as_str() {
-        "c" if command_only || control_shift || (control_only && has_selection) => {
+        "c" if command_only
+            || control_shift
+            || (cfg!(windows) && control_only && has_selection) =>
+        {
             Some(TerminalClipboardShortcut::Copy)
         }
         "v" if command_only || control_shift || (cfg!(windows) && control_only) => {

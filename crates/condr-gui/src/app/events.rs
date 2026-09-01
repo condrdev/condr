@@ -665,6 +665,15 @@ impl Condr {
                         };
                     }
                 };
+                if let Some(selection) = &mut self.terminal_selection
+                    && selection.connection_key == key
+                    && pane_ids.contains(&selection.pane_id)
+                {
+                    selection.range.display_offset = self.connections[index].terminals
+                        [&selection.pane_id]
+                        .view
+                        .display_offset;
+                }
                 if self.last_terminal_mouse_motion.is_some_and(|motion| {
                     motion.connection_key == key
                         && pane_ids.contains(&motion.pane_id)

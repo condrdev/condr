@@ -14,22 +14,56 @@ impl Drop for UserInputPermit {
     }
 }
 
-pub(super) struct TerminalReplyPermit {
-    slot: Arc<(Mutex<bool>, Condvar)>,
+pub(super) struct ControlInputPermit {
+    pending_entries: Arc<AtomicUsize>,
 }
 
-impl Drop for TerminalReplyPermit {
+impl Drop for ControlInputPermit {
     fn drop(&mut self) {
-        let (occupied, ready) = &*self.slot;
-        *occupied.lock().expect("terminal reply slot lock poisoned") = false;
-        ready.notify_one();
+        self.pending_entries.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
 pub(super) struct QueuedInput {
     pub(super) bytes: Vec<u8>,
     _user_permit: Option<UserInputPermit>,
-    _terminal_reply_permit: Option<TerminalReplyPermit>,
+    _control_permit: Option<ControlInputPermit>,
+    terminal_replies: Option<Arc<Mutex<TerminalReplyState>>>,
+}
+
+#[derive(Default)]
+pub(super) struct TerminalReplyState {
+    pending: VecDeque<Vec<u8>>,
+    token_queued: bool,
+}
+
+pub(super) struct TerminalInputReceiver {
+    receiver: mpsc::Receiver<QueuedInput>,
+    terminal_replies: Arc<Mutex<TerminalReplyState>>,
+    accepting: Arc<AtomicBool>,
+}
+
+impl TerminalInputReceiver {
+    fn recv_timeout(&self, timeout: Duration) -> Result<QueuedInput, mpsc::RecvTimeoutError> {
+        self.receiver.recv_timeout(timeout)
+    }
+
+    #[cfg(test)]
+    pub(super) fn recv(&self) -> Result<QueuedInput, mpsc::RecvError> {
+        self.receiver.recv()
+    }
+}
+
+impl Drop for TerminalInputReceiver {
+    fn drop(&mut self) {
+        self.accepting.store(false, Ordering::Release);
+        let mut replies = self
+            .terminal_replies
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        replies.pending.clear();
+        replies.token_queued = false;
+    }
 }
 
 #[derive(Clone)]
@@ -37,24 +71,32 @@ pub(super) struct TerminalInput {
     sender: mpsc::SyncSender<QueuedInput>,
     pending_bytes: Arc<AtomicUsize>,
     pending_entries: Arc<AtomicUsize>,
-    terminal_reply_slot: Arc<(Mutex<bool>, Condvar)>,
+    pending_control_entries: Arc<AtomicUsize>,
+    terminal_replies: Arc<Mutex<TerminalReplyState>>,
     accepting: Arc<AtomicBool>,
 }
 
 impl TerminalInput {
-    pub(super) fn channel() -> (Self, mpsc::Receiver<QueuedInput>) {
+    pub(super) fn channel() -> (Self, TerminalInputReceiver) {
         let (sender, receiver) = mpsc::sync_channel(
             INPUT_QUEUE_CAPACITY + TERMINAL_REPLY_QUEUE_RESERVE + TERMINAL_CONTROL_QUEUE_RESERVE,
         );
+        let terminal_replies = Arc::new(Mutex::new(TerminalReplyState::default()));
+        let accepting = Arc::new(AtomicBool::new(true));
         (
             Self {
                 sender,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
                 pending_entries: Arc::new(AtomicUsize::new(0)),
-                terminal_reply_slot: Arc::new((Mutex::new(false), Condvar::new())),
-                accepting: Arc::new(AtomicBool::new(true)),
+                pending_control_entries: Arc::new(AtomicUsize::new(0)),
+                terminal_replies: Arc::clone(&terminal_replies),
+                accepting: Arc::clone(&accepting),
             },
-            receiver,
+            TerminalInputReceiver {
+                receiver,
+                terminal_replies,
+                accepting,
+            },
         )
     }
 
@@ -98,7 +140,8 @@ impl TerminalInput {
                 pending_bytes: Arc::clone(&self.pending_bytes),
                 pending_entries: Arc::clone(&self.pending_entries),
             }),
-            _terminal_reply_permit: None,
+            _control_permit: None,
+            terminal_replies: None,
         };
         if !self.accepting.load(Ordering::Acquire) {
             drop(input);
@@ -127,31 +170,48 @@ impl TerminalInput {
                 "terminal writer stopped",
             ));
         }
-        let (occupied, ready) = &*self.terminal_reply_slot;
-        let mut occupied = occupied.lock().expect("terminal reply slot lock poisoned");
-        while *occupied && self.accepting.load(Ordering::Acquire) {
-            occupied = ready
-                .wait(occupied)
-                .expect("terminal reply slot lock poisoned");
-        }
+        let mut replies = self
+            .terminal_replies
+            .lock()
+            .expect("terminal reply queue lock poisoned");
         if !self.accepting.load(Ordering::Acquire) {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "terminal writer stopped",
             ));
         }
-        *occupied = true;
-        drop(occupied);
-
-        self.sender
-            .send(QueuedInput {
-                bytes,
-                _user_permit: None,
-                _terminal_reply_permit: Some(TerminalReplyPermit {
-                    slot: Arc::clone(&self.terminal_reply_slot),
-                }),
-            })
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped"))
+        if replies.token_queued {
+            replies.pending.push_back(bytes);
+            return Ok(());
+        }
+        replies.token_queued = true;
+        let input = QueuedInput {
+            bytes,
+            _user_permit: None,
+            _control_permit: None,
+            terminal_replies: Some(Arc::clone(&self.terminal_replies)),
+        };
+        if !self.accepting.load(Ordering::Acquire) {
+            replies.token_queued = false;
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal writer stopped",
+            ));
+        }
+        match self.sender.try_send(input) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                replies.token_queued = false;
+                Err(match error {
+                    mpsc::TrySendError::Full(_) => {
+                        io::Error::new(io::ErrorKind::WouldBlock, "terminal reply queue is full")
+                    }
+                    mpsc::TrySendError::Disconnected(_) => {
+                        io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped")
+                    }
+                })
+            }
+        }
     }
 
     pub(super) fn try_write_control(&self, bytes: Vec<u8>) -> io::Result<()> {
@@ -164,25 +224,40 @@ impl TerminalInput {
                 "terminal writer stopped",
             ));
         }
-        self.sender
-            .try_send(QueuedInput {
-                bytes,
-                _user_permit: None,
-                _terminal_reply_permit: None,
+        self.pending_control_entries
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+                (pending < TERMINAL_CONTROL_QUEUE_RESERVE).then(|| pending + 1)
             })
-            .map_err(|error| match error {
-                mpsc::TrySendError::Full(_) => {
-                    io::Error::new(io::ErrorKind::WouldBlock, "terminal control queue is full")
-                }
-                mpsc::TrySendError::Disconnected(_) => {
-                    io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped")
-                }
-            })
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::WouldBlock, "terminal control queue is full")
+            })?;
+        let input = QueuedInput {
+            bytes,
+            _user_permit: None,
+            _control_permit: Some(ControlInputPermit {
+                pending_entries: Arc::clone(&self.pending_control_entries),
+            }),
+            terminal_replies: None,
+        };
+        if !self.accepting.load(Ordering::Acquire) {
+            drop(input);
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal writer stopped",
+            ));
+        }
+        self.sender.try_send(input).map_err(|error| match error {
+            mpsc::TrySendError::Full(_) => {
+                io::Error::new(io::ErrorKind::WouldBlock, "terminal control queue is full")
+            }
+            mpsc::TrySendError::Disconnected(_) => {
+                io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped")
+            }
+        })
     }
 
     pub(super) fn stop(&self) {
         self.accepting.store(false, Ordering::Release);
-        self.terminal_reply_slot.1.notify_all();
     }
 }
 
@@ -295,14 +370,14 @@ pub(super) fn flush_terminal_replies(
     terminal: &Arc<Mutex<Terminal>>,
     input: &TerminalInput,
     pending_replies: &PendingTerminalReplies,
-) {
+) -> io::Result<()> {
     let replies = std::mem::take(
         &mut *pending_replies
             .lock()
             .expect("terminal reply queue lock poisoned"),
     );
     if replies.is_empty() {
-        return;
+        return Ok(());
     }
     let terminal = terminal.lock().expect("terminal state lock poisoned");
     let mut bytes = Vec::new();
@@ -319,7 +394,7 @@ pub(super) fn flush_terminal_replies(
         }
     }
     drop(terminal);
-    let _ = input.write_terminal_reply(bytes);
+    input.write_terminal_reply(bytes)
 }
 
 fn default_terminal_color(index: usize) -> Option<Rgb> {
@@ -390,7 +465,7 @@ pub(super) type Terminal = Term<TerminalEventProxy>;
 
 pub(super) struct TerminalIoLoop {
     pub(super) writer: Box<dyn Write + Send>,
-    pub(super) input: mpsc::Receiver<QueuedInput>,
+    pub(super) input: TerminalInputReceiver,
     pub(super) stopping: Arc<AtomicBool>,
 }
 
@@ -575,7 +650,7 @@ pub(super) fn read_loop(
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal_guard, &bytes[..read]);
                 drop(terminal_guard);
-                flush_terminal_replies(&terminal, &input, &pending_replies);
+                flush_terminal_replies(&terminal, &input, &pending_replies)?;
                 publish_view(&revision, &updates);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -720,14 +795,33 @@ pub(super) fn io_loop(io: TerminalIoLoop) -> io::Result<()> {
         if stopping.load(Ordering::Acquire) {
             return Ok(());
         }
-        if let Err(error) = writer
-            .write_all(&queued.bytes)
-            .and_then(|()| writer.flush())
-        {
-            if stopping.load(Ordering::Acquire) {
-                return Ok(());
+        let QueuedInput {
+            mut bytes,
+            _user_permit,
+            _control_permit,
+            terminal_replies,
+        } = queued;
+        loop {
+            if let Err(error) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
+                drop(input);
+                if stopping.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                return Err(error);
             }
-            return Err(error);
+            let Some(replies) = terminal_replies.as_ref() else {
+                break;
+            };
+            let mut replies = replies.lock().expect("terminal reply queue lock poisoned");
+            match replies.pending.pop_front() {
+                Some(next) => bytes = next,
+                None => {
+                    // Producers append and inspect this flag under the same lock, so a
+                    // reply racing this clear will enqueue the next wake token.
+                    replies.token_queued = false;
+                    break;
+                }
+            }
         }
     }
     Ok(())
@@ -745,18 +839,40 @@ pub(super) fn resize_loop(
         control: Arc::clone(&control),
     };
     while let Some(size) = control.next() {
-        master
+        let master = master
             .upgrade()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "PTY was closed"))?
-            .lock()
-            .expect("PTY master lock poisoned")
-            .resize(size.into())
-            .map_err(other_error)?;
-        let mut terminal = terminal.lock().expect("terminal state lock poisoned");
-        terminal.resize(size);
-        *current_size.lock().expect("terminal size lock poisoned") = size;
-        drop(terminal);
-        publish_view(&revision, &updates);
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "PTY was closed"))?;
+        resize_terminal_and_pty(
+            &terminal,
+            &current_size,
+            &revision,
+            &updates,
+            size,
+            |_, pty_size| {
+                master
+                    .lock()
+                    .expect("PTY master lock poisoned")
+                    .resize(pty_size)
+                    .map_err(other_error)
+            },
+        )?;
     }
     Ok(())
+}
+
+pub(super) fn resize_terminal_and_pty(
+    terminal: &Arc<Mutex<Terminal>>,
+    current_size: &Arc<Mutex<TerminalSize>>,
+    revision: &AtomicU64,
+    updates: &mpsc::Sender<TerminalUpdate>,
+    size: TerminalSize,
+    resize_pty: impl FnOnce(&Terminal, PtySize) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut terminal = terminal.lock().expect("terminal state lock poisoned");
+    terminal.resize(size);
+    let resize_result = resize_pty(&terminal, size.into());
+    *current_size.lock().expect("terminal size lock poisoned") = size;
+    drop(terminal);
+    publish_view(revision, updates);
+    resize_result
 }

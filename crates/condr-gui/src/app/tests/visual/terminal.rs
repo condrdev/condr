@@ -74,6 +74,75 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            view.read(app)
+                .active_session()?
+                .active_workspace()
+                .map(|workspace| workspace.active_tab().focused_pane().id())
+        });
+        let Some(pane_id) = pane_id else {
+            return false;
+        };
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        window.debug_bounds(terminal_selector(pane_id)).is_some()
+            && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+    }));
+    let pane_id = pane_id.unwrap();
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(
+                    "i=0; while [ $i -lt 80 ]; do printf 'CONDR_SCROLL_%03d\\n' \"$i\"; i=$((i+1)); done; stty -echo -icanon min 1 time 0; printf 'CONDR_PAGEUP_READY\\n'; bytes=$(dd bs=1 count=4 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_PAGEUP_BYTES_%s\\n' \"$bytes\"\r"
+                        .into(),
+                ),
+            );
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_PAGEUP_READY")
+    }));
+
+    window.simulate_keystrokes("pageup");
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_PAGEUP_BYTES_1b5b357e")
+    }));
+
+    window.simulate_keystrokes("shift-pageup");
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .terminal(1, pane_id)
+                .is_some_and(|terminal| terminal.view.display_offset > 0)
+        })
+    }));
+}
+
 #[test]
 fn terminal_drag_selection_updates_locally() {
     let _serial_guard = acquire_visual_test_lock();
@@ -176,6 +245,102 @@ fn terminal_drag_selection_updates_locally() {
     }));
     let after_output = window.read(|app| view.read(app).terminal_selection.unwrap());
     assert_eq!(after_output.range, completed.range);
+}
+
+#[test]
+fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+
+    let mut pane_id = None;
+    assert!(wait_until_event_driven(window, |window| {
+        pane_id = window.read(|app| {
+            view.read(app)
+                .active_session()?
+                .active_workspace()
+                .map(|workspace| workspace.active_tab().focused_pane().id())
+        });
+        pane_id.is_some()
+    }));
+    let pane_id = pane_id.unwrap();
+    let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let range = TerminalSelection {
+                start: TerminalPosition {
+                    row: 1,
+                    column: 1,
+                    side: TerminalSide::Left,
+                },
+                end: TerminalPosition {
+                    row: 1,
+                    column: 3,
+                    side: TerminalSide::Right,
+                },
+                display_offset: 3,
+            };
+            this.terminal_selection = Some(LocalTerminalSelection {
+                connection_key: 1,
+                pane_id,
+                range,
+                dragging: false,
+            });
+
+            let (generation, server_id, session_id, mut terminal_view) = {
+                let connection = this.connection(1).unwrap();
+                (
+                    connection.connect_generation,
+                    connection.server_id.unwrap(),
+                    connection.session_id.unwrap(),
+                    connection.terminals[&pane_id].view.clone(),
+                )
+            };
+            terminal_view.revision += 1;
+            terminal_view.display_offset = 7;
+            this.connection_mut(1).unwrap().io = Some(ClientIo {
+                outgoing,
+                _incoming_task: Task::ready(()),
+            });
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::TerminalFrame(TerminalFrameBatch {
+                    server_id,
+                    session_id,
+                    panes: vec![PaneTerminalFrame {
+                        pane_id,
+                        frame: TerminalViewFrame::Full(terminal_view),
+                    }],
+                })),
+                cx,
+            );
+
+            let updated = this.terminal_selection.unwrap().range;
+            assert_eq!((updated.start, updated.end), (range.start, range.end));
+            assert_eq!(updated.display_offset, 7);
+            assert!(this.copy_terminal_selection(1, pane_id, cx));
+        });
+    });
+
+    assert!(matches!(
+        outgoing_rx.recv().unwrap(),
+        ClientMessage::Terminal {
+            pane_id: copied_pane,
+            command: TerminalCommand::Copy { selection },
+            ..
+        } if copied_pane == pane_id && selection.display_offset == 7
+    ));
 }
 
 #[cfg(unix)]
@@ -308,7 +473,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
 }
 
 #[test]
-fn terminal_double_click_and_ctrl_c_copy_a_word() {
+fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(gpui_component::init);
@@ -413,7 +578,7 @@ fn terminal_double_click_and_ctrl_c_copy_a_word() {
             connection.bootstrap_resync_session_id = connection.session_id;
         });
     });
-    window.simulate_keystrokes("ctrl-c");
+    window.simulate_keystrokes("ctrl-shift-c");
     assert!(
         window.read(|app| view.read(app).terminal_selection.is_some()),
         "a rejected Copy must preserve the local selection"
@@ -425,7 +590,7 @@ fn terminal_double_click_and_ctrl_c_copy_a_word() {
             connection.bootstrap_resync_session_id = None;
         });
     });
-    window.simulate_keystrokes("ctrl-c");
+    window.simulate_keystrokes("ctrl-shift-c");
     assert!(window.read(|app| view.read(app).terminal_selection.is_some()));
     assert!(wait_until_event_driven(window, |window| {
         window

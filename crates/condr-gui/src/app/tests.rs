@@ -634,10 +634,20 @@ fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
         Some(TerminalClipboardShortcut::Paste)
     );
     assert_eq!(shortcut("ctrl-c", false), None);
+    #[cfg(windows)]
     assert_eq!(
         shortcut("ctrl-c", true),
         Some(TerminalClipboardShortcut::Copy)
     );
+    #[cfg(not(windows))]
+    assert_eq!(shortcut("ctrl-c", true), None);
+    #[cfg(target_os = "macos")]
+    assert_eq!(
+        shortcut("cmd-c", true),
+        Some(TerminalClipboardShortcut::Copy)
+    );
+    #[cfg(not(target_os = "macos"))]
+    assert_eq!(shortcut("cmd-c", true), None);
     assert_eq!(shortcut("ctrl-alt-v", false), None);
 
     #[cfg(windows)]
