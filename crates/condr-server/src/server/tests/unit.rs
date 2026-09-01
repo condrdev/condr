@@ -1,13 +1,27 @@
 use super::*;
 
 #[test]
-fn snapshot_paths_preserve_the_complete_local_endpoint_name() {
-    let socket = snapshot_path_for_endpoint(&Endpoint::local("condr.sock"));
-    let pipe = snapshot_path_for_endpoint(&Endpoint::local("condr.pipe"));
+fn snapshot_paths_use_platform_state_and_endpoint_identity() {
+    let socket = snapshot_path_for_endpoint(&Endpoint::local("condr.sock")).unwrap();
+    let pipe = snapshot_path_for_endpoint(&Endpoint::local("condr.pipe")).unwrap();
+    let state_directory = condr_core::state_directory().unwrap();
 
-    assert_eq!(socket, PathBuf::from("condr.sock.snapshot"));
-    assert_eq!(pipe, PathBuf::from("condr.pipe.snapshot"));
+    assert_eq!(socket.parent(), Some(state_directory.as_path()));
+    assert_eq!(pipe.parent(), Some(state_directory.as_path()));
+    assert_eq!(
+        socket.extension().and_then(|value| value.to_str()),
+        Some("snapshot")
+    );
     assert_ne!(socket, pipe);
+}
+
+#[cfg(unix)]
+#[test]
+fn local_endpoint_identity_normalizes_relative_paths() {
+    let relative = Endpoint::local("condr.sock");
+    let absolute = Endpoint::local(std::path::absolute("condr.sock").unwrap());
+
+    assert_eq!(stable_endpoint_id(&relative), stable_endpoint_id(&absolute));
 }
 
 #[test]

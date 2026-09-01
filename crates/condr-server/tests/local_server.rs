@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use condr_core::Session;
-use condr_core::protocol::{ClientMessage, LayoutCommand, ServerMessage, SessionEvent};
+use condr_core::protocol::{ClientMessage, LayoutCommand, ServerId, ServerMessage, SessionEvent};
 use condr_server::{ClientConnection, Endpoint, ServerConfig, ensure_local_server, stop_server};
 
 const HELPER_ENV: &str = "CONDR_LOCAL_SERVER_TEST_HELPER";
@@ -29,7 +29,6 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
     ));
     let workspace_path = endpoint_path.with_extension("workspace");
     let snapshot_path = endpoint_path.with_extension("snapshot");
-    let log_path = server_log_path(&endpoint_path);
     let output = Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
         .arg("local_server_helper")
@@ -53,7 +52,6 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
     );
     let _ = std::fs::remove_dir_all(workspace_path);
     let _ = std::fs::remove_file(&snapshot_path);
-    let _ = std::fs::remove_file(log_path);
     let mut lock_path = snapshot_path.into_os_string();
     lock_path.push(".lock");
     let _ = std::fs::remove_file(lock_path);
@@ -247,6 +245,7 @@ fn local_server_helper() {
     stop_server(&empty_endpoint).unwrap();
     wait_for_stop(&empty_endpoint);
     empty_guard.disarm();
+    let _ = std::fs::remove_file(server_log_path(server_id));
 }
 
 #[test]
@@ -257,7 +256,6 @@ fn auto_started_server_survives_launcher_exit() {
         unique_suffix()
     ));
     let snapshot_path = endpoint_path.with_extension("snapshot");
-    let log_path = server_log_path(&endpoint_path);
     let status = Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
         .arg("detached_server_launcher_helper")
@@ -276,6 +274,7 @@ fn auto_started_server_survives_launcher_exit() {
     let endpoint = Endpoint::local(&endpoint_path);
     let guard = ServerGuard(endpoint.clone());
     let client = ClientConnection::connect(&endpoint, "detached-process-check").unwrap();
+    let log_path = server_log_path(client.bootstrap().server_id);
     #[cfg(unix)]
     assert_is_session_leader(client.bootstrap().runtime_epoch);
     drop(client);
@@ -336,6 +335,9 @@ fn lifecycle_commands_manage_a_detached_server() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let client = ClientConnection::connect(&endpoint, "log-path-check").unwrap();
+    let log_path = server_log_path(client.bootstrap().server_id);
+    drop(client);
 
     let status = Command::new(server)
         .arg("status")
@@ -377,6 +379,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         .unwrap();
     assert_eq!(stopped_status.code(), Some(1));
 
+    let _ = std::fs::remove_file(log_path);
     std::fs::remove_dir_all(data_directory).unwrap();
 }
 
@@ -394,10 +397,10 @@ fn assert_is_session_leader(runtime_epoch: condr_core::protocol::RuntimeEpoch) {
     assert_eq!(nix::unistd::getsid(Some(pid)).unwrap(), pid);
 }
 
-fn server_log_path(endpoint_path: &std::path::Path) -> std::path::PathBuf {
-    let mut log_path = endpoint_path.as_os_str().to_os_string();
-    log_path.push(".log");
-    log_path.into()
+fn server_log_path(server_id: ServerId) -> std::path::PathBuf {
+    condr_core::log_directory()
+        .expect("platform log directory")
+        .join(format!("condr-server-{:016x}.log", server_id.0))
 }
 
 struct ServerGuard(Endpoint);

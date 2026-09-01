@@ -187,13 +187,12 @@ pub fn default_socket_path() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    portable_socket_path()
+    platform_socket_path()
+        .expect("no platform runtime directory is available; set CONDR_SOCKET_PATH")
 }
 
-fn portable_socket_path() -> PathBuf {
-    condr_core::executable_directory()
-        .join("data")
-        .join("condr.sock")
+fn platform_socket_path() -> Option<PathBuf> {
+    condr_core::runtime_directory().map(|root| root.join("condr.sock"))
 }
 
 fn connect_local(path: &Path) -> io::Result<LocalStream> {
@@ -470,12 +469,10 @@ mod tests {
     const CHILD_READY_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_READY";
 
     #[test]
-    fn portable_socket_is_in_the_executable_data_directory() {
+    fn socket_is_in_the_platform_runtime_directory() {
         assert_eq!(
-            portable_socket_path(),
-            condr_core::executable_directory()
-                .join("data")
-                .join("condr.sock")
+            platform_socket_path(),
+            condr_core::runtime_directory().map(|root| root.join("condr.sock"))
         );
     }
 

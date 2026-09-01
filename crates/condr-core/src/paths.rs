@@ -1,11 +1,39 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-pub fn executable_directory() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|executable| executable.parent().map(Path::to_path_buf))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+const DIRECTORY_NAME: &str = "condr";
+
+pub fn config_directory() -> Option<PathBuf> {
+    dirs::config_dir().map(|root| root.join(DIRECTORY_NAME))
+}
+
+pub fn data_directory() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|root| root.join(DIRECTORY_NAME))
+}
+
+pub fn state_directory() -> Option<PathBuf> {
+    dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .map(|root| root.join(DIRECTORY_NAME))
+}
+
+pub fn log_directory() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    return dirs::home_dir().map(|root| root.join("Library/Logs").join(DIRECTORY_NAME));
+
+    #[cfg(not(target_os = "macos"))]
+    state_directory()
+}
+
+pub fn runtime_directory() -> Option<PathBuf> {
+    if let Some(root) = dirs::runtime_dir() {
+        return Some(root.join(DIRECTORY_NAME));
+    }
+
+    #[cfg(target_os = "macos")]
+    return Some(std::env::temp_dir().join(DIRECTORY_NAME));
+
+    #[cfg(not(target_os = "macos"))]
+    data_directory().map(|root| root.join("runtime"))
 }
 
 #[cfg(test)]
@@ -13,14 +41,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn executable_directory_is_the_parent_of_the_running_binary() {
+    fn directories_follow_the_platform_roots() {
         assert_eq!(
-            executable_directory(),
-            std::env::current_exe().unwrap().parent().unwrap()
+            config_directory(),
+            dirs::config_dir().map(|root| root.join(DIRECTORY_NAME))
         );
         assert_eq!(
-            crate::default_worktree_root(),
-            executable_directory().join("worktrees")
+            data_directory(),
+            dirs::data_local_dir().map(|root| root.join(DIRECTORY_NAME))
+        );
+        assert_eq!(
+            state_directory(),
+            dirs::state_dir()
+                .or_else(dirs::data_local_dir)
+                .map(|root| root.join(DIRECTORY_NAME))
+        );
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            log_directory(),
+            dirs::home_dir().map(|root| root.join("Library/Logs").join(DIRECTORY_NAME))
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(log_directory(), state_directory());
+
+        #[cfg(target_os = "macos")]
+        let expected_runtime = Some(std::env::temp_dir().join(DIRECTORY_NAME));
+        #[cfg(not(target_os = "macos"))]
+        let expected_runtime = data_directory().map(|root| root.join("runtime"));
+        assert_eq!(
+            runtime_directory(),
+            dirs::runtime_dir()
+                .map(|root| root.join(DIRECTORY_NAME))
+                .or(expected_runtime)
         );
     }
 }

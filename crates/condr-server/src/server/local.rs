@@ -6,32 +6,41 @@ use std::process::{Command, Stdio};
 #[cfg(windows)]
 use windows_spawn::{Command, CreationFlags, SpawnOptions, Stdio};
 
-pub(super) fn default_snapshot_path(endpoint: &Endpoint) -> PathBuf {
+pub(super) fn default_snapshot_path(endpoint: &Endpoint) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("CONDR_SNAPSHOT_PATH")
         && !path.is_empty()
     {
-        return PathBuf::from(path);
+        return Some(PathBuf::from(path));
     }
     snapshot_path_for_endpoint(endpoint)
 }
 
-pub(super) fn snapshot_path_for_endpoint(endpoint: &Endpoint) -> PathBuf {
-    match endpoint {
-        Endpoint::Local(path) => {
-            let mut snapshot = path.as_os_str().to_os_string();
-            snapshot.push(".snapshot");
-            PathBuf::from(snapshot)
-        }
-        Endpoint::Tcp(_) => default_socket_path().with_file_name(format!(
-            "condr-server-{:016x}.snapshot",
+pub(super) fn snapshot_path_for_endpoint(endpoint: &Endpoint) -> Option<PathBuf> {
+    endpoint_file(condr_core::state_directory(), endpoint, "snapshot")
+}
+
+fn endpoint_file(
+    directory: Option<PathBuf>,
+    endpoint: &Endpoint,
+    extension: &str,
+) -> Option<PathBuf> {
+    directory.map(|directory| {
+        directory.join(format!(
+            "condr-server-{:016x}.{extension}",
             stable_endpoint_id(endpoint)
-        )),
-    }
+        ))
+    })
 }
 
 pub(super) fn stable_endpoint_id(endpoint: &Endpoint) -> u64 {
     let text = match endpoint {
-        Endpoint::Local(path) => format!("local:{}", path.to_string_lossy()),
+        Endpoint::Local(path) => {
+            #[cfg(unix)]
+            let path = std::path::absolute(path).unwrap_or_else(|_| path.clone());
+            #[cfg(not(unix))]
+            let path = path.clone();
+            format!("local:{}", path.to_string_lossy())
+        }
         Endpoint::Tcp(address) => format!("tcp:{address}"),
     };
     text.bytes().fold(0xcbf29ce484222325, |hash, byte| {
@@ -68,7 +77,7 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     }
 
     let server_executable = resolve_server_executable()?;
-    let log_path = server_log_path(&endpoint);
+    let log_path = server_log_path(&endpoint)?;
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -139,18 +148,13 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     ))
 }
 
-fn server_log_path(endpoint: &Endpoint) -> PathBuf {
-    match endpoint {
-        Endpoint::Local(path) => {
-            let mut path = path.as_os_str().to_os_string();
-            path.push(".log");
-            PathBuf::from(path)
-        }
-        Endpoint::Tcp(_) => default_socket_path().with_file_name(format!(
-            "condr-server-{:016x}.log",
-            stable_endpoint_id(endpoint)
-        )),
-    }
+fn server_log_path(endpoint: &Endpoint) -> io::Result<PathBuf> {
+    endpoint_file(condr_core::log_directory(), endpoint, "log").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no platform log directory is available",
+        )
+    })
 }
 
 pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {

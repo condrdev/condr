@@ -67,8 +67,8 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
     }))
 }
 
-pub fn default_worktree_root() -> PathBuf {
-    crate::paths::executable_directory().join("worktrees")
+pub fn default_worktree_root() -> Option<PathBuf> {
+    crate::data_directory().map(|root| root.join("worktrees"))
 }
 
 pub fn create_worktree(

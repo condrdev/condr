@@ -10,6 +10,20 @@ Condr 在私有 GitHub 仓库中维护一个滚动的 `Development Build` Pre-re
 - 三个 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨开发版本兼容承诺，必须一起更新。
 
+## 数据位置
+
+Condr 按数据用途遵循 XDG 和各平台目录规范：
+
+| 用途 | Linux | Windows | macOS |
+| --- | --- | --- | --- |
+| `config.toml` | `$XDG_CONFIG_HOME/condr`，默认 `~/.config/condr` | `%APPDATA%\condr` | `~/Library/Application Support/condr` |
+| Managed Worktree | `$XDG_DATA_HOME/condr/worktrees`，默认 `~/.local/share/condr/worktrees` | `%LOCALAPPDATA%\condr\worktrees` | `~/Library/Application Support/condr/worktrees` |
+| Snapshot | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
+| Log | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Logs/condr` |
+| 本地 endpoint | `$XDG_RUNTIME_DIR/condr` | `%LOCALAPPDATA%\condr\runtime` | `$TMPDIR/condr` |
+
+Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下的 `runtime/`。`CONDR_SOCKET_PATH` 和 `CONDR_SNAPSHOT_PATH` 仍可覆盖 Server 的默认路径。Development Build 是普通归档，不会修改 PATH；全局命令注册需要单独的显式安装步骤。
+
 发布一个已经测试并推送到 `main` 的 commit：
 
 ```bash
@@ -33,7 +47,7 @@ Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Forc
 
 运行 `condr-dev\condr\condr.exe`。它只启动 GUI，不承载命令行接口。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。需要显式管理 Server 时，使用同目录下的 `condr-server.exe start|status|stop|run`。
 
-Condr 使用 portable 目录布局：`config.toml` 位于程序目录，Server 的 snapshot、log 和本地 endpoint 文件位于 `data/`，Managed Worktree 位于 `worktrees/`。更新前先运行 `condr-server.exe stop`，再将新版覆盖解压到同一个 `condr-dev`；归档内固定的 `condr/` 目录使这些运行数据保留。卸载前同样先停止 Server，再删除整个 `condr/` 目录。
+更新前先运行 `condr-server.exe stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
 ## Linux Server
 
@@ -50,7 +64,7 @@ archive=$(find "$PWD/condr-download" -name "condr-server-linux-${arch}-*.tar.gz"
 tar -C condr-download -xzf "$archive"
 ```
 
-使用 loopback listener 后台启动远端 Server，避免暴露未鉴权端口。默认 snapshot 和 log 会写入程序旁的 `data/`：
+使用 loopback listener 后台启动远端 Server，避免暴露未鉴权端口。默认 snapshot 和 log 会写入 XDG state 目录：
 
 ```bash
 ./condr-download/condr/condr-server start --listen 127.0.0.1:4242

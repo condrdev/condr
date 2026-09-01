@@ -14,8 +14,8 @@ pub(super) struct SavedServer {
     pub address: SocketAddr,
 }
 
-pub(super) fn default_path() -> PathBuf {
-    condr_core::executable_directory().join("config.toml")
+pub(super) fn default_path() -> Option<PathBuf> {
+    condr_core::config_directory().map(|root| root.join("config.toml"))
 }
 
 pub(super) fn load_servers(path: &Path) -> io::Result<Vec<SavedServer>> {
@@ -96,10 +96,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_is_next_to_the_executable() {
+    fn default_config_uses_the_platform_config_directory() {
         assert_eq!(
             default_path(),
-            condr_core::executable_directory().join("config.toml")
+            condr_core::config_directory().map(|root| root.join("config.toml"))
         );
     }
 

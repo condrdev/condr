@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 alacritty_terminal.workspace = true
 bincode.workspace = true
+dirs.workspace = true
 portable-pty.workspace = true
 serde.workspace = true
 smol_str.workspace = true

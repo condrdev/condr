@@ -86,7 +86,7 @@ impl ServerConfig {
     pub fn new(endpoint: Endpoint) -> Self {
         let snapshot_path = match &endpoint {
             Endpoint::Tcp(address) if address.port() == 0 => None,
-            _ => Some(default_snapshot_path(&endpoint)),
+            _ => default_snapshot_path(&endpoint),
         };
         Self {
             endpoint,
@@ -672,7 +672,7 @@ impl RuntimeState {
             agents: std::collections::HashMap::new(),
             workspace_git: std::collections::HashMap::new(),
             workspace_git_scanned_at: std::collections::HashMap::new(),
-            worktree_root: Some(default_worktree_root()),
+            worktree_root: default_worktree_root(),
             active_controller: None,
             focused_terminal: None,
             events: std::collections::VecDeque::new(),
