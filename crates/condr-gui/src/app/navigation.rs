@@ -55,6 +55,24 @@ impl Condr {
         }) {
             self.terminal_selection = None;
         }
+        if self.terminal_mouse_capture.is_some_and(|capture| {
+            capture.connection_key == key && !pane_ids.contains(&capture.pane_id)
+        }) {
+            self.terminal_mouse_capture = None;
+        }
+        if self.last_terminal_mouse_motion.is_some_and(|motion| {
+            motion.connection_key == key && !pane_ids.contains(&motion.pane_id)
+        }) {
+            self.last_terminal_mouse_motion = None;
+        }
+        if self
+            .reported_terminal_focus
+            .is_some_and(|(connection_key, pane_id)| {
+                connection_key == key && !pane_ids.contains(&pane_id)
+            })
+        {
+            self.reported_terminal_focus = None;
+        }
     }
 
     pub(super) fn mark_agent_seen(&mut self, key: ConnectionKey, pane_id: PaneId) {

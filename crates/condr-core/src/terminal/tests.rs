@@ -16,6 +16,7 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, columns.max(1)),
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
     }
@@ -41,7 +42,7 @@ fn pending_resize_keeps_only_the_latest_request() {
 }
 
 #[test]
-fn terminal_reply_uses_capacity_reserved_from_user_input() {
+fn terminal_control_has_capacity_reserved_from_user_input_and_replies() {
     let (input, receiver) = TerminalInput::channel();
     for _ in 0..INPUT_QUEUE_CAPACITY {
         input.try_write(vec![b'u']).unwrap();
@@ -52,10 +53,44 @@ fn terminal_reply_uses_capacity_reserved_from_user_input() {
     );
 
     input.write_terminal_reply(b"reply".to_vec()).unwrap();
+    for _ in 0..TERMINAL_CONTROL_QUEUE_RESERVE {
+        input.try_write_control(b"release".to_vec()).unwrap();
+    }
+    assert_eq!(
+        input
+            .try_write_control(b"extra release".to_vec())
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
     for _ in 0..INPUT_QUEUE_CAPACITY {
         assert_eq!(receiver.recv().unwrap().bytes, b"u");
     }
     assert_eq!(receiver.recv().unwrap().bytes, b"reply");
+    for _ in 0..TERMINAL_CONTROL_QUEUE_RESERVE {
+        assert_eq!(receiver.recv().unwrap().bytes, b"release");
+    }
+}
+
+#[test]
+fn terminal_color_replies_use_the_render_palette_and_preserve_order() {
+    let size = TerminalSize::new(4, 12);
+    let shared_size = Arc::new(Mutex::new(size));
+    let (event_proxy, pending_replies) = TerminalEventProxy::new(Arc::clone(&shared_size));
+    let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
+    let (input, receiver) = TerminalInput::channel();
+    let mut parser: Processor = Processor::new();
+
+    parser.advance(
+        &mut *terminal.lock().expect("terminal state lock poisoned"),
+        b"\x1b]11;?\x07\x1b[5n\x1b]4;1;#123456\x07\x1b]4;1;?\x07",
+    );
+    flush_terminal_replies(&terminal, &input, &pending_replies);
+
+    assert_eq!(
+        receiver.recv().unwrap().bytes,
+        b"\x1b]11;rgb:0d0d/1111/1717\x07\x1b[0n\x1b]4;1;rgb:1212/3434/5656\x07"
+    );
 }
 
 #[test]
@@ -78,15 +113,12 @@ fn resize_worker_failure_stops_accepting_requests() {
     let requested_size = TerminalSize::new(10, 40);
     let control = Arc::new(ResizeControl::default());
     control.request(requested_size).unwrap();
-    let (input, _receiver) = TerminalInput::channel();
     let current_size = Arc::new(Mutex::new(initial_size));
+    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
     let terminal = Arc::new(Mutex::new(Term::new(
         Config::default(),
         &initial_size,
-        TerminalEventProxy {
-            input,
-            size: Arc::clone(&current_size),
-        },
+        event_proxy,
     )));
     let (updates, _update_receiver) = mpsc::channel();
 
@@ -170,52 +202,89 @@ fn cwd_probe_rejects_a_reused_shell_pid_identity() {
 #[test]
 fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
     let none = TerminalModifiers::default();
-    assert_eq!(
-        encode_key(&TerminalKey::Up, none, false).unwrap(),
-        b"\x1b[A"
-    );
-    assert_eq!(encode_key(&TerminalKey::Up, none, true).unwrap(), b"\x1bOA");
-    assert_eq!(
-        encode_key(
-            &TerminalKey::Left,
+    let cases: &[(TerminalKey, TerminalModifiers, bool, &[u8])] = &[
+        (TerminalKey::Up, none, false, b"\x1b[A"),
+        (TerminalKey::Up, none, true, b"\x1bOA"),
+        (
+            TerminalKey::Left,
             TerminalModifiers {
                 shift: true,
                 control: true,
-                ..TerminalModifiers::default()
+                ..none
             },
             true,
-        )
-        .unwrap(),
-        b"\x1b[1;6D"
-    );
-    assert_eq!(
-        encode_key(
-            &TerminalKey::Character("c".into()),
+            b"\x1b[1;6D",
+        ),
+        (
+            TerminalKey::Left,
             TerminalModifiers {
                 control: true,
-                ..TerminalModifiers::default()
+                platform: true,
+                ..none
             },
             false,
-        )
-        .unwrap(),
-        b"\x03"
-    );
-    assert_eq!(
-        encode_key(
-            &TerminalKey::Character("x".into()),
+            b"\x1b[1;5D",
+        ),
+        (
+            TerminalKey::Character("c".into()),
             TerminalModifiers {
-                alt: true,
-                ..TerminalModifiers::default()
+                control: true,
+                ..none
             },
             false,
-        )
-        .unwrap(),
-        b"\x1bx"
-    );
-    assert_eq!(
-        encode_key(&TerminalKey::Function(12), none, false).unwrap(),
-        b"\x1b[24~"
-    );
+            b"\x03",
+        ),
+        (
+            TerminalKey::Character("x".into()),
+            TerminalModifiers { alt: true, ..none },
+            false,
+            b"\x1bx",
+        ),
+        (
+            TerminalKey::Backspace,
+            TerminalModifiers {
+                control: true,
+                ..none
+            },
+            false,
+            b"\x08",
+        ),
+        (TerminalKey::Function(12), none, false, b"\x1b[24~"),
+    ];
+    for (key, modifiers, application_cursor, expected) in cases {
+        assert_eq!(
+            encode_key(key, *modifiers, *application_cursor).unwrap(),
+            *expected,
+            "{key:?} with {modifiers:?}"
+        );
+    }
+
+    let control_aliases = [
+        ("2", 0),
+        ("3", 27),
+        ("4", 28),
+        ("5", 29),
+        ("6", 30),
+        ("7", 31),
+        ("/", 31),
+        ("-", 31),
+    ];
+    for (text, expected) in control_aliases {
+        assert_eq!(
+            encode_key(
+                &TerminalKey::Character(text.into()),
+                TerminalModifiers {
+                    control: true,
+                    ..none
+                },
+                false,
+            )
+            .unwrap(),
+            [expected],
+            "Ctrl+{text}"
+        );
+    }
+
     assert!(encode_key(&TerminalKey::Function(13), none, false).is_err());
 }
 
@@ -407,16 +476,9 @@ fn sparse_terminal_frame_round_trips_from_the_committed_baseline() {
 #[test]
 fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
     let size = TerminalSize::new(4, 12);
-    let (input, _receiver) = TerminalInput::channel();
     let shared_size = Arc::new(Mutex::new(size));
-    let terminal = Arc::new(Mutex::new(Term::new(
-        Config::default(),
-        &size,
-        TerminalEventProxy {
-            input,
-            size: Arc::clone(&shared_size),
-        },
-    )));
+    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&shared_size));
+    let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
     let revision = Arc::new(AtomicU64::new(0));
     let source = TerminalViewSource {
         terminal: Arc::clone(&terminal),
@@ -479,6 +541,7 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
         base_revision: 5,
         revision: 6,
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: Vec::new(),
     });
@@ -494,6 +557,7 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
         base_revision: 4,
         revision: 5,
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 4,
@@ -583,6 +647,7 @@ fn terminal_view_selects_words_by_display_column() {
         revision: 1,
         size,
         display_offset: 3,
+        mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
     };
@@ -606,6 +671,7 @@ fn terminal_view_selects_a_complete_line() {
         revision: 1,
         size: TerminalSize::new(3, 10),
         display_offset: 2,
+        mouse_tracking: TerminalMouseTracking::None,
         cells: vec![blank_cell(); 30],
         cursor: None,
     };

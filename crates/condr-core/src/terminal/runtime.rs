@@ -12,6 +12,7 @@ pub struct TerminalRuntime {
     update_sender: mpsc::Sender<TerminalUpdate>,
     updates: Option<mpsc::Receiver<TerminalUpdate>>,
     input: TerminalInput,
+    reported_mouse_press: Mutex<Option<ReportedMousePress>>,
     resize: Arc<ResizeControl>,
     child: Option<Box<dyn Child + Send + Sync>>,
     process_shutdown: ProcessShutdownState,
@@ -23,6 +24,13 @@ pub struct TerminalRuntime {
     reader_cancel: Option<UnixStream>,
     #[cfg(unix)]
     writer_cancel: Option<UnixStream>,
+}
+
+#[derive(Clone, Copy)]
+struct ReportedMousePress {
+    button: TerminalMouseButton,
+    position: TerminalMousePosition,
+    modifiers: TerminalModifiers,
 }
 
 impl TerminalRuntime {
@@ -101,11 +109,13 @@ impl TerminalRuntime {
 
         let (input, input_receiver) = TerminalInput::channel();
         let current_size = Arc::new(Mutex::new(size));
-        let event_proxy = TerminalEventProxy {
-            input: input.clone(),
-            size: Arc::clone(&current_size),
+        let (event_proxy, pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+        let terminal_config = Config {
+            // Clipboard writes need an explicit remote/client authorization policy.
+            osc52: Osc52::Disabled,
+            ..Config::default()
         };
-        let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
+        let terminal = Arc::new(Mutex::new(Term::new(terminal_config, &size, event_proxy)));
         let revision = Arc::new(AtomicU64::new(0));
         let damage_baseline = Arc::new(Mutex::new(None));
         let reported_cwd = Arc::new(Mutex::new(ReportedCwd::default()));
@@ -165,12 +175,15 @@ impl TerminalRuntime {
         let reader_revision = Arc::clone(&revision);
         let reader_updates = update_sender.clone();
         let reader_reported_cwd = Arc::clone(&reported_cwd);
+        let reader_input = input.clone();
         let reader_thread = match thread::Builder::new()
             .name("condr-pty-reader".into())
             .spawn(move || {
                 read_loop(
                     reader,
                     reader_terminal,
+                    reader_input,
+                    pending_replies,
                     reader_revision,
                     reader_updates,
                     reader_reported_cwd,
@@ -202,6 +215,7 @@ impl TerminalRuntime {
             update_sender,
             updates: Some(updates),
             input,
+            reported_mouse_press: Mutex::new(None),
             resize,
             child: Some(child),
             process_shutdown: ProcessShutdownState::default(),
@@ -242,13 +256,27 @@ impl TerminalRuntime {
     pub fn execute(&self, command: TerminalCommand) -> io::Result<Option<String>> {
         match command {
             TerminalCommand::Key { key, modifiers } => {
-                let application_cursor = self
+                let modes = *self
                     .terminal
                     .lock()
                     .expect("terminal state lock poisoned")
-                    .mode()
-                    .contains(TermMode::APP_CURSOR);
-                self.write(encode_key(&key, modifiers, application_cursor)?)?;
+                    .mode();
+                if modifiers.shift
+                    && !modes.contains(TermMode::ALT_SCREEN)
+                    && matches!(key, TerminalKey::PageUp | TerminalKey::PageDown)
+                {
+                    self.scroll(match key {
+                        TerminalKey::PageUp => TerminalScroll::PageUp,
+                        TerminalKey::PageDown => TerminalScroll::PageDown,
+                        _ => unreachable!(),
+                    });
+                } else {
+                    self.write(encode_key(
+                        &key,
+                        modifiers,
+                        modes.contains(TermMode::APP_CURSOR),
+                    )?)?;
+                }
                 Ok(None)
             }
             TerminalCommand::Text(text) => {
@@ -265,6 +293,26 @@ impl TerminalRuntime {
                 self.write(encode_paste(&text, bracketed))?;
                 Ok(None)
             }
+            TerminalCommand::Mouse(event) => {
+                self.handle_mouse(event)?;
+                Ok(None)
+            }
+            TerminalCommand::Focus(focused) => {
+                let focus_reporting = self
+                    .terminal
+                    .lock()
+                    .expect("terminal state lock poisoned")
+                    .mode()
+                    .contains(TermMode::FOCUS_IN_OUT);
+                if !focused {
+                    self.release_mouse()?;
+                }
+                if focus_reporting {
+                    self.input
+                        .try_write(if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec())?;
+                }
+                Ok(None)
+            }
             TerminalCommand::Resize(size) => {
                 self.request_resize(size)?;
                 Ok(None)
@@ -275,6 +323,247 @@ impl TerminalRuntime {
             }
             TerminalCommand::Copy { selection } => Ok(self.copy_range(selection)),
         }
+    }
+
+    fn handle_mouse(&self, event: TerminalMouseEvent) -> io::Result<()> {
+        let (modes, display_offset, screen_lines) = {
+            let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+            (
+                *terminal.mode(),
+                terminal.grid().display_offset(),
+                terminal.screen_lines(),
+            )
+        };
+        let shifted_wheel = matches!(
+            event,
+            TerminalMouseEvent::Wheel { modifiers, .. } if modifiers.shift
+        );
+        if !shifted_wheel && modes.intersects(TermMode::MOUSE_MODE) {
+            return self.handle_application_mouse(event, modes, display_offset, screen_lines);
+        }
+        if let TerminalMouseEvent::Button {
+            button,
+            pressed: false,
+            ..
+        } = event
+        {
+            self.clear_reported_mouse_press(button);
+        }
+
+        let TerminalMouseEvent::Wheel {
+            direction, amount, ..
+        } = event
+        else {
+            return Ok(());
+        };
+        if amount == 0 || (!shifted_wheel && modes.intersects(TermMode::MOUSE_MODE)) {
+            return Ok(());
+        }
+
+        if !shifted_wheel && modes.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
+            let key = match direction {
+                TerminalMouseWheel::Up => TerminalKey::Up,
+                TerminalMouseWheel::Down => TerminalKey::Down,
+                TerminalMouseWheel::Left | TerminalMouseWheel::Right => return Ok(()),
+            };
+            let bytes = encode_key(
+                &key,
+                TerminalModifiers::default(),
+                modes.contains(TermMode::APP_CURSOR),
+            )?
+            .repeat(usize::from(amount.min(MAX_MOUSE_WHEEL_STEPS)));
+            return self.input.try_write(bytes);
+        }
+
+        let lines = match direction {
+            TerminalMouseWheel::Up => i32::from(amount),
+            TerminalMouseWheel::Down => -i32::from(amount),
+            TerminalMouseWheel::Left | TerminalMouseWheel::Right => return Ok(()),
+        };
+        self.scroll(TerminalScroll::Lines(lines));
+        Ok(())
+    }
+
+    fn handle_application_mouse(
+        &self,
+        event: TerminalMouseEvent,
+        modes: TermMode,
+        display_offset: usize,
+        screen_lines: usize,
+    ) -> io::Result<()> {
+        match event {
+            TerminalMouseEvent::Button {
+                button,
+                pressed: true,
+                position,
+                modifiers,
+            } => {
+                let Some(position) = live_mouse_position(position, display_offset, screen_lines)
+                else {
+                    return Ok(());
+                };
+                let event = TerminalMouseEvent::Button {
+                    button,
+                    pressed: true,
+                    position,
+                    modifiers,
+                };
+                if self.write_mouse_report(event, modes)? {
+                    *self
+                        .reported_mouse_press
+                        .lock()
+                        .expect("reported mouse press lock poisoned") = Some(ReportedMousePress {
+                        button,
+                        position,
+                        modifiers,
+                    });
+                }
+            }
+            TerminalMouseEvent::Button {
+                button,
+                pressed: false,
+                position,
+                modifiers,
+            } => {
+                let mut reported = self
+                    .reported_mouse_press
+                    .lock()
+                    .expect("reported mouse press lock poisoned");
+                let Some(press) = *reported else {
+                    return Ok(());
+                };
+                if press.button != button {
+                    return Ok(());
+                }
+                let position = live_mouse_position(position, display_offset, screen_lines)
+                    .unwrap_or(press.position);
+                let event = TerminalMouseEvent::Button {
+                    button,
+                    pressed: false,
+                    position,
+                    modifiers,
+                };
+                if let Some(bytes) = encode_mouse(event, modes) {
+                    self.input.try_write_control(bytes)?;
+                }
+                *reported = None;
+            }
+            TerminalMouseEvent::Motion {
+                button: Some(button),
+                position,
+                modifiers,
+            } => {
+                let Some(position) = live_mouse_position(position, display_offset, screen_lines)
+                else {
+                    return Ok(());
+                };
+                let mut reported = self
+                    .reported_mouse_press
+                    .lock()
+                    .expect("reported mouse press lock poisoned");
+                let Some(press) = reported.as_mut() else {
+                    return Ok(());
+                };
+                if press.button != button {
+                    return Ok(());
+                }
+                let event = TerminalMouseEvent::Motion {
+                    button: Some(button),
+                    position,
+                    modifiers,
+                };
+                if let Some(bytes) = encode_mouse(event, modes) {
+                    self.input.try_write(bytes)?;
+                    press.position = position;
+                    press.modifiers = modifiers;
+                }
+            }
+            TerminalMouseEvent::Motion {
+                button: None,
+                position,
+                modifiers,
+            } => {
+                let Some(position) = live_mouse_position(position, display_offset, screen_lines)
+                else {
+                    return Ok(());
+                };
+                self.write_mouse_report(
+                    TerminalMouseEvent::Motion {
+                        button: None,
+                        position,
+                        modifiers,
+                    },
+                    modes,
+                )?;
+            }
+            TerminalMouseEvent::Wheel {
+                direction,
+                amount,
+                position,
+                modifiers,
+            } => {
+                let Some(position) = live_mouse_position(position, display_offset, screen_lines)
+                else {
+                    return Ok(());
+                };
+                self.write_mouse_report(
+                    TerminalMouseEvent::Wheel {
+                        direction,
+                        amount,
+                        position,
+                        modifiers,
+                    },
+                    modes,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_mouse_report(&self, event: TerminalMouseEvent, modes: TermMode) -> io::Result<bool> {
+        let Some(bytes) = encode_mouse(event, modes) else {
+            return Ok(false);
+        };
+        self.input.try_write(bytes)?;
+        Ok(true)
+    }
+
+    fn clear_reported_mouse_press(&self, button: TerminalMouseButton) {
+        let mut reported = self
+            .reported_mouse_press
+            .lock()
+            .expect("reported mouse press lock poisoned");
+        if reported.is_some_and(|press| press.button == button) {
+            *reported = None;
+        }
+    }
+
+    pub fn release_mouse(&self) -> io::Result<()> {
+        let modes = *self
+            .terminal
+            .lock()
+            .expect("terminal state lock poisoned")
+            .mode();
+        let mut reported = self
+            .reported_mouse_press
+            .lock()
+            .expect("reported mouse press lock poisoned");
+        let Some(press) = *reported else {
+            return Ok(());
+        };
+        if let Some(bytes) = encode_mouse(
+            TerminalMouseEvent::Button {
+                button: press.button,
+                pressed: false,
+                position: press.position,
+                modifiers: press.modifiers,
+            },
+            modes,
+        ) {
+            self.input.try_write_control(bytes)?;
+        }
+        *reported = None;
+        Ok(())
     }
 
     /// Validates a resize and replaces any older resize that has not started yet.
@@ -495,6 +784,18 @@ impl TerminalRuntime {
     }
 }
 
+fn live_mouse_position(
+    position: TerminalMousePosition,
+    display_offset: usize,
+    screen_lines: usize,
+) -> Option<TerminalMousePosition> {
+    let row = usize::from(position.row).checked_sub(display_offset)?;
+    (row < screen_lines).then_some(TerminalMousePosition {
+        row: u16::try_from(row).ok()?,
+        column: position.column,
+    })
+}
+
 #[cfg(not(windows))]
 fn default_shell_command() -> CommandBuilder {
     let default = CommandBuilder::new_default_prog();
@@ -531,6 +832,7 @@ impl TerminalViewSource {
             .expect("terminal damage baseline lock poisoned");
         let content = terminal.renderable_content();
         let display_offset = u32::try_from(content.display_offset).unwrap_or(u32::MAX);
+        let mouse_tracking = TerminalMouseTracking::from_term_mode(*terminal.mode());
         let cursor = terminal_cursor(
             content.cursor.point,
             content.cursor.shape,
@@ -585,6 +887,7 @@ impl TerminalViewSource {
                     base_revision: previous.revision,
                     revision,
                     display_offset,
+                    mouse_tracking,
                     cursor,
                     runs,
                 }))

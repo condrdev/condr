@@ -32,6 +32,7 @@ pub(super) fn encode_key(
         TerminalKey::Tab if modifiers.shift => "\x1b[Z".into(),
         TerminalKey::Tab => "\t".into(),
         TerminalKey::BackTab => "\x1b[Z".into(),
+        TerminalKey::Backspace if modifiers.control => "\x08".into(),
         TerminalKey::Backspace => "\x7f".into(),
         TerminalKey::Escape => "\x1b".into(),
         TerminalKey::Up => cursor_sequence('A', modifier, application_cursor),
@@ -67,23 +68,20 @@ pub(super) fn encode_key(
 fn control_character(text: &str) -> Option<u8> {
     let byte = text.as_bytes().first()?.to_ascii_lowercase();
     match byte {
-        b'@' | b' ' => Some(0),
+        b'@' | b' ' | b'2' => Some(0),
         b'a'..=b'z' => Some(byte - b'a' + 1),
-        b'[' => Some(27),
-        b'\\' => Some(28),
-        b']' => Some(29),
-        b'^' => Some(30),
-        b'_' => Some(31),
+        b'[' | b'3' => Some(27),
+        b'\\' | b'4' => Some(28),
+        b']' | b'5' => Some(29),
+        b'^' | b'6' => Some(30),
+        b'_' | b'/' | b'7' | b'-' => Some(31),
         b'?' => Some(127),
         _ => None,
     }
 }
 
 fn modifier_code(modifiers: TerminalModifiers) -> u8 {
-    1 + u8::from(modifiers.shift)
-        + 2 * u8::from(modifiers.alt)
-        + 4 * u8::from(modifiers.control)
-        + 8 * u8::from(modifiers.platform)
+    1 + u8::from(modifiers.shift) + 2 * u8::from(modifiers.alt) + 4 * u8::from(modifiers.control)
 }
 
 fn cursor_sequence(final_byte: char, modifier: u8, application_cursor: bool) -> String {

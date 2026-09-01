@@ -199,11 +199,35 @@ impl Condr {
             self.terminal_selection = None;
         }
         if self
+            .terminal_mouse_capture
+            .is_some_and(|capture| capture.connection_key == key)
+        {
+            self.terminal_mouse_capture = None;
+        }
+        if self
+            .last_terminal_mouse_motion
+            .is_some_and(|motion| motion.connection_key == key)
+        {
+            self.last_terminal_mouse_motion = None;
+        }
+        if self
+            .reported_terminal_focus
+            .is_some_and(|(connection_key, _)| connection_key == key)
+        {
+            self.reported_terminal_focus = None;
+        }
+        if self
             .target_pane
             .is_some_and(|(connection_key, _)| connection_key == key)
         {
             self.target_pane = None;
-            self.marked_text = None;
+        }
+        if self
+            .terminal_composition
+            .as_ref()
+            .is_some_and(|composition| composition.connection_key == key)
+        {
+            self.terminal_composition = None;
         }
     }
 
@@ -641,6 +665,18 @@ impl Condr {
                         };
                     }
                 };
+                if self.last_terminal_mouse_motion.is_some_and(|motion| {
+                    motion.connection_key == key
+                        && pane_ids.contains(&motion.pane_id)
+                        && self.connections[index]
+                            .terminals
+                            .get(&motion.pane_id)
+                            .is_some_and(|terminal| {
+                                terminal.view.mouse_tracking != motion.mouse_tracking
+                            })
+                }) {
+                    self.last_terminal_mouse_motion = None;
+                }
                 for pane_id in &pane_ids {
                     let terminal_size = self.connections[index]
                         .terminals

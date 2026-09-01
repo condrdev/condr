@@ -18,7 +18,7 @@ use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::{Cell, Flags};
-use alacritty_terminal::term::{Config, TermDamage, TermMode};
+use alacritty_terminal::term::{Config, Osc52, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
 #[cfg(unix)]
 use filedescriptor::FileDescriptor;
@@ -43,6 +43,7 @@ const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_OSC_CWD_BYTES: usize = 4 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 64;
 const TERMINAL_REPLY_QUEUE_RESERVE: usize = 1;
+const TERMINAL_CONTROL_QUEUE_RESERVE: usize = INPUT_QUEUE_CAPACITY + 1;
 const MAX_PENDING_INPUT_BYTES: usize = 8 * 1024 * 1024;
 const IO_CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const PROCESS_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
@@ -69,20 +70,23 @@ exec "$1" --rcfile /dev/fd/3 -i
 "#;
 
 mod input;
+mod mouse;
 mod process;
 mod pty_io;
 mod runtime;
 mod view;
 
 use input::{encode_key, encode_paste};
+use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 use process::*;
 use pty_io::*;
 pub use runtime::{TerminalAgentProbe, TerminalCwdProbe, TerminalRuntime};
 pub use view::{
     TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor,
-    TerminalCursorShape, TerminalFrameError, TerminalKey, TerminalModifiers, TerminalPosition,
-    TerminalScroll, TerminalSelection, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
-    TerminalViewDelta, TerminalViewFrame, TerminalViewSource,
+    TerminalCursorShape, TerminalFrameError, TerminalKey, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
+    TerminalPosition, TerminalScroll, TerminalSelection, TerminalSide, TerminalSize,
+    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, TerminalViewSource,
 };
 use view::{
     TerminalDamageBaseline, publish_view, side, snapshot_terminal, terminal_cell, terminal_cursor,

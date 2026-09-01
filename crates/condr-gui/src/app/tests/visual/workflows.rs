@@ -819,11 +819,34 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
 
     let terminal = window.debug_bounds(initial_terminal).unwrap();
     window.simulate_mouse_down(terminal.center(), MouseButton::Right, Modifiers::default());
+    window.simulate_mouse_up(terminal.center(), MouseButton::Right, Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| {
         _ = window.draw(cx);
     });
-    window.simulate_keystrokes("down down enter");
+    let terminal_focus = window.read(|app| {
+        view.read(app).panels[&(1, initial_pane)]
+            .read(app)
+            .focus_handle
+            .clone()
+    });
+    assert!(
+        window.update(|window, _| terminal_focus.is_focused(window)),
+        "right-clicking a Pane must keep focus in the terminal"
+    );
+    let pane_menu = window
+        .debug_bounds(leaked_selector(format!(
+            "terminal-pane-menu-{}",
+            initial_pane.as_u64()
+        )))
+        .expect("Pane actions button should be rendered");
+    window.simulate_mouse_down(pane_menu.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(pane_menu.center(), MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| {
+        _ = window.draw(cx);
+    });
+    window.simulate_keystrokes("down enter");
     let split_right = wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
@@ -833,7 +856,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             })
         })
     });
-    assert!(split_right, "Pane context menu did not split right");
+    assert!(split_right, "Pane actions menu did not split right");
     assert!(
         wait_until_event_driven(window, |window| {
             window.read(|app| {

@@ -4,11 +4,11 @@ use condr_core::protocol::{
     TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
-    AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor, TerminalSize,
-    TerminalView, TerminalViewDelta, TerminalViewFrame,
+    AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor,
+    TerminalMouseTracking, TerminalSize, TerminalView, TerminalViewDelta, TerminalViewFrame,
 };
 use condr_server::Endpoint;
-use gpui::{AssetSource as _, Keystroke, Task};
+use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::{
     ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, PreviousTab, ServerConnection,
@@ -17,7 +17,7 @@ use super::{
     apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
     merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
-    terminal_chunk_identity_matches, terminal_clipboard_shortcut,
+    should_defer_to_character_input, terminal_chunk_identity_matches, terminal_clipboard_shortcut,
 };
 
 fn terminal_cell(text: &str) -> TerminalCell {
@@ -86,6 +86,7 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cells,
         cursor: None,
     }
@@ -495,6 +496,7 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
                     start: 0,
@@ -508,6 +510,7 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                 base_revision: 99,
                 revision: 100,
                 display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
                 cursor: None,
                 runs: vec![TerminalCellRun {
                     start: 0,
@@ -647,6 +650,24 @@ fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
 }
 
 #[test]
+fn printable_character_input_preference_bypasses_terminal_key_encoding() {
+    let event = KeyDownEvent {
+        keystroke: Keystroke::parse("ctrl-alt-q->@").unwrap(),
+        is_held: false,
+        prefer_character_input: true,
+    };
+    assert!(should_defer_to_character_input(&event));
+
+    let mut ordinary_modified_key = event.clone();
+    ordinary_modified_key.prefer_character_input = false;
+    assert!(!should_defer_to_character_input(&ordinary_modified_key));
+
+    let mut non_printable = event;
+    non_printable.keystroke.key_char = Some("\t".into());
+    assert!(!should_defer_to_character_input(&non_printable));
+}
+
+#[test]
 fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
     let pane_id = pane_id();
     let slot = TerminalVisualSlot::default();
@@ -659,6 +680,7 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         base_revision: 1,
         revision: 2,
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 1,
@@ -669,6 +691,7 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         base_revision: 2,
         revision: 3,
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 2,
@@ -726,6 +749,7 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
         base_revision: 4,
         revision: 5,
         display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 1,
@@ -736,6 +760,7 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
         base_revision: 5,
         revision: 6,
         display_offset: 3,
+        mouse_tracking: TerminalMouseTracking::None,
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 2,

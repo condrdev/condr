@@ -112,6 +112,7 @@ fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
         revision,
         size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
         display_offset: 0,
+        mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells,
         cursor: None,
     }
@@ -189,6 +190,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
+        mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells: Vec::new(),
         cursor: None,
     };
@@ -398,6 +400,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
+        mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells: vec![condr_core::TerminalCell {
             text: "x".repeat(MAX_FRAME_SIZE / 2 + 1024).into(),
             foreground: condr_core::TerminalColor::Named(0),
@@ -457,6 +460,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
             revision: 9,
             size: TerminalSize::new(1, 1),
             display_offset: 0,
+            mouse_tracking: condr_core::TerminalMouseTracking::None,
             cells: vec![condr_core::TerminalCell {
                 text: "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024).into(),
                 foreground: condr_core::TerminalColor::Named(0),
@@ -511,6 +515,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
+        mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells: vec![condr_core::TerminalCell {
             text: "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024).into(),
             foreground: condr_core::TerminalColor::Named(0),

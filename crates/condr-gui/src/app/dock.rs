@@ -32,12 +32,30 @@ pub(super) struct LocalTerminalSelection {
     pub(super) dragging: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct ReportedTerminalMouse {
+    pub(super) connection_key: ConnectionKey,
+    pub(super) pane_id: PaneId,
+    pub(super) button: TerminalMouseButton,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) struct ReportedTerminalMouseMotion {
+    pub(super) connection_key: ConnectionKey,
+    pub(super) pane_id: PaneId,
+    pub(super) mouse_tracking: TerminalMouseTracking,
+    pub(super) event: TerminalMouseEvent,
+}
+
 pub(super) struct TerminalPanel {
     connection_key: ConnectionKey,
     pane_id: PaneId,
     owner: WeakEntity<Condr>,
     pub(super) focus_handle: FocusHandle,
     pub(super) render_cache: Rc<RefCell<TerminalRenderCache>>,
+    pub(super) scroll_remainder: Rc<RefCell<Point<f32>>>,
+    focus_subscriptions: Vec<Subscription>,
+    ime_terminal_revision: Option<u64>,
 }
 
 pub(super) struct CondrDockRenderer;
@@ -156,6 +174,9 @@ impl TerminalPanel {
             owner,
             focus_handle: cx.focus_handle(),
             render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
+            scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+            focus_subscriptions: Vec::new(),
+            ime_terminal_revision: None,
         }
     }
 }
@@ -183,35 +204,64 @@ impl BasePanel for TerminalPanel {
 }
 
 impl Render for TerminalPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.focus_subscriptions.is_empty() {
+            let focus_owner = self.owner.clone();
+            let blur_owner = self.owner.clone();
+            self.focus_subscriptions = vec![
+                cx.on_focus(&self.focus_handle, window, move |_, window, cx| {
+                    let _ = focus_owner.update(cx, |app, cx| {
+                        app.sync_terminal_focus(window, cx);
+                    });
+                }),
+                cx.on_blur(&self.focus_handle, window, move |_, window, cx| {
+                    let _ = blur_owner.update(cx, |app, cx| {
+                        app.sync_terminal_focus(window, cx);
+                    });
+                }),
+            ];
+        }
         let owner = self.owner.upgrade();
-        let (terminal, active, controlling, marked_text, selection, runtime_epoch) = owner
+        let (terminal, active, controlling, marked_text, selection, runtime_epoch, pane_title) =
+            owner
+                .as_ref()
+                .map(|owner| {
+                    let app = owner.read(cx);
+                    let active = app.target_pane == Some((self.connection_key, self.pane_id));
+                    let connection = app.connection(self.connection_key);
+                    (
+                        app.terminal(self.connection_key, self.pane_id).cloned(),
+                        active,
+                        connection.is_some_and(ServerConnection::can_mutate),
+                        app.marked_text_for(self.connection_key, self.pane_id),
+                        app.selection_for(self.connection_key, self.pane_id),
+                        connection.and_then(|connection| connection.runtime_epoch),
+                        connection
+                            .and_then(|connection| connection.agents.get(&self.pane_id))
+                            .map(|agent| agent.kind.label())
+                            .unwrap_or("Terminal"),
+                    )
+                })
+                .unwrap_or((None, false, false, None, None, None, "Terminal"));
+        let ime_terminal_revision = marked_text
             .as_ref()
-            .map(|owner| {
-                let app = owner.read(cx);
-                let active = app.target_pane == Some((self.connection_key, self.pane_id));
-                (
-                    app.terminal(self.connection_key, self.pane_id).cloned(),
-                    active,
-                    app.connection(self.connection_key)
-                        .is_some_and(ServerConnection::can_mutate),
-                    active.then(|| app.marked_text.clone()).flatten(),
-                    app.selection_for(self.connection_key, self.pane_id),
-                    app.connection(self.connection_key)
-                        .and_then(|connection| connection.runtime_epoch),
-                )
-            })
-            .unwrap_or((None, false, false, None, None, None));
+            .and_then(|_| terminal.as_ref().map(|terminal| terminal.view.revision));
+        if self.ime_terminal_revision.is_some()
+            && ime_terminal_revision.is_some()
+            && self.ime_terminal_revision != ime_terminal_revision
+        {
+            window.invalidate_character_coordinates();
+        }
+        self.ime_terminal_revision = ime_terminal_revision;
 
         let key = self.connection_key;
         let pane_id = self.pane_id;
         let focus = self.focus_handle.clone();
         let click_owner = self.owner.clone();
-        let right_click_owner = self.owner.clone();
         let body = div()
             .id(format!("terminal-pane-{key}-{}", pane_id.as_u64()))
             .debug_selector(move || format!("terminal-pane-{}", pane_id.as_u64()))
-            .key_context("Condr")
+            .key_context("CondrTerminal")
             .track_focus(&self.focus_handle)
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 let accepted = click_owner
@@ -221,22 +271,13 @@ impl Render for TerminalPanel {
                     focus.focus(window, cx);
                 }
             })
-            .on_mouse_down(MouseButton::Right, move |_, _, cx| {
-                let _ = right_click_owner.update(cx, |app, cx| {
-                    app.set_target_pane(key, pane_id, cx);
-                });
-            })
-            .size_full()
+            .w_full()
+            .flex_1()
+            .min_h(px(0.))
             .overflow_hidden()
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(cx.theme().mono_font_size)
             .line_height(relative(1.35))
-            .border_3()
-            .border_color(if active {
-                rgb(ACTIVE_PANE_BORDER_RGB).into()
-            } else {
-                cx.theme().border
-            })
             .child(if let (Some(owner), Some(terminal)) = (owner, terminal) {
                 TerminalElement::new(
                     owner,
@@ -249,6 +290,7 @@ impl Render for TerminalPanel {
                         selection,
                         runtime_epoch,
                         render_cache: self.render_cache.clone(),
+                        scroll_remainder: self.scroll_remainder.clone(),
                     },
                 )
                 .into_any_element()
@@ -264,20 +306,66 @@ impl Render for TerminalPanel {
                     .into_any_element()
             });
 
-        body.context_menu(move |menu, window, cx| {
-            menu.menu_with_enable("Split Right", Box::new(SplitRight), controlling)
-                .menu_with_enable("Split Down", Box::new(SplitDown), controlling)
-                .separator()
-                .submenu("Swap", window, cx, move |menu, _, _| {
-                    menu.menu_with_enable("Left", Box::new(SwapLeft), controlling)
-                        .menu_with_enable("Right", Box::new(SwapRight), controlling)
-                        .menu_with_enable("Up", Box::new(SwapUp), controlling)
-                        .menu_with_enable("Down", Box::new(SwapDown), controlling)
-                })
-                .separator()
-                .menu_with_enable("Toggle Zoom", Box::new(ToggleZoom), controlling)
-                .menu_with_enable("Close Pane", Box::new(ClosePane), controlling)
-        })
+        let menu_owner = self.owner.clone();
+        let pane_menu = Button::new(format!("terminal-pane-menu-{key}-{}", pane_id.as_u64()))
+            .icon(IconName::Ellipsis)
+            .xsmall()
+            .ghost()
+            .tab_stop(false)
+            .tooltip("Pane actions")
+            .accessibility_label("Pane actions")
+            .debug_selector(move || format!("terminal-pane-menu-{}", pane_id.as_u64()))
+            .dropdown_menu(move |menu, window, cx| {
+                let _ = menu_owner.update(cx, |app, cx| {
+                    app.set_target_pane(key, pane_id, cx);
+                });
+                menu.menu_with_enable("Split Right", Box::new(SplitRight), controlling)
+                    .menu_with_enable("Split Down", Box::new(SplitDown), controlling)
+                    .separator()
+                    .submenu("Swap", window, cx, move |menu, _, _| {
+                        menu.menu_with_enable("Left", Box::new(SwapLeft), controlling)
+                            .menu_with_enable("Right", Box::new(SwapRight), controlling)
+                            .menu_with_enable("Up", Box::new(SwapUp), controlling)
+                            .menu_with_enable("Down", Box::new(SwapDown), controlling)
+                    })
+                    .separator()
+                    .menu_with_enable("Toggle Zoom", Box::new(ToggleZoom), controlling)
+                    .menu_with_enable("Close Pane", Box::new(ClosePane), controlling)
+            })
+            .anchor(Anchor::TopRight);
+
+        v_flex()
+            .size_full()
+            .overflow_hidden()
+            .border_3()
+            .border_color(if active {
+                rgb(ACTIVE_PANE_BORDER_RGB).into()
+            } else {
+                cx.theme().border
+            })
+            .child(
+                h_flex()
+                    .h(px(28.))
+                    .w_full()
+                    .flex_shrink_0()
+                    .justify_between()
+                    .gap_2()
+                    .px_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
+                    .occlude()
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(pane_title),
+                    )
+                    .child(pane_menu),
+            )
+            .child(body)
     }
 }
 

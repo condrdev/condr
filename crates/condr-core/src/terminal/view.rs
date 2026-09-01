@@ -39,11 +39,35 @@ pub struct TerminalCursor {
     pub shape: TerminalCursorShape,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalMouseTracking {
+    #[default]
+    None,
+    Click,
+    Drag,
+    Motion,
+}
+
+impl TerminalMouseTracking {
+    pub(super) fn from_term_mode(mode: TermMode) -> Self {
+        if mode.contains(TermMode::MOUSE_MOTION) {
+            Self::Motion
+        } else if mode.contains(TermMode::MOUSE_DRAG) {
+            Self::Drag
+        } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+            Self::Click
+        } else {
+            Self::None
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TerminalView {
     pub revision: u64,
     pub size: TerminalSize,
     pub display_offset: u32,
+    pub mouse_tracking: TerminalMouseTracking,
     pub cells: Vec<TerminalCell>,
     pub cursor: Option<TerminalCursor>,
 }
@@ -59,6 +83,7 @@ pub struct TerminalViewDelta {
     pub base_revision: u64,
     pub revision: u64,
     pub display_offset: u32,
+    pub mouse_tracking: TerminalMouseTracking,
     pub cursor: Option<TerminalCursor>,
     pub runs: Vec<TerminalCellRun>,
 }
@@ -150,8 +175,9 @@ impl TerminalView {
             });
         }
 
-        let metadata_changed =
-            previous.display_offset != current.display_offset || previous.cursor != current.cursor;
+        let metadata_changed = previous.display_offset != current.display_offset
+            || previous.mouse_tracking != current.mouse_tracking
+            || previous.cursor != current.cursor;
         if changed_cells == 0 && !metadata_changed {
             return None;
         }
@@ -163,6 +189,7 @@ impl TerminalView {
             base_revision: previous.revision,
             revision: current.revision,
             display_offset: current.display_offset,
+            mouse_tracking: current.mouse_tracking,
             cursor: current.cursor,
             runs,
         }))
@@ -208,6 +235,7 @@ impl TerminalView {
                 }
                 self.revision = delta.revision;
                 self.display_offset = delta.display_offset;
+                self.mouse_tracking = delta.mouse_tracking;
                 self.cursor = delta.cursor;
                 Ok(())
             }
@@ -221,6 +249,48 @@ pub struct TerminalModifiers {
     pub alt: bool,
     pub control: bool,
     pub platform: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalMouseButton {
+    Left,
+    Middle,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalMouseWheel {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminalMousePosition {
+    pub row: u16,
+    pub column: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalMouseEvent {
+    Button {
+        button: TerminalMouseButton,
+        pressed: bool,
+        position: TerminalMousePosition,
+        modifiers: TerminalModifiers,
+    },
+    Motion {
+        button: Option<TerminalMouseButton>,
+        position: TerminalMousePosition,
+        modifiers: TerminalModifiers,
+    },
+    Wheel {
+        direction: TerminalMouseWheel,
+        amount: u16,
+        position: TerminalMousePosition,
+        modifiers: TerminalModifiers,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -439,6 +509,8 @@ pub enum TerminalCommand {
     },
     Text(String),
     Paste(String),
+    Mouse(TerminalMouseEvent),
+    Focus(bool),
     Resize(TerminalSize),
     Scroll(TerminalScroll),
     Copy {
@@ -558,6 +630,7 @@ pub(super) fn snapshot_terminal(
         revision,
         size,
         display_offset: u32::try_from(display_offset).unwrap_or(u32::MAX),
+        mouse_tracking: TerminalMouseTracking::from_term_mode(*terminal.mode()),
         cells,
         cursor,
     }

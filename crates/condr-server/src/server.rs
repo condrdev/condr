@@ -521,6 +521,7 @@ struct RuntimeState {
     workspace_git_scanned_at: std::collections::HashMap<WorkspaceId, Instant>,
     worktree_root: Option<PathBuf>,
     active_controller: Option<u64>,
+    focused_terminal: Option<PaneId>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
     persistence: Option<SnapshotPersistence>,
@@ -673,9 +674,25 @@ impl RuntimeState {
             workspace_git_scanned_at: std::collections::HashMap::new(),
             worktree_root: Some(default_worktree_root()),
             active_controller: None,
+            focused_terminal: None,
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             persistence,
+        }
+    }
+
+    fn clear_controller_terminal_state(&mut self) {
+        for runtime in self.terminals.values() {
+            let _ = runtime.release_mouse();
+        }
+        self.clear_terminal_focus();
+    }
+
+    fn clear_terminal_focus(&mut self) {
+        if let Some(pane_id) = self.focused_terminal.take()
+            && let Some(runtime) = self.terminals.get(&pane_id)
+        {
+            let _ = runtime.execute(TerminalCommand::Focus(false));
         }
     }
 

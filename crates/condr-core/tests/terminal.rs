@@ -2,7 +2,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "linux")]
 use condr_core::{
-    AgentKind, AgentState, TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
+    AgentKind, AgentState, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
+    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
+    TerminalScroll, TerminalSide, TerminalUpdate,
 };
 use condr_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
 #[cfg(target_os = "windows")]
@@ -182,6 +184,198 @@ stty size"#,
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
     assert!(!runtime.shutdown().unwrap().success());
     assert!(runtime.shutdown().is_err());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn terminal_modes_route_mouse_focus_and_alternate_scroll() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.arg("-c");
+    command.arg(
+        r#"stty raw -echo
+for i in $(seq 1 30); do printf 'history-%02d\r\n' "$i"; done
+printf 'mouse-ready\r\n\033[?1003h\033[?1006h'
+history_mouse=$(timeout 0.3 dd bs=1 count=64 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf 'live-mouse-ready\r\n'
+mouse_press=$(dd bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf 'release-ready\r\n'
+mouse_release=$(dd bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf '\r\nfocus-ready\r\n\033[?1004h'
+focus=$(dd bs=1 count=24 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf '\033[?1003l\033[?1006l\033[?1004l\033[?1049h\033[?1007hshift-scroll-ready\r\n'
+shift_scroll=$(timeout 0.3 dd bs=1 count=3 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf 'scroll-ready\r\n'
+scroll=$(dd bs=1 count=3 2>/dev/null | od -An -tx1 | tr -d ' \n')
+printf '\033[?1007l\033[?1049l'
+stty sane
+printf '\r\nhistory-mouse=%s mouse=%s%s focus=%s shift-scroll=%s scroll=%s\r\n' "$history_mouse" "$mouse_press" "$mouse_release" "$focus" "$shift_scroll" "$scroll""#,
+    );
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(8, 240)).unwrap();
+    let position = TerminalMousePosition { row: 3, column: 7 };
+    let history_position = TerminalMousePosition { row: 0, column: 7 };
+
+    wait_for_text(&runtime, "mouse-ready");
+    assert_eq!(runtime.view().mouse_tracking, TerminalMouseTracking::Motion);
+    runtime.scroll(TerminalScroll::Bottom);
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Up,
+            amount: 2,
+            position,
+            modifiers: TerminalModifiers {
+                shift: true,
+                ..TerminalModifiers::default()
+            },
+        }))
+        .unwrap();
+    assert!(runtime.view().display_offset > 0);
+    for event in [
+        TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Right,
+            pressed: true,
+            position: history_position,
+            modifiers: TerminalModifiers::default(),
+        },
+        TerminalMouseEvent::Motion {
+            button: None,
+            position: history_position,
+            modifiers: TerminalModifiers::default(),
+        },
+        TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Up,
+            amount: 1,
+            position: history_position,
+            modifiers: TerminalModifiers::default(),
+        },
+    ] {
+        runtime.execute(TerminalCommand::Mouse(event)).unwrap();
+        assert!(runtime.view().display_offset > 0);
+    }
+    runtime.scroll(TerminalScroll::Bottom);
+    wait_for_text(&runtime, "live-mouse-ready");
+
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Up,
+            amount: 2,
+            position,
+            modifiers: TerminalModifiers {
+                shift: true,
+                ..TerminalModifiers::default()
+            },
+        }))
+        .unwrap();
+    let scrolled_offset = runtime.view().display_offset;
+    assert!(scrolled_offset > 0);
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Right,
+            pressed: true,
+            position,
+            modifiers: TerminalModifiers::default(),
+        }))
+        .unwrap();
+    assert_eq!(runtime.view().display_offset, scrolled_offset);
+    runtime.scroll(TerminalScroll::Bottom);
+    wait_for_text(&runtime, "release-ready");
+    runtime.scroll(TerminalScroll::Top);
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Right,
+            pressed: false,
+            position: history_position,
+            modifiers: TerminalModifiers::default(),
+        }))
+        .unwrap();
+    assert!(runtime.view().display_offset > 0);
+    runtime.scroll(TerminalScroll::Bottom);
+
+    wait_for_text(&runtime, "focus-ready");
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Right,
+            pressed: true,
+            position,
+            modifiers: TerminalModifiers::default(),
+        }))
+        .unwrap();
+    runtime.execute(TerminalCommand::Focus(false)).unwrap();
+    runtime.execute(TerminalCommand::Focus(true)).unwrap();
+
+    wait_for_text(&runtime, "shift-scroll-ready");
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Up,
+            amount: 1,
+            position,
+            modifiers: TerminalModifiers {
+                shift: true,
+                ..TerminalModifiers::default()
+            },
+        }))
+        .unwrap();
+    wait_for_text(&runtime, "scroll-ready");
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Up,
+            amount: 1,
+            position,
+            modifiers: TerminalModifiers::default(),
+        }))
+        .unwrap();
+
+    wait_for_text(&runtime, "mouse=1b5b3c323b383b324d1b5b3c323b383b326d");
+    let text = runtime.visible_text();
+    assert!(text.contains("history-mouse= mouse="), "{text:?}");
+    assert!(
+        text.contains("focus=1b5b3c323b383b344d1b5b3c323b383b346d1b5b4f1b5b49"),
+        "{text:?}"
+    );
+    assert!(text.contains("shift-scroll= scroll=1b5b41"), "{text:?}");
+    assert!(text.contains("scroll=1b5b41"), "{text:?}");
+    assert!(runtime.wait().unwrap().success());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn mouse_release_bypasses_user_input_backpressure() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        "stty raw -echo; printf 'release-ready\\r\\n\\033[?1000h\\033[?1006h'; sleep 30",
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    wait_for_text(&runtime, "release-ready");
+    assert_eq!(runtime.view().mouse_tracking, TerminalMouseTracking::Click);
+
+    let position = TerminalMousePosition { row: 1, column: 1 };
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Left,
+            pressed: true,
+            position,
+            modifiers: TerminalModifiers::default(),
+        }))
+        .unwrap();
+
+    let payload = vec![b'x'; 1024 * 1024];
+    loop {
+        match runtime.write(payload.clone()) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("unexpected terminal input failure: {error}"),
+        }
+    }
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Left,
+            pressed: false,
+            position,
+            modifiers: TerminalModifiers::default(),
+        }))
+        .unwrap();
+
+    runtime.shutdown().unwrap();
 }
 
 #[cfg(target_os = "linux")]

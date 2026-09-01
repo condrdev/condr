@@ -321,6 +321,7 @@ pub(super) fn merge_terminal_deltas(
         base_revision: previous.base_revision,
         revision: next.revision,
         display_offset: next.display_offset,
+        mouse_tracking: next.mouse_tracking,
         cursor: next.cursor,
         runs,
     })
@@ -566,6 +567,7 @@ impl ClientIo {
                         {
                             this.rebuild_dock(window, cx);
                         }
+                        this.sync_terminal_focus(window, cx);
                         if effect.notify || effect.rebuild || effect.rebuild_active {
                             cx.notify();
                         }

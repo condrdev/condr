@@ -37,8 +37,10 @@ pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
     }
 }
 
-fn bind_keys(cx: &mut App) {
+pub(super) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
+        KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
+        KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
         KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),

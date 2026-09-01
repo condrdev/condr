@@ -1,5 +1,10 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
+use condr_core::{
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+};
+
 #[test]
 fn compatible_client_gets_bootstrap_and_reconnect_sees_same_epoch() {
     let (handle, endpoint, thread) = start();
@@ -433,6 +438,133 @@ fn controller_is_exclusive_and_released_on_disconnect() {
     acquire_control(&mut second, session_id);
     handle.stop();
     drop(second);
+    thread.join().unwrap().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn releasing_control_releases_reported_mouse_before_focus() {
+    let (handle, endpoint, thread) = start();
+    let mut stream = connect_and_bootstrap(&endpoint);
+    let server_id = handle.server_id();
+    let session_id = handle.state.lock().unwrap().session_id;
+    acquire_control(&mut stream, session_id);
+    subscribe(&mut stream, session_id, 0);
+
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Layout {
+            server_id,
+            session_id,
+            request_id: 1,
+            command: LayoutCommand::CreateWorkspace {
+                root_directory: std::env::temp_dir(),
+            },
+        },
+    )
+    .unwrap();
+    let message = wait_for_message(&mut stream, |message| {
+        matches!(
+            message,
+            ServerMessage::Event {
+                event: SessionEvent::LayoutChanged,
+                ..
+            }
+        )
+    });
+    let ServerMessage::Event { sequence, .. } = message else {
+        unreachable!("predicate only accepts LayoutChanged events");
+    };
+    assert_layout_applied(&mut stream, server_id, session_id, 1, sequence);
+    let pane_id = handle
+        .state
+        .lock()
+        .unwrap()
+        .session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let mut views = std::collections::HashMap::new();
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Resize(TerminalSize::new(8, 160)),
+    );
+    wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
+        view.size.columns == 160
+    });
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Text(
+            "stty raw -echo; printf 'controller-cleanup-ready\\r\\n\\033[?1002h\\033[?1006h\\033[?1004h'; bytes=$(dd bs=1 count=36 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf '\\033[?1002l\\033[?1006l\\033[?1004l'; stty sane; printf '\\r\\ncontroller-cleanup-bytes_%s\\r\\n' \"$bytes\"\r"
+                .into(),
+        ),
+    );
+    wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
+        view.mouse_tracking == condr_core::TerminalMouseTracking::Drag
+            && view_text(view).contains("controller-cleanup-ready")
+    });
+
+    let press_position = TerminalMousePosition { row: 3, column: 7 };
+    let motion_position = TerminalMousePosition { row: 4, column: 9 };
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Focus(true),
+    );
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Mouse(TerminalMouseEvent::Button {
+            button: TerminalMouseButton::Left,
+            pressed: true,
+            position: press_position,
+            modifiers: TerminalModifiers::default(),
+        }),
+    );
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Mouse(TerminalMouseEvent::Motion {
+            button: Some(TerminalMouseButton::Left),
+            position: motion_position,
+            modifiers: TerminalModifiers {
+                alt: true,
+                ..TerminalModifiers::default()
+            },
+        }),
+    );
+    condr_core::protocol::write_message(&mut stream, &ClientMessage::ReleaseControl { session_id })
+        .unwrap();
+    assert!(matches!(
+        wait_for_message(&mut stream, |message| matches!(
+            message,
+            ServerMessage::ControlReleased { .. }
+        )),
+        ServerMessage::ControlReleased {
+            server_id: released_server,
+            session_id: released_session,
+        } if released_server == server_id && released_session == session_id
+    ));
+
+    let expected = "controller-cleanup-bytes_1b5b491b5b3c303b383b344d1b5b3c34303b31303b354d1b5b3c383b31303b356d1b5b4f";
+    wait_for_terminal_text(&mut stream, &mut views, pane_id, expected);
+
+    handle.stop();
+    drop(stream);
     thread.join().unwrap().unwrap();
 }
 

@@ -13,7 +13,8 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneId, PaneLayout, Session, TabId,
-    TerminalCommand, TerminalViewFrame, WorkspaceId,
+    TerminalCommand, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 use gpui::{
@@ -25,7 +26,8 @@ use gpui_component::{Root, WindowExt as _};
 
 use super::super::{
     CONTROL_BUSY_REASON, Condr, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE,
-    DockSurfaceKey, Incoming, PendingWorkspaceSelection, ServerConnection, default_window_options,
+    DockSurfaceKey, Incoming, PendingWorkspaceSelection, ReportedTerminalMouseMotion,
+    ServerConnection, default_window_options,
 };
 
 #[cfg(windows)]

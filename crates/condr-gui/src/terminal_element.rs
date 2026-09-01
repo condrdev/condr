@@ -4,17 +4,18 @@ use std::rc::Rc;
 
 use condr_core::protocol::RuntimeEpoch;
 use condr_core::{
-    PaneId, TerminalColor, TerminalCursorShape, TerminalPosition, TerminalSelection, TerminalSide,
-    TerminalSize, TerminalView,
+    PaneId, TerminalColor, TerminalCursorShape, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
+    TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
 };
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    InputHandler, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    ShapedLine, Size, StrikethroughStyle, Style, TextAlign, TextInputConfiguration, TextRun,
-    TextStyle, UTF16Selection, UnderlineStyle, Window, fill, outline, point, px, relative, rgb,
-    size,
+    InputHandler, InspectorElementId, IntoElement, LayoutId, Modifiers as GpuiModifiers,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle, Style, TextAlign,
+    TextInputConfiguration, TextRun, TextStyle, TouchPhase, UTF16Selection, UnderlineStyle, Window,
+    fill, outline, point, px, relative, rgb, size,
 };
 use smol_str::SmolStr;
 
@@ -86,6 +87,7 @@ pub(crate) struct TerminalElementProps {
     pub(crate) selection: Option<TerminalSelection>,
     pub(crate) runtime_epoch: Option<RuntimeEpoch>,
     pub(crate) render_cache: Rc<RefCell<TerminalRenderCache>>,
+    pub(crate) scroll_remainder: Rc<RefCell<Point<f32>>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -350,8 +352,8 @@ impl Element for TerminalElement {
             None,
         );
         let cell_size = size(measure.width().max(px(1.)), line_height);
-        let rows = ((bounds.size.height / cell_size.height).floor() as u16).max(1);
-        let columns = ((bounds.size.width / cell_size.width).floor() as u16).max(1);
+        let rows = terminal_grid_extent(bounds.size.height, cell_size.height, 1);
+        let columns = terminal_grid_extent(bounds.size.width, cell_size.width, 2);
         let terminal_size = TerminalSize {
             rows,
             columns,
@@ -368,9 +370,15 @@ impl Element for TerminalElement {
             cell_size,
             terminal_size,
         ) {
-            window.defer(cx, move |_, cx| {
+            window.defer(cx, move |window, cx| {
                 view.update(cx, |view, cx| {
-                    view.update_terminal_geometry(connection_key, pane_id, bounds, cell_size);
+                    view.update_terminal_geometry(
+                        connection_key,
+                        pane_id,
+                        bounds,
+                        cell_size,
+                        window,
+                    );
                     view.resize_terminal(connection_key, pane_id, terminal_size, cx);
                 });
             });
@@ -591,75 +599,263 @@ impl Element for TerminalElement {
         let connection_key = self.props.connection_key;
         let pane_id = self.props.pane_id;
         let focus_handle = self.props.focus_handle.clone();
+        let mouse_tracking = self.props.terminal.mouse_tracking;
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-            if phase.bubble() && event.button == MouseButton::Left && hitbox.is_hovered(window) {
-                let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                let accepted = view.update(cx, |view, cx| {
-                    view.select_pane(connection_key, pane_id, window, cx)
+            if !phase.bubble() || !hitbox.is_hovered(window) {
+                return;
+            }
+            let Some(button) = terminal_mouse_button(event.button) else {
+                return;
+            };
+            let position = terminal_position(event.position, bounds, cell_size, terminal_size);
+            let accepted = view.update(cx, |view, cx| {
+                view.select_pane(connection_key, pane_id, window, cx)
+            });
+            if !accepted {
+                return;
+            }
+            focus_handle.focus(window, cx);
+
+            if button == TerminalMouseButton::Left
+                && (mouse_tracking == TerminalMouseTracking::None || event.modifiers.shift)
+            {
+                view.update(cx, |view, cx| {
+                    view.begin_selection(connection_key, pane_id, position, event.click_count, cx);
                 });
-                if accepted {
-                    focus_handle.focus(window, cx);
+                window.capture_pointer(hitbox.id);
+                cx.stop_propagation();
+                return;
+            }
+            if event.modifiers.shift {
+                cx.stop_propagation();
+                return;
+            }
+            if mouse_tracking != TerminalMouseTracking::None {
+                let position = TerminalMousePosition {
+                    row: position.row,
+                    column: position.column,
+                };
+                let sent = view.update(cx, |view, cx| {
+                    view.start_terminal_mouse_capture(
+                        connection_key,
+                        pane_id,
+                        button,
+                        TerminalMouseEvent::Button {
+                            button,
+                            pressed: true,
+                            position,
+                            modifiers: terminal_modifiers(event.modifiers),
+                        },
+                        cx,
+                    )
+                });
+                if sent {
+                    window.capture_pointer(hitbox.id);
+                    cx.stop_propagation();
+                }
+            }
+        });
+
+        let hitbox = prepaint.hitbox.clone();
+        let view = self.view.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if !phase.bubble() {
+                return;
+            }
+            if view
+                .read(cx)
+                .terminal_mouse_gesture_owner()
+                .is_some_and(|owner| owner != (connection_key, pane_id))
+            {
+                return;
+            }
+            if view.read(cx).is_selecting(connection_key, pane_id) {
+                let position = terminal_position(event.position, bounds, cell_size, terminal_size);
+                if event.dragging() {
                     view.update(cx, |view, cx| {
-                        view.begin_selection(
+                        view.update_selection(connection_key, pane_id, position, cx)
+                    });
+                } else {
+                    view.update(cx, |view, cx| {
+                        view.end_selection(connection_key, pane_id, position, cx)
+                    });
+                    window.release_pointer();
+                }
+                cx.stop_propagation();
+                return;
+            }
+
+            let captured = view
+                .read(cx)
+                .terminal_mouse_capture(connection_key, pane_id);
+            if let Some(button) = captured {
+                let position =
+                    terminal_mouse_position(event.position, bounds, cell_size, terminal_size);
+                if event.pressed_button.and_then(terminal_mouse_button) != Some(button) {
+                    view.update(cx, |view, _| {
+                        view.finish_terminal_mouse_capture(
                             connection_key,
                             pane_id,
-                            position,
-                            event.click_count,
-                            cx,
-                        );
+                            button,
+                            TerminalMouseEvent::Button {
+                                button,
+                                pressed: false,
+                                position,
+                                modifiers: terminal_modifiers(event.modifiers),
+                            },
+                        )
+                    });
+                    window.release_pointer();
+                } else if matches!(
+                    mouse_tracking,
+                    TerminalMouseTracking::Drag | TerminalMouseTracking::Motion
+                ) {
+                    view.update(cx, |view, _| {
+                        view.report_captured_terminal_mouse(
+                            connection_key,
+                            pane_id,
+                            TerminalMouseEvent::Motion {
+                                button: Some(button),
+                                position,
+                                modifiers: terminal_modifiers(event.modifiers),
+                            },
+                        )
                     });
                 }
                 cx.stop_propagation();
-            }
-        });
-
-        let view = self.view.clone();
-        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-            if phase.bubble()
-                && event.dragging()
-                && view.read(cx).is_selecting(connection_key, pane_id)
+            } else if !event.modifiers.shift
+                && mouse_tracking == TerminalMouseTracking::Motion
+                && hitbox.is_hovered(window)
             {
-                let position = terminal_position(event.position, bounds, cell_size, terminal_size);
-                view.update(cx, |view, cx| {
-                    view.update_selection(connection_key, pane_id, position, cx)
+                let position =
+                    terminal_mouse_position(event.position, bounds, cell_size, terminal_size);
+                let sent = view.update(cx, |view, _| {
+                    view.report_terminal_motion(
+                        connection_key,
+                        pane_id,
+                        TerminalMouseEvent::Motion {
+                            button: None,
+                            position,
+                            modifiers: terminal_modifiers(event.modifiers),
+                        },
+                    )
                 });
-                cx.stop_propagation();
+                if sent {
+                    cx.stop_propagation();
+                }
             }
         });
 
         let view = self.view.clone();
-        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-            if phase.bubble()
-                && event.button == MouseButton::Left
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+            if !phase.bubble() {
+                return;
+            }
+            if view
+                .read(cx)
+                .terminal_mouse_gesture_owner()
+                .is_some_and(|owner| owner != (connection_key, pane_id))
+            {
+                return;
+            }
+            if event.button == MouseButton::Left
                 && view.read(cx).is_selecting(connection_key, pane_id)
             {
                 let position = terminal_position(event.position, bounds, cell_size, terminal_size);
                 view.update(cx, |view, cx| {
                     view.end_selection(connection_key, pane_id, position, cx)
                 });
+                window.release_pointer();
+                cx.stop_propagation();
+                return;
+            }
+            let Some(button) = terminal_mouse_button(event.button) else {
+                return;
+            };
+            let position =
+                terminal_mouse_position(event.position, bounds, cell_size, terminal_size);
+            let captured = view.update(cx, |view, _| {
+                view.finish_terminal_mouse_capture(
+                    connection_key,
+                    pane_id,
+                    button,
+                    TerminalMouseEvent::Button {
+                        button,
+                        pressed: false,
+                        position,
+                        modifiers: terminal_modifiers(event.modifiers),
+                    },
+                )
+            });
+            if captured {
+                window.release_pointer();
                 cx.stop_propagation();
             }
         });
 
         let hitbox = prepaint.hitbox.clone();
         let view = self.view.clone();
+        let scroll_remainder = self.props.scroll_remainder.clone();
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
             if !phase.bubble() || !hitbox.should_handle_scroll(window) {
                 return;
             }
-            let delta = match event.delta {
-                ScrollDelta::Pixels(delta) => delta.y / cell_size.height,
-                ScrollDelta::Lines(delta) => delta.y,
+            if matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                *scroll_remainder.borrow_mut() = point(0., 0.);
+                return;
+            }
+            if event.touch_phase == TouchPhase::Started {
+                *scroll_remainder.borrow_mut() = point(0., 0.);
+            }
+            let precise_scroll = matches!(
+                event.delta,
+                ScrollDelta::Pixels(delta) if delta.x != px(0.) || delta.y != px(0.)
+            );
+            let (horizontal, vertical) = match event.delta {
+                ScrollDelta::Pixels(delta) => {
+                    let mut remainder = scroll_remainder.borrow_mut();
+                    (
+                        accumulated_wheel_steps(&mut remainder.x, delta.x / cell_size.width),
+                        accumulated_wheel_steps(&mut remainder.y, delta.y / cell_size.height),
+                    )
+                }
+                ScrollDelta::Lines(delta) => (delta.x, delta.y),
             };
-            let lines = if delta.abs() < 1. && delta != 0. {
-                delta.signum() as i32
-            } else {
-                delta.round() as i32
-            };
-            view.update(cx, |view, cx| {
-                view.scroll_terminal(connection_key, pane_id, lines, cx)
-            });
-            cx.stop_propagation();
+            let position =
+                terminal_mouse_position(event.position, bounds, cell_size, terminal_size);
+            let modifiers = terminal_modifiers(event.modifiers);
+            let directions = [
+                (vertical, TerminalMouseWheel::Up, TerminalMouseWheel::Down),
+                (
+                    horizontal,
+                    TerminalMouseWheel::Left,
+                    TerminalMouseWheel::Right,
+                ),
+            ];
+            let mut handled = false;
+            for (delta, positive, negative) in directions {
+                let amount = wheel_steps(delta);
+                if amount == 0 {
+                    continue;
+                }
+                handled |= view.update(cx, |view, cx| {
+                    view.report_terminal_mouse(
+                        connection_key,
+                        pane_id,
+                        TerminalMouseEvent::Wheel {
+                            direction: if delta > 0. { positive } else { negative },
+                            amount,
+                            position,
+                            modifiers,
+                        },
+                        true,
+                        cx,
+                    )
+                });
+            }
+            if handled || precise_scroll {
+                cx.stop_propagation();
+            }
         });
     }
 }
@@ -730,6 +926,62 @@ fn terminal_position(
         column: (x.max(0.).floor() as u16).min(terminal_size.columns.saturating_sub(1)),
         side,
     }
+}
+
+fn terminal_mouse_position(
+    point: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+    cell_size: Size<Pixels>,
+    terminal_size: TerminalSize,
+) -> TerminalMousePosition {
+    let position = terminal_position(point, bounds, cell_size, terminal_size);
+    TerminalMousePosition {
+        row: position.row,
+        column: position.column,
+    }
+}
+
+fn terminal_mouse_button(button: MouseButton) -> Option<TerminalMouseButton> {
+    match button {
+        MouseButton::Left => Some(TerminalMouseButton::Left),
+        MouseButton::Middle => Some(TerminalMouseButton::Middle),
+        MouseButton::Right => Some(TerminalMouseButton::Right),
+        MouseButton::Navigate(_) => None,
+    }
+}
+
+fn terminal_modifiers(modifiers: GpuiModifiers) -> TerminalModifiers {
+    TerminalModifiers {
+        shift: modifiers.shift,
+        alt: modifiers.alt,
+        control: modifiers.control,
+        platform: modifiers.platform,
+    }
+}
+
+fn wheel_steps(delta: f32) -> u16 {
+    if delta == 0. {
+        0
+    } else {
+        delta.abs().round().max(1.) as u16
+    }
+}
+
+fn accumulated_wheel_steps(remainder: &mut f32, delta: f32) -> f32 {
+    if delta == 0. {
+        return 0.;
+    }
+    if *remainder != 0. && remainder.signum() != delta.signum() {
+        *remainder = 0.;
+    }
+    *remainder += delta;
+    let steps = remainder.trunc();
+    *remainder -= steps;
+    steps
+}
+
+fn terminal_grid_extent(extent: Pixels, cell: Pixels, minimum: u16) -> u16 {
+    ((extent / cell).next_up().floor() as u16).max(minimum)
 }
 
 fn terminal_color(color: TerminalColor, foreground: bool, palette: &TerminalPalette) -> Hsla {
@@ -906,5 +1158,25 @@ mod tests {
         );
 
         assert_eq!(quads.len(), 3);
+    }
+
+    #[test]
+    fn terminal_grid_keeps_two_columns_at_narrow_widths() {
+        assert_eq!(terminal_grid_extent(px(1.), px(10.), 2), 2);
+        assert_eq!(terminal_grid_extent(px(20.), px(10.), 2), 2);
+        assert_eq!(terminal_grid_extent(px(30.), px(10.), 2), 3);
+        assert_eq!(terminal_grid_extent(px(1.), px(10.), 1), 1);
+    }
+
+    #[test]
+    fn pixel_scroll_accumulates_whole_lines_and_drops_stale_direction() {
+        let mut remainder = 0.;
+        assert_eq!(accumulated_wheel_steps(&mut remainder, 0.4), 0.);
+        assert_eq!(accumulated_wheel_steps(&mut remainder, 0.4), 0.);
+        assert_eq!(accumulated_wheel_steps(&mut remainder, 0.4), 1.);
+        assert!((remainder - 0.2).abs() < f32::EPSILON * 4.);
+
+        assert_eq!(accumulated_wheel_steps(&mut remainder, -0.6), 0.);
+        assert!((remainder + 0.6).abs() < f32::EPSILON * 4.);
     }
 }

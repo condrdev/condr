@@ -23,7 +23,8 @@ pub use snapshot::{SessionSnapshot, SnapshotError};
 pub use terminal::{
     CommandBuilder, TerminalAgentProbe, TerminalCell, TerminalCellRun, TerminalColor,
     TerminalCommand, TerminalCursor, TerminalCursorShape, TerminalCwdProbe, TerminalFrameError,
-    TerminalKey, TerminalModifiers, TerminalPosition, TerminalRuntime, TerminalScroll,
+    TerminalKey, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalRuntime, TerminalScroll,
     TerminalSelection, TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta,
     TerminalViewFrame, TerminalViewSource,
 };

@@ -1,4 +1,5 @@
 use super::*;
+use alacritty_terminal::vte::ansi::Rgb;
 
 pub(super) struct UserInputPermit {
     bytes: usize,
@@ -13,9 +14,22 @@ impl Drop for UserInputPermit {
     }
 }
 
+pub(super) struct TerminalReplyPermit {
+    slot: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl Drop for TerminalReplyPermit {
+    fn drop(&mut self) {
+        let (occupied, ready) = &*self.slot;
+        *occupied.lock().expect("terminal reply slot lock poisoned") = false;
+        ready.notify_one();
+    }
+}
+
 pub(super) struct QueuedInput {
     pub(super) bytes: Vec<u8>,
     _user_permit: Option<UserInputPermit>,
+    _terminal_reply_permit: Option<TerminalReplyPermit>,
 }
 
 #[derive(Clone)]
@@ -23,18 +37,21 @@ pub(super) struct TerminalInput {
     sender: mpsc::SyncSender<QueuedInput>,
     pending_bytes: Arc<AtomicUsize>,
     pending_entries: Arc<AtomicUsize>,
+    terminal_reply_slot: Arc<(Mutex<bool>, Condvar)>,
     accepting: Arc<AtomicBool>,
 }
 
 impl TerminalInput {
     pub(super) fn channel() -> (Self, mpsc::Receiver<QueuedInput>) {
-        let (sender, receiver) =
-            mpsc::sync_channel(INPUT_QUEUE_CAPACITY + TERMINAL_REPLY_QUEUE_RESERVE);
+        let (sender, receiver) = mpsc::sync_channel(
+            INPUT_QUEUE_CAPACITY + TERMINAL_REPLY_QUEUE_RESERVE + TERMINAL_CONTROL_QUEUE_RESERVE,
+        );
         (
             Self {
                 sender,
                 pending_bytes: Arc::new(AtomicUsize::new(0)),
                 pending_entries: Arc::new(AtomicUsize::new(0)),
+                terminal_reply_slot: Arc::new((Mutex::new(false), Condvar::new())),
                 accepting: Arc::new(AtomicBool::new(true)),
             },
             receiver,
@@ -81,6 +98,7 @@ impl TerminalInput {
                 pending_bytes: Arc::clone(&self.pending_bytes),
                 pending_entries: Arc::clone(&self.pending_entries),
             }),
+            _terminal_reply_permit: None,
         };
         if !self.accepting.load(Ordering::Acquire) {
             drop(input);
@@ -109,16 +127,62 @@ impl TerminalInput {
                 "terminal writer stopped",
             ));
         }
+        let (occupied, ready) = &*self.terminal_reply_slot;
+        let mut occupied = occupied.lock().expect("terminal reply slot lock poisoned");
+        while *occupied && self.accepting.load(Ordering::Acquire) {
+            occupied = ready
+                .wait(occupied)
+                .expect("terminal reply slot lock poisoned");
+        }
+        if !self.accepting.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal writer stopped",
+            ));
+        }
+        *occupied = true;
+        drop(occupied);
+
         self.sender
             .send(QueuedInput {
                 bytes,
                 _user_permit: None,
+                _terminal_reply_permit: Some(TerminalReplyPermit {
+                    slot: Arc::clone(&self.terminal_reply_slot),
+                }),
             })
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped"))
     }
 
+    pub(super) fn try_write_control(&self, bytes: Vec<u8>) -> io::Result<()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        if !self.accepting.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal writer stopped",
+            ));
+        }
+        self.sender
+            .try_send(QueuedInput {
+                bytes,
+                _user_permit: None,
+                _terminal_reply_permit: None,
+            })
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => {
+                    io::Error::new(io::ErrorKind::WouldBlock, "terminal control queue is full")
+                }
+                mpsc::TrySendError::Disconnected(_) => {
+                    io::Error::new(io::ErrorKind::BrokenPipe, "terminal writer stopped")
+                }
+            })
+    }
+
     pub(super) fn stop(&self) {
         self.accepting.store(false, Ordering::Release);
+        self.terminal_reply_slot.1.notify_all();
     }
 }
 
@@ -179,23 +243,146 @@ impl Drop for ResizeWorkerGuard {
 
 #[derive(Clone)]
 pub(super) struct TerminalEventProxy {
-    pub(super) input: TerminalInput,
     pub(super) size: Arc<Mutex<TerminalSize>>,
+    pub(super) pending_replies: PendingTerminalReplies,
+}
+
+pub(super) enum PendingTerminalReply {
+    Bytes(Vec<u8>),
+    Color(usize, Arc<dyn Fn(Rgb) -> String + Sync + Send + 'static>),
+}
+
+pub(super) type PendingTerminalReplies = Arc<Mutex<Vec<PendingTerminalReply>>>;
+
+impl TerminalEventProxy {
+    pub(super) fn new(size: Arc<Mutex<TerminalSize>>) -> (Self, PendingTerminalReplies) {
+        let pending_replies = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                size,
+                pending_replies: Arc::clone(&pending_replies),
+            },
+            pending_replies,
+        )
+    }
 }
 
 impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: Event) {
-        let bytes = match event {
-            Event::PtyWrite(text) => Some(text.into_bytes()),
+        let reply = match event {
+            Event::PtyWrite(text) => Some(PendingTerminalReply::Bytes(text.into_bytes())),
             Event::TextAreaSizeRequest(formatter) => {
                 let size = *self.size.lock().expect("terminal size lock poisoned");
-                Some(formatter(size.window_size()).into_bytes())
+                Some(PendingTerminalReply::Bytes(
+                    formatter(size.window_size()).into_bytes(),
+                ))
+            }
+            Event::ColorRequest(index, formatter) => {
+                Some(PendingTerminalReply::Color(index, formatter))
             }
             _ => None,
         };
-        if let Some(bytes) = bytes {
-            let _ = self.input.write_terminal_reply(bytes);
+        if let Some(reply) = reply {
+            self.pending_replies
+                .lock()
+                .expect("terminal reply queue lock poisoned")
+                .push(reply);
         }
+    }
+}
+
+pub(super) fn flush_terminal_replies(
+    terminal: &Arc<Mutex<Terminal>>,
+    input: &TerminalInput,
+    pending_replies: &PendingTerminalReplies,
+) {
+    let replies = std::mem::take(
+        &mut *pending_replies
+            .lock()
+            .expect("terminal reply queue lock poisoned"),
+    );
+    if replies.is_empty() {
+        return;
+    }
+    let terminal = terminal.lock().expect("terminal state lock poisoned");
+    let mut bytes = Vec::new();
+    for reply in replies {
+        match reply {
+            PendingTerminalReply::Bytes(reply) => bytes.extend(reply),
+            PendingTerminalReply::Color(index, formatter) => {
+                let color = terminal.colors()[index].or_else(|| default_terminal_color(index));
+                let Some(color) = color else {
+                    continue;
+                };
+                bytes.extend(formatter(color).bytes());
+            }
+        }
+    }
+    drop(terminal);
+    let _ = input.write_terminal_reply(bytes);
+}
+
+fn default_terminal_color(index: usize) -> Option<Rgb> {
+    const NORMAL: [Rgb; 8] = [
+        rgb(0x48_4f_58),
+        rgb(0xff_7b_72),
+        rgb(0x3f_b9_50),
+        rgb(0xd2_99_22),
+        rgb(0x58_a6_ff),
+        rgb(0xbc_8c_ff),
+        rgb(0x39_c5_cf),
+        rgb(0xb1_ba_c4),
+    ];
+    const BRIGHT: [Rgb; 8] = [
+        rgb(0x6e_76_81),
+        rgb(0xff_a1_98),
+        rgb(0x56d364),
+        rgb(0xe3_b3_41),
+        rgb(0x79_c0_ff),
+        rgb(0xd2_a8_ff),
+        rgb(0x56_d4_dd),
+        rgb(0xff_ff_ff),
+    ];
+
+    match index {
+        0..=7 => Some(NORMAL[index]),
+        8..=15 => Some(BRIGHT[index - 8]),
+        16..=231 => {
+            let value = index - 16;
+            Some(Rgb {
+                r: color_cube(value / 36),
+                g: color_cube((value / 6) % 6),
+                b: color_cube(value % 6),
+            })
+        }
+        232..=255 => {
+            let gray = 8 + (index - 232) * 10;
+            Some(Rgb {
+                r: gray as u8,
+                g: gray as u8,
+                b: gray as u8,
+            })
+        }
+        index if index == NamedColor::Foreground as usize => Some(rgb(0xc9_d1_d9)),
+        index if index == NamedColor::Background as usize => Some(rgb(0x0d_11_17)),
+        index if index == NamedColor::Cursor as usize => Some(rgb(0xf0_f6_fc)),
+        _ => None,
+    }
+}
+
+const fn rgb(value: u32) -> Rgb {
+    Rgb {
+        r: (value >> 16) as u8,
+        g: (value >> 8) as u8,
+        b: value as u8,
+    }
+}
+
+fn color_cube(value: usize) -> u8 {
+    if value == 0 {
+        0
+    } else {
+        (55 + value * 40) as u8
     }
 }
 
@@ -369,6 +556,8 @@ impl Read for UnixPtyReader {
 pub(super) fn read_loop(
     mut reader: Box<dyn Read + Send>,
     terminal: Arc<Mutex<Terminal>>,
+    input: TerminalInput,
+    pending_replies: PendingTerminalReplies,
     revision: Arc<AtomicU64>,
     updates: mpsc::Sender<TerminalUpdate>,
     reported_cwd: Arc<Mutex<ReportedCwd>>,
@@ -383,8 +572,10 @@ pub(super) fn read_loop(
                 cwd_parser.advance(&bytes[..read], |cwd| {
                     record_reported_cwd(&reported_cwd, cwd);
                 });
-                let mut terminal = terminal.lock().expect("terminal state lock poisoned");
-                parser.advance(&mut *terminal, &bytes[..read]);
+                let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
+                parser.advance(&mut *terminal_guard, &bytes[..read]);
+                drop(terminal_guard);
+                flush_terminal_replies(&terminal, &input, &pending_replies);
                 publish_view(&revision, &updates);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}

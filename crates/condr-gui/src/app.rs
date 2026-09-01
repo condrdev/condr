@@ -17,9 +17,10 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentDisplayState, AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session,
-    SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalKey,
-    TerminalModifiers, TerminalPosition, TerminalScroll, TerminalSelection, TerminalSize,
-    TerminalViewDelta, TerminalViewFrame, WorkspaceId,
+    SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
+    TerminalKey, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking,
+    TerminalPosition, TerminalSelection, TerminalSize, TerminalViewDelta, TerminalViewFrame,
+    WorkspaceId,
 };
 use condr_server::{ClientConnection, Endpoint, ServerConfig};
 use gpui::prelude::FluentBuilder;
@@ -31,7 +32,7 @@ use gpui_component::dock::{
     PanelState, TabGroupRenderer, TilesRenderer,
 };
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::sidebar::{
     Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarItem,
@@ -66,7 +67,9 @@ use startup::connect_to_server_with;
 pub(crate) use startup::run;
 use startup::{connect_to_server, fixed_shortcut};
 #[cfg(test)]
-use terminal_input::{TerminalClipboardShortcut, terminal_clipboard_shortcut};
+use terminal_input::{
+    TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
+};
 
 actions!(
     condr,
@@ -100,11 +103,21 @@ actions!(
         SwapRight,
         SwapUp,
         SwapDown,
-        ToggleZoom
+        ToggleZoom,
+        TerminalTab,
+        TerminalBackTab
     ]
 );
 
 pub(crate) type ConnectionKey = u64;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct TerminalComposition {
+    pub(super) connection_key: ConnectionKey,
+    pub(super) pane_id: PaneId,
+    pub(super) text: String,
+    pub(super) selected_range: Range<usize>,
+}
 
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
 const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
@@ -455,10 +468,14 @@ pub(crate) struct Condr {
     workspace_size: Size<Pixels>,
     focus_handle: FocusHandle,
     terminal_selection: Option<LocalTerminalSelection>,
+    terminal_mouse_capture: Option<ReportedTerminalMouse>,
+    last_terminal_mouse_motion: Option<ReportedTerminalMouseMotion>,
+    reported_terminal_focus: Option<(ConnectionKey, PaneId)>,
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
-    marked_text: Option<String>,
+    terminal_composition: Option<TerminalComposition>,
     app_error: Option<String>,
+    _window_activation_subscription: Subscription,
 }
 
 fn accepted_text_input(value: String, trim_value: bool) -> Option<String> {
@@ -505,6 +522,10 @@ impl Condr {
         }
         let next_connection_key = connections.len() as u64 + 1;
 
+        let window_activation_subscription =
+            cx.observe_window_activation(window, |this, window, cx| {
+                this.sync_terminal_focus(window, cx);
+            });
         let mut this = Self {
             client_config_path,
             connections,
@@ -526,10 +547,14 @@ impl Condr {
             ),
             focus_handle: cx.focus_handle(),
             terminal_selection: None,
+            terminal_mouse_capture: None,
+            last_terminal_mouse_motion: None,
+            reported_terminal_focus: None,
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
-            marked_text: None,
+            terminal_composition: None,
             app_error: config_error,
+            _window_activation_subscription: window_activation_subscription,
         };
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);

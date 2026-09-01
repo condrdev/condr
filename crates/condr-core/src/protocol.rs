@@ -1167,6 +1167,7 @@ mod tests {
                 revision: 11,
                 size: crate::TerminalSize::new(1, 1),
                 display_offset: 0,
+                mouse_tracking: crate::TerminalMouseTracking::None,
                 cells: vec![crate::TerminalCell {
                     text: text.into(),
                     foreground: crate::TerminalColor::Named(0),

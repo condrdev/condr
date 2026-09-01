@@ -250,6 +250,7 @@ pub(super) fn handle_client(
                             message: "unknown Session".into(),
                         }
                     } else if state.active_controller == Some(client_id) {
+                        state.clear_controller_terminal_state();
                         state.active_controller = None;
                         ServerMessage::ControlReleased {
                             server_id: state.server_id,
@@ -548,8 +549,12 @@ pub(super) fn handle_client(
                 pane_id,
                 command,
             } => {
-                let state = state.lock().expect("server state lock poisoned");
+                let mut state = state.lock().expect("server state lock poisoned");
                 let is_copy = matches!(&command, TerminalCommand::Copy { .. });
+                let focus = match &command {
+                    TerminalCommand::Focus(focused) => Some(*focused),
+                    _ => None,
+                };
                 if server_id != state.server_id {
                     queue_message(
                         &outbound,
@@ -595,11 +600,23 @@ pub(super) fn handle_client(
                         },
                     )
                 } else {
+                    if focus == Some(true) && state.focused_terminal != Some(pane_id) {
+                        state.clear_terminal_focus();
+                    }
                     let result = state
                         .terminals
                         .get(&pane_id)
                         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown Pane"))
                         .and_then(|runtime| runtime.execute(command));
+                    if result.is_ok() {
+                        match focus {
+                            Some(true) => state.focused_terminal = Some(pane_id),
+                            Some(false) if state.focused_terminal == Some(pane_id) => {
+                                state.focused_terminal = None;
+                            }
+                            _ => {}
+                        }
+                    }
                     match result {
                         Ok(text) if is_copy => queue_message(
                             &outbound,
@@ -661,6 +678,7 @@ pub(super) fn handle_client(
     let mut state = state.lock().expect("server state lock poisoned");
     state.subscribers.remove(&client_id);
     if state.active_controller == Some(client_id) {
+        state.clear_controller_terminal_state();
         state.active_controller = None;
     }
     drop(state);

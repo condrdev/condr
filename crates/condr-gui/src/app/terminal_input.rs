@@ -28,9 +28,22 @@ impl Condr {
         pane_id: PaneId,
         bounds: Bounds<Pixels>,
         cell_size: Size<Pixels>,
+        window: &Window,
     ) {
-        self.terminal_geometry
-            .insert((key, pane_id), TerminalGeometry { bounds, cell_size });
+        let geometry = TerminalGeometry { bounds, cell_size };
+        let changed = self.terminal_geometry.get(&(key, pane_id)) != Some(&geometry);
+        self.terminal_geometry.insert((key, pane_id), geometry);
+        if changed
+            && self
+                .terminal_composition
+                .as_ref()
+                .is_some_and(|composition| {
+                    composition.belongs_to_target(self.target_pane)
+                        && composition.belongs_to(key, pane_id)
+                })
+        {
+            window.invalidate_character_coordinates();
+        }
     }
 
     pub(crate) fn terminal_layout_is_current(
@@ -46,6 +59,155 @@ impl Condr {
                 || self
                     .terminal(key, pane_id)
                     .is_some_and(|terminal| terminal.view.size == terminal_size))
+    }
+
+    pub(crate) fn start_terminal_mouse_capture(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        button: TerminalMouseButton,
+        event: TerminalMouseEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.terminal_command(key, pane_id, TerminalCommand::Mouse(event)) {
+            return false;
+        }
+        self.clear_selection(cx);
+        self.last_terminal_mouse_motion = None;
+        self.terminal_mouse_capture = Some(ReportedTerminalMouse {
+            connection_key: key,
+            pane_id,
+            button,
+        });
+        true
+    }
+
+    pub(crate) fn terminal_mouse_capture(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+    ) -> Option<TerminalMouseButton> {
+        self.terminal_mouse_capture
+            .filter(|capture| capture.connection_key == key && capture.pane_id == pane_id)
+            .map(|capture| capture.button)
+    }
+
+    pub(crate) fn terminal_mouse_gesture_owner(&self) -> Option<(ConnectionKey, PaneId)> {
+        self.terminal_selection
+            .filter(|selection| selection.dragging)
+            .map(|selection| (selection.connection_key, selection.pane_id))
+            .or_else(|| {
+                self.terminal_mouse_capture
+                    .map(|capture| (capture.connection_key, capture.pane_id))
+            })
+    }
+
+    pub(crate) fn report_captured_terminal_mouse(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        event: TerminalMouseEvent,
+    ) -> bool {
+        if self.terminal_mouse_capture(key, pane_id).is_none() {
+            return false;
+        }
+        self.report_terminal_motion(key, pane_id, event)
+    }
+
+    pub(crate) fn finish_terminal_mouse_capture(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        button: TerminalMouseButton,
+        event: TerminalMouseEvent,
+    ) -> bool {
+        if self.terminal_mouse_capture(key, pane_id) != Some(button) {
+            return false;
+        }
+        self.terminal_mouse_capture = None;
+        self.last_terminal_mouse_motion = None;
+        self.terminal_command(key, pane_id, TerminalCommand::Mouse(event));
+        true
+    }
+
+    pub(crate) fn report_terminal_motion(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        event: TerminalMouseEvent,
+    ) -> bool {
+        let Some(mouse_tracking) = self
+            .terminal(key, pane_id)
+            .map(|terminal| terminal.view.mouse_tracking)
+        else {
+            return false;
+        };
+        let motion = ReportedTerminalMouseMotion {
+            connection_key: key,
+            pane_id,
+            mouse_tracking,
+            event,
+        };
+        if self.last_terminal_mouse_motion == Some(motion) {
+            return true;
+        }
+        if self.terminal_command(key, pane_id, TerminalCommand::Mouse(event)) {
+            self.last_terminal_mouse_motion = Some(motion);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn report_terminal_mouse(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        event: TerminalMouseEvent,
+        clear_selection: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.last_terminal_mouse_motion = None;
+        let sent = self.terminal_command(key, pane_id, TerminalCommand::Mouse(event));
+        if sent && clear_selection {
+            self.clear_selection(cx);
+        }
+        sent
+    }
+
+    pub(crate) fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !window.is_window_active() {
+            window.release_pointer();
+            self.terminal_mouse_capture = None;
+            if let Some(selection) = &mut self.terminal_selection {
+                selection.dragging = false;
+            }
+        }
+        let focused = window
+            .is_window_active()
+            .then(|| {
+                self.panels.iter().find_map(|(&(key, pane_id), panel)| {
+                    panel
+                        .read(cx)
+                        .focus_handle
+                        .is_focused(window)
+                        .then_some((key, pane_id))
+                })
+            })
+            .flatten();
+        if focused == self.reported_terminal_focus {
+            return;
+        }
+        self.last_terminal_mouse_motion = None;
+
+        if let Some((key, pane_id)) = self.reported_terminal_focus.take() {
+            self.terminal_command(key, pane_id, TerminalCommand::Focus(false));
+        }
+        if let Some((key, pane_id)) = focused
+            && self.terminal_command(key, pane_id, TerminalCommand::Focus(true))
+        {
+            self.reported_terminal_focus = Some((key, pane_id));
+        }
     }
 
     pub(crate) fn begin_selection(
@@ -134,7 +296,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         pane_id: PaneId,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> bool {
         let Some(selection) = self.selection_for(key, pane_id) else {
             return false;
@@ -149,12 +311,7 @@ impl Condr {
             return false;
         }
 
-        if self.terminal_command(key, pane_id, TerminalCommand::Copy { selection }) {
-            self.clear_selection(cx);
-            true
-        } else {
-            false
-        }
+        self.terminal_command(key, pane_id, TerminalCommand::Copy { selection })
     }
 
     pub(super) fn paste_into_terminal(
@@ -175,21 +332,70 @@ impl Condr {
         }
     }
 
-    pub(crate) fn scroll_terminal(
+    pub(super) fn action_terminal_tab(
         &mut self,
-        key: ConnectionKey,
-        pane_id: PaneId,
-        lines: i32,
+        _: &TerminalTab,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if lines != 0 {
-            self.clear_selection(cx);
-            self.terminal_command(
-                key,
-                pane_id,
-                TerminalCommand::Scroll(TerminalScroll::Lines(lines)),
-            );
+        self.send_terminal_action_key(TerminalKey::Tab, TerminalModifiers::default(), window, cx);
+    }
+
+    pub(super) fn action_terminal_back_tab(
+        &mut self,
+        _: &TerminalBackTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_terminal_action_key(
+            TerminalKey::BackTab,
+            TerminalModifiers {
+                shift: true,
+                ..TerminalModifiers::default()
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn send_terminal_action_key(
+        &mut self,
+        terminal_key: TerminalKey,
+        modifiers: TerminalModifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((key, pane_id)) = self.target_pane else {
+            cx.propagate();
+            return;
+        };
+        if !self.terminal_is_focused(key, pane_id, window, cx) {
+            cx.propagate();
+            return;
         }
+
+        self.clear_selection(cx);
+        self.terminal_command(
+            key,
+            pane_id,
+            TerminalCommand::Key {
+                key: terminal_key,
+                modifiers,
+            },
+        );
+    }
+
+    fn terminal_is_focused(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        self.panels
+            .get(&(key, pane_id))
+            .map(|panel| panel.read(cx).focus_handle.clone())
+            .is_some_and(|focus| focus.is_focused(window))
     }
 
     pub(super) fn key_down(
@@ -202,17 +408,15 @@ impl Condr {
             return;
         };
         let stroke = &event.keystroke;
+        if should_defer_to_character_input(event) {
+            return;
+        }
         if let Some(action) = fixed_shortcut(stroke) {
             window.dispatch_action(action, cx);
             cx.stop_propagation();
             return;
         }
-        let terminal_focused = self
-            .panels
-            .get(&(key, pane_id))
-            .map(|panel| panel.read(cx).focus_handle.clone())
-            .is_some_and(|focus| focus.is_focused(window));
-        if !terminal_focused {
+        if !self.terminal_is_focused(key, pane_id, window, cx) {
             return;
         }
         let modifiers = stroke.modifiers;
@@ -235,18 +439,6 @@ impl Condr {
             cx.stop_propagation();
             return;
         }
-        let scroll = match stroke.key.as_str() {
-            "pageup" if modifiers.shift => Some(TerminalScroll::PageUp),
-            "pagedown" if modifiers.shift => Some(TerminalScroll::PageDown),
-            _ => None,
-        };
-        if let Some(scroll) = scroll {
-            self.clear_selection(cx);
-            self.terminal_command(key, pane_id, TerminalCommand::Scroll(scroll));
-            cx.stop_propagation();
-            return;
-        }
-
         let key_code = match stroke.key.as_str() {
             "enter" => Some(TerminalKey::Enter),
             "tab" if modifiers.shift => Some(TerminalKey::BackTab),
@@ -296,6 +488,15 @@ impl Condr {
             cx.stop_propagation();
         }
     }
+}
+
+pub(super) fn should_defer_to_character_input(event: &KeyDownEvent) -> bool {
+    event.prefer_character_input
+        && event
+            .keystroke
+            .key_char
+            .as_deref()
+            .is_some_and(|text| !text.is_empty() && text.chars().all(|ch| !ch.is_control()))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
