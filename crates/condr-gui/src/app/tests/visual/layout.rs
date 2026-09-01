@@ -1413,6 +1413,25 @@ fn settings_dialog_renders_the_appearance_page_and_applies_a_theme_mode() {
         "the Settings button should open the Settings dialog"
     );
 
+    // A window smaller than the dialog's preferred size must still show all of it,
+    // chrome included: Dialog does not clamp itself to the viewport.
+    for viewport in [
+        size(px(1280.), px(720.)),
+        size(px(760.), px(600.)),
+        size(px(640.), px(400.)),
+    ] {
+        window.simulate_resize(viewport);
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+        let content = window
+            .debug_bounds("settings-content")
+            .expect("the Settings dialog should render its content");
+        assert!(
+            content.bottom() <= viewport.height && content.right() <= viewport.width,
+            "the Settings dialog overflowed a {viewport:?} window: {content:?}"
+        );
+    }
+
     window.update(|window, cx| {
         view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx));
         _ = window.draw(cx);

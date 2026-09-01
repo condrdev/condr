@@ -5,15 +5,7 @@ use super::*;
 
 /// macOS puts Settings on Cmd+`,`; the other platforms use Ctrl+`,`.
 fn is_settings_shortcut(stroke: &Keystroke) -> bool {
-    let modifiers = stroke.modifiers;
-    if stroke.key != "," || modifiers.alt || modifiers.shift || modifiers.function {
-        return false;
-    }
-    if cfg!(target_os = "macos") {
-        modifiers.platform && !modifiers.control
-    } else {
-        modifiers.control && !modifiers.platform
-    }
+    stroke.key == "," && stroke.modifiers == Modifiers::secondary_key()
 }
 
 pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {

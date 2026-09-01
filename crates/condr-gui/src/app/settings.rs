@@ -1,10 +1,13 @@
 use super::*;
 
-/// The dialog is sized in pixels because `Dialog::w` takes pixels and does not
-/// clamp itself to the viewport, so a small window would otherwise clip it.
-const SETTINGS_DIALOG_WIDTH: Pixels = px(860.);
-const SETTINGS_DIALOG_HEIGHT: Pixels = px(520.);
-const SETTINGS_DIALOG_MARGIN: Pixels = px(48.);
+// Sized in rems so the dialog zooms with the base font, then resolved to the pixels
+// `Dialog::w` takes. Dialog neither clamps itself to the viewport nor counts its own
+// chrome against a content height, so both are done here.
+const SETTINGS_DIALOG_WIDTH: Rems = rems(54.);
+const SETTINGS_DIALOG_HEIGHT: Rems = rems(32.5);
+const SETTINGS_DIALOG_MARGIN: Rems = rems(3.);
+/// The dialog's own title row, vertical padding and gap, which sit outside the content.
+const SETTINGS_DIALOG_CHROME: Rems = rems(4.);
 
 /// The GUI appearance preference. `System` follows the OS; the other two pin a mode.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -76,19 +79,18 @@ impl Condr {
             return;
         }
         self.appearance = appearance;
-        // Resolving System reads the Window's own appearance, which Linux reports more
-        // reliably than the app-global one. Condr renders the dialog layer itself, so
-        // notifying it repaints the whole window either way.
-        if self
-            .window_handle
-            .update(cx, |_, window, cx| {
-                apply_appearance(appearance, Some(window), cx)
-            })
-            .is_err()
-        {
-            apply_appearance(appearance, None, cx);
-        }
         self.save_appearance();
+        let handle = self.window_handle;
+        // Resolving System reads the Window's own appearance, which Linux reports more
+        // reliably than the app-global one. GPUI takes the Window out of its table for
+        // the duration of an update, so it is unreachable from here — this runs inside
+        // one — and the apply has to wait for the current update to finish. A closed
+        // window has nothing left to theme.
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                apply_appearance(appearance, Some(window), cx)
+            });
+        });
         cx.notify();
     }
 
@@ -98,16 +100,32 @@ impl Condr {
             let owner = owner.clone();
             window.open_dialog(cx, move |dialog, window, _| {
                 let owner = owner.clone();
+                let rem = window.rem_size();
                 let viewport = window.viewport_size();
-                let width = SETTINGS_DIALOG_WIDTH.min(viewport.width - SETTINGS_DIALOG_MARGIN);
-                let height = SETTINGS_DIALOG_HEIGHT.min(viewport.height - SETTINGS_DIALOG_MARGIN);
+                let margin = SETTINGS_DIALOG_MARGIN.to_pixels(rem);
+                let width = SETTINGS_DIALOG_WIDTH
+                    .to_pixels(rem)
+                    .min(viewport.width - margin - margin)
+                    .max(px(1.));
+                let height = SETTINGS_DIALOG_HEIGHT
+                    .to_pixels(rem)
+                    .min(viewport.height - margin - margin - SETTINGS_DIALOG_CHROME.to_pixels(rem))
+                    .max(px(1.));
                 dialog
                     .title("Settings")
-                    .w(width.max(px(1.)))
+                    .w(width)
+                    .margin_top(margin)
                     .content(move |content, _, _| {
-                        content
-                            .h(height.max(px(1.)))
-                            .child(Settings::new("condr-settings").page(appearance_page(&owner)))
+                        content.child(
+                            div()
+                                .id("condr-settings-content")
+                                .debug_selector(|| "settings-content".into())
+                                .w_full()
+                                .h(height)
+                                .child(
+                                    Settings::new("condr-settings").page(appearance_page(&owner)),
+                                ),
+                        )
                     })
             });
         });

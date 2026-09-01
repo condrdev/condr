@@ -98,7 +98,21 @@ fn write_client_value(path: &Path, key: &str, value: toml_edit::Item) -> io::Res
     let client = client
         .as_table_like_mut()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "client must be a table"))?;
-    client.insert(key, value);
+    // `insert` replaces the key as well as the value, taking the comments around both
+    // with it. Overwriting an existing scalar in place keeps them.
+    match (
+        client.get_mut(key).and_then(toml_edit::Item::as_value_mut),
+        value.as_value(),
+    ) {
+        (Some(existing), Some(replacement)) => {
+            let decor = existing.decor().clone();
+            *existing = replacement.clone();
+            *existing.decor_mut() = decor;
+        }
+        _ => {
+            client.insert(key, value);
+        }
+    }
     let text = document.to_string();
 
     if let Some(parent) = path.parent() {
@@ -229,7 +243,8 @@ mod tests {
 listen = '127.0.0.1:4242'   # keep the port in sync with the client
 
 [client]
-appearance = 'light'
+# Pinned so screenshots stay readable.
+appearance = 'light'   # was system
 
 # The Linux box in the corner.
 [[client.servers]]
@@ -257,7 +272,37 @@ address = '127.0.0.1:4242'
             saved.contains("listen = '127.0.0.1:4242'"),
             "an untouched value must keep its original quoting:\n{saved}"
         );
+        assert!(
+            saved.contains("# Pinned so screenshots stay readable."),
+            "a comment above the rewritten key must survive:\n{saved}"
+        );
+        assert!(
+            saved.contains("# was system"),
+            "a trailing comment on the rewritten key must survive:\n{saved}"
+        );
         assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
+        assert_eq!(load_servers(&path).unwrap().len(), 1);
+
+        // Rewriting the server list regenerates it from the live connections, so its own
+        // entries are reformatted, but nothing around them may be disturbed.
+        write_servers(
+            &path,
+            [SavedServer {
+                name: "Linux".into(),
+                address: "127.0.0.1:4242".parse().unwrap(),
+            }],
+        )
+        .unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.contains("# Which endpoint this Server listens on."),
+            "rewriting the server list must not disturb the rest of the file:\n{saved}"
+        );
+        assert!(
+            saved.contains("# Pinned so screenshots stay readable."),
+            "rewriting the server list must not disturb the other client keys:\n{saved}"
+        );
+        assert!(saved.contains("# was system"), "{saved}");
         assert_eq!(load_servers(&path).unwrap().len(), 1);
         fs::remove_dir_all(directory).unwrap();
     }
