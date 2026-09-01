@@ -894,8 +894,8 @@ impl Condr {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Settings2)
-                            .tooltip("Settings")
-                            .accessibility_label("Settings")
+                            .tooltip("Settings…")
+                            .accessibility_label("Settings…")
                             .on_click(move |_, window, cx| {
                                 let _ = settings_owner
                                     .update(cx, |this, cx| this.open_settings(window, cx));

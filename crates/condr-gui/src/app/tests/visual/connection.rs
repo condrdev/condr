@@ -649,3 +649,74 @@ fn server_events_wake_gui_without_polling_clock() {
         "server events should wake GPUI without a timer tick"
     );
 }
+
+#[test]
+fn chosen_appearance_persists_and_survives_gui_restart() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("client-appearance");
+    let config_path = directory.0.join("config.toml");
+    let (server, endpoint) = start_server();
+
+    {
+        let mut cx = TestAppContext::single();
+        cx.update(gpui_component::init);
+        let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+        let view_holder = Rc::new(RefCell::new(None));
+        let view_holder_for_window = view_holder.clone();
+        let (_root, window) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| {
+                Condr::new(
+                    endpoint.clone(),
+                    Ok(initial),
+                    Some(config_path.clone()),
+                    window,
+                    cx,
+                )
+            });
+            view_holder_for_window.borrow_mut().replace(view.clone());
+            Root::new(view, window, cx)
+        });
+        let view = view_holder.borrow_mut().take().unwrap();
+        assert!(!window.update(|_, cx| cx.theme().is_dark()));
+
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx));
+        });
+        assert!(window.update(|_, cx| cx.theme().is_dark()));
+        assert!(
+            window.read(|app| view.read(app).app_error.is_none()),
+            "saving the appearance must not report a config error"
+        );
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .unwrap()
+                .contains("appearance = \"dark\""),
+            "the appearance must reach the client config file"
+        );
+    }
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    assert!(
+        !cx.update(|cx| cx.theme().is_dark()),
+        "gpui_component::init starts every process in Light"
+    );
+    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let view_holder = Rc::new(RefCell::new(None));
+    let view_holder_for_window = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| Condr::new(endpoint, Ok(initial), Some(config_path), window, cx));
+        view_holder_for_window.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    assert!(
+        window.update(|_, cx| cx.theme().is_dark()),
+        "a restarted GUI must restore the saved appearance"
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).appearance),
+        Appearance::Dark
+    );
+    drop(server);
+}

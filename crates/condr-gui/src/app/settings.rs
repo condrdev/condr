@@ -1,7 +1,10 @@
 use super::*;
 
+/// The dialog is sized in pixels because `Dialog::w` takes pixels and does not
+/// clamp itself to the viewport, so a small window would otherwise clip it.
 const SETTINGS_DIALOG_WIDTH: Pixels = px(860.);
 const SETTINGS_DIALOG_HEIGHT: Pixels = px(520.);
+const SETTINGS_DIALOG_MARGIN: Pixels = px(48.);
 
 /// The GUI appearance preference. `System` follows the OS; the other two pin a mode.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -65,14 +68,17 @@ impl Condr {
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let owner = owner.clone();
-            window.open_dialog(cx, move |dialog, _, _| {
+            window.open_dialog(cx, move |dialog, window, _| {
                 let owner = owner.clone();
+                let viewport = window.viewport_size();
+                let width = SETTINGS_DIALOG_WIDTH.min(viewport.width - SETTINGS_DIALOG_MARGIN);
+                let height = SETTINGS_DIALOG_HEIGHT.min(viewport.height - SETTINGS_DIALOG_MARGIN);
                 dialog
                     .title("Settings")
-                    .w(SETTINGS_DIALOG_WIDTH)
+                    .w(width.max(px(1.)))
                     .content(move |content, _, _| {
                         content
-                            .h(SETTINGS_DIALOG_HEIGHT)
+                            .h(height.max(px(1.)))
                             .child(Settings::new("condr-settings").page(appearance_page(&owner)))
                     })
             });
@@ -91,7 +97,8 @@ fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
-                    "Theme",
+                    // The page is already named Appearance, and CONTEXT.md avoids "Theme".
+                    "Mode",
                     SettingField::dropdown(
                         options,
                         move |cx| {
