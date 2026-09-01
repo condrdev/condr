@@ -11,8 +11,8 @@ use condr_server::Endpoint;
 use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::{
-    ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, PreviousTab, ServerConnection,
-    SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown, SplitRight,
+    ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, OpenSettings, PreviousTab,
+    ServerConnection, SidebarGlyph, SidebarIconTone, SidebarStatusVisual, SplitDown, SplitRight,
     TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
     apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
@@ -608,6 +608,8 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
     assert!(action("alt-+").unwrap().as_any().is::<SplitRight>());
     assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
     assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
+    // Settings must open even while a terminal owns the keystroke.
+    assert!(action("ctrl-,").unwrap().as_any().is::<OpenSettings>());
     assert!(action("ctrl-p").is_none());
 }
 

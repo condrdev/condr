@@ -21,6 +21,7 @@ pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
         modifiers.shift,
         stroke.key.as_str(),
     ) {
+        (true, false, false, ",") => Some(Box::new(OpenSettings)),
         (true, false, true, "t") => Some(Box::new(NewTab)),
         (true, false, true, "w") => Some(Box::new(ClosePane)),
         (true, false, false, "tab") => Some(Box::new(NextTab)),
@@ -42,6 +43,7 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
         KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
         KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
+        KeyBinding::new("ctrl-,", OpenSettings, Some("Condr")),
         KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),

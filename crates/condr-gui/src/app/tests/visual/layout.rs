@@ -1391,3 +1391,48 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
         })
     }));
 }
+
+#[test]
+fn settings_dialog_renders_the_appearance_page_and_applies_a_theme_mode() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    let settings_button = window
+        .debug_bounds("open-settings")
+        .expect("the sidebar should render a Settings button");
+    window.simulate_click(settings_button.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.update(|window, cx| window.has_active_dialog(cx)),
+        "the Settings button should open the Settings dialog"
+    );
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx));
+        _ = window.draw(cx);
+    });
+    assert!(
+        window.update(|_, cx| cx.theme().is_dark()),
+        "choosing Dark should switch the theme mode"
+    );
+    assert!(
+        window.update(|window, cx| window.has_active_dialog(cx)),
+        "switching the theme must keep the Settings dialog open"
+    );
+
+    window.update(|window, cx| window.close_dialog(cx));
+    window.run_until_parked();
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.set_appearance(Appearance::Light, cx));
+        _ = window.draw(cx);
+    });
+    assert!(!window.update(|_, cx| cx.theme().is_dark()));
+}

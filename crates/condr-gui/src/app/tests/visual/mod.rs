@@ -23,12 +23,13 @@ use gpui::{
     Task, TestAppContext, VisualTestContext, point, px, size,
 };
 use gpui_component::dialog::Confirm;
-use gpui_component::{Root, WindowExt as _};
+use gpui_component::{ActiveTheme as _, Root, WindowExt as _};
 
 use super::super::{
-    CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE,
-    DockSurfaceKey, Incoming, LocalTerminalSelection, PendingWorkspaceSelection,
-    ReportedTerminalMouseMotion, ServerConnection, default_window_options,
+    Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
+    DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
+    PendingWorkspaceSelection, ReportedTerminalMouseMotion, ServerConnection,
+    default_window_options,
 };
 
 #[cfg(windows)]

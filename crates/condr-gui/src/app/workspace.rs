@@ -491,6 +491,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_reconnect))
             .on_action(cx.listener(Self::action_new_workspace))
             .on_action(cx.listener(Self::action_new_tab))
+            .on_action(cx.listener(Self::action_open_settings))
             .on_action(cx.listener(Self::action_rename_workspace))
             .on_action(cx.listener(Self::action_rename_tab))
             .on_action(cx.listener(Self::action_move_workspace_up))

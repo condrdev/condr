@@ -880,13 +880,27 @@ impl Condr {
             },
             items,
         );
+        let settings_owner = cx.weak_entity();
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
             .header(
                 SidebarHeader::new()
                     .child(Icon::new(IconName::SquareTerminal))
-                    .child(div().flex_1().font_semibold().child(condr_core::APP_NAME)),
+                    .child(div().flex_1().font_semibold().child(condr_core::APP_NAME))
+                    .child(
+                        Button::new("open-settings")
+                            .debug_selector(|| "open-settings".into())
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Settings2)
+                            .tooltip("Settings")
+                            .accessibility_label("Settings")
+                            .on_click(move |_, window, cx| {
+                                let _ = settings_owner
+                                    .update(cx, |this, cx| this.open_settings(window, cx));
+                            }),
+                    ),
             )
             .child(servers)
             .when(reconnect_visible, |sidebar| {

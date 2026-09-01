@@ -34,9 +34,11 @@ use gpui_component::dock::{
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
+use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
 use gpui_component::sidebar::{
     Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarItem,
 };
+use gpui_component::theme::{Theme, ThemeMode};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName, IconNamed,
@@ -53,6 +55,7 @@ mod dialogs;
 mod dock;
 mod events;
 mod navigation;
+mod settings;
 mod sidebar;
 mod startup;
 mod terminal_input;
@@ -60,6 +63,7 @@ mod workspace;
 
 use connection::*;
 use dock::*;
+use settings::{Appearance, apply_appearance};
 #[cfg(test)]
 use sidebar::*;
 #[cfg(test)]
@@ -78,6 +82,7 @@ actions!(
         ReconnectServer,
         NewWorkspace,
         NewTab,
+        OpenSettings,
         RenameWorkspace,
         RenameTab,
         MoveWorkspaceUp,
@@ -474,8 +479,10 @@ pub(crate) struct Condr {
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
     terminal_composition: Option<TerminalComposition>,
+    appearance: Appearance,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
+    _window_appearance_subscription: Subscription,
 }
 
 fn accepted_text_input(value: String, trim_value: bool) -> Option<String> {
@@ -512,6 +519,10 @@ impl Condr {
                 |error| (Vec::new(), Some(format!("Failed to load config: {error}"))),
                 |servers| (servers, None),
             );
+        let appearance = client_config_path
+            .as_deref()
+            .and_then(|path| config::load_appearance(path).ok())
+            .unwrap_or_default();
         let mut connections = vec![connection];
         for (index, server) in saved_servers.into_iter().enumerate() {
             connections.push(ServerConnection::new(
@@ -526,6 +537,13 @@ impl Condr {
             cx.observe_window_activation(window, |this, window, cx| {
                 this.sync_terminal_focus(window, cx);
             });
+        let window_appearance_subscription =
+            cx.observe_window_appearance(window, |this, window, cx| {
+                if this.appearance == Appearance::System {
+                    apply_appearance(this.appearance, Some(window), cx);
+                }
+            });
+        apply_appearance(appearance, Some(window), cx);
         let mut this = Self {
             client_config_path,
             connections,
@@ -553,8 +571,10 @@ impl Condr {
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
             terminal_composition: None,
+            appearance,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,
+            _window_appearance_subscription: window_appearance_subscription,
         };
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);

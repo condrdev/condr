@@ -30,6 +30,7 @@ action_handlers! {
         this.choose_workspace_directory_on(this.active_connection, window, cx);
     }
     action_new_tab(NewTab) |this, window, cx| { this.new_tab(window, cx); }
+    action_open_settings(OpenSettings) |this, window, cx| { this.open_settings(window, cx); }
     action_rename_workspace(RenameWorkspace) |this, window, cx| {
         this.prompt_rename_workspace(window, cx);
     }
