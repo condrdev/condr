@@ -63,7 +63,7 @@ mod workspace;
 
 use connection::*;
 use dock::*;
-use settings::{Appearance, apply_appearance};
+use settings::{Appearance, apply_appearance, sync_theme_with_system};
 #[cfg(test)]
 use sidebar::*;
 #[cfg(test)]
@@ -479,6 +479,7 @@ pub(crate) struct Condr {
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
     terminal_composition: Option<TerminalComposition>,
+    window_handle: AnyWindowHandle,
     appearance: Appearance,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
@@ -540,7 +541,7 @@ impl Condr {
         let window_appearance_subscription =
             cx.observe_window_appearance(window, |this, window, cx| {
                 if this.appearance == Appearance::System {
-                    apply_appearance(this.appearance, Some(window), cx);
+                    sync_theme_with_system(window, cx);
                 }
             });
         apply_appearance(appearance, Some(window), cx);
@@ -571,6 +572,7 @@ impl Condr {
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
             terminal_composition: None,
+            window_handle: window.window_handle(),
             appearance,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,

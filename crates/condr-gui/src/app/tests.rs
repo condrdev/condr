@@ -608,8 +608,14 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
     assert!(action("alt-+").unwrap().as_any().is::<SplitRight>());
     assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
     assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
-    // Settings must open even while a terminal owns the keystroke.
-    assert!(action("ctrl-,").unwrap().as_any().is::<OpenSettings>());
+    // Settings must open even while a terminal owns the keystroke, on the platform's
+    // own chord: Cmd+, on macOS, Ctrl+, elsewhere.
+    assert!(action("secondary-,").unwrap().as_any().is::<OpenSettings>());
+    if cfg!(target_os = "macos") {
+        assert!(action("ctrl-,").is_none());
+    } else {
+        assert!(action("cmd-,").is_none());
+    }
     assert!(action("ctrl-p").is_none());
 }
 

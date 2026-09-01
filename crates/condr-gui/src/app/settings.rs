@@ -43,13 +43,31 @@ impl Appearance {
     }
 }
 
-/// The single place that hands an Appearance to the theme.
+/// Applies a chosen Appearance: the native window-chrome override plus the theme.
+///
+/// Forcing an appearance stops the platform from tracking system light/dark changes,
+/// so `System` clears the override instead of setting one. A system appearance change
+/// goes through [`sync_theme_with_system`], which leaves the override alone.
 pub(super) fn apply_appearance(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) {
     match appearance {
-        Appearance::System => Theme::sync_system_appearance(window, cx),
-        Appearance::Light => Theme::change(ThemeMode::Light, window, cx),
-        Appearance::Dark => Theme::change(ThemeMode::Dark, window, cx),
+        Appearance::System => {
+            cx.set_window_appearance(None);
+            Theme::sync_system_appearance(window, cx);
+        }
+        Appearance::Light => {
+            cx.set_window_appearance(Some(WindowAppearance::Light));
+            Theme::change(ThemeMode::Light, window, cx);
+        }
+        Appearance::Dark => {
+            cx.set_window_appearance(Some(WindowAppearance::Dark));
+            Theme::change(ThemeMode::Dark, window, cx);
+        }
     }
+}
+
+/// Re-resolves `System` after the operating system changed its appearance.
+pub(super) fn sync_theme_with_system(window: &mut Window, cx: &mut App) {
+    Theme::sync_system_appearance(Some(window), cx);
 }
 
 impl Condr {
@@ -58,8 +76,18 @@ impl Condr {
             return;
         }
         self.appearance = appearance;
-        // Condr renders the dialog layer itself, so notifying it repaints the whole window.
-        apply_appearance(appearance, None, cx);
+        // Resolving System reads the Window's own appearance, which Linux reports more
+        // reliably than the app-global one. Condr renders the dialog layer itself, so
+        // notifying it repaints the whole window either way.
+        if self
+            .window_handle
+            .update(cx, |_, window, cx| {
+                apply_appearance(appearance, Some(window), cx)
+            })
+            .is_err()
+        {
+            apply_appearance(appearance, None, cx);
+        }
         self.save_appearance();
         cx.notify();
     }
