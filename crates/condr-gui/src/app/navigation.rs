@@ -523,45 +523,6 @@ impl Condr {
         self.activate_tab_on(self.active_connection, tabs[target_ix].id(), window, cx);
     }
 
-    pub(super) fn move_workspace(&mut self, step: isize) {
-        let Some(session) = self.active_session() else {
-            return;
-        };
-        let Some(workspace_id) = session.active_workspace_id() else {
-            return;
-        };
-        let Some(index) = session
-            .workspaces()
-            .iter()
-            .position(|workspace| workspace.id() == workspace_id)
-        else {
-            return;
-        };
-        let target = (index as isize + step).clamp(0, session.workspaces().len() as isize - 1);
-        self.send_layout(LayoutCommand::MoveWorkspace {
-            workspace_id,
-            target_index: target as u32,
-        });
-    }
-
-    pub(super) fn move_tab(&mut self, step: isize) {
-        let Some(session) = self.active_session() else {
-            return;
-        };
-        let Some(workspace) = session.active_workspace() else {
-            return;
-        };
-        let tab_id = workspace.active_tab().id();
-        let Some(index) = workspace.tabs().iter().position(|tab| tab.id() == tab_id) else {
-            return;
-        };
-        let target = (index as isize + step).clamp(0, workspace.tabs().len() as isize - 1);
-        self.send_layout(LayoutCommand::MoveTab {
-            tab_id,
-            target_index: target as u32,
-        });
-    }
-
     pub(super) fn split(&mut self, direction: SplitDirection) {
         if let Some(pane_id) = self.focused_pane() {
             self.send_layout(LayoutCommand::SplitPane { pane_id, direction });

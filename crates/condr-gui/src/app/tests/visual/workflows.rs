@@ -522,7 +522,7 @@ fn tcp_paths_use_server_side_text_dialogs() {
 }
 
 #[test]
-fn context_menus_reorder_the_target_items_without_changing_focus() {
+fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     let _serial_guard = acquire_visual_test_lock();
     let first_root = TestDirectory::new("reorder-first");
     let second_root = TestDirectory::new("reorder-second");
@@ -597,9 +597,15 @@ fn context_menus_reorder_the_target_items_without_changing_focus() {
     let workspace = window
         .debug_bounds(sidebar_workspace_selector(first_workspace))
         .expect("the non-active Workspace should render in the sidebar");
-    window.simulate_mouse_down(workspace.center(), MouseButton::Right, Modifiers::default());
+    let drop_target = window
+        .debug_bounds(sidebar_workspace_selector(second_workspace))
+        .expect("the drop target Workspace should render in the sidebar");
+    window.simulate_mouse_down(workspace.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(drop_target.center(), MouseButton::Left, Modifiers::default());
     window.run_until_parked();
-    window.simulate_keystrokes("down down enter");
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_move(drop_target.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(drop_target.center(), MouseButton::Left, Modifiers::default());
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
@@ -613,9 +619,15 @@ fn context_menus_reorder_the_target_items_without_changing_focus() {
     let tab = window
         .debug_bounds(tab_selector(first_tab))
         .expect("the non-active Tab should render");
-    window.simulate_mouse_down(tab.center(), MouseButton::Right, Modifiers::default());
+    let tab_target = window
+        .debug_bounds(tab_selector(active_tab))
+        .expect("the drop target Tab should render");
+    window.simulate_mouse_down(tab.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(tab_target.center(), MouseButton::Left, Modifiers::default());
     window.run_until_parked();
-    window.simulate_keystrokes("down down enter");
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_move(tab_target.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(tab_target.center(), MouseButton::Left, Modifiers::default());
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {

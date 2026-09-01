@@ -16,7 +16,7 @@ use super::{
     TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
     apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
-    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches,
+    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches, reorder_connection,
     should_defer_to_character_input, single_instance_lock_path, terminal_chunk_identity_matches,
     terminal_clipboard_shortcut,
 };
@@ -104,6 +104,36 @@ fn pane_id() -> condr_core::PaneId {
         .active_tab()
         .focused_pane()
         .id()
+}
+
+#[test]
+fn reordering_connections_moves_the_dragged_server_into_the_target_slot() {
+    let endpoint = || Endpoint::Tcp("127.0.0.1:4242".parse().unwrap());
+    let connection = |key: u64| ServerConnection::new(key, format!("server-{key}"), endpoint());
+    let keys = |connections: &Vec<ServerConnection>| {
+        connections.iter().map(|c| c.key).collect::<Vec<_>>()
+    };
+
+    let mut connections = vec![connection(1), connection(2), connection(3)];
+    assert!(reorder_connection(&mut connections, 3, 1));
+    assert_eq!(keys(&connections), [3, 1, 2]);
+
+    assert!(reorder_connection(&mut connections, 3, 2));
+    assert_eq!(keys(&connections), [1, 2, 3]);
+
+    assert!(
+        !reorder_connection(&mut connections, 2, 2),
+        "dropping a server on itself should not change the order"
+    );
+    assert!(
+        !reorder_connection(&mut connections, 9, 1),
+        "an unknown dragged key should be ignored"
+    );
+    assert!(
+        !reorder_connection(&mut connections, 1, 9),
+        "an unknown target key should be ignored"
+    );
+    assert_eq!(keys(&connections), [1, 2, 3]);
 }
 
 #[test]

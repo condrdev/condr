@@ -161,7 +161,44 @@ impl CondrSidebarIcon {
     }
 }
 
+#[derive(Clone)]
+pub(super) struct DraggedWorkspace {
+    pub(super) key: ConnectionKey,
+    pub(super) workspace_id: WorkspaceId,
+    name: SharedString,
+}
+
+#[derive(Clone)]
+pub(super) struct DraggedServer {
+    pub(super) key: ConnectionKey,
+    name: SharedString,
+}
+
+pub(super) struct DragPreview {
+    pub(super) icon: Option<IconName>,
+    pub(super) name: SharedString,
+}
+
+impl Render for DragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .px_2()
+            .py_1()
+            .gap_x_2()
+            .rounded(cx.theme().radius)
+            .bg(cx.theme().tokens.sidebar_accent)
+            .text_sm()
+            .text_color(cx.theme().sidebar_accent_foreground)
+            .when_some(self.icon.clone(), |this, icon| {
+                this.child(Icon::new(icon).size_4())
+            })
+            .child(self.name.clone())
+    }
+}
+
 type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type SidebarDropHandler = Rc<dyn Fn(&DraggedWorkspace, &mut Window, &mut App)>;
+type SidebarServerDropHandler = Rc<dyn Fn(&DraggedServer, &mut Window, &mut App)>;
 type SidebarSuffixBuilder = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 type SidebarContextMenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut App) -> PopupMenu>;
 
@@ -181,6 +218,8 @@ pub(super) struct CondrSidebarTreeItem {
     suffix: Option<SidebarSuffixBuilder>,
     disabled: bool,
     context_menu: Option<SidebarContextMenuBuilder>,
+    drag: Option<DraggedWorkspace>,
+    on_drop: Option<SidebarDropHandler>,
 }
 
 impl FluentBuilder for CondrSidebarTreeItem {}
@@ -207,7 +246,22 @@ impl CondrSidebarTreeItem {
             suffix: None,
             disabled: false,
             context_menu: None,
+            drag: None,
+            on_drop: None,
         }
+    }
+
+    pub(super) fn draggable(mut self, drag: DraggedWorkspace) -> Self {
+        self.drag = Some(drag);
+        self
+    }
+
+    pub(super) fn on_drop(
+        mut self,
+        handler: impl Fn(&DraggedWorkspace, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_drop = Some(Rc::new(handler));
+        self
     }
 
     pub(super) fn icon(mut self, icon: CondrSidebarIcon) -> Self {
@@ -288,6 +342,8 @@ impl CondrSidebarTreeItem {
             suffix,
             disabled,
             context_menu,
+            drag,
+            on_drop,
         } = self;
         let is_submenu = !children.is_empty();
         let open_state = reserve_toggle_space.then(|| {
@@ -378,6 +434,24 @@ impl CondrSidebarTreeItem {
             })
             .when(!disabled, |this| {
                 this.on_click(move |event, window, cx| handler(event, window, cx))
+            })
+            .when_some(drag, |this, drag| {
+                let name = drag.name.clone();
+                this.on_drag(drag, move |_, _, _, cx| {
+                    cx.stop_propagation();
+                    cx.new(|_| DragPreview {
+                        icon: Some(IconName::Folder),
+                        name: name.clone(),
+                    })
+                })
+            })
+            .when_some(on_drop, |this, on_drop| {
+                this.drag_over::<DraggedWorkspace>(|style, _, _, cx| {
+                    style.bg(cx.theme().sidebar_accent.opacity(0.8))
+                })
+                .on_drop(move |dragged: &DraggedWorkspace, window, cx| {
+                    on_drop(dragged, window, cx)
+                })
             });
         let row = if let Some(context_menu) = context_menu {
             row.context_menu(move |menu, window, cx| context_menu(menu, window, cx))
@@ -415,6 +489,8 @@ pub(super) struct CondrSidebarSection {
     active: bool,
     on_click: Option<SidebarClickHandler>,
     context_menu: Option<SidebarContextMenuBuilder>,
+    drag: Option<DraggedServer>,
+    on_drop: Option<SidebarServerDropHandler>,
 }
 
 impl CondrSidebarSection {
@@ -433,7 +509,22 @@ impl CondrSidebarSection {
             active: false,
             on_click: None,
             context_menu: None,
+            drag: None,
+            on_drop: None,
         }
+    }
+
+    pub(super) fn draggable(mut self, drag: DraggedServer) -> Self {
+        self.drag = Some(drag);
+        self
+    }
+
+    pub(super) fn on_drop(
+        mut self,
+        handler: impl Fn(&DraggedServer, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_drop = Some(Rc::new(handler));
+        self
     }
 
     pub(super) fn active(mut self, active: bool) -> Self {
@@ -508,6 +599,24 @@ impl SidebarItem for CondrSidebarSection {
             .child((self.action)(window, cx))
             .when_some(self.on_click, |this, handler| {
                 this.on_click(move |event, window, cx| handler(event, window, cx))
+            })
+            .when_some(self.drag, |this, drag| {
+                let name = drag.name.clone();
+                this.on_drag(drag, move |_, _, _, cx| {
+                    cx.stop_propagation();
+                    cx.new(|_| DragPreview {
+                        icon: None,
+                        name: name.clone(),
+                    })
+                })
+            })
+            .when_some(self.on_drop, |this, on_drop| {
+                this.drag_over::<DraggedServer>(|style, _, _, cx| {
+                    style.bg(cx.theme().sidebar_accent.opacity(0.8))
+                })
+                .on_drop(move |dragged: &DraggedServer, window, cx| {
+                    on_drop(dragged, window, cx)
+                })
             });
         let heading = if let Some(context_menu) = self.context_menu {
             heading
@@ -524,7 +633,36 @@ impl SidebarItem for CondrSidebarSection {
     }
 }
 
+/// Moves the dragged connection into the target connection's slot. Returns
+/// whether the order changed.
+pub(super) fn reorder_connection(
+    connections: &mut Vec<ServerConnection>,
+    dragged: ConnectionKey,
+    target: ConnectionKey,
+) -> bool {
+    let Some(from) = connections.iter().position(|c| c.key == dragged) else {
+        return false;
+    };
+    let Some(to) = connections.iter().position(|c| c.key == target) else {
+        return false;
+    };
+    if from == to {
+        return false;
+    }
+    let connection = connections.remove(from);
+    connections.insert(to, connection);
+    true
+}
+
 impl Condr {
+    fn move_server(&mut self, dragged: ConnectionKey, target: ConnectionKey) {
+        if reorder_connection(&mut self.connections, dragged, target) {
+            // ponytail: the saved order only covers TCP servers, so the local
+            // server always loads first again after a restart.
+            self.save_servers();
+        }
+    }
+
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = cx.weak_entity();
         let items = self.connections.iter().map(|connection| {
@@ -535,7 +673,6 @@ impl Condr {
                 .ok()
                 .map(|session| {
                     let active_workspace = self.presented_workspace_id(key, &session);
-                    let workspace_count = session.workspaces().len();
                     session
                         .workspaces()
                         .iter()
@@ -623,13 +760,35 @@ impl Condr {
                             .default_open(active_server && active_workspace == Some(workspace_id))
                             .children(agents)
                             .disable(!connected)
+                            .when(connected, |item| {
+                                let drop_owner = owner.clone();
+                                item.draggable(DraggedWorkspace {
+                                    key,
+                                    workspace_id,
+                                    name: workspace_name.clone().into(),
+                                })
+                                .on_drop(move |dragged, _, cx| {
+                                    if dragged.key != key
+                                        || dragged.workspace_id == workspace_id
+                                    {
+                                        return;
+                                    }
+                                    let _ = drop_owner.update(cx, |this, _| {
+                                        this.send_layout_to(
+                                            key,
+                                            LayoutCommand::MoveWorkspace {
+                                                workspace_id: dragged.workspace_id,
+                                                target_index: workspace_index as u32,
+                                            },
+                                        );
+                                    });
+                                })
+                            })
                             .context_menu(move |menu, _, _| {
                                 let rename_owner = menu_owner.clone();
                                 let create_owner = menu_owner.clone();
                                 let open_owner = menu_owner.clone();
                                 let remove_owner = menu_owner.clone();
-                                let move_up_owner = menu_owner.clone();
-                                let move_down_owner = menu_owner.clone();
                                 let close_owner = menu_owner.clone();
                                 let rename_name = workspace_name.clone();
                                 let create_name = workspace_name.clone();
@@ -708,44 +867,6 @@ impl Condr {
                                 } else {
                                     menu
                                 };
-                                let menu = menu
-                                    .separator()
-                                    .item(
-                                        PopupMenuItem::new("Move Up")
-                                            .disabled(!connected || workspace_index == 0)
-                                            .on_click(move |_, _, cx| {
-                                                let _ = move_up_owner.update(cx, |this, _| {
-                                                    this.send_layout_to(
-                                                        key,
-                                                        LayoutCommand::MoveWorkspace {
-                                                            workspace_id,
-                                                            target_index: workspace_index
-                                                                .saturating_sub(1)
-                                                                as u32,
-                                                        },
-                                                    );
-                                                });
-                                            }),
-                                    )
-                                    .item(
-                                        PopupMenuItem::new("Move Down")
-                                            .disabled(
-                                                !connected
-                                                    || workspace_index + 1 >= workspace_count,
-                                            )
-                                            .on_click(move |_, _, cx| {
-                                                let _ = move_down_owner.update(cx, |this, _| {
-                                                    this.send_layout_to(
-                                                        key,
-                                                        LayoutCommand::MoveWorkspace {
-                                                            workspace_id,
-                                                            target_index: (workspace_index + 1)
-                                                                as u32,
-                                                        },
-                                                    );
-                                                });
-                                            }),
-                                    );
                                 menu.separator().item(
                                     PopupMenuItem::new("Close Workspace")
                                         .disabled(!connected)
@@ -813,6 +934,22 @@ impl Condr {
                 workspaces,
             )
             .active(active_server && !descendant_selected)
+            .draggable(DraggedServer {
+                key,
+                name: connection.label.clone().into(),
+            })
+            .on_drop({
+                let drop_owner = owner.clone();
+                move |dragged, _, cx| {
+                    if dragged.key == key {
+                        return;
+                    }
+                    let _ = drop_owner.update(cx, |this, cx| {
+                        this.move_server(dragged.key, key);
+                        cx.notify();
+                    });
+                }
+            })
             .context_menu(move |menu, _, _| {
                 let rename_owner = server_menu_owner.clone();
                 let connection_owner = server_menu_owner.clone();

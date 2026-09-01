@@ -1,4 +1,13 @@
+use super::sidebar::DragPreview;
 use super::*;
+
+#[derive(Clone)]
+struct DraggedTab {
+    key: ConnectionKey,
+    workspace_id: WorkspaceId,
+    tab_id: TabId,
+    name: SharedString,
+}
 
 impl Condr {
     pub(super) fn render_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -59,7 +68,6 @@ impl Condr {
             .flatten()
             .map(|surface| surface.area.clone());
         let closes_workspace = workspace.tabs().len() == 1;
-        let tab_count = workspace.tabs().len();
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
@@ -67,6 +75,43 @@ impl Condr {
             let menu_owner = cx.weak_entity();
             h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
+                .when(can_mutate, |this| {
+                    let drop_owner = cx.weak_entity();
+                    this.on_drag(
+                        DraggedTab {
+                            key,
+                            workspace_id,
+                            tab_id,
+                            name: tab.name().to_owned().into(),
+                        },
+                        move |drag, _, _, cx| {
+                            cx.stop_propagation();
+                            let name = drag.name.clone();
+                            cx.new(|_| DragPreview { icon: None, name })
+                        },
+                    )
+                    .drag_over::<DraggedTab>(|style, _, _, cx| {
+                        style.bg(cx.theme().accent.opacity(0.8))
+                    })
+                    .on_drop(move |dragged: &DraggedTab, _, cx| {
+                        if dragged.key != key
+                            || dragged.workspace_id != workspace_id
+                            || dragged.tab_id == tab_id
+                        {
+                            return;
+                        }
+                        let dragged_tab = dragged.tab_id;
+                        let _ = drop_owner.update(cx, |this, _| {
+                            this.send_layout_to(
+                                key,
+                                LayoutCommand::MoveTab {
+                                    tab_id: dragged_tab,
+                                    target_index: tab_index as u32,
+                                },
+                            );
+                        });
+                    })
+                })
                 .child(
                     Button::new(("tab", tab_id.as_u64()))
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
@@ -83,8 +128,6 @@ impl Condr {
                 )
                 .context_menu(move |menu, _, _| {
                     let rename_owner = menu_owner.clone();
-                    let move_left_owner = menu_owner.clone();
-                    let move_right_owner = menu_owner.clone();
                     let close_owner = menu_owner.clone();
                     let rename_name = tab_name.clone();
                     menu.item(
@@ -94,37 +137,6 @@ impl Condr {
                                 let name = rename_name.clone();
                                 let _ = rename_owner.update(cx, |this, cx| {
                                     this.prompt_rename_tab_on(key, tab_id, name, window, cx)
-                                });
-                            }),
-                    )
-                    .separator()
-                    .item(
-                        PopupMenuItem::new("Move Left")
-                            .disabled(!can_mutate || tab_index == 0)
-                            .on_click(move |_, _, cx| {
-                                let _ = move_left_owner.update(cx, |this, _| {
-                                    this.send_layout_to(
-                                        key,
-                                        LayoutCommand::MoveTab {
-                                            tab_id,
-                                            target_index: tab_index.saturating_sub(1) as u32,
-                                        },
-                                    );
-                                });
-                            }),
-                    )
-                    .item(
-                        PopupMenuItem::new("Move Right")
-                            .disabled(!can_mutate || tab_index + 1 >= tab_count)
-                            .on_click(move |_, _, cx| {
-                                let _ = move_right_owner.update(cx, |this, _| {
-                                    this.send_layout_to(
-                                        key,
-                                        LayoutCommand::MoveTab {
-                                            tab_id,
-                                            target_index: (tab_index + 1) as u32,
-                                        },
-                                    );
                                 });
                             }),
                     )
@@ -494,10 +506,6 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_open_settings))
             .on_action(cx.listener(Self::action_rename_workspace))
             .on_action(cx.listener(Self::action_rename_tab))
-            .on_action(cx.listener(Self::action_move_workspace_up))
-            .on_action(cx.listener(Self::action_move_workspace_down))
-            .on_action(cx.listener(Self::action_move_tab_left))
-            .on_action(cx.listener(Self::action_move_tab_right))
             .on_action(cx.listener(Self::action_close_pane))
             .on_action(cx.listener(Self::action_close_tab))
             .on_action(cx.listener(Self::action_close_workspace))

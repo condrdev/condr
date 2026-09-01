@@ -35,10 +35,6 @@ action_handlers! {
         this.prompt_rename_workspace(window, cx);
     }
     action_rename_tab(RenameTab) |this, window, cx| { this.prompt_rename_tab(window, cx); }
-    action_move_workspace_up(MoveWorkspaceUp) |this, window, cx| { this.move_workspace(-1); }
-    action_move_workspace_down(MoveWorkspaceDown) |this, window, cx| { this.move_workspace(1); }
-    action_move_tab_left(MoveTabLeft) |this, window, cx| { this.move_tab(-1); }
-    action_move_tab_right(MoveTabRight) |this, window, cx| { this.move_tab(1); }
     action_close_pane(ClosePane) |this, window, cx| { this.close_pane(window, cx); }
     action_close_tab(CloseTab) |this, window, cx| { this.close_tab(window, cx); }
     action_close_workspace(CloseWorkspace) |this, window, cx| {
