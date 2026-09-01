@@ -9,10 +9,17 @@ Guidance for coding agents working in this repository.
 核心定位:**Orca 的易上手 + herdr 的架构(嵌入原生 CLI 作为 agent 后端)− 两者的缺点**。
 
 - herdr:架构对(直接嵌原生 agent CLI),但纯 TUI 上手门槛高
-- paseo:需要自己维护对话 GUI,负担重
+- [paseo](https://github.com/getpaseo/paseo):需要自己维护对话 GUI,负担重
 - orca:webview 实现,卡、重
 
 Condr 用原生 GUI 解决:跨端、轻量、快。
+
+### 参考仓库
+
+- `../herdr`:Herdr 的本地 checkout,用于参考 Server/Client、Terminal、Agent 编排和跨平台生命周期实现。
+- `../paseo`:Paseo 的本地 checkout,用于参考产品交互、UI/UX 等 GUI 设计。
+- 两者都是独立的只读参考仓库,不是 Condr workspace member 或依赖。研究时优先读取本地 checkout,并在产出的研究文档中记录 `git -C ../<repo> rev-parse HEAD` 的精确 commit;只有任务需要最新上游时才执行 `git -C ../<repo> pull --ff-only`。
+- 引用或移植实现前按文件核对许可证和 third-party notice;不能仅依据仓库顶层许可证判断代码兼容性。
 
 ## 技术栈
 
