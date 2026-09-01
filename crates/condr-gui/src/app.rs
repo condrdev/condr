@@ -66,10 +66,10 @@ use dock::*;
 use settings::{Appearance, apply_appearance, sync_theme_with_system};
 #[cfg(test)]
 use sidebar::*;
-#[cfg(test)]
-use startup::connect_to_server_with;
 pub(crate) use startup::run;
 use startup::{connect_to_server, fixed_shortcut};
+#[cfg(test)]
+use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
 #[cfg(test)]
 use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,

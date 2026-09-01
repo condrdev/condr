@@ -20,9 +20,19 @@ Condr 按数据用途遵循 XDG 和各平台目录规范：
 | Managed Worktree | `$XDG_DATA_HOME/condr/worktrees`，默认 `~/.local/share/condr/worktrees` | `%LOCALAPPDATA%\condr\worktrees` | `~/Library/Application Support/condr/worktrees` |
 | Snapshot | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
 | Log | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Logs/condr` |
-| 本地 endpoint | `$XDG_RUNTIME_DIR/condr` | `%LOCALAPPDATA%\condr\runtime` | `$TMPDIR/condr` |
+| 本地 endpoint 与 GUI 实例锁 | `$XDG_RUNTIME_DIR/condr` | `%LOCALAPPDATA%\condr\runtime` | `$TMPDIR/condr` |
 
 Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下的 `runtime/`。`CONDR_SOCKET_PATH` 和 `CONDR_SNAPSHOT_PATH` 仍可覆盖 Server 的默认路径。Development Build 是普通归档，不会修改 PATH；全局命令注册需要单独的显式安装步骤。
+
+### `config.toml` 可以手工编辑
+
+`config.toml` 由 Client 和 Server 共享，允许手工编辑。GUI 写回时只改动它自己那个键，注释、键顺序和引号风格都会保留。
+
+### GUI 是单实例
+
+GUI 启动时在 runtime 目录取一把 `condr-gui.lock` 独占文件锁；锁已被占用时第二个实例打印一行说明后直接退出，不会打开窗口。这条约束的存在理由是 Client 独占 `config.toml` 的读-改-写：两个 GUI 并发保存会互相丢键。锁在进程退出时释放，包括崩溃。
+
+Server 不受此限制 —— 每个 endpoint 本来就由 socket/named pipe 的绑定天然互斥。
 
 发布一个已经测试并推送到 `main` 的 commit：
 

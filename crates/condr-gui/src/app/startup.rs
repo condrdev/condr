@@ -1,3 +1,6 @@
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io;
+
 use super::*;
 
 /// macOS puts Settings on Cmd+`,`; the other platforms use Ctrl+`,`.
@@ -109,7 +112,54 @@ pub(super) fn connect_to_server(
     })
 }
 
+pub(super) fn single_instance_lock_path() -> Option<PathBuf> {
+    condr_core::runtime_directory().map(|root| root.join("condr-gui.lock"))
+}
+
+/// Takes the GUI's single-instance lock, which the caller must hold for the whole run.
+///
+/// The Client owns `config.toml` and rewrites it in place, so a second GUI would race
+/// the first and drop whichever key it had not read. The lock is released when the
+/// process exits, including on a crash.
+pub(super) fn acquire_single_instance_lock() -> io::Result<File> {
+    let path = single_instance_lock_path().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no platform runtime directory for the single-instance lock",
+        )
+    })?;
+    lock_exclusively(&path)
+}
+
+// `Path` alone would resolve to `gpui::Path`.
+pub(super) fn lock_exclusively(path: &std::path::Path) -> io::Result<File> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock().map_err(|error| match error {
+        TryLockError::WouldBlock => io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "another Condr GUI is already running",
+        ),
+        TryLockError::Error(error) => error,
+    })?;
+    Ok(file)
+}
+
 pub(crate) fn run() {
+    // Held until `run` returns, which is when the GUI exits.
+    let _instance_lock = match acquire_single_instance_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("Condr is already running, or its lock is unavailable: {error}");
+            return;
+        }
+    };
     let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr-gui");
     let config_path = config::default_path();
     let app = gpui_platform::application().with_assets(CondrAssets::new());

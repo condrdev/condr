@@ -4,14 +4,14 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::{Appearance, Condr, Endpoint};
 
 const APPEARANCE_KEY: &str = "appearance";
 const SERVERS_KEY: &str = "servers";
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub(super) struct SavedServer {
     pub name: String,
     pub address: SocketAddr,
@@ -70,28 +70,36 @@ impl Condr {
             return;
         };
         let appearance = self.appearance;
-        if let Err(error) = write_client_value(path, APPEARANCE_KEY, appearance.as_str().into()) {
+        if let Err(error) =
+            write_client_value(path, APPEARANCE_KEY, toml_edit::value(appearance.as_str()))
+        {
             self.app_error = Some(format!("Failed to save config: {error}"));
         }
     }
 }
 
 fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) -> io::Result<()> {
-    let servers =
-        toml::Value::try_from(servers.into_iter().collect::<Vec<_>>()).map_err(invalid_data)?;
-    write_client_value(path, SERVERS_KEY, servers)
+    let mut saved = toml_edit::ArrayOfTables::new();
+    for server in servers {
+        let mut table = toml_edit::Table::new();
+        table["name"] = toml_edit::value(server.name);
+        table["address"] = toml_edit::value(server.address.to_string());
+        saved.push(table);
+    }
+    write_client_value(path, SERVERS_KEY, toml_edit::Item::ArrayOfTables(saved))
 }
 
-/// Rewrites one `[client]` key, preserving every other key in the shared config file.
-fn write_client_value(path: &Path, key: &str, value: toml::Value) -> io::Result<()> {
-    let mut root = read_root(path)?;
-    let client = root
-        .entry("client")
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-        .as_table_mut()
+/// Rewrites one `[client]` key. The file is shared with the Server and meant to be
+/// hand-editable, so this edits the parsed document in place and keeps every other
+/// key, its comments and its formatting.
+fn write_client_value(path: &Path, key: &str, value: toml_edit::Item) -> io::Result<()> {
+    let mut document = read_document(path)?;
+    let client = document["client"].or_insert(toml_edit::table());
+    let client = client
+        .as_table_like_mut()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "client must be a table"))?;
-    client.insert(key.into(), value);
-    let text = toml::to_string_pretty(&root).map_err(invalid_data)?;
+    client.insert(key, value);
+    let text = document.to_string();
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -108,10 +116,26 @@ fn write_client_value(path: &Path, key: &str, value: toml::Value) -> io::Result<
         .map_err(io::Error::from)
 }
 
+/// Reads for the typed load path. `toml` deserializes a hand-edited value into
+/// `SavedServer` and reports a useful error; `toml_edit` is only for writing back.
 fn read_root(path: &Path) -> io::Result<toml::Table> {
+    match read_config_text(path)? {
+        Some(text) => toml::from_str(&text).map_err(invalid_data),
+        None => Ok(toml::Table::new()),
+    }
+}
+
+fn read_document(path: &Path) -> io::Result<toml_edit::DocumentMut> {
+    match read_config_text(path)? {
+        Some(text) => text.parse().map_err(invalid_data),
+        None => Ok(toml_edit::DocumentMut::new()),
+    }
+}
+
+fn read_config_text(path: &Path) -> io::Result<Option<String>> {
     match fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(invalid_data),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(toml::Table::new()),
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
 }
@@ -185,8 +209,56 @@ mod tests {
         let root = read_root(&path).unwrap();
         assert_eq!(root["server"]["listen"].as_str(), Some("127.0.0.1:4242"));
 
-        write_client_value(&path, APPEARANCE_KEY, "solarized".into()).unwrap();
+        write_client_value(&path, APPEARANCE_KEY, toml_edit::value("solarized")).unwrap();
         assert_eq!(load_appearance(&path).unwrap(), Appearance::System);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn saving_keeps_a_hand_edited_config_readable() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-handedit-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+        let original = "\
+# Which endpoint this Server listens on.
+[server]
+listen = '127.0.0.1:4242'   # keep the port in sync with the client
+
+[client]
+appearance = 'light'
+
+# The Linux box in the corner.
+[[client.servers]]
+name = 'Linux'
+address = '127.0.0.1:4242'
+";
+        fs::write(&path, original).unwrap();
+
+        write_client_value(&path, APPEARANCE_KEY, toml_edit::value("dark")).unwrap();
+
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.contains("# Which endpoint this Server listens on."),
+            "a hand-written comment must survive a save:\n{saved}"
+        );
+        assert!(
+            saved.contains("# keep the port in sync with the client"),
+            "a trailing comment must survive a save:\n{saved}"
+        );
+        assert!(
+            saved.contains("# The Linux box in the corner."),
+            "a comment on a rewritten section must survive a save:\n{saved}"
+        );
+        assert!(
+            saved.contains("listen = '127.0.0.1:4242'"),
+            "an untouched value must keep its original quoting:\n{saved}"
+        );
+        assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
+        assert_eq!(load_servers(&path).unwrap().len(), 1);
         fs::remove_dir_all(directory).unwrap();
     }
 }

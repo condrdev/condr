@@ -21,7 +21,7 @@ The window surface shown when a Session contains no Workspaces. It offers an ent
 _Avoid_: Empty Workspace, empty Pane
 
 **Settings**:
-A Client-owned dialog presenting this Client's GUI preferences as pages. Its values live in the Client's `config.toml`, apply to every Server the Client connects to, and never reach a Server or a Session Snapshot.
+A Client-owned dialog presenting this Client's GUI preferences as pages. Its values live in the Client's `config.toml`, apply to every Server the Client connects to, and never reach a Server or a Session Snapshot. That file is hand-editable: a save rewrites one key and leaves the rest of the document, comments included, as written. Only one Client runs at a time, so no second Client can race that rewrite.
 _Avoid_: Preferences, options, config
 
 **Appearance**:

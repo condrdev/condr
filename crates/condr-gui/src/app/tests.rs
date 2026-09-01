@@ -16,8 +16,9 @@ use super::{
     TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
     apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
     connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
-    merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
-    should_defer_to_character_input, terminal_chunk_identity_matches, terminal_clipboard_shortcut,
+    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches, server_sidebar_status,
+    should_defer_to_character_input, single_instance_lock_path, terminal_chunk_identity_matches,
+    terminal_clipboard_shortcut,
 };
 
 fn terminal_cell(text: &str) -> TerminalCell {
@@ -797,3 +798,29 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
 
 #[cfg(feature = "test-support")]
 mod visual;
+
+#[test]
+fn single_instance_lock_admits_one_holder_at_a_time() {
+    let directory = std::env::temp_dir().join(format!(
+        "condr-instance-lock-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let path = directory.join("condr-gui.lock");
+
+    let held = lock_exclusively(&path).expect("the first GUI takes the lock");
+    let refused = lock_exclusively(&path).expect_err("a second GUI must be refused");
+    assert_eq!(refused.kind(), std::io::ErrorKind::WouldBlock);
+
+    drop(held);
+    lock_exclusively(&path).expect("the lock is free once the first GUI exits");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn single_instance_lock_lives_in_the_platform_runtime_directory() {
+    assert_eq!(
+        single_instance_lock_path(),
+        condr_core::runtime_directory().map(|root| root.join("condr-gui.lock"))
+    );
+}
