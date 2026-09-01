@@ -64,6 +64,8 @@ mod workspace;
 use connection::*;
 use dock::*;
 use settings::{Appearance, apply_appearance, sync_theme_with_system};
+#[cfg(all(test, feature = "test-support"))]
+use settings::{select_appearance, selected_appearance};
 #[cfg(test)]
 use sidebar::*;
 pub(crate) use startup::run;

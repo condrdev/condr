@@ -26,7 +26,9 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 ### `config.toml` 可以手工编辑
 
-`config.toml` 由 Client 和 Server 共享，允许手工编辑。GUI 写回时只改动它自己那个键，注释、键顺序和引号风格都会保留。
+`config.toml` 由 Client 和 Server 共享，允许手工编辑。GUI 写回时只改动它自己那个键，文件其余部分——注释、键顺序、空行和引号风格——原样保留，包括被改键上方和行尾的注释。
+
+被改动的那个值本身会按标准格式重写（`appearance = 'dark'` 变成 `appearance = "dark"`）。Server 列表是从当前连接整体重新生成的，所以 `[[client.servers]]` 各条目内部的手写格式和注释不保留；其外的内容不受影响。
 
 ### GUI 是单实例
 

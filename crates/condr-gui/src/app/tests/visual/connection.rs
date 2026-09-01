@@ -720,3 +720,61 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
     );
     drop(server);
 }
+
+#[test]
+fn the_mode_dropdown_reads_and_writes_the_appearance() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("client-dropdown");
+    let config_path = directory.0.join("config.toml");
+    let (server, endpoint) = start_server();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let view_holder = Rc::new(RefCell::new(None));
+    let view_holder_for_window = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            Condr::new(
+                endpoint.clone(),
+                Ok(initial),
+                Some(config_path.clone()),
+                window,
+                cx,
+            )
+        });
+        view_holder_for_window.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    let owner = view.downgrade();
+
+    assert_eq!(
+        window.read(|app| selected_appearance(&owner, app)),
+        "system",
+        "the dropdown starts on the stored preference"
+    );
+
+    window.update(|_, cx| select_appearance(&owner, "dark", cx));
+    assert_eq!(
+        window.read(|app| selected_appearance(&owner, app)),
+        "dark",
+        "choosing an option must move the dropdown to it"
+    );
+    assert!(window.update(|_, cx| cx.theme().is_dark()));
+    assert!(
+        std::fs::read_to_string(&config_path)
+            .unwrap()
+            .contains("appearance = \"dark\""),
+        "choosing an option must reach the client config file"
+    );
+
+    // The dropdown hands back whatever string its option carried, so an option that no
+    // longer matches an Appearance must land on System rather than on nothing.
+    window.update(|_, cx| select_appearance(&owner, "solarized", cx));
+    assert_eq!(
+        window.read(|app| selected_appearance(&owner, app)),
+        "system"
+    );
+    drop(server);
+}

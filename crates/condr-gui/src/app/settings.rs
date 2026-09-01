@@ -1,13 +1,12 @@
 use super::*;
 
 // Sized in rems so the dialog zooms with the base font, then resolved to the pixels
-// `Dialog::w` takes. Dialog neither clamps itself to the viewport nor counts its own
-// chrome against a content height, so both are done here.
+// Dialog takes. These bound the whole dialog, not its content: Dialog does not clamp
+// itself to the viewport, but it does give its content whatever it has left, so the
+// content never has to know what the title and padding cost.
 const SETTINGS_DIALOG_WIDTH: Rems = rems(54.);
-const SETTINGS_DIALOG_HEIGHT: Rems = rems(32.5);
+const SETTINGS_DIALOG_HEIGHT: Rems = rems(34.);
 const SETTINGS_DIALOG_MARGIN: Rems = rems(3.);
-/// The dialog's own title row, vertical padding and gap, which sit outside the content.
-const SETTINGS_DIALOG_CHROME: Rems = rems(4.);
 
 /// The GUI appearance preference. `System` follows the OS; the other two pin a mode.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -85,13 +84,13 @@ impl Condr {
         // reliably than the app-global one. GPUI takes the Window out of its table for
         // the duration of an update, so it is unreachable from here — this runs inside
         // one — and the apply has to wait for the current update to finish. A closed
-        // window has nothing left to theme.
+        // window has nothing left to theme. Applying refreshes the Window, which
+        // repaints the dialog along with everything else, so there is nothing to notify.
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 apply_appearance(appearance, Some(window), cx)
             });
         });
-        cx.notify();
     }
 
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -109,19 +108,19 @@ impl Condr {
                     .max(px(1.));
                 let height = SETTINGS_DIALOG_HEIGHT
                     .to_pixels(rem)
-                    .min(viewport.height - margin - margin - SETTINGS_DIALOG_CHROME.to_pixels(rem))
+                    .min(viewport.height - margin - margin)
                     .max(px(1.));
                 dialog
                     .title("Settings")
                     .w(width)
+                    .h(height)
                     .margin_top(margin)
                     .content(move |content, _, _| {
                         content.child(
                             div()
                                 .id("condr-settings-content")
                                 .debug_selector(|| "settings-content".into())
-                                .w_full()
-                                .h(height)
+                                .size_full()
                                 .child(
                                     Settings::new("condr-settings").page(appearance_page(&owner)),
                                 ),
@@ -130,6 +129,22 @@ impl Condr {
             });
         });
     }
+}
+
+/// What the Mode dropdown shows. Its getter only ever sees an `&App`.
+pub(super) fn selected_appearance(owner: &WeakEntity<Condr>, cx: &App) -> SharedString {
+    owner
+        .upgrade()
+        .map(|owner| owner.read(cx).appearance)
+        .unwrap_or_default()
+        .as_str()
+        .into()
+}
+
+/// What the Mode dropdown does. Its setter only ever sees an `&mut App`.
+pub(super) fn select_appearance(owner: &WeakEntity<Condr>, value: &str, cx: &mut App) {
+    let appearance = Appearance::from_str(value);
+    let _ = owner.update(cx, |this, cx| this.set_appearance(appearance, cx));
 }
 
 fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
@@ -147,19 +162,8 @@ fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
                     "Mode",
                     SettingField::dropdown(
                         options,
-                        move |cx| {
-                            selected_owner
-                                .upgrade()
-                                .map(|owner| owner.read(cx).appearance)
-                                .unwrap_or_default()
-                                .as_str()
-                                .into()
-                        },
-                        move |value: SharedString, cx| {
-                            let appearance = Appearance::from_str(&value);
-                            let _ = select_owner
-                                .update(cx, |this, cx| this.set_appearance(appearance, cx));
-                        },
+                        move |cx| selected_appearance(&selected_owner, cx),
+                        move |value: SharedString, cx| select_appearance(&select_owner, &value, cx),
                     ),
                 )
                 .description("Follow the system appearance, or pick one."),

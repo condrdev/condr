@@ -1414,23 +1414,45 @@ fn settings_dialog_renders_the_appearance_page_and_applies_a_theme_mode() {
     );
 
     // A window smaller than the dialog's preferred size must still show all of it,
-    // chrome included: Dialog does not clamp itself to the viewport.
-    for viewport in [
-        size(px(1280.), px(720.)),
-        size(px(760.), px(600.)),
-        size(px(640.), px(400.)),
-    ] {
-        window.simulate_resize(viewport);
-        window.run_until_parked();
-        window.update(|window, cx| _ = window.draw(cx));
-        let content = window
-            .debug_bounds("settings-content")
-            .expect("the Settings dialog should render its content");
+    // chrome included: Dialog does not clamp itself to the viewport. The content fills
+    // whatever the dialog has left, so its bounds plus the margin below it stand in for
+    // the dialog's own. Both base font sizes matter, since the dialog is sized in rems.
+    for base_font in [px(16.), px(24.)] {
+        window.update(|window, cx| {
+            gpui_component::theme::Theme::global_mut(cx).font_size = base_font;
+            gpui_component::theme::Theme::sync_base(cx);
+            window.refresh();
+        });
+        let mut heights = Vec::new();
+        for viewport in [
+            size(px(1280.), px(720.)),
+            size(px(760.), px(600.)),
+            size(px(640.), px(400.)),
+        ] {
+            window.simulate_resize(viewport);
+            window.run_until_parked();
+            window.update(|window, cx| _ = window.draw(cx));
+            let content = window
+                .debug_bounds("settings-content")
+                .expect("the Settings dialog should render its content");
+            assert!(
+                content.bottom() <= viewport.height && content.right() <= viewport.width,
+                "the Settings dialog overflowed a {viewport:?} window at a {base_font:?} base font: {content:?}"
+            );
+            heights.push(content.size.height);
+        }
+        // Not overflowing is also true of a dialog collapsed to nothing, so the roomy
+        // window has to actually spend the room it has.
         assert!(
-            content.bottom() <= viewport.height && content.right() <= viewport.width,
-            "the Settings dialog overflowed a {viewport:?} window: {content:?}"
+            heights[0] > heights[2] * 1.5,
+            "the Settings dialog did not grow with the window at a {base_font:?} base font: {heights:?}"
         );
     }
+    window.update(|window, cx| {
+        gpui_component::theme::Theme::global_mut(cx).font_size = px(16.);
+        gpui_component::theme::Theme::sync_base(cx);
+        window.refresh();
+    });
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx));

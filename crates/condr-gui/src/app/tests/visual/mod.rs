@@ -29,7 +29,7 @@ use super::super::{
     Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
     DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
     PendingWorkspaceSelection, ReportedTerminalMouseMotion, ServerConnection,
-    default_window_options,
+    default_window_options, select_appearance, selected_appearance,
 };
 
 #[cfg(windows)]
