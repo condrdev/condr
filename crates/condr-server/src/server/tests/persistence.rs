@@ -533,7 +533,20 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
         if state.session.pane(first_pane).and_then(|pane| pane.cwd())
             == Some(workspace_cwd.as_path())
         {
-            assert_eq!(state.sequence, sequence_after_layout);
+            // A cwd change is durable state, not an event; only the shell's own title
+            // reports (and bells) may have been published meanwhile.
+            assert!(
+                state
+                    .events
+                    .iter()
+                    .filter(|event| event.sequence > sequence_after_layout)
+                    .all(|event| matches!(
+                        event.event,
+                        SessionEvent::TerminalTitleChanged { .. }
+                            | SessionEvent::TerminalAttentionChanged { .. }
+                    )),
+                "cwd observation published a layout event"
+            );
             break state.session.snapshot();
         }
         drop(state);
@@ -588,7 +601,21 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     let bootstrap = restored.bootstrap().clone();
     assert_eq!(bootstrap.server_id, first_server_id);
     assert_ne!(bootstrap.runtime_epoch, first_epoch);
-    assert_eq!(bootstrap.sequence, 0);
+    // A fresh runtime starts its event log empty; the restarted shells may already have
+    // reported their titles, which is the only kind of event allowed here.
+    assert!(
+        replacement_handle
+            .state
+            .lock()
+            .unwrap()
+            .events
+            .iter()
+            .all(|event| matches!(
+                event.event,
+                SessionEvent::TerminalTitleChanged { .. }
+                    | SessionEvent::TerminalAttentionChanged { .. }
+            ))
+    );
     assert_eq!(bootstrap.snapshot, expected);
     assert_eq!(bootstrap.terminals.len(), 2);
     assert!(bootstrap.agents.is_empty());

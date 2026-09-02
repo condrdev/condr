@@ -120,6 +120,7 @@ fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
             foreground: condr_core::TerminalColor::Named(0),
             background: condr_core::TerminalColor::Named(0),
             flags: 0,
+            hyperlink: None,
         })
         .collect::<Vec<_>>();
     TerminalView {
@@ -129,6 +130,15 @@ fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
         mouse_tracking: condr_core::TerminalMouseTracking::None,
         cells,
         cursor: None,
+    }
+}
+
+fn latest_terminal_view(mut view: TerminalView) -> LatestTerminalView {
+    let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
+    LatestTerminalView {
+        view: Arc::new(view),
+        hyperlinks,
+        producer_frame: None,
     }
 }
 
@@ -146,22 +156,217 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
         .active_tab()
         .focused_pane()
         .id();
-    state.terminal_views.insert(
-        pane_id,
-        LatestTerminalView {
-            view: Arc::new(terminal_test_view(1, "tail")),
-            producer_frame: None,
-        },
-    );
+    state
+        .terminal_views
+        .insert(pane_id, latest_terminal_view(terminal_test_view(1, "tail")));
     state.closing_terminals.insert(pane_id);
+    state
+        .terminal_titles
+        .insert(pane_id, "still closing".into());
+    state.pending_terminal_bells.insert(pane_id);
 
     let bootstrap = state.bootstrap();
     assert_eq!(bootstrap.terminals.len(), 1);
     assert!(!bootstrap.terminals[0].exited);
     assert_eq!(view_text(&bootstrap.terminals[0].view), "tail");
+    assert_eq!(
+        bootstrap.terminals[0].title.as_deref(),
+        Some("still closing")
+    );
+    assert!(bootstrap.terminals[0].attention);
 
     state.exited_terminals.insert(pane_id);
     assert!(state.bootstrap().terminals[0].exited);
+}
+
+#[test]
+fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
+    let mut state = RuntimeState::new(&test_endpoint());
+    state.active_controller = Some(1);
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = state
+        .session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let events = |state: &RuntimeState| {
+        state
+            .events
+            .iter()
+            .map(|event| event.event.clone())
+            .collect::<Vec<_>>()
+    };
+
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            title: Some(Some("build".into())),
+            bells: 7,
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(
+        events(&state),
+        vec![
+            SessionEvent::TerminalTitleChanged {
+                pane_id,
+                title: Some("build".into()),
+            },
+            SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: true,
+            },
+        ]
+    );
+    assert_eq!(
+        state.bootstrap().terminals.len(),
+        0,
+        "no runtime, so no terminal record"
+    );
+
+    // Re-reporting the same title is not a change; a reset is.
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            title: Some(Some("build".into())),
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(events(&state).len(), 2);
+
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            bells: 1_000,
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(events(&state).len(), 2, "pending bells stay coalesced");
+
+    state.exited_terminals.insert(pane_id);
+    state.record_terminal_focus(pane_id, true);
+    assert_eq!(
+        events(&state).last(),
+        Some(&SessionEvent::TerminalAttentionChanged {
+            pane_id,
+            attention: false,
+        }),
+        "focusing an exited Pane still acknowledges its final bell"
+    );
+    state.exited_terminals.remove(&pane_id);
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            bells: 1,
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(events(&state).len(), 3, "focused panes need no attention");
+    state.record_terminal_focus(pane_id, false);
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            bells: 1,
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(events(&state).len(), 4, "focus rearms the bell marker");
+
+    state.clear_controller_terminal_state();
+    state.active_controller = None;
+    assert_eq!(
+        events(&state)
+            .into_iter()
+            .filter(|event| matches!(event, SessionEvent::TerminalAttentionChanged { .. }))
+            .collect::<Vec<_>>(),
+        vec![
+            SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: true,
+            },
+            SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: false,
+            },
+            SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: true,
+            },
+            SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: false,
+            },
+        ],
+        "controller handoff replays every attention marker with a later clear"
+    );
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            bells: 1,
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(
+        events(&state).len(),
+        5,
+        "BELs without an active controller do not leave stale attention"
+    );
+
+    state.clear_terminal_title(pane_id);
+    assert_eq!(
+        events(&state).last(),
+        Some(&SessionEvent::TerminalTitleChanged {
+            pane_id,
+            title: None,
+        })
+    );
+    state.clear_terminal_title(pane_id);
+    assert_eq!(events(&state).len(), 6);
+
+    // OSC 52 copies fan out to subscribed clients without entering the event history.
+    let (writer, receiver) = ClientWriter::channel();
+    state.subscribers.insert(
+        1,
+        ClientSubscriber {
+            writer,
+            terminal_baselines: std::collections::HashMap::new(),
+            pending_terminals: std::collections::HashSet::new(),
+            render_generation: 0,
+            bootstrap_pending: false,
+            deferred_reliable: std::collections::VecDeque::new(),
+            deferred_clipboard: None,
+        },
+    );
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            clipboard: Some("copied".into()),
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert_eq!(events(&state).len(), 6);
+    let Some(ClientWriteItem::Reliable(data)) = receiver.recv() else {
+        panic!("clipboard broadcast must be a reliable frame");
+    };
+    assert_eq!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut data.as_slice()).unwrap(),
+        ServerMessage::TerminalClipboard {
+            pane_id,
+            text: "copied".into(),
+        }
+    );
 }
 
 #[test]
@@ -216,6 +421,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
         render_generation: 0,
         bootstrap_pending: false,
         deferred_reliable: std::collections::VecDeque::new(),
+        deferred_clipboard: None,
     };
 
     subscriber
@@ -242,9 +448,243 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
 }
 
 #[test]
+fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
+    let mut session = Session::new();
+    session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let mut current = terminal_test_view(1, "x");
+    current.cells[0].hyperlink = Some("x".repeat(8 * 1024 + 1).into());
+
+    let prepared = prepare_terminal_render(TerminalRenderSnapshot {
+        client_id: 7,
+        generation: 1,
+        server_id: ServerId(1),
+        session_id: SessionId(1),
+        panes: vec![TerminalRenderPaneSnapshot {
+            pane_id,
+            baseline: None,
+            current: Arc::new(current.clone()),
+            producer_frame: None,
+        }],
+    });
+    let TerminalViewFrame::Full(projected) = &prepared.frames[0].frame else {
+        panic!("a missing client baseline requires a full frame");
+    };
+    assert!(projected.cells[0].hyperlink.is_none());
+    assert_eq!(prepared.baselines[0].1.as_ref(), projected);
+
+    let (batches, baselines) = split_bootstrap_records(
+        ServerId(1),
+        SessionId(1),
+        vec![BootstrapRecord::Terminal(PaneTerminalSnapshot {
+            pane_id,
+            view: current,
+            exited: false,
+            title: None,
+            attention: false,
+        })],
+    )
+    .unwrap();
+    let payload = batches
+        .into_iter()
+        .flat_map(|batch| batch.payload)
+        .collect::<Vec<_>>();
+    let BootstrapRecord::Terminal(projected) =
+        condr_core::protocol::decode_bootstrap_record(&payload).unwrap()
+    else {
+        panic!("the Bootstrap record must remain a Terminal");
+    };
+    assert!(projected.view.cells[0].hyperlink.is_none());
+    assert_eq!(baselines[0].1.as_ref(), &projected.view);
+}
+
+#[test]
+fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
+    const URI_BYTES: usize = 8 * 1024;
+    const LINK_COUNT: usize = 512;
+
+    let mut session = Session::new();
+    session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let linked_cell = |index: usize| {
+        let mut cell = terminal_test_view(0, "x").cells.remove(0);
+        cell.hyperlink = Some(format!("{index:04}:{}", "x".repeat(URI_BYTES - 5)).into());
+        cell
+    };
+    let initial = terminal_test_view(0, &"x".repeat(LINK_COUNT + 1));
+    let mut state = RuntimeState::new(&test_endpoint());
+    state.publish_terminal(pane_id, TerminalViewFrame::Full(initial));
+    state.publish_terminal(
+        pane_id,
+        TerminalViewFrame::Delta(condr_core::TerminalViewDelta {
+            base_revision: 0,
+            revision: 1,
+            display_offset: 0,
+            mouse_tracking: condr_core::TerminalMouseTracking::None,
+            cursor: None,
+            runs: vec![condr_core::TerminalCellRun {
+                start: 1,
+                cells: (1..=LINK_COUNT).map(linked_cell).collect(),
+            }],
+        }),
+    );
+    state.publish_terminal(
+        pane_id,
+        TerminalViewFrame::Delta(condr_core::TerminalViewDelta {
+            base_revision: 1,
+            revision: 2,
+            display_offset: 0,
+            mouse_tracking: condr_core::TerminalMouseTracking::None,
+            cursor: None,
+            runs: vec![condr_core::TerminalCellRun {
+                start: 0,
+                cells: vec![linked_cell(0)],
+            }],
+        }),
+    );
+
+    let latest = &state.terminal_views[&pane_id];
+    let hyperlinks = latest
+        .view
+        .cells
+        .iter()
+        .filter_map(|cell| cell.hyperlink.as_ref())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        hyperlinks.iter().map(|uri| uri.len()).sum::<usize>(),
+        4 * 1024 * 1024
+    );
+    assert!(latest.view.cells[0].hyperlink.is_none());
+    assert!(latest.view.cells[LINK_COUNT].hyperlink.is_some());
+    assert!(matches!(
+        &latest.producer_frame,
+        Some(TerminalViewFrame::Delta(delta))
+            if delta.runs.iter().any(|run| {
+                run.start == 0
+                    && run.cells.len() == 1
+                    && run.cells[0].hyperlink.is_none()
+            })
+    ));
+
+    state.publish_terminal(
+        pane_id,
+        TerminalViewFrame::Delta(condr_core::TerminalViewDelta {
+            base_revision: 2,
+            revision: 3,
+            display_offset: 0,
+            mouse_tracking: condr_core::TerminalMouseTracking::None,
+            cursor: None,
+            runs: vec![
+                condr_core::TerminalCellRun {
+                    start: 0,
+                    cells: vec![linked_cell(0)],
+                },
+                condr_core::TerminalCellRun {
+                    start: LINK_COUNT as u32,
+                    cells: vec![terminal_test_view(0, "x").cells.remove(0)],
+                },
+            ],
+        }),
+    );
+    let latest = &state.terminal_views[&pane_id];
+    assert!(latest.view.cells[0].hyperlink.is_some());
+    assert!(latest.view.cells[LINK_COUNT].hyperlink.is_none());
+}
+
+#[test]
+fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_it() {
+    let endpoint = test_endpoint();
+    let mut state = RuntimeState::new(&endpoint);
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = state
+        .session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let clipboard_text = |item| {
+        let Some(ClientWriteItem::Reliable(frame)) = item else {
+            panic!("clipboard must be a reliable frame");
+        };
+        match condr_core::protocol::read_message::<_, ServerMessage>(&mut frame.as_slice()).unwrap()
+        {
+            ServerMessage::TerminalClipboard { text, .. } => text,
+            other => panic!("expected clipboard, got {other:?}"),
+        }
+    };
+    let subscriber = |writer| ClientSubscriber {
+        writer,
+        terminal_baselines: std::collections::HashMap::new(),
+        pending_terminals: std::collections::HashSet::new(),
+        render_generation: 0,
+        bootstrap_pending: false,
+        deferred_reliable: std::collections::VecDeque::new(),
+        deferred_clipboard: None,
+    };
+
+    // A copy queued before the fence, with no newer copy: it follows the Bootstrap intact.
+    let (writer, receiver) = ClientWriter::channel();
+    state.subscribers.insert(7, subscriber(writer));
+    state.broadcast_clipboard(pane_id, "before".into());
+    state.begin_bootstrap(7);
+    let framed = frame_bootstrap_messages(state.capture_bootstrap().materialize()).unwrap();
+    assert!(state.finish_bootstrap(7, framed).is_ok());
+    assert!(matches!(
+        receiver.recv(),
+        Some(ClientWriteItem::ReliableBatch(_))
+    ));
+    assert_eq!(clipboard_text(receiver.recv()), "before");
+
+    // A copy during the fence replaces the older unsent one; only the latest goes out.
+    let (writer, receiver) = ClientWriter::channel();
+    state.subscribers.insert(8, subscriber(writer));
+    state.broadcast_clipboard(pane_id, "old".into());
+    state.begin_bootstrap(8);
+    state.broadcast_clipboard(pane_id, "newer".into());
+    let framed = frame_bootstrap_messages(state.capture_bootstrap().materialize()).unwrap();
+    assert!(state.finish_bootstrap(8, framed).is_ok());
+    assert!(matches!(
+        receiver.recv(),
+        Some(ClientWriteItem::ReliableBatch(_))
+    ));
+    assert_eq!(clipboard_text(receiver.recv()), "newer");
+    drop(state);
+    assert!(receiver.recv().is_none());
+}
+
+#[test]
 fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
     let endpoint = test_endpoint();
     let mut state = RuntimeState::new(&endpoint);
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    let pane_id = state
+        .session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
     let capture = state.capture_bootstrap();
     let (writer, receiver) = ClientWriter::channel();
     state.subscribers.insert(
@@ -256,16 +696,19 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
             render_generation: 0,
             bootstrap_pending: false,
             deferred_reliable: std::collections::VecDeque::new(),
+            deferred_clipboard: None,
         },
     );
 
     state.begin_bootstrap(7);
     state.publish_background(SessionEvent::LayoutChanged);
+    state.broadcast_clipboard(pane_id, "during bootstrap".into());
     assert!(state.terminal_render_snapshot(7).is_none());
     assert_eq!(state.subscribers[&7].deferred_reliable.len(), 1);
+    assert!(state.subscribers[&7].deferred_clipboard.is_some());
 
     let framed = frame_bootstrap_messages(capture.materialize()).unwrap();
-    assert!(!state.finish_bootstrap(7, framed));
+    assert!(state.finish_bootstrap(7, framed).is_ok());
     let Some(ClientWriteItem::ReliableBatch(bootstrap_frames)) = receiver.recv() else {
         panic!("complete Bootstrap must be the first reliable item");
     };
@@ -282,6 +725,17 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
             ..
         }
     ));
+    let Some(ClientWriteItem::Reliable(clipboard_frame)) = receiver.recv() else {
+        panic!("live clipboard state must follow the replacement Bootstrap");
+    };
+    assert_eq!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut clipboard_frame.as_slice())
+            .unwrap(),
+        ServerMessage::TerminalClipboard {
+            pane_id,
+            text: "during bootstrap".into(),
+        }
+    );
     assert!(!state.subscribers[&7].bootstrap_pending);
 }
 
@@ -311,6 +765,7 @@ fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
             render_generation: 11,
             bootstrap_pending: false,
             deferred_reliable: std::collections::VecDeque::new(),
+            deferred_clipboard: None,
         },
     );
     let (replacement_writer, _replacement_receiver) = ClientWriter::channel();
@@ -339,14 +794,11 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
         .focused_pane()
         .id();
     let initial = Arc::new(terminal_test_view(1, "old"));
-    let latest = Arc::new(terminal_test_view(3, "oXd"));
-    state.terminal_views.insert(
-        pane_id,
-        LatestTerminalView {
-            view: Arc::clone(&latest),
-            producer_frame: None,
-        },
-    );
+    let latest = terminal_test_view(3, "oXd");
+    state
+        .terminal_views
+        .insert(pane_id, latest_terminal_view(latest.clone()));
+    let latest = Arc::clone(&state.terminal_views[&pane_id].view);
     let (writer, receiver) = ClientWriter::channel();
     writer.try_send_render(vec![vec![0]]).unwrap();
     state.subscribers.insert(
@@ -358,6 +810,7 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
             render_generation: 1,
             bootstrap_pending: false,
             deferred_reliable: std::collections::VecDeque::new(),
+            deferred_clipboard: None,
         },
     );
     let state = Arc::new(Mutex::new(state));
@@ -395,6 +848,10 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
     let state = state.lock().unwrap();
     let subscriber = &state.subscribers[&7];
     assert_eq!(subscriber.terminal_baselines[&pane_id].revision, 3);
+    assert!(Arc::ptr_eq(
+        &subscriber.terminal_baselines[&pane_id],
+        &latest
+    ));
     assert!(!subscriber.pending_terminals.contains(&pane_id));
 }
 
@@ -420,6 +877,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
             foreground: condr_core::TerminalColor::Named(0),
             background: condr_core::TerminalColor::Named(0),
             flags: 0,
+            hyperlink: None,
         }],
         cursor: None,
     };
@@ -480,6 +938,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
                 foreground: condr_core::TerminalColor::Named(0),
                 background: condr_core::TerminalColor::Named(0),
                 flags: 0,
+                hyperlink: None,
             }],
             cursor: None,
         }),
@@ -535,6 +994,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
             foreground: condr_core::TerminalColor::Named(0),
             background: condr_core::TerminalColor::Named(0),
             flags: 0,
+            hyperlink: None,
         }],
         cursor: None,
     };
@@ -549,11 +1009,15 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
                 pane_id: first_pane,
                 view: large_view(1),
                 exited: false,
+                title: None,
+                attention: false,
             },
             PaneTerminalSnapshot {
                 pane_id: second_pane,
                 view: large_view(2),
                 exited: true,
+                title: None,
+                attention: false,
             },
         ],
         agents: Vec::new(),

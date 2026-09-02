@@ -1,13 +1,20 @@
 use super::*;
 
+/// Queues a direct response. `Err(Lagged)` means the response was dropped in favour of the
+/// lag notice: the client will re-Bootstrap, so callers must not commit state that only this
+/// response would have told the client about.
+pub(super) fn queue_response(
+    outbound: &ClientWriter,
+    message: ServerMessage,
+) -> Result<(), ReliableSendError> {
+    let data = frame_message(&message).map_err(|_| ReliableSendError::Disconnected)?;
+    outbound.send_reliable(data)
+}
+
+/// Queues a direct response and reports whether the connection must close. A lagged writer
+/// keeps its connection: the queued lag notice drives recovery.
 pub(super) fn queue_message(outbound: &ClientWriter, message: ServerMessage) -> bool {
-    frame_message(&message)
-        .and_then(|data| {
-            outbound
-                .send_reliable(data)
-                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "client writer stopped"))
-        })
-        .is_err()
+    queue_response(outbound, message) == Err(ReliableSendError::Disconnected)
 }
 
 pub(super) fn send_bootstrap(
@@ -36,17 +43,23 @@ pub(super) fn queue_runtime_bootstrap(
     session_id: SessionId,
     outbound: &ClientWriter,
 ) -> bool {
+    // Fence order for a lagged writer: the lag notice already sits in the reliable queue and
+    // the writer refuses everything else. Only reopen it (`resume_after_lag`) once this client
+    // is fenced by `begin_bootstrap`, so background events land in `deferred_reliable` instead
+    // of slipping between the notice and the Bootstrap. Rejections reopen it just before they
+    // are queued, which still keeps them behind the notice.
+    let reject = |message: ServerMessage| {
+        outbound.resume_after_lag();
+        queue_message(outbound, message)
+    };
     let probes = {
         let state = state.lock().expect("server state lock poisoned");
         if session_id != state.session_id {
-            return queue_message(
-                outbound,
-                ServerMessage::SnapshotRejected {
-                    server_id: state.server_id,
-                    session_id: state.session_id,
-                    reason: "unknown Session".into(),
-                },
-            );
+            return reject(ServerMessage::SnapshotRejected {
+                server_id: state.server_id,
+                session_id: state.session_id,
+                reason: "unknown Session".into(),
+            });
         }
         state.terminal_cwd_probes()
     };
@@ -54,14 +67,11 @@ pub(super) fn queue_runtime_bootstrap(
     let (capture, fenced) = {
         let mut state = state.lock().expect("server state lock poisoned");
         if session_id != state.session_id {
-            return queue_message(
-                outbound,
-                ServerMessage::SnapshotRejected {
-                    server_id: state.server_id,
-                    session_id: state.session_id,
-                    reason: "unknown Session".into(),
-                },
-            );
+            return reject(ServerMessage::SnapshotRejected {
+                server_id: state.server_id,
+                session_id: state.session_id,
+                reason: "unknown Session".into(),
+            });
         }
         state.record_terminal_cwd_observations(observations);
         let capture = state.capture_bootstrap();
@@ -83,32 +93,32 @@ pub(super) fn queue_runtime_bootstrap(
                     .expect("server state lock poisoned")
                     .abort_bootstrap(client_id);
             }
-            let _ = queue_message(
-                outbound,
-                ServerMessage::SnapshotRejected {
-                    server_id: bootstrap_server_id,
-                    session_id: bootstrap_session_id,
-                    reason: format!("cannot encode Session Bootstrap: {error}"),
-                },
-            );
+            let _ = reject(ServerMessage::SnapshotRejected {
+                server_id: bootstrap_server_id,
+                session_id: bootstrap_session_id,
+                reason: format!("cannot encode Session Bootstrap: {error}"),
+            });
             return true;
         }
     };
 
-    let failed = if fenced {
+    let result = if fenced {
         let mut state = state.lock().expect("server state lock poisoned");
-        let failed = state.finish_bootstrap(client_id, framed);
-        if failed {
+        // Fenced and encoded: reopening now puts the Bootstrap right behind the lag notice.
+        outbound.resume_after_lag();
+        let result = state.finish_bootstrap(client_id, framed);
+        if result.is_err() {
             state.subscribers.remove(&client_id);
         }
-        failed
+        result
     } else {
-        outbound.send_reliable_batch(framed.frames).is_err()
+        outbound.resume_after_lag();
+        outbound.send_reliable_batch(framed.frames)
     };
-    if !failed && fenced {
+    if result.is_ok() && fenced {
         flush_terminal_render(state, client_id);
     }
-    failed
+    result == Err(ReliableSendError::Disconnected)
 }
 
 pub(super) fn send_error(
@@ -187,13 +197,32 @@ pub(super) fn prepare_terminal_render(snapshot: TerminalRenderSnapshot) -> Prepa
             }
             (baseline, _) => TerminalView::frame_from(baseline.as_deref(), &pane.current),
         };
-        if let Some(frame) = frame {
-            frames.push(PaneTerminalFrame {
-                pane_id: pane.pane_id,
-                frame,
-            });
-        }
-        baselines.push((pane.pane_id, pane.current));
+        let Some(mut frame) = frame else {
+            continue;
+        };
+        let projected = frame.normalize_hyperlinks_for_wire();
+        let baseline = if projected {
+            match &frame {
+                TerminalViewFrame::Full(view) => Arc::new(view.clone()),
+                TerminalViewFrame::Delta(_) => {
+                    let mut view = pane
+                        .baseline
+                        .expect("a prepared terminal delta has a client baseline")
+                        .as_ref()
+                        .clone();
+                    view.apply_frame(frame.clone())
+                        .expect("a prepared terminal delta matches its client baseline");
+                    Arc::new(view)
+                }
+            }
+        } else {
+            pane.current
+        };
+        frames.push(PaneTerminalFrame {
+            pane_id: pane.pane_id,
+            frame,
+        });
+        baselines.push((pane.pane_id, baseline));
     }
     PreparedTerminalRender {
         client_id: snapshot.client_id,
@@ -292,9 +321,12 @@ pub(super) fn split_bootstrap_records(
     let mut batches = Vec::new();
     let mut baselines = Vec::new();
     let mut total_payload_size = 0usize;
-    for (record_index, record) in records.into_iter().enumerate() {
+    for (record_index, mut record) in records.into_iter().enumerate() {
         let record_index = u32::try_from(record_index)
             .map_err(|_| io::Error::other("too many Bootstrap records"))?;
+        if let BootstrapRecord::Terminal(terminal) = &mut record {
+            let _ = terminal.view.normalize_hyperlinks_for_wire();
+        }
         let payload = encode_bootstrap_record(&record).map_err(io::Error::other)?;
         total_payload_size = total_payload_size
             .checked_add(payload.len())

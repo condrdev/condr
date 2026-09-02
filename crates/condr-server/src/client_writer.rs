@@ -1,7 +1,22 @@
 use std::collections::VecDeque;
-use std::sync::mpsc::{Receiver, SendError, SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
+
+use condr_core::protocol::{MAX_FRAME_SIZE, MAX_FRAMED_BOOTSTRAP_BYTES};
+
+const MAX_RELIABLE_QUEUE_ITEMS: usize = 512;
+// Room for the largest framed Bootstrap the protocol allows plus one ordinary frame, so a
+// legitimate recovery Bootstrap can never itself trip the lag bound.
+const MAX_RELIABLE_QUEUE_BYTES: usize = MAX_FRAMED_BOOTSTRAP_BYTES + MAX_FRAME_SIZE + 4;
+
+/// Why a reliable send was refused. `Lagged` means the backlog was replaced by the lag
+/// notice and the client will re-Bootstrap; the connection itself is still alive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ReliableSendError {
+    Lagged,
+    Disconnected,
+}
 
 #[derive(Debug)]
 pub(crate) struct ClientWriter {
@@ -39,6 +54,10 @@ struct ClientWriterQueue {
 #[derive(Debug)]
 struct ClientWriterQueueState {
     reliable: VecDeque<ClientWriteItem>,
+    reliable_bytes: usize,
+    lag_notice: Option<Vec<u8>>,
+    lagged: bool,
+    clipboard: Option<Vec<u8>>,
     // One visual generation stays shared so a Bootstrap can discard its unsent frames.
     render: Option<VecDeque<Vec<u8>>>,
     senders: usize,
@@ -46,10 +65,23 @@ struct ClientWriterQueueState {
 }
 
 impl ClientWriter {
+    #[cfg(test)]
     pub(crate) fn channel() -> (Self, ClientWriterReceiver) {
+        Self::channel_inner(None)
+    }
+
+    pub(crate) fn channel_with_lag_notice(lag_notice: Vec<u8>) -> (Self, ClientWriterReceiver) {
+        Self::channel_inner(Some(lag_notice))
+    }
+
+    fn channel_inner(lag_notice: Option<Vec<u8>>) -> (Self, ClientWriterReceiver) {
         let queue = Arc::new(ClientWriterQueue {
             state: Mutex::new(ClientWriterQueueState {
                 reliable: VecDeque::new(),
+                reliable_bytes: 0,
+                lag_notice,
+                lagged: false,
+                clipboard: None,
                 render: None,
                 senders: 1,
                 writer_alive: true,
@@ -64,10 +96,12 @@ impl ClientWriter {
         )
     }
 
-    pub(crate) fn send_reliable(&self, data: Vec<u8>) -> Result<(), SendError<Vec<u8>>> {
+    pub(crate) fn send_reliable(&self, data: Vec<u8>) -> Result<(), ReliableSendError> {
         let mut state = self.queue.lock_state();
-        if !state.writer_alive {
-            return Err(SendError(data));
+        state.refusal()?;
+        if let Err(error) = state.reserve_reliable(data.len()) {
+            self.queue.ready.notify_all();
+            return Err(error);
         }
         state.reliable.push_back(ClientWriteItem::Reliable(data));
         self.queue.ready.notify_one();
@@ -77,10 +111,15 @@ impl ClientWriter {
     pub(crate) fn send_reliable_batch(
         &self,
         frames: Vec<Vec<u8>>,
-    ) -> Result<(), SendError<Vec<Vec<u8>>>> {
+    ) -> Result<(), ReliableSendError> {
         let mut state = self.queue.lock_state();
-        if !state.writer_alive {
-            return Err(SendError(frames));
+        state.refusal()?;
+        let bytes = frames
+            .iter()
+            .fold(0usize, |total, frame| total.saturating_add(frame.len()));
+        if let Err(error) = state.reserve_reliable(bytes) {
+            self.queue.ready.notify_all();
+            return Err(error);
         }
         state
             .reliable
@@ -89,19 +128,31 @@ impl ClientWriter {
         Ok(())
     }
 
+    /// Queues the latest clipboard state without allowing OSC 52 bursts to grow this queue.
+    pub(crate) fn send_clipboard(&self, data: Vec<u8>) -> Result<(), ReliableSendError> {
+        let mut state = self.queue.lock_state();
+        state.refusal()?;
+        state.clipboard = Some(data);
+        self.queue.ready.notify_one();
+        Ok(())
+    }
+
     /// Queues the final reliable frame after earlier reliable work and closes this sender.
     pub(crate) fn send_closing_reliable(
         &self,
         data: Vec<u8>,
-    ) -> Result<ClientWriteReceipt, SendError<Vec<u8>>> {
+    ) -> Result<ClientWriteReceipt, ReliableSendError> {
         let mut state = self.queue.lock_state();
-        if !state.writer_alive {
-            return Err(SendError(data));
+        state.refusal()?;
+        if let Err(error) = state.reserve_reliable(data.len()) {
+            self.queue.ready.notify_all();
+            return Err(error);
         }
         let (delivered, receipt) = sync_channel(1);
         state
             .reliable
             .push_back(ClientWriteItem::ClosingReliable { data, delivered });
+        state.clipboard = None;
         state.render = None;
         state.writer_alive = false;
         self.queue.ready.notify_one();
@@ -117,7 +168,7 @@ impl ClientWriter {
             "render slot requires at least one frame"
         );
         let mut state = self.queue.lock_state();
-        if !state.writer_alive {
+        if !state.writer_alive || state.lagged {
             return Err(TrySendError::Disconnected(frames));
         }
         if state.render.is_some() {
@@ -130,6 +181,20 @@ impl ClientWriter {
 
     pub(crate) fn clear_render(&self) {
         self.queue.lock_state().render = None;
+    }
+
+    /// Reopens a lagged queue for the recovery Bootstrap. The reliable queue is kept: after an
+    /// overflow it holds only the lag notice, which must still reach the client (the Bootstrap
+    /// may answer a visual-gap request sent before the lag, and the client only drops its
+    /// subscription when it reads the notice). Droppable slots are cleared.
+    pub(crate) fn resume_after_lag(&self) {
+        let mut state = self.queue.lock_state();
+        if !state.lagged {
+            return;
+        }
+        state.clipboard = None;
+        state.render = None;
+        state.lagged = false;
     }
 }
 
@@ -163,7 +228,13 @@ impl ClientWriterReceiver {
         let mut state = self.queue.lock_state();
         loop {
             if let Some(item) = state.reliable.pop_front() {
+                state.reliable_bytes = state
+                    .reliable_bytes
+                    .saturating_sub(reliable_item_bytes(&item));
                 return Some(item);
+            }
+            if let Some(data) = state.clipboard.take() {
+                return Some(ClientWriteItem::Reliable(data));
             }
             if let Some(frames) = state.render.as_mut() {
                 let data = frames.pop_front().expect("render slot must not be empty");
@@ -188,8 +259,58 @@ impl ClientWriterReceiver {
         let mut state = self.queue.lock_state();
         state.writer_alive = false;
         state.reliable.clear();
+        state.reliable_bytes = 0;
+        state.lagged = false;
+        state.clipboard = None;
         state.render = None;
         self.queue.ready.notify_all();
+    }
+}
+
+impl ClientWriterQueueState {
+    fn refusal(&self) -> Result<(), ReliableSendError> {
+        if !self.writer_alive {
+            Err(ReliableSendError::Disconnected)
+        } else if self.lagged {
+            Err(ReliableSendError::Lagged)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn reserve_reliable(&mut self, bytes: usize) -> Result<(), ReliableSendError> {
+        let next_bytes = self.reliable_bytes.checked_add(bytes);
+        if self.reliable.len() >= MAX_RELIABLE_QUEUE_ITEMS
+            || next_bytes.is_none_or(|bytes| bytes > MAX_RELIABLE_QUEUE_BYTES)
+        {
+            self.reliable.clear();
+            self.reliable_bytes = 0;
+            self.clipboard = None;
+            self.render = None;
+            return if let Some(notice) = self.lag_notice.clone() {
+                self.reliable_bytes = notice.len();
+                self.reliable.push_back(ClientWriteItem::Reliable(notice));
+                self.lagged = true;
+                Err(ReliableSendError::Lagged)
+            } else {
+                self.writer_alive = false;
+                Err(ReliableSendError::Disconnected)
+            };
+        }
+        self.reliable_bytes = next_bytes.expect("checked above");
+        Ok(())
+    }
+}
+
+fn reliable_item_bytes(item: &ClientWriteItem) -> usize {
+    match item {
+        ClientWriteItem::Reliable(data) | ClientWriteItem::ClosingReliable { data, .. } => {
+            data.len()
+        }
+        ClientWriteItem::ReliableBatch(frames) => frames
+            .iter()
+            .fold(0usize, |total, frame| total.saturating_add(frame.len())),
+        ClientWriteItem::Render { .. } => 0,
     }
 }
 
@@ -236,6 +357,26 @@ mod tests {
         assert_eq!(
             receiver.recv(),
             Some(ClientWriteItem::Reliable(b"control".to_vec()))
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Render {
+                data: b"render".to_vec(),
+                slot_drained: true,
+            })
+        );
+    }
+
+    #[test]
+    fn clipboard_slot_keeps_only_the_latest_value() {
+        let (writer, receiver) = ClientWriter::channel();
+        writer.try_send_render(vec![b"render".to_vec()]).unwrap();
+        writer.send_clipboard(b"old".to_vec()).unwrap();
+        writer.send_clipboard(b"latest".to_vec()).unwrap();
+
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"latest".to_vec()))
         );
         assert_eq!(
             receiver.recv(),
@@ -365,5 +506,105 @@ mod tests {
         assert!(receipt.wait(Duration::from_millis(10)));
         assert!(receiver.recv().is_none());
         assert!(writer.send_reliable(b"late".to_vec()).is_err());
+    }
+
+    #[test]
+    fn reliable_queue_disconnects_a_writer_that_falls_behind() {
+        let (writer, receiver) = ClientWriter::channel();
+        for _ in 0..MAX_RELIABLE_QUEUE_ITEMS {
+            writer.send_reliable(vec![0]).unwrap();
+        }
+
+        assert_eq!(
+            writer.send_reliable(vec![0]),
+            Err(ReliableSendError::Disconnected)
+        );
+        assert!(receiver.recv().is_none());
+        assert_eq!(
+            writer.send_reliable(vec![0]),
+            Err(ReliableSendError::Disconnected)
+        );
+    }
+
+    #[test]
+    fn lag_notice_replaces_overflow_and_bootstrap_reopens_the_queue() {
+        let (writer, receiver) = ClientWriter::channel_with_lag_notice(b"resync".to_vec());
+        for _ in 0..MAX_RELIABLE_QUEUE_ITEMS {
+            writer.send_reliable(vec![0]).unwrap();
+        }
+
+        assert_eq!(
+            writer.send_reliable(vec![0]),
+            Err(ReliableSendError::Lagged)
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"resync".to_vec()))
+        );
+        assert_eq!(
+            writer.send_reliable(vec![0]),
+            Err(ReliableSendError::Lagged)
+        );
+
+        writer.resume_after_lag();
+        writer.send_reliable(b"bootstrap".to_vec()).unwrap();
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"bootstrap".to_vec()))
+        );
+    }
+
+    #[test]
+    fn largest_allowed_bootstrap_fits_while_an_ordinary_backlog_still_lags() {
+        use condr_core::protocol::{
+            BOOTSTRAP_BATCH_FRAME_OVERHEAD, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
+        };
+        let batches = MAX_BOOTSTRAP_BATCHES as usize;
+        let payload_per_batch = MAX_BOOTSTRAP_TOTAL_SIZE / batches;
+        let mut frames = Vec::with_capacity(batches + 1);
+        frames.push(vec![0; MAX_FRAME_SIZE + 4]);
+        frames.extend(
+            (0..batches).map(|_| vec![0; BOOTSTRAP_BATCH_FRAME_OVERHEAD + payload_per_batch]),
+        );
+        assert_eq!(
+            frames.iter().map(Vec::len).sum::<usize>(),
+            MAX_FRAMED_BOOTSTRAP_BYTES
+        );
+
+        let (writer, receiver) = ClientWriter::channel_with_lag_notice(b"resync".to_vec());
+        writer.send_reliable_batch(frames).unwrap();
+        writer.send_reliable(vec![0; MAX_FRAME_SIZE + 4]).unwrap();
+        assert_eq!(
+            writer.send_reliable(vec![0; MAX_FRAME_SIZE + 4]),
+            Err(ReliableSendError::Lagged)
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"resync".to_vec()))
+        );
+    }
+
+    #[test]
+    fn resuming_before_the_lag_notice_is_read_keeps_it_ahead_of_the_bootstrap() {
+        let (writer, receiver) = ClientWriter::channel_with_lag_notice(b"resync".to_vec());
+        for _ in 0..MAX_RELIABLE_QUEUE_ITEMS {
+            writer.send_reliable(vec![0]).unwrap();
+        }
+        assert_eq!(
+            writer.send_reliable(vec![0]),
+            Err(ReliableSendError::Lagged)
+        );
+
+        // A SnapshotRequest sent before the lag reopens the queue while the notice is unread.
+        writer.resume_after_lag();
+        writer.send_reliable(b"bootstrap".to_vec()).unwrap();
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"resync".to_vec()))
+        );
+        assert_eq!(
+            receiver.recv(),
+            Some(ClientWriteItem::Reliable(b"bootstrap".to_vec()))
+        );
     }
 }

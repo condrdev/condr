@@ -95,6 +95,60 @@ fn incompatible_client_is_rejected() {
     thread.join().unwrap().unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn controller_can_acknowledge_attention_while_terminal_is_closing() {
+    let (handle, endpoint, thread) = start();
+    let mut stream = connect_and_bootstrap(&endpoint);
+    let (server_id, session_id, pane_id) = {
+        let mut state = handle.state.lock().unwrap();
+        state
+            .session
+            .create_workspace(std::env::temp_dir())
+            .expect("Workspace capacity");
+        let pane_id = state
+            .session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        state.closing_terminals.insert(pane_id);
+        state.pending_terminal_bells.insert(pane_id);
+        (state.server_id, state.session_id, pane_id)
+    };
+    acquire_control(&mut stream, session_id);
+
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Focus(true),
+    );
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Ping {
+            server_id,
+            nonce: 7,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+        ServerMessage::Pong { nonce: 7, .. }
+    ));
+    {
+        let state = handle.state.lock().unwrap();
+        assert_eq!(state.focused_terminal, Some(pane_id));
+        assert!(!state.pending_terminal_bells.contains(&pane_id));
+    }
+
+    handle.stop();
+    drop(stream);
+    thread.join().unwrap().unwrap();
+}
+
 #[test]
 fn oversized_client_frame_is_rejected_with_a_clear_error() {
     let (handle, endpoint, thread) = start();
@@ -254,7 +308,18 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         let workspace = state.session.active_workspace().unwrap();
         let tab = workspace.active_tab();
         assert_eq!(state.session.snapshot(), snapshot_before);
-        assert_eq!(state.sequence, sequence_before);
+        assert!(
+            state
+                .events
+                .iter()
+                .filter(|event| event.sequence > sequence_before)
+                .all(|event| matches!(
+                    event.event,
+                    SessionEvent::TerminalTitleChanged { .. }
+                        | SessionEvent::TerminalAttentionChanged { .. }
+                )),
+            "a rejected layout command published a layout event"
+        );
         assert_eq!(
             (workspace.id(), tab.id(), tab.focused_pane().id()),
             focus_before
@@ -347,6 +412,185 @@ fn rejected_subscription_is_typed_and_removes_the_previous_subscriber() {
 
     handle.stop();
     drop(stream);
+    thread.join().unwrap().unwrap();
+}
+
+#[test]
+fn lagged_subscriber_is_told_to_bootstrap_and_can_resubscribe() {
+    let (handle, endpoint, thread) = start();
+    let mut stream = connect_and_bootstrap(&endpoint);
+    stream
+        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let (server_id, session_id) = {
+        let state = handle.state.lock().unwrap();
+        (state.server_id, state.session_id)
+    };
+    subscribe(&mut stream, session_id, 0);
+    let (client_id, subscriber_writer) = {
+        let state = handle.state.lock().unwrap();
+        let (&client_id, subscriber) = state.subscribers.iter().next().unwrap();
+        (client_id, subscriber.writer.clone())
+    };
+
+    let blocking_frame = frame_message(&ServerMessage::Error {
+        message: "x".repeat(MAX_FRAME_SIZE - 1024),
+    })
+    .unwrap();
+    subscriber_writer.send_reliable(blocking_frame).unwrap();
+    thread::sleep(Duration::from_millis(30));
+    let queued_frame = frame_message(&ServerMessage::Pong {
+        server_id,
+        nonce: 1,
+        sequence: 0,
+    })
+    .unwrap();
+    let lagged = (0..600).any(|_| {
+        subscriber_writer
+            .send_reliable(queued_frame.clone())
+            .is_err()
+    });
+    assert!(lagged, "test did not reach the reliable queue bound");
+    handle.state.lock().unwrap().subscribers.remove(&client_id);
+
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+        ServerMessage::Error { .. }
+    ));
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+        ServerMessage::SubscriptionRejected {
+            server_id: rejected_server,
+            session_id: rejected_session,
+            reason,
+        } if rejected_server == server_id
+            && rejected_session == session_id
+            && reason == "client fell behind the reliable event stream"
+    ));
+
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::SnapshotRequest { session_id },
+    )
+    .unwrap();
+    let ServerMessage::Bootstrap(header) =
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap()
+    else {
+        panic!("expected recovery Bootstrap header");
+    };
+    let batch_count = header.batch_count;
+    let mut assembler = BootstrapAssembler::new(header).unwrap();
+    for _ in 0..batch_count {
+        let ServerMessage::BootstrapBatch(batch) =
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap()
+        else {
+            panic!("expected recovery Bootstrap batch");
+        };
+        assembler.push(batch).unwrap();
+    }
+    let bootstrap = assembler.finish().unwrap();
+    subscribe(&mut stream, session_id, bootstrap.sequence);
+    assert_eq!(handle.state.lock().unwrap().subscribers.len(), 1);
+
+    handle.stop();
+    drop(stream);
+    drop(subscriber_writer);
+    thread.join().unwrap().unwrap();
+}
+
+#[test]
+fn lagged_direct_requests_keep_the_connection_and_do_not_commit_control() {
+    let (handle, endpoint, thread) = start();
+    let mut stream = connect_and_bootstrap(&endpoint);
+    stream
+        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let (server_id, session_id) = {
+        let state = handle.state.lock().unwrap();
+        (state.server_id, state.session_id)
+    };
+    subscribe(&mut stream, session_id, 0);
+    let (client_id, subscriber_writer) = {
+        let state = handle.state.lock().unwrap();
+        let (&client_id, subscriber) = state.subscribers.iter().next().unwrap();
+        (client_id, subscriber.writer.clone())
+    };
+
+    // Fill the writer until it lags: the backlog collapses into one SubscriptionRejected.
+    let blocking_frame = frame_message(&ServerMessage::Error {
+        message: "x".repeat(MAX_FRAME_SIZE - 1024),
+    })
+    .unwrap();
+    subscriber_writer.send_reliable(blocking_frame).unwrap();
+    thread::sleep(Duration::from_millis(30));
+    let queued_frame = frame_message(&ServerMessage::Pong {
+        server_id,
+        nonce: 1,
+        sequence: 0,
+    })
+    .unwrap();
+    let lagged = (0..600).any(|_| {
+        subscriber_writer.send_reliable(queued_frame.clone()) == Err(ReliableSendError::Lagged)
+    });
+    assert!(lagged, "test did not reach the reliable queue bound");
+    handle.state.lock().unwrap().subscribers.remove(&client_id);
+
+    // A direct request while lagged is answered by nothing, but the connection survives and
+    // the grant is not committed because its response never reached the client.
+    condr_core::protocol::write_message(&mut stream, &ClientMessage::AcquireControl { session_id })
+        .unwrap();
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Ping {
+            server_id,
+            nonce: 9,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+        ServerMessage::Error { .. }
+    ));
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
+        ServerMessage::SubscriptionRejected { .. }
+    ));
+
+    // Recovery: Bootstrap reopens the queue, then subscribe and control work normally.
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::SnapshotRequest { session_id },
+    )
+    .unwrap();
+    let ServerMessage::Bootstrap(header) =
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap()
+    else {
+        panic!("expected recovery Bootstrap header");
+    };
+    let batch_count = header.batch_count;
+    let mut assembler = BootstrapAssembler::new(header).unwrap();
+    for _ in 0..batch_count {
+        let ServerMessage::BootstrapBatch(batch) =
+            condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap()
+        else {
+            panic!("expected recovery Bootstrap batch");
+        };
+        assembler.push(batch).unwrap();
+    }
+    let bootstrap = assembler.finish().unwrap();
+    // Inbound requests are handled in order on one connection, so once the Bootstrap has
+    // arrived the earlier (lagged) AcquireControl was processed: it must not have committed.
+    assert_eq!(handle.state.lock().unwrap().active_controller, None);
+    subscribe(&mut stream, session_id, bootstrap.sequence);
+    acquire_control(&mut stream, session_id);
+    assert_eq!(
+        handle.state.lock().unwrap().active_controller,
+        Some(client_id)
+    );
+
+    handle.stop();
+    drop(stream);
+    drop(subscriber_writer);
     thread.join().unwrap().unwrap();
 }
 

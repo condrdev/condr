@@ -15,12 +15,13 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentSnapshot, GitRepository, PaneId, Session, TerminalAgentProbe, TerminalCommand,
-    TerminalCwdProbe, TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView,
-    TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, default_worktree_root,
-    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
+    TerminalCwdProbe, TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe,
+    TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame,
+    TerminalViewSource, WorkspaceId, create_worktree, default_worktree_root, discover_repository,
+    open_worktree, remove_worktree, validate_worktree_removal,
 };
 
-use crate::client_writer::{ClientWriteItem, ClientWriter};
+use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};
 use crate::endpoint::{Endpoint, EndpointListener, EndpointStream, default_socket_path};
 use crate::persistence::{SnapshotLoad, SnapshotPersistence};
 
@@ -55,6 +56,7 @@ type StartedTerminal = (
     mpsc::Receiver<TerminalUpdate>,
     TerminalAgentProbe,
     TerminalCwdProbe,
+    TerminalNoticeProbe,
     TerminalViewSource,
 );
 type TerminalBaselines = Vec<(PaneId, Arc<TerminalView>)>;
@@ -65,6 +67,7 @@ struct TerminalMonitor {
     updates: mpsc::Receiver<TerminalUpdate>,
     agent_probe: TerminalAgentProbe,
     cwd_probe: TerminalCwdProbe,
+    notice_probe: TerminalNoticeProbe,
     view_source: TerminalViewSource,
     state: Arc<Mutex<RuntimeState>>,
     lifecycle: Arc<ServerLifecycle>,
@@ -276,7 +279,7 @@ impl BoundServer {
     }
 
     fn run_blocking(mut self) -> io::Result<()> {
-        for (pane_id, instance_id, updates, agent_probe, cwd_probe, view_source) in
+        for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
             std::mem::take(&mut self.startup_terminals)
         {
             monitor_terminal(TerminalMonitor {
@@ -285,6 +288,7 @@ impl BoundServer {
                 updates,
                 agent_probe,
                 cwd_probe,
+                notice_probe,
                 view_source,
                 state: Arc::clone(&self.state),
                 lifecycle: Arc::clone(&self.lifecycle),
@@ -517,6 +521,9 @@ struct RuntimeState {
     closing_terminals: std::collections::HashSet<PaneId>,
     exited_terminals: std::collections::HashSet<PaneId>,
     agents: std::collections::HashMap<PaneId, AgentSnapshot>,
+    terminal_titles: std::collections::HashMap<PaneId, String>,
+    /// BEL attention is controller-only because PTY focus has one authoritative owner.
+    pending_terminal_bells: std::collections::HashSet<PaneId>,
     workspace_git: std::collections::HashMap<WorkspaceId, GitRepository>,
     workspace_git_scanned_at: std::collections::HashMap<WorkspaceId, Instant>,
     worktree_root: Option<PathBuf>,
@@ -534,6 +541,7 @@ struct ClientSubscriber {
     render_generation: u64,
     bootstrap_pending: bool,
     deferred_reliable: std::collections::VecDeque<Vec<u8>>,
+    deferred_clipboard: Option<Vec<u8>>,
 }
 
 struct BootstrapCapture {
@@ -550,22 +558,10 @@ struct BootstrapCapture {
 
 struct BootstrapTerminalCapture {
     pane_id: PaneId,
-    view: BootstrapTerminalView,
+    view: Arc<TerminalView>,
     exited: bool,
-}
-
-enum BootstrapTerminalView {
-    Live(TerminalViewSource),
-    Retained(Arc<TerminalView>),
-}
-
-impl BootstrapTerminalView {
-    fn materialize(self) -> TerminalView {
-        match self {
-            Self::Live(source) => source.view(),
-            Self::Retained(view) => Arc::unwrap_or_clone(view),
-        }
-    }
+    title: Option<String>,
+    attention: bool,
 }
 
 impl BootstrapCapture {
@@ -581,8 +577,10 @@ impl BootstrapCapture {
                 .into_iter()
                 .map(|terminal| PaneTerminalSnapshot {
                     pane_id: terminal.pane_id,
-                    view: terminal.view.materialize(),
+                    view: Arc::unwrap_or_clone(terminal.view),
                     exited: terminal.exited,
+                    title: terminal.title,
+                    attention: terminal.attention,
                 })
                 .collect(),
             agents: self.agents,
@@ -594,6 +592,7 @@ impl BootstrapCapture {
 
 struct LatestTerminalView {
     view: Arc<TerminalView>,
+    hyperlinks: TerminalHyperlinkBudget,
     producer_frame: Option<TerminalViewFrame>,
 }
 
@@ -670,6 +669,8 @@ impl RuntimeState {
             closing_terminals: std::collections::HashSet::new(),
             exited_terminals: std::collections::HashSet::new(),
             agents: std::collections::HashMap::new(),
+            terminal_titles: std::collections::HashMap::new(),
+            pending_terminal_bells: std::collections::HashSet::new(),
             workspace_git: std::collections::HashMap::new(),
             workspace_git_scanned_at: std::collections::HashMap::new(),
             worktree_root: default_worktree_root(),
@@ -686,6 +687,12 @@ impl RuntimeState {
             let _ = runtime.release_mouse();
         }
         self.clear_terminal_focus();
+        for pane_id in std::mem::take(&mut self.pending_terminal_bells) {
+            self.publish_background(SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: false,
+            });
+        }
     }
 
     fn clear_terminal_focus(&mut self) {
@@ -849,11 +856,17 @@ impl RuntimeState {
             .agent_probe()
             .expect("new Terminal has an agent probe");
         let cwd_probe = runtime.cwd_probe();
+        let notice_probe = runtime.notice_probe();
         let view_source = runtime.view_source();
+        self.clear_terminal_title(pane_id);
+        self.clear_terminal_attention(pane_id);
+        let mut view = runtime.view();
+        let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
         self.terminal_views.insert(
             pane_id,
             LatestTerminalView {
-                view: Arc::new(runtime.view()),
+                view: Arc::new(view),
+                hyperlinks,
                 producer_frame: None,
             },
         );
@@ -865,7 +878,43 @@ impl RuntimeState {
         self.terminals.insert(pane_id, runtime);
         self.terminal_instances.insert(pane_id, instance_id);
         self.closing_terminals.remove(&pane_id);
-        (pane_id, instance_id, updates, probe, cwd_probe, view_source)
+        (
+            pane_id,
+            instance_id,
+            updates,
+            probe,
+            cwd_probe,
+            notice_probe,
+            view_source,
+        )
+    }
+
+    /// Forgets a Terminal's reported title and tells subscribers, if there was one.
+    fn clear_terminal_title(&mut self, pane_id: PaneId) {
+        if self.terminal_titles.remove(&pane_id).is_some() {
+            self.publish_background(SessionEvent::TerminalTitleChanged {
+                pane_id,
+                title: None,
+            });
+        }
+    }
+
+    fn record_terminal_focus(&mut self, pane_id: PaneId, focused: bool) {
+        if focused {
+            self.focused_terminal = Some(pane_id);
+            self.clear_terminal_attention(pane_id);
+        } else if self.focused_terminal == Some(pane_id) {
+            self.focused_terminal = None;
+        }
+    }
+
+    fn clear_terminal_attention(&mut self, pane_id: PaneId) {
+        if self.pending_terminal_bells.remove(&pane_id) {
+            self.publish_background(SessionEvent::TerminalAttentionChanged {
+                pane_id,
+                attention: false,
+            });
+        }
     }
 
     fn restore_exited_terminal(&mut self, pane_id: PaneId, runtime: TerminalRuntime) -> bool {
@@ -880,6 +929,7 @@ impl RuntimeState {
         if self.exited_terminals.insert(pane_id) {
             self.publish_background(SessionEvent::TerminalExited { pane_id });
         }
+        self.clear_terminal_title(pane_id);
         if self.agents.remove(&pane_id).is_some() {
             self.publish_background(SessionEvent::AgentChanged {
                 pane_id,
@@ -1047,19 +1097,16 @@ impl RuntimeState {
         for workspace in self.session.workspaces() {
             for tab in workspace.tabs() {
                 for pane in tab.panes() {
-                    if let Some(runtime) = self.terminals.get(&pane.id()) {
-                        terminals.push(BootstrapTerminalCapture {
-                            pane_id: pane.id(),
-                            view: BootstrapTerminalView::Live(runtime.view_source()),
-                            exited: self.exited_terminals.contains(&pane.id()),
-                        });
-                    } else if self.closing_terminals.contains(&pane.id())
+                    if (self.terminals.contains_key(&pane.id())
+                        || self.closing_terminals.contains(&pane.id()))
                         && let Some(latest) = self.terminal_views.get(&pane.id())
                     {
                         terminals.push(BootstrapTerminalCapture {
                             pane_id: pane.id(),
-                            view: BootstrapTerminalView::Retained(Arc::clone(&latest.view)),
+                            view: Arc::clone(&latest.view),
                             exited: self.exited_terminals.contains(&pane.id()),
+                            title: self.terminal_titles.get(&pane.id()).cloned(),
+                            attention: self.pending_terminal_bells.contains(&pane.id()),
                         });
                     }
                 }
@@ -1140,11 +1187,13 @@ impl RuntimeState {
             event,
         };
         let data = frame_message(&message).expect("Session event must fit a protocol frame");
-        let origin_failed =
-            origin.is_some_and(|(_, writer)| writer.send_reliable(data.clone()).is_err());
+        // The event is already committed; a lagged origin merely leaves the subscriber set
+        // and recovers through its Bootstrap. Only a dead writer closes the connection.
+        let origin_result = origin.map(|(_, writer)| writer.send_reliable(data.clone()));
+        let origin_lost = origin_result.is_some_and(|result| result.is_err());
         self.subscribers.retain(|client_id, subscriber| {
             if origin.is_some_and(|(origin_client_id, _)| *client_id == origin_client_id) {
-                !origin_failed
+                !origin_lost
             } else if subscriber.bootstrap_pending {
                 subscriber.deferred_reliable.push_back(data.clone());
                 true
@@ -1152,24 +1201,42 @@ impl RuntimeState {
                 subscriber.writer.send_reliable(data.clone()).is_ok()
             }
         });
-        origin_failed
+        origin_result == Some(Err(ReliableSendError::Disconnected))
+    }
+
+    /// Fans out the latest non-replayed clipboard state to every attached client.
+    fn broadcast_clipboard(&mut self, pane_id: PaneId, text: String) {
+        let Ok(data) = frame_message(&ServerMessage::TerminalClipboard { pane_id, text }) else {
+            return;
+        };
+        self.subscribers.retain(|_, subscriber| {
+            if subscriber.bootstrap_pending {
+                subscriber.deferred_clipboard = Some(data.clone());
+                true
+            } else {
+                subscriber.writer.send_clipboard(data.clone()).is_ok()
+            }
+        });
     }
 
     fn publish_terminal(&mut self, pane_id: PaneId, frame: TerminalViewFrame) -> Option<Vec<u64>> {
         match frame {
-            TerminalViewFrame::Full(view) => {
+            TerminalViewFrame::Full(mut view) => {
+                let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
                 self.terminal_views.insert(
                     pane_id,
                     LatestTerminalView {
                         view: Arc::new(view),
+                        hyperlinks,
                         producer_frame: None,
                     },
                 );
             }
             TerminalViewFrame::Delta(delta) => {
                 let latest = self.terminal_views.get_mut(&pane_id)?;
-                Arc::make_mut(&mut latest.view)
-                    .apply_frame(TerminalViewFrame::Delta(delta.clone()))
+                let delta = latest
+                    .hyperlinks
+                    .apply_delta(Arc::make_mut(&mut latest.view), delta)
                     .ok()?;
                 latest.producer_frame = Some(TerminalViewFrame::Delta(delta));
             }
@@ -1252,6 +1319,9 @@ impl RuntimeState {
             return;
         };
         subscriber.writer.clear_render();
+        // Clipboard state is neither in the Bootstrap nor in event history, so a copy that is
+        // still unsent must survive the fence (ADR 0007); newer copies keep replacing it and
+        // go out after the Bootstrap. Only lag recovery drops it (`resume_after_lag`).
         subscriber.pending_terminals.clear();
         subscriber.terminal_baselines.clear();
         subscriber.bootstrap_pending = true;
@@ -1271,39 +1341,42 @@ impl RuntimeState {
                     render_generation: 1,
                     bootstrap_pending: false,
                     deferred_reliable: std::collections::VecDeque::new(),
+                    deferred_clipboard: None,
                 });
                 true
             }
         }
     }
 
-    fn finish_bootstrap(&mut self, client_id: u64, framed: FramedBootstrap) -> bool {
+    fn finish_bootstrap(
+        &mut self,
+        client_id: u64,
+        framed: FramedBootstrap,
+    ) -> Result<(), ReliableSendError> {
         let Some(subscriber) = self.subscribers.get_mut(&client_id) else {
-            return true;
+            return Err(ReliableSendError::Disconnected);
         };
         subscriber.writer.clear_render();
         subscriber.terminal_baselines = framed.baselines.into_iter().collect();
-        if subscriber
-            .writer
-            .send_reliable_batch(framed.frames)
-            .is_err()
-        {
-            return true;
-        }
+        subscriber.writer.send_reliable_batch(framed.frames)?;
         while let Some(data) = subscriber.deferred_reliable.pop_front() {
-            if subscriber.writer.send_reliable(data).is_err() {
-                return true;
-            }
+            subscriber.writer.send_reliable(data)?;
+        }
+        if let Some(data) = subscriber.deferred_clipboard.take() {
+            subscriber.writer.send_clipboard(data)?;
         }
         subscriber.bootstrap_pending = false;
         subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
-        false
+        Ok(())
     }
 
     fn abort_bootstrap(&mut self, client_id: u64) {
         if let Some(subscriber) = self.subscribers.get_mut(&client_id) {
             subscriber.bootstrap_pending = false;
             subscriber.deferred_reliable.clear();
+            if let Some(data) = subscriber.deferred_clipboard.take() {
+                let _ = subscriber.writer.send_clipboard(data);
+            }
             subscriber.pending_terminals.clear();
             subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
         }

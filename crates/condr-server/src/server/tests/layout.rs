@@ -18,7 +18,7 @@ fn apply_for_test(
         }
         None => apply_layout_command(state, command).unwrap(),
     };
-    for (_, _, receiver, _, _, _) in effect.started_terminals {
+    for (_, _, receiver, _, _, _, _) in effect.started_terminals {
         updates.push(receiver);
     }
     let removed_count = terminal_count_before.saturating_sub(state.terminals.len());
@@ -375,6 +375,16 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     approve_external_layout(&mut state, &mut prepared).unwrap();
     assert!(!state.terminals.contains_key(&pane_id));
     assert!(!state.terminal_instances.contains_key(&pane_id));
+    state.active_controller = Some(1);
+    apply_terminal_notices(
+        &mut state,
+        pane_id,
+        TerminalNoticeBatch {
+            bells: 1,
+            ..TerminalNoticeBatch::default()
+        },
+    );
+    assert!(state.pending_terminal_bells.contains(&pane_id));
 
     let failure = match finish_external_layout(prepared) {
         Ok(_) => panic!("dirty worktree removal unexpectedly succeeded"),
@@ -389,6 +399,14 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     assert!(state.terminals.contains_key(&pane_id));
     assert_ne!(state.terminal_instances[&pane_id], previous_instance);
     assert!(state.session.workspace(child_workspace_id).is_some());
+    assert!(!state.pending_terminal_bells.contains(&pane_id));
+    assert!(matches!(
+        state.events.back().map(|event| &event.event),
+        Some(SessionEvent::TerminalAttentionChanged {
+            pane_id: event_pane_id,
+            attention: false,
+        }) if *event_pane_id == pane_id
+    ));
 
     std::fs::remove_file(child_root.join("became-dirty.txt")).unwrap();
     apply_for_test(

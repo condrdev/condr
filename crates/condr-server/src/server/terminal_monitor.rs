@@ -7,6 +7,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
         updates,
         agent_probe,
         cwd_probe,
+        notice_probe,
         view_source,
         state,
         lifecycle,
@@ -38,6 +39,16 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                     last_view_publish + TERMINAL_FRAME_INTERVAL,
                 )
             });
+            if update.is_some() {
+                let notices = notice_probe.take();
+                if !notices.is_empty() {
+                    let mut state = state.lock().expect("server state lock poisoned");
+                    if !state.terminal_is_current(pane_id, instance_id) {
+                        break;
+                    }
+                    apply_terminal_notices(&mut state, pane_id, notices);
+                }
+            }
             match update {
                 Some(TerminalUpdate::View(_)) => {
                     agent_scan_pending = true;
@@ -94,6 +105,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                         }
                         state.exited_terminals.insert(pane_id);
                         state.publish_background(SessionEvent::TerminalExited { pane_id });
+                        state.clear_terminal_title(pane_id);
                         if state.agents.remove(&pane_id).is_some() {
                             state.publish_background(SessionEvent::AgentChanged {
                                 pane_id,
@@ -241,6 +253,35 @@ pub(super) fn apply_agent_refresh(
         pane_id,
         agent: next,
     });
+}
+
+pub(super) fn apply_terminal_notices(
+    state: &mut RuntimeState,
+    pane_id: PaneId,
+    notices: TerminalNoticeBatch,
+) {
+    if let Some(title) = notices.title {
+        let previous = match &title {
+            Some(title) => state.terminal_titles.insert(pane_id, title.clone()),
+            None => state.terminal_titles.remove(&pane_id),
+        };
+        if previous != title {
+            state.publish_background(SessionEvent::TerminalTitleChanged { pane_id, title });
+        }
+    }
+    if notices.bells > 0
+        && state.active_controller.is_some()
+        && state.focused_terminal != Some(pane_id)
+        && state.pending_terminal_bells.insert(pane_id)
+    {
+        state.publish_background(SessionEvent::TerminalAttentionChanged {
+            pane_id,
+            attention: true,
+        });
+    }
+    if let Some(text) = notices.clipboard {
+        state.broadcast_clipboard(pane_id, text);
+    }
 }
 
 pub(super) enum WorkspaceGitScan {

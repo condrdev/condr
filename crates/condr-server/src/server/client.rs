@@ -70,7 +70,13 @@ pub(super) fn handle_client(
         Ok(stream) => stream,
         Err(_) => return,
     };
-    let (outbound, outbound_rx) = ClientWriter::channel();
+    let lag_notice = frame_message(&ServerMessage::SubscriptionRejected {
+        server_id,
+        session_id,
+        reason: "client fell behind the reliable event stream".into(),
+    })
+    .expect("lag notice must fit a protocol frame");
+    let (outbound, outbound_rx) = ClientWriter::channel_with_lag_notice(lag_notice);
     let writer_state = Arc::downgrade(&state);
     let writer = thread::spawn(move || {
         while let Some(item) = outbound_rx.recv() {
@@ -182,18 +188,19 @@ pub(super) fn handle_client(
                 } else if let Some(subscriber) = state.subscribers.remove(&client_id) {
                     subscriber.writer.clear_render();
                 }
-                let failed = responses
+                let queued = responses
                     .into_iter()
-                    .any(|response| queue_message(&outbound, response));
-                if failed {
+                    .try_for_each(|response| queue_response(&outbound, response));
+                if queued.is_err() {
+                    // Lagged or dead: either way this subscription did not reach the client.
                     state.subscribers.remove(&client_id);
                 }
-                let should_flush = should_subscribe && !failed;
+                let should_flush = should_subscribe && queued.is_ok();
                 drop(state);
                 if should_flush {
                     flush_terminal_render(&shared_state, client_id);
                 }
-                failed
+                queued == Err(ReliableSendError::Disconnected)
             }
             ClientMessage::Ping { server_id, nonce } => {
                 let state = state.lock().expect("server state lock poisoned");
@@ -215,56 +222,88 @@ pub(super) fn handle_client(
                     )
                 }
             }
+            // Control changes commit only once their response is queued: a response lost to
+            // writer lag must not leave the client believing the opposite of the Server.
             ClientMessage::AcquireControl { session_id } => {
-                let response = {
-                    let mut state = state.lock().expect("server state lock poisoned");
-                    if session_id != state.session_id {
+                let mut state = state.lock().expect("server state lock poisoned");
+                let (response, grant) = if session_id != state.session_id {
+                    (
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
                             reason: "unknown Session".into(),
-                        }
-                    } else if state.active_controller.is_none()
-                        || state.active_controller == Some(client_id)
-                    {
-                        state.active_controller = Some(client_id);
+                        },
+                        false,
+                    )
+                } else if state.active_controller.is_none()
+                    || state.active_controller == Some(client_id)
+                {
+                    (
                         ServerMessage::ControlGranted {
                             server_id: state.server_id,
                             session_id,
-                        }
-                    } else {
+                        },
+                        true,
+                    )
+                } else {
+                    (
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
                             reason: "another client controls this Session".into(),
-                        }
-                    }
+                        },
+                        false,
+                    )
                 };
-                queue_message(&outbound, response)
+                match queue_response(&outbound, response) {
+                    Ok(()) => {
+                        if grant {
+                            state.active_controller = Some(client_id);
+                        }
+                        false
+                    }
+                    Err(ReliableSendError::Lagged) => false,
+                    Err(ReliableSendError::Disconnected) => true,
+                }
             }
             ClientMessage::ReleaseControl { session_id } => {
-                let response = {
-                    let mut state = state.lock().expect("server state lock poisoned");
-                    if state.session_id != session_id {
+                let mut state = state.lock().expect("server state lock poisoned");
+                let (response, release) = if state.session_id != session_id {
+                    (
                         ServerMessage::Error {
                             message: "unknown Session".into(),
-                        }
-                    } else if state.active_controller == Some(client_id) {
-                        state.clear_controller_terminal_state();
-                        state.active_controller = None;
+                        },
+                        false,
+                    )
+                } else if state.active_controller == Some(client_id) {
+                    (
                         ServerMessage::ControlReleased {
                             server_id: state.server_id,
                             session_id,
-                        }
-                    } else {
+                        },
+                        true,
+                    )
+                } else {
+                    (
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
                             reason: "client does not control this Session".into(),
-                        }
-                    }
+                        },
+                        false,
+                    )
                 };
-                queue_message(&outbound, response)
+                match queue_response(&outbound, response) {
+                    Ok(()) => {
+                        if release {
+                            state.clear_controller_terminal_state();
+                            state.active_controller = None;
+                        }
+                        false
+                    }
+                    Err(ReliableSendError::Lagged) => false,
+                    Err(ReliableSendError::Disconnected) => true,
+                }
             }
             ClientMessage::Layout {
                 server_id,
@@ -585,14 +624,21 @@ pub(super) fn handle_client(
                             reason: "acquire Session control before using a terminal".into(),
                         },
                     )
-                } else if state.exited_terminals.contains(&pane_id) {
+                } else if state.session.pane(pane_id).is_none() {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::Error {
+                            message: "unknown Pane".into(),
+                        },
+                    )
+                } else if state.exited_terminals.contains(&pane_id) && focus.is_none() {
                     queue_message(
                         &outbound,
                         ServerMessage::Error {
                             message: "terminal has exited".into(),
                         },
                     )
-                } else if state.closing_terminals.contains(&pane_id) {
+                } else if state.closing_terminals.contains(&pane_id) && focus.is_none() {
                     queue_message(
                         &outbound,
                         ServerMessage::Error {
@@ -600,23 +646,23 @@ pub(super) fn handle_client(
                         },
                     )
                 } else {
-                    if focus == Some(true) && state.focused_terminal != Some(pane_id) {
-                        state.clear_terminal_focus();
-                    }
-                    let result = state
-                        .terminals
-                        .get(&pane_id)
-                        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown Pane"))
-                        .and_then(|runtime| runtime.execute(command));
-                    if result.is_ok() {
-                        match focus {
-                            Some(true) => state.focused_terminal = Some(pane_id),
-                            Some(false) if state.focused_terminal == Some(pane_id) => {
-                                state.focused_terminal = None;
-                            }
-                            _ => {}
+                    let unavailable = state.exited_terminals.contains(&pane_id)
+                        || state.closing_terminals.contains(&pane_id);
+                    let result = if !unavailable && !state.terminals.contains_key(&pane_id) {
+                        Err(io::Error::new(io::ErrorKind::NotFound, "unknown Pane"))
+                    } else {
+                        if focus == Some(true) && state.focused_terminal != Some(pane_id) {
+                            state.clear_terminal_focus();
                         }
-                    }
+                        if let Some(focused) = focus {
+                            state.record_terminal_focus(pane_id, focused);
+                        }
+                        if unavailable {
+                            Ok(None)
+                        } else {
+                            state.terminals[&pane_id].execute(command)
+                        }
+                    };
                     match result {
                         Ok(text) if is_copy => queue_message(
                             &outbound,
@@ -655,7 +701,7 @@ pub(super) fn handle_client(
             ClientMessage::Detach => true,
             ClientMessage::Hello(Hello { .. }) => false,
         };
-        for (pane_id, instance_id, updates, agent_probe, cwd_probe, view_source) in
+        for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
             started_terminals
         {
             monitor_terminal(TerminalMonitor {
@@ -664,6 +710,7 @@ pub(super) fn handle_client(
                 updates,
                 agent_probe,
                 cwd_probe,
+                notice_probe,
                 view_source,
                 state: Arc::clone(&state),
                 lifecycle: Arc::clone(&lifecycle),
