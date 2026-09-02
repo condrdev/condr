@@ -433,6 +433,22 @@ fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
             b"\x08",
         ),
         (TerminalKey::Function(12), none, false, b"\x1b[24~"),
+        (TerminalKey::Enter, none, false, b"\r"),
+        (
+            TerminalKey::Enter,
+            TerminalModifiers { alt: true, ..none },
+            false,
+            b"\x1b\r",
+        ),
+        (
+            TerminalKey::Enter,
+            TerminalModifiers {
+                shift: true,
+                ..none
+            },
+            false,
+            b"\n",
+        ),
     ];
     for (key, modifiers, application_cursor, expected) in cases {
         assert_eq!(

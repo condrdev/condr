@@ -28,6 +28,8 @@ pub(super) fn encode_key(
 
     let modifier = modifier_code(modifiers);
     let sequence = match key {
+        // Shift+Enter sends LF (Ctrl+J), which agent CLIs treat as newline.
+        TerminalKey::Enter if modifiers.shift => "\n".into(),
         TerminalKey::Enter => "\r".into(),
         TerminalKey::Tab if modifiers.shift => "\x1b[Z".into(),
         TerminalKey::Tab => "\t".into(),
