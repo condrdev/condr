@@ -2,6 +2,7 @@
 
 mod apca;
 mod app;
+mod color_scheme;
 mod terminal_element;
 
 pub(crate) use app::{Condr, ConnectionKey};

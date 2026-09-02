@@ -21,12 +21,16 @@ The window surface shown when a Session contains no Workspaces. It offers an ent
 _Avoid_: Empty Workspace, empty Pane
 
 **Settings**:
-A Client-owned dialog presenting this Client's GUI preferences as pages. Its values live in the Client's `config.toml`, apply to every Server the Client connects to, and never reach a Server or a Session Snapshot. That file is hand-editable: a save rewrites one key and leaves the rest of the document, comments included, as written. Only one Client runs at a time, so no second Client can race that rewrite.
+A Client-owned window presenting this Client's GUI preferences as pages. It opens beside the main window so every change shows live on the real Panes, and closes with the main window. Its values live in the Client's `config.toml`, apply to every Server the Client connects to, and never reach a Server or a Session Snapshot. That file is hand-editable: a save rewrites one key and leaves the rest of the document, comments included, as written. Only one Client runs at a time, so no second Client can race that rewrite.
 _Avoid_: Preferences, options, config
 
 **Appearance**:
-The Settings page owning how the GUI chrome looks, and the `System` / `Light` / `Dark` preference on it. `System` follows the operating system's appearance for as long as it stays selected. It also owns the Terminal font family and size, which apply to every Pane on every connected Server. It does not change Terminal colors, which are currently fixed.
+The Settings page owning how the GUI chrome looks, and the `System` / `Light` / `Dark` preference on it. `System` follows the operating system's appearance for as long as it stays selected. It also owns the Terminal font family, size and Color Scheme, which apply to every Pane on every connected Server.
 _Avoid_: Theme, dark mode
+
+**Color Scheme**:
+A named Terminal palette (background, foreground, cursor, selection and the 16 ANSI colors) chosen on the Appearance page. The built-in collection is vendored from iTerm2-Color-Schemes in Alacritty's TOML layout; `Default` is Condr's own dark palette. It is independent of the `System` / `Light` / `Dark` mode.
+_Avoid_: Terminal theme, palette (as a user-facing name)
 
 **Workspace**:
 A project- or task-level container with a stable identity and Root Directory. It owns an ordered set of Tabs. Closing it terminates its terminals but never removes files or a Git worktree checkout.

@@ -34,6 +34,7 @@ use gpui_component::dock::{
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
+use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
@@ -44,7 +45,7 @@ use gpui_component::theme::{Theme, ThemeMode};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName, IconNamed,
-    Root, Selectable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    IndexPath, Root, Selectable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_component_assets::Assets;
 
@@ -66,7 +67,8 @@ mod workspace;
 use connection::*;
 use dock::*;
 use settings::{
-    Appearance, TerminalFont, apply_appearance, apply_terminal_font, sync_theme_with_system,
+    Appearance, TerminalFont, apply_appearance, apply_terminal_color_scheme, apply_terminal_font,
+    sync_theme_with_system,
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{select_appearance, selected_appearance};
@@ -484,6 +486,9 @@ pub(crate) struct Condr {
     window_handle: AnyWindowHandle,
     appearance: Appearance,
     terminal_font: TerminalFont,
+    terminal_color_scheme: SharedString,
+    settings_window: Option<WindowHandle<Root>>,
+    _settings_window_closed: Option<Subscription>,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
@@ -531,6 +536,10 @@ impl Condr {
             .as_deref()
             .and_then(|path| config::load_terminal_font(path).ok())
             .unwrap_or_default();
+        let terminal_color_scheme = client_config_path
+            .as_deref()
+            .and_then(|path| config::load_terminal_color_scheme(path).ok())
+            .unwrap_or_default();
         let mut connections = vec![connection];
         for (index, server) in saved_servers.into_iter().enumerate() {
             connections.push(ServerConnection::new(
@@ -553,6 +562,7 @@ impl Condr {
             });
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
+        apply_terminal_color_scheme(&terminal_color_scheme, cx);
         let mut this = Self {
             client_config_path,
             connections,
@@ -583,6 +593,9 @@ impl Condr {
             window_handle: window.window_handle(),
             appearance,
             terminal_font,
+            terminal_color_scheme,
+            settings_window: None,
+            _settings_window_closed: None,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,

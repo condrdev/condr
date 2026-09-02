@@ -10,8 +10,8 @@ use condr_core::{
 };
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
-    ElementInputHandler, Entity, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    InputHandler, InspectorElementId, IntoElement, LayoutId, Modifiers as GpuiModifiers,
+    ElementInputHandler, Entity, FocusHandle, Global, GlobalElementId, Hitbox, HitboxBehavior,
+    Hsla, InputHandler, InspectorElementId, IntoElement, LayoutId, Modifiers as GpuiModifiers,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle, Style, TextAlign,
     TextInputConfiguration, TextRun, TextStyle, TouchPhase, UTF16Selection, UnderlineStyle, Window,
@@ -37,19 +37,22 @@ const ALL_UNDERLINES: u16 = 0b0111_1000_0000_1000;
 /// once terminal appearance configuration exists.
 const MINIMUM_CONTRAST_LC: f32 = 45.0;
 
+/// The colors every Terminal renders with. Set as a GPUI global by the Appearance
+/// settings; absent, the built-in default applies.
 #[derive(Clone, PartialEq)]
-struct TerminalPalette {
-    background: Hsla,
-    foreground: Hsla,
-    cursor: Hsla,
-    selection: Hsla,
-    normal: [Hsla; 8],
-    bright: [Hsla; 8],
+pub(crate) struct TerminalPalette {
+    pub(crate) background: Hsla,
+    pub(crate) foreground: Hsla,
+    pub(crate) cursor: Hsla,
+    pub(crate) selection: Hsla,
+    pub(crate) normal: [Hsla; 8],
+    pub(crate) bright: [Hsla; 8],
 }
 
-impl TerminalPalette {
-    // Fixed dark palette until terminal theme configuration is available.
-    fn temporary_dark() -> Self {
+impl Global for TerminalPalette {}
+
+impl Default for TerminalPalette {
+    fn default() -> Self {
         Self {
             background: rgb(0x0d1117).into(),
             foreground: rgb(0xc9d1d9).into(),
@@ -395,7 +398,10 @@ impl Element for TerminalElement {
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        let palette = TerminalPalette::temporary_dark();
+        let palette = cx
+            .try_global::<TerminalPalette>()
+            .cloned()
+            .unwrap_or_default();
         let mut quads = vec![fill(bounds, palette.background)];
         let mut cells = Vec::with_capacity(self.props.terminal.cells.len());
         let cache_key = TerminalRenderCacheKey {
@@ -1407,7 +1413,7 @@ mod tests {
             size: TerminalSize::new(24, 80),
             style: TextStyle::default(),
             font_size: px(14.),
-            palette: TerminalPalette::temporary_dark(),
+            palette: TerminalPalette::default(),
         };
         let foreground: Hsla = rgb(0xffffff).into();
         cache.prepare(key.clone(), 2);
@@ -1564,7 +1570,7 @@ mod tests {
 
     #[test]
     fn temporary_palette_resolves_terminal_colors_independently_from_ui_theme() {
-        let palette = TerminalPalette::temporary_dark();
+        let palette = TerminalPalette::default();
 
         assert_eq!(
             terminal_color(TerminalColor::Named(256), true, &palette),

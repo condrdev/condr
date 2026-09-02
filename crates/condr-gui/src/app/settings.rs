@@ -1,12 +1,10 @@
 use super::*;
 
-// Sized in rems so the dialog zooms with the base font, then resolved to the pixels
-// Dialog takes. These bound the whole dialog, not its content: Dialog does not clamp
-// itself to the viewport, but it does give its content whatever it has left, so the
-// content never has to know what the title and padding cost.
-const SETTINGS_DIALOG_WIDTH: Rems = rems(54.);
-const SETTINGS_DIALOG_HEIGHT: Rems = rems(34.);
-const SETTINGS_DIALOG_MARGIN: Rems = rems(3.);
+// Sized in rems so the window zooms with the base font, resolved against the main
+// window's rem size when it opens.
+const SETTINGS_WINDOW_WIDTH: Rems = rems(54.);
+const SETTINGS_WINDOW_HEIGHT: Rems = rems(34.);
+const SETTINGS_WINDOW_MIN_SIZE: Size<Pixels> = size(px(480.), px(320.));
 
 /// The GUI appearance preference. `System` follows the OS; the other two pin a mode.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -83,6 +81,13 @@ pub(super) fn apply_terminal_font(font: &TerminalFont, cx: &mut App) {
     cx.refresh_windows();
 }
 
+/// Terminal color scheme names come from the built-in collection; an empty or
+/// unknown name selects the built-in default palette.
+pub(super) fn apply_terminal_color_scheme(name: &str, cx: &mut App) {
+    cx.set_global(crate::color_scheme::palette(name).unwrap_or_default());
+    cx.refresh_windows();
+}
+
 /// Applies a chosen Appearance: the native window-chrome override plus the theme.
 ///
 /// Forcing an appearance stops the platform from tracking system light/dark changes,
@@ -128,6 +133,8 @@ impl Condr {
             let _ = handle.update(cx, |_, window, cx| {
                 apply_appearance(appearance, Some(window), cx)
             });
+            // The Settings window shows the new mode too.
+            cx.refresh_windows();
         });
     }
 
@@ -148,41 +155,142 @@ impl Condr {
         apply_terminal_font(&self.terminal_font, cx);
     }
 
+    pub(super) fn set_terminal_color_scheme(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        if self.terminal_color_scheme == name {
+            return;
+        }
+        self.terminal_color_scheme = name;
+        self.save_terminal_color_scheme();
+        apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
+    }
+
+    /// Settings opens in its own window, as Zed does, so it can be moved aside while
+    /// the real Panes behind it show every change live. A second open re-activates it.
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(existing) = self.settings_window
+            && existing
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+        {
+            return;
+        }
+        let rem = window.rem_size();
+        let window_size = size(
+            SETTINGS_WINDOW_WIDTH.to_pixels(rem),
+            SETTINGS_WINDOW_HEIGHT.to_pixels(rem),
+        );
+        let main_window = self.window_handle;
         let owner = cx.weak_entity();
-        window.defer(cx, move |window, cx| {
-            let owner = owner.clone();
-            window.open_dialog(cx, move |dialog, window, _| {
-                let owner = owner.clone();
-                let rem = window.rem_size();
-                let viewport = window.viewport_size();
-                let margin = SETTINGS_DIALOG_MARGIN.to_pixels(rem);
-                let width = SETTINGS_DIALOG_WIDTH
-                    .to_pixels(rem)
-                    .min(viewport.width - margin - margin)
-                    .max(px(1.));
-                let height = SETTINGS_DIALOG_HEIGHT
-                    .to_pixels(rem)
-                    .min(viewport.height - margin - margin)
-                    .max(px(1.));
-                dialog
-                    .title("Settings")
-                    .w(width)
-                    .h(height)
-                    .margin_top(margin)
-                    .content(move |content, _, _| {
-                        content.child(
-                            div()
-                                .id("condr-settings-content")
-                                .debug_selector(|| "settings-content".into())
-                                .size_full()
-                                .child(
-                                    Settings::new("condr-settings").page(appearance_page(&owner)),
-                                ),
-                        )
-                    })
+        // Opening a window needs the App without this entity on the stack.
+        cx.defer(move |cx| {
+            let options = WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Condr — Settings".into()),
+                    ..Default::default()
+                }),
+                window_bounds: Some(WindowBounds::centered(window_size, cx)),
+                window_min_size: Some(SETTINGS_WINDOW_MIN_SIZE),
+                ..Default::default()
+            };
+            let view_owner = owner.clone();
+            let opened = cx.open_window(options, |window, cx| {
+                let view = cx.new(|cx| SettingsWindow::new(view_owner, window, cx));
+                view.read(cx).focus_handle.clone().focus(window, cx);
+                cx.new(|cx| Root::new(view, window, cx))
+            });
+            let _ = owner.update(cx, |this, cx| match opened {
+                Ok(handle) => {
+                    this.settings_window = Some(handle);
+                    // Closing the main window closes Settings too; otherwise it would
+                    // keep the process alive with nothing left to configure.
+                    this._settings_window_closed = Some(cx.on_window_closed(move |cx, _| {
+                        if !cx.windows().contains(&main_window) {
+                            let _ = handle.update(cx, |_, window, _| window.remove_window());
+                        }
+                    }));
+                }
+                Err(error) => this.app_error = Some(format!("Failed to open Settings: {error}")),
             });
         });
+    }
+}
+
+/// The Colors entry standing for the built-in palette, stored as an empty name.
+const DEFAULT_COLOR_SCHEME_LABEL: &str = "Default";
+
+fn color_scheme_name(label: &SharedString) -> SharedString {
+    if label == DEFAULT_COLOR_SCHEME_LABEL {
+        SharedString::default()
+    } else {
+        label.clone()
+    }
+}
+
+type ColorSchemeSelect = SelectState<SearchableVec<SharedString>>;
+
+/// The Settings window's root. Every value lives on `Condr`; it only owns the widget
+/// state a searchable list of 600 schemes needs to scroll to and filter its selection.
+pub(super) struct SettingsWindow {
+    owner: WeakEntity<Condr>,
+    focus_handle: FocusHandle,
+    color_scheme: Entity<ColorSchemeSelect>,
+}
+
+impl SettingsWindow {
+    fn new(owner: WeakEntity<Condr>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let labels = std::iter::once(DEFAULT_COLOR_SCHEME_LABEL.into())
+            .chain(crate::color_scheme::names().map(SharedString::from))
+            .collect::<Vec<SharedString>>();
+        let current = owner
+            .upgrade()
+            .map(|owner| owner.read(cx).terminal_color_scheme.clone())
+            .unwrap_or_default();
+        let selected = labels
+            .iter()
+            .position(|label| color_scheme_name(label) == current)
+            .map(IndexPath::new);
+        let color_scheme = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(labels), selected, window, cx).searchable(true)
+        });
+        cx.subscribe(
+            &color_scheme,
+            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+                let SelectEvent::Confirm(Some(label)) = event else {
+                    return;
+                };
+                let name = color_scheme_name(label);
+                let _ = this
+                    .owner
+                    .update(cx, |owner, cx| owner.set_terminal_color_scheme(name, cx));
+            },
+        )
+        .detach();
+        Self {
+            owner,
+            focus_handle: cx.focus_handle(),
+            color_scheme,
+        }
+    }
+}
+
+impl Render for SettingsWindow {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("condr-settings-window")
+            .debug_selector(|| "settings-content".into())
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .on_key_down(|event, window, _| {
+                if event.keystroke.key == "escape" {
+                    window.remove_window();
+                }
+            })
+            .child(
+                Settings::new("condr-settings")
+                    .page(appearance_page(&self.owner, &self.color_scheme)),
+            )
     }
 }
 
@@ -209,7 +317,11 @@ fn terminal_font(owner: &WeakEntity<Condr>, cx: &App) -> TerminalFont {
         .unwrap_or_default()
 }
 
-fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
+fn appearance_page(
+    owner: &WeakEntity<Condr>,
+    color_scheme: &Entity<ColorSchemeSelect>,
+) -> SettingPage {
+    let color_scheme = color_scheme.clone();
     let selected_owner = owner.clone();
     let select_owner = owner.clone();
     let options = Appearance::ALL
@@ -281,6 +393,22 @@ fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
                         .default_value(f64::from(default_font.size)),
                     )
                     .description("In pixels."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Colors",
+                        // A searchable Select: 600 entries need filtering, and it opens
+                        // scrolled to the current choice.
+                        SettingField::render(move |_, _, _| {
+                            // The field slot shrinks to content, so the trigger and the
+                            // menu need a width that fits the longest scheme name.
+                            Select::new(&color_scheme)
+                                .w(px(280.))
+                                .menu_width(px(320.))
+                                .menu_max_h(px(360.))
+                        }),
+                    )
+                    .description("Terminal color schemes."),
                 ),
         )
 }

@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
+use gpui::SharedString;
 use serde::Deserialize;
 
 use super::{Appearance, Condr, Endpoint, TerminalFont};
@@ -14,6 +15,7 @@ const SERVERS_KEY: &str = "servers";
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
+const COLOR_SCHEME_KEY: &str = "color_scheme";
 
 #[derive(Deserialize)]
 pub(super) struct SavedServer {
@@ -57,6 +59,15 @@ pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
         font.size = TerminalFont::clamp_size(size as f32);
     }
     Ok(font)
+}
+
+/// Empty when unset; the caller resolves unknown names to the default palette.
+pub(super) fn load_terminal_color_scheme(path: &Path) -> io::Result<SharedString> {
+    Ok(read_value(path, &TERMINAL_TABLE, COLOR_SCHEME_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_str)
+        .map(|name| name.trim().to_string().into())
+        .unwrap_or_default())
 }
 
 fn read_client_value(path: &Path, key: &str) -> io::Result<Option<toml::Value>> {
@@ -128,6 +139,21 @@ impl Condr {
                 toml_edit::value(f64::from(font.size)),
             )
         }) {
+            self.app_error = Some(format!("Failed to save config: {error}"));
+        }
+    }
+
+    pub(super) fn save_terminal_color_scheme(&mut self) {
+        let Some(path) = self.client_config_path.as_deref() else {
+            return;
+        };
+        let name = self.terminal_color_scheme.clone();
+        if let Err(error) = write_value(
+            path,
+            &TERMINAL_TABLE,
+            COLOR_SCHEME_KEY,
+            toml_edit::value(name.as_ref()),
+        ) {
             self.app_error = Some(format!("Failed to save config: {error}"));
         }
     }
@@ -337,6 +363,28 @@ mod tests {
         let font = load_terminal_font(&path).unwrap();
         assert_eq!(font.family, TerminalFont::default().family);
         assert_eq!(font.size, TerminalFont::MAX_SIZE);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn terminal_color_scheme_round_trips_and_defaults_to_empty() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-color-scheme-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert_eq!(load_terminal_color_scheme(&path).unwrap(), "");
+        write_value(
+            &path,
+            &TERMINAL_TABLE,
+            COLOR_SCHEME_KEY,
+            "Gruvbox Dark".into(),
+        )
+        .unwrap();
+        assert_eq!(load_terminal_color_scheme(&path).unwrap(), "Gruvbox Dark");
         fs::remove_dir_all(directory).unwrap();
     }
 
