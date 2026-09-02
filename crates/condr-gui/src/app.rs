@@ -35,9 +35,7 @@ use gpui_component::input::{Editor, EditorState, Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
-use gpui_component::setting::{
-    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
-};
+use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
 use gpui_component::sidebar::{
     Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarItem,
 };
@@ -75,7 +73,8 @@ use settings::{
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
     color_scheme_is_dirty, reset_color_scheme, select_appearance, select_terminal_font_family,
-    select_terminal_font_size, selected_appearance, terminal_font_family, terminal_font_size,
+    select_terminal_font_size, selected_appearance, step_terminal_font_size, terminal_font_family,
+    terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;

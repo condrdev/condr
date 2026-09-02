@@ -739,3 +739,97 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         "moving focus out of a Pane should report the terminal as unfocused"
     );
 }
+
+#[test]
+fn selected_block_elements_stay_visible_in_the_selection_text_color() {
+    let _serial_guard = acquire_visual_test_lock();
+    let workspace_root = TestDirectory::new("selected-block-elements");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                root_directory: workspace_root.0.clone(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until_event_driven(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            Some(session.active_workspace()?.active_tab().focused_pane().id())
+        });
+        pane_id.is_some()
+    }));
+    let pane_id = pane_id.unwrap();
+
+    // A scheme with a selection text color, as Gruvbox and most of the collection have.
+    let selection_text: gpui::Hsla = gpui::rgb(0x123456).into();
+    let palette = TerminalPalette {
+        selection_text: Some(selection_text),
+        ..TerminalPalette::default()
+    };
+    let selection_background: Background = palette.selection.into();
+    let block_foreground: Background = selection_text.into();
+    window.update(|_, cx| cx.set_global(palette));
+
+    let cell = |text: &str| TerminalCell {
+        text: text.into(),
+        foreground: TerminalColor::Named(256),
+        background: TerminalColor::Named(257),
+        flags: 0,
+    };
+    let terminal = TerminalView {
+        revision: 1,
+        size: TerminalSize::new(1, 2),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells: vec![cell("█"), cell("x")],
+        cursor: None,
+    };
+    let selection = TerminalSelection {
+        start: TerminalPosition {
+            row: 0,
+            column: 0,
+            side: TerminalSide::Left,
+        },
+        end: TerminalPosition {
+            row: 0,
+            column: 0,
+            side: TerminalSide::Right,
+        },
+        display_offset: 0,
+    };
+    let (_, prepaint) = window.draw(point(px(0.), px(0.)), size(px(200.), px(40.)), |_, cx| {
+        TerminalElement::new(
+            view.clone(),
+            TerminalElementProps {
+                focus_handle: cx.focus_handle(),
+                connection_key: 1,
+                pane_id,
+                terminal,
+                marked_text: None,
+                selection: Some(selection),
+                runtime_epoch: None,
+                render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
+                scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+            },
+        )
+    });
+
+    let selection_index = prepaint
+        .quads
+        .iter()
+        .position(|quad| quad.background == selection_background)
+        .expect("the selection background is painted");
+    let block_index = prepaint
+        .quads
+        .iter()
+        .position(|quad| quad.background == block_foreground)
+        .expect("the selected █ is painted as a quad in the selection text color");
+    assert!(
+        block_index > selection_index,
+        "the block element must paint above the selection: block at {block_index}, selection at {selection_index}"
+    );
+}

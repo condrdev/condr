@@ -1497,18 +1497,44 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         "an empty family falls back to the default font"
     );
 
-    // Font size: same split between the typed and the applied value.
-    window.update(|_, cx| select_terminal_font_size(&settings_view, 1., cx));
+    // Font size: the real stepper buttons, one pixel per click, clamped to the bounds.
+    let default_size = f64::from(TerminalFont::default().size);
+    settings.update(|window, cx| _ = window.draw(cx));
+    let decrease = settings
+        .debug_bounds("terminal-font-size-decrease")
+        .expect("the Font size stepper should render");
+    settings.simulate_click(decrease.center(), Modifiers::default());
+    settings.run_until_parked();
     assert_eq!(
         window.read(|app| terminal_font_size(&settings_view, app)),
-        1.
+        default_size - 1.
     );
     assert_eq!(
         window.read(|app| app.theme().mono_font_size),
-        px(TerminalFont::MIN_SIZE)
+        px(TerminalFont::default().size - 1.)
     );
-    window.update(|_, cx| select_terminal_font_size(&settings_view, 18., cx));
-    assert_eq!(window.read(|app| app.theme().mono_font_size), px(18.));
+    settings.update(|window, cx| _ = window.draw(cx));
+    let increase = settings
+        .debug_bounds("terminal-font-size-increase")
+        .unwrap();
+    settings.simulate_click(increase.center(), Modifiers::default());
+    settings.simulate_click(increase.center(), Modifiers::default());
+    settings.run_until_parked();
+    assert_eq!(
+        window.read(|app| app.theme().mono_font_size),
+        px(TerminalFont::default().size + 1.)
+    );
+    window.update(|_, cx| step_terminal_font_size(&settings_view, -100., cx));
+    assert_eq!(
+        window.read(|app| app.theme().mono_font_size),
+        px(TerminalFont::MIN_SIZE),
+        "stepping never leaves the allowed range"
+    );
+    window.update(|_, cx| select_terminal_font_size(&settings_view, default_size, cx));
+    assert_eq!(
+        window.read(|app| app.theme().mono_font_size),
+        px(TerminalFont::default().size)
+    );
 
     settings.update(|window, _| window.remove_window());
     window.run_until_parked();

@@ -297,7 +297,8 @@ struct ShapedCell {
 
 pub(crate) struct PrepaintState {
     hitbox: Hitbox,
-    quads: Vec<PaintQuad>,
+    /// Bottom to top; tests read this to check layering.
+    pub(crate) quads: Vec<PaintQuad>,
     cells: Vec<ShapedCell>,
     /// Painted after `cells`: the cursor block and the character or IME text
     /// repainted on top of it.
@@ -487,6 +488,15 @@ impl Element for TerminalElement {
                 if cell.flags & DIM != 0 {
                     foreground = foreground.opacity(0.65);
                 }
+                // Before block elements turn into quads, so a selected █ takes the
+                // selection text color too.
+                let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
+                    + usize::from(column);
+                if let Some((range, color)) = &selected_text
+                    && range.contains(&(cache_index as u32))
+                {
+                    foreground = *color;
+                }
                 if let Some(character) = single_character
                     && collect_block_element_regions(
                         &mut block_regions,
@@ -499,13 +509,6 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
-                    + usize::from(column);
-                if let Some((range, color)) = &selected_text
-                    && range.contains(&(cache_index as u32))
-                {
-                    foreground = *color;
-                }
                 let line = render_cache.shaped_line(
                     cache_index,
                     &cell.text,
@@ -552,8 +555,7 @@ impl Element for TerminalElement {
             }
         }
 
-        // Cell backgrounds paint below the block elements.
-        for regions in [background_regions, block_regions] {
+        let push_regions = |quads: &mut Vec<PaintQuad>, regions| {
             for region in merge_block_regions(regions) {
                 let left = bounds.left()
                     + cell_size.width * (region.start_col as f32 / BLOCK_SUBCOLUMNS as f32);
@@ -568,8 +570,10 @@ impl Element for TerminalElement {
                     region.color,
                 ));
             }
-        }
-
+        };
+        // Bottom to top: cell backgrounds, the selection, then block elements, which
+        // stand in for glyphs and must stay visible inside a selection like text does.
+        push_regions(&mut quads, background_regions);
         if let Some(selection) = self.props.selection {
             push_selection_quads(
                 &mut quads,
@@ -580,6 +584,7 @@ impl Element for TerminalElement {
                 palette.selection,
             );
         }
+        push_regions(&mut quads, block_regions);
 
         let mut overlay_quads = Vec::new();
         let mut overlay_cells = Vec::new();
@@ -712,10 +717,11 @@ impl Element for TerminalElement {
         window.set_cursor_style(CursorStyle::IBeam, &prepaint.hitbox);
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            for quad in prepaint.quads.drain(..) {
+            // Borrowed rather than drained so tests can inspect what was painted.
+            for quad in prepaint.quads.iter().cloned() {
                 window.paint_quad(quad);
             }
-            for cell in prepaint.cells.drain(..) {
+            for cell in &prepaint.cells {
                 cell.line
                     .paint(
                         cell.origin,
@@ -727,10 +733,10 @@ impl Element for TerminalElement {
                     )
                     .ok();
             }
-            for quad in prepaint.overlay_quads.drain(..) {
+            for quad in prepaint.overlay_quads.iter().cloned() {
                 window.paint_quad(quad);
             }
-            for cell in prepaint.overlay_cells.drain(..) {
+            for cell in &prepaint.overlay_cells {
                 cell.line
                     .paint(
                         cell.origin,

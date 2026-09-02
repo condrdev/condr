@@ -464,6 +464,14 @@ pub(super) fn select_terminal_font_size(
     });
 }
 
+/// What the Font size stepper buttons do: one pixel at a time, within bounds.
+pub(super) fn step_terminal_font_size(settings: &Entity<SettingsWindow>, delta: f32, cx: &mut App) {
+    settings.update(cx, |this, cx| {
+        this.font_draft.size = TerminalFont::clamp_size(this.font_draft.size + delta);
+        this.commit_font(cx);
+    });
+}
+
 /// Whether Reset All has anything to do for Colors.
 pub(super) fn color_scheme_is_dirty(owner: &WeakEntity<Condr>, cx: &App) -> bool {
     owner
@@ -505,6 +513,8 @@ fn appearance_page(
     let family_set = settings.clone();
     let size_get = settings.clone();
     let size_set = settings.clone();
+    let size_dirty = settings.clone();
+    let default_size = default_font.size;
     let scheme_select = color_scheme.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
@@ -542,16 +552,56 @@ fn appearance_page(
                 .item(
                     SettingItem::new(
                         "Font size",
-                        SettingField::number_input(
-                            NumberFieldOptions {
-                                min: f64::from(TerminalFont::MIN_SIZE),
-                                max: f64::from(TerminalFont::MAX_SIZE),
-                                step: 1.,
+                        // A stepper rather than a text field: the number widget rewrites
+                        // half-typed values that leave its range, and one pixel at a time
+                        // is how a font size gets tuned anyway.
+                        SettingField::render(move |_, _, cx| {
+                            let size = terminal_font_size(&size_get, cx);
+                            let step = |id: &'static str, icon, delta: f32, enabled: bool| {
+                                let settings = size_get.clone();
+                                div()
+                                    .debug_selector(move || format!("terminal-font-size-{id}"))
+                                    .child(
+                                        Button::new(format!("terminal-font-size-{id}"))
+                                            .icon(icon)
+                                            .small()
+                                            .outline()
+                                            .disabled(!enabled)
+                                            .on_click(move |_, _, cx| {
+                                                step_terminal_font_size(&settings, delta, cx)
+                                            }),
+                                    )
+                            };
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(step(
+                                    "decrease",
+                                    IconName::Minus,
+                                    -1.,
+                                    size > f64::from(TerminalFont::MIN_SIZE),
+                                ))
+                                .child(
+                                    div()
+                                        .min_w(rems(2.))
+                                        .text_center()
+                                        .child(format!("{size:.0}")),
+                                )
+                                .child(step(
+                                    "increase",
+                                    IconName::Plus,
+                                    1.,
+                                    size < f64::from(TerminalFont::MAX_SIZE),
+                                ))
+                        })
+                        .on_reset(
+                            move |cx| {
+                                terminal_font_size(&size_dirty, cx) != f64::from(default_size)
                             },
-                            move |cx| terminal_font_size(&size_get, cx),
-                            move |value: f64, cx| select_terminal_font_size(&size_set, value, cx),
-                        )
-                        .default_value(f64::from(default_font.size)),
+                            move |_, cx| {
+                                select_terminal_font_size(&size_set, f64::from(default_size), cx)
+                            },
+                        ),
                     )
                     .description("In pixels."),
                 )
