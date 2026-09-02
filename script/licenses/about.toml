@@ -1,0 +1,24 @@
+# cargo-about configuration for script/generate-licenses.
+no-clearly-defined = true
+private = { ignore = true }
+# Licenses allowed in Condr's dependencies.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "BSL-1.0",
+    "OpenSSL",
+    "NCSA",
+    "CDLA-Permissive-2.0",
+    "0BSD",
+    "bzip2-1.0.6",
+]

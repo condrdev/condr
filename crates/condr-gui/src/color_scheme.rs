@@ -45,11 +45,13 @@ struct Primary {
 #[derive(Deserialize)]
 struct Cursor {
     cursor: Color,
+    text: Option<Color>,
 }
 
 #[derive(Deserialize)]
 struct Selection {
     background: Color,
+    text: Option<Color>,
 }
 
 #[derive(Deserialize)]
@@ -101,11 +103,14 @@ impl TryFrom<String> for Color {
 
 fn parse(toml: &str) -> Result<TerminalPalette, toml::de::Error> {
     let Scheme { colors } = toml::from_str(toml)?;
+    let background = colors.primary.background.0;
     Ok(TerminalPalette {
-        background: colors.primary.background.0,
+        background,
         foreground: colors.primary.foreground.0,
         cursor: colors.cursor.cursor.0,
+        cursor_text: colors.cursor.text.map_or(background, |color| color.0),
         selection: colors.selection.background.0,
+        selection_text: colors.selection.text.map(|color| color.0),
         normal: colors.normal.into_array(),
         bright: colors.bright.into_array(),
     })
@@ -138,7 +143,9 @@ mod tests {
         assert_eq!(gruvbox.background, rgb(0x282828).into());
         assert_eq!(gruvbox.foreground, rgb(0xebdbb2).into());
         assert_eq!(gruvbox.cursor, rgb(0xebdbb2).into());
+        assert_eq!(gruvbox.cursor_text, rgb(0x282828).into());
         assert_eq!(gruvbox.selection, rgb(0x665c54).into());
+        assert_eq!(gruvbox.selection_text, Some(rgb(0xebdbb2).into()));
         assert_eq!(gruvbox.normal[1], rgb(0xcc241d).into());
         assert_eq!(gruvbox.bright[4], rgb(0x83a598).into());
         assert!(palette("No Such Scheme").is_none());

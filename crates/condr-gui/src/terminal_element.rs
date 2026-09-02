@@ -44,7 +44,11 @@ pub(crate) struct TerminalPalette {
     pub(crate) background: Hsla,
     pub(crate) foreground: Hsla,
     pub(crate) cursor: Hsla,
+    /// Text under a block cursor.
+    pub(crate) cursor_text: Hsla,
     pub(crate) selection: Hsla,
+    /// Text inside the selection; `None` keeps each cell's own color.
+    pub(crate) selection_text: Option<Hsla>,
     pub(crate) normal: [Hsla; 8],
     pub(crate) bright: [Hsla; 8],
 }
@@ -57,7 +61,9 @@ impl Default for TerminalPalette {
             background: rgb(0x0d1117).into(),
             foreground: rgb(0xc9d1d9).into(),
             cursor: rgb(0xf0f6fc).into(),
+            cursor_text: rgb(0x0d1117).into(),
             selection: rgb(0x264f78).into(),
+            selection_text: None,
             normal: [
                 rgb(0x484f58).into(),
                 rgb(0xff7b72).into(),
@@ -416,6 +422,13 @@ impl Element for TerminalElement {
         let mut block_regions = Vec::new();
         let mut background_regions: Vec<BlockRegion> = Vec::new();
         let mut contrast_memo = ContrastMemo::default();
+        let selected_text = palette.selection_text.and_then(|color| {
+            let (start, end) = self
+                .props
+                .selection?
+                .selected_cell_range(self.props.terminal.size.columns)?;
+            Some((start..=end, color))
+        });
 
         // Terminal revisions often change only a cursor or spinner cell.
         for row in 0..self.props.terminal.size.rows {
@@ -488,6 +501,11 @@ impl Element for TerminalElement {
 
                 let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
                     + usize::from(column);
+                if let Some((range, color)) = &selected_text
+                    && range.contains(&(cache_index as u32))
+                {
+                    foreground = *color;
+                }
                 let line = render_cache.shaped_line(
                     cache_index,
                     &cell.text,
@@ -586,7 +604,7 @@ impl Element for TerminalElement {
                     &[TextRun {
                         len: cell.text.len(),
                         font: style.font(),
-                        color: palette.background,
+                        color: palette.cursor_text,
                         background_color: None,
                         underline: None,
                         strikethrough: None,

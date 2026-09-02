@@ -293,6 +293,14 @@ impl Render for TerminalPanel {
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
+            // The gap between border and grid belongs to the terminal, so it is
+            // painted in the terminal's background rather than the pane chrome.
+            .p(px(5.))
+            .bg(cx
+                .try_global::<TerminalPalette>()
+                .cloned()
+                .unwrap_or_default()
+                .background)
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(cx.theme().mono_font_size)
             .line_height(relative(1.35))
@@ -355,7 +363,6 @@ impl Render for TerminalPanel {
         v_flex()
             .size_full()
             .overflow_hidden()
-            .p(px(5.))
             .when(!solo, |this| {
                 this.border_3().border_color(if active {
                     rgb(ACTIVE_PANE_BORDER_RGB).into()

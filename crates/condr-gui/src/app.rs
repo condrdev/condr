@@ -31,7 +31,7 @@ use gpui_component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
     PanelState, TabGroupRenderer, TilesRenderer,
 };
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Editor, EditorState, Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
@@ -49,7 +49,9 @@ use gpui_component::{
 };
 use gpui_component_assets::Assets;
 
-use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
+use crate::terminal_element::{
+    TerminalElement, TerminalElementProps, TerminalPalette, TerminalRenderCache,
+};
 
 mod actions;
 mod config;
@@ -558,6 +560,8 @@ impl Condr {
             cx.observe_window_appearance(window, |this, window, cx| {
                 if this.appearance == Appearance::System {
                     sync_theme_with_system(window, cx);
+                    // The Settings window follows the system too.
+                    cx.refresh_windows();
                 }
             });
         apply_appearance(appearance, Some(window), cx);

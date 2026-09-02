@@ -124,21 +124,15 @@ impl Condr {
         let Some(path) = self.client_config_path.as_deref() else {
             return;
         };
-        let font = self.terminal_font.clone();
-        if let Err(error) = write_value(
+        let font = self.terminal_font.normalized();
+        if let Err(error) = write_values(
             path,
             &TERMINAL_TABLE,
-            FONT_FAMILY_KEY,
-            toml_edit::value(font.family.as_ref()),
-        )
-        .and_then(|()| {
-            write_value(
-                path,
-                &TERMINAL_TABLE,
-                FONT_SIZE_KEY,
-                toml_edit::value(f64::from(font.size)),
-            )
-        }) {
+            vec![
+                (FONT_FAMILY_KEY, toml_edit::value(font.family.as_ref())),
+                (FONT_SIZE_KEY, toml_edit::value(f64::from(font.size))),
+            ],
+        ) {
             self.app_error = Some(format!("Failed to save config: {error}"));
         }
     }
@@ -179,6 +173,16 @@ fn write_client_value(path: &Path, key: &str, value: toml_edit::Item) -> io::Res
 
 /// Like [`write_client_value`], for a key nested under `tables`, creating them as needed.
 fn write_value(path: &Path, tables: &[&str], key: &str, value: toml_edit::Item) -> io::Result<()> {
+    write_values(path, tables, vec![(key, value)])
+}
+
+/// Writes several keys of one table in a single read-modify-write, so related
+/// values never land half-updated.
+fn write_values(
+    path: &Path,
+    tables: &[&str],
+    entries: Vec<(&str, toml_edit::Item)>,
+) -> io::Result<()> {
     let mut document = read_document(path)?;
     let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
     for name in tables {
@@ -193,19 +197,21 @@ fn write_value(path: &Path, tables: &[&str], key: &str, value: toml_edit::Item) 
                 )
             })?;
     }
-    // `insert` replaces the key as well as the value, taking the comments around both
-    // with it. Overwriting an existing scalar in place keeps them.
-    match (
-        table.get_mut(key).and_then(toml_edit::Item::as_value_mut),
-        value.as_value(),
-    ) {
-        (Some(existing), Some(replacement)) => {
-            let decor = existing.decor().clone();
-            *existing = replacement.clone();
-            *existing.decor_mut() = decor;
-        }
-        _ => {
-            table.insert(key, value);
+    for (key, value) in entries {
+        // `insert` replaces the key as well as the value, taking the comments around
+        // both with it. Overwriting an existing scalar in place keeps them.
+        match (
+            table.get_mut(key).and_then(toml_edit::Item::as_value_mut),
+            value.as_value(),
+        ) {
+            (Some(existing), Some(replacement)) => {
+                let decor = existing.decor().clone();
+                *existing = replacement.clone();
+                *existing.decor_mut() = decor;
+            }
+            _ => {
+                table.insert(key, value);
+            }
         }
     }
     let text = document.to_string();

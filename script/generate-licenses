@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Regenerates crates/condr-gui/assets/licenses.md, the text shown on the
+# Settings > Licenses page: Condr's own license, the notices for bundled assets,
+# and every Rust crate's license as collected by cargo-about.
+#
+# Requires cargo-about 0.8.x (`cargo install cargo-about`); point CARGO_ABOUT at
+# the binary if it is not on PATH. Run after adding assets or dependencies.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+OUT=crates/condr-gui/assets/licenses.md
+CARGO_ABOUT="${CARGO_ABOUT:-cargo-about}"
+
+{
+    echo "# Licenses"
+    echo
+    echo "Condr is licensed under the Apache License 2.0. The notices below cover"
+    echo "the assets and Rust crates it ships with."
+    echo
+    echo "## Condr"
+    echo
+    cat LICENSE
+    echo
+    echo "## Terminal color schemes"
+    echo
+    echo "Copied from iTerm2-Color-Schemes, https://github.com/mbadolato/iTerm2-Color-Schemes."
+    echo "See crates/condr-gui/assets/color_schemes/README.md for the exact upstream commit."
+    echo
+    cat crates/condr-gui/assets/color_schemes/LICENSE
+    echo
+    echo "## Icons"
+    echo
+    echo "Lucide icons, https://lucide.dev."
+    echo
+    cat crates/condr-gui/assets/icons/LICENSE-LUCIDE
+    echo
+    echo "## Rust crates"
+    echo
+} > "$OUT"
+
+TMP="$(mktemp)"
+"$CARGO_ABOUT" generate -c script/licenses/about.toml -o "$TMP" script/licenses/template.md.hbs
+# cargo-about HTML-escapes the template output.
+sed -e 's/&quot;/"/g' -e "s/&#x27;/'/g" -e 's/&#x3D;/=/g' -e 's/&#x60;/`/g' \
+    -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' "$TMP" >> "$OUT"
+rm -f "$TMP"
+echo "wrote $OUT"
