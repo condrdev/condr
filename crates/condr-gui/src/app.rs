@@ -34,7 +34,9 @@ use gpui_component::dock::{
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::resizable::{h_resizable, resizable_panel};
-use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
+use gpui_component::setting::{
+    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+};
 use gpui_component::sidebar::{
     Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarItem,
 };
@@ -63,7 +65,9 @@ mod workspace;
 
 use connection::*;
 use dock::*;
-use settings::{Appearance, apply_appearance, sync_theme_with_system};
+use settings::{
+    Appearance, TerminalFont, apply_appearance, apply_terminal_font, sync_theme_with_system,
+};
 #[cfg(all(test, feature = "test-support"))]
 use settings::{select_appearance, selected_appearance};
 #[cfg(test)]
@@ -479,6 +483,7 @@ pub(crate) struct Condr {
     terminal_composition: Option<TerminalComposition>,
     window_handle: AnyWindowHandle,
     appearance: Appearance,
+    terminal_font: TerminalFont,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
@@ -522,6 +527,10 @@ impl Condr {
             .as_deref()
             .and_then(|path| config::load_appearance(path).ok())
             .unwrap_or_default();
+        let terminal_font = client_config_path
+            .as_deref()
+            .and_then(|path| config::load_terminal_font(path).ok())
+            .unwrap_or_default();
         let mut connections = vec![connection];
         for (index, server) in saved_servers.into_iter().enumerate() {
             connections.push(ServerConnection::new(
@@ -543,6 +552,7 @@ impl Condr {
                 }
             });
         apply_appearance(appearance, Some(window), cx);
+        apply_terminal_font(&terminal_font, cx);
         let mut this = Self {
             client_config_path,
             connections,
@@ -572,6 +582,7 @@ impl Condr {
             terminal_composition: None,
             window_handle: window.window_handle(),
             appearance,
+            terminal_font,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,

@@ -45,6 +45,44 @@ impl Appearance {
     }
 }
 
+/// The font every Terminal renders with. Lives on the Appearance page.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct TerminalFont {
+    pub family: SharedString,
+    pub size: f32,
+}
+
+impl TerminalFont {
+    pub(super) const MIN_SIZE: f32 = 6.;
+    pub(super) const MAX_SIZE: f32 = 72.;
+
+    pub(super) fn clamp_size(size: f32) -> f32 {
+        if size.is_finite() {
+            size.clamp(Self::MIN_SIZE, Self::MAX_SIZE)
+        } else {
+            Self::default().size
+        }
+    }
+}
+
+impl Default for TerminalFont {
+    fn default() -> Self {
+        let theme = Theme::default();
+        Self {
+            family: theme.mono_font_family.clone(),
+            size: theme.mono_font_size.as_f32(),
+        }
+    }
+}
+
+/// The Terminal reads its font from the theme's mono font, which a mode change keeps.
+pub(super) fn apply_terminal_font(font: &TerminalFont, cx: &mut App) {
+    let theme = Theme::global_mut(cx);
+    theme.mono_font_family = font.family.clone();
+    theme.mono_font_size = px(font.size);
+    cx.refresh_windows();
+}
+
 /// Applies a chosen Appearance: the native window-chrome override plus the theme.
 ///
 /// Forcing an appearance stops the platform from tracking system light/dark changes,
@@ -91,6 +129,23 @@ impl Condr {
                 apply_appearance(appearance, Some(window), cx)
             });
         });
+    }
+
+    pub(super) fn set_terminal_font(&mut self, font: TerminalFont, cx: &mut Context<Self>) {
+        let font = TerminalFont {
+            family: if font.family.trim().is_empty() {
+                TerminalFont::default().family
+            } else {
+                font.family
+            },
+            size: TerminalFont::clamp_size(font.size),
+        };
+        if self.terminal_font == font {
+            return;
+        }
+        self.terminal_font = font;
+        self.save_terminal_font();
+        apply_terminal_font(&self.terminal_font, cx);
     }
 
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -147,12 +202,24 @@ pub(super) fn select_appearance(owner: &WeakEntity<Condr>, value: &str, cx: &mut
     let _ = owner.update(cx, |this, cx| this.set_appearance(appearance, cx));
 }
 
+fn terminal_font(owner: &WeakEntity<Condr>, cx: &App) -> TerminalFont {
+    owner
+        .upgrade()
+        .map(|owner| owner.read(cx).terminal_font.clone())
+        .unwrap_or_default()
+}
+
 fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
     let selected_owner = owner.clone();
     let select_owner = owner.clone();
     let options = Appearance::ALL
         .map(|appearance| (appearance.as_str().into(), appearance.label().into()))
         .to_vec();
+    let default_font = TerminalFont::default();
+    let family_get = owner.clone();
+    let family_set = owner.clone();
+    let size_get = owner.clone();
+    let size_set = owner.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
         .group(
@@ -169,6 +236,53 @@ fn appearance_page(owner: &WeakEntity<Condr>) -> SettingPage {
                 .description("Follow the system appearance, or pick one."),
             ),
         )
+        .group(
+            SettingGroup::new()
+                .title("Terminal")
+                .item(
+                    SettingItem::new(
+                        "Font",
+                        SettingField::input(
+                            move |cx| terminal_font(&family_get, cx).family,
+                            move |value: SharedString, cx| {
+                                let _ = family_set.update(cx, |this, cx| {
+                                    let font = TerminalFont {
+                                        family: value,
+                                        ..this.terminal_font.clone()
+                                    };
+                                    this.set_terminal_font(font, cx);
+                                });
+                            },
+                        )
+                        .default_value(default_font.family.clone()),
+                    )
+                    .description("Font family used by every terminal."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Font size",
+                        SettingField::number_input(
+                            NumberFieldOptions {
+                                min: f64::from(TerminalFont::MIN_SIZE),
+                                max: f64::from(TerminalFont::MAX_SIZE),
+                                step: 1.,
+                            },
+                            move |cx| f64::from(terminal_font(&size_get, cx).size),
+                            move |value: f64, cx| {
+                                let _ = size_set.update(cx, |this, cx| {
+                                    let font = TerminalFont {
+                                        size: value as f32,
+                                        ..this.terminal_font.clone()
+                                    };
+                                    this.set_terminal_font(font, cx);
+                                });
+                            },
+                        )
+                        .default_value(f64::from(default_font.size)),
+                    )
+                    .description("In pixels."),
+                ),
+        )
 }
 
 #[cfg(test)]
@@ -177,9 +291,9 @@ mod tests {
     #[cfg(feature = "test-support")]
     use gpui_component::ActiveTheme as _;
 
-    use super::Appearance;
+    use super::{Appearance, TerminalFont};
     #[cfg(feature = "test-support")]
-    use super::apply_appearance;
+    use super::{apply_appearance, apply_terminal_font};
 
     #[test]
     fn appearance_round_trips_through_its_stored_name() {
@@ -192,6 +306,34 @@ mod tests {
     fn unknown_appearance_names_follow_the_system() {
         assert_eq!(Appearance::from_str("solarized"), Appearance::System);
         assert_eq!(Appearance::from_str(""), Appearance::System);
+    }
+
+    #[test]
+    fn terminal_font_size_stays_within_bounds() {
+        assert_eq!(TerminalFont::clamp_size(1.), TerminalFont::MIN_SIZE);
+        assert_eq!(TerminalFont::clamp_size(500.), TerminalFont::MAX_SIZE);
+        assert_eq!(TerminalFont::clamp_size(14.), 14.);
+        assert_eq!(
+            TerminalFont::clamp_size(f32::NAN),
+            TerminalFont::default().size
+        );
+    }
+
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn the_terminal_font_survives_an_appearance_change(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            let font = TerminalFont {
+                family: "Cascadia Mono".into(),
+                size: 17.,
+            };
+            apply_terminal_font(&font, cx);
+            apply_appearance(Appearance::Dark, None, cx);
+            apply_appearance(Appearance::Light, None, cx);
+            assert_eq!(cx.theme().mono_font_family.as_ref(), "Cascadia Mono");
+            assert_eq!(cx.theme().mono_font_size, gpui::px(17.));
+        });
     }
 
     #[cfg(feature = "test-support")]

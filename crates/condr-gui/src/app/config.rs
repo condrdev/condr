@@ -6,10 +6,14 @@ use std::path::{Path, PathBuf};
 use atomicwrites::{AllowOverwrite, AtomicFile};
 use serde::Deserialize;
 
-use super::{Appearance, Condr, Endpoint};
+use super::{Appearance, Condr, Endpoint, TerminalFont};
 
 const APPEARANCE_KEY: &str = "appearance";
 const SERVERS_KEY: &str = "servers";
+/// `[client.terminal]` holds every Terminal preference.
+const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
+const FONT_FAMILY_KEY: &str = "font_family";
+const FONT_SIZE_KEY: &str = "font_size";
 
 #[derive(Deserialize)]
 pub(super) struct SavedServer {
@@ -34,12 +38,40 @@ pub(super) fn load_appearance(path: &Path) -> io::Result<Appearance> {
         .unwrap_or_default())
 }
 
+/// A missing or malformed key keeps its default so the terminal always has a font.
+pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
+    let mut font = TerminalFont::default();
+    if let Some(family) = read_value(path, &TERMINAL_TABLE, FONT_FAMILY_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|family| !family.is_empty())
+    {
+        font.family = family.to_string().into();
+    }
+    if let Some(size) = read_value(path, &TERMINAL_TABLE, FONT_SIZE_KEY)?.and_then(|value| {
+        value
+            .as_float()
+            .or_else(|| value.as_integer().map(|size| size as f64))
+    }) {
+        font.size = TerminalFont::clamp_size(size as f32);
+    }
+    Ok(font)
+}
+
 fn read_client_value(path: &Path, key: &str) -> io::Result<Option<toml::Value>> {
-    Ok(read_root(path)?
-        .get("client")
-        .and_then(toml::Value::as_table)
-        .and_then(|client| client.get(key))
-        .cloned())
+    read_value(path, &["client"], key)
+}
+
+fn read_value(path: &Path, tables: &[&str], key: &str) -> io::Result<Option<toml::Value>> {
+    let root = read_root(path)?;
+    let mut table = Some(&root);
+    for name in tables {
+        table = table
+            .and_then(|table| table.get(*name))
+            .and_then(toml::Value::as_table);
+    }
+    Ok(table.and_then(|table| table.get(key)).cloned())
 }
 
 fn decode_servers(value: toml::Value) -> io::Result<Vec<SavedServer>> {
@@ -76,6 +108,29 @@ impl Condr {
             self.app_error = Some(format!("Failed to save config: {error}"));
         }
     }
+
+    pub(super) fn save_terminal_font(&mut self) {
+        let Some(path) = self.client_config_path.as_deref() else {
+            return;
+        };
+        let font = self.terminal_font.clone();
+        if let Err(error) = write_value(
+            path,
+            &TERMINAL_TABLE,
+            FONT_FAMILY_KEY,
+            toml_edit::value(font.family.as_ref()),
+        )
+        .and_then(|()| {
+            write_value(
+                path,
+                &TERMINAL_TABLE,
+                FONT_SIZE_KEY,
+                toml_edit::value(f64::from(font.size)),
+            )
+        }) {
+            self.app_error = Some(format!("Failed to save config: {error}"));
+        }
+    }
 }
 
 fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) -> io::Result<()> {
@@ -93,15 +148,29 @@ fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) ->
 /// hand-editable, so this edits the parsed document in place and keeps every other
 /// key, its comments and its formatting.
 fn write_client_value(path: &Path, key: &str, value: toml_edit::Item) -> io::Result<()> {
+    write_value(path, &["client"], key, value)
+}
+
+/// Like [`write_client_value`], for a key nested under `tables`, creating them as needed.
+fn write_value(path: &Path, tables: &[&str], key: &str, value: toml_edit::Item) -> io::Result<()> {
     let mut document = read_document(path)?;
-    let client = document["client"].or_insert(toml_edit::table());
-    let client = client
-        .as_table_like_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "client must be a table"))?;
+    let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
+    for name in tables {
+        table = table
+            .entry(name)
+            .or_insert(toml_edit::table())
+            .as_table_like_mut()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{name} must be a table"),
+                )
+            })?;
+    }
     // `insert` replaces the key as well as the value, taking the comments around both
     // with it. Overwriting an existing scalar in place keeps them.
     match (
-        client.get_mut(key).and_then(toml_edit::Item::as_value_mut),
+        table.get_mut(key).and_then(toml_edit::Item::as_value_mut),
         value.as_value(),
     ) {
         (Some(existing), Some(replacement)) => {
@@ -110,7 +179,7 @@ fn write_client_value(path: &Path, key: &str, value: toml_edit::Item) -> io::Res
             *existing.decor_mut() = decor;
         }
         _ => {
-            client.insert(key, value);
+            table.insert(key, value);
         }
     }
     let text = document.to_string();
@@ -225,6 +294,49 @@ mod tests {
 
         write_client_value(&path, APPEARANCE_KEY, toml_edit::value("solarized")).unwrap();
         assert_eq!(load_appearance(&path).unwrap(), Appearance::System);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn terminal_font_round_trips_and_tolerates_bad_values() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-terminal-font-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert_eq!(load_terminal_font(&path).unwrap(), TerminalFont::default());
+
+        write_value(
+            &path,
+            &TERMINAL_TABLE,
+            FONT_FAMILY_KEY,
+            "Cascadia Mono".into(),
+        )
+        .unwrap();
+        write_value(&path, &TERMINAL_TABLE, FONT_SIZE_KEY, toml_edit::value(15)).unwrap();
+        let font = load_terminal_font(&path).unwrap();
+        assert_eq!(font.family.as_ref(), "Cascadia Mono");
+        assert_eq!(font.size, 15.);
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.contains("[client.terminal]"),
+            "terminal keys must live in their own table:\n{saved}"
+        );
+
+        write_value(&path, &TERMINAL_TABLE, FONT_FAMILY_KEY, "   ".into()).unwrap();
+        write_value(
+            &path,
+            &TERMINAL_TABLE,
+            FONT_SIZE_KEY,
+            toml_edit::value(1000),
+        )
+        .unwrap();
+        let font = load_terminal_font(&path).unwrap();
+        assert_eq!(font.family, TerminalFont::default().family);
+        assert_eq!(font.size, TerminalFont::MAX_SIZE);
         fs::remove_dir_all(directory).unwrap();
     }
 
