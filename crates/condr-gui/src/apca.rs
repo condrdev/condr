@@ -52,10 +52,18 @@ pub(crate) fn contrast(text: Hsla, background: Hsla) -> f32 {
 
     let contrast = if background_y > text_y {
         let raw = (background_y.powf(NORM_BG) - text_y.powf(NORM_TEXT)) * SCALE;
-        if raw < LOW_CLIP { 0.0 } else { raw - LOW_OFFSET }
+        if raw < LOW_CLIP {
+            0.0
+        } else {
+            raw - LOW_OFFSET
+        }
     } else {
         let raw = (background_y.powf(REV_BG) - text_y.powf(REV_TEXT)) * SCALE;
-        if raw > -LOW_CLIP { 0.0 } else { raw + LOW_OFFSET }
+        if raw > -LOW_CLIP {
+            0.0
+        } else {
+            raw + LOW_OFFSET
+        }
     };
     contrast * 100.0
 }
@@ -64,11 +72,7 @@ pub(crate) fn contrast(text: Hsla, background: Hsla) -> f32 {
 /// reaches `minimum` (an absolute Lc value). Keeps the original color when it
 /// already passes; otherwise it first moves only the lightness, then trades
 /// away saturation, and as a last resort falls back to black or white.
-pub(crate) fn ensure_minimum_contrast(
-    foreground: Hsla,
-    background: Hsla,
-    minimum: f32,
-) -> Hsla {
+pub(crate) fn ensure_minimum_contrast(foreground: Hsla, background: Hsla, minimum: f32) -> Hsla {
     if minimum <= 0.0 || contrast(foreground, background).abs() >= minimum {
         return foreground;
     }

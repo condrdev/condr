@@ -591,10 +591,7 @@ impl Element for TerminalElement {
             let cursor_width = cursor_text
                 .as_ref()
                 .map_or(cell_size.width, |line| line.width.max(cell_size.width));
-            let cursor_bounds = Bounds::new(
-                cursor_origin,
-                size(cursor_width, cell_size.height),
-            );
+            let cursor_bounds = Bounds::new(cursor_origin, size(cursor_width, cell_size.height));
             // Only the focused pane shows a filled cursor; unfocused panes
             // demote every visible shape to a hollow outline.
             let focused = self.props.focus_handle.is_focused(window);
@@ -1017,11 +1014,9 @@ impl BlockRegion {
         if self.color != other.color {
             return false;
         }
-        let same_lines =
-            self.start_line == other.start_line && self.end_line == other.end_line;
+        let same_lines = self.start_line == other.start_line && self.end_line == other.end_line;
         let same_cols = self.start_col == other.start_col && self.end_col == other.end_col;
-        let cols_touch =
-            self.start_col <= other.end_col + 1 && other.start_col <= self.end_col + 1;
+        let cols_touch = self.start_col <= other.end_col + 1 && other.start_col <= self.end_col + 1;
         let lines_touch =
             self.start_line <= other.end_line + 1 && other.start_line <= self.end_line + 1;
         (same_lines && cols_touch) || (same_cols && lines_touch)
@@ -1481,7 +1476,11 @@ mod tests {
         // U+1FB14 BLOCK SEXTANT-235 straddles the enumeration gap left by ▌.
         assert_eq!(
             regions_for('\u{1FB14}'),
-            [region(0, 4, 7, 7), region(8, 0, 15, 3), region(16, 0, 23, 3)]
+            [
+                region(0, 4, 7, 7),
+                region(8, 0, 15, 3),
+                region(16, 0, 23, 3)
+            ]
         );
         // The last sextant fills everything but the top-left subcell.
         let last = regions_for('\u{1FB3B}');

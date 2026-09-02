@@ -601,11 +601,23 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
         .debug_bounds(sidebar_workspace_selector(second_workspace))
         .expect("the drop target Workspace should render in the sidebar");
     window.simulate_mouse_down(workspace.center(), MouseButton::Left, Modifiers::default());
-    window.simulate_mouse_move(drop_target.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(
+        drop_target.center(),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-    window.simulate_mouse_move(drop_target.center(), MouseButton::Left, Modifiers::default());
-    window.simulate_mouse_up(drop_target.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(
+        drop_target.center(),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    window.simulate_mouse_up(
+        drop_target.center(),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {

@@ -449,9 +449,7 @@ impl CondrSidebarTreeItem {
                 this.drag_over::<DraggedWorkspace>(|style, _, _, cx| {
                     style.bg(cx.theme().sidebar_accent.opacity(0.8))
                 })
-                .on_drop(move |dragged: &DraggedWorkspace, window, cx| {
-                    on_drop(dragged, window, cx)
-                })
+                .on_drop(move |dragged: &DraggedWorkspace, window, cx| on_drop(dragged, window, cx))
             });
         let row = if let Some(context_menu) = context_menu {
             row.context_menu(move |menu, window, cx| context_menu(menu, window, cx))
@@ -588,8 +586,7 @@ impl SidebarItem for CondrSidebarSection {
             .text_xs()
             .text_color(cx.theme().sidebar_foreground.opacity(0.7))
             .when(self.active, |this| {
-                this.font_medium()
-                    .text_color(cx.theme().sidebar_foreground)
+                this.font_medium().text_color(cx.theme().sidebar_foreground)
             })
             .child(
                 div()
@@ -614,9 +611,7 @@ impl SidebarItem for CondrSidebarSection {
                 this.drag_over::<DraggedServer>(|style, _, _, cx| {
                     style.bg(cx.theme().sidebar_accent.opacity(0.8))
                 })
-                .on_drop(move |dragged: &DraggedServer, window, cx| {
-                    on_drop(dragged, window, cx)
-                })
+                .on_drop(move |dragged: &DraggedServer, window, cx| on_drop(dragged, window, cx))
             });
         let heading = if let Some(context_menu) = self.context_menu {
             heading
@@ -768,9 +763,7 @@ impl Condr {
                                     name: workspace_name.clone().into(),
                                 })
                                 .on_drop(move |dragged, _, cx| {
-                                    if dragged.key != key
-                                        || dragged.workspace_id == workspace_id
-                                    {
+                                    if dragged.key != key || dragged.workspace_id == workspace_id {
                                         return;
                                     }
                                     let _ = drop_owner.update(cx, |this, _| {
@@ -907,9 +900,7 @@ impl Condr {
             let server_name = connection.label.clone();
             let status = connection.status;
             let new_workspace_label = connection.label.clone();
-            let descendant_selected = workspaces
-                .iter()
-                .any(CondrSidebarTreeItem::subtree_active);
+            let descendant_selected = workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
             CondrSidebarSection::new(
                 connection.label.clone(),
                 format!("server-heading-{key}"),

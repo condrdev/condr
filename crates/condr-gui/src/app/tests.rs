@@ -110,9 +110,8 @@ fn pane_id() -> condr_core::PaneId {
 fn reordering_connections_moves_the_dragged_server_into_the_target_slot() {
     let endpoint = || Endpoint::Tcp("127.0.0.1:4242".parse().unwrap());
     let connection = |key: u64| ServerConnection::new(key, format!("server-{key}"), endpoint());
-    let keys = |connections: &Vec<ServerConnection>| {
-        connections.iter().map(|c| c.key).collect::<Vec<_>>()
-    };
+    let keys =
+        |connections: &Vec<ServerConnection>| connections.iter().map(|c| c.key).collect::<Vec<_>>();
 
     let mut connections = vec![connection(1), connection(2), connection(3)];
     assert!(reorder_connection(&mut connections, 3, 1));
