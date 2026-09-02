@@ -69,11 +69,14 @@ mod workspace;
 use connection::*;
 use dock::*;
 use settings::{
-    Appearance, TerminalFont, apply_appearance, apply_terminal_color_scheme, apply_terminal_font,
-    sync_theme_with_system,
+    Appearance, SettingsWindow, TerminalFont, apply_appearance, apply_terminal_color_scheme,
+    apply_terminal_font, sync_theme_with_system,
 };
 #[cfg(all(test, feature = "test-support"))]
-use settings::{select_appearance, selected_appearance};
+use settings::{
+    color_scheme_is_dirty, reset_color_scheme, select_appearance, select_terminal_font_family,
+    select_terminal_font_size, selected_appearance, terminal_font_family, terminal_font_size,
+};
 #[cfg(test)]
 use sidebar::*;
 pub(crate) use startup::run;
@@ -490,6 +493,7 @@ pub(crate) struct Condr {
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
     settings_window: Option<WindowHandle<Root>>,
+    settings_view: Option<WeakEntity<SettingsWindow>>,
     _settings_window_closed: Option<Subscription>,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
@@ -599,6 +603,7 @@ impl Condr {
             terminal_font,
             terminal_color_scheme,
             settings_window: None,
+            settings_view: None,
             _settings_window_closed: None,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,

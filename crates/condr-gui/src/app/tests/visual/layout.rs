@@ -1403,3 +1403,112 @@ fn the_settings_button_opens_a_separate_window_that_applies_a_theme_mode() {
         "closing the main window must close Settings too"
     );
 }
+
+#[test]
+fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let owner = view.downgrade();
+    let main_window = window.update(|window, _| window.window_handle());
+
+    let settings_button = window.debug_bounds("open-settings").unwrap();
+    window.simulate_click(settings_button.center(), Modifiers::default());
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .expect("Settings should open in its own window");
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    settings.update(|window, cx| _ = window.draw(cx));
+    let select_state = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .expect("the Settings window view is recorded")
+            .read(app)
+            .color_scheme
+            .clone()
+    });
+
+    // Colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
+    let select = settings
+        .debug_bounds("terminal-color-scheme")
+        .expect("the Colors select should render");
+    settings.simulate_click(select.center(), Modifiers::default());
+    settings.run_until_parked();
+    settings.simulate_input("Kanagawa Dragon");
+    settings.simulate_keystrokes("enter");
+    settings.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).terminal_color_scheme.clone()),
+        "Kanagawa Dragon",
+        "confirming a scheme in the select must store it"
+    );
+    let expected = crate::color_scheme::palette("Kanagawa Dragon").unwrap();
+    assert_eq!(
+        window.read(|app| app.global::<TerminalPalette>().background),
+        expected.background,
+        "the chosen scheme must reach the terminal palette"
+    );
+    assert!(window.read(|app| color_scheme_is_dirty(&owner, app)));
+
+    // Reset All for Colors: preference and widget both return to Default.
+    settings.update(|window, cx| reset_color_scheme(&owner, &select_state, window, cx));
+    settings.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).terminal_color_scheme.clone()),
+        ""
+    );
+    assert!(!window.read(|app| color_scheme_is_dirty(&owner, app)));
+    assert_eq!(
+        window.read(|app| select_state.read(app).selected_value().cloned()),
+        Some("Default".into()),
+        "the select must show Default after a reset"
+    );
+    assert_eq!(
+        window.read(|app| app.global::<TerminalPalette>().background),
+        TerminalPalette::default().background
+    );
+
+    // Font: the field keeps what was typed; the theme gets the normalized value.
+    window.update(|_, cx| select_terminal_font_family(&owner, "Cascadia Mono".into(), cx));
+    assert_eq!(
+        window.read(|app| terminal_font_family(&owner, app)),
+        "Cascadia Mono"
+    );
+    assert_eq!(
+        window.read(|app| app.theme().mono_font_family.clone()),
+        "Cascadia Mono"
+    );
+    window.update(|_, cx| select_terminal_font_family(&owner, "".into(), cx));
+    assert_eq!(
+        window.read(|app| terminal_font_family(&owner, app)),
+        "",
+        "a half-edited field must not be rewritten under the user"
+    );
+    assert_eq!(
+        window.read(|app| app.theme().mono_font_family.clone()),
+        TerminalFont::default().family,
+        "an empty family falls back to the default font"
+    );
+
+    // Font size: same split between the typed and the applied value.
+    window.update(|_, cx| select_terminal_font_size(&owner, 1., cx));
+    assert_eq!(window.read(|app| terminal_font_size(&owner, app)), 1.);
+    assert_eq!(
+        window.read(|app| app.theme().mono_font_size),
+        px(TerminalFont::MIN_SIZE)
+    );
+    window.update(|_, cx| select_terminal_font_size(&owner, 18., cx));
+    assert_eq!(window.read(|app| app.theme().mono_font_size), px(18.));
+
+    settings.update(|window, _| window.remove_window());
+    window.run_until_parked();
+}

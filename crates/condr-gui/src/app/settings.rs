@@ -229,8 +229,10 @@ impl Condr {
             };
             let view_owner = owner.clone();
             let opened = cx.open_window(options, |window, cx| {
-                let view = cx.new(|cx| SettingsWindow::new(view_owner, window, cx));
+                let view = cx.new(|cx| SettingsWindow::new(view_owner.clone(), window, cx));
                 view.read(cx).focus_handle.clone().focus(window, cx);
+                let _ =
+                    view_owner.update(cx, |this, _| this.settings_view = Some(view.downgrade()));
                 cx.new(|cx| Root::new(view, window, cx))
             });
             let _ = owner.update(cx, |this, cx| match opened {
@@ -268,7 +270,7 @@ type ColorSchemeSelect = SelectState<SearchableVec<SharedString>>;
 pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
-    color_scheme: Entity<ColorSchemeSelect>,
+    pub(super) color_scheme: Entity<ColorSchemeSelect>,
     /// The Licenses page text, in a read-only editor because it is far too long
     /// for a plain text element.
     licenses: Entity<EditorState>,
@@ -309,7 +311,7 @@ impl SettingsWindow {
         let licenses = cx.new(|cx| {
             EditorState::new(window, cx)
                 .default_value(LICENSES)
-                .soft_wrap(true)
+                .soft_wrap(false)
                 .line_number(false)
                 // License texts are indented prose, not code: no guides, no fold gutter.
                 .indent_guides(false)
@@ -387,11 +389,72 @@ fn terminal_font(owner: &WeakEntity<Condr>, cx: &App) -> TerminalFont {
         .unwrap_or_default()
 }
 
+// The field callbacks below are named so tests can drive them the way the widgets
+// do; the widgets themselves belong to gpui-component and expose no test hooks.
+
+/// What the Font field shows: the value as typed.
+pub(super) fn terminal_font_family(owner: &WeakEntity<Condr>, cx: &App) -> SharedString {
+    terminal_font(owner, cx).family
+}
+
+/// What the Font field does on every change.
+pub(super) fn select_terminal_font_family(
+    owner: &WeakEntity<Condr>,
+    family: SharedString,
+    cx: &mut App,
+) {
+    let _ = owner.update(cx, |this, cx| {
+        let font = TerminalFont {
+            family,
+            ..this.terminal_font.clone()
+        };
+        this.set_terminal_font(font, cx);
+    });
+}
+
+/// What the Font size field shows.
+pub(super) fn terminal_font_size(owner: &WeakEntity<Condr>, cx: &App) -> f64 {
+    f64::from(terminal_font(owner, cx).size)
+}
+
+/// What the Font size field does on every change.
+pub(super) fn select_terminal_font_size(owner: &WeakEntity<Condr>, size: f64, cx: &mut App) {
+    let _ = owner.update(cx, |this, cx| {
+        let font = TerminalFont {
+            size: size as f32,
+            ..this.terminal_font.clone()
+        };
+        this.set_terminal_font(font, cx);
+    });
+}
+
+/// Whether Reset All has anything to do for Colors.
+pub(super) fn color_scheme_is_dirty(owner: &WeakEntity<Condr>, cx: &App) -> bool {
+    owner
+        .upgrade()
+        .is_some_and(|owner| !owner.read(cx).terminal_color_scheme.is_empty())
+}
+
+/// What Reset All does for Colors: back to the built-in palette, in both the
+/// preference and the select widget.
+pub(super) fn reset_color_scheme(
+    owner: &WeakEntity<Condr>,
+    select: &Entity<ColorSchemeSelect>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let _ = owner.update(cx, |this, cx| {
+        this.set_terminal_color_scheme(SharedString::default(), cx)
+    });
+    select.update(cx, |select, cx| {
+        select.set_selected_value(&DEFAULT_COLOR_SCHEME_LABEL.into(), window, cx);
+    });
+}
+
 fn appearance_page(
     owner: &WeakEntity<Condr>,
     color_scheme: &Entity<ColorSchemeSelect>,
 ) -> SettingPage {
-    let color_scheme = color_scheme.clone();
     let reset_select = color_scheme.clone();
     let dirty_owner = owner.clone();
     let reset_owner = owner.clone();
@@ -405,6 +468,7 @@ fn appearance_page(
     let family_set = owner.clone();
     let size_get = owner.clone();
     let size_set = owner.clone();
+    let scheme_select = color_scheme.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
         .group(
@@ -429,15 +493,9 @@ fn appearance_page(
                     SettingItem::new(
                         "Font",
                         SettingField::input(
-                            move |cx| terminal_font(&family_get, cx).family,
+                            move |cx| terminal_font_family(&family_get, cx),
                             move |value: SharedString, cx| {
-                                let _ = family_set.update(cx, |this, cx| {
-                                    let font = TerminalFont {
-                                        family: value,
-                                        ..this.terminal_font.clone()
-                                    };
-                                    this.set_terminal_font(font, cx);
-                                });
+                                select_terminal_font_family(&family_set, value, cx)
                             },
                         )
                         .default_value(default_font.family.clone()),
@@ -453,16 +511,8 @@ fn appearance_page(
                                 max: f64::from(TerminalFont::MAX_SIZE),
                                 step: 1.,
                             },
-                            move |cx| f64::from(terminal_font(&size_get, cx).size),
-                            move |value: f64, cx| {
-                                let _ = size_set.update(cx, |this, cx| {
-                                    let font = TerminalFont {
-                                        size: value as f32,
-                                        ..this.terminal_font.clone()
-                                    };
-                                    this.set_terminal_font(font, cx);
-                                });
-                            },
+                            move |cx| terminal_font_size(&size_get, cx),
+                            move |value: f64, cx| select_terminal_font_size(&size_set, value, cx),
                         )
                         .default_value(f64::from(default_font.size)),
                     )
@@ -478,28 +528,19 @@ fn appearance_page(
                             // menu need a width that fits the longest scheme name. Rems,
                             // like the window itself; the window's minimum width leaves
                             // room for this beside the page sidebar.
-                            Select::new(&color_scheme)
-                                .w(rems(17.5))
-                                .menu_width(rems(20.))
-                                .menu_max_h(rems(22.5))
+                            div()
+                                .debug_selector(|| "terminal-color-scheme".into())
+                                .child(
+                                    Select::new(&scheme_select)
+                                        .w(rems(17.5))
+                                        .menu_width(rems(20.))
+                                        .menu_max_h(rems(22.5)),
+                                )
                         })
                         .on_reset(
-                            move |cx| {
-                                dirty_owner.upgrade().is_some_and(|owner| {
-                                    !owner.read(cx).terminal_color_scheme.is_empty()
-                                })
-                            },
+                            move |cx| color_scheme_is_dirty(&dirty_owner, cx),
                             move |window, cx| {
-                                let _ = reset_owner.update(cx, |this, cx| {
-                                    this.set_terminal_color_scheme(SharedString::default(), cx)
-                                });
-                                reset_select.update(cx, |select, cx| {
-                                    select.set_selected_value(
-                                        &DEFAULT_COLOR_SCHEME_LABEL.into(),
-                                        window,
-                                        cx,
-                                    );
-                                });
+                                reset_color_scheme(&reset_owner, &reset_select, window, cx)
                             },
                         ),
                     )

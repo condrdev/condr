@@ -28,8 +28,10 @@ use gpui_component::{ActiveTheme as _, Root, WindowExt as _};
 use super::super::{
     Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
     DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
-    PendingWorkspaceSelection, ReportedTerminalMouseMotion, ServerConnection,
-    default_window_options, select_appearance, selected_appearance,
+    PendingWorkspaceSelection, ReportedTerminalMouseMotion, ServerConnection, TerminalFont,
+    TerminalPalette, color_scheme_is_dirty, default_window_options, reset_color_scheme,
+    select_appearance, select_terminal_font_family, select_terminal_font_size, selected_appearance,
+    terminal_font_family, terminal_font_size,
 };
 
 #[cfg(windows)]
