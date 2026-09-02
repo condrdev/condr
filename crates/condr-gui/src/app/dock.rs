@@ -226,27 +226,41 @@ impl Render for TerminalPanel {
             ];
         }
         let owner = self.owner.upgrade();
-        let (terminal, active, controlling, marked_text, selection, runtime_epoch, pane_title) =
-            owner
-                .as_ref()
-                .map(|owner| {
-                    let app = owner.read(cx);
-                    let active = app.target_pane == Some((self.connection_key, self.pane_id));
-                    let connection = app.connection(self.connection_key);
-                    (
-                        app.terminal(self.connection_key, self.pane_id).cloned(),
-                        active,
-                        connection.is_some_and(ServerConnection::can_mutate),
-                        app.marked_text_for(self.connection_key, self.pane_id),
-                        app.selection_for(self.connection_key, self.pane_id),
-                        connection.and_then(|connection| connection.runtime_epoch),
-                        connection
-                            .and_then(|connection| connection.agents.get(&self.pane_id))
-                            .map(|agent| agent.kind.label())
-                            .unwrap_or("Terminal"),
-                    )
-                })
-                .unwrap_or((None, false, false, None, None, None, "Terminal"));
+        let (
+            terminal,
+            active,
+            solo,
+            controlling,
+            marked_text,
+            selection,
+            runtime_epoch,
+            pane_title,
+        ) = owner
+            .as_ref()
+            .map(|owner| {
+                let app = owner.read(cx);
+                let active = app.target_pane == Some((self.connection_key, self.pane_id));
+                let solo = app.dock_surfaces.iter().any(|(surface_key, surface)| {
+                    surface_key.connection_key == self.connection_key
+                        && surface.pane_ids.len() == 1
+                        && surface.pane_ids.contains(&self.pane_id)
+                });
+                let connection = app.connection(self.connection_key);
+                (
+                    app.terminal(self.connection_key, self.pane_id).cloned(),
+                    active,
+                    solo,
+                    connection.is_some_and(ServerConnection::can_mutate),
+                    app.marked_text_for(self.connection_key, self.pane_id),
+                    app.selection_for(self.connection_key, self.pane_id),
+                    connection.and_then(|connection| connection.runtime_epoch),
+                    connection
+                        .and_then(|connection| connection.agents.get(&self.pane_id))
+                        .map(|agent| agent.kind.label())
+                        .unwrap_or("Terminal"),
+                )
+            })
+            .unwrap_or((None, false, false, false, None, None, None, "Terminal"));
         let ime_terminal_revision = marked_text
             .as_ref()
             .and_then(|_| terminal.as_ref().map(|terminal| terminal.view.revision));
@@ -341,11 +355,12 @@ impl Render for TerminalPanel {
         v_flex()
             .size_full()
             .overflow_hidden()
-            .border_3()
-            .border_color(if active {
-                rgb(ACTIVE_PANE_BORDER_RGB).into()
-            } else {
-                cx.theme().border
+            .when(!solo, |this| {
+                this.border_3().border_color(if active {
+                    rgb(ACTIVE_PANE_BORDER_RGB).into()
+                } else {
+                    cx.theme().border
+                })
             })
             .child(
                 h_flex()
