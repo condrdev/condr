@@ -82,20 +82,51 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
     let root = path_line()?;
     let git_directory = path_line()?;
     let common_directory = path_line()?;
-    // `symbolic-ref` names an unborn branch too and exits quietly when HEAD is detached.
-    let head = run_git(path, ["symbolic-ref", "--short", "-q", "HEAD"])?;
-    let branch = if head.status.success() {
-        text(&head).trim().to_owned()
-    } else {
-        String::new()
-    };
+    let branch = head_branch(path, &git_directory, &common_directory)?;
 
     Ok(Some(GitRepository {
         root,
         git_directory,
         common_directory,
-        branch: (!branch.is_empty()).then_some(branch),
+        branch,
     }))
+}
+
+/// The checked-out branch, read from the `HEAD` file like herdr does so the common path spawns
+/// no process: `ref: refs/heads/<name>` names it (an unborn branch too), anything else is a
+/// detached HEAD. Reftable repositories keep HEAD elsewhere, so they ask `git`.
+fn head_branch(
+    cwd: &Path,
+    git_directory: &Path,
+    common_directory: &Path,
+) -> Result<Option<String>, GitError> {
+    if uses_reftable(common_directory) {
+        let head = run_git(cwd, ["symbolic-ref", "--short", "-q", "HEAD"])?;
+        return Ok(head
+            .status
+            .success()
+            .then(|| text(&head).trim().to_owned())
+            .filter(|branch| !branch.is_empty()));
+    }
+    let head = fs::read_to_string(git_directory.join("HEAD"))
+        .map_err(|error| GitError(format!("cannot read HEAD: {error}")))?;
+    Ok(head
+        .trim()
+        .strip_prefix("ref: refs/heads/")
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_owned))
+}
+
+fn uses_reftable(common_directory: &Path) -> bool {
+    fs::read_to_string(common_directory.join("config")).is_ok_and(|config| {
+        config.lines().any(|line| {
+            let mut parts = line.splitn(2, '=');
+            parts.next().is_some_and(|key| key.trim() == "refstorage")
+                && parts
+                    .next()
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case("reftable"))
+        })
+    })
 }
 
 pub fn default_worktree_root() -> Option<PathBuf> {

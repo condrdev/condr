@@ -129,6 +129,11 @@ fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
     assert_eq!(on_main.head_fingerprint().unwrap(), before);
 
     std::thread::sleep(std::time::Duration::from_millis(20));
+    git(&repository, ["checkout", "-b", "feature/nested"]);
+    assert_eq!(
+        discover_repository(&repository).unwrap().unwrap().branch(),
+        Some("feature/nested")
+    );
     git(&repository, ["checkout", "--detach"]);
     let detached = discover_repository(&repository).unwrap().unwrap();
     assert_eq!(detached.branch(), None);

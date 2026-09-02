@@ -47,6 +47,8 @@ const MAX_TERMINAL_HYPERLINK_BYTES: usize = 4 * 1024 * 1024;
 // Agent *kind* only changes when a process starts or exits; agent *state* comes from screen
 // text, so the process table can refresh well below the 500 ms agent scan cadence.
 const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+// Once an agent is identified its process rarely changes; screen text drives state meanwhile.
+const AGENT_KIND_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_OSC_CWD_BYTES: usize = 4 * 1024;
 const MAX_TERMINAL_TITLE_CHARS: usize = 256;
 const MAX_PENDING_CLIPBOARD_BYTES: usize = 1024 * 1024;

@@ -10,8 +10,20 @@ pub(super) struct ProcessProbe {
 
 pub(super) struct ProcessSnapshot {
     system: System,
-    refresh_kind: ProcessRefreshKind,
     refreshed_at: Option<Instant>,
+}
+
+impl ProcessSnapshot {
+    /// Reads command lines for `pids` only and returns the table for identification.
+    fn with_command_lines(&mut self, pids: &[Pid]) -> &System {
+        if !pids.is_empty() {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::Some(pids),
+                ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+            );
+        }
+        &self.system
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -307,40 +319,48 @@ impl ProcessProbe {
                 let shell_pid = i32::try_from(self.shell_pid?).ok()?;
                 getpgid(Some(UnixPid::from_raw(shell_pid))).ok()
             })?;
-        let processes = process_snapshot();
-        let system = &processes.system;
-
+        let mut processes = process_snapshot();
+        // Phase one is the cheap table (no command lines); phase two reads command lines for
+        // the foreground group only, leader first.
         let leader = Pid::from_u32(u32::try_from(foreground_group.as_raw()).ok()?);
-        if let Some(kind) = system.process(leader).and_then(|process| {
+        let mut members = vec![leader];
+        members.extend(processes.system.processes().keys().copied().filter(|pid| {
+            *pid != leader
+                && i32::try_from(pid.as_u32())
+                    .ok()
+                    .and_then(|pid| getpgid(Some(UnixPid::from_raw(pid))).ok())
+                    == Some(foreground_group)
+        }));
+        let system = processes.with_command_lines(&members);
+        members.iter().find_map(|pid| {
+            let process = system.process(*pid)?;
             identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
-        }) {
-            return Some(kind);
-        }
-
-        system.processes().iter().find_map(|(pid, process)| {
-            let pid = i32::try_from(pid.as_u32()).ok()?;
-            (getpgid(Some(UnixPid::from_raw(pid))).ok()? == foreground_group).then(|| {
-                identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
-            })?
         })
     }
 
     #[cfg(windows)]
     pub(super) fn agent_kind(&self) -> Option<AgentKind> {
         let shell_pid = Pid::from_u32(self.shell_pid?);
-        let processes = process_snapshot();
-        let system = &processes.system;
-        if system.process(shell_pid)?.start_time() != self.shell_started_at? {
+        let mut processes = process_snapshot();
+        if processes.system.process(shell_pid)?.start_time() != self.shell_started_at? {
             return None;
         }
-        let candidates = system
+        // Phase one is the cheap table (names and parents); command lines, the expensive part
+        // on Windows, are read only for the shell's descendants.
+        let descendants = processes
+            .system
             .processes()
+            .keys()
+            .copied()
+            .filter(|pid| descendant_depth(&processes.system, *pid, shell_pid).is_some())
+            .collect::<Vec<_>>();
+        let system = processes.with_command_lines(&descendants);
+        let candidates = descendants
             .iter()
-            .filter_map(|(pid, process)| {
-                descendant_depth(system, *pid, shell_pid).and_then(|_| {
-                    identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
-                        .map(|kind| (*pid, kind))
-                })
+            .filter_map(|pid| {
+                let process = system.process(*pid)?;
+                identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
+                    .map(|kind| (*pid, kind))
             })
             .collect::<Vec<_>>();
         root_agent(&candidates, |ancestor, descendant| {
@@ -369,9 +389,6 @@ pub(super) fn process_snapshot() -> std::sync::MutexGuard<'static, ProcessSnapsh
         .get_or_init(|| {
             Mutex::new(ProcessSnapshot {
                 system: System::new(),
-                // Identification reads name and cmd only; resolving every exe path is the
-                // expensive part of a full refresh on Windows.
-                refresh_kind: ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
                 refreshed_at: None,
             })
         })
@@ -382,10 +399,10 @@ pub(super) fn process_snapshot() -> std::sync::MutexGuard<'static, ProcessSnapsh
         .refreshed_at
         .is_none_or(|refreshed| now.duration_since(refreshed) >= PROCESS_REFRESH_INTERVAL)
     {
-        let refresh_kind = snapshot.refresh_kind;
+        // Names, parents, and start times only; see `with_command_lines`.
         snapshot
             .system
-            .refresh_processes_specifics(ProcessesToUpdate::All, refresh_kind);
+            .refresh_processes_specifics(ProcessesToUpdate::All, ProcessRefreshKind::new());
         snapshot.refreshed_at = Some(now);
     }
     snapshot

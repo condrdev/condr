@@ -125,7 +125,7 @@ fn probe_terminal(
     pane_id: PaneId,
     instance_id: u64,
     activity: mpsc::Receiver<()>,
-    agent_probe: TerminalAgentProbe,
+    mut agent_probe: TerminalAgentProbe,
     cwd_probe: TerminalCwdProbe,
     state: Arc<Mutex<RuntimeState>>,
 ) {
@@ -133,9 +133,6 @@ fn probe_terminal(
         let mut last_agent_scan = Instant::now();
         let mut agent_scan_pending = false;
         let mut git_scan_pending: Option<Instant> = None;
-        // HEAD fingerprints as of each Workspace's last rediscovery from this probe.
-        let mut git_heads: std::collections::HashMap<WorkspaceId, GitHeadFingerprint> =
-            std::collections::HashMap::new();
         loop {
             let nudged = if agent_scan_pending || git_scan_pending.is_some() {
                 match activity.recv_timeout(AGENT_SCAN_INTERVAL) {
@@ -190,29 +187,34 @@ fn probe_terminal(
                     WorkspaceGitScan::Ready { workspace_id, root } => {
                         git_scan_pending = None;
                         // Terminal output alone does not change the branch; only rediscover
-                        // when the HEAD files moved since this probe last looked.
-                        let fingerprint = {
+                        // when the HEAD files moved since the Workspace was last discovered.
+                        let known = {
                             let state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
                                 break;
                             }
-                            state
-                                .workspace_git
-                                .get(&workspace_id)
-                                .and_then(GitRepository::head_fingerprint)
+                            state.workspace_git.get(&workspace_id).cloned()
                         };
-                        if fingerprint.is_some()
-                            && git_heads.get(&workspace_id) == fingerprint.as_ref()
+                        let fingerprint = known.as_ref().and_then(GitRepository::head_fingerprint);
                         {
-                            continue;
-                        }
-                        // Recorded before the scan: a switch racing the scan differs next time.
-                        match fingerprint {
-                            Some(fingerprint) => {
-                                git_heads.insert(workspace_id, fingerprint);
+                            let mut state = state.lock().expect("server state lock poisoned");
+                            if !state.terminal_is_current(pane_id, instance_id) {
+                                break;
                             }
-                            None => {
-                                git_heads.remove(&workspace_id);
+                            if fingerprint.is_some()
+                                && state.workspace_git_heads.get(&workspace_id)
+                                    == fingerprint.as_ref()
+                            {
+                                continue;
+                            }
+                            // Recorded before the scan: a switch racing the scan differs next time.
+                            match fingerprint {
+                                Some(fingerprint) => {
+                                    state.workspace_git_heads.insert(workspace_id, fingerprint);
+                                }
+                                None => {
+                                    state.workspace_git_heads.remove(&workspace_id);
+                                }
                             }
                         }
                         if let Ok(next) = discover_repository(&root) {

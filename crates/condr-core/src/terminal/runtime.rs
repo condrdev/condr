@@ -643,7 +643,8 @@ impl TerminalRuntime {
     }
 
     pub fn agent_snapshot(&self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
-        self.agent_probe()?.snapshot(previous)
+        let mut probe = self.agent_probe()?;
+        probe.snapshot(previous)
     }
 
     pub fn agent_probe(&self) -> Option<TerminalAgentProbe> {
@@ -653,6 +654,7 @@ impl TerminalRuntime {
             #[cfg(unix)]
             master: Arc::downgrade(self.master.as_ref().expect("checked Terminal PTY master")),
             process: self.process,
+            kind_checked_at: None,
         })
     }
 
@@ -1003,17 +1005,23 @@ pub struct TerminalAgentProbe {
     #[cfg(unix)]
     master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
     pub(super) process: ProcessProbe,
+    /// When the process table last confirmed the current agent kind.
+    kind_checked_at: Option<Instant>,
 }
 
 impl TerminalAgentProbe {
-    pub fn snapshot(&self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
-        #[cfg(unix)]
-        let kind = {
-            let master = self.master.upgrade()?;
-            self.process.agent_kind(&master)?
+    pub fn snapshot(&mut self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
+        let recent = self
+            .kind_checked_at
+            .is_some_and(|checked| checked.elapsed() < AGENT_KIND_RECHECK_INTERVAL);
+        let kind = match previous.filter(|_| recent) {
+            Some(snapshot) => snapshot.kind,
+            None => {
+                let kind = self.lookup_kind();
+                self.kind_checked_at = kind.map(|_| Instant::now());
+                kind?
+            }
         };
-        #[cfg(windows)]
-        let kind = self.process.agent_kind()?;
         let previous = previous
             .filter(|snapshot| snapshot.kind == kind)
             .map_or(AgentState::Unknown, |snapshot| snapshot.state);
@@ -1022,6 +1030,18 @@ impl TerminalAgentProbe {
             kind,
             state: classify_agent(kind, &bottom_text(&terminal), previous),
         })
+    }
+
+    fn lookup_kind(&self) -> Option<AgentKind> {
+        #[cfg(unix)]
+        {
+            let master = self.master.upgrade()?;
+            self.process.agent_kind(&master)
+        }
+        #[cfg(windows)]
+        {
+            self.process.agent_kind()
+        }
     }
 }
 
