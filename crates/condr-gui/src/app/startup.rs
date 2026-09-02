@@ -44,6 +44,7 @@ pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
         (false, true, true, "right") => Some(Box::new(ResizeRight)),
         (false, true, true, "up") => Some(Box::new(ResizeUp)),
         (false, true, true, "down") => Some(Box::new(ResizeDown)),
+        (false, true, true, "enter") => Some(Box::new(ToggleZoom)),
         _ => None,
     }
 }
@@ -68,6 +69,7 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-shift-right", ResizeRight, Some("Condr")),
         KeyBinding::new("alt-shift-up", ResizeUp, Some("Condr")),
         KeyBinding::new("alt-shift-down", ResizeDown, Some("Condr")),
+        KeyBinding::new("alt-shift-enter", ToggleZoom, Some("Condr")),
     ]);
 }
 

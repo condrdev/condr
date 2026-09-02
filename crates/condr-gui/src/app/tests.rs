@@ -13,12 +13,12 @@ use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 use super::{
     ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, OpenSettings, PreviousTab,
     ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
-    TerminalClipboardShortcut, TerminalVisualSlot, accepted_text_input, agent_sidebar_status,
-    apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
-    connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
-    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches, reorder_connection,
-    should_defer_to_character_input, single_instance_lock_path, terminal_chunk_identity_matches,
-    terminal_clipboard_shortcut,
+    TerminalClipboardShortcut, TerminalVisualSlot, ToggleZoom, accepted_text_input,
+    agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
+    clear_pending_sizes_for_bootstrap, connect_to_server_with,
+    enforce_terminal_chunk_reliable_fence, fixed_shortcut, lock_exclusively, merge_terminal_deltas,
+    read_bootstrap_batches, reorder_connection, should_defer_to_character_input,
+    single_instance_lock_path, terminal_chunk_identity_matches, terminal_clipboard_shortcut,
 };
 
 fn terminal_cell(text: &str) -> TerminalCell {
@@ -601,6 +601,13 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
     assert!(action("alt-+").unwrap().as_any().is::<SplitRight>());
     assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
     assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
+    assert!(
+        action("alt-shift-enter")
+            .unwrap()
+            .as_any()
+            .is::<ToggleZoom>()
+    );
+    assert!(action("alt-enter").is_none());
     // Settings must open even while a terminal owns the keystroke, on the platform's
     // own chord: Cmd+, on macOS, Ctrl+, elsewhere.
     assert!(action("secondary-,").unwrap().as_any().is::<OpenSettings>());

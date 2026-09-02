@@ -1,4 +1,6 @@
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+// Not for the test harness: a windowless test process has no console, so every
+// console child it starts (git in the test helpers) would flash its own window.
+#![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
 
 mod apca;
 mod app;
