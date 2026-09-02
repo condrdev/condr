@@ -11,8 +11,8 @@ pub use agent::{
     identify_agent_process,
 };
 pub use git::{
-    GitError, GitRepository, create_worktree, default_worktree_root, discover_repository,
-    open_worktree, remove_worktree, validate_worktree_removal,
+    GitError, GitHeadFingerprint, GitRepository, create_worktree, default_worktree_root,
+    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
 };
 pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,

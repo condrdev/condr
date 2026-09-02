@@ -3,6 +3,11 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::SystemTime;
+
+/// Modification times of the HEAD files a branch switch rewrites. Equal fingerprints mean a
+/// rediscovery would return the same branch, so the caller can skip spawning `git`.
+pub type GitHeadFingerprint = (SystemTime, SystemTime);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitRepository {
@@ -24,6 +29,14 @@ impl GitRepository {
     pub fn is_linked_worktree(&self) -> bool {
         self.git_directory != self.common_directory
     }
+
+    pub fn head_fingerprint(&self) -> Option<GitHeadFingerprint> {
+        let modified = |directory: &Path| fs::metadata(directory.join("HEAD"))?.modified();
+        Some((
+            modified(&self.git_directory).ok()?,
+            modified(&self.common_directory).ok()?,
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,25 +52,43 @@ impl std::error::Error for GitError {}
 
 pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepository>, GitError> {
     let path = path.as_ref();
-    let inside = run_git(path, ["rev-parse", "--is-inside-work-tree"])?;
-    if !inside.status.success() || text(&inside).trim() != "true" {
+    // One `rev-parse` answers everything but the branch; it fails outside a work tree, which is
+    // the "not a repository" case rather than an error.
+    let facts = run_git(
+        path,
+        [
+            "rev-parse",
+            "--is-inside-work-tree",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--absolute-git-dir",
+            "--git-common-dir",
+        ],
+    )?;
+    if !facts.status.success() {
         return Ok(None);
     }
-
-    let root = checked_path(
-        path,
-        ["rev-parse", "--path-format=absolute", "--show-toplevel"],
-    )?;
-    let git_directory = checked_path(
-        path,
-        ["rev-parse", "--path-format=absolute", "--absolute-git-dir"],
-    )?;
-    let common_directory = checked_path(
-        path,
-        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )?;
-    let branch = checked(path, ["branch", "--show-current"])?;
-    let branch = text(&branch).trim().to_owned();
+    let mut lines = facts.stdout.split(|byte| *byte == b'\n');
+    if lines.next().map(<[u8]>::trim_ascii) != Some(b"true") {
+        return Ok(None);
+    }
+    let mut path_line = || {
+        let bytes = lines.next().map(<[u8]>::trim_ascii).unwrap_or_default();
+        if bytes.is_empty() {
+            return Err(GitError("Git returned an empty path".into()));
+        }
+        Ok(PathBuf::from(bytes_to_os_string(bytes)?))
+    };
+    let root = path_line()?;
+    let git_directory = path_line()?;
+    let common_directory = path_line()?;
+    // `symbolic-ref` names an unborn branch too and exits quietly when HEAD is detached.
+    let head = run_git(path, ["symbolic-ref", "--short", "-q", "HEAD"])?;
+    let branch = if head.status.success() {
+        text(&head).trim().to_owned()
+    } else {
+        String::new()
+    };
 
     Ok(Some(GitRepository {
         root,
@@ -227,19 +258,6 @@ where
     S: AsRef<std::ffi::OsStr>,
 {
     checked_output(run_git(cwd, args)?)
-}
-
-fn checked_path<I, S>(cwd: &Path, args: I) -> Result<PathBuf, GitError>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    let output = checked(cwd, args)?;
-    let bytes = output.stdout.trim_ascii_end();
-    if bytes.is_empty() {
-        return Err(GitError("Git returned an empty path".into()));
-    }
-    Ok(PathBuf::from(bytes_to_os_string(bytes)?))
 }
 
 fn checked_output(output: Output) -> Result<Output, GitError> {

@@ -369,9 +369,9 @@ pub(super) fn process_snapshot() -> std::sync::MutexGuard<'static, ProcessSnapsh
         .get_or_init(|| {
             Mutex::new(ProcessSnapshot {
                 system: System::new(),
-                refresh_kind: ProcessRefreshKind::new()
-                    .with_cmd(UpdateKind::Always)
-                    .with_exe(UpdateKind::Always),
+                // Identification reads name and cmd only; resolving every exe path is the
+                // expensive part of a full refresh on Windows.
+                refresh_kind: ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
                 refreshed_at: None,
             })
         })

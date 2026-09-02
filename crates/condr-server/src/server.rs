@@ -14,11 +14,11 @@ use condr_core::protocol::{
     check_version, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
-    AgentSnapshot, GitRepository, PaneId, Session, TerminalAgentProbe, TerminalCommand,
-    TerminalCwdProbe, TerminalHyperlinkBudget, TerminalNoticeBatch, TerminalNoticeProbe,
-    TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView, TerminalViewFrame,
-    TerminalViewSource, WorkspaceId, create_worktree, default_worktree_root, discover_repository,
-    open_worktree, remove_worktree, validate_worktree_removal,
+    AgentSnapshot, GitHeadFingerprint, GitRepository, PaneId, Session, TerminalAgentProbe,
+    TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget, TerminalNoticeBatch,
+    TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView,
+    TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, default_worktree_root,
+    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
 };
 
 use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};

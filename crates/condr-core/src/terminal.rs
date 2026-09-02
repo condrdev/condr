@@ -44,7 +44,9 @@ const MAX_TERMINAL_CELLS: usize = 65_536;
 const MAX_TERMINAL_CELL_TEXT_BYTES: usize = 256;
 const MAX_TERMINAL_HYPERLINK_URI_BYTES: usize = 8 * 1024;
 const MAX_TERMINAL_HYPERLINK_BYTES: usize = 4 * 1024 * 1024;
-const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
+// Agent *kind* only changes when a process starts or exits; agent *state* comes from screen
+// text, so the process table can refresh well below the 500 ms agent scan cadence.
+const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_OSC_CWD_BYTES: usize = 4 * 1024;
 const MAX_TERMINAL_TITLE_CHARS: usize = 256;
 const MAX_PENDING_CLIPBOARD_BYTES: usize = 1024 * 1024;

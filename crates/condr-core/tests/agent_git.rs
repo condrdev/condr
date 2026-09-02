@@ -100,6 +100,46 @@ fn worktree_association_survives_parent_workspace_close() {
     assert!(session.workspace(child).unwrap().worktree().is_some());
 }
 
+#[test]
+fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
+    let temp = TempDirectory::new("git-head");
+    let repository = temp.path().join("repository");
+    fs::create_dir_all(&repository).unwrap();
+    git(&repository, ["init"]);
+    git(&repository, ["config", "user.name", "Condr Tests"]);
+    git(
+        &repository,
+        ["config", "user.email", "condr@example.invalid"],
+    );
+    git(&repository, ["branch", "-M", "main"]);
+    // Unborn branch: no commits yet, but HEAD already names it.
+    assert_eq!(
+        discover_repository(&repository).unwrap().unwrap().branch(),
+        Some("main")
+    );
+    fs::write(repository.join("README.md"), "condr\n").unwrap();
+    git(&repository, ["add", "README.md"]);
+    git(&repository, ["commit", "-m", "initial"]);
+
+    let on_main = discover_repository(&repository).unwrap().unwrap();
+    let before = on_main.head_fingerprint().unwrap();
+    // Committing on the same branch does not rewrite HEAD.
+    fs::write(repository.join("README.md"), "again\n").unwrap();
+    git(&repository, ["commit", "-am", "second"]);
+    assert_eq!(on_main.head_fingerprint().unwrap(), before);
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    git(&repository, ["checkout", "--detach"]);
+    let detached = discover_repository(&repository).unwrap().unwrap();
+    assert_eq!(detached.branch(), None);
+    assert_ne!(detached.head_fingerprint().unwrap(), before);
+    assert!(
+        discover_repository(repository.join(".git"))
+            .unwrap()
+            .is_none()
+    );
+}
+
 fn git<const N: usize>(cwd: &Path, args: [&str; N]) {
     let output = Command::new("git")
         .arg("-C")

@@ -133,6 +133,9 @@ fn probe_terminal(
         let mut last_agent_scan = Instant::now();
         let mut agent_scan_pending = false;
         let mut git_scan_pending: Option<Instant> = None;
+        // HEAD fingerprints as of each Workspace's last rediscovery from this probe.
+        let mut git_heads: std::collections::HashMap<WorkspaceId, GitHeadFingerprint> =
+            std::collections::HashMap::new();
         loop {
             let nudged = if agent_scan_pending || git_scan_pending.is_some() {
                 match activity.recv_timeout(AGENT_SCAN_INTERVAL) {
@@ -186,6 +189,32 @@ fn probe_terminal(
                     WorkspaceGitScan::Covered => git_scan_pending = None,
                     WorkspaceGitScan::Ready { workspace_id, root } => {
                         git_scan_pending = None;
+                        // Terminal output alone does not change the branch; only rediscover
+                        // when the HEAD files moved since this probe last looked.
+                        let fingerprint = {
+                            let state = state.lock().expect("server state lock poisoned");
+                            if !state.terminal_is_current(pane_id, instance_id) {
+                                break;
+                            }
+                            state
+                                .workspace_git
+                                .get(&workspace_id)
+                                .and_then(GitRepository::head_fingerprint)
+                        };
+                        if fingerprint.is_some()
+                            && git_heads.get(&workspace_id) == fingerprint.as_ref()
+                        {
+                            continue;
+                        }
+                        // Recorded before the scan: a switch racing the scan differs next time.
+                        match fingerprint {
+                            Some(fingerprint) => {
+                                git_heads.insert(workspace_id, fingerprint);
+                            }
+                            None => {
+                                git_heads.remove(&workspace_id);
+                            }
+                        }
                         if let Ok(next) = discover_repository(&root) {
                             let mut state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
