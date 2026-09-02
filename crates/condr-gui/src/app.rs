@@ -495,6 +495,8 @@ pub(crate) struct Condr {
     settings_window: Option<WindowHandle<Root>>,
     settings_view: Option<WeakEntity<SettingsWindow>>,
     _settings_window_closed: Option<Subscription>,
+    /// The pending debounced font save; replacing it cancels the previous one.
+    _font_save: Option<Task<()>>,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
@@ -605,6 +607,7 @@ impl Condr {
             settings_window: None,
             settings_view: None,
             _settings_window_closed: None,
+            _font_save: None,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,

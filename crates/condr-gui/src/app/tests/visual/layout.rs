@@ -1426,16 +1426,14 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         .expect("Settings should open in its own window");
     let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
     settings.update(|window, cx| _ = window.draw(cx));
-    let select_state = settings.read(|app| {
+    let settings_view = settings.read(|app| {
         view.read(app)
             .settings_view
             .as_ref()
             .and_then(|view| view.upgrade())
             .expect("the Settings window view is recorded")
-            .read(app)
-            .color_scheme
-            .clone()
     });
+    let select_state = settings.read(|app| settings_view.read(app).color_scheme.clone());
 
     // Colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
     let select = settings
@@ -1478,18 +1476,18 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     );
 
     // Font: the field keeps what was typed; the theme gets the normalized value.
-    window.update(|_, cx| select_terminal_font_family(&owner, "Cascadia Mono".into(), cx));
+    window.update(|_, cx| select_terminal_font_family(&settings_view, "Cascadia Mono".into(), cx));
     assert_eq!(
-        window.read(|app| terminal_font_family(&owner, app)),
+        window.read(|app| terminal_font_family(&settings_view, app)),
         "Cascadia Mono"
     );
     assert_eq!(
         window.read(|app| app.theme().mono_font_family.clone()),
         "Cascadia Mono"
     );
-    window.update(|_, cx| select_terminal_font_family(&owner, "".into(), cx));
+    window.update(|_, cx| select_terminal_font_family(&settings_view, "".into(), cx));
     assert_eq!(
-        window.read(|app| terminal_font_family(&owner, app)),
+        window.read(|app| terminal_font_family(&settings_view, app)),
         "",
         "a half-edited field must not be rewritten under the user"
     );
@@ -1500,13 +1498,16 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     );
 
     // Font size: same split between the typed and the applied value.
-    window.update(|_, cx| select_terminal_font_size(&owner, 1., cx));
-    assert_eq!(window.read(|app| terminal_font_size(&owner, app)), 1.);
+    window.update(|_, cx| select_terminal_font_size(&settings_view, 1., cx));
+    assert_eq!(
+        window.read(|app| terminal_font_size(&settings_view, app)),
+        1.
+    );
     assert_eq!(
         window.read(|app| app.theme().mono_font_size),
         px(TerminalFont::MIN_SIZE)
     );
-    window.update(|_, cx| select_terminal_font_size(&owner, 18., cx));
+    window.update(|_, cx| select_terminal_font_size(&settings_view, 18., cx));
     assert_eq!(window.read(|app| app.theme().mono_font_size), px(18.));
 
     settings.update(|window, _| window.remove_window());

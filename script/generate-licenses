@@ -11,6 +11,12 @@ cd "$(dirname "$0")/.."
 OUT=crates/condr-gui/assets/licenses.md
 CARGO_ABOUT="${CARGO_ABOUT:-cargo-about}"
 
+# Everything is assembled in a temporary file and moved into place at the end, so
+# a failing cargo-about leaves the committed licenses.md untouched.
+TMP="$(mktemp)"
+ABOUT="$(mktemp)"
+trap 'rm -f "$TMP" "$ABOUT"' EXIT
+
 {
     echo "# Licenses"
     echo
@@ -36,12 +42,12 @@ CARGO_ABOUT="${CARGO_ABOUT:-cargo-about}"
     echo
     echo "## Rust crates"
     echo
-} > "$OUT"
+} > "$TMP"
 
-TMP="$(mktemp)"
-"$CARGO_ABOUT" generate -c script/licenses/about.toml -o "$TMP" script/licenses/template.md.hbs
+"$CARGO_ABOUT" generate -c script/licenses/about.toml -o "$ABOUT" script/licenses/template.md.hbs
 # cargo-about HTML-escapes the template output.
 sed -e 's/&quot;/"/g' -e "s/&#x27;/'/g" -e 's/&#x3D;/=/g' -e 's/&#x60;/`/g' \
-    -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' "$TMP" >> "$OUT"
-rm -f "$TMP"
+    -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' "$ABOUT" >> "$TMP"
+
+mv "$TMP" "$OUT"
 echo "wrote $OUT"

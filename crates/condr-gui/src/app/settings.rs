@@ -7,17 +7,27 @@ const SETTINGS_WINDOW_HEIGHT: Rems = rems(34.);
 // Wide enough for the page sidebar plus the Colors select.
 const SETTINGS_WINDOW_MIN_WIDTH: Rems = rems(40.);
 const SETTINGS_WINDOW_MIN_HEIGHT: Rems = rems(20.);
+/// How long after the last font keystroke the config file is written.
+const FONT_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// Centered over the main window and kept on that window's display, so a main
-/// window on a secondary screen gets its Settings there too.
+/// Centered over the main window and kept inside that window's display, minus the
+/// taskbar or Dock: a main window on a secondary screen gets its Settings there, and
+/// a small screen gets a smaller Settings window rather than one hanging off the edge.
 fn settings_window_bounds(window: &Window, size: Size<Pixels>, cx: &App) -> Bounds<Pixels> {
     let main = window.bounds();
+    let screen = window.display(cx).map(|display| display.visible_bounds());
+    let size = match &screen {
+        Some(screen) => gpui::size(
+            size.width.min(screen.size.width),
+            size.height.min(screen.size.height),
+        ),
+        None => size,
+    };
     let mut origin = point(
         main.origin.x + (main.size.width - size.width) / 2.,
         main.origin.y + (main.size.height - size.height) / 2.,
     );
-    if let Some(display) = window.display(cx) {
-        let screen = display.bounds();
+    if let Some(screen) = screen {
         origin.x = origin.x.min(screen.right() - size.width).max(screen.left());
         origin.y = origin
             .y
@@ -174,15 +184,20 @@ impl Condr {
         });
     }
 
-    /// Keeps the value as typed so the fields never rewrite a half-edited entry;
-    /// the theme and the config file receive the normalized form.
+    /// Stores the normalized font, so this value, the theme and the config file
+    /// never disagree; the half-typed state lives in the Settings window. Saving is
+    /// debounced so a burst of keystrokes rewrites the file once.
     pub(super) fn set_terminal_font(&mut self, font: TerminalFont, cx: &mut Context<Self>) {
+        let font = font.normalized();
         if self.terminal_font == font {
             return;
         }
         self.terminal_font = font;
-        self.save_terminal_font();
-        apply_terminal_font(&self.terminal_font.normalized(), cx);
+        apply_terminal_font(&self.terminal_font, cx);
+        self._font_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
+            let _ = this.update(cx, |this, _| this.save_terminal_font());
+        }));
     }
 
     pub(super) fn set_terminal_color_scheme(&mut self, name: SharedString, cx: &mut Context<Self>) {
@@ -271,6 +286,10 @@ pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
     pub(super) color_scheme: Entity<ColorSchemeSelect>,
+    /// The font as typed in this window. `Condr` only ever holds the normalized
+    /// form, so a half-edited value never reaches the theme or the config file, and
+    /// reopening Settings starts from what is actually in use.
+    pub(super) font_draft: TerminalFont,
     /// The Licenses page text, in a read-only editor because it is far too long
     /// for a plain text element.
     licenses: Entity<EditorState>,
@@ -318,21 +337,33 @@ impl SettingsWindow {
                 .folding(false)
                 .searchable(true)
         });
+        let font_draft = owner
+            .upgrade()
+            .map(|owner| owner.read(cx).terminal_font.clone())
+            .unwrap_or_default();
         Self {
             owner,
             focus_handle: cx.focus_handle(),
             color_scheme,
+            font_draft,
             licenses,
         }
+    }
+
+    /// Pushes the draft to `Condr`, which normalizes and applies it.
+    fn commit_font(&self, cx: &mut Context<Self>) {
+        let font = self.font_draft.clone();
+        let _ = self
+            .owner
+            .update(cx, move |owner, cx| owner.set_terminal_font(font, cx));
     }
 }
 
 fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
     let licenses = licenses.clone();
-    SettingPage::new("Licenses")
-        .icon(IconName::BookOpen)
-        .group(
-            SettingGroup::new().item(SettingItem::render(move |_, _, _| {
+    SettingPage::new("Licenses").icon(IconName::BookOpen).group(
+        SettingGroup::new().item(
+            SettingItem::render(move |_, _, _| {
                 // Plain text: no border, background or line numbers. It stays an
                 // Editor only because a 900 KB text needs virtualized rendering.
                 Editor::new(&licenses)
@@ -340,8 +371,18 @@ fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
                     .appearance(false)
                     .bordered(false)
                     .h(rems(26.))
-            })),
-        )
+            })
+            // Settings search only matches custom items by keyword.
+            .keywords([
+                "licenses",
+                "license",
+                "third-party",
+                "open source",
+                "notices",
+                "attribution",
+            ]),
+        ),
+    )
 }
 
 impl Render for SettingsWindow {
@@ -360,7 +401,11 @@ impl Render for SettingsWindow {
             })
             .child(
                 Settings::new("condr-settings")
-                    .page(appearance_page(&self.owner, &self.color_scheme))
+                    .page(appearance_page(
+                        &self.owner,
+                        &cx.entity(),
+                        &self.color_scheme,
+                    ))
                     .page(licenses_page(&self.licenses)),
             )
     }
@@ -382,49 +427,40 @@ pub(super) fn select_appearance(owner: &WeakEntity<Condr>, value: &str, cx: &mut
     let _ = owner.update(cx, |this, cx| this.set_appearance(appearance, cx));
 }
 
-fn terminal_font(owner: &WeakEntity<Condr>, cx: &App) -> TerminalFont {
-    owner
-        .upgrade()
-        .map(|owner| owner.read(cx).terminal_font.clone())
-        .unwrap_or_default()
-}
-
 // The field callbacks below are named so tests can drive them the way the widgets
 // do; the widgets themselves belong to gpui-component and expose no test hooks.
 
-/// What the Font field shows: the value as typed.
-pub(super) fn terminal_font_family(owner: &WeakEntity<Condr>, cx: &App) -> SharedString {
-    terminal_font(owner, cx).family
+/// What the Font field shows: the value as typed in this window.
+pub(super) fn terminal_font_family(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
+    settings.read(cx).font_draft.family.clone()
 }
 
 /// What the Font field does on every change.
 pub(super) fn select_terminal_font_family(
-    owner: &WeakEntity<Condr>,
+    settings: &Entity<SettingsWindow>,
     family: SharedString,
     cx: &mut App,
 ) {
-    let _ = owner.update(cx, |this, cx| {
-        let font = TerminalFont {
-            family,
-            ..this.terminal_font.clone()
-        };
-        this.set_terminal_font(font, cx);
+    settings.update(cx, |this, cx| {
+        this.font_draft.family = family;
+        this.commit_font(cx);
     });
 }
 
 /// What the Font size field shows.
-pub(super) fn terminal_font_size(owner: &WeakEntity<Condr>, cx: &App) -> f64 {
-    f64::from(terminal_font(owner, cx).size)
+pub(super) fn terminal_font_size(settings: &Entity<SettingsWindow>, cx: &App) -> f64 {
+    f64::from(settings.read(cx).font_draft.size)
 }
 
 /// What the Font size field does on every change.
-pub(super) fn select_terminal_font_size(owner: &WeakEntity<Condr>, size: f64, cx: &mut App) {
-    let _ = owner.update(cx, |this, cx| {
-        let font = TerminalFont {
-            size: size as f32,
-            ..this.terminal_font.clone()
-        };
-        this.set_terminal_font(font, cx);
+pub(super) fn select_terminal_font_size(
+    settings: &Entity<SettingsWindow>,
+    size: f64,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        this.font_draft.size = size as f32;
+        this.commit_font(cx);
     });
 }
 
@@ -453,6 +489,7 @@ pub(super) fn reset_color_scheme(
 
 fn appearance_page(
     owner: &WeakEntity<Condr>,
+    settings: &Entity<SettingsWindow>,
     color_scheme: &Entity<ColorSchemeSelect>,
 ) -> SettingPage {
     let reset_select = color_scheme.clone();
@@ -464,10 +501,10 @@ fn appearance_page(
         .map(|appearance| (appearance.as_str().into(), appearance.label().into()))
         .to_vec();
     let default_font = TerminalFont::default();
-    let family_get = owner.clone();
-    let family_set = owner.clone();
-    let size_get = owner.clone();
-    let size_set = owner.clone();
+    let family_get = settings.clone();
+    let family_set = settings.clone();
+    let size_get = settings.clone();
+    let size_set = settings.clone();
     let scheme_select = color_scheme.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
