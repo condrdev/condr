@@ -27,27 +27,51 @@ pub(super) struct PendingTerminalVisual {
 }
 
 impl TerminalVisualSlot {
+    /// Merges a batch into the pending visual, all panes or none: a `take` racing with this
+    /// call sees either the previous pending state or the fully merged one, never a batch
+    /// with some panes committed and the failing pane removed.
     pub(super) fn publish(&self, batch: TerminalFrameBatch) -> Result<Option<u64>, ()> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.pending.as_ref().is_some_and(|pending| {
+            pending.server_id != batch.server_id || pending.session_id != batch.session_id
+        }) {
+            return Err(());
+        }
+        // Read-only pre-validation: every merge that could fail is checked before any
+        // frame moves, so no frame needs cloning and a failure leaves the slot untouched.
+        let mut seen = HashMap::new();
+        for pane in &batch.panes {
+            let previous = seen
+                .get(&pane.pane_id)
+                .copied()
+                .or_else(|| state.pending.as_ref()?.panes.get(&pane.pane_id));
+            if let Some(previous) = previous {
+                check_terminal_frame_merge(previous, &pane.frame)?;
+            }
+            seen.insert(pane.pane_id, &pane.frame);
+        }
         let pending = state.pending.get_or_insert_with(|| PendingTerminalVisual {
             server_id: batch.server_id,
             session_id: batch.session_id,
             panes: HashMap::new(),
         });
-        if pending.server_id != batch.server_id || pending.session_id != batch.session_id {
-            return Err(());
-        }
         for pane in batch.panes {
-            match pending.panes.remove(&pane.pane_id) {
-                Some(previous) => {
-                    pending
-                        .panes
-                        .insert(pane.pane_id, merge_terminal_frames(previous, pane.frame)?);
-                }
-                None => {
-                    pending.panes.insert(pane.pane_id, pane.frame);
-                }
-            }
+            let frame = match pending.panes.remove(&pane.pane_id) {
+                Some(previous) => match merge_terminal_frames(previous, pane.frame) {
+                    Ok(frame) => frame,
+                    Err(()) => {
+                        // Pre-validation covers every server-produced batch; should a merge
+                        // still fail, invalidate the whole slot under this lock so a `take`
+                        // never observes a half-committed batch.
+                        state.generation = state.generation.wrapping_add(1);
+                        state.pending = None;
+                        state.signaled = false;
+                        return Err(());
+                    }
+                },
+                None => pane.frame,
+            };
+            pending.panes.insert(pane.pane_id, frame);
         }
         if state.signaled {
             Ok(None)
@@ -191,7 +215,16 @@ pub(super) fn enforce_terminal_chunk_reliable_fence(
     if assembly.is_none()
         || matches!(
             message,
-            ServerMessage::TerminalFrame(_) | ServerMessage::TerminalFrameChunk(_)
+            ServerMessage::TerminalFrame(_)
+                | ServerMessage::TerminalFrameChunk(_)
+                | ServerMessage::TerminalClipboard { .. }
+                | ServerMessage::Event {
+                    event: SessionEvent::AgentChanged { .. }
+                        | SessionEvent::WorkspaceGitChanged { .. }
+                        | SessionEvent::TerminalTitleChanged { .. }
+                        | SessionEvent::TerminalAttentionChanged { .. },
+                    ..
+                }
         )
     {
         return Ok(());
@@ -224,25 +257,39 @@ pub(super) fn publish_terminal_batch(
 
 pub(super) fn apply_terminal_frame_batch(
     terminals: &mut HashMap<PaneId, PaneTerminalSnapshot>,
+    terminal_hyperlinks: &mut HashMap<PaneId, TerminalHyperlinkBudget>,
     panes: Vec<PaneTerminalFrame>,
 ) -> Result<Vec<PaneId>, ()> {
     let mut pane_ids = Vec::with_capacity(panes.len());
-    let mut staged = Vec::with_capacity(panes.len());
     let mut seen = HashSet::with_capacity(panes.len());
-    for pane in panes {
+    for pane in &panes {
         if !seen.insert(pane.pane_id) {
             return Err(());
         }
-        let mut view = terminals.get(&pane.pane_id).ok_or(())?.view.clone();
-        view.apply_frame(pane.frame).map_err(|_| ())?;
-        pane_ids.push(pane.pane_id);
-        staged.push((pane.pane_id, view));
+        let terminal = terminals.get(&pane.pane_id).ok_or(())?;
+        if !terminal_hyperlinks.contains_key(&pane.pane_id) {
+            return Err(());
+        }
+        terminal.view.validate_frame(&pane.frame).map_err(|_| ())?;
     }
-    for (pane_id, view) in staged {
-        terminals
-            .get_mut(&pane_id)
-            .expect("staged terminal still exists")
-            .view = view;
+    for pane in panes {
+        let terminal = terminals
+            .get_mut(&pane.pane_id)
+            .expect("prevalidated terminal still exists");
+        match pane.frame {
+            TerminalViewFrame::Full(mut view) => {
+                terminal_hyperlinks.insert(pane.pane_id, TerminalHyperlinkBudget::new(&mut view));
+                terminal.view = view;
+            }
+            TerminalViewFrame::Delta(delta) => {
+                terminal_hyperlinks
+                    .get_mut(&pane.pane_id)
+                    .expect("prevalidated terminal hyperlink budget still exists")
+                    .apply_delta(&mut terminal.view, delta)
+                    .expect("prevalidated terminal delta remains valid");
+            }
+        }
+        pane_ids.push(pane.pane_id);
     }
     Ok(pane_ids)
 }
@@ -266,11 +313,53 @@ pub(super) fn request_terminal_resync(
         .map_err(|_| ())
 }
 
+/// Whether [`merge_terminal_frames`] would succeed, without consuming either frame.
+pub(super) fn check_terminal_frame_merge(
+    previous: &TerminalViewFrame,
+    next: &TerminalViewFrame,
+) -> Result<(), ()> {
+    match (previous, next) {
+        (_, TerminalViewFrame::Full(_)) => Ok(()),
+        (TerminalViewFrame::Full(view), TerminalViewFrame::Delta(delta)) => {
+            view.validate_delta(delta).map_err(|_| ())
+        }
+        (TerminalViewFrame::Delta(previous), TerminalViewFrame::Delta(next)) => {
+            check_terminal_delta_merge(previous, next)
+        }
+    }
+}
+
+fn check_terminal_delta_merge(
+    previous: &TerminalViewDelta,
+    next: &TerminalViewDelta,
+) -> Result<(), ()> {
+    if previous.revision != next.base_revision {
+        return Err(());
+    }
+    for run in previous.runs.iter().chain(&next.runs) {
+        let len = u32::try_from(run.cells.len()).map_err(|_| ())?;
+        if run.cells.is_empty() || run.start.checked_add(len).is_none() {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn merge_terminal_frames(
     previous: TerminalViewFrame,
     next: TerminalViewFrame,
 ) -> Result<TerminalViewFrame, ()> {
-    match (previous, next) {
+    // Every wire frame is already within the hyperlink limits on its own; only merging a
+    // link-bearing delta into an earlier frame can push the union past them.
+    let next_adds_links = match &next {
+        TerminalViewFrame::Delta(delta) => delta
+            .runs
+            .iter()
+            .flat_map(|run| &run.cells)
+            .any(|cell| cell.hyperlink.is_some()),
+        TerminalViewFrame::Full(_) => false,
+    };
+    let mut merged = match (previous, next) {
         (TerminalViewFrame::Full(mut view), TerminalViewFrame::Delta(delta)) => {
             view.apply_frame(TerminalViewFrame::Delta(delta))
                 .map_err(|_| ())?;
@@ -280,21 +369,20 @@ pub(super) fn merge_terminal_frames(
         (TerminalViewFrame::Delta(previous), TerminalViewFrame::Delta(next)) => {
             merge_terminal_deltas(previous, next).map(TerminalViewFrame::Delta)
         }
+    }?;
+    if next_adds_links {
+        let _ = merged.normalize_hyperlinks_for_wire();
     }
+    Ok(merged)
 }
 
 pub(super) fn merge_terminal_deltas(
     previous: TerminalViewDelta,
     next: TerminalViewDelta,
 ) -> Result<TerminalViewDelta, ()> {
-    if previous.revision != next.base_revision {
-        return Err(());
-    }
+    check_terminal_delta_merge(&previous, &next)?;
     let mut cells = BTreeMap::new();
     for run in previous.runs.into_iter().chain(next.runs) {
-        if run.cells.is_empty() {
-            return Err(());
-        }
         for (offset, cell) in run.cells.into_iter().enumerate() {
             let offset = u32::try_from(offset).map_err(|_| ())?;
             let index = run.start.checked_add(offset).ok_or(())?;

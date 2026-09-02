@@ -18,9 +18,9 @@ use condr_core::protocol::{
 use condr_core::{
     AgentDisplayState, AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session,
     SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
-    TerminalKey, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking,
-    TerminalPosition, TerminalSelection, TerminalSize, TerminalViewDelta, TerminalViewFrame,
-    WorkspaceId,
+    TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSize,
+    TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{ClientConnection, Endpoint, ServerConfig};
 use gpui::prelude::FluentBuilder;
@@ -47,7 +47,8 @@ use gpui_component::{
 use gpui_component_assets::Assets;
 
 use crate::terminal_element::{
-    TerminalElement, TerminalElementProps, TerminalPalette, TerminalRenderCache,
+    HoveredTerminalLink, TerminalElement, TerminalElementProps, TerminalPalette,
+    TerminalRenderCache, link_at,
 };
 
 mod actions;
@@ -233,8 +234,11 @@ struct ServerConnection {
     sequence: u64,
     snapshot: SessionSnapshot,
     terminals: HashMap<PaneId, PaneTerminalSnapshot>,
+    terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     agents: HashMap<PaneId, AgentSnapshot>,
     agent_trackers: HashMap<PaneId, AgentTracker>,
+    /// Panes that rang BEL while not focused; cleared when the Terminal gains focus.
+    attention: HashSet<PaneId>,
     workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
     zoomed_panes: HashSet<PaneId>,
     io: Option<ClientIo>,
@@ -245,6 +249,9 @@ struct ServerConnection {
     control_retry_attempts: u8,
     control_retry_scheduled: bool,
     bootstrap_resync_session_id: Option<SessionId>,
+    /// Set by a subscription rejection: the next Bootstrap must re-acquire control and drop
+    /// pending layout projections, because responses may have been lost to writer lag.
+    reacquire_after_bootstrap: bool,
     error: Option<String>,
     next_layout_request_id: u64,
 }
@@ -252,7 +259,10 @@ struct ServerConnection {
 struct BootstrapApplication {
     rebuild: bool,
     resubscribe: bool,
+    /// Re-send AcquireControl and drop pending layout projections.
     reacquire_control: bool,
+    /// A different Server/runtime/Session: cached GUI state for the connection is stale.
+    authority_changed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,8 +301,10 @@ impl ServerConnection {
             sequence: 0,
             snapshot: Session::new().snapshot(),
             terminals: HashMap::new(),
+            terminal_hyperlinks: HashMap::new(),
             agents: HashMap::new(),
             agent_trackers: HashMap::new(),
+            attention: HashSet::new(),
             workspace_git: HashMap::new(),
             zoomed_panes: HashSet::new(),
             io: None,
@@ -303,6 +315,7 @@ impl ServerConnection {
             control_retry_attempts: 0,
             control_retry_scheduled: false,
             bootstrap_resync_session_id: None,
+            reacquire_after_bootstrap: false,
             error: None,
             next_layout_request_id: 1,
         }
@@ -314,11 +327,13 @@ impl ServerConnection {
 
     fn reset_sync_state(&mut self) {
         self.controlling = false;
+        self.attention.clear();
         self.subscribed = false;
         self.subscription_pending = false;
         self.control_retry_attempts = 0;
         self.control_retry_scheduled = false;
         self.bootstrap_resync_session_id = None;
+        self.reacquire_after_bootstrap = false;
     }
 
     fn is_synchronized(&self) -> bool {
@@ -333,6 +348,7 @@ impl ServerConnection {
             || self.runtime_epoch != Some(bootstrap.runtime_epoch)
             || self.session_id != Some(bootstrap.session_id);
         let resubscribe = self.bootstrap_resync_session_id.is_some() && !self.subscribed;
+        let rejected_recovery = std::mem::take(&mut self.reacquire_after_bootstrap);
         if authority_changed {
             self.controlling = false;
             self.subscribed = false;
@@ -340,17 +356,30 @@ impl ServerConnection {
             self.control_retry_attempts = 0;
             self.control_retry_scheduled = false;
             self.agent_trackers.clear();
+            self.attention.clear();
         }
         self.server_id = Some(bootstrap.server_id);
         self.runtime_epoch = Some(bootstrap.runtime_epoch);
         self.session_id = Some(bootstrap.session_id);
         self.sequence = bootstrap.sequence;
         self.snapshot = bootstrap.snapshot;
-        self.terminals = bootstrap
-            .terminals
-            .into_iter()
-            .map(|terminal| (terminal.pane_id, terminal))
-            .collect();
+        self.attention = if self.controlling {
+            bootstrap
+                .terminals
+                .iter()
+                .filter_map(|terminal| terminal.attention.then_some(terminal.pane_id))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        self.terminals.clear();
+        self.terminal_hyperlinks.clear();
+        for mut terminal in bootstrap.terminals {
+            let pane_id = terminal.pane_id;
+            self.terminal_hyperlinks
+                .insert(pane_id, TerminalHyperlinkBudget::new(&mut terminal.view));
+            self.terminals.insert(pane_id, terminal);
+        }
         self.agents = bootstrap
             .agents
             .into_iter()
@@ -376,7 +405,8 @@ impl ServerConnection {
         BootstrapApplication {
             rebuild: previous_layout != self.dock_projection(),
             resubscribe: resubscribe || authority_changed,
-            reacquire_control: authority_changed,
+            reacquire_control: authority_changed || rejected_recovery,
+            authority_changed,
         }
     }
 
@@ -399,9 +429,11 @@ impl ServerConnection {
         if failed {
             self.status = ConnectionStatus::Disconnected;
             self.controlling = false;
+            self.attention.clear();
             self.subscribed = false;
             self.subscription_pending = false;
             self.bootstrap_resync_session_id = None;
+            self.reacquire_after_bootstrap = false;
             self.error = Some("Disconnected from condr-server".into());
             self.io = None;
         }
@@ -459,11 +491,12 @@ impl ServerConnection {
         server_id: ServerId,
         authoritative_session_id: SessionId,
     ) -> bool {
-        if !self.subscription_pending || self.server_id != Some(server_id) {
+        if (!self.subscription_pending && !self.subscribed) || self.server_id != Some(server_id) {
             return false;
         }
         self.subscription_pending = false;
         self.subscribed = false;
+        self.reacquire_after_bootstrap = true;
         self.request_snapshot_for(authoritative_session_id);
         true
     }
@@ -487,8 +520,11 @@ pub(crate) struct Condr {
     workspace_size: Size<Pixels>,
     focus_handle: FocusHandle,
     terminal_selection: Option<LocalTerminalSelection>,
+    hovered_link: Option<(ConnectionKey, PaneId, HoveredTerminalLink)>,
+    pressed_terminal_link: Option<(ConnectionKey, PaneId, HoveredTerminalLink)>,
     terminal_mouse_capture: Option<ReportedTerminalMouse>,
     last_terminal_mouse_motion: Option<ReportedTerminalMouseMotion>,
+    focused_terminal: Option<(ConnectionKey, PaneId)>,
     reported_terminal_focus: Option<(ConnectionKey, PaneId)>,
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
@@ -611,8 +647,11 @@ impl Condr {
             ),
             focus_handle: cx.focus_handle(),
             terminal_selection: None,
+            hovered_link: None,
+            pressed_terminal_link: None,
             terminal_mouse_capture: None,
             last_terminal_mouse_motion: None,
+            focused_terminal: None,
             reported_terminal_focus: None,
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),

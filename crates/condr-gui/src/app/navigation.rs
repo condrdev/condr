@@ -6,7 +6,7 @@ impl Condr {
         if key == self.active_connection {
             self.target_pane = target.map(|pane_id| (key, pane_id));
             if let Some(pane_id) = target {
-                self.mark_agent_seen(key, pane_id);
+                self.mark_pane_seen(key, pane_id);
             }
         }
     }
@@ -55,6 +55,24 @@ impl Condr {
         }) {
             self.terminal_selection = None;
         }
+        if self
+            .hovered_link
+            .as_ref()
+            .is_some_and(|(connection_key, pane_id, _)| {
+                *connection_key == key && !pane_ids.contains(pane_id)
+            })
+        {
+            self.hovered_link = None;
+        }
+        if self
+            .pressed_terminal_link
+            .as_ref()
+            .is_some_and(|(connection_key, pane_id, _)| {
+                *connection_key == key && !pane_ids.contains(pane_id)
+            })
+        {
+            self.pressed_terminal_link = None;
+        }
         if self.terminal_mouse_capture.is_some_and(|capture| {
             capture.connection_key == key && !pane_ids.contains(&capture.pane_id)
         }) {
@@ -66,6 +84,14 @@ impl Condr {
             self.last_terminal_mouse_motion = None;
         }
         if self
+            .focused_terminal
+            .is_some_and(|(connection_key, pane_id)| {
+                connection_key == key && !pane_ids.contains(&pane_id)
+            })
+        {
+            self.focused_terminal = None;
+        }
+        if self
             .reported_terminal_focus
             .is_some_and(|(connection_key, pane_id)| {
                 connection_key == key && !pane_ids.contains(&pane_id)
@@ -75,13 +101,19 @@ impl Condr {
         }
     }
 
-    pub(super) fn mark_agent_seen(&mut self, key: ConnectionKey, pane_id: PaneId) {
-        if let Some(tracker) = self
-            .connection_mut(key)
-            .and_then(|connection| connection.agent_trackers.get_mut(&pane_id))
-        {
+    /// The user selected this Pane: drop its unseen-completion marker.
+    pub(super) fn mark_pane_seen(&mut self, key: ConnectionKey, pane_id: PaneId) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if let Some(tracker) = connection.agent_trackers.get_mut(&pane_id) {
             tracker.mark_seen();
         }
+    }
+
+    pub(super) fn clear_pane_attention(&mut self, key: ConnectionKey, pane_id: PaneId) -> bool {
+        self.connection_mut(key)
+            .is_some_and(|connection| connection.attention.remove(&pane_id))
     }
 
     pub(super) fn connection_focused_pane(&self, key: ConnectionKey) -> Option<PaneId> {
@@ -269,7 +301,7 @@ impl Condr {
         if !can_mutate {
             if target_is_displayed {
                 self.target_pane = Some((key, pane_id));
-                self.mark_agent_seen(key, pane_id);
+                self.mark_pane_seen(key, pane_id);
                 self.focus_pane_panel(target_surface, pane_id, window, cx);
                 cx.notify();
                 return true;
@@ -291,7 +323,7 @@ impl Condr {
             self.pending_presentation_request = None;
             self.active_connection = key;
             self.target_pane = Some((key, pane_id));
-            self.mark_agent_seen(key, pane_id);
+            self.mark_pane_seen(key, pane_id);
             self.rebuild_dock(window, cx);
             cx.notify();
             return true;
@@ -304,7 +336,7 @@ impl Condr {
         pending.request_id = request_id;
         self.pending_workspace_selections.insert(key, pending);
         self.pending_presentation_request = Some((key, request_id));
-        self.mark_agent_seen(key, pane_id);
+        self.mark_pane_seen(key, pane_id);
         if target_is_displayed {
             self.target_pane = Some((key, pane_id));
             self.focus_pane_panel(target_surface, pane_id, window, cx);
@@ -331,7 +363,7 @@ impl Condr {
         let changed = self.active_connection != key || self.target_pane != Some((key, pane_id));
         self.active_connection = key;
         self.target_pane = Some((key, pane_id));
-        self.mark_agent_seen(key, pane_id);
+        self.mark_pane_seen(key, pane_id);
         if changed {
             cx.notify();
         }
@@ -423,11 +455,15 @@ impl Condr {
             return false;
         };
         let read_only = matches!(&command, TerminalCommand::Copy { .. });
-        if ((read_only && connection.is_synchronized()) || connection.can_mutate())
-            && !connection
-                .terminals
-                .get(&pane_id)
-                .is_some_and(|terminal| terminal.exited)
+        let synchronizes_focus = matches!(&command, TerminalCommand::Focus(_));
+        if ((synchronizes_focus && connection.controlling)
+            || (read_only && connection.is_synchronized())
+            || connection.can_mutate())
+            && (synchronizes_focus
+                || !connection
+                    .terminals
+                    .get(&pane_id)
+                    .is_some_and(|terminal| terminal.exited))
         {
             connection.send(ClientMessage::Terminal {
                 server_id,

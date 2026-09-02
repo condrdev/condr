@@ -553,21 +553,19 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
         })
     }));
 
-    let focused_before = window.read(|app| {
-        view.read(app)
-            .active_session()
-            .unwrap()
-            .tab(second_tab)
-            .unwrap()
-            .focused_pane()
-            .id()
-    });
-    let same_surface_target = *second_panes
-        .iter()
-        .find(|pane_id| **pane_id != focused_before)
-        .unwrap();
-    window.update(|window, cx| {
+    let (focused_before, same_surface_target) = window.update(|window, cx| {
         view.update(cx, |this, cx| {
+            let focused_before = this
+                .active_session()
+                .unwrap()
+                .tab(second_tab)
+                .unwrap()
+                .focused_pane()
+                .id();
+            let same_surface_target = *second_panes
+                .iter()
+                .find(|pane_id| **pane_id != focused_before)
+                .unwrap();
             assert!(this.select_pane(1, same_surface_target, window, cx));
             let first_request = this.pending_workspace_selection_for(1).unwrap().request_id;
             assert_eq!(this.target_pane, Some((1, same_surface_target)));
@@ -578,7 +576,8 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
             assert_eq!(corrective.pane_id, Some(focused_before));
             assert_ne!(corrective.request_id, first_request);
             assert_eq!(this.target_pane, Some((1, focused_before)));
-        });
+            (focused_before, same_surface_target)
+        })
     });
     window.run_until_parked();
     let focused_handle = window.read(|app| {

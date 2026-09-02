@@ -24,6 +24,8 @@ use crate::{Condr, ConnectionKey};
 const INVERSE: u16 = 1 << 0;
 const BOLD: u16 = 1 << 1;
 const ITALIC: u16 = 1 << 2;
+const UNDERLINE: u16 = 1 << 3;
+const WRAPLINE: u16 = 1 << 4;
 const WIDE_CHAR_SPACER: u16 = 1 << 6;
 const DIM: u16 = 1 << 7;
 const HIDDEN: u16 = 1 << 8;
@@ -100,9 +102,18 @@ pub(crate) struct TerminalElementProps {
     pub(crate) terminal: TerminalView,
     pub(crate) marked_text: Option<String>,
     pub(crate) selection: Option<TerminalSelection>,
+    pub(crate) hovered_link: Option<HoveredTerminalLink>,
     pub(crate) runtime_epoch: Option<RuntimeEpoch>,
     pub(crate) render_cache: Rc<RefCell<TerminalRenderCache>>,
     pub(crate) scroll_remainder: Rc<RefCell<Point<f32>>>,
+}
+
+/// A link under the pointer. Presentation is enabled while the secondary modifier is held.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HoveredTerminalLink {
+    pub(crate) range: Range<u32>,
+    pub(crate) uri: SmolStr,
+    pub(crate) position: TerminalMousePosition,
 }
 
 #[derive(Clone, PartialEq)]
@@ -423,6 +434,11 @@ impl Element for TerminalElement {
         let mut block_regions = Vec::new();
         let mut background_regions: Vec<BlockRegion> = Vec::new();
         let mut contrast_memo = ContrastMemo::default();
+        let hovered_range = self
+            .props
+            .hovered_link
+            .as_ref()
+            .map(|link| link.range.clone());
         let selected_text = palette.selection_text.and_then(|color| {
             let (start, end) = self
                 .props
@@ -437,6 +453,18 @@ impl Element for TerminalElement {
                 let Some(cell) = self.props.terminal.cell(row, column) else {
                     continue;
                 };
+                let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
+                    + usize::from(column);
+                // OSC 8 links are always underlined; a hovered plain-text URL joins them.
+                let linked = cell.hyperlink.is_some()
+                    || hovered_range
+                        .as_ref()
+                        .is_some_and(|range| range.contains(&(cache_index as u32)));
+                let flags = if linked {
+                    cell.flags | UNDERLINE
+                } else {
+                    cell.flags
+                };
                 let cell_bounds = Bounds::new(
                     point(
                         bounds.left() + cell_size.width * usize::from(column),
@@ -446,7 +474,7 @@ impl Element for TerminalElement {
                 );
                 let mut foreground = terminal_color(cell.foreground, true, &palette);
                 let mut background = terminal_color(cell.background, false, &palette);
-                if cell.flags & INVERSE != 0 {
+                if flags & INVERSE != 0 {
                     std::mem::swap(&mut foreground, &mut background);
                 }
                 if background != palette.background {
@@ -464,8 +492,8 @@ impl Element for TerminalElement {
                         _ => background_regions.push(region),
                     }
                 }
-                if cell.flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0
-                    || (cell.text == " " && cell.flags & (ALL_UNDERLINES | STRIKEOUT) == 0)
+                if flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0
+                    || (cell.text == " " && flags & (ALL_UNDERLINES | STRIKEOUT) == 0)
                 {
                     continue;
                 }
@@ -475,7 +503,7 @@ impl Element for TerminalElement {
                     (Some(character), None) => Some(character),
                     _ => None,
                 };
-                let foreground_source = if cell.flags & INVERSE != 0 {
+                let foreground_source = if flags & INVERSE != 0 {
                     cell.background
                 } else {
                     cell.foreground
@@ -485,19 +513,18 @@ impl Element for TerminalElement {
                 {
                     foreground = contrast_memo.ensure(foreground, background);
                 }
-                if cell.flags & DIM != 0 {
+                if flags & DIM != 0 {
                     foreground = foreground.opacity(0.65);
                 }
                 // Before block elements turn into quads, so a selected █ takes the
                 // selection text color too.
-                let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
-                    + usize::from(column);
                 if let Some((range, color)) = &selected_text
                     && range.contains(&(cache_index as u32))
                 {
                     foreground = *color;
                 }
-                if let Some(character) = single_character
+                if !linked
+                    && let Some(character) = single_character
                     && collect_block_element_regions(
                         &mut block_regions,
                         character,
@@ -509,27 +536,22 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                let line = render_cache.shaped_line(
-                    cache_index,
-                    &cell.text,
-                    foreground,
-                    cell.flags,
-                    || {
+                let line =
+                    render_cache.shaped_line(cache_index, &cell.text, foreground, flags, || {
                         let mut font = style.font();
-                        if cell.flags & BOLD != 0 {
+                        if flags & BOLD != 0 {
                             font = font.bold();
                         }
-                        if cell.flags & ITALIC != 0 {
+                        if flags & ITALIC != 0 {
                             font = font.italic();
                         }
-                        let underline =
-                            (cell.flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
-                                thickness: px(1.),
-                                color: Some(foreground),
-                                wavy: cell.flags & UNDERCURL != 0,
-                            });
+                        let underline = (flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
+                            thickness: px(1.),
+                            color: Some(foreground),
+                            wavy: flags & UNDERCURL != 0,
+                        });
                         let strikethrough =
-                            (cell.flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
+                            (flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
                                 thickness: px(1.),
                                 color: Some(foreground),
                             });
@@ -546,8 +568,7 @@ impl Element for TerminalElement {
                             }],
                             None,
                         )
-                    },
-                );
+                    });
                 cells.push(ShapedCell {
                     origin: cell_bounds.origin,
                     line,
@@ -714,7 +735,12 @@ impl Element for TerminalElement {
             TerminalInputHandler::new(bounds, self.view.clone()),
             cx,
         );
-        window.set_cursor_style(CursorStyle::IBeam, &prepaint.hitbox);
+        let cursor_style = if window.modifiers().secondary() && self.props.hovered_link.is_some() {
+            CursorStyle::PointingHand
+        } else {
+            CursorStyle::IBeam
+        };
+        window.set_cursor_style(cursor_style, &prepaint.hitbox);
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             // Borrowed rather than drained so tests can inspect what was painted.
@@ -759,13 +785,29 @@ impl Element for TerminalElement {
         let focus_handle = self.props.focus_handle.clone();
         let mouse_tracking = self.props.terminal.mouse_tracking;
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-            if !phase.bubble() || !hitbox.is_hovered(window) {
+            if !phase.bubble() || !pointer_event_hits(&hitbox, event.position, window) {
                 return;
             }
             let Some(button) = terminal_mouse_button(event.button) else {
                 return;
             };
             let position = terminal_position(event.position, bounds, cell_size, terminal_size);
+            if button == TerminalMouseButton::Left
+                && event.modifiers.secondary()
+                && let Some(link) = view
+                    .read(cx)
+                    .terminal(connection_key, pane_id)
+                    .and_then(|terminal| link_at(&terminal.view, position.row, position.column))
+            {
+                view.update(cx, |view, _| {
+                    view.set_pressed_terminal_link(connection_key, pane_id, Some(link))
+                });
+                cx.stop_propagation();
+                return;
+            }
+            view.update(cx, |view, _| {
+                view.set_pressed_terminal_link(connection_key, pane_id, None)
+            });
             let accepted = view.update(cx, |view, cx| {
                 view.select_pane(connection_key, pane_id, window, cx)
             });
@@ -843,6 +885,20 @@ impl Element for TerminalElement {
                 return;
             }
 
+            let hovered = hitbox
+                .is_hovered(window)
+                .then(|| {
+                    let position =
+                        terminal_position(event.position, bounds, cell_size, terminal_size);
+                    view.read(cx)
+                        .terminal(connection_key, pane_id)
+                        .and_then(|terminal| link_at(&terminal.view, position.row, position.column))
+                })
+                .flatten();
+            view.update(cx, |view, cx| {
+                view.set_hovered_link(connection_key, pane_id, hovered, cx)
+            });
+
             let captured = view
                 .read(cx)
                 .terminal_mouse_capture(connection_key, pane_id);
@@ -904,8 +960,24 @@ impl Element for TerminalElement {
             }
         });
 
+        let hitbox = prepaint.hitbox.clone();
         let view = self.view.clone();
+        let mut released_link = None;
         window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+            if phase.capture() {
+                released_link = None;
+                if event.button == MouseButton::Left {
+                    let pressed = view.update(cx, |view, _| {
+                        view.take_pressed_terminal_link(connection_key, pane_id)
+                    });
+                    if event.modifiers.secondary()
+                        && pointer_event_hits(&hitbox, event.position, window)
+                    {
+                        released_link = pressed;
+                    }
+                }
+                return;
+            }
             if !phase.bubble() {
                 return;
             }
@@ -914,6 +986,22 @@ impl Element for TerminalElement {
                 .terminal_mouse_gesture_owner()
                 .is_some_and(|owner| owner != (connection_key, pane_id))
             {
+                return;
+            }
+            if let Some(pressed) = released_link.take() {
+                let position =
+                    terminal_mouse_position(event.position, bounds, cell_size, terminal_size);
+                let matches_pressed = view
+                    .read(cx)
+                    .terminal(connection_key, pane_id)
+                    .and_then(|terminal| link_at(&terminal.view, position.row, position.column))
+                    .is_some_and(|released| {
+                        released.uri == pressed.uri && released.range == pressed.range
+                    });
+                if matches_pressed {
+                    cx.open_url(&pressed.uri);
+                }
+                cx.stop_propagation();
                 return;
             }
             if event.button == MouseButton::Left
@@ -1301,6 +1389,139 @@ fn push_selection_quads(
     }
 }
 
+/// The link under a cell: an OSC 8 run sharing one URI, or a plain-text URL on its
+/// visible logical line.
+pub(crate) fn link_at(view: &TerminalView, row: u16, column: u16) -> Option<HoveredTerminalLink> {
+    let columns = u32::from(view.size.columns);
+    let index = u32::from(row) * columns + u32::from(column);
+    let cell = view.cell(row, column)?;
+    if let Some(uri) = &cell.hyperlink {
+        let same = |index: u32| {
+            view.cells
+                .get(index as usize)
+                .is_some_and(|cell| cell.hyperlink.as_ref() == Some(uri))
+        };
+        let mut start = index;
+        while start > 0 && same(start - 1) {
+            start -= 1;
+        }
+        let mut end = index + 1;
+        while same(end) {
+            end += 1;
+        }
+        return Some(HoveredTerminalLink {
+            range: start..end,
+            uri: uri.clone(),
+            position: TerminalMousePosition { row, column },
+        });
+    }
+
+    // One character per cell; wide-char spacers collapse into the cell they follow.
+    let mut first_row = row;
+    while first_row > 0
+        && view
+            .cell(first_row - 1, view.size.columns - 1)
+            .is_some_and(|cell| cell.flags & WRAPLINE != 0)
+    {
+        first_row -= 1;
+    }
+    let mut last_row = row;
+    while last_row + 1 < view.size.rows
+        && view
+            .cell(last_row, view.size.columns - 1)
+            .is_some_and(|cell| cell.flags & WRAPLINE != 0)
+    {
+        last_row += 1;
+    }
+    let mut text = Vec::new();
+    let mut cell_of_char = Vec::new();
+    for logical_row in first_row..=last_row {
+        for logical_column in 0..view.size.columns {
+            let cell = view.cell(logical_row, logical_column)?;
+            if cell.flags & (WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0 {
+                continue;
+            }
+            text.push(cell.text.chars().next().unwrap_or(' '));
+            cell_of_char.push(u32::from(logical_row) * columns + u32::from(logical_column));
+        }
+    }
+    let at = cell_of_char.iter().position(|&cell| cell == index)?;
+    let (start, end) = url_span(&text, at)?;
+    Some(HoveredTerminalLink {
+        range: cell_of_char[start]..cell_of_char[end - 1] + 1,
+        uri: text[start..end].iter().collect::<String>().into(),
+        position: TerminalMousePosition { row, column },
+    })
+}
+
+/// The `[start, end)` character span of the URL covering `at`, if any. URLs run from a
+/// known scheme to whitespace or a quote/bracket, minus trailing punctuation and any
+/// closing bracket without a matching opener.
+fn url_span(text: &[char], at: usize) -> Option<(usize, usize)> {
+    const SCHEMES: [&str; 14] = [
+        "https://",
+        "http://",
+        "file://",
+        "ftp://",
+        "ipfs:",
+        "ipns:",
+        "magnet:",
+        "mailto:",
+        "gemini://",
+        "gopher://",
+        "news:",
+        "ssh:",
+        "git://",
+        "zed://",
+    ];
+    let starts_with = |start: usize, scheme: &str| {
+        scheme.chars().enumerate().all(|(offset, expected)| {
+            text.get(start + offset)
+                .is_some_and(|actual| actual.eq_ignore_ascii_case(&expected))
+        })
+    };
+    let mut start = 0;
+    while start <= at {
+        if SCHEMES.iter().any(|scheme| starts_with(start, scheme)) {
+            let mut end = start;
+            while end < text.len()
+                && !text[end].is_whitespace()
+                && !matches!(text[end], '"' | '\'' | '<' | '>' | '`')
+            {
+                end += 1;
+            }
+            loop {
+                match text[start..end].last() {
+                    Some('.' | ',' | ';' | ':' | '!' | '?') => end -= 1,
+                    Some(&close @ (')' | ']' | '}')) => {
+                        let open = match close {
+                            ')' => '(',
+                            ']' => '[',
+                            _ => '{',
+                        };
+                        let span = &text[start..end];
+                        if span.iter().filter(|&&c| c == open).count()
+                            < span.iter().filter(|&&c| c == close).count()
+                        {
+                            end -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            if at < end {
+                return Some((start, end));
+            }
+            start = end.max(start + 1);
+        } else {
+            start += 1;
+        }
+    }
+    None
+}
+
 fn terminal_position(
     point: Point<Pixels>,
     bounds: Bounds<Pixels>,
@@ -1321,6 +1542,10 @@ fn terminal_position(
         column: (x.max(0.).floor() as u16).min(terminal_size.columns.saturating_sub(1)),
         side,
     }
+}
+
+fn pointer_event_hits(hitbox: &Hitbox, position: Point<Pixels>, window: &Window) -> bool {
+    hitbox.bounds.contains(&position) && hitbox.should_handle_scroll(window)
 }
 
 fn terminal_mouse_position(
@@ -1427,6 +1652,118 @@ fn color_cube(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn span(text: &str, at: usize) -> Option<String> {
+        let chars = text.chars().collect::<Vec<_>>();
+        url_span(&chars, at).map(|(start, end)| chars[start..end].iter().collect())
+    }
+
+    #[test]
+    fn plain_text_urls_are_trimmed_of_trailing_punctuation_and_unbalanced_brackets() {
+        assert_eq!(
+            span("see https://example.com/a?b=1. now", 6).as_deref(),
+            Some("https://example.com/a?b=1")
+        );
+        assert_eq!(span("(https://x.y/z)", 3).as_deref(), Some("https://x.y/z"));
+        assert_eq!(
+            span("https://en.wikipedia.org/wiki/Foo_(bar)", 10).as_deref(),
+            Some("https://en.wikipedia.org/wiki/Foo_(bar)")
+        );
+        assert_eq!(span("see https://example.com now", 2), None);
+        assert_eq!(span("see https://example.com now", 24), None);
+        assert_eq!(span("http:/nope", 0), None);
+        assert_eq!(
+            span("SSH://host/path", 4).as_deref(),
+            Some("SSH://host/path")
+        );
+        assert_eq!(
+            span("mailto:user@example.com", 12).as_deref(),
+            Some("mailto:user@example.com")
+        );
+        assert_eq!(
+            span("gemini://example.com capsule", 4).as_deref(),
+            Some("gemini://example.com")
+        );
+    }
+
+    #[test]
+    fn osc8_runs_and_plain_urls_resolve_to_cell_ranges() {
+        let cell = |text: &str, hyperlink: Option<&str>| condr_core::TerminalCell {
+            text: text.into(),
+            foreground: TerminalColor::Named(0),
+            background: TerminalColor::Named(0),
+            flags: 0,
+            hyperlink: hyperlink.map(SmolStr::new),
+        };
+        let mut cells = vec![cell("a", Some("https://a")), cell("b", Some("https://a"))];
+        cells.push(cell(" ", None));
+        cells.extend("http://b".chars().map(|c| cell(&c.to_string(), None)));
+        let view = TerminalView {
+            revision: 1,
+            size: TerminalSize::new(1, cells.len() as u16),
+            display_offset: 0,
+            mouse_tracking: TerminalMouseTracking::None,
+            cells,
+            cursor: None,
+        };
+        assert_eq!(
+            link_at(&view, 0, 1),
+            Some(HoveredTerminalLink {
+                range: 0..2,
+                uri: "https://a".into(),
+                position: TerminalMousePosition { row: 0, column: 1 },
+            })
+        );
+        assert_eq!(link_at(&view, 0, 2), None);
+        assert_eq!(
+            link_at(&view, 0, 5),
+            Some(HoveredTerminalLink {
+                range: 3..11,
+                uri: "http://b".into(),
+                position: TerminalMousePosition { row: 0, column: 5 },
+            })
+        );
+    }
+
+    #[test]
+    fn plain_text_urls_continue_across_soft_wrapped_rows_only() {
+        let cell = |text: char, flags| condr_core::TerminalCell {
+            text: text.to_string().into(),
+            foreground: TerminalColor::Named(0),
+            background: TerminalColor::Named(0),
+            flags,
+            hyperlink: None,
+        };
+        let mut cells = "https://"
+            .chars()
+            .map(|text| cell(text, 0))
+            .collect::<Vec<_>>();
+        cells[7].flags |= WRAPLINE;
+        cells.extend("example.".chars().map(|text| cell(text, 0)));
+        cells[15].flags |= WRAPLINE;
+        cells.extend("com/path".chars().map(|text| cell(text, 0)));
+        let view = TerminalView {
+            revision: 1,
+            size: TerminalSize::new(3, 8),
+            display_offset: 0,
+            mouse_tracking: TerminalMouseTracking::None,
+            cells,
+            cursor: None,
+        };
+
+        assert_eq!(
+            link_at(&view, 1, 2),
+            Some(HoveredTerminalLink {
+                range: 0..24,
+                uri: "https://example.com/path".into(),
+                position: TerminalMousePosition { row: 1, column: 2 },
+            })
+        );
+
+        let mut hard_break = view;
+        hard_break.cells[7].flags &= !WRAPLINE;
+        assert_eq!(link_at(&hard_break, 1, 2), None);
+    }
 
     #[cfg(feature = "test-support")]
     #[test]

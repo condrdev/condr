@@ -68,6 +68,14 @@ pub(super) struct SidebarStatusVisual {
     pub(super) label: &'static str,
 }
 
+/// Overrides the agent state while a BEL from this Pane is unseen.
+pub(super) const BELL_SIDEBAR_STATUS: SidebarStatusVisual = SidebarStatusVisual {
+    glyph: SidebarGlyph::CircleAlert,
+    tone: SidebarIconTone::Warning,
+    key: "bell",
+    label: "Bell",
+};
+
 pub(super) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
     match state {
         AgentDisplayState::Unknown => SidebarStatusVisual {
@@ -696,7 +704,11 @@ impl Condr {
                                         .unwrap_or_else(|| {
                                             AgentTracker::new(agent.state).display_state()
                                         });
-                                    let status = agent_sidebar_status(state);
+                                    let status = if connection.attention.contains(&pane_id) {
+                                        BELL_SIDEBAR_STATUS
+                                    } else {
+                                        agent_sidebar_status(state)
+                                    };
                                     let agent_label = agent.kind.label();
                                     let agent_owner = owner.clone();
                                     Some(

@@ -233,8 +233,10 @@ impl Render for TerminalPanel {
             controlling,
             marked_text,
             selection,
+            hovered_link,
             runtime_epoch,
             pane_title,
+            attention,
         ) = owner
             .as_ref()
             .map(|owner| {
@@ -246,21 +248,43 @@ impl Render for TerminalPanel {
                         && surface.pane_ids.contains(&self.pane_id)
                 });
                 let connection = app.connection(self.connection_key);
+                let terminal = app.terminal(self.connection_key, self.pane_id).cloned();
+                let pane_title = terminal
+                    .as_ref()
+                    .and_then(|terminal| terminal.title.clone())
+                    .map(SharedString::from)
+                    .or_else(|| {
+                        connection
+                            .and_then(|connection| connection.agents.get(&self.pane_id))
+                            .map(|agent| SharedString::from(agent.kind.label()))
+                    })
+                    .unwrap_or_else(|| SharedString::from("Terminal"));
                 (
-                    app.terminal(self.connection_key, self.pane_id).cloned(),
+                    terminal,
                     active,
                     solo,
                     connection.is_some_and(ServerConnection::can_mutate),
                     app.marked_text_for(self.connection_key, self.pane_id),
                     app.selection_for(self.connection_key, self.pane_id),
+                    app.hovered_link_for(self.connection_key, self.pane_id),
                     connection.and_then(|connection| connection.runtime_epoch),
+                    pane_title,
                     connection
-                        .and_then(|connection| connection.agents.get(&self.pane_id))
-                        .map(|agent| agent.kind.label())
-                        .unwrap_or("Terminal"),
+                        .is_some_and(|connection| connection.attention.contains(&self.pane_id)),
                 )
             })
-            .unwrap_or((None, false, false, false, None, None, None, "Terminal"));
+            .unwrap_or((
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+                None,
+                None,
+                SharedString::from("Terminal"),
+                false,
+            ));
         let ime_terminal_revision = marked_text
             .as_ref()
             .and_then(|_| terminal.as_ref().map(|terminal| terminal.view.revision));
@@ -274,6 +298,9 @@ impl Render for TerminalPanel {
 
         let key = self.connection_key;
         let pane_id = self.pane_id;
+        let link_tooltip = hovered_link
+            .as_ref()
+            .map(|link| SharedString::from(link.uri.as_str()));
         let focus = self.focus_handle.clone();
         let click_owner = self.owner.clone();
         let body = div()
@@ -314,6 +341,7 @@ impl Render for TerminalPanel {
                         terminal: terminal.view,
                         marked_text,
                         selection,
+                        hovered_link,
                         runtime_epoch,
                         render_cache: self.render_cache.clone(),
                         scroll_remainder: self.scroll_remainder.clone(),
@@ -330,6 +358,9 @@ impl Render for TerminalPanel {
                     .text_color(cx.theme().muted_foreground)
                     .child("Terminal unavailable")
                     .into_any_element()
+            })
+            .when_some(link_tooltip, |this, uri| {
+                this.tooltip(move |window, cx| Tooltip::new(uri.clone()).build(window, cx))
             });
 
         let menu_owner = self.owner.clone();
@@ -359,6 +390,7 @@ impl Render for TerminalPanel {
                     .menu_with_enable("Close Pane", Box::new(ClosePane), controlling)
             })
             .anchor(Anchor::TopRight);
+        let title_tooltip = pane_title.clone();
 
         v_flex()
             .size_full()
@@ -385,10 +417,44 @@ impl Render for TerminalPanel {
                     .child(
                         div()
                             .flex_1()
-                            .truncate()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(pane_title),
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .when(attention, |header| {
+                                header.child(
+                                    div()
+                                        .id(format!(
+                                            "terminal-pane-bell-{key}-{}",
+                                            pane_id.as_u64()
+                                        ))
+                                        .size_4()
+                                        .flex_shrink_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .tooltip(|window, cx| {
+                                            Tooltip::new("Terminal bell").build(window, cx)
+                                        })
+                                        .child(
+                                            super::sidebar::SidebarGlyph::CircleAlert
+                                                .icon()
+                                                .xsmall()
+                                                .text_color(cx.theme().warning),
+                                        ),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .id(format!("terminal-pane-title-{key}-{}", pane_id.as_u64()))
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .tooltip(move |window, cx| {
+                                        Tooltip::new(title_tooltip.clone()).build(window, cx)
+                                    })
+                                    .child(pane_title),
+                            ),
                     )
                     .child(pane_menu),
             )

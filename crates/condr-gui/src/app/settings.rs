@@ -573,8 +573,7 @@ fn appearance_page(
                             let step = |id: &'static str, icon, delta: f32, enabled: bool| {
                                 let settings = size_get.clone();
                                 let label = format!("{id} font size");
-                                let label =
-                                    format!("{}{}", &label[..1].to_uppercase(), &label[1..]);
+                                let label = format!("{}{}", label[..1].to_uppercase(), &label[1..]);
                                 div()
                                     .debug_selector(move || format!("terminal-font-size-{id}"))
                                     .child(

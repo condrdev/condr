@@ -1,11 +1,14 @@
+use super::terminal_input::next_hovered_link;
+use crate::terminal_element::HoveredTerminalLink;
 use condr_core::protocol::{
     BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionId, TerminalFrameBatch,
-    TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
+    RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId,
+    TerminalFrameBatch, TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor,
-    TerminalMouseTracking, TerminalSize, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    TerminalHyperlinkBudget, TerminalMouseTracking, TerminalSize, TerminalView, TerminalViewDelta,
+    TerminalViewFrame,
 };
 use condr_server::Endpoint;
 use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
@@ -27,7 +30,37 @@ fn terminal_cell(text: &str) -> TerminalCell {
         foreground: TerminalColor::Named(0),
         background: TerminalColor::Named(0),
         flags: 0,
+        hyperlink: None,
     }
+}
+
+fn terminal_hyperlink_budgets(
+    terminals: &mut std::collections::HashMap<condr_core::PaneId, PaneTerminalSnapshot>,
+) -> std::collections::HashMap<condr_core::PaneId, TerminalHyperlinkBudget> {
+    terminals
+        .iter_mut()
+        .map(|(&pane_id, terminal)| (pane_id, TerminalHyperlinkBudget::new(&mut terminal.view)))
+        .collect()
+}
+
+fn connection_with_io() -> ServerConnection {
+    let mut connection = ServerConnection::new(
+        1,
+        "test".into(),
+        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+    );
+    connection.status = ConnectionStatus::Connected;
+    connection.server_id = Some(ServerId(1));
+    connection.runtime_epoch = Some(RuntimeEpoch(2));
+    connection.session_id = Some(SessionId(3));
+    connection.sequence = 7;
+    let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+    std::mem::forget(outgoing_rx);
+    connection.io = Some(ClientIo {
+        outgoing,
+        _incoming_task: Task::ready(()),
+    });
+    connection
 }
 
 #[test]
@@ -239,6 +272,39 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
         Err(std::sync::mpsc::TryRecvError::Empty)
     ));
 
+    // Same authority: a rejection-recovery Bootstrap re-acquires control without discarding
+    // the connection's GUI state, and a plain visual resync Bootstrap touches neither.
+    {
+        let bootstrap = |sequence| SessionBootstrap {
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(3),
+            sequence,
+            snapshot: Session::new().snapshot(),
+            terminals: Vec::new(),
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        };
+        let mut same_authority = connection_with_io();
+        same_authority.subscribed = true;
+        same_authority.controlling = true;
+        same_authority.bootstrap_resync_session_id = Some(SessionId(3));
+        assert!(same_authority.recover_rejected_subscription(ServerId(1), SessionId(3)));
+        let recovered = same_authority.apply_bootstrap(bootstrap(8));
+        assert!(recovered.reacquire_control);
+        assert!(recovered.resubscribe);
+        assert!(!recovered.authority_changed);
+        assert!(same_authority.controlling);
+
+        same_authority.subscribed = true;
+        assert!(same_authority.request_snapshot());
+        let resynced = same_authority.apply_bootstrap(bootstrap(9));
+        assert!(!resynced.reacquire_control);
+        assert!(!resynced.resubscribe);
+        assert!(!resynced.authority_changed);
+    }
+
     let application = connection.apply_bootstrap(SessionBootstrap {
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
@@ -313,7 +379,34 @@ fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
 }
 
 #[test]
-fn ordinary_runtime_bootstrap_keeps_the_existing_subscription_and_baseline() {
+fn a_dropped_active_subscription_requests_an_authoritative_bootstrap() {
+    let mut connection = ServerConnection::new(
+        1,
+        "test".into(),
+        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+    );
+    connection.status = ConnectionStatus::Connected;
+    connection.server_id = Some(ServerId(1));
+    connection.session_id = Some(SessionId(3));
+    connection.subscribed = true;
+    let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+    connection.io = Some(ClientIo {
+        outgoing,
+        _incoming_task: Task::ready(()),
+    });
+
+    assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(3)));
+    assert_eq!(
+        outgoing_rx.recv().unwrap(),
+        condr_core::protocol::ClientMessage::SnapshotRequest {
+            session_id: SessionId(3),
+        }
+    );
+    assert!(!connection.subscribed);
+}
+
+#[test]
+fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
     let mut connection = ServerConnection::new(
         1,
         "test".into(),
@@ -327,6 +420,7 @@ fn ordinary_runtime_bootstrap_keeps_the_existing_subscription_and_baseline() {
     connection.controlling = true;
     connection.subscribed = true;
     connection.bootstrap_resync_session_id = Some(SessionId(3));
+    let pane_id = pane_id();
 
     let application = connection.apply_bootstrap(SessionBootstrap {
         server_id: ServerId(1),
@@ -334,7 +428,13 @@ fn ordinary_runtime_bootstrap_keeps_the_existing_subscription_and_baseline() {
         session_id: SessionId(3),
         sequence: 8,
         snapshot: Session::new().snapshot(),
-        terminals: Vec::new(),
+        terminals: vec![PaneTerminalSnapshot {
+            pane_id,
+            view: terminal_view(1, "bell"),
+            exited: false,
+            title: None,
+            attention: true,
+        }],
         agents: Vec::new(),
         workspace_git: Vec::new(),
         zoomed_panes: Vec::new(),
@@ -344,6 +444,7 @@ fn ordinary_runtime_bootstrap_keeps_the_existing_subscription_and_baseline() {
     assert!(!application.reacquire_control);
     assert!(connection.subscribed);
     assert!(connection.can_mutate());
+    assert!(connection.attention.contains(&pane_id));
 }
 
 #[test]
@@ -364,7 +465,7 @@ fn authoritative_bootstrap_releases_pending_resize_for_retry() {
 }
 
 #[test]
-fn terminal_frame_chunks_are_exposed_only_after_complete_reassembly() {
+fn terminal_frame_chunks_survive_metadata_interleaving_until_complete() {
     let pane_id = pane_id();
     let expected = PaneTerminalFrame {
         pane_id,
@@ -373,29 +474,46 @@ fn terminal_frame_chunks_are_exposed_only_after_complete_reassembly() {
     let payload = encode_pane_terminal_frame(&expected).unwrap();
     let midpoint = payload.len() / 2;
     let chunks = [&payload[..midpoint], &payload[midpoint..]];
-    let mut assembly = None;
-
-    for (chunk_index, payload) in chunks.into_iter().enumerate() {
-        let assembled = assemble_terminal_frame_chunk(
-            &mut assembly,
-            TerminalFrameChunk {
-                server_id: ServerId(1),
-                session_id: SessionId(1),
+    for interleaved in [
+        ServerMessage::TerminalClipboard {
+            pane_id,
+            text: "copied between chunks".into(),
+        },
+        ServerMessage::Event {
+            server_id: ServerId(1),
+            session_id: SessionId(1),
+            sequence: 1,
+            event: SessionEvent::TerminalTitleChanged {
                 pane_id,
-                revision: 7,
-                chunk_index: chunk_index as u32,
-                chunk_count: 2,
-                payload: payload.to_vec(),
+                title: Some("title between chunks".into()),
             },
-        )
-        .unwrap();
-        if chunk_index == 0 {
-            assert!(assembled.is_none());
-        } else {
-            assert_eq!(assembled, Some(expected.clone()));
+        },
+    ] {
+        let mut assembly = None;
+        for (chunk_index, payload) in chunks.iter().enumerate() {
+            let assembled = assemble_terminal_frame_chunk(
+                &mut assembly,
+                TerminalFrameChunk {
+                    server_id: ServerId(1),
+                    session_id: SessionId(1),
+                    pane_id,
+                    revision: 7,
+                    chunk_index: chunk_index as u32,
+                    chunk_count: 2,
+                    payload: payload.to_vec(),
+                },
+            )
+            .unwrap();
+            if chunk_index == 0 {
+                assert!(assembled.is_none());
+                assert!(enforce_terminal_chunk_reliable_fence(&mut assembly, &interleaved).is_ok());
+                assert!(assembly.is_some());
+            } else {
+                assert_eq!(assembled, Some(expected.clone()));
+            }
         }
+        assert!(assembly.is_none());
     }
-    assert!(assembly.is_none());
 }
 
 #[test]
@@ -471,6 +589,8 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                 pane_id: first_pane,
                 view: first_view.clone(),
                 exited: false,
+                title: None,
+                attention: false,
             },
         ),
         (
@@ -479,6 +599,8 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
                 pane_id: second_pane,
                 view: second_view.clone(),
                 exited: false,
+                title: None,
+                attention: false,
             },
         ),
     ]);
@@ -512,10 +634,98 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
             }),
         },
     ];
+    let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
 
-    assert!(apply_terminal_frame_batch(&mut terminals, batch).is_err());
+    assert!(apply_terminal_frame_batch(&mut terminals, &mut terminal_hyperlinks, batch).is_err());
     assert_eq!(terminals[&first_pane].view, first_view);
     assert_eq!(terminals[&second_pane].view, second_view);
+}
+
+#[test]
+fn terminal_frame_batch_bounds_hyperlinks_across_retained_deltas() {
+    let pane_id = pane_id();
+    let mut terminals = std::collections::HashMap::from([(
+        pane_id,
+        PaneTerminalSnapshot {
+            pane_id,
+            view: terminal_view(1, "x"),
+            exited: false,
+            title: None,
+            attention: false,
+        },
+    )]);
+    let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
+    let mut linked = terminal_cell("x");
+    linked.hyperlink = Some("x".repeat(8 * 1024 + 1).into());
+
+    apply_terminal_frame_batch(
+        &mut terminals,
+        &mut terminal_hyperlinks,
+        vec![PaneTerminalFrame {
+            pane_id,
+            frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                base_revision: 1,
+                revision: 2,
+                display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
+                cursor: None,
+                runs: vec![TerminalCellRun {
+                    start: 0,
+                    cells: vec![linked],
+                }],
+            }),
+        }],
+    )
+    .unwrap();
+
+    assert!(terminals[&pane_id].view.cells[0].hyperlink.is_none());
+}
+
+#[test]
+fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
+    let pane_id = pane_id();
+    let uri = "https://example.com/a-long-target-shared-across-deltas";
+    let mut view = terminal_view(1, "ab");
+    view.cells[0].hyperlink = Some(uri.into());
+    let mut terminals = std::collections::HashMap::from([(
+        pane_id,
+        PaneTerminalSnapshot {
+            pane_id,
+            view,
+            exited: false,
+            title: None,
+            attention: false,
+        },
+    )]);
+    let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
+    let mut linked = terminal_cell("b");
+    linked.hyperlink = Some(uri.into());
+
+    apply_terminal_frame_batch(
+        &mut terminals,
+        &mut terminal_hyperlinks,
+        vec![PaneTerminalFrame {
+            pane_id,
+            frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                base_revision: 1,
+                revision: 2,
+                display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
+                cursor: None,
+                runs: vec![TerminalCellRun {
+                    start: 1,
+                    cells: vec![linked],
+                }],
+            }),
+        }],
+    )
+    .unwrap();
+
+    let view = &terminals[&pane_id].view;
+    assert_eq!(
+        view.cells[0].hyperlink.as_ref().unwrap().as_ptr(),
+        view.cells[1].hyperlink.as_ref().unwrap().as_ptr()
+    );
 }
 
 #[test]
@@ -534,6 +744,8 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
         pane_id,
         view: terminal_view(3, "restore"),
         exited: false,
+        title: None,
+        attention: false,
     };
     let payload = encode_bootstrap_record(&BootstrapRecord::Terminal(terminal.clone())).unwrap();
     let midpoint = payload.len() / 2;
@@ -694,6 +906,11 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         session_id: SessionId(2),
         panes: vec![PaneTerminalFrame { pane_id, frame }],
     };
+    let uri = "https://example.com/a-long-target-shared-across-pending-deltas";
+    let mut first_cell = terminal_cell("X");
+    first_cell.hyperlink = Some(uri.into());
+    let mut second_cell = terminal_cell("Y");
+    second_cell.hyperlink = Some(uri.into());
     let first = TerminalViewDelta {
         base_revision: 1,
         revision: 2,
@@ -702,7 +919,7 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 1,
-            cells: vec![terminal_cell("X")],
+            cells: vec![first_cell],
         }],
     };
     let second = TerminalViewDelta {
@@ -713,7 +930,7 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         cursor: None,
         runs: vec![TerminalCellRun {
             start: 2,
-            cells: vec![terminal_cell("Y")],
+            cells: vec![second_cell],
         }],
     };
 
@@ -735,6 +952,119 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
     assert_eq!(view.revision, 3);
     assert_eq!(view.cells[1].text.as_str(), "X");
     assert_eq!(view.cells[2].text.as_str(), "Y");
+    assert_eq!(
+        view.cells[1].hyperlink.as_ref().unwrap().as_ptr(),
+        view.cells[2].hyperlink.as_ref().unwrap().as_ptr()
+    );
+}
+
+#[test]
+fn hover_clears_only_from_the_pane_that_owns_it() {
+    let owner = pane_id();
+    let other = pane_id();
+    let link = HoveredTerminalLink {
+        range: 0..4,
+        uri: "https://example.com".into(),
+        position: condr_core::TerminalMousePosition { row: 0, column: 1 },
+    };
+    let current = (1, owner, link.clone());
+
+    assert_eq!(
+        next_hovered_link(None, 1, owner, Some(link.clone())),
+        Some(Some(current.clone()))
+    );
+    assert_eq!(
+        next_hovered_link(Some(&current), 1, owner, Some(link.clone())),
+        None
+    );
+    // Another pane (or another connection) reporting no link leaves the owner's hover alone.
+    assert_eq!(next_hovered_link(Some(&current), 1, other, None), None);
+    assert_eq!(next_hovered_link(Some(&current), 2, owner, None), None);
+    // The owner reporting no link clears it; a new link elsewhere replaces it.
+    assert_eq!(
+        next_hovered_link(Some(&current), 1, owner, None),
+        Some(None)
+    );
+    assert_eq!(
+        next_hovered_link(Some(&current), 1, other, Some(link.clone())),
+        Some(Some((1, other, link)))
+    );
+}
+
+#[test]
+fn visual_slot_publish_is_atomic_across_panes() {
+    let first_pane = pane_id();
+    let second_pane = pane_id();
+    let slot = TerminalVisualSlot::default();
+    let batch = |panes| TerminalFrameBatch {
+        server_id: ServerId(1),
+        session_id: SessionId(2),
+        panes,
+    };
+    let delta = |base_revision, text| {
+        TerminalViewFrame::Delta(TerminalViewDelta {
+            base_revision,
+            revision: base_revision + 1,
+            display_offset: 0,
+            mouse_tracking: TerminalMouseTracking::None,
+            cursor: None,
+            runs: vec![TerminalCellRun {
+                start: 0,
+                cells: vec![terminal_cell(text)],
+            }],
+        })
+    };
+
+    assert_eq!(
+        slot.publish(batch(vec![
+            PaneTerminalFrame {
+                pane_id: first_pane,
+                frame: TerminalViewFrame::Full(terminal_view(1, "a")),
+            },
+            PaneTerminalFrame {
+                pane_id: second_pane,
+                frame: TerminalViewFrame::Full(terminal_view(1, "b")),
+            },
+        ]))
+        .unwrap(),
+        Some(0)
+    );
+
+    // The first pane merges cleanly; the second pane's delta does not match its base.
+    assert!(
+        slot.publish(batch(vec![
+            PaneTerminalFrame {
+                pane_id: first_pane,
+                frame: delta(1, "x"),
+            },
+            PaneTerminalFrame {
+                pane_id: second_pane,
+                frame: delta(5, "y"),
+            },
+        ]))
+        .is_err()
+    );
+    {
+        let state = slot.state.lock().unwrap();
+        assert_eq!(state.generation, 0);
+        assert!(state.signaled);
+        let pending = state.pending.as_ref().unwrap();
+        assert_eq!(pending.panes.len(), 2);
+        assert!(matches!(
+            &pending.panes[&first_pane],
+            TerminalViewFrame::Full(view) if view.revision == 1 && view.cells[0].text == "a"
+        ));
+        assert!(matches!(
+            &pending.panes[&second_pane],
+            TerminalViewFrame::Full(view) if view.revision == 1 && view.cells[0].text == "b"
+        ));
+    }
+    let taken = slot.take(0).unwrap();
+    assert_eq!(taken.panes.len(), 2);
+    assert!(taken.panes.iter().all(|pane| matches!(
+        &pane.frame,
+        TerminalViewFrame::Full(view) if view.revision == 1
+    )));
 }
 
 #[test]

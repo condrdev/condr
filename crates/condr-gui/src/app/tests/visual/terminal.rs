@@ -680,6 +680,202 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
 }
 
 #[test]
+fn terminal_link_hover_and_modified_click_open_the_url() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            view.read(app)
+                .active_session()?
+                .active_workspace()
+                .map(|workspace| workspace.active_tab().focused_pane().id())
+        });
+        pane_id.is_some_and(|pane_id| window.debug_bounds(terminal_selector(pane_id)).is_some())
+    }));
+    let pane_id = pane_id.unwrap();
+    let uri = "https://example.com/path";
+    let row = 0;
+    let hover_column = 10;
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            connection.io = None;
+            connection.connect_generation = connection.connect_generation.wrapping_add(1);
+        });
+    });
+    window.run_until_parked();
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let (generation, server_id, session_id, mut terminal_view) = {
+                let connection = this.connection(1).unwrap();
+                (
+                    connection.connect_generation,
+                    connection.server_id.unwrap(),
+                    connection.session_id.unwrap(),
+                    connection.terminals[&pane_id].view.clone(),
+                )
+            };
+            assert!(usize::from(terminal_view.size.columns) >= uri.len());
+            for column in 0..terminal_view.size.columns {
+                let cell = &mut terminal_view.cells[usize::from(row)
+                    * usize::from(terminal_view.size.columns)
+                    + usize::from(column)];
+                cell.text = " ".into();
+                cell.flags = 0;
+                cell.hyperlink = None;
+            }
+            for (column, text) in uri.chars().enumerate() {
+                terminal_view.cells
+                    [usize::from(row) * usize::from(terminal_view.size.columns) + column]
+                    .text = text.to_string().into();
+            }
+            terminal_view.cursor = None;
+            terminal_view.revision += 1;
+            let effect = this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::TerminalFrame(TerminalFrameBatch {
+                    server_id,
+                    session_id,
+                    panes: vec![PaneTerminalFrame {
+                        pane_id,
+                        frame: TerminalViewFrame::Full(terminal_view),
+                    }],
+                })),
+                cx,
+            );
+            if effect.notify {
+                cx.notify();
+            }
+        });
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+
+    let (geometry, render_cache, terminal_size) = window.read(|app| {
+        let condr = view.read(app);
+        (
+            condr.terminal_geometry[&(1, pane_id)],
+            condr.panels[&(1, pane_id)].read(app).render_cache.clone(),
+            condr.terminal(1, pane_id).unwrap().view.size,
+        )
+    });
+    let link_cell = point(
+        geometry.bounds.left() + geometry.cell_size.width * (f32::from(hover_column) + 0.5),
+        geometry.bounds.top() + geometry.cell_size.height * (f32::from(row) + 0.5),
+    );
+    let off_link_column = u16::try_from(uri.len()).unwrap();
+    assert!(terminal_size.columns > off_link_column);
+    let off_link_cell = point(
+        geometry.bounds.left() + geometry.cell_size.width * (f32::from(off_link_column) + 0.5),
+        geometry.bounds.top() + geometry.cell_size.height * (f32::from(row) + 0.5),
+    );
+    let shaped_before_hover = render_cache.borrow().shaped_cells();
+    window.simulate_mouse_move(link_cell, None, Modifiers::default());
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.read(|app| {
+            view.read(app)
+                .hovered_link
+                .as_ref()
+                .map(|(_, _, link)| (link.uri.to_string(), link.position))
+        }),
+        Some((
+            uri.to_owned(),
+            TerminalMousePosition {
+                row,
+                column: hover_column,
+            },
+        )),
+        "moving over a URL must cache it without Ctrl/Cmd"
+    );
+    assert!(
+        render_cache.borrow().shaped_cells() > shaped_before_hover,
+        "hovering a URL must render its underline"
+    );
+
+    window.simulate_mouse_down(link_cell, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(link_cell, MouseButton::Left, Modifiers::default());
+    assert_eq!(
+        window.opened_url(),
+        None,
+        "a plain click must not activate a terminal link"
+    );
+
+    let secondary = Modifiers::secondary_key();
+    window.simulate_mouse_down(link_cell, MouseButton::Left, secondary);
+    assert_eq!(
+        window.opened_url(),
+        None,
+        "pressing a link must wait for a matching release"
+    );
+    assert!(window.read(|app| view.read(app).pressed_terminal_link.is_some()));
+    window.simulate_mouse_move(off_link_cell, MouseButton::Left, secondary);
+    window.simulate_mouse_up(off_link_cell, MouseButton::Left, secondary);
+    assert_eq!(
+        window.opened_url(),
+        None,
+        "releasing away from the pressed link must cancel activation"
+    );
+    assert!(window.read(|app| view.read(app).pressed_terminal_link.is_none()));
+
+    window.simulate_mouse_move(link_cell, None, secondary);
+    window.simulate_mouse_down(link_cell, MouseButton::Left, secondary);
+    assert_eq!(window.opened_url(), None);
+    window.simulate_mouse_up(link_cell, MouseButton::Left, secondary);
+    assert_eq!(window.opened_url().as_deref(), Some(uri));
+
+    assert!(window.read(|app| view.read(app).hovered_link.is_some()));
+
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let (generation, server_id, session_id, mut terminal_view) = {
+                let connection = this.connection(1).unwrap();
+                (
+                    connection.connect_generation,
+                    connection.server_id.unwrap(),
+                    connection.session_id.unwrap(),
+                    connection.terminals[&pane_id].view.clone(),
+                )
+            };
+            terminal_view.cells[usize::from(row) * usize::from(terminal_view.size.columns)
+                + usize::from(hover_column)]
+            .text = " ".into();
+            terminal_view.revision += 1;
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::TerminalFrame(TerminalFrameBatch {
+                    server_id,
+                    session_id,
+                    panes: vec![PaneTerminalFrame {
+                        pane_id,
+                        frame: TerminalViewFrame::Full(terminal_view),
+                    }],
+                })),
+                cx,
+            );
+        });
+    });
+    assert!(
+        window.read(|app| view.read(app).hovered_link.is_none()),
+        "a terminal frame must invalidate a link no longer under the pointer"
+    );
+}
+
+#[test]
 fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
@@ -728,8 +924,120 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         "activating the window should report terminal focus to the PTY"
     );
 
-    // Blurring a Pane runs the Panel's focus callback while GPUI holds its lease.
     let app_focus = window.read(|app| view.read(app).focus_handle.clone());
+    let terminal_focus = window.read(|app| {
+        view.read(app).panels[&(1, pane_id)]
+            .read(app)
+            .focus_handle
+            .clone()
+    });
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let session_id = this.connection(1).unwrap().session_id.unwrap();
+            this.connection_mut(1).unwrap().bootstrap_resync_session_id = Some(session_id);
+            this.sync_terminal_focus(window, cx);
+        });
+    });
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        Some((1, pane_id)),
+        "Bootstrap resync alone must not report a focused terminal as unfocused"
+    );
+    window.update(|window, cx| app_focus.focus(window, cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        None,
+        "a blur during Bootstrap resync must still be reported"
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).focused_terminal),
+        None,
+        "the GUI must also consider the terminal locally unfocused"
+    );
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            connection.send(ClientMessage::Terminal {
+                server_id: connection.server_id.unwrap(),
+                session_id: connection.session_id.unwrap(),
+                pane_id,
+                command: TerminalCommand::Text(
+                    "printf '\\a'; printf 'focus-blur-command-'; printf 'finished\\n'\r".into(),
+                ),
+            });
+        });
+    });
+    assert!(
+        wait_until(window, |window| terminal_contains(
+            window,
+            &view,
+            1,
+            pane_id,
+            "focus-blur-command-finished"
+        )),
+        "the shell must execute the BEL command before attention is asserted"
+    );
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .attention
+                .contains(&pane_id)
+        })
+    }));
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1).unwrap().bootstrap_resync_session_id = None;
+        });
+    });
+    window.update(|window, cx| terminal_focus.focus(window, cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+
+    let send_attention = |window: &mut VisualTestContext, attention| {
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| {
+                let (generation, server_id, session_id, sequence) = {
+                    let connection = this.connection(1).unwrap();
+                    (
+                        connection.connect_generation,
+                        connection.server_id.unwrap(),
+                        connection.session_id.unwrap(),
+                        connection.sequence + 1,
+                    )
+                };
+                let effect = this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::Event {
+                        server_id,
+                        session_id,
+                        sequence,
+                        event: SessionEvent::TerminalAttentionChanged { pane_id, attention },
+                    }),
+                    cx,
+                );
+                if effect.notify {
+                    cx.notify();
+                }
+            });
+        });
+    };
+    send_attention(window, true);
+    assert!(
+        !window.read(|app| view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .attention
+            .contains(&pane_id)),
+        "a bell from the actually focused terminal must not create attention"
+    );
+
+    // Blurring a Pane runs the Panel's focus callback while GPUI holds its lease.
     window.update(|window, cx| app_focus.focus(window, cx));
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
@@ -737,6 +1045,94 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         window.read(|app| view.read(app).reported_terminal_focus),
         None,
         "moving focus out of a Pane should report the terminal as unfocused"
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).target_pane),
+        Some((1, pane_id)),
+        "blurring the terminal does not change the selected Pane"
+    );
+
+    send_attention(window, true);
+    assert!(
+        window.read(|app| view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .attention
+            .contains(&pane_id)),
+        "a selected but unfocused terminal must retain bell attention"
+    );
+
+    window.update(|window, cx| terminal_focus.focus(window, cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        Some((1, pane_id))
+    );
+    assert!(
+        !window.read(|app| view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .attention
+            .contains(&pane_id)),
+        "successfully reporting terminal focus must clear bell attention"
+    );
+
+    window.update(|window, cx| app_focus.focus(window, cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    send_attention(window, true);
+    send_attention(window, false);
+    assert!(
+        !window.read(|app| view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .attention
+            .contains(&pane_id)),
+        "the ordered focus clear must cancel a delayed pre-focus bell"
+    );
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1).unwrap().controlling = false;
+        });
+    });
+    send_attention(window, true);
+    assert!(
+        !window.read(|app| view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .attention
+            .contains(&pane_id)),
+        "a read-only viewer must not accumulate bell attention"
+    );
+
+    window.update(|window, cx| terminal_focus.focus(window, cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).focused_terminal),
+        Some((1, pane_id))
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        None,
+        "a viewer tracks local focus even though it cannot report Focus(true)"
+    );
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.connection_mut(1).unwrap().controlling = true;
+            this.sync_terminal_focus(window, cx);
+        });
+    });
+    assert_eq!(
+        window.read(|app| view.read(app).reported_terminal_focus),
+        Some((1, pane_id)),
+        "control reacquisition must report existing local focus without a new focus event"
     );
 }
 
@@ -779,6 +1175,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         foreground: TerminalColor::Named(256),
         background: TerminalColor::Named(257),
         flags: 0,
+        hyperlink: None,
     };
     let terminal = TerminalView {
         revision: 1,
@@ -811,6 +1208,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
                 terminal,
                 marked_text: None,
                 selection: Some(selection),
+                hovered_link: None,
                 runtime_epoch: None,
                 render_cache: Rc::new(RefCell::new(TerminalRenderCache::default())),
                 scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
@@ -831,5 +1229,40 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
     assert!(
         block_index > selection_index,
         "the block element must paint above the selection: block at {block_index}, selection at {selection_index}"
+    );
+
+    let linked_cache = Rc::new(RefCell::new(TerminalRenderCache::default()));
+    let linked_block = TerminalView {
+        revision: 2,
+        size: TerminalSize::new(1, 1),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells: vec![TerminalCell {
+            hyperlink: Some("https://example.com".into()),
+            ..cell("█")
+        }],
+        cursor: None,
+    };
+    window.draw(point(px(0.), px(0.)), size(px(100.), px(40.)), |_, cx| {
+        TerminalElement::new(
+            view.clone(),
+            TerminalElementProps {
+                focus_handle: cx.focus_handle(),
+                connection_key: 1,
+                pane_id,
+                terminal: linked_block,
+                marked_text: None,
+                selection: None,
+                hovered_link: None,
+                runtime_epoch: None,
+                render_cache: linked_cache.clone(),
+                scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
+            },
+        )
+    });
+    assert_eq!(
+        linked_cache.borrow().shaped_cells(),
+        1,
+        "a linked block glyph must be shaped so its underline is visible"
     );
 }

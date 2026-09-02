@@ -195,7 +195,19 @@ impl Condr {
                 })
             })
             .flatten();
-        if focused == self.reported_terminal_focus {
+        if focused != self.focused_terminal {
+            self.focused_terminal = focused;
+            if let Some((key, pane_id)) = focused
+                && self.clear_pane_attention(key, pane_id)
+            {
+                cx.notify();
+            }
+        }
+        let reportable_focus = focused.filter(|(key, _)| {
+            self.connection(*key)
+                .is_some_and(|connection| connection.controlling)
+        });
+        if reportable_focus == self.reported_terminal_focus {
             return;
         }
         self.last_terminal_mouse_motion = None;
@@ -203,7 +215,7 @@ impl Condr {
         if let Some((key, pane_id)) = self.reported_terminal_focus.take() {
             self.terminal_command(key, pane_id, TerminalCommand::Focus(false));
         }
-        if let Some((key, pane_id)) = focused
+        if let Some((key, pane_id)) = reportable_focus
             && self.terminal_command(key, pane_id, TerminalCommand::Focus(true))
         {
             self.reported_terminal_focus = Some((key, pane_id));
@@ -279,6 +291,55 @@ impl Condr {
             && selection.pane_id == pane_id
         {
             selection.dragging = false;
+        }
+    }
+
+    pub(crate) fn set_hovered_link(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        link: Option<HoveredTerminalLink>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(next) = next_hovered_link(self.hovered_link.as_ref(), key, pane_id, link) {
+            self.hovered_link = next;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn hovered_link_for(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+    ) -> Option<HoveredTerminalLink> {
+        self.hovered_link
+            .as_ref()
+            .filter(|(link_key, link_pane, _)| *link_key == key && *link_pane == pane_id)
+            .map(|(_, _, link)| link.clone())
+    }
+
+    pub(crate) fn set_pressed_terminal_link(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        link: Option<HoveredTerminalLink>,
+    ) {
+        self.pressed_terminal_link = link.map(|link| (key, pane_id, link));
+    }
+
+    pub(crate) fn take_pressed_terminal_link(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+    ) -> Option<HoveredTerminalLink> {
+        if self
+            .pressed_terminal_link
+            .as_ref()
+            .is_some_and(|(link_key, link_pane, _)| *link_key == key && *link_pane == pane_id)
+        {
+            self.pressed_terminal_link.take().map(|(_, _, link)| link)
+        } else {
+            None
         }
     }
 
@@ -533,5 +594,25 @@ pub(super) fn terminal_clipboard_shortcut(
         "insert" if control_only => Some(TerminalClipboardShortcut::Copy),
         "insert" if shift_only => Some(TerminalClipboardShortcut::Paste),
         _ => None,
+    }
+}
+
+/// The hover state after a pane reports `link`, or `None` when nothing changes. Every pane's
+/// mouse handler reports, so a `None` from a pane that does not own the current hover must
+/// not clear the pane that does.
+pub(super) fn next_hovered_link(
+    current: Option<&(ConnectionKey, PaneId, HoveredTerminalLink)>,
+    key: ConnectionKey,
+    pane_id: PaneId,
+    link: Option<HoveredTerminalLink>,
+) -> Option<Option<(ConnectionKey, PaneId, HoveredTerminalLink)>> {
+    match link {
+        Some(link) => {
+            let next = (key, pane_id, link);
+            (current != Some(&next)).then_some(Some(next))
+        }
+        None => current
+            .is_some_and(|(owner_key, owner_pane, _)| *owner_key == key && *owner_pane == pane_id)
+            .then_some(None),
     }
 }

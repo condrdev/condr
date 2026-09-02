@@ -199,6 +199,20 @@ impl Condr {
             self.terminal_selection = None;
         }
         if self
+            .hovered_link
+            .as_ref()
+            .is_some_and(|(connection_key, _, _)| *connection_key == key)
+        {
+            self.hovered_link = None;
+        }
+        if self
+            .pressed_terminal_link
+            .as_ref()
+            .is_some_and(|(connection_key, _, _)| *connection_key == key)
+        {
+            self.pressed_terminal_link = None;
+        }
+        if self
             .terminal_mouse_capture
             .is_some_and(|capture| capture.connection_key == key)
         {
@@ -209,6 +223,12 @@ impl Condr {
             .is_some_and(|motion| motion.connection_key == key)
         {
             self.last_terminal_mouse_motion = None;
+        }
+        if self
+            .focused_terminal
+            .is_some_and(|(connection_key, _)| connection_key == key)
+        {
+            self.focused_terminal = None;
         }
         if self
             .reported_terminal_focus
@@ -231,7 +251,7 @@ impl Condr {
         }
     }
 
-    pub(super) fn terminal(
+    pub(crate) fn terminal(
         &self,
         connection_key: ConnectionKey,
         pane_id: PaneId,
@@ -414,11 +434,13 @@ impl Condr {
             let presentation_before = self.pending_presentation_request;
             _ = self.clear_pending_projections_for(key);
             clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
-            if application.reacquire_control {
+            if application.authority_changed {
                 self.clear_connection_gui_state(key);
-                self.clear_pending_workspace_selection_for(key);
             } else {
                 self.prune_dock_cache(key);
+            }
+            if application.reacquire_control {
+                self.clear_pending_workspace_selection_for(key);
             }
             self.acquire_and_subscribe(key);
             self.refresh_target_pane(key);
@@ -451,12 +473,31 @@ impl Condr {
             Incoming::Bootstrap(bootstrap) => {
                 let presentation_before = self.pending_presentation_request;
                 let application = self.connections[index].apply_bootstrap(bootstrap);
+                if self
+                    .hovered_link
+                    .as_ref()
+                    .is_some_and(|(hover_key, _, _)| *hover_key == key)
+                {
+                    self.hovered_link = None;
+                }
+                if self
+                    .pressed_terminal_link
+                    .as_ref()
+                    .is_some_and(|(press_key, _, _)| *press_key == key)
+                {
+                    self.pressed_terminal_link = None;
+                }
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
-                if application.reacquire_control {
+                if application.authority_changed {
                     self.clear_connection_gui_state(key);
-                    self.clear_pending_workspace_selection_for(key);
                 } else {
                     self.prune_dock_cache(key);
+                }
+                if application.reacquire_control {
+                    // Layout responses may have been lost to writer lag; this Bootstrap is
+                    // the authoritative layout, so nothing stays pending against it.
+                    self.clear_pending_workspace_selection_for(key);
+                    _ = self.clear_pending_projections_for(key);
                 }
 
                 let bootstrap_sequence = self.connections[index].sequence;
@@ -639,6 +680,26 @@ impl Condr {
                         }
                         notify = true;
                     }
+                    SessionEvent::TerminalTitleChanged { pane_id, title } => {
+                        // An unknown Pane's title arrives with its Bootstrap record instead.
+                        notify = match self.connections[index].terminals.get_mut(&pane_id) {
+                            Some(terminal) => {
+                                terminal.title = title;
+                                true
+                            }
+                            None => false,
+                        };
+                    }
+                    SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
+                        let focused = self.focused_terminal == Some((key, pane_id));
+                        notify = if attention {
+                            self.connections[index].controlling
+                                && !focused
+                                && self.connections[index].attention.insert(pane_id)
+                        } else {
+                            self.connections[index].attention.remove(&pane_id)
+                        };
+                    }
                 }
                 IncomingEffect {
                     notify,
@@ -652,8 +713,10 @@ impl Condr {
                     return IncomingEffect::default();
                 }
 
+                let connection = &mut self.connections[index];
                 let pane_ids = match apply_terminal_frame_batch(
-                    &mut self.connections[index].terminals,
+                    &mut connection.terminals,
+                    &mut connection.terminal_hyperlinks,
                     batch.panes,
                 ) {
                     Ok(pane_ids) => pane_ids,
@@ -685,6 +748,23 @@ impl Condr {
                             })
                 }) {
                     self.last_terminal_mouse_motion = None;
+                }
+                if let Some((hover_key, hover_pane, hovered)) = self.hovered_link.take() {
+                    self.hovered_link = if hover_key == key && pane_ids.contains(&hover_pane) {
+                        self.connections[index]
+                            .terminals
+                            .get(&hover_pane)
+                            .and_then(|terminal| {
+                                link_at(
+                                    &terminal.view,
+                                    hovered.position.row,
+                                    hovered.position.column,
+                                )
+                            })
+                            .map(|link| (hover_key, hover_pane, link))
+                    } else {
+                        Some((hover_key, hover_pane, hovered))
+                    };
                 }
                 for pane_id in &pane_ids {
                     let terminal_size = self.connections[index]
@@ -741,6 +821,7 @@ impl Condr {
                     return IncomingEffect::default();
                 }
                 self.connections[index].controlling = false;
+                self.connections[index].attention.clear();
                 self.connections[index].control_retry_attempts = 0;
                 self.connections[index].control_retry_scheduled = false;
                 IncomingEffect {
@@ -760,6 +841,7 @@ impl Condr {
                 }
                 let retry_control = reason == CONTROL_BUSY_REASON;
                 self.connections[index].controlling = false;
+                self.connections[index].attention.clear();
                 self.connections[index].error = Some(reason);
                 if retry_control {
                     self.schedule_control_retry(key, cx);
@@ -863,6 +945,10 @@ impl Condr {
                 if let Some(text) = text {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
+                IncomingEffect::default()
+            }
+            ServerMessage::TerminalClipboard { text, .. } => {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
                 IncomingEffect::default()
             }
             ServerMessage::ServerStopping => {
