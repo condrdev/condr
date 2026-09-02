@@ -551,7 +551,11 @@ impl Render for Condr {
                             .flex_none()
                             .h_full()
                             .child(self.render_sidebar(cx))
-                            .child(
+                            // Deferred so it paints above the workspace it overlaps by
+                            // half its width, occluding so the terminal underneath never
+                            // sees the press, and swallowing the press so the pane does
+                            // not start a selection.
+                            .child(deferred(
                                 div()
                                     .id("condr-sidebar-resize")
                                     .debug_selector(|| "condr-sidebar-resize".into())
@@ -560,9 +564,13 @@ impl Render for Condr {
                                     .bottom_0()
                                     .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
                                     .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                    .occlude()
                                     .cursor_col_resize()
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
                                     .on_drag(DraggedSidebar, |_, _, _, cx| cx.new(|_| EmptyView)),
-                            ),
+                            )),
                     )
                     .child(workspace),
             )

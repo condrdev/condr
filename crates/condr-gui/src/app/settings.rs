@@ -87,9 +87,11 @@ impl TerminalFont {
     pub(super) const MIN_SIZE: f32 = 6.;
     pub(super) const MAX_SIZE: f32 = 72.;
 
+    /// Whole pixels within bounds: the stepper moves by one and shows integers, so a
+    /// hand-edited `13.5` becomes 14 rather than a value the UI cannot display.
     pub(super) fn clamp_size(size: f32) -> f32 {
         if size.is_finite() {
-            size.clamp(Self::MIN_SIZE, Self::MAX_SIZE)
+            size.round().clamp(Self::MIN_SIZE, Self::MAX_SIZE)
         } else {
             Self::default().size
         }
@@ -198,7 +200,11 @@ impl Condr {
         apply_terminal_font(&self.terminal_font, cx);
         self._font_save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
-            let _ = this.update(cx, |this, _| this.save_terminal_font());
+            // Notify so a save error reaches the UI without waiting for another event.
+            let _ = this.update(cx, |this, cx| {
+                this.save_terminal_font();
+                cx.notify();
+            });
         }));
     }
 
@@ -231,6 +237,9 @@ impl Condr {
             SETTINGS_WINDOW_MIN_HEIGHT.to_pixels(rem),
         );
         let bounds = settings_window_bounds(window, window_size, cx);
+        // The bounds are in this display's coordinates; without the id, Windows
+        // would place them on the primary monitor.
+        let display_id = window.display(cx).map(|display| display.id());
         let main_window = self.window_handle;
         let owner = cx.weak_entity();
         // Opening a window needs the App without this entity on the stack.
@@ -240,6 +249,7 @@ impl Condr {
                     title: Some("Condr — Settings".into()),
                     ..Default::default()
                 }),
+                display_id,
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(min_size),
                 ..Default::default()
@@ -562,6 +572,9 @@ fn appearance_page(
                             let size = terminal_font_size(&size_get, cx);
                             let step = |id: &'static str, icon, delta: f32, enabled: bool| {
                                 let settings = size_get.clone();
+                                let label = format!("{id} font size");
+                                let label =
+                                    format!("{}{}", &label[..1].to_uppercase(), &label[1..]);
                                 div()
                                     .debug_selector(move || format!("terminal-font-size-{id}"))
                                     .child(
@@ -569,6 +582,8 @@ fn appearance_page(
                                             .icon(icon)
                                             .small()
                                             .outline()
+                                            .tooltip(label.clone())
+                                            .accessibility_label(label)
                                             .disabled(!enabled)
                                             .on_click(move |_, _, cx| {
                                                 step_terminal_font_size(&settings, delta, cx)
@@ -667,6 +682,7 @@ mod tests {
         assert_eq!(TerminalFont::clamp_size(1.), TerminalFont::MIN_SIZE);
         assert_eq!(TerminalFont::clamp_size(500.), TerminalFont::MAX_SIZE);
         assert_eq!(TerminalFont::clamp_size(14.), 14.);
+        assert_eq!(TerminalFont::clamp_size(13.5), 14.);
         assert_eq!(
             TerminalFont::clamp_size(f32::NAN),
             TerminalFont::default().size

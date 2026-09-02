@@ -505,6 +505,8 @@ pub(crate) struct Condr {
     _settings_window_closed: Option<Subscription>,
     /// The pending debounced font save; replacing it cancels the previous one.
     _font_save: Option<Task<()>>,
+    /// Flushes a pending font save when the app quits before the debounce elapses.
+    _quit_subscription: Subscription,
     app_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
@@ -581,6 +583,13 @@ impl Condr {
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
+        let quit_subscription = cx.on_app_quit(|this, _| {
+            // A change made less than a debounce before quitting is still saved.
+            if this._font_save.is_some() {
+                this.save_terminal_font();
+            }
+            async {}
+        });
         let mut this = Self {
             client_config_path,
             connections,
@@ -617,6 +626,7 @@ impl Condr {
             settings_view: None,
             _settings_window_closed: None,
             _font_save: None,
+            _quit_subscription: quit_subscription,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
