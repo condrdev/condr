@@ -266,11 +266,13 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
             session_id: SessionId(30),
         }
     );
-    assert!(!connection.recover_rejected_subscription(ServerId(1), SessionId(30)));
+    // A repeated rejection is still accepted but does not request a second snapshot.
+    assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(30)));
     assert!(matches!(
         outgoing_rx.try_recv(),
         Err(std::sync::mpsc::TryRecvError::Empty)
     ));
+    assert!(!connection.recover_rejected_subscription(ServerId(9), SessionId(30)));
 
     // Same authority: a rejection-recovery Bootstrap re-acquires control without discarding
     // the connection's GUI state, and a plain visual resync Bootstrap touches neither.
@@ -956,6 +958,55 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         view.cells[1].hyperlink.as_ref().unwrap().as_ptr(),
         view.cells[2].hyperlink.as_ref().unwrap().as_ptr()
     );
+}
+
+#[test]
+fn lag_notice_during_a_visual_gap_resync_still_reacquires_control() {
+    let mut connection = connection_with_io();
+    // A revision gap already dropped the subscription and requested a snapshot.
+    connection.subscribed = false;
+    connection.subscription_pending = false;
+    assert!(connection.request_snapshot());
+    assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(3)));
+    let application = connection.apply_bootstrap(SessionBootstrap {
+        server_id: ServerId(1),
+        runtime_epoch: RuntimeEpoch(2),
+        session_id: SessionId(3),
+        sequence: 8,
+        snapshot: Session::new().snapshot(),
+        terminals: Vec::new(),
+        agents: Vec::new(),
+        workspace_git: Vec::new(),
+        zoomed_panes: Vec::new(),
+    });
+    assert!(application.reacquire_control);
+    assert!(application.resubscribe);
+    assert!(!application.authority_changed);
+}
+
+#[test]
+fn bootstrap_attention_survives_arriving_before_control_is_granted() {
+    let mut connection = connection_with_io();
+    connection.controlling = false;
+    let pane = pane_id();
+    connection.apply_bootstrap(SessionBootstrap {
+        server_id: ServerId(1),
+        runtime_epoch: RuntimeEpoch(2),
+        session_id: SessionId(3),
+        sequence: 8,
+        snapshot: Session::new().snapshot(),
+        terminals: vec![PaneTerminalSnapshot {
+            pane_id: pane,
+            view: terminal_view(1, "x"),
+            exited: false,
+            title: None,
+            attention: true,
+        }],
+        agents: Vec::new(),
+        workspace_git: Vec::new(),
+        zoomed_panes: Vec::new(),
+    });
+    assert!(connection.attention.contains(&pane));
 }
 
 #[test]

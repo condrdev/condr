@@ -363,15 +363,13 @@ impl ServerConnection {
         self.session_id = Some(bootstrap.session_id);
         self.sequence = bootstrap.sequence;
         self.snapshot = bootstrap.snapshot;
-        self.attention = if self.controlling {
-            bootstrap
-                .terminals
-                .iter()
-                .filter_map(|terminal| terminal.attention.then_some(terminal.pane_id))
-                .collect()
-        } else {
-            HashSet::new()
-        };
+        // Server-authoritative; the Bootstrap usually lands before ControlGranted, so keep it
+        // regardless of `controlling` and let presentation gate on control instead.
+        self.attention = bootstrap
+            .terminals
+            .iter()
+            .filter_map(|terminal| terminal.attention.then_some(terminal.pane_id))
+            .collect();
         self.terminals.clear();
         self.terminal_hyperlinks.clear();
         for mut terminal in bootstrap.terminals {
@@ -491,7 +489,9 @@ impl ServerConnection {
         server_id: ServerId,
         authoritative_session_id: SessionId,
     ) -> bool {
-        if (!self.subscription_pending && !self.subscribed) || self.server_id != Some(server_id) {
+        // Writer overflow may already have discarded a queued ControlGranted or LayoutApplied,
+        // so the rejection is actionable even while a visual-gap snapshot is in flight.
+        if self.server_id != Some(server_id) {
             return false;
         }
         self.subscription_pending = false;

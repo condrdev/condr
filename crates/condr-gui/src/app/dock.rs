@@ -269,8 +269,9 @@ impl Render for TerminalPanel {
                     app.hovered_link_for(self.connection_key, self.pane_id),
                     connection.and_then(|connection| connection.runtime_epoch),
                     pane_title,
-                    connection
-                        .is_some_and(|connection| connection.attention.contains(&self.pane_id)),
+                    connection.is_some_and(|connection| {
+                        connection.controlling && connection.attention.contains(&self.pane_id)
+                    }),
                 )
             })
             .unwrap_or((

@@ -131,6 +131,9 @@ struct WireTerminalViewDelta {
     runs: Vec<WireTerminalCellRun>,
 }
 
+/// Interns URIs for one wire frame. The pointer cache is sound only because a pass never
+/// allocates new strings: every cell keeps its `SmolStr` alive until the pass ends, so a
+/// heap address cannot be reused for a different URI mid-pass.
 #[derive(Default)]
 struct WireHyperlinks {
     values: Vec<SmolStr>,

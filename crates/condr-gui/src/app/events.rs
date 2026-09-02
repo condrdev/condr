@@ -693,9 +693,7 @@ impl Condr {
                     SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                         let focused = self.focused_terminal == Some((key, pane_id));
                         notify = if attention {
-                            self.connections[index].controlling
-                                && !focused
-                                && self.connections[index].attention.insert(pane_id)
+                            !focused && self.connections[index].attention.insert(pane_id)
                         } else {
                             self.connections[index].attention.remove(&pane_id)
                         };

@@ -704,7 +704,9 @@ impl Condr {
                                         .unwrap_or_else(|| {
                                             AgentTracker::new(agent.state).display_state()
                                         });
-                                    let status = if connection.attention.contains(&pane_id) {
+                                    let status = if connection.controlling
+                                        && connection.attention.contains(&pane_id)
+                                    {
                                         BELL_SIDEBAR_STATUS
                                     } else {
                                         agent_sidebar_status(state)
