@@ -12,47 +12,39 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
         state,
         lifecycle,
     } = monitor;
+    // Frames must never wait on process enumeration or `git` subprocesses, so the agent,
+    // cwd, and Git probes run on their own thread, nudged (coalesced) by terminal activity.
+    let (activity, activity_rx) = mpsc::sync_channel::<()>(1);
+    probe_terminal(
+        pane_id,
+        instance_id,
+        activity_rx,
+        agent_probe,
+        cwd_probe.clone(),
+        Arc::clone(&state),
+    );
     thread::spawn(move || {
-        let mut last_agent_scan = Instant::now();
         let mut last_view_publish = Instant::now()
             .checked_sub(TERMINAL_FRAME_INTERVAL)
             .unwrap_or_else(Instant::now);
-        let mut agent_scan_pending = false;
-        let mut git_scan_pending = None;
-        loop {
-            let update = if agent_scan_pending || git_scan_pending.is_some() {
-                match updates.recv_timeout(AGENT_SCAN_INTERVAL) {
-                    Ok(update) => Some(update),
-                    Err(mpsc::RecvTimeoutError::Timeout) => None,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        while let Ok(update) = updates.recv() {
+            let update = coalesce_terminal_update(
+                update,
+                &updates,
+                last_view_publish + TERMINAL_FRAME_INTERVAL,
+            );
+            let notices = notice_probe.take();
+            if !notices.is_empty() {
+                let mut state = state.lock().expect("server state lock poisoned");
+                if !state.terminal_is_current(pane_id, instance_id) {
+                    break;
                 }
-            } else {
-                match updates.recv() {
-                    Ok(update) => Some(update),
-                    Err(_) => break,
-                }
-            };
-            let update = update.map(|update| {
-                coalesce_terminal_update(
-                    update,
-                    &updates,
-                    last_view_publish + TERMINAL_FRAME_INTERVAL,
-                )
-            });
-            if update.is_some() {
-                let notices = notice_probe.take();
-                if !notices.is_empty() {
-                    let mut state = state.lock().expect("server state lock poisoned");
-                    if !state.terminal_is_current(pane_id, instance_id) {
-                        break;
-                    }
-                    apply_terminal_notices(&mut state, pane_id, notices);
-                }
+                apply_terminal_notices(&mut state, pane_id, notices);
             }
             match update {
-                Some(TerminalUpdate::View(_)) => {
-                    agent_scan_pending = true;
-                    git_scan_pending = Some(Instant::now());
+                TerminalUpdate::View(_) => {
+                    // Full means a nudge is already pending; the probe reads the latest state.
+                    let _ = activity.try_send(());
                     let Some(frame) = view_source.take_frame() else {
                         continue;
                     };
@@ -61,7 +53,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                     }
                     last_view_publish = Instant::now();
                 }
-                Some(TerminalUpdate::Exited) => {
+                TerminalUpdate::Exited => {
                     let Some(_operation) = lifecycle.begin_operation() else {
                         break;
                     };
@@ -119,7 +111,44 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                     }
                     break;
                 }
-                None => {}
+            }
+        }
+        // Dropping `activity` ends the probe thread.
+    });
+}
+
+/// Runs the agent, cwd, and Git probes for one Terminal off the frame path. Each nudge marks
+/// activity; agent scans are rate-limited to AGENT_SCAN_INTERVAL and Git scans go through
+/// `reserve_workspace_git_scan`, exactly as before, but a slow `git` or process enumeration
+/// now only delays the next probe, never a frame.
+fn probe_terminal(
+    pane_id: PaneId,
+    instance_id: u64,
+    activity: mpsc::Receiver<()>,
+    agent_probe: TerminalAgentProbe,
+    cwd_probe: TerminalCwdProbe,
+    state: Arc<Mutex<RuntimeState>>,
+) {
+    thread::spawn(move || {
+        let mut last_agent_scan = Instant::now();
+        let mut agent_scan_pending = false;
+        let mut git_scan_pending: Option<Instant> = None;
+        loop {
+            let nudged = if agent_scan_pending || git_scan_pending.is_some() {
+                match activity.recv_timeout(AGENT_SCAN_INTERVAL) {
+                    Ok(()) => true,
+                    Err(mpsc::RecvTimeoutError::Timeout) => false,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                match activity.recv() {
+                    Ok(()) => true,
+                    Err(_) => break,
+                }
+            };
+            if nudged {
+                agent_scan_pending = true;
+                git_scan_pending = Some(Instant::now());
             }
 
             let now = Instant::now();
@@ -144,13 +173,13 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                 last_agent_scan = now;
                 agent_scan_pending = false;
             }
-            if let Some(activity) = git_scan_pending {
+            if let Some(activity_at) = git_scan_pending {
                 let scan = {
                     let mut state = state.lock().expect("server state lock poisoned");
                     if !state.terminal_is_current(pane_id, instance_id) {
                         break;
                     }
-                    reserve_workspace_git_scan(&mut state, pane_id, activity, now)
+                    reserve_workspace_git_scan(&mut state, pane_id, activity_at, now)
                 };
                 match scan {
                     WorkspaceGitScan::Waiting => {}
