@@ -601,10 +601,30 @@ impl Session {
             return false;
         };
         let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
-        let Some(neighbor) = neighbor_pane_id(&tab.layout, pane_id, direction) else {
-            return false;
+        // tmux semantics: the command moves a boundary of the pane in `direction`.
+        // The trailing boundary (right or bottom) moves when the pane has one, else
+        // the leading boundary, so a pane can shrink as well as grow and the same
+        // key moves the same divider the same way from either side of it.
+        let (trailing, leading) = match direction {
+            PaneDirection::Left | PaneDirection::Right => {
+                (PaneDirection::Right, PaneDirection::Left)
+            }
+            PaneDirection::Up | PaneDirection::Down => (PaneDirection::Down, PaneDirection::Up),
         };
-        resize_between(&mut tab.layout, pane_id, neighbor, amount.abs().min(0.4))
+        let (neighbor, pane_grows) =
+            if let Some(neighbor) = neighbor_pane_id(&tab.layout, pane_id, trailing) {
+                (neighbor, direction == trailing)
+            } else if let Some(neighbor) = neighbor_pane_id(&tab.layout, pane_id, leading) {
+                (neighbor, direction == leading)
+            } else {
+                return false;
+            };
+        let amount = amount.abs().min(0.4);
+        if pane_grows {
+            resize_between(&mut tab.layout, pane_id, neighbor, amount)
+        } else {
+            resize_between(&mut tab.layout, neighbor, pane_id, amount)
+        }
     }
 
     pub fn swap_pane(&mut self, pane_id: PaneId, direction: PaneDirection) -> bool {

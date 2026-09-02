@@ -1124,3 +1124,59 @@ impl EncodedLayoutNode {
         }
     }
 }
+
+fn only_split_ratio(session: &Session) -> f32 {
+    match session.active_workspace().unwrap().active_tab().layout() {
+        PaneLayout::Split { ratio, .. } => *ratio,
+        PaneLayout::Pane(_) => panic!("the tab should hold one split"),
+    }
+}
+
+#[test]
+fn resizing_moves_the_divider_in_the_key_direction_from_either_side() {
+    let mut session = Session::new();
+    session
+        .create_workspace(PathBuf::from("projects/condr"))
+        .unwrap();
+    let left = session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let right = session
+        .split_pane(left, SplitDirection::Horizontal, 0.5)
+        .expect("Pane capacity");
+
+    // The left pane's right edge moves left: it shrinks.
+    assert!(session.resize_pane(left, PaneDirection::Left, 0.1));
+    assert!((only_split_ratio(&session) - 0.4).abs() < 1e-6);
+    // The same key from the right pane moves the same divider the same way.
+    assert!(session.resize_pane(right, PaneDirection::Left, 0.1));
+    assert!((only_split_ratio(&session) - 0.3).abs() < 1e-6);
+    // And Right brings it back from either side.
+    assert!(session.resize_pane(right, PaneDirection::Right, 0.1));
+    assert!(session.resize_pane(left, PaneDirection::Right, 0.1));
+    assert!((only_split_ratio(&session) - 0.5).abs() < 1e-6);
+    // Nothing to move across the other axis.
+    assert!(!session.resize_pane(left, PaneDirection::Up, 0.1));
+    assert!(!session.resize_pane(left, PaneDirection::Down, 0.1));
+
+    let mut session = Session::new();
+    session
+        .create_workspace(PathBuf::from("projects/condr"))
+        .unwrap();
+    let top = session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let bottom = session
+        .split_pane(top, SplitDirection::Vertical, 0.5)
+        .expect("Pane capacity");
+    assert!(session.resize_pane(top, PaneDirection::Up, 0.1));
+    assert!((only_split_ratio(&session) - 0.4).abs() < 1e-6);
+    assert!(session.resize_pane(bottom, PaneDirection::Down, 0.1));
+    assert!((only_split_ratio(&session) - 0.5).abs() < 1e-6);
+}
