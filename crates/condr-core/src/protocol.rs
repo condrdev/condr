@@ -24,6 +24,14 @@ pub const MAX_BOOTSTRAP_BATCHES: u32 = 65_536;
 pub const MAX_CHUNKED_RECORD_SIZE: usize = 32 * 1024 * 1024;
 pub const MAX_BOOTSTRAP_TOTAL_SIZE: usize = 64 * 1024 * 1024;
 pub const MAX_CHUNK_PAYLOAD_SIZE: usize = MAX_FRAME_SIZE - 256;
+/// Bytes a framed `BootstrapBatch` adds on top of its payload: the 4-byte length prefix plus
+/// the bincode envelope (discriminant, identifiers, indices, payload length).
+pub const BOOTSTRAP_BATCH_FRAME_OVERHEAD: usize = 64;
+/// The largest complete framed Bootstrap the limits above allow: one header frame, every
+/// batch envelope, and the aggregate record payload.
+pub const MAX_FRAMED_BOOTSTRAP_BYTES: usize = (MAX_FRAME_SIZE + 4)
+    + MAX_BOOTSTRAP_TOTAL_SIZE
+    + MAX_BOOTSTRAP_BATCHES as usize * BOOTSTRAP_BATCH_FRAME_OVERHEAD;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ServerId(pub u64);
@@ -196,6 +204,10 @@ pub struct PaneTerminalSnapshot {
     pub pane_id: PaneId,
     pub view: TerminalView,
     pub exited: bool,
+    /// The OSC 0/2 title the Terminal last reported, already sanitized by the Server.
+    pub title: Option<String>,
+    /// Whether the active controller still needs to acknowledge a BEL from this Pane.
+    pub attention: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -256,6 +268,15 @@ pub enum SessionEvent {
     WorkspaceGitChanged {
         workspace_id: WorkspaceId,
         git: Option<WorkspaceGitSnapshot>,
+    },
+    TerminalTitleChanged {
+        pane_id: PaneId,
+        title: Option<String>,
+    },
+    /// The active controller's ordered, coalesced BEL attention state for this Pane.
+    TerminalAttentionChanged {
+        pane_id: PaneId,
+        attention: bool,
     },
 }
 
@@ -326,6 +347,11 @@ pub enum ServerMessage {
     TerminalCopied {
         pane_id: PaneId,
         text: Option<String>,
+    },
+    /// A program in the Pane copied text with OSC 52; every subscribed client receives it.
+    TerminalClipboard {
+        pane_id: PaneId,
+        text: String,
     },
     ServerStopping,
     Error {
@@ -1173,10 +1199,13 @@ mod tests {
                     foreground: crate::TerminalColor::Named(0),
                     background: crate::TerminalColor::Named(0),
                     flags: 0,
+                    hyperlink: None,
                 }],
                 cursor: None,
             },
             exited: false,
+            title: None,
+            attention: false,
         }
     }
 
@@ -1221,5 +1250,24 @@ mod tests {
             chunk_count,
             payload,
         }
+    }
+
+    #[test]
+    fn bootstrap_batch_frame_overhead_covers_the_envelope_and_framing() {
+        let mut bytes = Vec::new();
+        write_message(
+            &mut bytes,
+            &ServerMessage::BootstrapBatch(BootstrapBatch {
+                server_id: ServerId(u64::MAX),
+                session_id: SessionId(u64::MAX),
+                batch_index: u32::MAX,
+                record_index: u32::MAX,
+                chunk_index: u32::MAX,
+                chunk_count: u32::MAX,
+                payload: Vec::new(),
+            }),
+        )
+        .unwrap();
+        assert!(bytes.len() <= BOOTSTRAP_BATCH_FRAME_OVERHEAD);
     }
 }

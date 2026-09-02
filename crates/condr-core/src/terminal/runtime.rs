@@ -6,6 +6,7 @@ pub struct TerminalRuntime {
     pub(super) process: ProcessProbe,
     pub(super) last_known_cwd: Arc<Mutex<Option<PathBuf>>>,
     reported_cwd: Arc<Mutex<ReportedCwd>>,
+    notices: SharedTerminalNotices,
     size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
     damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
@@ -109,10 +110,12 @@ impl TerminalRuntime {
 
         let (input, input_receiver) = TerminalInput::channel();
         let current_size = Arc::new(Mutex::new(size));
-        let (event_proxy, pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+        let (event_proxy, pending_replies, notices) =
+            TerminalEventProxy::new(Arc::clone(&current_size));
         let terminal_config = Config {
-            // Clipboard writes need an explicit remote/client authorization policy.
-            osc52: Osc52::Disabled,
+            // Copy only: a program may fill the user's clipboard (like tmux `set-clipboard on`),
+            // never read it. See ADR 0007.
+            osc52: Osc52::OnlyCopy,
             ..Config::default()
         };
         let terminal = Arc::new(Mutex::new(Term::new(terminal_config, &size, event_proxy)));
@@ -209,6 +212,7 @@ impl TerminalRuntime {
             process,
             last_known_cwd,
             reported_cwd,
+            notices,
             size: current_size,
             revision,
             damage_baseline,
@@ -237,6 +241,12 @@ impl TerminalRuntime {
 
     pub fn take_updates(&mut self) -> Option<mpsc::Receiver<TerminalUpdate>> {
         self.updates.take()
+    }
+
+    pub fn notice_probe(&self) -> TerminalNoticeProbe {
+        TerminalNoticeProbe {
+            notices: Arc::clone(&self.notices),
+        }
     }
 
     pub fn cwd_probe(&self) -> TerminalCwdProbe {
@@ -309,7 +319,7 @@ impl TerminalRuntime {
                 }
                 if focus_reporting {
                     self.input
-                        .try_write(if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec())?;
+                        .try_write_control(if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec())?;
                 }
                 Ok(None)
             }
@@ -854,6 +864,7 @@ impl TerminalViewSource {
             let columns = usize::from(size.columns);
             let mut runs = Vec::new();
             let mut changed_cells = 0usize;
+            let mut hyperlinks = SnapshotHyperlinks::default();
             for bounds in damage.expect("full damage was handled") {
                 if bounds.line >= usize::from(size.rows) || bounds.left >= columns {
                     continue;
@@ -869,6 +880,7 @@ impl TerminalViewSource {
                     cells.push(terminal_cell(
                         &terminal.grid()[Point::new(Line(line), Column(column))],
                         content.colors,
+                        &mut hyperlinks,
                     ));
                 }
                 changed_cells += cells.len();
@@ -950,6 +962,38 @@ impl TerminalCwdProbe {
             last_known.clone().and_then(existing_absolute_directory)
         };
         (cwd, reported_generation)
+    }
+}
+
+#[derive(Clone)]
+pub struct TerminalNoticeProbe {
+    pub(super) notices: SharedTerminalNotices,
+}
+
+/// What changed since the previous `take`: `title` is `Some` only when the title changed
+/// (to the new title, or `None` when it was reset); `bells` counts BELs, collapsed by the caller.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TerminalNoticeBatch {
+    pub title: Option<Option<String>>,
+    pub bells: u64,
+    /// Latest OSC 52 copy payload, including an empty clipboard clear.
+    pub clipboard: Option<String>,
+}
+
+impl TerminalNoticeBatch {
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none() && self.bells == 0 && self.clipboard.is_none()
+    }
+}
+
+impl TerminalNoticeProbe {
+    pub fn take(&self) -> TerminalNoticeBatch {
+        let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+        TerminalNoticeBatch {
+            title: std::mem::take(&mut notices.title_changed).then(|| notices.title.clone()),
+            bells: std::mem::take(&mut notices.bells),
+            clipboard: std::mem::take(&mut notices.clipboard),
+        }
     }
 }
 

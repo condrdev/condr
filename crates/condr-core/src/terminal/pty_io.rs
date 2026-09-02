@@ -320,6 +320,59 @@ impl Drop for ResizeWorkerGuard {
 pub(super) struct TerminalEventProxy {
     pub(super) size: Arc<Mutex<TerminalSize>>,
     pub(super) pending_replies: PendingTerminalReplies,
+    pub(super) notices: SharedTerminalNotices,
+}
+
+/// Out-of-band signals the VT emits alongside grid changes: the OSC 0/2 title, BEL and
+/// OSC 52 copies. The monitor drains them with [`TerminalNoticeProbe::take`]; bells are
+/// counted, not queued, and only the latest clipboard payload is retained.
+#[derive(Debug, Default)]
+pub(super) struct TerminalNotices {
+    pub(super) title: Option<String>,
+    pub(super) title_changed: bool,
+    pub(super) bells: u64,
+    pub(super) clipboard: Option<String>,
+}
+
+pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;
+
+impl TerminalNotices {
+    fn record_title(&mut self, title: Option<String>) {
+        if self.title != title {
+            self.title = title;
+            self.title_changed = true;
+        }
+    }
+
+    fn record_clipboard(&mut self, text: String) {
+        if text.len() <= MAX_PENDING_CLIPBOARD_BYTES {
+            self.clipboard = Some(text);
+        }
+    }
+}
+
+/// Drops control characters, strips one leading spinner glyph (Claude Code animates the
+/// title with braille/asterisk frames), trims, and caps the length. Empty becomes `None`.
+pub(super) fn sanitize_terminal_title(raw: &str) -> Option<String> {
+    const ACTIVITY_GLYPHS: &str = "·✢✳✶✻✽◐◓◑◒";
+    let cleaned = raw
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect::<String>();
+    let mut title = cleaned.trim();
+    if let Some(first) = title.chars().next()
+        && (matches!(first, '\u{2800}'..='\u{28ff}') || ACTIVITY_GLYPHS.contains(first))
+    {
+        let rest = &title[first.len_utf8()..];
+        if rest.chars().next().is_none_or(char::is_whitespace) {
+            title = rest.trim();
+        }
+    }
+    let title = title
+        .chars()
+        .take(MAX_TERMINAL_TITLE_CHARS)
+        .collect::<String>();
+    (!title.is_empty()).then_some(title)
 }
 
 pub(super) enum PendingTerminalReply {
@@ -330,21 +383,47 @@ pub(super) enum PendingTerminalReply {
 pub(super) type PendingTerminalReplies = Arc<Mutex<Vec<PendingTerminalReply>>>;
 
 impl TerminalEventProxy {
-    pub(super) fn new(size: Arc<Mutex<TerminalSize>>) -> (Self, PendingTerminalReplies) {
+    pub(super) fn new(
+        size: Arc<Mutex<TerminalSize>>,
+    ) -> (Self, PendingTerminalReplies, SharedTerminalNotices) {
         let pending_replies = Arc::new(Mutex::new(Vec::new()));
+        let notices = SharedTerminalNotices::default();
         (
             Self {
                 size,
                 pending_replies: Arc::clone(&pending_replies),
+                notices: Arc::clone(&notices),
             },
             pending_replies,
+            notices,
         )
+    }
+
+    fn notices(&self) -> std::sync::MutexGuard<'_, TerminalNotices> {
+        self.notices.lock().expect("terminal notices lock poisoned")
     }
 }
 
 impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: Event) {
         let reply = match event {
+            Event::Title(title) => {
+                self.notices().record_title(sanitize_terminal_title(&title));
+                return;
+            }
+            Event::ResetTitle => {
+                self.notices().record_title(None);
+                return;
+            }
+            Event::Bell => {
+                let mut notices = self.notices();
+                notices.bells = notices.bells.saturating_add(1);
+                return;
+            }
+            Event::ClipboardStore(_, text) => {
+                self.notices().record_clipboard(text);
+                return;
+            }
             Event::PtyWrite(text) => Some(PendingTerminalReply::Bytes(text.into_bytes())),
             Event::TextAreaSizeRequest(formatter) => {
                 let size = *self.size.lock().expect("terminal size lock poisoned");
@@ -650,7 +729,9 @@ pub(super) fn read_loop(
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal_guard, &bytes[..read]);
                 drop(terminal_guard);
-                flush_terminal_replies(&terminal, &input, &pending_replies)?;
+                if let Err(error) = flush_terminal_replies(&terminal, &input, &pending_replies) {
+                    break Err(error);
+                }
                 publish_view(&revision, &updates);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}

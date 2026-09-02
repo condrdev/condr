@@ -18,6 +18,8 @@ use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
+#[cfg(test)]
+use alacritty_terminal::term::cell::Hyperlink;
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Config, Osc52, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
@@ -40,8 +42,12 @@ use crate::{AgentKind, AgentSnapshot, AgentState, classify_agent, identify_agent
 
 const MAX_TERMINAL_CELLS: usize = 65_536;
 const MAX_TERMINAL_CELL_TEXT_BYTES: usize = 256;
+const MAX_TERMINAL_HYPERLINK_URI_BYTES: usize = 8 * 1024;
+const MAX_TERMINAL_HYPERLINK_BYTES: usize = 4 * 1024 * 1024;
 const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_OSC_CWD_BYTES: usize = 4 * 1024;
+const MAX_TERMINAL_TITLE_CHARS: usize = 256;
+const MAX_PENDING_CLIPBOARD_BYTES: usize = 1024 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 64;
 const TERMINAL_REPLY_QUEUE_RESERVE: usize = 1;
 const TERMINAL_CONTROL_QUEUE_RESERVE: usize = INPUT_QUEUE_CAPACITY + 1;
@@ -81,17 +87,20 @@ use input::{encode_key, encode_paste};
 use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 use process::*;
 use pty_io::*;
-pub use runtime::{TerminalAgentProbe, TerminalCwdProbe, TerminalRuntime};
-pub use view::{
-    TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor,
-    TerminalCursorShape, TerminalFrameError, TerminalKey, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
-    TerminalPosition, TerminalScroll, TerminalSelection, TerminalSide, TerminalSize,
-    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, TerminalViewSource,
+pub use runtime::{
+    TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime,
 };
 use view::{
-    TerminalDamageBaseline, publish_view, side, snapshot_terminal, terminal_cell, terminal_cursor,
-    viewport_point,
+    SnapshotHyperlinks, TerminalDamageBaseline, publish_view, side, snapshot_terminal,
+    terminal_cell, terminal_cursor, viewport_point,
+};
+pub use view::{
+    TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor,
+    TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalScroll, TerminalSelection,
+    TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    TerminalViewSource,
 };
 #[cfg(test)]
 use view::{blank_cell, terminal_cell_text};

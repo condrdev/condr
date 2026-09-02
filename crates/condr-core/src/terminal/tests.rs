@@ -188,7 +188,8 @@ fn terminal_reply_writer_failure_disconnects_future_replies() {
 fn terminal_color_replies_use_the_render_palette_and_preserve_order() {
     let size = TerminalSize::new(4, 12);
     let shared_size = Arc::new(Mutex::new(size));
-    let (event_proxy, pending_replies) = TerminalEventProxy::new(Arc::clone(&shared_size));
+    let (event_proxy, pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::clone(&shared_size));
     let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
     let (input, receiver) = TerminalInput::channel();
     let mut parser: Processor = Processor::new();
@@ -202,6 +203,170 @@ fn terminal_color_replies_use_the_render_palette_and_preserve_order() {
     assert_eq!(
         receiver.recv().unwrap().bytes,
         b"\x1b]11;rgb:0d0d/1111/1717\x07\x1b[0n\x1b]4;1;rgb:1212/3434/5656\x07"
+    );
+}
+
+#[test]
+fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
+    let size = TerminalSize::new(4, 12);
+    let shared_size = Arc::new(Mutex::new(size));
+    let (event_proxy, _pending_replies, notices) =
+        TerminalEventProxy::new(Arc::clone(&shared_size));
+    let probe = TerminalNoticeProbe { notices };
+    let mut terminal = Term::new(Config::default(), &size, event_proxy);
+    let mut parser: Processor = Processor::new();
+
+    parser.advance(
+        &mut terminal,
+        b"\x1b]2;\xe2\x9c\xb3 fix tests\x07\x07\x07\x1b]52;c;aGVsbG8=\x07\x1b]52;c;d29ybGQ=\x07",
+    );
+    assert_eq!(
+        probe.take(),
+        TerminalNoticeBatch {
+            title: Some(Some("fix tests".into())),
+            bells: 2,
+            clipboard: Some("world".into()),
+        }
+    );
+    assert!(probe.take().is_empty());
+
+    // A spinner frame change alone is not a title change.
+    parser.advance(&mut terminal, b"\x1b]2;\xe2\x9c\xbb fix tests\x07");
+    assert!(probe.take().is_empty());
+
+    parser.advance(&mut terminal, b"\x1b]2;\x07");
+    assert_eq!(probe.take().title, Some(None));
+
+    parser.advance(&mut terminal, b"\x1b]52;c;\x07");
+    assert_eq!(probe.take().clipboard.as_deref(), Some(""));
+}
+
+#[test]
+fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
+    let size = TerminalSize::new(4, 12);
+    let shared_size = Arc::new(Mutex::new(size));
+    let (event_proxy, pending_replies, notices) = TerminalEventProxy::new(Arc::clone(&shared_size));
+    let probe = TerminalNoticeProbe { notices };
+    let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
+    let (input, input_receiver) = TerminalInput::channel();
+    drop(input_receiver);
+    let (updates, update_receiver) = mpsc::channel();
+
+    let error = read_loop(
+        Box::new(io::Cursor::new(
+            b"\x1b]2;tail title\x07\x07\x1b]52;c;dGFpbCBjb3B5\x07\x1b[5n".to_vec(),
+        )),
+        terminal,
+        input,
+        pending_replies,
+        Arc::new(AtomicU64::new(0)),
+        updates,
+        Arc::new(Mutex::new(ReportedCwd::default())),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(update_receiver.recv().unwrap(), TerminalUpdate::Exited);
+    assert!(update_receiver.try_recv().is_err());
+    assert_eq!(
+        probe.take(),
+        TerminalNoticeBatch {
+            title: Some(Some("tail title".into())),
+            bells: 1,
+            clipboard: Some("tail copy".into()),
+        }
+    );
+}
+
+#[test]
+fn osc8_hyperlinks_are_carried_per_cell() {
+    let size = TerminalSize::new(1, 4);
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
+    let mut terminal = Term::new(Config::default(), &size, event_proxy);
+    let mut parser: Processor = Processor::new();
+    parser.advance(
+        &mut terminal,
+        b"\x1b]8;;https://example.com/a-long-shared-target\x1b\\ab\x1b]8;;\x1b\\c",
+    );
+
+    let view = snapshot_terminal(&terminal, size, 1);
+    let link = |column| view.cell(0, column).unwrap().hyperlink.clone();
+    assert_eq!(
+        link(0).as_deref(),
+        Some("https://example.com/a-long-shared-target")
+    );
+    assert_eq!(
+        link(1).as_deref(),
+        Some("https://example.com/a-long-shared-target")
+    );
+    assert_eq!(
+        link(0).unwrap().as_ptr(),
+        link(1).unwrap().as_ptr(),
+        "linked cells in one snapshot must share long URI storage"
+    );
+    assert_eq!(link(2), None);
+}
+
+#[test]
+fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
+    let size = TerminalSize::new(1, 1);
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
+    let terminal = Term::new(Config::default(), &size, event_proxy);
+    let mut hyperlinks = SnapshotHyperlinks::default();
+    hyperlinks.bytes = MAX_TERMINAL_HYPERLINK_BYTES - 3;
+    let mut cell = Cell::default();
+    cell.set_hyperlink(Some(Hyperlink::new(Some("first"), "abc".into())));
+
+    assert_eq!(
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks)
+            .hyperlink
+            .as_deref(),
+        Some("abc")
+    );
+
+    cell.set_hyperlink(Some(Hyperlink::new(Some("new-id"), "abc".into())));
+    assert_eq!(
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks)
+            .hyperlink
+            .as_deref(),
+        Some("abc")
+    );
+
+    cell.set_hyperlink(Some(Hyperlink::new(Some("second"), "d".into())));
+    assert_eq!(
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks).hyperlink,
+        None
+    );
+
+    cell.set_hyperlink(Some(Hyperlink::new(
+        Some("oversized"),
+        "x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES + 1),
+    )));
+    assert_eq!(
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks).hyperlink,
+        None
+    );
+}
+
+#[test]
+fn terminal_titles_are_sanitized() {
+    assert_eq!(
+        sanitize_terminal_title("  plain  ").as_deref(),
+        Some("plain")
+    );
+    assert_eq!(
+        sanitize_terminal_title("\u{280b} task").as_deref(),
+        Some("task")
+    );
+    assert_eq!(sanitize_terminal_title("\u{280b}").as_deref(), None);
+    assert_eq!(sanitize_terminal_title("★task").as_deref(), Some("★task"));
+    assert_eq!(sanitize_terminal_title("a\x08b\r\n").as_deref(), Some("ab"));
+    assert_eq!(sanitize_terminal_title("").as_deref(), None);
+    assert_eq!(
+        sanitize_terminal_title(&"x".repeat(1000)).map(|title| title.len()),
+        Some(MAX_TERMINAL_TITLE_CHARS)
     );
 }
 
@@ -226,7 +391,8 @@ fn resize_worker_failure_stops_accepting_requests() {
     let control = Arc::new(ResizeControl::default());
     control.request(requested_size).unwrap();
     let current_size = Arc::new(Mutex::new(initial_size));
-    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::clone(&current_size));
     let terminal = Arc::new(Mutex::new(Term::new(
         Config::default(),
         &initial_size,
@@ -256,7 +422,8 @@ fn terminal_is_resized_before_the_pty() {
     let initial_size = TerminalSize::new(5, 20);
     let requested_size = TerminalSize::new(10, 40);
     let current_size = Arc::new(Mutex::new(initial_size));
-    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::clone(&current_size));
     let terminal = Arc::new(Mutex::new(Term::new(
         Config::default(),
         &initial_size,
@@ -293,7 +460,8 @@ fn failed_pty_resize_still_publishes_the_new_vt_size() {
     let initial_size = TerminalSize::new(5, 20);
     let requested_size = TerminalSize::new(10, 40);
     let current_size = Arc::new(Mutex::new(initial_size));
-    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&current_size));
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::clone(&current_size));
     let terminal = Arc::new(Mutex::new(Term::new(
         Config::default(),
         &initial_size,
@@ -673,10 +841,179 @@ fn sparse_terminal_frame_round_trips_from_the_committed_baseline() {
 }
 
 #[test]
+fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
+    let uri = "https://example.com/a-long-target-that-must-not-repeat";
+    let mut view = frame_test_view(7, "abcdef");
+    for cell in &mut view.cells[1..4] {
+        cell.hyperlink = Some(uri.into());
+    }
+    let delta = TerminalViewDelta {
+        base_revision: 7,
+        revision: 8,
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cursor: None,
+        runs: vec![TerminalCellRun {
+            start: 1,
+            cells: view.cells[1..4].to_vec(),
+        }],
+    };
+
+    for frame in [
+        TerminalViewFrame::Full(view),
+        TerminalViewFrame::Delta(delta),
+    ] {
+        let encoded = bincode::serialize(&frame).unwrap();
+        assert_eq!(
+            encoded
+                .windows(uri.len())
+                .filter(|bytes| *bytes == uri.as_bytes())
+                .count(),
+            1
+        );
+        assert_eq!(
+            bincode::deserialize::<TerminalViewFrame>(&encoded).unwrap(),
+            frame
+        );
+    }
+}
+
+#[test]
+fn link_free_deltas_take_the_budget_fast_path_without_changing_results() {
+    let mut budgeted = frame_test_view(1, "abc");
+    let mut plain = budgeted.clone();
+    let mut hyperlinks = TerminalHyperlinkBudget::new(&mut budgeted);
+    let delta = TerminalViewDelta {
+        base_revision: 1,
+        revision: 2,
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cursor: None,
+        runs: vec![TerminalCellRun {
+            start: 1,
+            cells: vec![frame_test_view(2, "x").cells.remove(0)],
+        }],
+    };
+
+    let returned = hyperlinks
+        .apply_delta(&mut budgeted, delta.clone())
+        .unwrap();
+    plain
+        .apply_frame(TerminalViewFrame::Delta(delta.clone()))
+        .unwrap();
+    assert_eq!(returned, delta);
+    assert_eq!(budgeted, plain);
+
+    // A stale delta is still rejected before anything is applied.
+    assert!(hyperlinks.apply_delta(&mut budgeted, delta).is_err());
+    assert_eq!(budgeted, plain);
+}
+
+#[test]
+fn retained_hyperlinks_share_storage_across_sparse_deltas() {
+    let uri = "https://example.com/a-long-target-shared-across-deltas";
+    let mut view = frame_test_view(1, "ab");
+    view.cells[0].hyperlink = Some(SmolStr::new(uri));
+    let mut hyperlinks = TerminalHyperlinkBudget::new(&mut view);
+    let incoming = SmolStr::new(uri);
+    assert_ne!(
+        view.cells[0].hyperlink.as_ref().unwrap().as_ptr(),
+        incoming.as_ptr()
+    );
+
+    let mut cell = frame_test_view(2, "b").cells.remove(0);
+    cell.hyperlink = Some(incoming);
+    hyperlinks
+        .apply_delta(
+            &mut view,
+            TerminalViewDelta {
+                base_revision: 1,
+                revision: 2,
+                display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
+                cursor: None,
+                runs: vec![TerminalCellRun {
+                    start: 1,
+                    cells: vec![cell],
+                }],
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        view.cells[0].hyperlink.as_ref().unwrap().as_ptr(),
+        view.cells[1].hyperlink.as_ref().unwrap().as_ptr(),
+        "retained cells must share one long URI allocation across deltas"
+    );
+}
+
+#[test]
+fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
+    let budgeted_links = MAX_TERMINAL_HYPERLINK_BYTES / MAX_TERMINAL_HYPERLINK_URI_BYTES;
+    let mut view = frame_test_view(7, &"x".repeat(budgeted_links + 2));
+    view.cells[0].hyperlink = Some("x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES + 1).into());
+    for (index, cell) in view.cells[1..=budgeted_links].iter_mut().enumerate() {
+        let prefix = format!("https://example.com/{index}/");
+        cell.hyperlink = Some(
+            format!(
+                "{prefix}{}",
+                "x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES - prefix.len())
+            )
+            .into(),
+        );
+    }
+    let prefix = "https://example.com/overflow/";
+    view.cells.last_mut().unwrap().hyperlink = Some(
+        format!(
+            "{prefix}{}",
+            "x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES - prefix.len())
+        )
+        .into(),
+    );
+    let delta = TerminalViewDelta {
+        base_revision: 6,
+        revision: 7,
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cursor: None,
+        runs: vec![TerminalCellRun {
+            start: 0,
+            cells: view.cells.clone(),
+        }],
+    };
+
+    for frame in [
+        TerminalViewFrame::Full(view),
+        TerminalViewFrame::Delta(delta),
+    ] {
+        let mut projected = frame.clone();
+        assert!(projected.normalize_hyperlinks_for_wire());
+        let encoded = bincode::serialize(&frame).unwrap();
+        assert!(encoded.len() <= crate::protocol::MAX_CHUNKED_RECORD_SIZE);
+        let decoded = bincode::deserialize::<TerminalViewFrame>(&encoded).unwrap();
+        assert_eq!(decoded, projected);
+        let cells = match &decoded {
+            TerminalViewFrame::Full(view) => &view.cells,
+            TerminalViewFrame::Delta(delta) => &delta.runs[0].cells,
+        };
+
+        assert!(cells.iter().all(|cell| cell.text == "x"));
+        assert!(cells[0].hyperlink.is_none());
+        assert!(
+            cells[1..=budgeted_links]
+                .iter()
+                .all(|cell| cell.hyperlink.is_some())
+        );
+        assert!(cells.last().unwrap().hyperlink.is_none());
+    }
+}
+
+#[test]
 fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
     let size = TerminalSize::new(4, 12);
     let shared_size = Arc::new(Mutex::new(size));
-    let (event_proxy, _pending_replies) = TerminalEventProxy::new(Arc::clone(&shared_size));
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::clone(&shared_size));
     let terminal = Arc::new(Mutex::new(Term::new(Config::default(), &size, event_proxy)));
     let revision = Arc::new(AtomicU64::new(0));
     let source = TerminalViewSource {
@@ -692,20 +1029,32 @@ fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
     let mut parser: Processor = Processor::new();
     parser.advance(
         &mut *terminal.lock().expect("terminal state lock poisoned"),
-        b"abc",
+        b"\x1b]8;;https://example.com/a-long-shared-target\x1b\\abc\x1b]8;;\x1b\\",
     );
     revision.store(1, Ordering::Release);
 
     let frame = source.take_frame().unwrap();
-    assert!(matches!(
-        &frame,
-        TerminalViewFrame::Delta(TerminalViewDelta {
-            base_revision: 0,
-            revision: 1,
-            runs,
-            ..
-        }) if runs.iter().map(|run| run.cells.len()).sum::<usize>() < retained.cells.len()
-    ));
+    let TerminalViewFrame::Delta(TerminalViewDelta {
+        base_revision: 0,
+        revision: 1,
+        runs,
+        ..
+    }) = &frame
+    else {
+        panic!("partial damage must produce a delta");
+    };
+    assert!(runs.iter().map(|run| run.cells.len()).sum::<usize>() < retained.cells.len());
+    let links = runs
+        .iter()
+        .flat_map(|run| &run.cells)
+        .filter_map(|cell| cell.hyperlink.as_ref())
+        .collect::<Vec<_>>();
+    assert!(links.len() >= 2);
+    assert_eq!(
+        links[0].as_ptr(),
+        links[1].as_ptr(),
+        "linked cells in one damage frame must share long URI storage"
+    );
     retained.apply_frame(frame).unwrap();
     assert_eq!(retained, source.view());
 }
