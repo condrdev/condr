@@ -4,7 +4,9 @@ use super::*;
 // window's rem size when it opens.
 const SETTINGS_WINDOW_WIDTH: Rems = rems(54.);
 const SETTINGS_WINDOW_HEIGHT: Rems = rems(34.);
-// Wide enough for the page sidebar plus the Colors select.
+/// The page list on the left; two short page names need less than the default.
+const SETTINGS_SIDEBAR_WIDTH: Pixels = px(200.);
+// Wide enough for the page sidebar plus a label beside the Colors select.
 const SETTINGS_WINDOW_MIN_WIDTH: Rems = rems(40.);
 const SETTINGS_WINDOW_MIN_HEIGHT: Rems = rems(20.);
 /// How long after the last font keystroke the config file is written.
@@ -401,6 +403,8 @@ impl Render for SettingsWindow {
             })
             .child(
                 Settings::new("condr-settings")
+                    // Matches the main window's sidebar.
+                    .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                     .page(appearance_page(
                         &self.owner,
                         &cx.entity(),
@@ -521,8 +525,7 @@ fn appearance_page(
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
-                    // The page is already named Appearance, and CONTEXT.md avoids "Theme".
-                    "Mode",
+                    "Theme",
                     SettingField::dropdown(
                         options,
                         move |cx| selected_appearance(&selected_owner, cx),

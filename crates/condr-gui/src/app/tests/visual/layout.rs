@@ -1539,3 +1539,61 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     settings.update(|window, _| window.remove_window());
     window.run_until_parked();
 }
+
+#[test]
+fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+
+    let initial = window.read(|app| view.read(app).sidebar_width);
+    let sidebar = window.debug_bounds("condr-sidebar").unwrap();
+    assert_eq!(sidebar.size.width, initial);
+
+    // Drag the handle 80px to the right.
+    let handle = window
+        .debug_bounds("condr-sidebar-resize")
+        .expect("the sidebar renders its resize handle");
+    let start = handle.center();
+    window.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(
+        point(start.x + px(40.), start.y),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    window.simulate_mouse_move(
+        point(start.x + px(80.), start.y),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    window.simulate_mouse_up(
+        point(start.x + px(80.), start.y),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    let dragged = window.read(|app| view.read(app).sidebar_width);
+    assert_eq!(
+        dragged,
+        initial + px(80.),
+        "dragging the handle resizes the sidebar"
+    );
+    assert_eq!(
+        window.debug_bounds("condr-sidebar").unwrap().size.width,
+        dragged
+    );
+
+    // A much wider window must not scale the sidebar along with it.
+    window.simulate_resize(size(px(1920.), px(1080.)));
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.debug_bounds("condr-sidebar").unwrap().size.width,
+        dragged,
+        "the sidebar width is absolute, not a share of the window"
+    );
+}

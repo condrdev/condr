@@ -530,17 +530,38 @@ impl Render for Condr {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
-                h_resizable("condr-shell")
+                // The sidebar keeps an absolute width, the way Zed sizes its docks: a
+                // resizable group would rescale it with the window on every resize.
+                // Dragging the handle on its right edge is the only thing that moves it.
+                h_flex()
+                    .size_full()
+                    .on_drag_move(cx.listener(
+                        |this, event: &DragMoveEvent<DraggedSidebar>, _, cx| {
+                            let width = event.event.position.x - event.bounds.origin.x;
+                            this.sidebar_width =
+                                width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
+                            cx.notify();
+                        },
+                    ))
                     .child(
-                        resizable_panel()
-                            .size(INITIAL_SIDEBAR_WIDTH)
-                            .size_range(px(180.)..px(360.))
+                        div()
+                            .debug_selector(|| "condr-sidebar".into())
+                            .relative()
+                            .w(self.sidebar_width)
                             .flex_none()
+                            .h_full()
+                            .child(self.render_sidebar(cx))
                             .child(
                                 div()
-                                    .debug_selector(|| "condr-sidebar".into())
-                                    .size_full()
-                                    .child(self.render_sidebar(cx)),
+                                    .id("condr-sidebar-resize")
+                                    .debug_selector(|| "condr-sidebar-resize".into())
+                                    .absolute()
+                                    .top_0()
+                                    .bottom_0()
+                                    .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
+                                    .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                    .cursor_col_resize()
+                                    .on_drag(DraggedSidebar, |_, _, _, cx| cx.new(|_| EmptyView)),
                             ),
                     )
                     .child(workspace),

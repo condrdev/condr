@@ -25,8 +25,8 @@ A Client-owned window presenting this Client's GUI preferences as pages. It open
 _Avoid_: Preferences, options, config
 
 **Appearance**:
-The Settings page owning how the GUI chrome looks, and the `System` / `Light` / `Dark` preference on it. `System` follows the operating system's appearance for as long as it stays selected. It also owns the Terminal font family, size and Color Scheme, which apply to every Pane on every connected Server.
-_Avoid_: Theme, dark mode
+The Settings page owning how the GUI chrome looks, and the `System` / `Light` / `Dark` preference on it, labeled Theme in the UI. `System` follows the operating system's appearance for as long as it stays selected. It also owns the Terminal font family, size and Color Scheme, which apply to every Pane on every connected Server.
+_Avoid_: dark mode, mode
 
 **Color Scheme**:
 A named Terminal palette (background, foreground, cursor, selection and the 16 ANSI colors) chosen on the Appearance page. The built-in collection is vendored from iTerm2-Color-Schemes in Alacritty's TOML layout; `Default` is Condr's own dark palette. It is independent of the `System` / `Light` / `Dark` mode.

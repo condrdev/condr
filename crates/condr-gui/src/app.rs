@@ -33,7 +33,6 @@ use gpui_component::dock::{
 };
 use gpui_component::input::{Editor, EditorState, Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
 use gpui_component::sidebar::{
@@ -140,8 +139,15 @@ const MAX_CONTROL_RETRY_ATTEMPTS: u8 = 20;
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
+const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
+const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
+const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
 const CONDR_ICON_PATHS: [&str; 2] = ["icons/circle.svg", "icons/circle-alert.svg"];
+
+/// The drag payload of the sidebar resize handle; the shell tracks its moves.
+#[derive(Clone)]
+struct DraggedSidebar;
 
 struct CondrAssets {
     base: Assets,
@@ -489,6 +495,9 @@ pub(crate) struct Condr {
     terminal_composition: Option<TerminalComposition>,
     window_handle: AnyWindowHandle,
     appearance: Appearance,
+    /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
+    /// only dragging the handle does.
+    sidebar_width: Pixels,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
     settings_window: Option<WindowHandle<Root>>,
@@ -601,6 +610,7 @@ impl Condr {
             terminal_composition: None,
             window_handle: window.window_handle(),
             appearance,
+            sidebar_width: INITIAL_SIDEBAR_WIDTH,
             terminal_font,
             terminal_color_scheme,
             settings_window: None,
