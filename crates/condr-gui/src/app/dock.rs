@@ -355,6 +355,7 @@ impl Render for TerminalPanel {
         v_flex()
             .size_full()
             .overflow_hidden()
+            .p(px(5.))
             .when(!solo, |this| {
                 this.border_3().border_color(if active {
                     rgb(ACTIVE_PANE_BORDER_RGB).into()
