@@ -591,9 +591,21 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
         expected
     );
 
-    let replacement =
-        BoundServer::bind(ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path))
-            .unwrap();
+    // The first server's socket path and bind lock are released as its thread winds down;
+    // under parallel test load that can trail the join briefly, so retry the address race.
+    let replacement_config = ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path);
+    let bind_deadline = Instant::now() + Duration::from_secs(5);
+    let replacement = loop {
+        match BoundServer::bind(replacement_config.clone()) {
+            Ok(server) => break server,
+            Err(error)
+                if error.kind() == io::ErrorKind::AddrInUse && Instant::now() < bind_deadline =>
+            {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("replacement server failed to bind: {error}"),
+        }
+    };
     let replacement_handle = replacement.handle();
     let replacement_thread = thread::spawn(move || replacement.run());
     wait_for_connection(&endpoint);
