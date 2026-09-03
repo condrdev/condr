@@ -1,64 +1,80 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use clap::{Args, Parser, Subcommand};
 use condr_server::{Endpoint, ServerConfig};
 
-const USAGE: &str = "\
-usage:
-  condr-server start [--endpoint PATH | --listen ADDR] [--snapshot PATH]
-  condr-server status [--endpoint PATH | --listen ADDR]
-  condr-server stop [--endpoint PATH | --listen ADDR]
-  condr-server run [--endpoint PATH | --listen ADDR] [--snapshot PATH]";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ServerCommand {
-    Start,
-    Status,
-    Stop,
-    Run,
+/// The Condr server: owns sessions, terminals and agents; the GUI is one of its clients.
+#[derive(Parser)]
+#[command(name = "condr-server", bin_name = "condr-server", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct Arguments {
-    command: ServerCommand,
-    endpoint: Endpoint,
-    snapshot_path: Option<PathBuf>,
-    detached: bool,
+#[derive(Subcommand)]
+enum Command {
+    /// Start a detached server unless one already answers at the endpoint
+    Start {
+        #[command(flatten)]
+        endpoint: EndpointArgs,
+        /// Where the session snapshot is persisted
+        #[arg(long, value_name = "PATH")]
+        snapshot: Option<PathBuf>,
+    },
+    /// Report whether a server answers at the endpoint
+    Status {
+        #[command(flatten)]
+        endpoint: EndpointArgs,
+    },
+    /// Ask the server at the endpoint to shut down
+    Stop {
+        #[command(flatten)]
+        endpoint: EndpointArgs,
+    },
+    /// Run the server in the foreground
+    Run {
+        #[command(flatten)]
+        endpoint: EndpointArgs,
+        /// Where the session snapshot is persisted
+        #[arg(long, value_name = "PATH")]
+        snapshot: Option<PathBuf>,
+        /// Leave the parent session first; `start` uses this for the server it spawns
+        #[arg(long)]
+        detached: bool,
+    },
+}
+
+/// `--endpoint` and `--listen` are alternatives; neither means the platform default.
+#[derive(Args)]
+#[group(multiple = false)]
+struct EndpointArgs {
+    /// Local socket or named pipe path
+    #[arg(long, value_name = "PATH")]
+    endpoint: Option<PathBuf>,
+    /// TCP address to listen on, normally loopback behind an SSH tunnel
+    #[arg(long, value_name = "ADDR")]
+    listen: Option<SocketAddr>,
+}
+
+impl EndpointArgs {
+    fn resolve(self) -> Endpoint {
+        match (self.endpoint, self.listen) {
+            (Some(path), _) => Endpoint::local(path),
+            (None, Some(address)) => Endpoint::tcp(address),
+            (None, None) => ServerConfig::default().endpoint,
+        }
+    }
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if matches!(
-        args.as_slice(),
-        [arg] if matches!(arg.as_str(), "help" | "--help" | "-h")
-    ) || matches!(
-        args.as_slice(),
-        [_, arg] if matches!(arg.as_str(), "--help" | "-h")
-    ) {
-        println!("{USAGE}");
-        return;
-    }
-    let arguments = match parse_args(&args) {
-        Ok(arguments) => arguments,
-        Err(error) => {
-            eprintln!("condr-server: {error}");
-            eprintln!("{USAGE}");
-            std::process::exit(2);
-        }
-    };
-    std::process::exit(dispatch(arguments));
+    std::process::exit(dispatch(Cli::parse().command));
 }
 
-fn dispatch(arguments: Arguments) -> i32 {
-    let Arguments {
-        command,
-        endpoint,
-        snapshot_path,
-        detached,
-    } = arguments;
+fn dispatch(command: Command) -> i32 {
     match command {
-        ServerCommand::Start => {
-            match condr_server::ensure_server(server_config(endpoint, snapshot_path)) {
+        Command::Start { endpoint, snapshot } => {
+            match condr_server::ensure_server(server_config(endpoint.resolve(), snapshot)) {
                 Ok(endpoint) => {
                     println!("condr-server: running at {}", endpoint_text(&endpoint));
                     0
@@ -69,17 +85,20 @@ fn dispatch(arguments: Arguments) -> i32 {
                 }
             }
         }
-        ServerCommand::Status => match condr_server::probe_server(&endpoint) {
-            Ok(()) => {
-                println!("condr-server: running at {}", endpoint_text(&endpoint));
-                0
+        Command::Status { endpoint } => {
+            let endpoint = endpoint.resolve();
+            match condr_server::probe_server(&endpoint) {
+                Ok(()) => {
+                    println!("condr-server: running at {}", endpoint_text(&endpoint));
+                    0
+                }
+                Err(error) => {
+                    println!("condr-server: not running ({error})");
+                    1
+                }
             }
-            Err(error) => {
-                println!("condr-server: not running ({error})");
-                1
-            }
-        },
-        ServerCommand::Stop => match condr_server::stop_server(&endpoint) {
+        }
+        Command::Stop { endpoint } => match condr_server::stop_server(&endpoint.resolve()) {
             Ok(()) => {
                 println!("condr-server: stopping");
                 0
@@ -89,7 +108,11 @@ fn dispatch(arguments: Arguments) -> i32 {
                 1
             }
         },
-        ServerCommand::Run => {
+        Command::Run {
+            endpoint,
+            snapshot,
+            detached,
+        } => {
             if detached {
                 #[cfg(unix)]
                 if let Err(error) = nix::unistd::setsid() {
@@ -101,7 +124,7 @@ fn dispatch(arguments: Arguments) -> i32 {
                     std::process::id()
                 );
             }
-            match condr_server::run(server_config(endpoint, snapshot_path)) {
+            match condr_server::run(server_config(endpoint.resolve(), snapshot)) {
                 Ok(()) => 0,
                 Err(error) => {
                     eprintln!("condr-server: {error}");
@@ -120,81 +143,6 @@ fn server_config(endpoint: Endpoint, snapshot_path: Option<PathBuf>) -> ServerCo
     config
 }
 
-fn parse_args(args: &[String]) -> Result<Arguments, String> {
-    let command = match args.first().map(String::as_str) {
-        Some("start") => ServerCommand::Start,
-        Some("status") => ServerCommand::Status,
-        Some("stop") => ServerCommand::Stop,
-        Some("run") => ServerCommand::Run,
-        Some(unknown) => return Err(format!("unknown command {unknown}")),
-        None => return Err("missing command".into()),
-    };
-    let mut endpoint = None;
-    let mut snapshot_path = None;
-    let mut detached = false;
-    let mut index = 1;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--endpoint" => {
-                if endpoint.is_some() {
-                    return Err("--endpoint and --listen may only be specified once".into());
-                }
-                let value = args
-                    .get(index + 1)
-                    .ok_or_else(|| "--endpoint requires a path".to_string())?;
-                endpoint = Some(Endpoint::local(PathBuf::from(value)));
-                index += 2;
-            }
-            "--listen" => {
-                if endpoint.is_some() {
-                    return Err("--endpoint and --listen may only be specified once".into());
-                }
-                let value = args
-                    .get(index + 1)
-                    .ok_or_else(|| "--listen requires an address".to_string())?;
-                let address: SocketAddr = value
-                    .parse()
-                    .map_err(|error| format!("invalid listen address {value}: {error}"))?;
-                endpoint = Some(Endpoint::tcp(address));
-                index += 2;
-            }
-            "--snapshot" => {
-                if snapshot_path.is_some() {
-                    return Err("--snapshot may only be specified once".into());
-                }
-                let value = args
-                    .get(index + 1)
-                    .ok_or_else(|| "--snapshot requires a path".to_string())?;
-                snapshot_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            "--detached" => {
-                detached = true;
-                index += 1;
-            }
-            unknown => return Err(format!("unknown argument {unknown}")),
-        }
-    }
-    let endpoint = endpoint.unwrap_or_else(|| ServerConfig::default().endpoint);
-    if matches!(command, ServerCommand::Status | ServerCommand::Stop) && snapshot_path.is_some() {
-        return Err("--snapshot is only valid with start or run".into());
-    }
-    if command != ServerCommand::Run && detached {
-        return Err("--detached is only valid with run".into());
-    }
-    if command == ServerCommand::Start
-        && matches!(&endpoint, Endpoint::Tcp(address) if address.port() == 0)
-    {
-        return Err("start requires a non-zero TCP port".into());
-    }
-    Ok(Arguments {
-        command,
-        endpoint,
-        snapshot_path,
-        detached,
-    })
-}
-
 fn endpoint_text(endpoint: &Endpoint) -> String {
     match endpoint {
         Endpoint::Local(path) => path.display().to_string(),
@@ -206,71 +154,61 @@ fn endpoint_text(endpoint: &Endpoint) -> String {
 mod tests {
     use super::*;
 
-    fn strings(args: &[&str]) -> Vec<String> {
-        args.iter().map(|arg| (*arg).into()).collect()
+    fn parse(args: &[&str]) -> Result<Command, clap::Error> {
+        Cli::try_parse_from(std::iter::once("condr-server").chain(args.iter().copied()))
+            .map(|cli| cli.command)
     }
 
     #[test]
     fn lifecycle_commands_parse_their_supported_options() {
-        let start = parse_args(&strings(&[
+        let Command::Start { endpoint, snapshot } = parse(&[
             "start",
             "--listen",
             "127.0.0.1:4242",
             "--snapshot",
             "state.snapshot",
-        ]))
-        .unwrap();
-        assert_eq!(start.command, ServerCommand::Start);
+        ])
+        .unwrap() else {
+            panic!("expected start");
+        };
         assert_eq!(
-            start.endpoint,
+            endpoint.resolve(),
             Endpoint::tcp("127.0.0.1:4242".parse().unwrap())
         );
-        assert_eq!(start.snapshot_path, Some("state.snapshot".into()));
+        assert_eq!(snapshot, Some("state.snapshot".into()));
 
-        let run = parse_args(&strings(&["run", "--endpoint", "test.sock", "--detached"])).unwrap();
-        assert_eq!(run.command, ServerCommand::Run);
-        assert_eq!(run.endpoint, Endpoint::local("test.sock"));
-        assert!(run.detached);
+        let Command::Run {
+            endpoint, detached, ..
+        } = parse(&["run", "--endpoint", "test.sock", "--detached"]).unwrap()
+        else {
+            panic!("expected run");
+        };
+        assert_eq!(endpoint.resolve(), Endpoint::local("test.sock"));
+        assert!(detached);
 
-        assert_eq!(
-            parse_args(&strings(&["status"])).unwrap().command,
-            ServerCommand::Status
-        );
-        assert_eq!(
-            parse_args(&strings(&["stop"])).unwrap().command,
-            ServerCommand::Stop
-        );
+        let Command::Status { endpoint } = parse(&["status"]).unwrap() else {
+            panic!("expected status");
+        };
+        assert_eq!(endpoint.resolve(), ServerConfig::default().endpoint);
+        assert!(matches!(parse(&["stop"]), Ok(Command::Stop { .. })));
     }
 
     #[test]
     fn invalid_command_option_combinations_are_rejected() {
-        assert_eq!(parse_args(&[]).unwrap_err(), "missing command");
-        assert_eq!(
-            parse_args(&strings(&["launch"])).unwrap_err(),
-            "unknown command launch"
-        );
-        assert_eq!(
-            parse_args(&strings(&[
+        assert!(parse(&[]).is_err());
+        assert!(parse(&["launch"]).is_err());
+        assert!(
+            parse(&[
                 "run",
                 "--endpoint",
                 "test.sock",
                 "--listen",
-                "127.0.0.1:4242",
-            ]))
-            .unwrap_err(),
-            "--endpoint and --listen may only be specified once"
+                "127.0.0.1:4242"
+            ])
+            .is_err()
         );
-        assert_eq!(
-            parse_args(&strings(&["status", "--snapshot", "state.snapshot"])).unwrap_err(),
-            "--snapshot is only valid with start or run"
-        );
-        assert_eq!(
-            parse_args(&strings(&["start", "--detached"])).unwrap_err(),
-            "--detached is only valid with run"
-        );
-        assert_eq!(
-            parse_args(&strings(&["start", "--listen", "127.0.0.1:0"])).unwrap_err(),
-            "start requires a non-zero TCP port"
-        );
+        assert!(parse(&["status", "--snapshot", "state.snapshot"]).is_err());
+        assert!(parse(&["start", "--detached"]).is_err());
+        assert!(parse(&["start", "--listen", "not-an-address"]).is_err());
     }
 }

@@ -3,59 +3,26 @@
 //!
 //! One binary serves the GUI and the CLI on every platform. On Linux and macOS that is
 //! free. On Windows the binary is a Windows-subsystem executable so double-clicking never
-//! opens a console, and CLI mode attaches to the parent shell's console before printing.
+//! opens a console; CLI mode attaches to the parent console before clap prints anything,
+//! and `condr.com` (see `shim.rs`) makes interactive shells wait for it.
 
-const USAGE: &str = "\
-usage:
-  condr              launch the GUI
-  condr --version    print the version
-  condr --help       show this help";
+use clap::Parser;
+
+/// Condr: a multi-agent terminal. Without arguments this opens the GUI.
+#[derive(Parser)]
+#[command(name = "condr", bin_name = "condr", version)]
+struct Cli {}
 
 pub(crate) fn run(args: Vec<String>) -> ! {
     attach_parent_console();
-    std::process::exit(dispatch(&args));
-}
-
-fn dispatch(args: &[String]) -> i32 {
-    let words: Vec<&str> = args.iter().map(String::as_str).collect();
-    match words.as_slice() {
-        ["help" | "--help" | "-h"] => {
-            print_line(&mut std::io::stdout(), USAGE);
-            0
-        }
-        ["--version" | "-V" | "version"] => {
-            print_line(
-                &mut std::io::stdout(),
-                &format!("condr {}", env!("CARGO_PKG_VERSION")),
-            );
-            0
-        }
-        _ => {
-            let mut stderr = std::io::stderr();
-            print_line(
-                &mut stderr,
-                &format!("condr: unknown command: {}", words.join(" ")),
-            );
-            print_line(&mut stderr, USAGE);
-            2
-        }
-    }
-}
-
-/// Writes one line and swallows failures: started with arguments from Explorer there
-/// is no console to attach to, and `println!` would panic instead of exiting quietly.
-fn print_line(out: &mut impl std::io::Write, line: &str) {
-    let _ = writeln!(out, "{line}");
-    let _ = out.flush();
+    // Only called with arguments, and no argument is accepted yet, so clap prints help,
+    // the version or a usage error and exits here.
+    let Cli {} = Cli::parse_from(std::iter::once("condr".to_owned()).chain(args));
+    std::process::exit(0)
 }
 
 /// Joins the parent process's console so stdout/stderr reach the shell that started
 /// us (Alacritty and Neovide do the same). Fails silently without a parent console.
-// ponytail: cmd and an interactive PowerShell do not wait for a Windows-subsystem
-// process, so their prompt can return before the output and `$LASTEXITCODE` is
-// unreliable there. Git Bash, scripts and agents capturing output wait normally. The
-// alternatives (a console-subsystem binary, or `consoleAllocationPolicy=detached`)
-// flash a console on double-click or need GPUI's embedded manifest changed.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 fn attach_parent_console() {
@@ -75,13 +42,18 @@ fn attach_parent_console() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::error::ErrorKind;
 
     #[test]
-    fn help_and_version_succeed_and_unknown_commands_exit_with_usage_status() {
-        assert_eq!(dispatch(&["--help".into()]), 0);
-        assert_eq!(dispatch(&["help".into()]), 0);
-        assert_eq!(dispatch(&["--version".into()]), 0);
-        assert_eq!(dispatch(&["frobnicate".into()]), 2);
-        assert_eq!(dispatch(&["pane".into(), "list".into()]), 2);
+    fn help_and_version_are_handled_by_clap_and_anything_else_is_a_usage_error() {
+        let kind = |args: &[&str]| {
+            Cli::try_parse_from(std::iter::once("condr").chain(args.iter().copied()))
+                .err()
+                .map(|error| error.kind())
+        };
+        assert_eq!(kind(&["--help"]), Some(ErrorKind::DisplayHelp));
+        assert_eq!(kind(&["--version"]), Some(ErrorKind::DisplayVersion));
+        assert_eq!(kind(&["frobnicate"]), Some(ErrorKind::UnknownArgument));
+        assert_eq!(kind(&["pane", "list"]), Some(ErrorKind::UnknownArgument));
     }
 }

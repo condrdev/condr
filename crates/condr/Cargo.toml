@@ -22,6 +22,7 @@ test-support = ["gpui/test-support"]
 [dependencies]
 async-channel.workspace = true
 atomicwrites.workspace = true
+clap.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true
