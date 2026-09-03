@@ -185,19 +185,19 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
         ),
         (
             AgentDisplayState::Working,
-            SidebarGlyph::LoaderCircle,
+            SidebarGlyph::CircleFilled,
             SidebarIconTone::Warning,
             "working",
         ),
         (
             AgentDisplayState::Blocked,
-            SidebarGlyph::CircleAlert,
+            SidebarGlyph::CircleFilled,
             SidebarIconTone::Danger,
             "blocked",
         ),
         (
             AgentDisplayState::Done,
-            SidebarGlyph::CircleCheck,
+            SidebarGlyph::CircleFilled,
             SidebarIconTone::Success,
             "done",
         ),
@@ -211,7 +211,11 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
 #[test]
 fn condr_assets_include_the_prototype_agent_status_icons() {
     let assets = CondrAssets::new();
-    for path in ["icons/circle.svg", "icons/circle-alert.svg"] {
+    for path in [
+        "icons/circle.svg",
+        "icons/circle-filled.svg",
+        "icons/circle-alert.svg",
+    ] {
         let bytes = assets
             .load(path)
             .unwrap()

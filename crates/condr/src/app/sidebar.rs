@@ -22,6 +22,8 @@ impl SidebarIconTone {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CondrIconName {
     Circle,
+    /// Lucide `circle` with a `currentColor` fill.
+    CircleFilled,
     CircleAlert,
     /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
     ServerPlus,
@@ -31,6 +33,7 @@ impl IconNamed for CondrIconName {
     fn path(self) -> SharedString {
         match self {
             Self::Circle => "icons/circle.svg",
+            Self::CircleFilled => "icons/circle-filled.svg",
             Self::CircleAlert => "icons/circle-alert.svg",
             Self::ServerPlus => "icons/server-plus.svg",
         }
@@ -42,9 +45,8 @@ impl IconNamed for CondrIconName {
 pub(super) enum SidebarGlyph {
     Info,
     Circle,
-    LoaderCircle,
+    CircleFilled,
     CircleAlert,
-    CircleCheck,
 }
 
 impl SidebarGlyph {
@@ -52,9 +54,8 @@ impl SidebarGlyph {
         match self {
             Self::Info => Icon::new(IconName::Info),
             Self::Circle => Icon::new(CondrIconName::Circle),
-            Self::LoaderCircle => Icon::new(IconName::LoaderCircle),
+            Self::CircleFilled => Icon::new(CondrIconName::CircleFilled),
             Self::CircleAlert => Icon::new(CondrIconName::CircleAlert),
-            Self::CircleCheck => Icon::new(IconName::CircleCheck),
         }
     }
 }
@@ -90,19 +91,19 @@ pub(super) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVis
             label: "Idle",
         },
         AgentDisplayState::Working => SidebarStatusVisual {
-            glyph: SidebarGlyph::LoaderCircle,
+            glyph: SidebarGlyph::CircleFilled,
             tone: SidebarIconTone::Warning,
             key: "working",
             label: "Working",
         },
         AgentDisplayState::Blocked => SidebarStatusVisual {
-            glyph: SidebarGlyph::CircleAlert,
+            glyph: SidebarGlyph::CircleFilled,
             tone: SidebarIconTone::Danger,
             key: "blocked",
             label: "Blocked",
         },
         AgentDisplayState::Done => SidebarStatusVisual {
-            glyph: SidebarGlyph::CircleCheck,
+            glyph: SidebarGlyph::CircleFilled,
             tone: SidebarIconTone::Success,
             key: "done",
             label: "Done",
