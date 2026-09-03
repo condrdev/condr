@@ -1499,9 +1499,11 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     // Shell: the Server page edits the selected Server; the Server stores the value and
     // reports it back, so the connection's settings follow the field.
     assert_eq!(
-        window.read(|app| selected_settings_server(&settings_view, app)),
-        "1"
+        window.read(|app| settings_view.read(app).selected_server),
+        1,
+        "the Server tab starts on the active connection"
     );
+    window.update(|_, cx| select_settings_server(&settings_view, 1, cx));
     assert_eq!(window.read(|app| server_shell(&settings_view, app)), "");
     assert!(
         !window.read(|app| server_default_shell(&owner, 1, app).is_empty()),
