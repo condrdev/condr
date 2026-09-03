@@ -567,15 +567,21 @@ impl Render for SettingsWindow {
                     }
                 });
             })
+            // The tabs start flush left otherwise; match the page sidebar's inset.
+            .prefix(div().w_3())
             .children([Tab::new().label("Application"), Tab::new().label("Server")])
             // The picker sits beside the tabs, so the whole Server tab reads as "this
-            // Server's settings".
+            // Server's settings". The Select fills its container, so the wrapper sets
+            // the width.
             .when(tab == SettingsTab::Server, |this| {
                 this.suffix(
                     div()
                         .debug_selector(|| "settings-server".into())
-                        .pr_2()
-                        .child(Select::new(&self.server_select).w(rems(14.))),
+                        .flex_none()
+                        .w(rems(11.))
+                        .pr_3()
+                        .py_1()
+                        .child(Select::new(&self.server_select).small()),
                 )
             });
         v_flex()
@@ -904,13 +910,9 @@ fn server_page(
     let shell_set = settings.clone();
     let default_shell = server_default_shell(owner, selected_server, cx);
     let shell_description: SharedString = if default_shell.is_empty() {
-        "Program started in new terminals. Empty uses the Server's system default shell.".into()
+        "Empty uses the system default.".into()
     } else {
-        format!(
-            "Program started in new terminals. Empty uses the Server's system default shell \
-             ({default_shell})."
-        )
-        .into()
+        format!("Empty uses the system default ({default_shell}).").into()
     };
     SettingPage::new("Server")
         .icon(IconName::Cpu)
