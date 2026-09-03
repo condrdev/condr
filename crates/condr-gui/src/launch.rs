@@ -24,7 +24,10 @@ pub(crate) fn run_gui(foreground: bool) {
 fn relaunch_detached() -> std::io::Result<()> {
     use windows_spawn::{Command, CreationFlags, SpawnOptions, Stdio};
 
+    // The flag, not a console check, tells the child it is the detached copy: its
+    // stdio is NUL, which is a valid handle and would otherwise read as "redirected".
     Command::new(std::env::current_exe()?)
+        .arg("--detached")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

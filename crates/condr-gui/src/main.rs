@@ -16,7 +16,8 @@ fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.as_slice() {
         [] => launch::run_gui(false),
-        [flag] if flag == "--foreground" => launch::run_gui(true),
+        // The detached copy `launch` starts, and the development escape hatch.
+        [flag] if flag == "--detached" || flag == "--foreground" => launch::run_gui(true),
         _ => cli::run(arguments),
     }
 }
