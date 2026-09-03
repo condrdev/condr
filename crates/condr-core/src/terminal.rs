@@ -82,12 +82,16 @@ __CONDR_BASHRC__
 exec "$1" --rcfile /dev/fd/3 -i
 "#;
 
+mod cursor_settle;
 mod input;
 mod mouse;
 mod process;
 mod pty_io;
 mod runtime;
 mod view;
+
+pub use cursor_settle::CURSOR_POSITION_SETTLE;
+use cursor_settle::{CURSOR_POSITION_SETTLE_ENABLED, CursorSettle};
 
 use input::{encode_key, encode_paste};
 use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};

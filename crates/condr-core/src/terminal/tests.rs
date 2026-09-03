@@ -263,6 +263,8 @@ fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
         updates,
         reported_cwd: Arc::new(Mutex::new(ReportedCwd::default())),
         notices: SharedTerminalNotices::default(),
+        size: shared_size,
+        cursor_settle: Arc::new(Mutex::new(Default::default())),
     })
     .unwrap_err();
 
@@ -277,6 +279,30 @@ fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
             clipboard: Some("tail copy".into()),
         }
     );
+}
+
+#[test]
+fn decscusr_shape_and_blink_reach_the_snapshot_cursor() {
+    let size = TerminalSize::new(1, 4);
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
+    let mut terminal = Term::new(Config::default(), &size, event_proxy);
+    let mut parser: Processor = Processor::new();
+
+    let cursor = |terminal: &Terminal| snapshot_terminal(terminal, size, 1).cursor.unwrap();
+    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Block);
+    assert!(!cursor(&terminal).blinking, "default cursor stays steady");
+
+    parser.advance(&mut terminal, b"\x1b[5 q");
+    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Beam);
+    assert!(cursor(&terminal).blinking);
+
+    parser.advance(&mut terminal, b"\x1b[4 q");
+    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Underline);
+    assert!(!cursor(&terminal).blinking);
+
+    parser.advance(&mut terminal, b"\x1b[?25l");
+    assert_eq!(cursor(&terminal).shape, TerminalCursorShape::Hidden);
 }
 
 #[test]
@@ -867,6 +893,7 @@ fn sparse_terminal_frame_round_trips_from_the_committed_baseline() {
         row: 0,
         column: 3,
         shape: TerminalCursorShape::Beam,
+        blinking: false,
     });
 
     let frame = TerminalView::frame_from(Some(&previous), &current).unwrap();
@@ -1060,6 +1087,7 @@ fn alacritty_damage_produces_a_sparse_frame_against_the_last_take() {
         size: shared_size,
         revision: Arc::clone(&revision),
         damage_baseline: Arc::new(Mutex::new(None)),
+        cursor_settle: Arc::new(Mutex::new(Default::default())),
     };
 
     let TerminalViewFrame::Full(mut retained) = source.take_frame().unwrap() else {

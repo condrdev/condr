@@ -533,6 +533,7 @@ impl Condr {
         };
         if let Some(key_code) = key_code {
             self.clear_selection(cx);
+            self.restart_cursor_blink(key, pane_id, cx);
             self.terminal_command(
                 key,
                 pane_id,

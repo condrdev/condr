@@ -56,6 +56,26 @@ pub(super) struct TerminalPanel {
     pub(super) scroll_remainder: Rc<RefCell<Point<f32>>>,
     focus_subscriptions: Vec<Subscription>,
     ime_terminal_revision: Option<u64>,
+    cursor_blink_hidden: bool,
+    /// Runs only while the focused cursor asks to blink; dropping it stops the blink.
+    _cursor_blink: Option<Task<()>>,
+}
+
+/// Half a blink period, matching the common host-terminal cadence.
+const CURSOR_BLINK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+impl Condr {
+    /// Input makes a blinking cursor visible again and restarts its phase.
+    pub(super) fn restart_cursor_blink(&self, key: ConnectionKey, pane_id: PaneId, cx: &mut App) {
+        if let Some(panel) = self.panels.get(&(key, pane_id)) {
+            panel.update(cx, |panel, cx| {
+                if panel._cursor_blink.is_some() {
+                    panel.restart_cursor_blink(cx);
+                    cx.notify();
+                }
+            });
+        }
+    }
 }
 
 pub(super) struct CondrDockRenderer;
@@ -177,7 +197,26 @@ impl TerminalPanel {
             scroll_remainder: Rc::new(RefCell::new(point(0., 0.))),
             focus_subscriptions: Vec::new(),
             ime_terminal_revision: None,
+            cursor_blink_hidden: false,
+            _cursor_blink: None,
         }
+    }
+
+    /// Shows the cursor and restarts the phase, so input never lands on a hidden cursor.
+    fn restart_cursor_blink(&mut self, cx: &mut Context<Self>) {
+        self.cursor_blink_hidden = false;
+        self._cursor_blink = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
+                let toggled = this.update(cx, |this, cx| {
+                    this.cursor_blink_hidden = !this.cursor_blink_hidden;
+                    cx.notify();
+                });
+                if toggled.is_err() {
+                    break;
+                }
+            }
+        }));
     }
 }
 
@@ -297,6 +336,22 @@ impl Render for TerminalPanel {
         }
         self.ime_terminal_revision = ime_terminal_revision;
 
+        // Like herdr forwarding DECSCUSR to its host terminal, blink only when the
+        // program asked for it, and only in the focused Pane.
+        let blinking = terminal
+            .as_ref()
+            .and_then(|terminal| terminal.view.cursor)
+            .is_some_and(|cursor| {
+                cursor.blinking && cursor.shape != condr_core::TerminalCursorShape::Hidden
+            })
+            && self.focus_handle.is_focused(window);
+        if !blinking {
+            self._cursor_blink = None;
+            self.cursor_blink_hidden = false;
+        } else if self._cursor_blink.is_none() {
+            self.restart_cursor_blink(cx);
+        }
+
         let key = self.connection_key;
         let pane_id = self.pane_id;
         let link_tooltip = hovered_link
@@ -344,6 +399,7 @@ impl Render for TerminalPanel {
                         selection,
                         hovered_link,
                         runtime_epoch,
+                        cursor_blink_hidden: self.cursor_blink_hidden,
                         render_cache: self.render_cache.clone(),
                         scroll_remainder: self.scroll_remainder.clone(),
                     },

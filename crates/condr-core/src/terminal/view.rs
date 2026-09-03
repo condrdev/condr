@@ -43,6 +43,8 @@ pub struct TerminalCursor {
     pub row: u16,
     pub column: u16,
     pub shape: TerminalCursorShape,
+    /// DECSCUSR 1/3/5 or DECSET 12 asked for a blinking cursor; the GUI drives the phase.
+    pub blinking: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -559,6 +561,7 @@ pub struct TerminalViewSource {
     pub(super) size: Arc<Mutex<TerminalSize>>,
     pub(super) revision: Arc<AtomicU64>,
     pub(super) damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
+    pub(super) cursor_settle: Arc<Mutex<super::cursor_settle::CursorSettle>>,
 }
 
 #[derive(Clone, Copy)]
@@ -566,6 +569,8 @@ pub(super) struct TerminalDamageBaseline {
     pub(super) revision: u64,
     pub(super) size: TerminalSize,
     pub(super) display_offset: u32,
+    /// The cursor as published, after settling; a settle alone must still emit a frame.
+    pub(super) cursor: Option<TerminalCursor>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1113,6 +1118,7 @@ pub(super) fn snapshot_terminal(
     let cursor = terminal_cursor(
         content.cursor.point,
         content.cursor.shape,
+        terminal.cursor_style().blinking,
         display_offset,
         size,
     );
@@ -1213,6 +1219,7 @@ pub(super) fn terminal_cell_text(cell: &Cell) -> SmolStr {
 pub(super) fn terminal_cursor(
     point: Point,
     shape: CursorShape,
+    blinking: bool,
     display_offset: usize,
     size: TerminalSize,
 ) -> Option<TerminalCursor> {
@@ -1223,6 +1230,7 @@ pub(super) fn terminal_cursor(
             row,
             column,
             shape: shape.into(),
+            blinking,
         })
     })
 }

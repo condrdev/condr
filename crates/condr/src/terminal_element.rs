@@ -10,12 +10,12 @@ use condr_core::{
 };
 use gpui::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
-    ElementInputHandler, Entity, FocusHandle, Global, GlobalElementId, Hitbox, HitboxBehavior,
-    Hsla, InputHandler, InspectorElementId, IntoElement, LayoutId, Modifiers as GpuiModifiers,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle, Style, TextAlign,
-    TextInputConfiguration, TextRun, TextStyle, TouchPhase, UTF16Selection, UnderlineStyle, Window,
-    fill, outline, point, px, relative, rgb, size,
+    ElementInputHandler, Entity, FocusHandle, Font, Global, GlobalElementId, Hitbox,
+    HitboxBehavior, Hsla, InputHandler, InspectorElementId, IntoElement, LayoutId,
+    Modifiers as GpuiModifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PaintQuad, Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle,
+    Style, TextAlign, TextInputConfiguration, TextRun, TextStyle, TouchPhase, UTF16Selection,
+    UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
 };
 use smol_str::SmolStr;
 
@@ -104,6 +104,8 @@ pub(crate) struct TerminalElementProps {
     pub(crate) selection: Option<TerminalSelection>,
     pub(crate) hovered_link: Option<HoveredTerminalLink>,
     pub(crate) runtime_epoch: Option<RuntimeEpoch>,
+    /// The blink phase hid the cursor; the owning Panel toggles this.
+    pub(crate) cursor_blink_hidden: bool,
     pub(crate) render_cache: Rc<RefCell<TerminalRenderCache>>,
     pub(crate) scroll_remainder: Rc<RefCell<Point<f32>>>,
 }
@@ -538,13 +540,7 @@ impl Element for TerminalElement {
 
                 let line =
                     render_cache.shaped_line(cache_index, &cell.text, foreground, flags, || {
-                        let mut font = style.font();
-                        if flags & BOLD != 0 {
-                            font = font.bold();
-                        }
-                        if flags & ITALIC != 0 {
-                            font = font.italic();
-                        }
+                        let font = cell_font(style.font(), flags);
                         let underline = (flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
                             thickness: px(1.),
                             color: Some(foreground),
@@ -629,7 +625,7 @@ impl Element for TerminalElement {
                     font_size,
                     &[TextRun {
                         len: cell.text.len(),
-                        font: style.font(),
+                        font: cell_font(style.font(), cell.flags),
                         color: palette.cursor_text,
                         background_color: None,
                         underline: None,
@@ -649,6 +645,7 @@ impl Element for TerminalElement {
                 TerminalCursorShape::Hidden => TerminalCursorShape::Hidden,
                 TerminalCursorShape::HollowBlock => TerminalCursorShape::HollowBlock,
                 _ if !focused => TerminalCursorShape::HollowBlock,
+                _ if self.props.cursor_blink_hidden => TerminalCursorShape::Hidden,
                 shape => shape,
             };
             match shape {
@@ -1602,6 +1599,16 @@ fn accumulated_wheel_steps(remainder: &mut f32, delta: f32) -> f32 {
 
 fn terminal_grid_extent(extent: Pixels, cell: Pixels, minimum: u16) -> u16 {
     ((extent / cell).next_up().floor() as u16).max(minimum)
+}
+
+fn cell_font(mut font: Font, flags: u16) -> Font {
+    if flags & BOLD != 0 {
+        font = font.bold();
+    }
+    if flags & ITALIC != 0 {
+        font = font.italic();
+    }
+    font
 }
 
 fn terminal_color(color: TerminalColor, foreground: bool, palette: &TerminalPalette) -> Hsla {

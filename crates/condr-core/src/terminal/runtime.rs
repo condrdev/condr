@@ -10,6 +10,7 @@ pub struct TerminalRuntime {
     size: Arc<Mutex<TerminalSize>>,
     revision: Arc<AtomicU64>,
     damage_baseline: Arc<Mutex<Option<TerminalDamageBaseline>>>,
+    cursor_settle: Arc<Mutex<CursorSettle>>,
     update_sender: mpsc::Sender<TerminalUpdate>,
     updates: Option<mpsc::Receiver<TerminalUpdate>>,
     input: TerminalInput,
@@ -124,6 +125,7 @@ impl TerminalRuntime {
         let terminal = Arc::new(Mutex::new(Term::new(terminal_config, &size, event_proxy)));
         let revision = Arc::new(AtomicU64::new(0));
         let damage_baseline = Arc::new(Mutex::new(None));
+        let cursor_settle = Arc::new(Mutex::new(CursorSettle::default()));
         let reported_cwd = Arc::new(Mutex::new(ReportedCwd::default()));
         let last_known_cwd = Arc::new(Mutex::new(initial_cwd));
         let (update_sender, updates) = mpsc::channel();
@@ -183,6 +185,8 @@ impl TerminalRuntime {
         let reader_reported_cwd = Arc::clone(&reported_cwd);
         let reader_notices = Arc::clone(&notices);
         let reader_input = input.clone();
+        let reader_size = Arc::clone(&current_size);
+        let reader_cursor_settle = Arc::clone(&cursor_settle);
         let reader_thread = match thread::Builder::new()
             .name("condr-pty-reader".into())
             .spawn(move || {
@@ -195,6 +199,8 @@ impl TerminalRuntime {
                     updates: reader_updates,
                     reported_cwd: reader_reported_cwd,
                     notices: reader_notices,
+                    size: reader_size,
+                    cursor_settle: reader_cursor_settle,
                 })
             }) {
             Ok(thread) => thread,
@@ -221,6 +227,7 @@ impl TerminalRuntime {
             size: current_size,
             revision,
             damage_baseline,
+            cursor_settle,
             update_sender,
             updates: Some(updates),
             input,
@@ -605,6 +612,7 @@ impl TerminalRuntime {
             size: Arc::clone(&self.size),
             revision: Arc::clone(&self.revision),
             damage_baseline: Arc::clone(&self.damage_baseline),
+            cursor_settle: Arc::clone(&self.cursor_settle),
         }
     }
 
@@ -1004,13 +1012,43 @@ impl TerminalViewSource {
     pub fn view(&self) -> TerminalView {
         let terminal = self.terminal.lock().expect("terminal state lock poisoned");
         let size = *self.size.lock().expect("terminal size lock poisoned");
-        snapshot_terminal(&terminal, size, self.revision.load(Ordering::Acquire))
+        let mut view = snapshot_terminal(&terminal, size, self.revision.load(Ordering::Acquire));
+        view.cursor = self.settled_cursor(view.cursor);
+        view
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
+    /// A cursor move is being held back; `take_frame` after [`CURSOR_POSITION_SETTLE`]
+    /// publishes it once it has stayed put.
+    pub fn cursor_settle_pending(&self) -> bool {
+        CURSOR_POSITION_SETTLE_ENABLED
+            && self
+                .cursor_settle
+                .lock()
+                .expect("cursor settle lock poisoned")
+                .pending()
+    }
+
+    fn settled_cursor(&self, cursor: Option<TerminalCursor>) -> Option<TerminalCursor> {
+        if !CURSOR_POSITION_SETTLE_ENABLED {
+            return cursor;
+        }
+        let now = Instant::now();
+        let mut settle = self
+            .cursor_settle
+            .lock()
+            .expect("cursor settle lock poisoned");
+        settle.observe(cursor, now);
+        settle.reported(cursor, now)
     }
 
     pub fn take_frame(&self) -> Option<TerminalViewFrame> {
         let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
         let size = *self.size.lock().expect("terminal size lock poisoned");
-        let revision = self.revision.load(Ordering::Acquire);
+        let mut revision = self.revision.load(Ordering::Acquire);
         let damage = match terminal.damage() {
             TermDamage::Full => None,
             TermDamage::Partial(lines) => Some(lines.collect::<Vec<_>>()),
@@ -1025,9 +1063,23 @@ impl TerminalViewSource {
         let cursor = terminal_cursor(
             content.cursor.point,
             content.cursor.shape,
+            terminal.cursor_style().blinking,
             content.display_offset,
             size,
         );
+        let cursor = self.settled_cursor(cursor);
+        if baseline
+            .is_some_and(|baseline| revision <= baseline.revision && baseline.cursor != cursor)
+        {
+            // Nothing new arrived from the PTY, but the settled cursor moved: give the
+            // cursor-only frame its own revision so clients accept it.
+            revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
+        }
+        let full = || {
+            let mut view = snapshot_terminal(&terminal, size, revision);
+            view.cursor = cursor;
+            TerminalViewFrame::Full(view)
+        };
         let requires_full = baseline.is_none_or(|baseline| {
             baseline.size != size || baseline.display_offset != display_offset
         }) || damage.is_none();
@@ -1035,9 +1087,7 @@ impl TerminalViewSource {
         let frame = if baseline.is_some_and(|baseline| revision <= baseline.revision) {
             None
         } else if requires_full {
-            Some(TerminalViewFrame::Full(snapshot_terminal(
-                &terminal, size, revision,
-            )))
+            Some(full())
         } else {
             let previous = baseline.expect("partial damage has a baseline");
             let columns = usize::from(size.columns);
@@ -1070,9 +1120,7 @@ impl TerminalViewSource {
                 });
             }
             if changed_cells > usize::from(size.rows) * columns / 2 {
-                Some(TerminalViewFrame::Full(snapshot_terminal(
-                    &terminal, size, revision,
-                )))
+                Some(full())
             } else {
                 Some(TerminalViewFrame::Delta(TerminalViewDelta {
                     base_revision: previous.revision,
@@ -1089,6 +1137,7 @@ impl TerminalViewSource {
             revision,
             size,
             display_offset,
+            cursor,
         });
         drop(baseline);
         terminal.reset_damage();

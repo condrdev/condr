@@ -414,6 +414,7 @@ impl EntityInputHandler for Condr {
             && !text.is_empty()
         {
             self.clear_selection(cx);
+            self.restart_cursor_blink(key, pane_id, cx);
             self.terminal_command(key, pane_id, TerminalCommand::Text(text));
         }
     }
@@ -710,6 +711,7 @@ mod ime_tests {
             row: 0,
             column: 3,
             shape: TerminalCursorShape::Block,
+            blinking: false,
         };
 
         assert_eq!(

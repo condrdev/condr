@@ -27,7 +27,23 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
         let mut last_view_publish = Instant::now()
             .checked_sub(TERMINAL_FRAME_INTERVAL)
             .unwrap_or_else(Instant::now);
-        while let Ok(update) = updates.recv() {
+        loop {
+            let update = if view_source.cursor_settle_pending() {
+                // herdr re-renders after its settle window. Here a synthetic wakeup lets
+                // take_frame re-observe the held cursor and publish it once it stays put.
+                match updates.recv_timeout(condr_core::CURSOR_POSITION_SETTLE) {
+                    Ok(update) => update,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        TerminalUpdate::View(view_source.revision())
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                let Ok(update) = updates.recv() else {
+                    break;
+                };
+                update
+            };
             let update = coalesce_terminal_update(
                 update,
                 &updates,

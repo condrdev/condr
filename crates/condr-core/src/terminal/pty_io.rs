@@ -712,6 +712,8 @@ pub(super) struct TerminalReadLoop {
     pub(super) updates: mpsc::Sender<TerminalUpdate>,
     pub(super) reported_cwd: Arc<Mutex<ReportedCwd>>,
     pub(super) notices: SharedTerminalNotices,
+    pub(super) size: Arc<Mutex<TerminalSize>>,
+    pub(super) cursor_settle: Arc<Mutex<CursorSettle>>,
 }
 
 pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
@@ -724,6 +726,8 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
         updates,
         reported_cwd,
         notices,
+        size,
+        cursor_settle,
     } = io;
     let mut parser: Processor = Processor::new();
     let mut cwd_parser = OscCwdParser::default();
@@ -743,6 +747,23 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
                 });
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal_guard, &bytes[..read]);
+                if CURSOR_POSITION_SETTLE_ENABLED {
+                    // Observe after every read like herdr does, so a position that only
+                    // lasts between two reads never counts as held, whatever the frame rate.
+                    let size = *size.lock().expect("terminal size lock poisoned");
+                    let content = terminal_guard.renderable_content();
+                    let cursor = terminal_cursor(
+                        content.cursor.point,
+                        content.cursor.shape,
+                        terminal_guard.cursor_style().blinking,
+                        content.display_offset,
+                        size,
+                    );
+                    cursor_settle
+                        .lock()
+                        .expect("cursor settle lock poisoned")
+                        .observe(cursor, Instant::now());
+                }
                 drop(terminal_guard);
                 if let Err(error) = flush_terminal_replies(&terminal, &input, &pending_replies) {
                     break Err(error);
