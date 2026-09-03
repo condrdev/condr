@@ -223,16 +223,16 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
     assert_eq!(
         probe.take(),
         TerminalNoticeBatch {
-            title: Some(Some("fix tests".into())),
+            title: Some(Some("\u{2733} fix tests".into())),
             bells: 2,
             clipboard: Some("world".into()),
         }
     );
     assert!(probe.take().is_empty());
 
-    // A spinner frame change alone is not a title change.
+    // A spinner frame is part of the title, as Windows Terminal shows it.
     parser.advance(&mut terminal, b"\x1b]2;\xe2\x9c\xbb fix tests\x07");
-    assert!(probe.take().is_empty());
+    assert_eq!(probe.take().title, Some(Some("\u{273b} fix tests".into())));
 
     parser.advance(&mut terminal, b"\x1b]2;\x07");
     assert_eq!(probe.take().title, Some(None));
@@ -358,9 +358,12 @@ fn terminal_titles_are_sanitized() {
     );
     assert_eq!(
         sanitize_terminal_title("\u{280b} task").as_deref(),
-        Some("task")
+        Some("\u{280b} task")
     );
-    assert_eq!(sanitize_terminal_title("\u{280b}").as_deref(), None);
+    assert_eq!(
+        sanitize_terminal_title("\u{280b}").as_deref(),
+        Some("\u{280b}")
+    );
     assert_eq!(sanitize_terminal_title("★task").as_deref(), Some("★task"));
     assert_eq!(sanitize_terminal_title("a\x08b\r\n").as_deref(), Some("ab"));
     assert_eq!(sanitize_terminal_title("").as_deref(), None);

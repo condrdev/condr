@@ -351,24 +351,16 @@ impl TerminalNotices {
     }
 }
 
-/// Drops control characters, strips one leading spinner glyph (Claude Code animates the
-/// title with braille/asterisk frames), trims, and caps the length. Empty becomes `None`.
+/// Drops control characters, trims, and caps the length. Empty becomes `None`. Spinner
+/// glyphs stay: Claude Code ("✳ Claude Code") and Codex ("⠼ condr") animate them as
+/// their activity indicator, and Windows Terminal shows them as is.
 pub(super) fn sanitize_terminal_title(raw: &str) -> Option<String> {
-    const ACTIVITY_GLYPHS: &str = "·✢✳✶✻✽◐◓◑◒";
-    let cleaned = raw
+    let title = raw
         .chars()
         .filter(|character| !character.is_control())
         .collect::<String>();
-    let mut title = cleaned.trim();
-    if let Some(first) = title.chars().next()
-        && (matches!(first, '\u{2800}'..='\u{28ff}') || ACTIVITY_GLYPHS.contains(first))
-    {
-        let rest = &title[first.len_utf8()..];
-        if rest.chars().next().is_none_or(char::is_whitespace) {
-            title = rest.trim();
-        }
-    }
     let title = title
+        .trim()
         .chars()
         .take(MAX_TERMINAL_TITLE_CHARS)
         .collect::<String>();
