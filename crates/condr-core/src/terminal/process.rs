@@ -323,8 +323,9 @@ impl ProcessProbe {
     }
 
     /// Identifies the agent in the PTY's foreground job, the way herdr does: the group
-    /// leader first, then the best-scoring member. A foreground group that is the
-    /// shell itself means whatever ran here has exited.
+    /// leader first, then the best-scoring member. The shell's own process takes part
+    /// (`exec agent` replaces it in place); only a job that contains the shell and no
+    /// agent means whatever ran here has exited.
     #[cfg(unix)]
     pub(super) fn probe_agent(
         &self,
@@ -333,12 +334,6 @@ impl ProcessProbe {
         let Some(foreground_group) = self.foreground_group(master) else {
             return ProcessProbeResult::Unidentified;
         };
-        if self
-            .shell_pid
-            .is_some_and(|shell| i64::from(shell) == i64::from(foreground_group.as_raw()))
-        {
-            return ProcessProbeResult::ShellOnly;
-        }
         let mut processes = process_snapshot();
         // Phase one is the cheap table (no command lines); phase two reads command lines for
         // the foreground group only, leader first.
@@ -365,8 +360,20 @@ impl ProcessProbe {
             .filter_map(|pid| system.process(*pid))
             .map(CandidateProcess::new)
             .collect::<Vec<_>>();
-        crate::agent::identify_agent_among(candidates.iter().map(CandidateProcess::info))
-            .map_or(ProcessProbeResult::Unidentified, ProcessProbeResult::Agent)
+        if let Some(agent) =
+            crate::agent::identify_agent_among(candidates.iter().map(CandidateProcess::info))
+        {
+            return ProcessProbeResult::Agent(agent);
+        }
+        let shell_in_job = self
+            .shell_pid
+            .map(Pid::from_u32)
+            .is_some_and(|shell| members.contains(&shell));
+        if shell_in_job {
+            ProcessProbeResult::ShellOnly
+        } else {
+            ProcessProbeResult::Unidentified
+        }
     }
 
     /// Identifies the agent among the shell's descendants. Windows has no foreground
