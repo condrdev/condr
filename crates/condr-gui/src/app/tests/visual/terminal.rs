@@ -963,6 +963,14 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
                 server_id: connection.server_id.unwrap(),
                 session_id: connection.session_id.unwrap(),
                 pane_id,
+                // BEL first, then a marker split so the echoed command line never
+                // matches it. The shell is pwsh on Windows and a POSIX shell elsewhere.
+                #[cfg(windows)]
+                command: TerminalCommand::Text(
+                    "[Console]::Write([char]7); Write-Host ('focus-blur-command-' + 'finished')\r"
+                        .into(),
+                ),
+                #[cfg(not(windows))]
                 command: TerminalCommand::Text(
                     "printf '\\a'; printf 'focus-blur-command-'; printf 'finished\\n'\r".into(),
                 ),
@@ -1101,13 +1109,14 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     });
     send_attention(window, true);
     assert!(
-        !window.read(|app| view
+        window.read(|app| view
             .read(app)
             .connection(1)
             .unwrap()
             .attention
             .contains(&pane_id)),
-        "a read-only viewer must not accumulate bell attention"
+        "attention is Server state and is kept without control; the pane header and \
+         sidebar gate on `controlling` instead (3c92fb8)"
     );
 
     window.update(|window, cx| terminal_focus.focus(window, cx));
