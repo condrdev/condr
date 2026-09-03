@@ -164,6 +164,8 @@ pub(crate) fn run() {
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
+                // The drawn title bar carries no OS title; the taskbar still needs one.
+                window.set_window_title("Condr");
                 let view = cx.new(|cx| Condr::new(endpoint, initial, config_path, window, cx));
                 let root = cx.new(|cx| Root::new(view, window, cx));
                 window.resize(DEFAULT_WINDOW_SIZE);

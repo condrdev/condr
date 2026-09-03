@@ -527,14 +527,21 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_swap_down))
             .on_action(cx.listener(Self::action_toggle_zoom))
             .size_full()
+            .flex()
+            .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            // Client-side title bar on every platform, as Zed does; the OS title for the
+            // taskbar is set separately when the window opens.
+            .child(TitleBar::new().child("Condr"))
             .child(
                 // The sidebar keeps an absolute width, the way Zed sizes its docks: a
                 // resizable group would rescale it with the window on every resize.
                 // Dragging the handle on its right edge is the only thing that moves it.
                 h_flex()
-                    .size_full()
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
                     .on_drag_move(cx.listener(
                         |this, event: &DragMoveEvent<DraggedSidebar>, _, cx| {
                             let width = event.event.position.x - event.bounds.origin.x;

@@ -42,7 +42,8 @@ use gpui_component::theme::{Theme, ThemeMode};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName, IconNamed,
-    IndexPath, Root, Selectable as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    IndexPath, Root, Selectable as _, Sizable as _, StyledExt as _, TitleBar, WindowExt as _,
+    h_flex, v_flex,
 };
 use gpui_component_assets::Assets;
 
@@ -206,7 +207,8 @@ fn default_worktree_branch(workspace_name: &str) -> String {
 fn default_window_options(cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::centered(DEFAULT_WINDOW_SIZE, cx)),
-        ..Default::default()
+        // The window draws its own title bar and owns dragging.
+        ..TitleBar::window_options()
     }
 }
 

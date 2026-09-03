@@ -12,6 +12,8 @@ const SETTINGS_WINDOW_MIN_WIDTH: Rems = rems(40.);
 const SETTINGS_WINDOW_MIN_HEIGHT: Rems = rems(20.);
 /// How long after the last font keystroke the config file is written.
 const FONT_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
+/// Shown in the drawn title bar and set as the OS title for the taskbar.
+const SETTINGS_WINDOW_TITLE: &str = "Condr — Settings";
 
 /// Centered over the main window and kept inside that window's display, minus the
 /// taskbar or Dock: a main window on a secondary screen gets its Settings there, and
@@ -267,17 +269,14 @@ impl Condr {
         // Opening a window needs the App without this entity on the stack.
         cx.defer(move |cx| {
             let options = WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Condr — Settings".into()),
-                    ..Default::default()
-                }),
                 display_id,
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(min_size),
-                ..Default::default()
+                ..TitleBar::window_options()
             };
             let view_owner = owner.clone();
             let opened = cx.open_window(options, |window, cx| {
+                window.set_window_title(SETTINGS_WINDOW_TITLE);
                 let view = cx.new(|cx| SettingsWindow::new(view_owner.clone(), window, cx));
                 view.read(cx).focus_handle.clone().focus(window, cx);
                 let _ =
@@ -592,6 +591,7 @@ impl Render for SettingsWindow {
                     window.remove_window();
                 }
             })
+            .child(TitleBar::new().child(SETTINGS_WINDOW_TITLE))
             .child(tabs)
             .child(div().flex_1().min_h_0().child(content))
     }
