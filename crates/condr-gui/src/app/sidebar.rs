@@ -1017,19 +1017,17 @@ impl Condr {
         });
 
         let add_owner = cx.weak_entity();
-        let reconnect_owner = cx.weak_entity();
-        let reconnect_visible = self
-            .active_connection()
-            .is_some_and(|connection| connection.status == ConnectionStatus::Disconnected);
         let settings_owner = cx.weak_entity();
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
             .children(items)
-            // The app name lives in the title bar; the actions sit at the bottom the way
-            // paseo lays out its sidebar: add on the left, settings on the right.
+            // The app name lives in the title bar; the actions sit at the bottom right,
+            // the way paseo lays out its sidebar. Reconnect is the `ReconnectServer`
+            // action; it has no button here.
             .footer(
                 h_flex()
+                    .w_full()
                     .justify_end()
                     .gap_1()
                     .p_2()
@@ -1047,36 +1045,17 @@ impl Condr {
                             }),
                     )
                     .child(
-                        h_flex()
-                            .gap_1()
-                            .when(reconnect_visible, |this| {
-                                this.child(
-                                    Button::new("reconnect-server")
-                                        .ghost()
-                                        .small()
-                                        .icon(IconName::LoaderCircle)
-                                        .tooltip("Reconnect")
-                                        .on_click(move |_, window, cx| {
-                                            let _ = reconnect_owner.update(cx, |this, cx| {
-                                                this.reconnect_active(window, cx);
-                                                cx.notify();
-                                            });
-                                        }),
-                                )
-                            })
-                            .child(
-                                Button::new("open-settings")
-                                    .debug_selector(|| "open-settings".into())
-                                    .ghost()
-                                    .small()
-                                    .icon(IconName::Settings)
-                                    .tooltip("Settings…")
-                                    .accessibility_label("Settings…")
-                                    .on_click(move |_, window, cx| {
-                                        let _ = settings_owner
-                                            .update(cx, |this, cx| this.open_settings(window, cx));
-                                    }),
-                            ),
+                        Button::new("open-settings")
+                            .debug_selector(|| "open-settings".into())
+                            .ghost()
+                            .small()
+                            .icon(IconName::Settings)
+                            .tooltip("Settings…")
+                            .accessibility_label("Settings…")
+                            .on_click(move |_, window, cx| {
+                                let _ = settings_owner
+                                    .update(cx, |this, cx| this.open_settings(window, cx));
+                            }),
                     ),
             )
     }
