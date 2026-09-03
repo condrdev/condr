@@ -2,9 +2,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "linux")]
 use condr_core::{
-    AgentKind, AgentState, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
-    TerminalScroll, TerminalSide, TerminalUpdate,
+    AgentKind, AgentSnapshot, AgentState, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
+    TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
 };
 use condr_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
 #[cfg(target_os = "windows")]

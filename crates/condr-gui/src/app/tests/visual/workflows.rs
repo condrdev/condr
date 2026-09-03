@@ -354,7 +354,8 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
                 1,
                 agent_pane,
                 TerminalCommand::Text(
-                    "exec -a codex /bin/bash -c \"echo '◦ Working (1s - esc to interrupt)'; sleep 1; printf '\\033[2J\\033[H›\\n'; sleep 30 & wait\"\r"
+                    // Working for longer than the detector's 3 s startup grace, then idle.
+                    "exec -a codex /bin/bash -c \"echo '◦ Working (1s - esc to interrupt)'; sleep 5; printf '\\033[2J\\033[H›\\n'; sleep 30 & wait\"\r"
                         .into(),
                 ),
             );
