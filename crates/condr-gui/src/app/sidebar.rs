@@ -1029,14 +1029,18 @@ impl Condr {
             // The app name lives in the title bar; the actions sit at the bottom the way
             // paseo lays out its sidebar: add on the left, settings on the right.
             .footer(
-                SidebarFooter::new()
+                h_flex()
+                    .justify_end()
+                    .gap_1()
+                    .p_2()
                     .child(
                         Button::new("add-server")
                             .debug_selector(|| "add-server".into())
                             .ghost()
                             .small()
                             .icon(Icon::new(CondrIconName::ServerPlus))
-                            .label("Add Server")
+                            .tooltip("Add Server")
+                            .accessibility_label("Add Server")
                             .on_click(move |_, window, cx| {
                                 let _ = add_owner
                                     .update(cx, |this, cx| this.prompt_add_server(window, cx));

@@ -35,7 +35,7 @@ use gpui_component::input::{Editor, EditorState, Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
-use gpui_component::sidebar::{Sidebar, SidebarCollapsible, SidebarFooter, SidebarItem};
+use gpui_component::sidebar::{Sidebar, SidebarCollapsible, SidebarItem};
 use gpui_component::theme::{Theme, ThemeMode};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
