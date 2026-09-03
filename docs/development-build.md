@@ -38,6 +38,10 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，但 Pane 的 cwd 只能靠进程探测。
 
+### `condr` 命令行
+
+`condr` 与 herdr 一样是 console 子系统程序：带参数时是普通 CLI，shell 会等待、能取到退出码和管道输出；不带参数时它以 `DETACHED_PROCESS` 重新拉起一个自己来跑 GUI，然后立刻返回，所以从 shell 输入 `condr` 提示符马上回来，GUI 进程本身不带控制台。从资源管理器双击时 Windows 会先给它分配一个控制台，它随即脱离并退出，会闪一下控制台窗口；Windows 11 24H2 起可用 manifest 的 `consoleAllocationPolicy=detached` 消除，尚未加入。`condr --foreground` 在当前控制台里直接跑 GUI，开发调试时用。
+
 ### Pane 内的环境变量
 
 Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径，TCP Server 为 `tcp://host:port`），并把 `condr-server` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
