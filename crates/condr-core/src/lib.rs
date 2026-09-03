@@ -7,8 +7,9 @@ mod snapshot;
 mod terminal;
 
 pub use agent::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, classify_agent,
-    identify_agent_process,
+    AgentDetection, AgentDetector, AgentDisplayState, AgentKind, AgentPublish, AgentSnapshot,
+    AgentState, AgentTracker, DetectionInput, ProcessInfo, ProcessProbeResult, detect_agent,
+    identify_agent_among, identify_agent_process,
 };
 pub use git::{
     GitError, GitHeadFingerprint, GitRepository, create_worktree, default_worktree_root,

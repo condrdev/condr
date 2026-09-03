@@ -12,9 +12,11 @@ alacritty_terminal.workspace = true
 bincode.workspace = true
 dirs.workspace = true
 portable-pty.workspace = true
+regex.workspace = true
 serde.workspace = true
 smol_str.workspace = true
 sysinfo.workspace = true
+toml.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 filedescriptor.workspace = true

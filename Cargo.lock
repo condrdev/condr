@@ -1118,9 +1118,11 @@ dependencies = [
  "filedescriptor",
  "nix",
  "portable-pty",
+ "regex",
  "serde",
  "smol_str",
  "sysinfo",
+ "toml 1.1.4+spec-1.1.0",
 ]
 
 [[package]]

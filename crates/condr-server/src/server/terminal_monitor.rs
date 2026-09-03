@@ -117,10 +117,11 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
     });
 }
 
-/// Runs the agent, cwd, and Git probes for one Terminal off the frame path. Each nudge marks
-/// activity; agent scans are rate-limited to AGENT_SCAN_INTERVAL and Git scans go through
-/// `reserve_workspace_git_scan`, exactly as before, but a slow `git` or process enumeration
-/// now only delays the next probe, never a frame.
+/// Runs the agent, cwd, and Git probes for one Terminal off the frame path. The agent
+/// detector ticks on its own cadence (300 ms, 100 ms while it holds a transition) whether
+/// or not the terminal printed anything, since processes exit and titles change without
+/// output; nudges only feed the cwd and Git probes. A slow `git` or process enumeration
+/// delays the next probe, never a frame.
 fn probe_terminal(
     pane_id: PaneId,
     instance_id: u64,
@@ -130,38 +131,27 @@ fn probe_terminal(
     state: Arc<Mutex<RuntimeState>>,
 ) {
     thread::spawn(move || {
-        let mut last_agent_scan = Instant::now();
-        let mut agent_scan_pending = false;
+        let mut cwd_scan_pending = false;
         let mut git_scan_pending: Option<Instant> = None;
         loop {
-            let nudged = if agent_scan_pending || git_scan_pending.is_some() {
-                match activity.recv_timeout(AGENT_SCAN_INTERVAL) {
-                    Ok(()) => true,
-                    Err(mpsc::RecvTimeoutError::Timeout) => false,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            match activity.recv_timeout(agent_probe.poll_interval()) {
+                Ok(()) => {
+                    cwd_scan_pending = true;
+                    git_scan_pending = Some(Instant::now());
                 }
-            } else {
-                match activity.recv() {
-                    Ok(()) => true,
-                    Err(_) => break,
-                }
-            };
-            if nudged {
-                agent_scan_pending = true;
-                git_scan_pending = Some(Instant::now());
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
             let now = Instant::now();
-            if agent_scan_pending && now.duration_since(last_agent_scan) >= AGENT_SCAN_INTERVAL {
-                let previous = {
-                    let state = state.lock().expect("server state lock poisoned");
-                    if !state.terminal_is_current(pane_id, instance_id) {
-                        break;
-                    }
-                    state.agents.get(&pane_id).copied()
-                };
-                let next = agent_probe.snapshot(previous);
-                let cwd = cwd_probe.cwd();
+            let agent_update = agent_probe.poll();
+            let cwd = if cwd_scan_pending {
+                cwd_scan_pending = false;
+                cwd_probe.cwd()
+            } else {
+                None
+            };
+            if agent_update.is_some() || cwd.is_some() {
                 let mut state = state.lock().expect("server state lock poisoned");
                 if !state.terminal_is_current(pane_id, instance_id) {
                     break;
@@ -169,9 +159,9 @@ fn probe_terminal(
                 if let Some(cwd) = cwd {
                     state.record_terminal_cwds([(pane_id, cwd)]);
                 }
-                apply_agent_refresh(&mut state, pane_id, next);
-                last_agent_scan = now;
-                agent_scan_pending = false;
+                if let Some(next) = agent_update {
+                    apply_agent_refresh(&mut state, pane_id, next);
+                }
             }
             if let Some(activity_at) = git_scan_pending {
                 let scan = {

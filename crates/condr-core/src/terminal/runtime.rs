@@ -176,19 +176,21 @@ impl TerminalRuntime {
         let reader_revision = Arc::clone(&revision);
         let reader_updates = update_sender.clone();
         let reader_reported_cwd = Arc::clone(&reported_cwd);
+        let reader_notices = Arc::clone(&notices);
         let reader_input = input.clone();
         let reader_thread = match thread::Builder::new()
             .name("condr-pty-reader".into())
             .spawn(move || {
-                read_loop(
+                read_loop(TerminalReadLoop {
                     reader,
-                    reader_terminal,
-                    reader_input,
+                    terminal: reader_terminal,
+                    input: reader_input,
                     pending_replies,
-                    reader_revision,
-                    reader_updates,
-                    reader_reported_cwd,
-                )
+                    revision: reader_revision,
+                    updates: reader_updates,
+                    reported_cwd: reader_reported_cwd,
+                    notices: reader_notices,
+                })
             }) {
             Ok(thread) => thread,
             Err(error) => {
@@ -640,11 +642,6 @@ impl TerminalRuntime {
         bottom_text(&terminal)
     }
 
-    pub fn agent_snapshot(&self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
-        let mut probe = self.agent_probe()?;
-        probe.snapshot(previous)
-    }
-
     pub fn agent_probe(&self) -> Option<TerminalAgentProbe> {
         self.master.as_ref()?;
         Some(TerminalAgentProbe {
@@ -652,7 +649,12 @@ impl TerminalRuntime {
             #[cfg(unix)]
             master: Arc::downgrade(self.master.as_ref().expect("checked Terminal PTY master")),
             process: self.process,
-            kind_checked_at: None,
+            notices: Arc::clone(&self.notices),
+            revision: Arc::clone(&self.revision),
+            detector: AgentDetector::new(),
+            screen_revision: None,
+            #[cfg(unix)]
+            last_foreground_group: None,
         })
     }
 
@@ -1100,48 +1102,114 @@ impl TerminalNoticeProbe {
     }
 }
 
-#[derive(Clone)]
+/// Drives agent detection for one Terminal: the process probe names the agent, the
+/// screen and OSC evidence classify it, and the [`AgentDetector`] decides what to
+/// publish. Poll it every [`TerminalAgentProbe::poll_interval`].
 pub struct TerminalAgentProbe {
     pub(super) terminal: Arc<Mutex<Terminal>>,
     #[cfg(unix)]
     master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
     pub(super) process: ProcessProbe,
-    /// When the process table last confirmed the current agent kind.
-    kind_checked_at: Option<Instant>,
+    notices: SharedTerminalNotices,
+    revision: Arc<AtomicU64>,
+    detector: AgentDetector,
+    /// The terminal revision the last screen read saw; unchanged means skip the read.
+    screen_revision: Option<u64>,
+    #[cfg(unix)]
+    last_foreground_group: Option<UnixPid>,
 }
 
 impl TerminalAgentProbe {
-    pub fn snapshot(&mut self, previous: Option<AgentSnapshot>) -> Option<AgentSnapshot> {
-        let recent = self
-            .kind_checked_at
-            .is_some_and(|checked| checked.elapsed() < AGENT_KIND_RECHECK_INTERVAL);
-        let kind = match previous.filter(|_| recent) {
-            Some(snapshot) => snapshot.kind,
-            None => {
-                let kind = self.lookup_kind();
-                self.kind_checked_at = kind.map(|_| Instant::now());
-                kind?
-            }
-        };
-        let previous = previous
-            .filter(|snapshot| snapshot.kind == kind)
-            .map_or(AgentState::Unknown, |snapshot| snapshot.state);
-        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        Some(AgentSnapshot {
-            kind,
-            state: classify_agent(kind, &bottom_text(&terminal), previous),
-        })
+    pub fn poll_interval(&self) -> Duration {
+        self.detector.poll_interval()
     }
 
-    fn lookup_kind(&self) -> Option<AgentKind> {
+    pub fn agent(&self) -> Option<AgentKind> {
+        self.detector.agent()
+    }
+
+    /// One detection tick. `Some(None)` means the agent left; `Some(Some(_))` is a new
+    /// snapshot to publish.
+    pub fn poll(&mut self) -> Option<Option<AgentSnapshot>> {
+        let now = Instant::now();
+        let (osc_title, osc_progress) = self.osc_evidence();
+        let foreground_changed = self.foreground_changed();
+        if self.detector.wants_process_probe(now, foreground_changed) {
+            let result = self.probe_process();
+            match self
+                .detector
+                .observe_process(result, &osc_title, &osc_progress, now)
+            {
+                AgentPublish::Nothing => {}
+                AgentPublish::Snapshot(snapshot) => {
+                    self.screen_revision = None;
+                    return Some(Some(snapshot));
+                }
+                AgentPublish::Cleared => return Some(None),
+            }
+        }
+        let revision = self.revision.load(Ordering::Acquire);
+        let screen_changed = self.screen_revision != Some(revision);
+        if !self.detector.wants_screen(screen_changed, now) {
+            return None;
+        }
+        let screen = {
+            let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+            bottom_text(&terminal)
+        };
+        self.screen_revision = Some(revision);
+        match self.detector.observe_screen(
+            DetectionInput {
+                screen: &screen,
+                osc_title: &osc_title,
+                osc_progress: &osc_progress,
+            },
+            now,
+        ) {
+            AgentPublish::Nothing => None,
+            AgentPublish::Snapshot(snapshot) => Some(Some(snapshot)),
+            AgentPublish::Cleared => Some(None),
+        }
+    }
+
+    fn osc_evidence(&self) -> (String, String) {
+        let notices = self.notices.lock().expect("terminal notices lock poisoned");
+        (
+            notices.title.clone().unwrap_or_default(),
+            notices.progress.clone().unwrap_or_default(),
+        )
+    }
+
+    /// A foreground group change (Unix) forces an early process probe, as herdr does.
+    fn foreground_changed(&mut self) -> bool {
         #[cfg(unix)]
         {
-            let master = self.master.upgrade()?;
-            self.process.agent_kind(&master)
+            let Some(master) = self.master.upgrade() else {
+                return false;
+            };
+            let group = self.process.foreground_group(&master);
+            let changed =
+                self.last_foreground_group.is_some() && group != self.last_foreground_group;
+            self.last_foreground_group = group;
+            changed
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
+    fn probe_process(&self) -> ProcessProbeResult {
+        #[cfg(unix)]
+        {
+            match self.master.upgrade() {
+                Some(master) => self.process.probe_agent(&master),
+                None => ProcessProbeResult::Unidentified,
+            }
         }
         #[cfg(windows)]
         {
-            self.process.agent_kind()
+            self.process.probe_agent()
         }
     }
 }

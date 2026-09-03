@@ -38,6 +38,10 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，但 Pane 的 cwd 只能靠进程探测。
 
+### Agent 状态检测规则
+
+Server 用内嵌的 TOML manifest（来自 herdr，`crates/condr-core/src/agent/manifests/`）判断 agent 的 idle / working / blocked。某个 agent 的规则不合适时，把修改后的 manifest 放到 `<config dir>/agent-detection/<id>.toml`（`id` 如 `claude`、`codex`），Server 启动时会用它替换内嵌版本；文件不合法时忽略并在 stderr 说明。
+
 ### GUI 是单实例
 
 GUI 启动时在 runtime 目录取一把 `condr-gui.lock` 独占文件锁；锁已被占用时第二个实例打印一行说明后直接退出，不会打开窗口。这条约束的存在理由是 Client 独占 `config.toml` 的读-改-写：两个 GUI 并发保存会互相丢键。锁在进程退出时释放，包括崩溃。

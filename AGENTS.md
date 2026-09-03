@@ -38,7 +38,7 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 - **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
 - **终端渲染:自研 GPUI element**(项目最大自研件)— gpui-component 无终端组件。
 - **布局:gpui-component 的 Dock** → 映射 workspace/tab/pane 模型。
-- **Agent 状态检测:** 从 terminal grid 提取底部纯文本快照,按 agent kind 启发式分类 idle/working/blocked/done(herdr 同款机制)。
+- **Agent 状态检测:** 移植 herdr 的实现:进程表识别 agent,底部屏幕文本 + OSC 标题/进度交给内嵌的 TOML manifest(`crates/condr-core/src/agent/manifests/`,与 herdr 上游逐字同步)按 priority/region 规则分类 idle/working/blocked,再经 herdr 同款迟滞(startup grace、Working→Idle 确认、6 次未命中)后发布;GUI 在此之上叠加 done。本地覆盖:`<config dir>/agent-detection/<id>.toml`。
 - **git worktree:shell out 调 `git`**,不引 git2。
 - **依赖:gpui 与 gpui-component 均为 git 依赖,锁定 rev**(gpui 不在 crates.io)。
 

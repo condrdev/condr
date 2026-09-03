@@ -252,17 +252,18 @@ fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
     drop(input_receiver);
     let (updates, update_receiver) = mpsc::channel();
 
-    let error = read_loop(
-        Box::new(io::Cursor::new(
+    let error = read_loop(TerminalReadLoop {
+        reader: Box::new(io::Cursor::new(
             b"\x1b]2;tail title\x07\x07\x1b]52;c;dGFpbCBjb3B5\x07\x1b[5n".to_vec(),
         )),
         terminal,
         input,
         pending_replies,
-        Arc::new(AtomicU64::new(0)),
+        revision: Arc::new(AtomicU64::new(0)),
         updates,
-        Arc::new(Mutex::new(ReportedCwd::default())),
-    )
+        reported_cwd: Arc::new(Mutex::new(ReportedCwd::default())),
+        notices: SharedTerminalNotices::default(),
+    })
     .unwrap_err();
 
     assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
@@ -724,11 +725,21 @@ fn osc_cwd_parser_handles_fragmented_st_and_bel_sequences() {
     let mut parser = OscCwdParser::default();
     let mut reported = Vec::new();
 
-    parser.advance(b"noise\x1b]9", |cwd| reported.push(cwd));
-    parser.advance(b";9;C:\\work space\x1b", |cwd| reported.push(cwd));
+    parser.advance(b"noise\x1b]9", |osc| {
+        if let OscNine::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
+    });
+    parser.advance(b";9;C:\\work space\x1b", |osc| {
+        if let OscNine::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
+    });
     assert!(reported.is_empty());
-    parser.advance(b"\\tail\x1b]9;9;\"D:\\quoted\"\x07", |cwd| {
-        reported.push(cwd)
+    parser.advance(b"\\tail\x1b]9;9;\"D:\\quoted\"\x07", |osc| {
+        if let OscNine::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
     });
 
     assert_eq!(
@@ -742,11 +753,32 @@ fn osc_cwd_parser_recovers_after_malformed_prefixes() {
     let mut parser = OscCwdParser::default();
     let mut reported = Vec::new();
 
-    parser.advance(b"\x1b]9;8;ignored\x07\x1b]9;9;/valid\x07", |cwd| {
-        reported.push(cwd)
+    parser.advance(b"\x1b]9;8;ignored\x07\x1b]9;9;/valid\x07", |osc| {
+        if let OscNine::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
     });
 
     assert_eq!(reported, [PathBuf::from("/valid")]);
+}
+
+#[test]
+fn osc_nine_parser_reports_progress_parameters_verbatim() {
+    let mut parser = OscCwdParser::default();
+    let mut reported = Vec::new();
+
+    parser.advance(
+        b"\x1b]9;4;3;0\x07\x1b]9;4;0\x1b\\\x1b]9;2;ignored\x07",
+        |osc| reported.push(osc),
+    );
+
+    assert_eq!(
+        reported,
+        [
+            OscNine::Progress("4;3;0".into()),
+            OscNine::Progress("4;0".into()),
+        ]
+    );
 }
 
 #[test]
@@ -764,11 +796,15 @@ fn parsed_cwd_reports_advance_the_observation_generation() {
     let reported = Mutex::new(ReportedCwd::default());
     let mut parser = OscCwdParser::default();
 
-    parser.advance(sequence.as_bytes(), |cwd| {
-        record_reported_cwd(&reported, cwd)
+    parser.advance(sequence.as_bytes(), |osc| {
+        if let OscNine::Cwd(cwd) = osc {
+            record_reported_cwd(&reported, cwd)
+        }
     });
-    parser.advance(sequence.as_bytes(), |cwd| {
-        record_reported_cwd(&reported, cwd)
+    parser.advance(sequence.as_bytes(), |osc| {
+        if let OscNine::Cwd(cwd) = osc {
+            record_reported_cwd(&reported, cwd)
+        }
     });
 
     assert_eq!(

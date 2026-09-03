@@ -332,6 +332,9 @@ pub(super) struct TerminalNotices {
     pub(super) title_changed: bool,
     pub(super) bells: u64,
     pub(super) clipboard: Option<String>,
+    /// The latest OSC 9;4 progress parameters (`"4;<state>;<percent>"`), as agent
+    /// manifests match them. Detection input only; not shown anywhere.
+    pub(super) progress: Option<String>,
 }
 
 pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;
@@ -699,15 +702,29 @@ impl Read for UnixPtyReader {
     }
 }
 
-pub(super) fn read_loop(
-    mut reader: Box<dyn Read + Send>,
-    terminal: Arc<Mutex<Terminal>>,
-    input: TerminalInput,
-    pending_replies: PendingTerminalReplies,
-    revision: Arc<AtomicU64>,
-    updates: mpsc::Sender<TerminalUpdate>,
-    reported_cwd: Arc<Mutex<ReportedCwd>>,
-) -> io::Result<()> {
+/// Everything the PTY reader thread owns.
+pub(super) struct TerminalReadLoop {
+    pub(super) reader: Box<dyn Read + Send>,
+    pub(super) terminal: Arc<Mutex<Terminal>>,
+    pub(super) input: TerminalInput,
+    pub(super) pending_replies: PendingTerminalReplies,
+    pub(super) revision: Arc<AtomicU64>,
+    pub(super) updates: mpsc::Sender<TerminalUpdate>,
+    pub(super) reported_cwd: Arc<Mutex<ReportedCwd>>,
+    pub(super) notices: SharedTerminalNotices,
+}
+
+pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
+    let TerminalReadLoop {
+        mut reader,
+        terminal,
+        input,
+        pending_replies,
+        revision,
+        updates,
+        reported_cwd,
+        notices,
+    } = io;
     let mut parser: Processor = Processor::new();
     let mut cwd_parser = OscCwdParser::default();
     let mut bytes = [0; 16 * 1024];
@@ -715,8 +732,14 @@ pub(super) fn read_loop(
         match reader.read(&mut bytes) {
             Ok(0) => break Ok(()),
             Ok(read) => {
-                cwd_parser.advance(&bytes[..read], |cwd| {
-                    record_reported_cwd(&reported_cwd, cwd);
+                cwd_parser.advance(&bytes[..read], |osc| match osc {
+                    OscNine::Cwd(cwd) => record_reported_cwd(&reported_cwd, cwd),
+                    OscNine::Progress(progress) => {
+                        notices
+                            .lock()
+                            .expect("terminal notices lock poisoned")
+                            .progress = Some(progress);
+                    }
                 });
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal_guard, &bytes[..read]);
@@ -760,10 +783,18 @@ pub(super) enum OscCwdState {
     DiscardEscape,
 }
 
-impl OscCwdParser {
-    const PREFIX: &'static [u8] = b"\x1b]9;9;";
+/// The OSC 9 payloads Condr reads: ConEmu-style `9;<cwd>` and progress `4;<state>;<n>`.
+/// vte does not parse OSC 9, so this scanner runs over the raw bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum OscNine {
+    Cwd(PathBuf),
+    Progress(String),
+}
 
-    pub(super) fn advance(&mut self, bytes: &[u8], mut report: impl FnMut(PathBuf)) {
+impl OscCwdParser {
+    const PREFIX: &'static [u8] = b"\x1b]9;";
+
+    pub(super) fn advance(&mut self, bytes: &[u8], mut report: impl FnMut(OscNine)) {
         for &byte in bytes {
             match self.state {
                 OscCwdState::Ground => {
@@ -836,13 +867,17 @@ impl OscCwdParser {
         }
     }
 
-    pub(super) fn finish(&mut self, report: &mut impl FnMut(PathBuf)) {
+    pub(super) fn finish(&mut self, report: &mut impl FnMut(OscNine)) {
         if let Ok(payload) = std::str::from_utf8(&self.payload) {
-            let payload = payload
-                .strip_prefix('"')
-                .and_then(|payload| payload.strip_suffix('"'))
-                .unwrap_or(payload);
-            report(PathBuf::from(payload));
+            if let Some(cwd) = payload.strip_prefix("9;") {
+                let cwd = cwd
+                    .strip_prefix('"')
+                    .and_then(|cwd| cwd.strip_suffix('"'))
+                    .unwrap_or(cwd);
+                report(OscNine::Cwd(PathBuf::from(cwd)));
+            } else if payload.starts_with("4;") || payload == "4" {
+                report(OscNine::Progress(payload.to_owned()));
+            }
         }
         self.reset();
     }

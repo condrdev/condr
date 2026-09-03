@@ -305,12 +305,13 @@ impl ProcessProbe {
             .or(leader_cwd)
     }
 
+    /// The foreground process group of the PTY, or the shell's own group.
     #[cfg(unix)]
-    pub(super) fn agent_kind(
+    pub(super) fn foreground_group(
         &self,
         master: &Mutex<Box<dyn MasterPty + Send>>,
-    ) -> Option<AgentKind> {
-        let foreground_group = master
+    ) -> Option<UnixPid> {
+        master
             .lock()
             .expect("PTY master lock poisoned")
             .process_group_leader()
@@ -318,11 +319,35 @@ impl ProcessProbe {
             .or_else(|| {
                 let shell_pid = i32::try_from(self.shell_pid?).ok()?;
                 getpgid(Some(UnixPid::from_raw(shell_pid))).ok()
-            })?;
+            })
+    }
+
+    /// Identifies the agent in the PTY's foreground job, the way herdr does: the group
+    /// leader first, then the best-scoring member. A foreground group that is the
+    /// shell itself means whatever ran here has exited.
+    #[cfg(unix)]
+    pub(super) fn probe_agent(
+        &self,
+        master: &Mutex<Box<dyn MasterPty + Send>>,
+    ) -> ProcessProbeResult {
+        let Some(foreground_group) = self.foreground_group(master) else {
+            return ProcessProbeResult::Unidentified;
+        };
+        if self
+            .shell_pid
+            .is_some_and(|shell| i64::from(shell) == i64::from(foreground_group.as_raw()))
+        {
+            return ProcessProbeResult::ShellOnly;
+        }
         let mut processes = process_snapshot();
         // Phase one is the cheap table (no command lines); phase two reads command lines for
         // the foreground group only, leader first.
-        let leader = Pid::from_u32(u32::try_from(foreground_group.as_raw()).ok()?);
+        let Some(leader) = u32::try_from(foreground_group.as_raw())
+            .ok()
+            .map(Pid::from_u32)
+        else {
+            return ProcessProbeResult::Unidentified;
+        };
         let mut members = vec![leader];
         members.extend(processes.system.processes().keys().copied().filter(|pid| {
             *pid != leader
@@ -332,18 +357,35 @@ impl ProcessProbe {
                     == Some(foreground_group)
         }));
         let system = processes.with_command_lines(&members);
-        members.iter().find_map(|pid| {
-            let process = system.process(*pid)?;
-            identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
-        })
+        if let Some(agent) = system.process(leader).and_then(identify_process) {
+            return ProcessProbeResult::Agent(agent);
+        }
+        let candidates = members
+            .iter()
+            .filter_map(|pid| system.process(*pid))
+            .map(CandidateProcess::new)
+            .collect::<Vec<_>>();
+        crate::agent::identify_agent_among(candidates.iter().map(CandidateProcess::info))
+            .map_or(ProcessProbeResult::Unidentified, ProcessProbeResult::Agent)
     }
 
+    /// Identifies the agent among the shell's descendants. Windows has no foreground
+    /// group, so the topmost identified process in the tree stands in for the leader;
+    /// a shell with no descendants at all means the agent has exited.
     #[cfg(windows)]
-    pub(super) fn agent_kind(&self) -> Option<AgentKind> {
-        let shell_pid = Pid::from_u32(self.shell_pid?);
+    pub(super) fn probe_agent(&self) -> ProcessProbeResult {
+        let (Some(shell_pid), Some(shell_started_at)) = (self.shell_pid, self.shell_started_at)
+        else {
+            return ProcessProbeResult::Unidentified;
+        };
+        let shell_pid = Pid::from_u32(shell_pid);
         let mut processes = process_snapshot();
-        if processes.system.process(shell_pid)?.start_time() != self.shell_started_at? {
-            return None;
+        if processes
+            .system
+            .process(shell_pid)
+            .is_none_or(|shell| shell.start_time() != shell_started_at)
+        {
+            return ProcessProbeResult::Unidentified;
         }
         // Phase one is the cheap table (names and parents); command lines, the expensive part
         // on Windows, are read only for the shell's descendants.
@@ -352,20 +394,25 @@ impl ProcessProbe {
             .processes()
             .keys()
             .copied()
-            .filter(|pid| descendant_depth(&processes.system, *pid, shell_pid).is_some())
+            .filter(|pid| {
+                *pid != shell_pid && descendant_depth(&processes.system, *pid, shell_pid).is_some()
+            })
             .collect::<Vec<_>>();
+        if descendants.is_empty() {
+            return ProcessProbeResult::ShellOnly;
+        }
         let system = processes.with_command_lines(&descendants);
         let candidates = descendants
             .iter()
             .filter_map(|pid| {
                 let process = system.process(*pid)?;
-                identify_process(process.name().to_string_lossy().as_ref(), process.cmd())
-                    .map(|kind| (*pid, kind))
+                identify_process(process).map(|kind| (*pid, kind))
             })
             .collect::<Vec<_>>();
         root_agent(&candidates, |ancestor, descendant| {
             descendant_depth(system, descendant, ancestor).is_some()
         })
+        .map_or(ProcessProbeResult::Unidentified, ProcessProbeResult::Agent)
     }
 }
 
@@ -440,12 +487,34 @@ pub(super) fn process_cwd_with_identity(pid: Pid, started_at: u64) -> Option<Pat
         .and_then(existing_absolute_directory)
 }
 
-pub(super) fn identify_process(name: &str, argv: &[std::ffi::OsString]) -> Option<AgentKind> {
-    let argv = argv
-        .iter()
-        .map(|argument| argument.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    identify_agent_process(name, &argv)
+/// A process table row in the shape the identifier reads.
+pub(super) struct CandidateProcess {
+    name: String,
+    argv: Vec<String>,
+}
+
+impl CandidateProcess {
+    fn new(process: &sysinfo::Process) -> Self {
+        Self {
+            name: process.name().to_string_lossy().into_owned(),
+            argv: process
+                .cmd()
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect(),
+        }
+    }
+
+    fn info(&self) -> ProcessInfo<'_> {
+        ProcessInfo {
+            name: &self.name,
+            argv: (!self.argv.is_empty()).then_some(self.argv.as_slice()),
+        }
+    }
+}
+
+pub(super) fn identify_process(process: &sysinfo::Process) -> Option<AgentKind> {
+    identify_agent_process(CandidateProcess::new(process).info())
 }
 
 pub(super) fn descendant_depth(system: &System, mut pid: Pid, ancestor: Pid) -> Option<usize> {
