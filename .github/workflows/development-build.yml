@@ -72,6 +72,12 @@ jobs:
         run: cargo build --release --locked -p condr -p condr-server
       - name: Smoke test server
         run: target\release\condr-server.exe --help
+      - name: Smoke test CLI shim
+        shell: pwsh
+        run: |
+          Copy-Item "target\release\condr-shim.exe" "target\release\condr.com"
+          target\release\condr.com --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Package GUI and server
         shell: pwsh
         run: |
@@ -80,6 +86,7 @@ jobs:
           $stage = Join-Path "dist" "condr"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "target\release\condr.exe" $stage
+          Copy-Item "target\release\condr.com" $stage
           Copy-Item "target\release\condr-server.exe" $stage
           Copy-Item "LICENSE" $stage
           Set-Content -Encoding ascii -Path (Join-Path $stage "BUILD-COMMIT") -Value $env:GITHUB_SHA

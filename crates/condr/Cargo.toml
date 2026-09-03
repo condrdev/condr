@@ -11,6 +11,10 @@ publish = false
 name = "condr"
 path = "src/main.rs"
 
+[[bin]]
+name = "condr-shim"
+path = "src/shim.rs"
+
 [features]
 test-support = ["gpui/test-support"]
 

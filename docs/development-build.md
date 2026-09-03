@@ -40,7 +40,7 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 
 ### `condr` 命令行
 
-`condr` 在三个平台上都是同一个二进制：不带参数启动 GUI，带参数是 CLI（目前只有 `--help`、`--version`，#27 的子命令陆续加入）。Linux / macOS 无特殊处理。Windows 上它是 GUI 子系统程序，双击不会出现控制台；CLI 模式先 `AttachConsole` 到父 shell 的控制台再输出，所以 Git Bash、脚本和捕获输出的 agent 都正常；只有在 cmd 或交互式 PowerShell 里直接敲，shell 不会等待它：输出可能出现在提示符之后，`$LASTEXITCODE` 不可靠。
+`condr` 在三个平台上都是同一个二进制：不带参数启动 GUI，带参数是 CLI（目前只有 `--help`、`--version`，#27 的子命令陆续加入）。Linux / macOS 无特殊处理。Windows 上它是 GUI 子系统程序，双击不会出现控制台；CLI 模式先 `AttachConsole` 到父 shell 的控制台再输出，所以 Git Bash、脚本和捕获输出的 agent 都正常；cmd 和交互式 PowerShell 不等待 GUI 子系统进程，所以 Windows bundle 里还有一个 console 子系统的壳 `condr.com`：`PATHEXT` 里 `.com` 排在 `.exe` 前，shell 里敲 `condr` 命中它，它以相同参数运行 `condr.exe`、等待并转发退出码；不带参数时只拉起 GUI 就返回。双击和快捷方式仍直接打开 `condr.exe`。本地开发时 Cargo 产出的是 `condr-shim.exe`，需要 `Copy-Item targetdebugndr-shim.exe targetdebugndr.com`。
 
 ### Pane 内的环境变量
 
@@ -77,7 +77,7 @@ $archive = Get-ChildItem .\condr-download\condr-windows-x86_64-*.zip | Select-Ob
 Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
 ```
 
-运行 `condr-dev\condr\condr.exe`。它只启动 GUI，不承载命令行接口。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。需要显式管理 Server 时，使用同目录下的 `condr-server.exe start|status|stop|run`。
+运行 `condr-dev\condr\condr.exe` 启动 GUI；在 shell 里用 `condr-dev\condr\condr.com --help` 走命令行。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。需要显式管理 Server 时，使用同目录下的 `condr-server.exe start|status|stop|run`。
 
 更新前先运行 `condr-server.exe stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
