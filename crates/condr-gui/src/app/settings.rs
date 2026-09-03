@@ -340,7 +340,7 @@ pub(super) struct SettingsWindow {
     licenses: Entity<EditorState>,
 }
 
-/// The two halves of Settings, like paseo's app / host split.
+/// The two halves of Settings: this Client's own preferences and one Server's.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum SettingsTab {
     #[default]
@@ -872,7 +872,7 @@ fn appearance_page(
 }
 
 /// Preferences a Server owns, edited for one connection at a time. Only the shell so
-/// far; the Server picker is the first item, as paseo's host settings do.
+/// far; the Server picker sits in the tab bar.
 fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
     let shell_get = settings.clone();
     let shell_set = settings.clone();

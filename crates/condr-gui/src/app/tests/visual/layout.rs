@@ -262,7 +262,10 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         .debug_bounds(workspace_toggle_selector)
         .expect("a Workspace without Agents should retain its disclosure control");
     let empty_workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
-    assert!(empty_workspace_toggle.right() <= empty_workspace_icon.left());
+    assert!(
+        empty_workspace_toggle.contains(&empty_workspace_icon.center()),
+        "the disclosure control shares the icon's slot and shows on hover"
+    );
     window.simulate_click(empty_workspace_toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
@@ -297,7 +300,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
     let workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
     let workspace_label = window.debug_bounds(workspace_label_selector).unwrap();
-    assert!(workspace_toggle.right() <= workspace_icon.left());
+    assert!(workspace_toggle.contains(&workspace_icon.center()));
     assert!(workspace_icon.right() <= workspace_label.left());
     assert!(
         (workspace_icon.left() - empty_workspace_icon.left()).abs() <= px(1.),

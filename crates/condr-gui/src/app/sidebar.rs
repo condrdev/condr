@@ -2,7 +2,6 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SidebarIconTone {
-    Default,
     Muted,
     Success,
     Warning,
@@ -12,7 +11,6 @@ pub(super) enum SidebarIconTone {
 impl SidebarIconTone {
     pub(super) fn color(self, cx: &App) -> Hsla {
         match self {
-            Self::Default => cx.theme().sidebar_foreground,
             Self::Muted => cx.theme().muted_foreground,
             Self::Success => cx.theme().success,
             Self::Warning => cx.theme().warning,
@@ -42,7 +40,6 @@ impl IconNamed for CondrIconName {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SidebarGlyph {
-    Folder,
     Info,
     Circle,
     LoaderCircle,
@@ -53,7 +50,6 @@ pub(super) enum SidebarGlyph {
 impl SidebarGlyph {
     pub(super) fn icon(self) -> Icon {
         match self {
-            Self::Folder => Icon::new(IconName::Folder),
             Self::Info => Icon::new(IconName::Info),
             Self::Circle => Icon::new(CondrIconName::Circle),
             Self::LoaderCircle => Icon::new(IconName::LoaderCircle),
@@ -114,19 +110,65 @@ pub(super) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVis
     }
 }
 
+/// Identity palette: muted fills that all land in one contrast band under a
+/// white letter, so a Workspace's color identifies it without ranking it. The order
+/// is load-bearing: the hash indexes into it.
+const IDENTITY_COLORS: [u32; 10] = [
+    0x7a6aa8, // violet
+    0x3d7ea6, // sky
+    0x388068, // emerald
+    0xa4673a, // orange
+    0xb05c80, // pink
+    0x6a70b8, // indigo
+    0x368080, // teal
+    0xb06260, // red
+    0x8f7838, // amber
+    0x5179b0, // blue
+];
+
+/// A stable color for `key`: `hash * 31 + char` indexes the identity palette.
+pub(super) fn identity_color(key: &str) -> Hsla {
+    let hash = key.chars().fold(0u32, |hash, character| {
+        hash.wrapping_mul(31).wrapping_add(character as u32)
+    });
+    rgb(IDENTITY_COLORS[hash as usize % IDENTITY_COLORS.len()]).into()
+}
+
+/// The letter on a Workspace avatar: the first character of the name, upper-cased.
+pub(super) fn avatar_initial(name: &str) -> SharedString {
+    name.trim()
+        .chars()
+        .next()
+        .map(|character| character.to_uppercase().collect::<String>())
+        .unwrap_or_default()
+        .into()
+}
+
+#[derive(Clone)]
+enum SidebarIconGraphic {
+    Glyph(SidebarGlyph, SidebarIconTone),
+    /// A colored square with an initial.
+    Avatar {
+        initial: SharedString,
+        color: Hsla,
+    },
+}
+
 #[derive(Clone)]
 pub(super) struct CondrSidebarIcon {
-    glyph: SidebarGlyph,
-    tone: SidebarIconTone,
+    graphic: SidebarIconGraphic,
     selector: SharedString,
     tooltip: Option<SharedString>,
 }
 
 impl CondrSidebarIcon {
-    pub(super) fn new(glyph: SidebarGlyph, selector: impl Into<SharedString>) -> Self {
+    /// `key` picks the color and should outlive renames (a Workspace's root path).
+    pub(super) fn avatar(name: &str, key: &str, selector: impl Into<SharedString>) -> Self {
         Self {
-            glyph,
-            tone: SidebarIconTone::Default,
+            graphic: SidebarIconGraphic::Avatar {
+                initial: avatar_initial(name),
+                color: identity_color(key),
+            },
             selector: selector.into(),
             tooltip: None,
         }
@@ -138,21 +180,32 @@ impl CondrSidebarIcon {
         tooltip: impl Into<SharedString>,
     ) -> Self {
         Self {
-            glyph: visual.glyph,
-            tone: visual.tone,
+            graphic: SidebarIconGraphic::Glyph(visual.glyph, visual.tone),
             selector: selector.into(),
             tooltip: Some(tooltip.into()),
         }
     }
 
     pub(super) fn render(self, cx: &mut App) -> AnyElement {
-        let color = self.tone.color(cx);
-        let graphic = self
-            .glyph
-            .icon()
-            .size_4()
-            .text_color(color)
-            .into_any_element();
+        let graphic = match self.graphic {
+            SidebarIconGraphic::Glyph(glyph, tone) => glyph
+                .icon()
+                .size_4()
+                .text_color(tone.color(cx))
+                .into_any_element(),
+            SidebarIconGraphic::Avatar { initial, color } => div()
+                .size_4()
+                .rounded_sm()
+                .bg(color)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .font_medium()
+                .text_color(gpui::white())
+                .child(initial)
+                .into_any_element(),
+        };
         let id = self.selector.clone();
         let debug_selector = self.selector;
 
@@ -399,6 +452,10 @@ impl CondrSidebarTreeItem {
                     .bg(cx.theme().tokens.sidebar_accent)
                     .text_color(cx.theme().sidebar_accent_foreground)
             })
+            // Hover reveals the disclosure chevron over the icon and the actions menu over
+            // the trailing text; at rest the row is
+            // just icon, name and detail.
+            .group(id.clone())
             .when(reserve_toggle_space, |this| {
                 let toggle_debug_selector = toggle_selector
                     .clone()
@@ -420,15 +477,47 @@ impl CondrSidebarTreeItem {
                 let open_state = open_state
                     .clone()
                     .expect("tree parents always own disclosure state");
-                this.child(button.tooltip(toggle_tooltip).on_click(move |_, _, cx| {
+                let toggle = button.tooltip(toggle_tooltip).on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     open_state.update(cx, |open, cx| {
                         *open = !*open;
                         cx.notify();
                     });
-                }))
+                });
+                // The icon and the chevron share one slot; hovering the row swaps them.
+                this.child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .size_5()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when_some(icon.clone(), |this, icon| {
+                            this.child(
+                                div()
+                                    .group_hover(id.clone(), |style| style.opacity(0.))
+                                    .child(icon.render(cx)),
+                            )
+                        })
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .when(icon.is_some(), |this| {
+                                    this.opacity(0.)
+                                        .group_hover(id.clone(), |style| style.opacity(1.))
+                                })
+                                .child(toggle),
+                        ),
+                )
             })
-            .when_some(icon, |this, icon| this.child(icon.render(cx)))
+            .when_some(icon.filter(|_| !reserve_toggle_space), |this, icon| {
+                this.child(icon.render(cx))
+            })
             .child(
                 div()
                     .debug_selector(move || label_debug_selector.to_string())
@@ -437,14 +526,69 @@ impl CondrSidebarTreeItem {
                     .truncate()
                     .child(label),
             )
-            .when_some(suffix, |this, suffix| {
-                this.child(suffix(window, cx).into_any_element())
+            .when(suffix.is_some() || context_menu.is_some(), |this| {
+                let menu = context_menu.clone().map(|context_menu| {
+                    Button::new(format!("{id}-menu"))
+                        .debug_selector({
+                            let id = id.clone();
+                            move || format!("{id}-menu")
+                        })
+                        .xsmall()
+                        .ghost()
+                        .tab_stop(false)
+                        .icon(IconName::EllipsisVertical)
+                        .tooltip("Actions")
+                        .accessibility_label("Actions")
+                        .dropdown_menu(move |menu, window, cx| context_menu(menu, window, cx))
+                });
+                this.child(
+                    h_flex()
+                        .relative()
+                        .flex_none()
+                        .items_center()
+                        .when_some(suffix, |this, suffix| {
+                            this.child(
+                                div()
+                                    .when(menu.is_some(), |this| {
+                                        this.group_hover(id.clone(), |style| style.opacity(0.))
+                                    })
+                                    .child(suffix(window, cx).into_any_element()),
+                            )
+                        })
+                        .when_some(menu, |this, menu| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .right_0()
+                                    .top_0()
+                                    .bottom_0()
+                                    .flex()
+                                    .items_center()
+                                    .opacity(0.)
+                                    .group_hover(id.clone(), |style| style.opacity(1.))
+                                    .child(menu),
+                            )
+                        }),
+                )
             })
             .when(disabled, |this| {
                 this.text_color(cx.theme().muted_foreground)
             })
             .when(!disabled, |this| {
-                this.on_click(move |event, window, cx| handler(event, window, cx))
+                // A double click on a parent toggles it; a single click keeps selecting.
+                let toggle_state = open_state.clone();
+                this.on_click(move |event, window, cx| {
+                    if event.click_count() == 2
+                        && let Some(open_state) = &toggle_state
+                    {
+                        open_state.update(cx, |open, cx| {
+                            *open = !*open;
+                            cx.notify();
+                        });
+                        return;
+                    }
+                    handler(event, window, cx)
+                })
             })
             .when_some(drag, |this, drag| {
                 let name = drag.name.clone();
@@ -756,8 +900,9 @@ impl Condr {
                                 format!("workspace-label-{key}-{}", workspace_id.as_u64()),
                                 workspace_name.clone(),
                             )
-                            .icon(CondrSidebarIcon::new(
-                                SidebarGlyph::Folder,
+                            .icon(CondrSidebarIcon::avatar(
+                                &workspace_name,
+                                &workspace.root_directory().to_string_lossy(),
                                 format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
                             ))
                             .active(
@@ -1023,7 +1168,7 @@ impl Condr {
             .w_full()
             .children(items)
             // The app name lives in the title bar; the actions sit at the bottom right,
-            // the way paseo lays out its sidebar. Reconnect is the `ReconnectServer`
+            // Add Server left of Settings. Reconnect is the `ReconnectServer`
             // action; it has no button here.
             .footer(
                 h_flex()
