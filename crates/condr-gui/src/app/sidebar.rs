@@ -1030,7 +1030,6 @@ impl Condr {
                     .w_full()
                     .justify_end()
                     .gap_1()
-                    .p_2()
                     .child(
                         Button::new("add-server")
                             .debug_selector(|| "add-server".into())
