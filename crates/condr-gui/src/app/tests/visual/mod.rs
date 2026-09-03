@@ -37,10 +37,9 @@ use super::super::{
     terminal_font_family, terminal_font_size,
 };
 
-#[cfg(windows)]
+/// A ceiling, not an expected wait: the loops return as soon as the condition holds.
+/// Five seconds was not enough on Linux when the whole workspace runs in parallel.
 const TEST_TIMEOUT: Duration = Duration::from_secs(15);
-#[cfg(not(windows))]
-const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const TEST_POLL_INTERVAL: Duration = Duration::from_millis(2);
 static NEXT_TEST_SERVER_ID: AtomicU64 = AtomicU64::new(1);
 static VISUAL_TEST_LOCK: Mutex<()> = Mutex::new(());
