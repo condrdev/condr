@@ -36,11 +36,13 @@ struct ReportedMousePress {
 
 impl TerminalRuntime {
     /// Starts an interactive shell in `cwd`. `program` is the configured shell; `None`
-    /// or blank means the system default, see [`default_shell_program`].
+    /// or blank means the system default, see [`default_shell_program`]. `pane` tells
+    /// programs inside the shell which Server and Pane they run in.
     pub fn spawn_shell(
         cwd: impl AsRef<Path>,
         size: TerminalSize,
         program: Option<&str>,
+        pane: Option<&PaneEnvironment>,
     ) -> io::Result<Self> {
         let cwd = cwd.as_ref();
         let metadata = std::fs::metadata(cwd).map_err(|error| {
@@ -66,6 +68,9 @@ impl TerminalRuntime {
             .filter(|program| !program.is_empty())
             .map_or_else(default_shell_program, str::to_owned);
         let mut command = shell_command(&program);
+        if let Some(pane) = pane {
+            pane.apply(&mut command);
+        }
         command.cwd(cwd);
         Self::spawn(command, size)
     }
@@ -808,6 +813,51 @@ fn live_mouse_position(
     })
 }
 
+/// What a Pane's shell and everything it starts learn about their surroundings, as
+/// environment variables. herdr does the same with `HERDR_*`; a `condr` CLI or an agent
+/// hook running inside the Pane uses these to reach the Server and name its Pane.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaneEnvironment {
+    pub pane_id: PaneId,
+    /// The Server's endpoint as `CONDR_SOCKET_PATH`: a local socket or pipe path, or
+    /// `tcp://host:port`.
+    pub socket_path: String,
+}
+
+impl PaneEnvironment {
+    pub const ENV: &'static str = "CONDR_ENV";
+    pub const PANE_ID: &'static str = "CONDR_PANE_ID";
+    pub const SOCKET_PATH: &'static str = "CONDR_SOCKET_PATH";
+
+    /// Sets the `CONDR_*` variables and puts the directory holding this executable in
+    /// front of `PATH`, so a portable or `cargo run` build has `condr` on the Pane's PATH
+    /// without an install step.
+    pub fn apply(&self, command: &mut CommandBuilder) {
+        command.env(Self::ENV, "1");
+        command.env(Self::PANE_ID, self.pane_id.as_u64().to_string());
+        command.env(Self::SOCKET_PATH, &self.socket_path);
+        if let Some(path) = prepend_executable_directory(
+            command
+                .get_env("PATH")
+                .map(ToOwned::to_owned)
+                .or_else(|| std::env::var_os("PATH")),
+        ) {
+            command.env("PATH", path);
+        }
+    }
+}
+
+fn prepend_executable_directory(path: Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
+    let directory = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let rest = path.unwrap_or_default();
+    let mut entries = vec![directory.clone()];
+    entries.extend(
+        std::env::split_paths(&rest)
+            .filter(|entry| !entry.as_os_str().is_empty() && *entry != directory),
+    );
+    std::env::join_paths(entries).ok()
+}
+
 /// The shell a terminal runs when none is configured: `$SHELL`, then the password
 /// database, on Unix (as herdr and Zed do); on Windows PowerShell 7 when installed,
 /// else Windows PowerShell, else `%ComSpec%`, in Zed's order.
@@ -918,6 +968,30 @@ mod shell_tests {
             assert_eq!(argv.last().unwrap(), WINDOWS_POWERSHELL_CWD_HOOK);
         }
         assert_eq!(shell_command("cmd.exe").get_argv(), &["cmd.exe"]);
+    }
+
+    #[test]
+    fn the_pane_environment_names_the_server_and_pane_and_leads_path() {
+        let mut command = CommandBuilder::new("sh");
+        command.env("PATH", "/usr/bin");
+        PaneEnvironment {
+            pane_id: PaneId::from_u64(42),
+            socket_path: "/run/condr.sock".into(),
+        }
+        .apply(&mut command);
+        assert_eq!(command.get_env("CONDR_ENV").unwrap(), "1");
+        assert_eq!(command.get_env("CONDR_PANE_ID").unwrap(), "42");
+        assert_eq!(
+            command.get_env("CONDR_SOCKET_PATH").unwrap(),
+            "/run/condr.sock"
+        );
+        let path = command.get_env("PATH").unwrap().to_owned();
+        let mut entries = std::env::split_paths(&path);
+        assert_eq!(
+            entries.next().as_deref(),
+            std::env::current_exe().unwrap().parent()
+        );
+        assert_eq!(entries.next().as_deref(), Some(Path::new("/usr/bin")));
     }
 
     #[test]

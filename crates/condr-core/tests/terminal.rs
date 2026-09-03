@@ -6,7 +6,9 @@ use condr_core::{
     TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
     TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
 };
-use condr_core::{CommandBuilder, TerminalCommand, TerminalRuntime, TerminalSize};
+use condr_core::{
+    CommandBuilder, PaneEnvironment, PaneId, TerminalCommand, TerminalRuntime, TerminalSize,
+};
 #[cfg(target_os = "windows")]
 use sysinfo::{Pid, System};
 
@@ -22,7 +24,8 @@ fn shell_spawn_rejects_a_missing_working_directory() {
     ));
     assert!(!missing.exists());
 
-    let error = match TerminalRuntime::spawn_shell(&missing, TerminalSize::new(24, 80), None) {
+    let error = match TerminalRuntime::spawn_shell(&missing, TerminalSize::new(24, 80), None, None)
+    {
         Ok(_) => panic!("a missing cwd must not start a shell elsewhere"),
         Err(error) => error,
     };
@@ -44,7 +47,8 @@ fn runtime_cwd_follows_a_real_shell_directory_change() {
     std::fs::create_dir_all(&target).unwrap();
     let expected_root = root.canonicalize().unwrap();
     let expected_target = target.canonicalize().unwrap();
-    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60), None).unwrap();
+    let mut runtime =
+        TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60), None, None).unwrap();
     let cwd_probe = runtime.cwd_probe();
 
     wait_for_cwd(|| cwd_probe.cwd(), &expected_root);
@@ -57,6 +61,34 @@ fn runtime_cwd_follows_a_real_shell_directory_change() {
 
     runtime.shutdown().unwrap();
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn pane_shell_sees_its_condr_environment() {
+    let pane = PaneEnvironment {
+        pane_id: PaneId::from_u64(7),
+        socket_path: "sock-here".into(),
+    };
+    let mut runtime = TerminalRuntime::spawn_shell(
+        std::env::temp_dir(),
+        TerminalSize::new(8, 80),
+        None,
+        Some(&pane),
+    )
+    .unwrap();
+    #[cfg(target_os = "windows")]
+    wait_for_terminal_output(&runtime);
+    #[cfg(target_os = "linux")]
+    let command =
+        "printf 'env=%s/%s/%s\\n' \"$CONDR_ENV\" \"$CONDR_PANE_ID\" \"$CONDR_SOCKET_PATH\"\r";
+    #[cfg(target_os = "windows")]
+    let command = "Write-Host \"env=$env:CONDR_ENV/$env:CONDR_PANE_ID/$env:CONDR_SOCKET_PATH\"\r";
+    runtime
+        .execute(TerminalCommand::Text(command.into()))
+        .unwrap();
+    wait_for_text(&runtime, "env=1/7/sock-here");
+    runtime.shutdown().unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -83,7 +115,8 @@ fn bash_shell_reports_the_final_cwd_before_normal_exit() {
     let target = root.join("final");
     std::fs::create_dir_all(&target).unwrap();
     let expected_target = target.canonicalize().unwrap();
-    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60), None).unwrap();
+    let mut runtime =
+        TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60), None, None).unwrap();
     let cwd_probe = runtime.cwd_probe();
     runtime
         .execute(TerminalCommand::Text(format!(

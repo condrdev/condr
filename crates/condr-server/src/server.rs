@@ -14,11 +14,12 @@ use condr_core::protocol::{
     WorkspaceGitSnapshot, check_version, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
-    AgentSnapshot, GitHeadFingerprint, GitRepository, PaneId, Session, TerminalAgentProbe,
-    TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget, TerminalNoticeBatch,
-    TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView,
-    TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, default_worktree_root,
-    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
+    AgentSnapshot, GitHeadFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
+    TerminalAgentProbe, TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget,
+    TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate,
+    TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree,
+    default_worktree_root, discover_repository, open_worktree, remove_worktree,
+    validate_worktree_removal,
 };
 
 use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};
@@ -603,6 +604,29 @@ struct RuntimeState {
     persistence: Option<SnapshotPersistence>,
     settings: ServerSettings,
     config_path: Option<PathBuf>,
+    /// This Server's endpoint as Panes see it in `CONDR_SOCKET_PATH`.
+    socket_path: String,
+}
+
+/// What every new shell is started with: the configured program plus the Server identity
+/// its Pane environment carries. Cloned out of the state for spawns that run unlocked.
+#[derive(Clone, Debug, Default)]
+pub(super) struct ShellLaunch {
+    shell: String,
+    socket_path: String,
+}
+
+impl ShellLaunch {
+    pub(super) fn shell(&self) -> Option<&str> {
+        Some(self.shell.as_str())
+    }
+
+    pub(super) fn pane_environment(&self, pane_id: PaneId) -> PaneEnvironment {
+        PaneEnvironment {
+            pane_id,
+            socket_path: self.socket_path.clone(),
+        }
+    }
 }
 
 struct ClientSubscriber {
@@ -727,6 +751,7 @@ impl RuntimeState {
             None,
             ServerSettings::default(),
             None,
+            String::new(),
         )
     }
 
@@ -736,6 +761,7 @@ impl RuntimeState {
         persistence: Option<SnapshotPersistence>,
         settings: ServerSettings,
         config_path: Option<PathBuf>,
+        socket_path: String,
     ) -> Self {
         Self {
             server_id: ServerId(stable_endpoint_id(endpoint)),
@@ -763,6 +789,14 @@ impl RuntimeState {
             persistence,
             settings,
             config_path,
+            socket_path,
+        }
+    }
+
+    pub(super) fn shell_launch(&self) -> ShellLaunch {
+        ShellLaunch {
+            shell: self.settings.shell.clone(),
+            socket_path: self.socket_path.clone(),
         }
     }
 
@@ -819,6 +853,10 @@ impl RuntimeState {
         let settings = ServerSettings {
             shell: load_shell(config_path.as_deref()),
             default_shell: condr_core::default_shell_program(),
+        };
+        let launch = ShellLaunch {
+            shell: settings.shell.clone(),
+            socket_path: endpoint.env_value(),
         };
         let persistence = snapshot_path.map(SnapshotPersistence::open).transpose()?;
         let mut session = Session::new();
@@ -883,7 +921,8 @@ impl RuntimeState {
             let started = match TerminalRuntime::spawn_shell(
                 requested_cwd,
                 TerminalSize::new(24, 80),
-                Some(settings.shell.as_str()),
+                launch.shell(),
+                Some(&launch.pane_environment(pane_id)),
             ) {
                 Ok(runtime) => Some((runtime, requested_cwd.to_path_buf())),
                 Err(error) if requested_cwd != workspace_root.as_path() => {
@@ -896,7 +935,8 @@ impl RuntimeState {
                     match TerminalRuntime::spawn_shell(
                         &workspace_root,
                         TerminalSize::new(24, 80),
-                        Some(settings.shell.as_str()),
+                        launch.shell(),
+                        Some(&launch.pane_environment(pane_id)),
                     ) {
                         Ok(runtime) => Some((runtime, workspace_root)),
                         Err(fallback_error) => {
@@ -938,7 +978,14 @@ impl RuntimeState {
                 .expect("restored Pane remains until it is pruned");
         }
 
-        let mut state = Self::with_session(endpoint, session, persistence, settings, config_path);
+        let mut state = Self::with_session(
+            endpoint,
+            session,
+            persistence,
+            settings,
+            config_path,
+            endpoint.env_value(),
+        );
         let workspace_roots = state
             .session
             .workspaces()

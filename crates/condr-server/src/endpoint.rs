@@ -67,6 +67,15 @@ impl Endpoint {
         }
     }
 
+    /// The value a Pane's `CONDR_SOCKET_PATH` carries: the socket or pipe path, or
+    /// `tcp://host:port` for a TCP Server.
+    pub fn env_value(&self) -> String {
+        match self {
+            Self::Local(path) => path.to_string_lossy().into_owned(),
+            Self::Tcp(address) => format!("tcp://{address}"),
+        }
+    }
+
     pub fn as_local_path(&self) -> Option<&Path> {
         match self {
             Self::Local(path) => Some(path),

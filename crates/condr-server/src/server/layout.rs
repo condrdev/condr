@@ -43,8 +43,6 @@ pub(super) enum PreparedExternalLayout {
         parent_root: PathBuf,
         parent: GitRepository,
         child: GitRepository,
-        runtime: Box<TerminalRuntime>,
-        updates: mpsc::Receiver<TerminalUpdate>,
     },
     OpenWorktree {
         parent_workspace_id: WorkspaceId,
@@ -129,7 +127,6 @@ pub(super) fn external_layout_plan(
 
 pub(super) fn prepare_external_layout(
     plan: ExternalLayoutPlan,
-    shell: Option<&str>,
 ) -> Result<PreparedExternalLayout, String> {
     match plan {
         ExternalLayoutPlan::CreateWorkspace { root } => {
@@ -150,31 +147,13 @@ pub(super) fn prepare_external_layout(
                 .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
             let child = create_worktree(&parent, &branch, &worktree_root)
                 .map_err(|error| error.to_string())?;
-            let mut runtime = match TerminalRuntime::spawn_shell(
-                child.root(),
-                TerminalSize::new(24, 80),
-                shell,
-            ) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    return match remove_worktree(&parent, &child) {
-                        Ok(()) => Err(format!("failed to start terminal: {error}")),
-                        Err(cleanup_error) => Err(format!(
-                            "failed to start terminal: {error}; failed to remove the prepared worktree: {cleanup_error}"
-                        )),
-                    };
-                }
-            };
-            let updates = runtime
-                .take_updates()
-                .expect("new Terminal update receiver exists");
+            // The shell starts in `apply_prepared_external_layout`, once the Pane exists
+            // and its id can go into the shell's environment.
             Ok(PreparedExternalLayout::CreateWorktree {
                 parent_workspace_id,
                 parent_root,
                 parent,
                 child,
-                runtime: Box::new(runtime),
-                updates,
             })
         }
         ExternalLayoutPlan::OpenWorktree {
@@ -316,7 +295,7 @@ pub(super) struct ExternalLayoutFinishError {
 
 pub(super) fn finish_external_layout(
     prepared: PreparedExternalLayout,
-    shell: Option<&str>,
+    launch: &ShellLaunch,
 ) -> Result<PreparedExternalLayout, ExternalLayoutFinishError> {
     match prepared {
         PreparedExternalLayout::RemoveWorktreeReady {
@@ -355,7 +334,12 @@ pub(super) fn finish_external_layout(
                     let mut restart_errors = Vec::new();
                     for spec in restart_specs {
                         let cwd = final_cwds.get(&spec.pane_id).cloned().unwrap_or(spec.cwd);
-                        match TerminalRuntime::spawn_shell(&cwd, spec.size, shell) {
+                        match TerminalRuntime::spawn_shell(
+                            &cwd,
+                            spec.size,
+                            launch.shell(),
+                            Some(&launch.pane_environment(spec.pane_id)),
+                        ) {
                             Ok(mut runtime) => {
                                 let updates = runtime
                                     .take_updates()
@@ -404,16 +388,7 @@ pub(super) fn finish_external_layout(
 pub(super) fn cancel_prepared_external_layout(
     prepared: PreparedExternalLayout,
 ) -> Result<(), String> {
-    if let PreparedExternalLayout::CreateWorktree {
-        parent,
-        child,
-        runtime,
-        updates,
-        ..
-    } = prepared
-    {
-        drop(updates);
-        drop(runtime);
+    if let PreparedExternalLayout::CreateWorktree { parent, child, .. } = prepared {
         remove_worktree(&parent, &child).map_err(|error| {
             format!("failed to remove the prepared worktree during rollback: {error}")
         })?;
@@ -604,10 +579,12 @@ pub(super) fn apply_layout_command(
             .pane(pane_id)
             .and_then(|pane| pane.cwd())
             .ok_or_else(|| "new Pane has no working directory".to_string())?;
+        let launch = state.shell_launch();
         let mut runtime = TerminalRuntime::spawn_shell(
             cwd,
             TerminalSize::new(24, 80),
-            Some(state.settings.shell.as_str()),
+            launch.shell(),
+            Some(&launch.pane_environment(pane_id)),
         )
         .map_err(|error| format!("failed to start terminal: {error}"))?;
         let updates = runtime
@@ -698,16 +675,12 @@ pub(super) fn apply_prepared_external_layout(
             parent_root,
             parent,
             child,
-            runtime,
-            updates,
         } => {
             let mut candidate = state.session.clone();
             if candidate
                 .workspace(parent_workspace_id)
                 .is_none_or(|workspace| workspace.root_directory() != parent_root)
             {
-                drop(updates);
-                drop(runtime);
                 return Err(prepared_worktree_failure(
                     &parent,
                     &child,
@@ -715,8 +688,6 @@ pub(super) fn apply_prepared_external_layout(
                 ));
             }
             let Some(workspace_id) = candidate.create_workspace(child.root().to_path_buf()) else {
-                drop(updates);
-                drop(runtime);
                 return Err(prepared_worktree_failure(
                     &parent,
                     &child,
@@ -724,8 +695,6 @@ pub(super) fn apply_prepared_external_layout(
                 ));
             };
             if !candidate.associate_worktree(workspace_id, parent_workspace_id, parent_root, true) {
-                drop(updates);
-                drop(runtime);
                 return Err(prepared_worktree_failure(
                     &parent,
                     &child,
@@ -740,15 +709,32 @@ pub(super) fn apply_prepared_external_layout(
                 .id();
             let snapshot = candidate.snapshot();
             if let Err(error) = validate_persistable_snapshot(&snapshot) {
-                drop(updates);
-                drop(runtime);
                 return Err(prepared_worktree_failure(&parent, &child, error));
             }
+            let launch = state.shell_launch();
+            let mut runtime = match TerminalRuntime::spawn_shell(
+                child.root(),
+                TerminalSize::new(24, 80),
+                launch.shell(),
+                Some(&launch.pane_environment(pane_id)),
+            ) {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    return Err(prepared_worktree_failure(
+                        &parent,
+                        &child,
+                        format!("failed to start terminal: {error}"),
+                    ));
+                }
+            };
+            let updates = runtime
+                .take_updates()
+                .expect("new Terminal update receiver exists");
             let effect = match commit_layout_candidate(
                 state,
                 candidate,
                 None,
-                Some((pane_id, *runtime, updates)),
+                Some((pane_id, runtime, updates)),
             ) {
                 Ok(effect) => effect,
                 Err(error) => {
@@ -798,10 +784,12 @@ pub(super) fn apply_prepared_external_layout(
                     .active_tab()
                     .focused_pane()
                     .id();
+                let launch = state.shell_launch();
                 let mut runtime = TerminalRuntime::spawn_shell(
                     child.root(),
                     TerminalSize::new(24, 80),
-                    Some(state.settings.shell.as_str()),
+                    launch.shell(),
+                    Some(&launch.pane_environment(pane_id)),
                 )
                 .map_err(|error| format!("failed to start terminal: {error}"))?;
                 let updates = runtime

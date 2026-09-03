@@ -42,7 +42,7 @@ use crate::agent::{
     AgentDetector, AgentPublish, DetectionInput, ProcessInfo, ProcessProbeResult,
     identify_agent_process,
 };
-use crate::{AgentKind, AgentSnapshot};
+use crate::{AgentKind, AgentSnapshot, PaneId};
 
 const MAX_TERMINAL_CELLS: usize = 65_536;
 const MAX_TERMINAL_CELL_TEXT_BYTES: usize = 256;
@@ -94,8 +94,8 @@ use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 use process::*;
 use pty_io::*;
 pub use runtime::{
-    TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe,
-    TerminalRuntime, default_shell_program,
+    PaneEnvironment, TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch,
+    TerminalNoticeProbe, TerminalRuntime, default_shell_program,
 };
 use view::{
     SnapshotHyperlinks, TerminalDamageBaseline, publish_view, side, snapshot_terminal,

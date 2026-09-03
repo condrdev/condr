@@ -320,12 +320,10 @@ pub(super) fn handle_client(
                 );
                 if external {
                     let operation = lifecycle.begin_operation();
-                    let shell = state
+                    let launch = state
                         .lock()
                         .expect("server state lock poisoned")
-                        .settings
-                        .shell
-                        .clone();
+                        .shell_launch();
                     let plan = if operation.is_some() {
                         let mut state = state.lock().expect("server state lock poisoned");
                         plan_client_external_layout(
@@ -347,7 +345,7 @@ pub(super) fn handle_client(
                         }))
                     };
                     match plan.and_then(|plan| {
-                        prepare_external_layout(plan, Some(shell.as_str())).map_err(|reason| {
+                        prepare_external_layout(plan).map_err(|reason| {
                             Box::new(ServerMessage::LayoutRejected {
                                 server_id,
                                 session_id,
@@ -419,7 +417,7 @@ pub(super) fn handle_client(
                                     failed || cleanup_failed
                                 }
                                 Ok(()) => {
-                                    match finish_external_layout(prepared, Some(shell.as_str())) {
+                                    match finish_external_layout(prepared, &launch) {
                                         Err(failure) => {
                                             let ExternalLayoutFinishError {
                                                 message,

@@ -38,6 +38,10 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，但 Pane 的 cwd 只能靠进程探测。
 
+### Pane 内的环境变量
+
+Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径，TCP Server 为 `tcp://host:port`），并把 `condr-server` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
+
 ### Agent 状态检测规则
 
 Server 用内嵌的 TOML manifest（来自 herdr，`crates/condr-core/src/agent/manifests/`）判断 agent 的 idle / working / blocked。某个 agent 的规则不合适时，把修改后的 manifest 放到 `<config dir>/agent-detection/<id>.toml`（`id` 如 `claude`、`codex`），Server 启动时会用它替换内嵌版本；文件不合法时忽略并在 stderr 说明。
