@@ -126,12 +126,13 @@ const IDENTITY_COLORS: [u32; 10] = [
     0x5179b0, // blue
 ];
 
-/// A stable color for `key`: `hash * 31 + char` indexes the identity palette.
+/// A stable color for `key`. `DefaultHasher::new()` is deterministic within one Rust
+/// release; a toolchain upgrade may recolor Workspaces once, which is fine.
 pub(super) fn identity_color(key: &str) -> Hsla {
-    let hash = key.chars().fold(0u32, |hash, character| {
-        hash.wrapping_mul(31).wrapping_add(character as u32)
-    });
-    rgb(IDENTITY_COLORS[hash as usize % IDENTITY_COLORS.len()]).into()
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::hash::DefaultHasher::new();
+    key.hash(&mut hasher);
+    rgb(IDENTITY_COLORS[hasher.finish() as usize % IDENTITY_COLORS.len()]).into()
 }
 
 /// The letter on a Workspace avatar: the first character of the name, upper-cased.
