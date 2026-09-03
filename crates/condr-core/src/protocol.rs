@@ -80,6 +80,12 @@ pub enum ClientMessage {
         pane_id: PaneId,
         command: TerminalCommand,
     },
+    /// Replaces the Server's shell preference; blank restores the system default.
+    /// Any client may do this, no Session control needed.
+    SetServerSettings {
+        server_id: ServerId,
+        shell: String,
+    },
     StopServer {
         server_id: ServerId,
     },
@@ -172,7 +178,19 @@ pub struct BootstrapHeader {
     pub session_id: SessionId,
     pub sequence: u64,
     pub snapshot: SessionSnapshot,
+    pub settings: ServerSettings,
     pub batch_count: u32,
+}
+
+/// Server-owned preferences, persisted in the Server's own `config.toml`. Clients
+/// change them through [`ClientMessage::SetServerSettings`] and learn the current
+/// values from the Bootstrap and [`SessionEvent::ServerSettingsChanged`].
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ServerSettings {
+    /// Program started in new terminals; empty means `default_shell`.
+    pub shell: String,
+    /// The system default shell this Server resolved, for display only.
+    pub default_shell: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -182,6 +200,7 @@ pub struct SessionBootstrap {
     pub session_id: SessionId,
     pub sequence: u64,
     pub snapshot: SessionSnapshot,
+    pub settings: ServerSettings,
     pub terminals: Vec<PaneTerminalSnapshot>,
     pub agents: Vec<PaneAgentSnapshot>,
     pub workspace_git: Vec<WorkspaceGitSnapshot>,
@@ -277,6 +296,9 @@ pub enum SessionEvent {
     TerminalAttentionChanged {
         pane_id: PaneId,
         attention: bool,
+    },
+    ServerSettingsChanged {
+        settings: ServerSettings,
     },
 }
 
@@ -576,6 +598,7 @@ impl BootstrapAssembler {
             session_id: self.header.session_id,
             sequence: self.header.sequence,
             snapshot: self.header.snapshot,
+            settings: self.header.settings,
             terminals: self.terminals,
             agents: self.agents,
             workspace_git: self.workspace_git,
@@ -874,6 +897,7 @@ mod tests {
             .split_pane(pane_id, SplitDirection::Horizontal, 0.5)
             .expect("Pane exists");
         let message = ServerMessage::Bootstrap(BootstrapHeader {
+            settings: Default::default(),
             server_id: ServerId(4),
             runtime_epoch: RuntimeEpoch(5),
             session_id: SessionId(1),
@@ -1135,6 +1159,7 @@ mod tests {
     fn bootstrap_assembler_finishes_an_empty_bootstrap() {
         let (header, _, _) = bootstrap_header(0);
         let expected = SessionBootstrap {
+            settings: Default::default(),
             server_id: header.server_id,
             runtime_epoch: header.runtime_epoch,
             session_id: header.session_id,
@@ -1174,6 +1199,7 @@ mod tests {
             .id();
         (
             BootstrapHeader {
+                settings: Default::default(),
                 server_id: ServerId(4),
                 runtime_epoch: RuntimeEpoch(5),
                 session_id: SessionId(1),

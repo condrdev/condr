@@ -320,6 +320,12 @@ pub(super) fn handle_client(
                 );
                 if external {
                     let operation = lifecycle.begin_operation();
+                    let shell = state
+                        .lock()
+                        .expect("server state lock poisoned")
+                        .settings
+                        .shell
+                        .clone();
                     let plan = if operation.is_some() {
                         let mut state = state.lock().expect("server state lock poisoned");
                         plan_client_external_layout(
@@ -341,7 +347,7 @@ pub(super) fn handle_client(
                         }))
                     };
                     match plan.and_then(|plan| {
-                        prepare_external_layout(plan).map_err(|reason| {
+                        prepare_external_layout(plan, Some(shell.as_str())).map_err(|reason| {
                             Box::new(ServerMessage::LayoutRejected {
                                 server_id,
                                 session_id,
@@ -412,119 +418,129 @@ pub(super) fn handle_client(
                                         });
                                     failed || cleanup_failed
                                 }
-                                Ok(()) => match finish_external_layout(prepared) {
-                                    Err(failure) => {
-                                        let ExternalLayoutFinishError {
-                                            message,
-                                            restarted,
-                                            exited,
-                                            cwds,
-                                        } = failure;
-                                        let stopping = lifecycle.is_stopping();
-                                        let clients = {
+                                Ok(()) => {
+                                    match finish_external_layout(prepared, Some(shell.as_str())) {
+                                        Err(failure) => {
+                                            let ExternalLayoutFinishError {
+                                                message,
+                                                restarted,
+                                                exited,
+                                                cwds,
+                                            } = failure;
+                                            let stopping = lifecycle.is_stopping();
+                                            let clients = {
+                                                let mut state = state
+                                                    .lock()
+                                                    .expect("server state lock poisoned");
+                                                state.record_terminal_cwds(cwds);
+                                                if stopping {
+                                                    Vec::new()
+                                                } else {
+                                                    let mut cleared_agents = Vec::new();
+                                                    for (pane_id, runtime, updates) in restarted {
+                                                        if state.session.pane(pane_id).is_none()
+                                                            || state
+                                                                .terminals
+                                                                .contains_key(&pane_id)
+                                                        {
+                                                            continue;
+                                                        }
+                                                        state.exited_terminals.remove(&pane_id);
+                                                        if state.agents.remove(&pane_id).is_some() {
+                                                            cleared_agents.push(pane_id);
+                                                        }
+                                                        started_terminals.push(
+                                                            state.install_terminal(
+                                                                pane_id, runtime, updates,
+                                                            ),
+                                                        );
+                                                    }
+                                                    for pane_id in cleared_agents {
+                                                        state.publish_background(
+                                                            SessionEvent::AgentChanged {
+                                                                pane_id,
+                                                                agent: None,
+                                                            },
+                                                        );
+                                                    }
+                                                    for (pane_id, runtime) in exited {
+                                                        state.restore_exited_terminal(
+                                                            pane_id, runtime,
+                                                        );
+                                                    }
+                                                    state
+                                                        .subscribers
+                                                        .keys()
+                                                        .copied()
+                                                        .collect::<Vec<_>>()
+                                                }
+                                            };
+                                            for client_id in clients {
+                                                flush_terminal_render(&state, client_id);
+                                            }
+                                            queue_message(
+                                                &outbound,
+                                                ServerMessage::LayoutRejected {
+                                                    server_id,
+                                                    session_id,
+                                                    request_id,
+                                                    reason: message,
+                                                },
+                                            )
+                                        }
+                                        Ok(prepared) => {
                                             let mut state =
                                                 state.lock().expect("server state lock poisoned");
-                                            state.record_terminal_cwds(cwds);
-                                            if stopping {
-                                                Vec::new()
-                                            } else {
-                                                let mut cleared_agents = Vec::new();
-                                                for (pane_id, runtime, updates) in restarted {
-                                                    if state.session.pane(pane_id).is_none()
-                                                        || state.terminals.contains_key(&pane_id)
-                                                    {
-                                                        continue;
-                                                    }
-                                                    state.exited_terminals.remove(&pane_id);
-                                                    if state.agents.remove(&pane_id).is_some() {
-                                                        cleared_agents.push(pane_id);
-                                                    }
-                                                    started_terminals.push(state.install_terminal(
-                                                        pane_id, runtime, updates,
-                                                    ));
-                                                }
-                                                for pane_id in cleared_agents {
-                                                    state.publish_background(
-                                                        SessionEvent::AgentChanged {
-                                                            pane_id,
-                                                            agent: None,
-                                                        },
-                                                    );
-                                                }
-                                                for (pane_id, runtime) in exited {
-                                                    state.restore_exited_terminal(pane_id, runtime);
-                                                }
-                                                state
-                                                    .subscribers
-                                                    .keys()
-                                                    .copied()
-                                                    .collect::<Vec<_>>()
-                                            }
-                                        };
-                                        for client_id in clients {
-                                            flush_terminal_render(&state, client_id);
-                                        }
-                                        queue_message(
-                                            &outbound,
-                                            ServerMessage::LayoutRejected {
-                                                server_id,
-                                                session_id,
-                                                request_id,
-                                                reason: message,
-                                            },
-                                        )
-                                    }
-                                    Ok(prepared) => {
-                                        let mut state =
-                                            state.lock().expect("server state lock poisoned");
-                                        // A successful Git removal cannot be rolled back, so its
-                                        // matching Session close must commit during shutdown.
-                                        let stopping = lifecycle.is_stopping()
-                                            && !matches!(
-                                                &prepared,
-                                                PreparedExternalLayout::RemoveWorktree { .. }
-                                            );
-                                        if let Some(message) = layout_authority_error(
-                                            &state, client_id, server_id, session_id, request_id,
-                                            stopping,
-                                        ) {
-                                            drop(state);
-                                            let failed = queue_message(&outbound, message);
-                                            let cleanup_failed =
-                                                cancel_prepared_external_layout(prepared)
-                                                    .is_err_and(|message| {
-                                                        eprintln!("condr-server: {message}");
-                                                        queue_message(
-                                                            &outbound,
-                                                            ServerMessage::Error { message },
-                                                        )
-                                                    });
-                                            failed || cleanup_failed
-                                        } else {
-                                            match apply_prepared_external_layout(
-                                                &mut state, prepared,
+                                            // A successful Git removal cannot be rolled back, so its
+                                            // matching Session close must commit during shutdown.
+                                            let stopping = lifecycle.is_stopping()
+                                                && !matches!(
+                                                    &prepared,
+                                                    PreparedExternalLayout::RemoveWorktree { .. }
+                                                );
+                                            if let Some(message) = layout_authority_error(
+                                                &state, client_id, server_id, session_id,
+                                                request_id, stopping,
                                             ) {
-                                                Ok(effect) => {
-                                                    started_terminals
-                                                        .extend(effect.started_terminals);
-                                                    removed_terminals = effect.removed_terminals;
-                                                    state.publish_layout_change(
-                                                        client_id, &outbound, request_id,
-                                                    )
+                                                drop(state);
+                                                let failed = queue_message(&outbound, message);
+                                                let cleanup_failed =
+                                                    cancel_prepared_external_layout(prepared)
+                                                        .is_err_and(|message| {
+                                                            eprintln!("condr-server: {message}");
+                                                            queue_message(
+                                                                &outbound,
+                                                                ServerMessage::Error { message },
+                                                            )
+                                                        });
+                                                failed || cleanup_failed
+                                            } else {
+                                                match apply_prepared_external_layout(
+                                                    &mut state, prepared,
+                                                ) {
+                                                    Ok(effect) => {
+                                                        started_terminals
+                                                            .extend(effect.started_terminals);
+                                                        removed_terminals =
+                                                            effect.removed_terminals;
+                                                        state.publish_layout_change(
+                                                            client_id, &outbound, request_id,
+                                                        )
+                                                    }
+                                                    Err(reason) => queue_message(
+                                                        &outbound,
+                                                        ServerMessage::LayoutRejected {
+                                                            server_id: state.server_id,
+                                                            session_id: state.session_id,
+                                                            request_id,
+                                                            reason,
+                                                        },
+                                                    ),
                                                 }
-                                                Err(reason) => queue_message(
-                                                    &outbound,
-                                                    ServerMessage::LayoutRejected {
-                                                        server_id: state.server_id,
-                                                        session_id: state.session_id,
-                                                        request_id,
-                                                        reason,
-                                                    },
-                                                ),
                                             }
                                         }
                                     }
-                                },
+                                }
                             }
                         }
                     }
@@ -676,6 +692,20 @@ pub(super) fn handle_client(
                             },
                         ),
                     }
+                }
+            }
+            ClientMessage::SetServerSettings { server_id, shell } => {
+                let mut state = state.lock().expect("server state lock poisoned");
+                if server_id != state.server_id {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::Error {
+                            message: "unknown Server".into(),
+                        },
+                    )
+                } else {
+                    // An unchanged value publishes nothing; the client already shows it.
+                    state.set_shell(&shell, Some((client_id, &outbound)))
                 }
             }
             ClientMessage::StopServer { server_id } => {

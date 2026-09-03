@@ -129,6 +129,7 @@ pub(super) fn external_layout_plan(
 
 pub(super) fn prepare_external_layout(
     plan: ExternalLayoutPlan,
+    shell: Option<&str>,
 ) -> Result<PreparedExternalLayout, String> {
     match plan {
         ExternalLayoutPlan::CreateWorkspace { root } => {
@@ -152,7 +153,7 @@ pub(super) fn prepare_external_layout(
             let mut runtime = match TerminalRuntime::spawn_shell(
                 child.root(),
                 TerminalSize::new(24, 80),
-                configured_shell().as_deref(),
+                shell,
             ) {
                 Ok(runtime) => runtime,
                 Err(error) => {
@@ -315,6 +316,7 @@ pub(super) struct ExternalLayoutFinishError {
 
 pub(super) fn finish_external_layout(
     prepared: PreparedExternalLayout,
+    shell: Option<&str>,
 ) -> Result<PreparedExternalLayout, ExternalLayoutFinishError> {
     match prepared {
         PreparedExternalLayout::RemoveWorktreeReady {
@@ -353,11 +355,7 @@ pub(super) fn finish_external_layout(
                     let mut restart_errors = Vec::new();
                     for spec in restart_specs {
                         let cwd = final_cwds.get(&spec.pane_id).cloned().unwrap_or(spec.cwd);
-                        match TerminalRuntime::spawn_shell(
-                            &cwd,
-                            spec.size,
-                            configured_shell().as_deref(),
-                        ) {
+                        match TerminalRuntime::spawn_shell(&cwd, spec.size, shell) {
                             Ok(mut runtime) => {
                                 let updates = runtime
                                     .take_updates()
@@ -609,7 +607,7 @@ pub(super) fn apply_layout_command(
         let mut runtime = TerminalRuntime::spawn_shell(
             cwd,
             TerminalSize::new(24, 80),
-            configured_shell().as_deref(),
+            Some(state.settings.shell.as_str()),
         )
         .map_err(|error| format!("failed to start terminal: {error}"))?;
         let updates = runtime
@@ -803,7 +801,7 @@ pub(super) fn apply_prepared_external_layout(
                 let mut runtime = TerminalRuntime::spawn_shell(
                     child.root(),
                     TerminalSize::new(24, 80),
-                    configured_shell().as_deref(),
+                    Some(state.settings.shell.as_str()),
                 )
                 .map_err(|error| format!("failed to start terminal: {error}"))?;
                 let updates = runtime

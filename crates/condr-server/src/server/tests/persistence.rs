@@ -85,7 +85,7 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
             std::fs::write(&path, bytes).unwrap();
         }
         let (state, startup_terminals) =
-            RuntimeState::recover(&test_endpoint(), Some(path)).unwrap();
+            RuntimeState::recover(&test_endpoint(), Some(path), None).unwrap();
         assert_eq!(
             state.session.snapshot(),
             Session::new().snapshot(),

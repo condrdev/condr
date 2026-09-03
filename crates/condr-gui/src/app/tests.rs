@@ -278,6 +278,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
     // the connection's GUI state, and a plain visual resync Bootstrap touches neither.
     {
         let bootstrap = |sequence| SessionBootstrap {
+            settings: Default::default(),
             server_id: ServerId(1),
             runtime_epoch: RuntimeEpoch(2),
             session_id: SessionId(3),
@@ -308,6 +309,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
     }
 
     let application = connection.apply_bootstrap(SessionBootstrap {
+        settings: Default::default(),
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
         session_id: SessionId(30),
@@ -425,6 +427,7 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
     let pane_id = pane_id();
 
     let application = connection.apply_bootstrap(SessionBootstrap {
+        settings: Default::default(),
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
         session_id: SessionId(3),
@@ -752,6 +755,7 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
     let payload = encode_bootstrap_record(&BootstrapRecord::Terminal(terminal.clone())).unwrap();
     let midpoint = payload.len() / 2;
     let header = BootstrapHeader {
+        settings: Default::default(),
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
         session_id: SessionId(1),
@@ -969,6 +973,7 @@ fn lag_notice_during_a_visual_gap_resync_still_reacquires_control() {
     assert!(connection.request_snapshot());
     assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(3)));
     let application = connection.apply_bootstrap(SessionBootstrap {
+        settings: Default::default(),
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
         session_id: SessionId(3),
@@ -990,6 +995,7 @@ fn bootstrap_attention_survives_arriving_before_control_is_granted() {
     connection.controlling = false;
     let pane = pane_id();
     connection.apply_bootstrap(SessionBootstrap {
+        settings: Default::default(),
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
         session_id: SessionId(3),

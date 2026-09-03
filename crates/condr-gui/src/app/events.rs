@@ -698,6 +698,10 @@ impl Condr {
                             self.connections[index].attention.remove(&pane_id)
                         };
                     }
+                    SessionEvent::ServerSettingsChanged { settings } => {
+                        self.connections[index].settings = settings;
+                        notify = true;
+                    }
                 }
                 IncomingEffect {
                     notify,

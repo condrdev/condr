@@ -9,9 +9,9 @@ use condr_core::protocol::{
     BootstrapAssembler, BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage,
     FramingError, Hello, LayoutCommand, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent,
-    SessionId, TerminalFrameBatch, TerminalFrameChunk, VersionCheck, WorkspaceGitSnapshot,
-    check_version, encode_bootstrap_record, encode_pane_terminal_frame,
+    PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage, ServerSettings, SessionBootstrap,
+    SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk, VersionCheck,
+    WorkspaceGitSnapshot, check_version, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentSnapshot, GitHeadFingerprint, GitRepository, PaneId, Session, TerminalAgentProbe,
@@ -77,6 +77,8 @@ struct TerminalMonitor {
 pub struct ServerConfig {
     pub endpoint: Endpoint,
     snapshot_path: Option<PathBuf>,
+    /// The Server's own `config.toml`; `None` keeps settings in memory only.
+    config_path: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -85,20 +87,59 @@ impl Default for ServerConfig {
     }
 }
 
-/// `[server.terminal] shell` from the shared `config.toml`; `None` means the system
-/// default. Read on every shell start so a Settings change reaches the next terminal
-/// without restarting the Server. A missing or malformed file falls back too.
-pub(crate) fn configured_shell() -> Option<String> {
-    let path = condr_core::config_directory()?.join("config.toml");
-    let text = std::fs::read_to_string(path).ok()?;
-    let root: toml::Value = text.parse().ok()?;
-    root.get("server")?
-        .get("terminal")?
-        .get("shell")?
-        .as_str()
-        .map(str::trim)
-        .filter(|shell| !shell.is_empty())
-        .map(str::to_owned)
+/// `[server.terminal] shell` from the Server's `config.toml`, blank when unset or the
+/// file is missing or malformed. Read once at startup; hand edits need a restart.
+fn load_shell(path: Option<&std::path::Path>) -> String {
+    let Some(path) = path else {
+        return String::new();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .and_then(|root| {
+            root.get("server")?
+                .get("terminal")?
+                .get("shell")?
+                .as_str()
+                .map(|shell| shell.trim().to_owned())
+        })
+        .unwrap_or_default()
+}
+
+/// Writes `[server.terminal] shell` back, keeping the rest of the hand-editable file
+/// (other keys, comments, formatting) as it was.
+fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
+    let mut document = match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
+        Err(error) => return Err(error),
+    };
+    // Explicit `[server.terminal]` tables, appended after the existing content; indexing
+    // would insert an inline table at the top, ahead of any leading comment.
+    let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
+    for name in ["server", "terminal"] {
+        table = table
+            .entry(name)
+            .or_insert(toml_edit::table())
+            .as_table_like_mut()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{name} must be a table"),
+                )
+            })?;
+    }
+    table.insert("shell", toml_edit::value(shell));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
+        .write(|file| file.write_all(document.to_string().as_bytes()))
+        .map_err(|error| match error {
+            atomicwrites::Error::Internal(error) | atomicwrites::Error::User(error) => error,
+        })
 }
 
 impl ServerConfig {
@@ -110,6 +151,7 @@ impl ServerConfig {
         Self {
             endpoint,
             snapshot_path,
+            config_path: condr_core::config_directory().map(|root| root.join("config.toml")),
         }
     }
 
@@ -117,11 +159,17 @@ impl ServerConfig {
         Self {
             endpoint,
             snapshot_path: None,
+            config_path: None,
         }
     }
 
     pub fn with_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.snapshot_path = Some(path.into());
+        self
+    }
+
+    pub fn with_config_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.config_path = Some(path.into());
         self
     }
 
@@ -252,7 +300,8 @@ impl BoundServer {
         let listener = config.endpoint.bind()?;
         listener.set_nonblocking(true)?;
         let (state, startup_terminals) =
-            match RuntimeState::recover(&config.endpoint, config.snapshot_path) {
+            match RuntimeState::recover(&config.endpoint, config.snapshot_path, config.config_path)
+            {
                 Ok(restored) => restored,
                 Err(error) => {
                     let _ = listener.cleanup();
@@ -550,6 +599,8 @@ struct RuntimeState {
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
     persistence: Option<SnapshotPersistence>,
+    settings: ServerSettings,
+    config_path: Option<PathBuf>,
 }
 
 struct ClientSubscriber {
@@ -572,6 +623,7 @@ struct BootstrapCapture {
     agents: Vec<PaneAgentSnapshot>,
     workspace_git: Vec<WorkspaceGitSnapshot>,
     zoomed_panes: Vec<PaneId>,
+    settings: ServerSettings,
 }
 
 struct BootstrapTerminalCapture {
@@ -590,6 +642,7 @@ impl BootstrapCapture {
             session_id: self.session_id,
             sequence: self.sequence,
             snapshot: self.snapshot,
+            settings: self.settings,
             terminals: self
                 .terminals
                 .into_iter()
@@ -666,13 +719,21 @@ struct SequencedEvent {
 impl RuntimeState {
     #[cfg(test)]
     fn new(endpoint: &Endpoint) -> Self {
-        Self::with_session(endpoint, Session::new(), None)
+        Self::with_session(
+            endpoint,
+            Session::new(),
+            None,
+            ServerSettings::default(),
+            None,
+        )
     }
 
     fn with_session(
         endpoint: &Endpoint,
         session: Session,
         persistence: Option<SnapshotPersistence>,
+        settings: ServerSettings,
+        config_path: Option<PathBuf>,
     ) -> Self {
         Self {
             server_id: ServerId(stable_endpoint_id(endpoint)),
@@ -698,7 +759,33 @@ impl RuntimeState {
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             persistence,
+            settings,
+            config_path,
         }
+    }
+
+    /// Stores the shell preference, writes it to `config.toml` when the Server has one,
+    /// and publishes the new settings to every client. Blank means the system default.
+    fn set_shell(&mut self, shell: &str, origin: Option<(u64, &ClientWriter)>) -> bool {
+        let shell = shell.trim();
+        if self.settings.shell == shell {
+            return false;
+        }
+        self.settings.shell = shell.to_owned();
+        if let Some(path) = self.config_path.as_deref()
+            && let Err(error) = save_shell(path, shell)
+        {
+            eprintln!(
+                "condr-server: failed to save the shell preference to {}: {error}",
+                path.display()
+            );
+        }
+        self.publish_event(
+            SessionEvent::ServerSettingsChanged {
+                settings: self.settings.clone(),
+            },
+            origin,
+        )
     }
 
     fn clear_controller_terminal_state(&mut self) {
@@ -725,7 +812,12 @@ impl RuntimeState {
     fn recover(
         endpoint: &Endpoint,
         snapshot_path: Option<PathBuf>,
+        config_path: Option<PathBuf>,
     ) -> io::Result<(Self, Vec<StartedTerminal>)> {
+        let settings = ServerSettings {
+            shell: load_shell(config_path.as_deref()),
+            default_shell: condr_core::default_shell_program(),
+        };
         let persistence = snapshot_path.map(SnapshotPersistence::open).transpose()?;
         let mut session = Session::new();
         let mut restored = false;
@@ -789,7 +881,7 @@ impl RuntimeState {
             let started = match TerminalRuntime::spawn_shell(
                 requested_cwd,
                 TerminalSize::new(24, 80),
-                configured_shell().as_deref(),
+                Some(settings.shell.as_str()),
             ) {
                 Ok(runtime) => Some((runtime, requested_cwd.to_path_buf())),
                 Err(error) if requested_cwd != workspace_root.as_path() => {
@@ -802,7 +894,7 @@ impl RuntimeState {
                     match TerminalRuntime::spawn_shell(
                         &workspace_root,
                         TerminalSize::new(24, 80),
-                        configured_shell().as_deref(),
+                        Some(settings.shell.as_str()),
                     ) {
                         Ok(runtime) => Some((runtime, workspace_root)),
                         Err(fallback_error) => {
@@ -844,7 +936,7 @@ impl RuntimeState {
                 .expect("restored Pane remains until it is pruned");
         }
 
-        let mut state = Self::with_session(endpoint, session, persistence);
+        let mut state = Self::with_session(endpoint, session, persistence, settings, config_path);
         let workspace_roots = state
             .session
             .workspaces()
@@ -1137,6 +1229,7 @@ impl RuntimeState {
             }
         }
         BootstrapCapture {
+            settings: self.settings.clone(),
             server_id: self.server_id,
             runtime_epoch: self.runtime_epoch,
             session_id: self.session_id,

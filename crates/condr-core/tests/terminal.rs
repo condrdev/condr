@@ -740,7 +740,7 @@ fn conpty_close_terminates_descendant_processes() {
     ));
     let escaped_pid_file = pid_file.display().to_string().replace('\'', "''");
     let script = format!(
-        "$child = Start-Process pwsh.exe -ArgumentList @('-NoLogo','-NoProfile','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{escaped_pid_file}' -Value $child.Id; Start-Sleep -Seconds 30"
+        "$child = Start-Process pwsh.exe -WindowStyle Hidden -ArgumentList @('-NoLogo','-NoProfile','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -LiteralPath '{escaped_pid_file}' -Value $child.Id; Start-Sleep -Seconds 30"
     );
     let mut command = CommandBuilder::new("pwsh.exe");
     command.args(["-NoLogo", "-NoProfile", "-Command", &script]);

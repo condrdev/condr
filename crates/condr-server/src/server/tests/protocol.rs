@@ -629,6 +629,7 @@ fn rejected_snapshot_is_typed_and_keeps_the_connection_usable() {
     assert!(matches!(
         read_server(&mut stream),
         ServerMessage::Bootstrap(BootstrapHeader {
+            settings: _,
             server_id: bootstrap_server,
             session_id: bootstrap_session,
             ..
@@ -1424,4 +1425,101 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     drop(stream);
     thread.join().unwrap().unwrap();
     let _ = std::fs::remove_dir_all(temp);
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn server_settings_are_stored_published_and_reloaded() {
+    let directory = std::env::temp_dir().join(format!(
+        "condr-server-settings-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let config_path = directory.join("config.toml");
+    std::fs::write(&config_path, "# keep me\n[client]\nappearance = \"dark\"\n").unwrap();
+    let endpoint = test_endpoint();
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(endpoint.clone()).with_config_path(&config_path))
+            .unwrap();
+    let handle = server.handle();
+    let thread = thread::spawn(move || server.run());
+    wait_for_connection(&endpoint);
+
+    let initial = ClientConnection::connect(&endpoint, "test").unwrap();
+    let server_id = initial.bootstrap().server_id;
+    let session_id = initial.bootstrap().session_id;
+    let sequence = initial.bootstrap().sequence;
+    assert_eq!(initial.bootstrap().settings.shell, "");
+    assert!(
+        !initial.bootstrap().settings.default_shell.is_empty(),
+        "the Bootstrap names the system default shell"
+    );
+    drop(initial);
+
+    let mut stream = connect_and_bootstrap(&endpoint);
+    subscribe(&mut stream, session_id, sequence);
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::SetServerSettings {
+            server_id,
+            shell: "  nu ".into(),
+        },
+    )
+    .unwrap();
+    let message = wait_for_message(&mut stream, |message| {
+        matches!(
+            message,
+            ServerMessage::Event {
+                event: SessionEvent::ServerSettingsChanged { .. },
+                ..
+            }
+        )
+    });
+    let ServerMessage::Event {
+        event: SessionEvent::ServerSettingsChanged { settings },
+        ..
+    } = message
+    else {
+        unreachable!()
+    };
+    assert_eq!(settings.shell, "nu", "the Server stores the trimmed value");
+
+    let text = std::fs::read_to_string(&config_path).unwrap();
+    assert!(text.starts_with("# keep me\n"), "comments survive: {text}");
+    assert!(
+        text.contains("appearance = \"dark\""),
+        "other keys survive: {text}"
+    );
+    assert!(
+        text.contains("shell = \"nu\""),
+        "the shell is written: {text}"
+    );
+
+    let reconnected = ClientConnection::connect(&endpoint, "test").unwrap();
+    assert_eq!(reconnected.bootstrap().settings.shell, "nu");
+    drop(reconnected);
+    drop(stream);
+    handle.stop();
+    thread.join().unwrap().unwrap();
+
+    // A fresh Server reads the preference back from the file.
+    let endpoint = test_endpoint();
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(endpoint.clone()).with_config_path(&config_path))
+            .unwrap();
+    let handle = server.handle();
+    let thread = thread::spawn(move || server.run());
+    wait_for_connection(&endpoint);
+    let restarted = ClientConnection::connect(&endpoint, "test").unwrap();
+    assert_eq!(
+        restarted.bootstrap().settings.shell,
+        "nu",
+        "a restarted Server reads the file back: {}",
+        std::fs::read_to_string(&config_path).unwrap()
+    );
+    drop(restarted);
+    handle.stop();
+    thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(directory);
 }

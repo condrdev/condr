@@ -217,16 +217,25 @@ impl Condr {
         apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
     }
 
-    /// Persists only: the Server picks the shell up when it starts the next terminal.
-    pub(super) fn set_server_shell(&mut self, shell: SharedString, cx: &mut Context<Self>) {
-        // Stored as typed so the field is never rewritten under the user; the Server
-        // trims and treats blank as the default.
-        if self.server_shell == shell {
+    /// Asks a Server to store a new shell preference. The stored value comes back as a
+    /// `ServerSettingsChanged` event; nothing is assumed locally.
+    pub(super) fn set_server_shell(&mut self, key: ConnectionKey, shell: &str) {
+        let Some(connection) = self
+            .connections
+            .iter_mut()
+            .find(|connection| connection.key == key)
+        else {
             return;
-        }
-        self.server_shell = shell;
-        self.save_server_shell();
-        cx.notify();
+        };
+        let Some(server_id) = connection.server_id else {
+            return;
+        };
+        // ponytail: one message per keystroke; the Server ignores unchanged values.
+        // Debounce like the font save if remote round-trips ever show.
+        connection.send(ClientMessage::SetServerSettings {
+            server_id,
+            shell: shell.to_owned(),
+        });
     }
 
     /// Settings opens in its own window, as Zed does, so it can be moved aside while
@@ -314,6 +323,11 @@ pub(super) struct SettingsWindow {
     /// form, so a half-edited value never reaches the theme or the config file, and
     /// reopening Settings starts from what is actually in use.
     pub(super) font_draft: TerminalFont,
+    /// Which Server the Server page edits; starts at the active connection.
+    pub(super) selected_server: ConnectionKey,
+    /// The Shell field as typed. The Server stores the trimmed value and echoes it
+    /// through its settings; the field is not rewritten under the user meanwhile.
+    pub(super) shell_draft: SharedString,
     /// The Licenses page text, in a read-only editor because it is far too long
     /// for a plain text element.
     licenses: Entity<EditorState>,
@@ -365,11 +379,18 @@ impl SettingsWindow {
             .upgrade()
             .map(|owner| owner.read(cx).terminal_font.clone())
             .unwrap_or_default();
+        let selected_server = owner
+            .upgrade()
+            .map(|owner| owner.read(cx).active_connection)
+            .unwrap_or_default();
+        let shell_draft = connection_shell(&owner, selected_server, cx);
         Self {
             owner,
             focus_handle: cx.focus_handle(),
             color_scheme,
             font_draft,
+            selected_server,
+            shell_draft,
             licenses,
         }
     }
@@ -383,29 +404,27 @@ impl SettingsWindow {
     }
 }
 
-fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
+fn licenses_group(licenses: &Entity<EditorState>) -> SettingGroup {
     let licenses = licenses.clone();
-    SettingPage::new("Licenses").icon(IconName::BookOpen).group(
-        SettingGroup::new().item(
-            SettingItem::render(move |_, _, _| {
-                // Plain text: no border, background or line numbers. It stays an
-                // Editor only because a 900 KB text needs virtualized rendering.
-                Editor::new(&licenses)
-                    .readonly(true)
-                    .appearance(false)
-                    .bordered(false)
-                    .h(rems(26.))
-            })
-            // Settings search only matches custom items by keyword.
-            .keywords([
-                "licenses",
-                "license",
-                "third-party",
-                "open source",
-                "notices",
-                "attribution",
-            ]),
-        ),
+    SettingGroup::new().title("Licenses").item(
+        SettingItem::render(move |_, _, _| {
+            // Plain text: no border, background or line numbers. It stays an
+            // Editor only because a 900 KB text needs virtualized rendering.
+            Editor::new(&licenses)
+                .readonly(true)
+                .appearance(false)
+                .bordered(false)
+                .h(rems(26.))
+        })
+        // Settings search only matches custom items by keyword.
+        .keywords([
+            "licenses",
+            "license",
+            "third-party",
+            "open source",
+            "notices",
+            "attribution",
+        ]),
     )
 }
 
@@ -427,12 +446,18 @@ impl Render for SettingsWindow {
                 Settings::new("condr-settings")
                     // Matches the main window's sidebar.
                     .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                    .page(appearance_page(
+                    .page(application_page(
                         &self.owner,
                         &cx.entity(),
                         &self.color_scheme,
+                        &self.licenses,
                     ))
-                    .page(licenses_page(&self.licenses)),
+                    .page(server_page(
+                        &self.owner,
+                        &cx.entity(),
+                        self.selected_server,
+                        cx,
+                    )),
             )
     }
 }
@@ -498,17 +523,102 @@ pub(super) fn step_terminal_font_size(settings: &Entity<SettingsWindow>, delta: 
     });
 }
 
-/// What the Shell field shows.
-pub(super) fn server_shell(owner: &WeakEntity<Condr>, cx: &App) -> SharedString {
+/// The shell a Server currently stores, as its Bootstrap or last event reported it.
+fn connection_shell(owner: &WeakEntity<Condr>, key: ConnectionKey, cx: &App) -> SharedString {
     owner
         .upgrade()
-        .map(|owner| owner.read(cx).server_shell.clone())
+        .and_then(|owner| {
+            owner
+                .read(cx)
+                .connections
+                .iter()
+                .find(|connection| connection.key == key)
+                .map(|connection| connection.settings.shell.clone().into())
+        })
         .unwrap_or_default()
 }
 
+/// The Server dropdown's options: every connection, keyed by its connection id.
+pub(super) fn settings_server_options(
+    owner: &WeakEntity<Condr>,
+    cx: &App,
+) -> Vec<(SharedString, SharedString)> {
+    owner
+        .upgrade()
+        .map(|owner| {
+            owner
+                .read(cx)
+                .connections
+                .iter()
+                .map(|connection| {
+                    (
+                        connection.key.to_string().into(),
+                        connection.label.clone().into(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What the Server dropdown shows.
+pub(super) fn selected_settings_server(
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SharedString {
+    settings.read(cx).selected_server.to_string().into()
+}
+
+/// What the Server dropdown does: switch the page to that Server and reload its shell.
+pub(super) fn select_settings_server(settings: &Entity<SettingsWindow>, value: &str, cx: &mut App) {
+    let Ok(key) = value.parse::<ConnectionKey>() else {
+        return;
+    };
+    settings.update(cx, |this, cx| {
+        this.selected_server = key;
+        this.shell_draft = connection_shell(&this.owner, key, cx);
+        cx.notify();
+    });
+}
+
+/// What the Shell field shows.
+pub(super) fn server_shell(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
+    settings.read(cx).shell_draft.clone()
+}
+
 /// What the Shell field does on every change.
-pub(super) fn select_server_shell(owner: &WeakEntity<Condr>, shell: SharedString, cx: &mut App) {
-    let _ = owner.update(cx, |owner, cx| owner.set_server_shell(shell, cx));
+pub(super) fn select_server_shell(
+    settings: &Entity<SettingsWindow>,
+    shell: SharedString,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        this.shell_draft = shell.clone();
+        let key = this.selected_server;
+        let _ = this
+            .owner
+            .update(cx, |owner, _| owner.set_server_shell(key, &shell));
+    });
+}
+
+/// A Server's system default shell, named in the Shell description. Takes the owner
+/// rather than the Settings entity because it runs inside that entity's render.
+pub(super) fn server_default_shell(
+    owner: &WeakEntity<Condr>,
+    key: ConnectionKey,
+    cx: &App,
+) -> SharedString {
+    owner
+        .upgrade()
+        .and_then(|owner| {
+            owner
+                .read(cx)
+                .connections
+                .iter()
+                .find(|connection| connection.key == key)
+                .map(|connection| connection.settings.default_shell.clone().into())
+        })
+        .unwrap_or_default()
 }
 
 /// Whether Reset All has anything to do for Colors.
@@ -534,10 +644,12 @@ pub(super) fn reset_color_scheme(
     });
 }
 
-fn appearance_page(
+/// Everything that lives in this Client: appearance, terminal rendering, licenses.
+fn application_page(
     owner: &WeakEntity<Condr>,
     settings: &Entity<SettingsWindow>,
     color_scheme: &Entity<ColorSchemeSelect>,
+    licenses: &Entity<EditorState>,
 ) -> SettingPage {
     let reset_select = color_scheme.clone();
     let dirty_owner = owner.clone();
@@ -555,12 +667,10 @@ fn appearance_page(
     let size_dirty = settings.clone();
     let default_size = default_font.size;
     let scheme_select = color_scheme.clone();
-    let shell_get = owner.clone();
-    let shell_set = owner.clone();
-    SettingPage::new("Appearance")
-        .icon(IconName::Palette)
+    SettingPage::new("Application")
+        .icon(IconName::Settings)
         .group(
-            SettingGroup::new().item(
+            SettingGroup::new().title("Appearance").item(
                 SettingItem::new(
                     "Theme",
                     SettingField::dropdown(
@@ -676,23 +786,64 @@ fn appearance_page(
                         ),
                     )
                     .description("Terminal color schemes."),
-                )
-                .item(
-                    SettingItem::new(
-                        "Shell",
-                        SettingField::input(
-                            move |cx| server_shell(&shell_get, cx),
-                            move |value: SharedString, cx| {
-                                select_server_shell(&shell_set, value, cx)
-                            },
-                        )
-                        .default_value(""),
-                    )
-                    .description(
-                        "Program the local Server starts in new terminals. Empty uses the \
-                         system default shell. A remote Server reads its own config.toml.",
-                    ),
                 ),
+        )
+        .group(licenses_group(licenses))
+}
+
+/// Preferences a Server owns, edited for one connection at a time. Only the shell so
+/// far; the Server picker is the first item, as paseo's host settings do.
+fn server_page(
+    owner: &WeakEntity<Condr>,
+    settings: &Entity<SettingsWindow>,
+    selected_server: ConnectionKey,
+    cx: &App,
+) -> SettingPage {
+    let server_get = settings.clone();
+    let server_set = settings.clone();
+    let shell_get = settings.clone();
+    let shell_set = settings.clone();
+    // Built on every render, so a new connection shows up without reopening Settings.
+    let options = settings_server_options(owner, cx);
+    let default_shell = server_default_shell(owner, selected_server, cx);
+    let shell_description: SharedString = if default_shell.is_empty() {
+        "Program started in new terminals. Empty uses the Server's system default shell.".into()
+    } else {
+        format!(
+            "Program started in new terminals. Empty uses the Server's system default shell \
+             ({default_shell})."
+        )
+        .into()
+    };
+    SettingPage::new("Server")
+        .icon(IconName::Cpu)
+        .group(
+            SettingGroup::new().item(
+                SettingItem::new(
+                    "Server",
+                    SettingField::dropdown(
+                        options,
+                        move |cx| selected_settings_server(&server_get, cx),
+                        move |value: SharedString, cx| {
+                            select_settings_server(&server_set, &value, cx)
+                        },
+                    ),
+                )
+                .description("Which Server the settings below belong to."),
+            ),
+        )
+        .group(
+            SettingGroup::new().title("Terminal").item(
+                SettingItem::new(
+                    "Shell",
+                    SettingField::input(
+                        move |cx| server_shell(&shell_get, cx),
+                        move |value: SharedString, cx| select_server_shell(&shell_set, value, cx),
+                    )
+                    .default_value(""),
+                )
+                .description(shell_description),
+            ),
         )
 }
 

@@ -34,7 +34,7 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 `[server.terminal] shell` 指定 Server 在新终端里启动的程序，例如 `"nu"`、`"zsh"` 或 `"C:\\Program Files\\Git\\bin\\bash.exe"`。留空或不写时使用系统默认：Unix 取 `$SHELL`（不可执行时回退 passwd 记录），Windows 依次找 PATH 上的 `pwsh.exe`、`powershell.exe`，最后 `%ComSpec%`。
 
-这是 Server 的配置。GUI Settings 里的 Shell 字段写的是本机 `config.toml`，只对共享该文件的本地 Server 生效；远程 Server 读它自己机器上的 `config.toml`。Server 在每次启动 shell 时重新读取，所以改动对下一个新终端生效，不必重启 Server。
+这是每个 Server 各自的配置，存在该 Server 所在机器的 `config.toml` 里。Settings 的 Server 页先选 Server，再改 Shell；GUI 通过协议把值发给那台 Server，Server 写回自己的 `config.toml` 并广播新设置给所有 client。改动对下一个新终端生效，不必重启 Server；直接手改文件则需要重启 Server 才会读到。
 
 cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，但 Pane 的 cwd 只能靠进程探测。
 

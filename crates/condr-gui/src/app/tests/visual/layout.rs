@@ -1496,13 +1496,41 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         "an empty family falls back to the default font"
     );
 
-    // Shell: stored as typed for the local Server; blank means the system default.
-    assert_eq!(window.read(|app| server_shell(&owner, app)), "");
-    window.update(|_, cx| select_server_shell(&owner, "nu".into(), cx));
-    assert_eq!(window.read(|app| view.read(app).server_shell.clone()), "nu");
-    assert_eq!(window.read(|app| server_shell(&owner, app)), "nu");
-    window.update(|_, cx| select_server_shell(&owner, "".into(), cx));
-    assert_eq!(window.read(|app| view.read(app).server_shell.clone()), "");
+    // Shell: the Server page edits the selected Server; the Server stores the value and
+    // reports it back, so the connection's settings follow the field.
+    assert_eq!(
+        window.read(|app| selected_settings_server(&settings_view, app)),
+        "1"
+    );
+    assert_eq!(window.read(|app| server_shell(&settings_view, app)), "");
+    assert!(
+        !window.read(|app| server_default_shell(&owner, 1, app).is_empty()),
+        "the Server reports the system default shell it resolved"
+    );
+    window.update(|_, cx| select_server_shell(&settings_view, " nu ".into(), cx));
+    assert_eq!(
+        window.read(|app| server_shell(&settings_view, app)),
+        " nu ",
+        "the field keeps what was typed"
+    );
+    assert!(
+        wait_until_event_driven(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .is_some_and(|connection| connection.settings.shell == "nu")
+            })
+        }),
+        "the Server must store the trimmed shell and publish it"
+    );
+    window.update(|_, cx| select_server_shell(&settings_view, "".into(), cx));
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .is_some_and(|connection| connection.settings.shell.is_empty())
+        })
+    }));
 
     // Font size: the real stepper buttons, one pixel per click, clamped to the bounds.
     let default_size = f64::from(TerminalFont::default().size);

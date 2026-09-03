@@ -281,6 +281,7 @@ pub(super) fn frame_bootstrap_messages(bootstrap: SessionBootstrap) -> io::Resul
         session_id,
         sequence,
         snapshot,
+        settings,
         terminals,
         agents,
         workspace_git,
@@ -302,6 +303,7 @@ pub(super) fn frame_bootstrap_messages(bootstrap: SessionBootstrap) -> io::Resul
         session_id,
         sequence,
         snapshot,
+        settings,
         batch_count,
     };
 

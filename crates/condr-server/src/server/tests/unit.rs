@@ -999,6 +999,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
         cursor: None,
     };
     let expected = SessionBootstrap {
+        settings: Default::default(),
         server_id: ServerId(1),
         runtime_epoch: RuntimeEpoch(2),
         session_id: SessionId(1),
@@ -1215,4 +1216,21 @@ fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
 
     drop(state);
     let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn load_shell_reads_the_nested_table() {
+    let path = std::env::temp_dir().join(format!(
+        "condr-load-shell-{}-{}.toml",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::write(
+        &path,
+        "# keep me\n[client]\nappearance = \"dark\"\n\n[server]\n\n[server.terminal]\nshell = \"nu\"\n",
+    )
+    .unwrap();
+    assert_eq!(load_shell(Some(&path)), "nu");
+    assert_eq!(load_shell(None), "");
+    let _ = std::fs::remove_file(path);
 }

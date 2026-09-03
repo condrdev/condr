@@ -10,9 +10,9 @@ fn apply_for_test(
     let plan = external_layout_plan(state, &command).unwrap();
     let effect = match plan {
         Some(plan) => {
-            let mut prepared = prepare_external_layout(plan).unwrap();
+            let mut prepared = prepare_external_layout(plan, None).unwrap();
             approve_external_layout(state, &mut prepared).unwrap();
-            let prepared = finish_external_layout(prepared)
+            let prepared = finish_external_layout(prepared, None)
                 .unwrap_or_else(|failure| panic!("{}", failure.message));
             apply_prepared_external_layout(state, prepared).unwrap()
         }
@@ -370,7 +370,7 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
         workspace_id: child_workspace_id,
     };
     let plan = external_layout_plan(&state, &command).unwrap().unwrap();
-    let mut prepared = prepare_external_layout(plan).unwrap();
+    let mut prepared = prepare_external_layout(plan, None).unwrap();
     std::fs::write(child_root.join("became-dirty.txt"), "dirty\n").unwrap();
     approve_external_layout(&mut state, &mut prepared).unwrap();
     assert!(!state.terminals.contains_key(&pane_id));
@@ -386,7 +386,7 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     );
     assert!(state.pending_terminal_bells.contains(&pane_id));
 
-    let failure = match finish_external_layout(prepared) {
+    let failure = match finish_external_layout(prepared, None) {
         Ok(_) => panic!("dirty worktree removal unexpectedly succeeded"),
         Err(failure) => failure,
     };
@@ -460,7 +460,7 @@ fn stopping_server_rolls_back_a_prepared_worktree() {
         branch: "feature/cancelled".into(),
     };
     let plan = external_layout_plan(&state, &command).unwrap().unwrap();
-    let prepared = prepare_external_layout(plan).unwrap();
+    let prepared = prepare_external_layout(plan, None).unwrap();
     let child_root = match &prepared {
         PreparedExternalLayout::CreateWorktree { child, .. } => child.root().to_path_buf(),
         _ => panic!("expected a prepared worktree"),
