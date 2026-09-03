@@ -502,13 +502,16 @@ fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
     let licenses = licenses.clone();
     SettingPage::new("Licenses").icon(IconName::BookOpen).group(
         SettingGroup::new().item(
-            SettingItem::render(move |_, _, _| {
+            SettingItem::render(move |_, _, cx| {
                 // Plain text: no border, background or line numbers. It stays an
                 // Editor only because a 900 KB text needs virtualized rendering.
+                // Prose, not code: the UI font rather than the terminal font.
                 Editor::new(&licenses)
                     .readonly(true)
                     .appearance(false)
                     .bordered(false)
+                    .font_family(cx.theme().font_family.clone())
+                    .text_size(cx.theme().font_size)
                     .h(rems(26.))
             })
             // Settings search only matches custom items by keyword.
