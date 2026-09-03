@@ -1,5 +1,5 @@
 [package]
-name = "condr-gui"
+name = "condr"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

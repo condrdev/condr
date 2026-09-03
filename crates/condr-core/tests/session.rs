@@ -72,7 +72,7 @@ fn splitting_a_pane_records_layout_cwd_and_focus_history() {
         .active_tab()
         .focused_pane()
         .id();
-    let pane_cwd = PathBuf::from("projects/condr/crates/condr-gui");
+    let pane_cwd = PathBuf::from("projects/condr/crates/condr");
     session.set_pane_cwd(first_pane_id, Some(pane_cwd.clone()));
 
     let second_pane_id = session

@@ -1192,7 +1192,7 @@ fn single_instance_lock_admits_one_holder_at_a_time() {
         std::process::id(),
         std::thread::current().id()
     ));
-    let path = directory.join("condr-gui.lock");
+    let path = directory.join("condr.lock");
 
     let held = lock_exclusively(&path).expect("the first GUI takes the lock");
     let refused = lock_exclusively(&path).expect_err("a second GUI must be refused");
@@ -1207,6 +1207,6 @@ fn single_instance_lock_admits_one_holder_at_a_time() {
 fn single_instance_lock_lives_in_the_platform_runtime_directory() {
     assert_eq!(
         single_instance_lock_path(),
-        condr_core::runtime_directory().map(|root| root.join("condr-gui.lock"))
+        condr_core::runtime_directory().map(|root| root.join("condr.lock"))
     );
 }

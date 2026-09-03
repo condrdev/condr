@@ -1109,24 +1109,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "condr-core"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "bincode",
- "dirs",
- "filedescriptor",
- "nix",
- "portable-pty",
- "regex",
- "serde",
- "smol_str",
- "sysinfo",
- "toml 1.1.4+spec-1.1.0",
-]
-
-[[package]]
-name = "condr-gui"
+name = "condr"
 version = "0.1.0"
 dependencies = [
  "async-channel",
@@ -1141,6 +1124,23 @@ dependencies = [
  "smol_str",
  "toml 1.1.4+spec-1.1.0",
  "toml_edit 0.25.13+spec-1.1.0",
+]
+
+[[package]]
+name = "condr-core"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "bincode",
+ "dirs",
+ "filedescriptor",
+ "nix",
+ "portable-pty",
+ "regex",
+ "serde",
+ "smol_str",
+ "sysinfo",
+ "toml 1.1.4+spec-1.1.0",
 ]
 
 [[package]]

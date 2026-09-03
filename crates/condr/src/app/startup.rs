@@ -107,7 +107,7 @@ pub(super) fn connect_to_server(
 }
 
 pub(super) fn single_instance_lock_path() -> Option<PathBuf> {
-    condr_core::runtime_directory().map(|root| root.join("condr-gui.lock"))
+    condr_core::runtime_directory().map(|root| root.join("condr.lock"))
 }
 
 /// Takes the GUI's single-instance lock, which the caller must hold for the whole run.
@@ -154,7 +154,7 @@ pub(crate) fn run() {
             return;
         }
     };
-    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr-gui");
+    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr");
     let config_path = config::default_path();
     let app = gpui_platform::application().with_assets(CondrAssets::new());
 

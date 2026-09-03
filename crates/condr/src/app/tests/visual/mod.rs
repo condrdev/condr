@@ -75,7 +75,7 @@ fn acquire_visual_test_lock() -> MutexGuard<'static, ()> {
 
 fn start_server() -> (TestServer, Endpoint) {
     let endpoint = Endpoint::local(std::env::temp_dir().join(format!(
-        "condr-gui-{}-{}.sock",
+        "condr-{}-{}.sock",
         std::process::id(),
         NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
     )));
@@ -123,7 +123,7 @@ fn connected_condr_with(
     let mut initial = None;
     let deadline = Instant::now() + TEST_TIMEOUT;
     while Instant::now() < deadline {
-        if let Ok(connection) = ClientConnection::connect(&endpoint, "condr-gui-test") {
+        if let Ok(connection) = ClientConnection::connect(&endpoint, "condr-test") {
             initial = Some(connection);
             break;
         }
@@ -231,7 +231,7 @@ struct TestDirectory(std::path::PathBuf);
 impl TestDirectory {
     fn new(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "condr-gui-{label}-{}-{}",
+            "condr-{label}-{}-{}",
             std::process::id(),
             NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
         ));

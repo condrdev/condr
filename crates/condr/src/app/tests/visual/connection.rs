@@ -521,7 +521,7 @@ fn added_server_survives_gui_restart() {
     {
         let mut cx = TestAppContext::single();
         cx.update(gpui_component::init);
-        let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+        let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
         let bootstrap = initial.bootstrap().clone();
         assert_eq!(bootstrap.server_id, server.handle.server_id());
         let view_holder = Rc::new(RefCell::new(None));
@@ -553,7 +553,7 @@ fn added_server_survives_gui_restart() {
 
     let mut cx = TestAppContext::single();
     cx.update(gpui_component::init);
-    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(|window, cx| {
@@ -660,7 +660,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
     {
         let mut cx = TestAppContext::single();
         cx.update(gpui_component::init);
-        let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+        let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
         let view_holder = Rc::new(RefCell::new(None));
         let view_holder_for_window = view_holder.clone();
         let (_root, window) = cx.add_window_view(|window, cx| {
@@ -701,7 +701,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
         !cx.update(|cx| cx.theme().is_dark()),
         "gpui_component::init starts every process in Light"
     );
-    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(|window, cx| {
@@ -730,7 +730,7 @@ fn font_changes_reach_the_config_once_the_debounce_elapses() {
 
     let mut cx = TestAppContext::single();
     cx.update(gpui_component::init);
-    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(|window, cx| {
@@ -795,7 +795,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
 
     let mut cx = TestAppContext::single();
     cx.update(gpui_component::init);
-    let initial = ClientConnection::connect(&endpoint, "condr-gui-test").unwrap();
+    let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(|window, cx| {

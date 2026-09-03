@@ -52,7 +52,7 @@ Server 用内嵌的 TOML manifest（来自 herdr，`crates/condr-core/src/agent/
 
 ### GUI 是单实例
 
-GUI 启动时在 runtime 目录取一把 `condr-gui.lock` 独占文件锁；锁已被占用时第二个实例打印一行说明后直接退出，不会打开窗口。这条约束的存在理由是 Client 独占 `config.toml` 的读-改-写：两个 GUI 并发保存会互相丢键。锁在进程退出时释放，包括崩溃。
+GUI 启动时在 runtime 目录取一把 `condr.lock` 独占文件锁；锁已被占用时第二个实例打印一行说明后直接退出，不会打开窗口。这条约束的存在理由是 Client 独占 `config.toml` 的读-改-写：两个 GUI 并发保存会互相丢键。锁在进程退出时释放，包括崩溃。
 
 Server 不受此限制 —— 每个 endpoint 本来就由 socket/named pipe 的绑定天然互斥。
 

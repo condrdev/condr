@@ -336,7 +336,7 @@ impl Condr {
         let sender = self.connect_results_tx.clone();
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         thread::spawn(move || {
-            let (connected_endpoint, result) = connect_to_server(endpoint, "condr-gui");
+            let (connected_endpoint, result) = connect_to_server(endpoint, "condr");
             let _ = sender.send_blocking(ConnectionResult {
                 key,
                 generation,

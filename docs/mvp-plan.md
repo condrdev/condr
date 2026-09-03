@@ -12,9 +12,9 @@ The GUI discovers an existing local `condr-server` or starts the same standalone
 | --- | --- | --- |
 | `condr-core` | Stable domain IDs and split layout, versioned protocol types, PTY and VT components, terminal I/O, agent detection, Git/worktree operations, Session Snapshot schema | GPUI entities, Dock runtime IDs, network listeners, GUI state |
 | `condr-server` | Stable Server identity, Session registry, live Terminal runtimes, protocol endpoint, client synchronization, Session Snapshot persistence | GPUI rendering, window focus, local-only behavior |
-| `condr-gui` | Connections to one or more Servers, local Server discovery/start, GPUI window and terminal element, input routing, Start Page, sidebar, Tab row, Dock projection | Authoritative domain state, PTY ownership, implicit Server shutdown |
+| `condr` | Connections to one or more Servers, local Server discovery/start, GPUI window and terminal element, input routing, Start Page, sidebar, Tab row, Dock projection | Authoritative domain state, PTY ownership, implicit Server shutdown |
 
-`condr-core` and `condr-server` run Tokio; `condr-gui` uses the GPUI executor. The wire protocol is transport-independent: length-prefixed `bincode + serde` frames, a `Hello`/`Welcome` handshake, strict protocol-version rejection, and bounded frame sizes. Local connections use a private `interprocess` endpoint (Unix domain socket or Windows named pipe); remote MVP connections use an explicitly configured trusted TCP endpoint, normally a Server loopback listener forwarded through an external SSH TCP tunnel. Both paths carry the same protocol and server behavior; the local Server does not expose a public listener, and application authentication/authorization is deferred.
+`condr-core` and `condr-server` run Tokio; `condr` uses the GPUI executor. The wire protocol is transport-independent: length-prefixed `bincode + serde` frames, a `Hello`/`Welcome` handshake, strict protocol-version rejection, and bounded frame sizes. Local connections use a private `interprocess` endpoint (Unix domain socket or Windows named pipe); remote MVP connections use an explicitly configured trusted TCP endpoint, normally a Server loopback listener forwarded through an external SSH TCP tunnel. Both paths carry the same protocol and server behavior; the local Server does not expose a public listener, and application authentication/authorization is deferred.
 
 The Server continues consuming PTY output and updating VT state with no clients connected. Reconnecting to a running Server first receives a one-shot authoritative bootstrap (stable Server identity plus runtime epoch, Session/layout state, active selections, focus, cwd, each Pane's live terminal view, foreground shell/Agent identity and status), then subscribes to ordered reliable events and a coalesced terminal visual stream; no shell or Agent is recreated. The identity/epoch pair lets the GUI distinguish a live reconnect from a replacement Server after restart. The server owns the event order and is the only authority for layout mutations. MVP has one active controller per Server/Session; a newly attached controller may supersede the previous one, while collaborative multi-client control is not guaranteed. This connection synchronization is distinct from durable Session Snapshot restore after a Server restart.
 
@@ -24,7 +24,7 @@ Each phase starts only after the preceding exit condition holds.
 
 | Phase | Deliverable | Exit condition |
 | --- | --- | --- |
-| 0. Build baseline | Cargo workspace, Apache-2.0 metadata, dependencies locked to reviewed revisions | `condr-core` checks on Linux/arm64 and an empty `condr-gui` window builds on Windows; no copied GPL Zed terminal code |
+| 0. Build baseline | Cargo workspace, Apache-2.0 metadata, dependencies locked to reviewed revisions | `condr-core` checks on Linux/arm64 and an empty `condr` window builds on Windows; no copied GPL Zed terminal code |
 | 1. Core domain | Session, Workspace, Tab, Pane, stable Root Directory, split tree, focus/order, Pane-to-Tab-to-Workspace close cascade, durable snapshot schema | Headless tests prove domain invariants without GPUI or a real shell |
 | 2. Server/client foundation | Standalone `condr-server`, stable Server/Session addressing, transport-independent versioned command/event protocol, private local IPC, local discovery/start, trusted TCP/SSH-tunnel configuration, disconnect/reconnect | Headless integration proves the same framed client protocol reaches local IPC and remote-style SSH/TCP endpoints, rejects incompatible versions and oversized frames, preserves Sessions with zero clients, bootstraps authoritative structure plus Server identity/epoch before ordered reliable events and coalesced terminal visual frames on reconnect, distinguishes a live reconnect from a replacement Server, enforces one active controller, and never exposes a non-loopback listener by default |
 | 3. Terminal vertical slice | Server-owned `portable-pty` shell runtime, persistent `alacritty_terminal` state, ordered I/O, resize, input encoding, paste, scrollback, GUI-local selection with Server-side copy extraction, terminal synchronization | A real PTY integration test passes on Linux; one Windows shell/Agent Pane survives GUI disconnect/reconnect with its process, layout, and terminal state intact |
@@ -51,7 +51,7 @@ Run:
 cargo fmt --all -- --check
 cargo clippy -p condr-core -p condr-server --all-targets -- -D warnings
 cargo test -p condr-core -p condr-server
-cargo test -p condr-gui --features test-support
+cargo test -p condr --features test-support
 ```
 
 The GUI test-support suite runs headless with GPUI's `TestPlatform`, but starts a real
@@ -84,7 +84,7 @@ Record the Windows version, commit, Rust toolchain, shell, GPU, Server endpoint,
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace
-cargo run -p condr-gui
+cargo run -p condr
 ```
 
 - First launch discovers or starts one detached local Server, shows Start Page, and starts no shell. `New Workspace…` uses the native directory picker for Local and a Server-path text field for TCP/SSH-tunnel connections, then opens a shell in the validated absolute Root Directory. It does not launch an agent CLI.
