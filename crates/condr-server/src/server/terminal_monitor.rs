@@ -131,13 +131,14 @@ fn probe_terminal(
     state: Arc<Mutex<RuntimeState>>,
 ) {
     thread::spawn(move || {
-        let mut cwd_scan_pending = false;
+        let mut cwd_scan_due: Option<Instant> = None;
         let mut git_scan_pending: Option<Instant> = None;
         loop {
             match activity.recv_timeout(agent_probe.poll_interval()) {
                 Ok(()) => {
-                    cwd_scan_pending = true;
-                    git_scan_pending = Some(Instant::now());
+                    let now = Instant::now();
+                    cwd_scan_due = Some(now + CWD_SCAN_INTERVAL);
+                    git_scan_pending = Some(now);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -145,8 +146,10 @@ fn probe_terminal(
 
             let now = Instant::now();
             let agent_update = agent_probe.poll();
-            let cwd = if cwd_scan_pending {
-                cwd_scan_pending = false;
+            // Debounced behind output: a burst must not turn into a process cwd read per
+            // chunk, and the shutdown path records the final cwd on its own.
+            let cwd = if cwd_scan_due.is_some_and(|due| now >= due) {
+                cwd_scan_due = None;
                 cwd_probe.cwd()
             } else {
                 None

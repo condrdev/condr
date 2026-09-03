@@ -44,6 +44,9 @@ const ACCEPT_POLL: Duration = Duration::from_millis(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const STOP_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 const EVENT_HISTORY_LIMIT: usize = 256;
+/// Process cwd reads are rate-limited behind terminal output; agent detection has its
+/// own cadence inside `TerminalAgentProbe`.
+const CWD_SCAN_INTERVAL: Duration = Duration::from_millis(500);
 const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
 const TERMINAL_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 const BOOTSTRAP_METADATA_HEADROOM: usize = 64 * 1024;
