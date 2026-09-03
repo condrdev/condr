@@ -144,8 +144,9 @@ const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
-const CONDR_ICON_PATHS: [&str; 3] = [
+const CONDR_ICON_PATHS: [&str; 4] = [
     "icons/circle.svg",
+    "icons/circle-filled.svg",
     "icons/circle-alert.svg",
     "icons/server-plus.svg",
 ];
@@ -171,6 +172,9 @@ impl AssetSource for CondrAssets {
         match path {
             "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle.svg"
+            )))),
+            "icons/circle-filled.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/circle-filled.svg"
             )))),
             "icons/circle-alert.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle-alert.svg"
