@@ -541,12 +541,7 @@ impl Render for SettingsWindow {
                 )),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(server_page(
-                    &self.owner,
-                    &settings,
-                    self.selected_server,
-                    cx,
-                )),
+                .page(server_page(&settings)),
         };
         let tabs = TabBar::new("condr-settings-tabs")
             .underline()
@@ -705,26 +700,6 @@ pub(super) fn select_server_shell(
             .owner
             .update(cx, |owner, _| owner.set_server_shell(key, &shell));
     });
-}
-
-/// A Server's system default shell, named in the Shell description. Takes the owner
-/// rather than the Settings entity because it runs inside that entity's render.
-pub(super) fn server_default_shell(
-    owner: &WeakEntity<Condr>,
-    key: ConnectionKey,
-    cx: &App,
-) -> SharedString {
-    owner
-        .upgrade()
-        .and_then(|owner| {
-            owner
-                .read(cx)
-                .connections
-                .iter()
-                .find(|connection| connection.key == key)
-                .map(|connection| connection.settings.default_shell.clone().into())
-        })
-        .unwrap_or_default()
 }
 
 /// Whether Reset All has anything to do for Colors.
@@ -900,20 +875,9 @@ fn application_page(
 
 /// Preferences a Server owns, edited for one connection at a time. Only the shell so
 /// far; the Server picker is the first item, as paseo's host settings do.
-fn server_page(
-    owner: &WeakEntity<Condr>,
-    settings: &Entity<SettingsWindow>,
-    selected_server: ConnectionKey,
-    cx: &App,
-) -> SettingPage {
+fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
     let shell_get = settings.clone();
     let shell_set = settings.clone();
-    let default_shell = server_default_shell(owner, selected_server, cx);
-    let shell_description: SharedString = if default_shell.is_empty() {
-        "Empty uses the system default.".into()
-    } else {
-        format!("Empty uses the system default ({default_shell}).").into()
-    };
     SettingPage::new("Server")
         .icon(IconName::Cpu)
         .default_open(true)
@@ -927,7 +891,7 @@ fn server_page(
                     )
                     .default_value(""),
                 )
-                .description(shell_description),
+                .description("Empty uses the system default."),
             ),
         )
 }

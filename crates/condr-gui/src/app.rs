@@ -74,8 +74,8 @@ use settings::{
 use settings::{
     color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
     select_settings_server, select_terminal_font_family, select_terminal_font_size,
-    selected_appearance, server_default_shell, server_shell, step_terminal_font_size,
-    terminal_font_family, terminal_font_size,
+    selected_appearance, server_shell, step_terminal_font_size, terminal_font_family,
+    terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;

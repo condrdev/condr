@@ -1505,10 +1505,6 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     );
     window.update(|_, cx| select_settings_server(&settings_view, 1, cx));
     assert_eq!(window.read(|app| server_shell(&settings_view, app)), "");
-    assert!(
-        !window.read(|app| server_default_shell(&owner, 1, app).is_empty()),
-        "the Server reports the system default shell it resolved"
-    );
     window.update(|_, cx| select_server_shell(&settings_view, " nu ".into(), cx));
     assert_eq!(
         window.read(|app| server_shell(&settings_view, app)),
