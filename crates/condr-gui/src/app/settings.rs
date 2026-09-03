@@ -498,27 +498,29 @@ impl SettingsWindow {
     }
 }
 
-fn licenses_group(licenses: &Entity<EditorState>) -> SettingGroup {
+fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
     let licenses = licenses.clone();
-    SettingGroup::new().title("Licenses").item(
-        SettingItem::render(move |_, _, _| {
-            // Plain text: no border, background or line numbers. It stays an
-            // Editor only because a 900 KB text needs virtualized rendering.
-            Editor::new(&licenses)
-                .readonly(true)
-                .appearance(false)
-                .bordered(false)
-                .h(rems(26.))
-        })
-        // Settings search only matches custom items by keyword.
-        .keywords([
-            "licenses",
-            "license",
-            "third-party",
-            "open source",
-            "notices",
-            "attribution",
-        ]),
+    SettingPage::new("Licenses").icon(IconName::BookOpen).group(
+        SettingGroup::new().item(
+            SettingItem::render(move |_, _, _| {
+                // Plain text: no border, background or line numbers. It stays an
+                // Editor only because a 900 KB text needs virtualized rendering.
+                Editor::new(&licenses)
+                    .readonly(true)
+                    .appearance(false)
+                    .bordered(false)
+                    .h(rems(26.))
+            })
+            // Settings search only matches custom items by keyword.
+            .keywords([
+                "licenses",
+                "license",
+                "third-party",
+                "open source",
+                "notices",
+                "attribution",
+            ]),
+        ),
     )
 }
 
@@ -533,12 +535,8 @@ impl Render for SettingsWindow {
             SettingsTab::Application => Settings::new("condr-settings-application")
                 // Matches the main window's sidebar.
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(application_page(
-                    &self.owner,
-                    &settings,
-                    &self.color_scheme,
-                    &self.licenses,
-                )),
+                .page(appearance_page(&self.owner, &settings, &self.color_scheme))
+                .page(licenses_page(&self.licenses)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(server_page(&settings)),
@@ -725,12 +723,11 @@ pub(super) fn reset_color_scheme(
     });
 }
 
-/// Everything that lives in this Client: appearance, terminal rendering, licenses.
-fn application_page(
+/// This Client's appearance and terminal rendering preferences.
+fn appearance_page(
     owner: &WeakEntity<Condr>,
     settings: &Entity<SettingsWindow>,
     color_scheme: &Entity<ColorSchemeSelect>,
-    licenses: &Entity<EditorState>,
 ) -> SettingPage {
     let reset_select = color_scheme.clone();
     let dirty_owner = owner.clone();
@@ -748,11 +745,10 @@ fn application_page(
     let size_dirty = settings.clone();
     let default_size = default_font.size;
     let scheme_select = color_scheme.clone();
-    SettingPage::new("Application")
-        .icon(IconName::Settings)
-        .default_open(true)
+    SettingPage::new("Appearance")
+        .icon(IconName::Palette)
         .group(
-            SettingGroup::new().title("Appearance").item(
+            SettingGroup::new().item(
                 SettingItem::new(
                     "Theme",
                     SettingField::dropdown(
@@ -870,7 +866,6 @@ fn application_page(
                     .description("Terminal color schemes."),
                 ),
         )
-        .group(licenses_group(licenses))
 }
 
 /// Preferences a Server owns, edited for one connection at a time. Only the shell so
