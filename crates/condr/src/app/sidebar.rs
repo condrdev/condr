@@ -192,7 +192,7 @@ impl CondrSidebarIcon {
         let graphic = match self.graphic {
             SidebarIconGraphic::Glyph(glyph, tone) => glyph
                 .icon()
-                .size_4()
+                .size_3()
                 .text_color(tone.color(cx))
                 .into_any_element(),
             SidebarIconGraphic::Avatar { initial, color } => div()
