@@ -1215,14 +1215,20 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         },
     )
     .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap(),
-        ServerMessage::Event {
-            event: SessionEvent::LayoutChanged,
-            ..
-        }
-    ));
-    let sequence = handle.state.lock().unwrap().sequence;
+    // The applied sequence is the LayoutChanged event's own; a Git or agent probe may
+    // already have moved the Server's sequence on by the time this thread looks.
+    let message = wait_for_message(&mut controller, |message| {
+        matches!(
+            message,
+            ServerMessage::Event {
+                event: SessionEvent::LayoutChanged,
+                ..
+            }
+        )
+    });
+    let ServerMessage::Event { sequence, .. } = message else {
+        unreachable!("predicate only accepts LayoutChanged events");
+    };
     assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
     let parent_workspace_id = handle
         .state
