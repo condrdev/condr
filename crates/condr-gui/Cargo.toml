@@ -28,9 +28,6 @@ smol_str.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows-spawn.workspace = true
-
 [lints.rust]
-# workspace 级别是 forbid;本 crate 降为 deny,唯一豁免是 launch.rs 的 GetConsoleWindow FFI。
+# workspace 级别是 forbid;本 crate 降为 deny,唯一豁免是 cli.rs 的 AttachConsole FFI。
 unsafe_code = "deny"

@@ -40,7 +40,7 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 
 ### `condr` 命令行
 
-`condr` 与 herdr 一样是 console 子系统程序：带参数时是普通 CLI，shell 会等待、能取到退出码和管道输出；不带参数时它以 `DETACHED_PROCESS` 重新拉起一个自己来跑 GUI，然后立刻返回，所以从 shell 输入 `condr` 提示符马上回来，GUI 进程本身不带控制台。从资源管理器双击时 Windows 会先给它分配一个控制台，它随即脱离并退出，会闪一下控制台窗口；Windows 11 24H2 起可用 manifest 的 `consoleAllocationPolicy=detached` 消除，尚未加入。`condr --foreground` 在当前控制台里直接跑 GUI，开发调试时用。
+`condr` 在三个平台上都是同一个二进制：不带参数启动 GUI，带参数是 CLI（目前只有 `--help`、`--version`，#27 的子命令陆续加入）。Linux / macOS 无特殊处理。Windows 上它是 GUI 子系统程序，双击不会出现控制台；CLI 模式先 `AttachConsole` 到父 shell 的控制台再输出，所以 Git Bash、脚本和捕获输出的 agent 都正常；只有在 cmd 或交互式 PowerShell 里直接敲，shell 不会等待它：输出可能出现在提示符之后，`$LASTEXITCODE` 不可靠。
 
 ### Pane 内的环境变量
 
