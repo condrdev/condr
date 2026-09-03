@@ -35,9 +35,7 @@ use gpui_component::input::{Editor, EditorState, Input, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
-use gpui_component::sidebar::{
-    Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarItem,
-};
+use gpui_component::sidebar::{Sidebar, SidebarCollapsible, SidebarFooter, SidebarItem};
 use gpui_component::theme::{Theme, ThemeMode};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
@@ -146,7 +144,11 @@ const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
-const CONDR_ICON_PATHS: [&str; 2] = ["icons/circle.svg", "icons/circle-alert.svg"];
+const CONDR_ICON_PATHS: [&str; 3] = [
+    "icons/circle.svg",
+    "icons/circle-alert.svg",
+    "icons/server-plus.svg",
+];
 
 /// The drag payload of the sidebar resize handle; the shell tracks its moves.
 #[derive(Clone)]
@@ -172,6 +174,9 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/circle-alert.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle-alert.svg"
+            )))),
+            "icons/server-plus.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/server-plus.svg"
             )))),
             _ => self.base.load(path),
         }

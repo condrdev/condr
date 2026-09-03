@@ -25,6 +25,8 @@ impl SidebarIconTone {
 pub(super) enum CondrIconName {
     Circle,
     CircleAlert,
+    /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
+    ServerPlus,
 }
 
 impl IconNamed for CondrIconName {
@@ -32,6 +34,7 @@ impl IconNamed for CondrIconName {
         match self {
             Self::Circle => "icons/circle.svg",
             Self::CircleAlert => "icons/circle-alert.svg",
+            Self::ServerPlus => "icons/server-plus.svg",
         }
         .into()
     }
@@ -1022,53 +1025,55 @@ impl Condr {
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
-            .header(
-                SidebarHeader::new()
-                    .child(Icon::new(IconName::SquareTerminal))
-                    .child(div().flex_1().font_semibold().child(condr_core::APP_NAME))
+            .children(items)
+            // The app name lives in the title bar; the actions sit at the bottom the way
+            // paseo lays out its sidebar: add on the left, settings on the right.
+            .footer(
+                SidebarFooter::new()
                     .child(
                         Button::new("add-server")
                             .debug_selector(|| "add-server".into())
                             .ghost()
-                            .xsmall()
-                            .icon(IconName::Plus)
-                            .tooltip("Add Server")
+                            .small()
+                            .icon(Icon::new(CondrIconName::ServerPlus))
+                            .label("Add Server")
                             .on_click(move |_, window, cx| {
                                 let _ = add_owner
                                     .update(cx, |this, cx| this.prompt_add_server(window, cx));
                             }),
                     )
                     .child(
-                        Button::new("open-settings")
-                            .debug_selector(|| "open-settings".into())
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::Settings2)
-                            .tooltip("Settings…")
-                            .accessibility_label("Settings…")
-                            .on_click(move |_, window, cx| {
-                                let _ = settings_owner
-                                    .update(cx, |this, cx| this.open_settings(window, cx));
-                            }),
+                        h_flex()
+                            .gap_1()
+                            .when(reconnect_visible, |this| {
+                                this.child(
+                                    Button::new("reconnect-server")
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::LoaderCircle)
+                                        .tooltip("Reconnect")
+                                        .on_click(move |_, window, cx| {
+                                            let _ = reconnect_owner.update(cx, |this, cx| {
+                                                this.reconnect_active(window, cx);
+                                                cx.notify();
+                                            });
+                                        }),
+                                )
+                            })
+                            .child(
+                                Button::new("open-settings")
+                                    .debug_selector(|| "open-settings".into())
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Settings)
+                                    .tooltip("Settings…")
+                                    .accessibility_label("Settings…")
+                                    .on_click(move |_, window, cx| {
+                                        let _ = settings_owner
+                                            .update(cx, |this, cx| this.open_settings(window, cx));
+                                    }),
+                            ),
                     ),
             )
-            .children(items)
-            .when(reconnect_visible, |sidebar| {
-                sidebar.footer(
-                    SidebarFooter::new().child(
-                        Button::new("reconnect-server")
-                            .ghost()
-                            .small()
-                            .icon(IconName::LoaderCircle)
-                            .tooltip("Reconnect")
-                            .on_click(move |_, window, cx| {
-                                let _ = reconnect_owner.update(cx, |this, cx| {
-                                    this.reconnect_active(window, cx);
-                                    cx.notify();
-                                });
-                            }),
-                    ),
-                )
-            })
     }
 }

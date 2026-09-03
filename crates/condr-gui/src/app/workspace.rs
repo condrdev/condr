@@ -533,7 +533,15 @@ impl Render for Condr {
             .text_color(cx.theme().foreground)
             // Client-side title bar on every platform, as Zed does; the OS title for the
             // taskbar is set separately when the window opens.
-            .child(TitleBar::new().child("Condr"))
+            .child(
+                TitleBar::new().child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(Icon::new(IconName::SquareTerminal).small())
+                        .child(condr_core::APP_NAME),
+                ),
+            )
             .child(
                 // The sidebar keeps an absolute width, the way Zed sizes its docks: a
                 // resizable group would rescale it with the window on every resize.
