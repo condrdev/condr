@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+default-run = "condr"
 
 [[bin]]
 name = "condr"
