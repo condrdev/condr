@@ -897,7 +897,8 @@ mod shell_tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn bash_is_wrapped_for_cwd_reporting() {
-        let argv = shell_command("/usr/local/bin/bash").get_argv();
+        let command = shell_command("/usr/local/bin/bash");
+        let argv = command.get_argv();
         assert_eq!(argv[0], "/bin/sh");
         assert_eq!(argv.last().unwrap(), "/usr/local/bin/bash");
     }
