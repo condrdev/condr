@@ -8,16 +8,10 @@ fn test_endpoint() -> Endpoint {
     )))
 }
 
-/// Unique within the process even when two tests ask within the same clock tick: the
-/// Windows system clock advances in coarse steps, so parallel tests used to share an
-/// endpoint path and talk to each other's Server.
+/// Random rather than clock-based: the Windows system clock ticks coarsely, so
+/// parallel tests used to share an endpoint path and talk to each other's Server.
 fn unique_suffix() -> u128 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    (nanos << 20) | u128::from(NEXT.fetch_add(1, Ordering::Relaxed) & 0xf_ffff)
+    uuid::Uuid::new_v4().as_u128()
 }
 
 fn run_git(cwd: &std::path::Path, args: &[&str]) {
