@@ -1496,6 +1496,14 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         "an empty family falls back to the default font"
     );
 
+    // Shell: stored as typed for the local Server; blank means the system default.
+    assert_eq!(window.read(|app| server_shell(&owner, app)), "");
+    window.update(|_, cx| select_server_shell(&owner, "nu".into(), cx));
+    assert_eq!(window.read(|app| view.read(app).server_shell.clone()), "nu");
+    assert_eq!(window.read(|app| server_shell(&owner, app)), "nu");
+    window.update(|_, cx| select_server_shell(&owner, "".into(), cx));
+    assert_eq!(window.read(|app| view.read(app).server_shell.clone()), "");
+
     // Font size: the real stepper buttons, one pixel per click, clamped to the bounds.
     let default_size = f64::from(TerminalFont::default().size);
     settings.update(|window, cx| _ = window.draw(cx));

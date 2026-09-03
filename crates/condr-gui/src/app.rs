@@ -72,9 +72,9 @@ use settings::{
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
-    color_scheme_is_dirty, reset_color_scheme, select_appearance, select_terminal_font_family,
-    select_terminal_font_size, selected_appearance, step_terminal_font_size, terminal_font_family,
-    terminal_font_size,
+    color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
+    select_terminal_font_family, select_terminal_font_size, selected_appearance, server_shell,
+    step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;
@@ -536,6 +536,9 @@ pub(crate) struct Condr {
     sidebar_width: Pixels,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
+    /// `[server.terminal] shell` as saved for the local Server; empty means the system
+    /// default. The GUI never applies it, the Server reads it when a shell starts.
+    server_shell: SharedString,
     settings_window: Option<WindowHandle<Root>>,
     settings_view: Option<WeakEntity<SettingsWindow>>,
     _settings_window_closed: Option<Subscription>,
@@ -593,6 +596,10 @@ impl Condr {
         let terminal_color_scheme = client_config_path
             .as_deref()
             .and_then(|path| config::load_terminal_color_scheme(path).ok())
+            .unwrap_or_default();
+        let server_shell = client_config_path
+            .as_deref()
+            .and_then(|path| config::load_server_shell(path).ok())
             .unwrap_or_default();
         let mut connections = vec![connection];
         for (index, server) in saved_servers.into_iter().enumerate() {
@@ -661,6 +668,7 @@ impl Condr {
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             terminal_font,
             terminal_color_scheme,
+            server_shell,
             settings_window: None,
             settings_view: None,
             _settings_window_closed: None,

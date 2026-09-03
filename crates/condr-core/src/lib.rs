@@ -29,7 +29,7 @@ pub use terminal::{
     TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
     TerminalNoticeBatch, TerminalNoticeProbe, TerminalPosition, TerminalRuntime, TerminalScroll,
     TerminalSelection, TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta,
-    TerminalViewFrame, TerminalViewSource,
+    TerminalViewFrame, TerminalViewSource, default_shell_program,
 };
 
 pub const APP_NAME: &str = "Condr";

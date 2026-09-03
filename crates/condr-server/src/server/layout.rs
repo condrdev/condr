@@ -152,6 +152,7 @@ pub(super) fn prepare_external_layout(
             let mut runtime = match TerminalRuntime::spawn_shell(
                 child.root(),
                 TerminalSize::new(24, 80),
+                configured_shell().as_deref(),
             ) {
                 Ok(runtime) => runtime,
                 Err(error) => {
@@ -352,7 +353,11 @@ pub(super) fn finish_external_layout(
                     let mut restart_errors = Vec::new();
                     for spec in restart_specs {
                         let cwd = final_cwds.get(&spec.pane_id).cloned().unwrap_or(spec.cwd);
-                        match TerminalRuntime::spawn_shell(&cwd, spec.size) {
+                        match TerminalRuntime::spawn_shell(
+                            &cwd,
+                            spec.size,
+                            configured_shell().as_deref(),
+                        ) {
                             Ok(mut runtime) => {
                                 let updates = runtime
                                     .take_updates()
@@ -601,8 +606,12 @@ pub(super) fn apply_layout_command(
             .pane(pane_id)
             .and_then(|pane| pane.cwd())
             .ok_or_else(|| "new Pane has no working directory".to_string())?;
-        let mut runtime = TerminalRuntime::spawn_shell(cwd, TerminalSize::new(24, 80))
-            .map_err(|error| format!("failed to start terminal: {error}"))?;
+        let mut runtime = TerminalRuntime::spawn_shell(
+            cwd,
+            TerminalSize::new(24, 80),
+            configured_shell().as_deref(),
+        )
+        .map_err(|error| format!("failed to start terminal: {error}"))?;
         let updates = runtime
             .take_updates()
             .expect("new Terminal update receiver exists");
@@ -791,9 +800,12 @@ pub(super) fn apply_prepared_external_layout(
                     .active_tab()
                     .focused_pane()
                     .id();
-                let mut runtime =
-                    TerminalRuntime::spawn_shell(child.root(), TerminalSize::new(24, 80))
-                        .map_err(|error| format!("failed to start terminal: {error}"))?;
+                let mut runtime = TerminalRuntime::spawn_shell(
+                    child.root(),
+                    TerminalSize::new(24, 80),
+                    configured_shell().as_deref(),
+                )
+                .map_err(|error| format!("failed to start terminal: {error}"))?;
                 let updates = runtime
                     .take_updates()
                     .expect("new Terminal update receiver exists");

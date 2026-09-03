@@ -217,6 +217,18 @@ impl Condr {
         apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
     }
 
+    /// Persists only: the Server picks the shell up when it starts the next terminal.
+    pub(super) fn set_server_shell(&mut self, shell: SharedString, cx: &mut Context<Self>) {
+        // Stored as typed so the field is never rewritten under the user; the Server
+        // trims and treats blank as the default.
+        if self.server_shell == shell {
+            return;
+        }
+        self.server_shell = shell;
+        self.save_server_shell();
+        cx.notify();
+    }
+
     /// Settings opens in its own window, as Zed does, so it can be moved aside while
     /// the real Panes behind it show every change live. A second open re-activates it.
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -486,6 +498,19 @@ pub(super) fn step_terminal_font_size(settings: &Entity<SettingsWindow>, delta: 
     });
 }
 
+/// What the Shell field shows.
+pub(super) fn server_shell(owner: &WeakEntity<Condr>, cx: &App) -> SharedString {
+    owner
+        .upgrade()
+        .map(|owner| owner.read(cx).server_shell.clone())
+        .unwrap_or_default()
+}
+
+/// What the Shell field does on every change.
+pub(super) fn select_server_shell(owner: &WeakEntity<Condr>, shell: SharedString, cx: &mut App) {
+    let _ = owner.update(cx, |owner, cx| owner.set_server_shell(shell, cx));
+}
+
 /// Whether Reset All has anything to do for Colors.
 pub(super) fn color_scheme_is_dirty(owner: &WeakEntity<Condr>, cx: &App) -> bool {
     owner
@@ -530,6 +555,8 @@ fn appearance_page(
     let size_dirty = settings.clone();
     let default_size = default_font.size;
     let scheme_select = color_scheme.clone();
+    let shell_get = owner.clone();
+    let shell_set = owner.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
         .group(
@@ -649,6 +676,22 @@ fn appearance_page(
                         ),
                     )
                     .description("Terminal color schemes."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Shell",
+                        SettingField::input(
+                            move |cx| server_shell(&shell_get, cx),
+                            move |value: SharedString, cx| {
+                                select_server_shell(&shell_set, value, cx)
+                            },
+                        )
+                        .default_value(""),
+                    )
+                    .description(
+                        "Program the local Server starts in new terminals. Empty uses the \
+                         system default shell. A remote Server reads its own config.toml.",
+                    ),
                 ),
         )
 }

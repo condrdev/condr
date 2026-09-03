@@ -35,7 +35,13 @@ struct ReportedMousePress {
 }
 
 impl TerminalRuntime {
-    pub fn spawn_shell(cwd: impl AsRef<Path>, size: TerminalSize) -> io::Result<Self> {
+    /// Starts an interactive shell in `cwd`. `program` is the configured shell; `None`
+    /// or blank means the system default, see [`default_shell_program`].
+    pub fn spawn_shell(
+        cwd: impl AsRef<Path>,
+        size: TerminalSize,
+        program: Option<&str>,
+    ) -> io::Result<Self> {
         let cwd = cwd.as_ref();
         let metadata = std::fs::metadata(cwd).map_err(|error| {
             io::Error::new(
@@ -55,19 +61,11 @@ impl TerminalRuntime {
                 ),
             ));
         }
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = CommandBuilder::new("pwsh.exe");
-            command.args([
-                "-NoLogo",
-                "-NoExit",
-                "-Command",
-                WINDOWS_POWERSHELL_CWD_HOOK,
-            ]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = default_shell_command();
+        let program = program
+            .map(str::trim)
+            .filter(|program| !program.is_empty())
+            .map_or_else(default_shell_program, str::to_owned);
+        let mut command = shell_command(&program);
         command.cwd(cwd);
         Self::spawn(command, size)
     }
@@ -808,19 +806,121 @@ fn live_mouse_position(
     })
 }
 
-#[cfg(not(windows))]
-fn default_shell_command() -> CommandBuilder {
-    let default = CommandBuilder::new_default_prog();
-    #[cfg(target_os = "linux")]
+/// The shell a terminal runs when none is configured: `$SHELL`, then the password
+/// database, on Unix (as herdr and Zed do); on Windows PowerShell 7 when installed,
+/// else Windows PowerShell, else `%ComSpec%`, in Zed's order.
+pub fn default_shell_program() -> String {
+    #[cfg(windows)]
     {
-        let shell = default.get_shell();
-        if Path::new(&shell).file_name().and_then(|name| name.to_str()) == Some("bash") {
-            let mut command = CommandBuilder::new("/bin/sh");
-            command.args(["-c", LINUX_BASH_CWD_WRAPPER, "condr-shell", shell.as_str()]);
-            return command;
+        // ponytail: PATH lookup only; Zed also probes Program Files, MSIX, scoop and
+        // dotnet tools for pwsh. Add those when a real install goes unnoticed.
+        if is_on_path("pwsh.exe") {
+            return "pwsh.exe".to_owned();
         }
+        if is_on_path("powershell.exe") {
+            return "powershell.exe".to_owned();
+        }
+        std::env::var("ComSpec")
+            .ok()
+            .map(|comspec| comspec.trim().to_owned())
+            .filter(|comspec| !comspec.is_empty())
+            .unwrap_or_else(|| "cmd.exe".to_owned())
     }
-    default
+    #[cfg(not(windows))]
+    CommandBuilder::new_default_prog().get_shell()
+}
+
+#[cfg(windows)]
+fn is_on_path(file_name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| directory.join(file_name).is_file())
+    })
+}
+
+/// The shell's file name without `.exe`, lower-cased; both separators count so a
+/// Windows path classifies the same on every host.
+fn shell_name(program: &str) -> String {
+    let name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name).to_owned()
+}
+
+/// The interactive shell command, with cwd reporting for the shells we know how to
+/// hook: bash on Linux through a wrapper rc file, PowerShell on Windows through a
+/// prompt hook. Any other shell starts plain.
+fn shell_command(program: &str) -> CommandBuilder {
+    match shell_name(program).as_str() {
+        #[cfg(target_os = "linux")]
+        "bash" => {
+            let mut command = CommandBuilder::new("/bin/sh");
+            command.args(["-c", LINUX_BASH_CWD_WRAPPER, "condr-shell", program]);
+            command
+        }
+        #[cfg(windows)]
+        "pwsh" | "powershell" => {
+            let mut command = CommandBuilder::new(program);
+            command.args([
+                "-NoLogo",
+                "-NoExit",
+                "-Command",
+                WINDOWS_POWERSHELL_CWD_HOOK,
+            ]);
+            command
+        }
+        _ => CommandBuilder::new(program),
+    }
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use super::*;
+
+    #[test]
+    fn shell_names_ignore_directories_extensions_and_case() {
+        assert_eq!(shell_name("/usr/bin/bash"), "bash");
+        assert_eq!(
+            shell_name(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            "pwsh"
+        );
+        assert_eq!(shell_name("PowerShell.EXE"), "powershell");
+        assert_eq!(shell_name("fish"), "fish");
+    }
+
+    #[test]
+    fn unknown_shells_start_without_extra_arguments() {
+        assert_eq!(shell_command("fish").get_argv(), &["fish"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bash_is_wrapped_for_cwd_reporting() {
+        let argv = shell_command("/usr/local/bin/bash").get_argv();
+        assert_eq!(argv[0], "/bin/sh");
+        assert_eq!(argv.last().unwrap(), "/usr/local/bin/bash");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_gets_the_prompt_hook() {
+        for program in [
+            "pwsh.exe",
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        ] {
+            let command = shell_command(program);
+            let argv = command.get_argv();
+            assert_eq!(argv[0], program);
+            assert_eq!(argv.last().unwrap(), WINDOWS_POWERSHELL_CWD_HOOK);
+        }
+        assert_eq!(shell_command("cmd.exe").get_argv(), &["cmd.exe"]);
+    }
+
+    #[test]
+    fn the_default_shell_is_never_blank() {
+        assert!(!default_shell_program().trim().is_empty());
+    }
 }
 
 impl TerminalViewSource {

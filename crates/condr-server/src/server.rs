@@ -85,6 +85,22 @@ impl Default for ServerConfig {
     }
 }
 
+/// `[server.terminal] shell` from the shared `config.toml`; `None` means the system
+/// default. Read on every shell start so a Settings change reaches the next terminal
+/// without restarting the Server. A missing or malformed file falls back too.
+pub(crate) fn configured_shell() -> Option<String> {
+    let path = condr_core::config_directory()?.join("config.toml");
+    let text = std::fs::read_to_string(path).ok()?;
+    let root: toml::Value = text.parse().ok()?;
+    root.get("server")?
+        .get("terminal")?
+        .get("shell")?
+        .as_str()
+        .map(str::trim)
+        .filter(|shell| !shell.is_empty())
+        .map(str::to_owned)
+}
+
 impl ServerConfig {
     pub fn new(endpoint: Endpoint) -> Self {
         let snapshot_path = match &endpoint {
@@ -773,6 +789,7 @@ impl RuntimeState {
             let started = match TerminalRuntime::spawn_shell(
                 requested_cwd,
                 TerminalSize::new(24, 80),
+                configured_shell().as_deref(),
             ) {
                 Ok(runtime) => Some((runtime, requested_cwd.to_path_buf())),
                 Err(error) if requested_cwd != workspace_root.as_path() => {
@@ -782,7 +799,11 @@ impl RuntimeState {
                         requested_cwd.display(),
                         workspace_root.display()
                     );
-                    match TerminalRuntime::spawn_shell(&workspace_root, TerminalSize::new(24, 80)) {
+                    match TerminalRuntime::spawn_shell(
+                        &workspace_root,
+                        TerminalSize::new(24, 80),
+                        configured_shell().as_deref(),
+                    ) {
                         Ok(runtime) => Some((runtime, workspace_root)),
                         Err(fallback_error) => {
                             eprintln!(

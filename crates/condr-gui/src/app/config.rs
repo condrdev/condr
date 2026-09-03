@@ -16,6 +16,10 @@ const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
+/// `[server.terminal]` is the Server's; the GUI only edits it for the local Server
+/// that shares this file.
+const SERVER_TERMINAL_TABLE: [&str; 2] = ["server", "terminal"];
+const SHELL_KEY: &str = "shell";
 
 #[derive(Deserialize)]
 pub(super) struct SavedServer {
@@ -67,6 +71,15 @@ pub(super) fn load_terminal_color_scheme(path: &Path) -> io::Result<SharedString
         .as_ref()
         .and_then(toml::Value::as_str)
         .map(|name| name.trim().to_string().into())
+        .unwrap_or_default())
+}
+
+/// Empty when unset; the Server then starts the system default shell.
+pub(super) fn load_server_shell(path: &Path) -> io::Result<SharedString> {
+    Ok(read_value(path, &SERVER_TERMINAL_TABLE, SHELL_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_str)
+        .map(|shell| shell.trim().to_string().into())
         .unwrap_or_default())
 }
 
@@ -132,6 +145,21 @@ impl Condr {
                 (FONT_FAMILY_KEY, toml_edit::value(font.family.as_ref())),
                 (FONT_SIZE_KEY, toml_edit::value(f64::from(font.size))),
             ],
+        ) {
+            self.app_error = Some(format!("Failed to save config: {error}"));
+        }
+    }
+
+    pub(super) fn save_server_shell(&mut self) {
+        let Some(path) = self.client_config_path.as_deref() else {
+            return;
+        };
+        let shell = self.server_shell.clone();
+        if let Err(error) = write_value(
+            path,
+            &SERVER_TERMINAL_TABLE,
+            SHELL_KEY,
+            toml_edit::value(shell.as_ref()),
         ) {
             self.app_error = Some(format!("Failed to save config: {error}"));
         }

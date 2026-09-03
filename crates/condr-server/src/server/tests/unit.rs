@@ -1187,7 +1187,8 @@ fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
         .active_tab()
         .focused_pane()
         .id();
-    let mut runtime = TerminalRuntime::spawn_shell(&initial, TerminalSize::new(24, 80)).unwrap();
+    let mut runtime =
+        TerminalRuntime::spawn_shell(&initial, TerminalSize::new(24, 80), None).unwrap();
     let updates = runtime.take_updates().unwrap();
     let (_, stale_instance, ..) = state.install_terminal(pane_id, runtime, updates);
     state

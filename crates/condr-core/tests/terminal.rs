@@ -22,7 +22,7 @@ fn shell_spawn_rejects_a_missing_working_directory() {
     ));
     assert!(!missing.exists());
 
-    let error = match TerminalRuntime::spawn_shell(&missing, TerminalSize::new(24, 80)) {
+    let error = match TerminalRuntime::spawn_shell(&missing, TerminalSize::new(24, 80), None) {
         Ok(_) => panic!("a missing cwd must not start a shell elsewhere"),
         Err(error) => error,
     };
@@ -44,7 +44,7 @@ fn runtime_cwd_follows_a_real_shell_directory_change() {
     std::fs::create_dir_all(&target).unwrap();
     let expected_root = root.canonicalize().unwrap();
     let expected_target = target.canonicalize().unwrap();
-    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60)).unwrap();
+    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60), None).unwrap();
     let cwd_probe = runtime.cwd_probe();
 
     wait_for_cwd(|| cwd_probe.cwd(), &expected_root);
@@ -83,7 +83,7 @@ fn bash_shell_reports_the_final_cwd_before_normal_exit() {
     let target = root.join("final");
     std::fs::create_dir_all(&target).unwrap();
     let expected_target = target.canonicalize().unwrap();
-    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60)).unwrap();
+    let mut runtime = TerminalRuntime::spawn_shell(&root, TerminalSize::new(8, 60), None).unwrap();
     let cwd_probe = runtime.cwd_probe();
     runtime
         .execute(TerminalCommand::Text(format!(

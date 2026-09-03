@@ -92,7 +92,8 @@ use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 use process::*;
 use pty_io::*;
 pub use runtime::{
-    TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime,
+    TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe,
+    TerminalRuntime, default_shell_program,
 };
 use view::{
     SnapshotHyperlinks, TerminalDamageBaseline, publish_view, side, snapshot_terminal,
