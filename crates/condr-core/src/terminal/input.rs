@@ -2,7 +2,8 @@ use super::*;
 
 pub(super) fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     if bracketed {
-        let text = text.replace(['\x1b', '\x03'], "");
+        // Only ESC is stripped so pasted text cannot forge the closing marker.
+        let text = text.replace('\x1b', "");
         format!("\x1b[200~{text}\x1b[201~").into_bytes()
     } else {
         text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
@@ -122,10 +123,18 @@ fn function_sequence(number: u8, modifier: u8) -> io::Result<String> {
         10 => tilde_sequence(21, modifier),
         11 => tilde_sequence(23, modifier),
         12 => tilde_sequence(24, modifier),
+        13 => tilde_sequence(25, modifier),
+        14 => tilde_sequence(26, modifier),
+        15 => tilde_sequence(28, modifier),
+        16 => tilde_sequence(29, modifier),
+        17 => tilde_sequence(31, modifier),
+        18 => tilde_sequence(32, modifier),
+        19 => tilde_sequence(33, modifier),
+        20 => tilde_sequence(34, modifier),
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "terminal function key must be F1 through F12",
+                "terminal function key must be F1 through F20",
             ));
         }
     };

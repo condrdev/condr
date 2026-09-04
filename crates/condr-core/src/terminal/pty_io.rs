@@ -971,7 +971,9 @@ pub(super) fn resize_loop(
         let master = master
             .upgrade()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "PTY was closed"))?;
-        resize_terminal_and_pty(
+        // A single failed ioctl must not kill the worker: the VT grid already
+        // resized and the next request retries against the same PTY.
+        let _ = resize_terminal_and_pty(
             &terminal,
             &current_size,
             &revision,
@@ -984,7 +986,7 @@ pub(super) fn resize_loop(
                     .resize(pty_size)
                     .map_err(other_error)
             },
-        )?;
+        );
     }
     Ok(())
 }

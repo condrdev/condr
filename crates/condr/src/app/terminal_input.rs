@@ -500,6 +500,10 @@ impl Condr {
             cx.stop_propagation();
             return;
         }
+        if modifiers.platform && !modifiers.control && !modifiers.alt {
+            // Cmd/Win chords without a binding are never terminal input; let them propagate.
+            return;
+        }
         let key_code = match stroke.key.as_str() {
             "enter" => Some(TerminalKey::Enter),
             "tab" if modifiers.shift => Some(TerminalKey::BackTab),
@@ -519,16 +523,14 @@ impl Condr {
             key if key.len() > 1 && key.starts_with('f') => key[1..]
                 .parse::<u8>()
                 .ok()
-                .filter(|number| (1..=12).contains(number))
+                .filter(|number| (1..=20).contains(number))
                 .map(TerminalKey::Function),
-            _ if modifiers.control || modifiers.alt || modifiers.platform => {
-                Some(TerminalKey::Character(
-                    stroke
-                        .key_char
-                        .clone()
-                        .unwrap_or_else(|| stroke.key.clone()),
-                ))
-            }
+            _ if modifiers.control || modifiers.alt => Some(TerminalKey::Character(
+                stroke
+                    .key_char
+                    .clone()
+                    .unwrap_or_else(|| stroke.key.clone()),
+            )),
             _ => None,
         };
         if let Some(key_code) = key_code {

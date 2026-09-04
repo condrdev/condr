@@ -631,6 +631,8 @@ fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
             b"\x08",
         ),
         (TerminalKey::Function(12), none, false, b"\x1b[24~"),
+        (TerminalKey::Function(13), none, false, b"\x1b[25~"),
+        (TerminalKey::Function(20), none, false, b"\x1b[34~"),
         (TerminalKey::Enter, none, false, b"\r"),
         (
             TerminalKey::Enter,
@@ -682,7 +684,7 @@ fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
         );
     }
 
-    assert!(encode_key(&TerminalKey::Function(13), none, false).is_err());
+    assert!(encode_key(&TerminalKey::Function(21), none, false).is_err());
 }
 
 #[test]
@@ -690,7 +692,7 @@ fn paste_respects_bracketed_mode_and_filters_control_markers() {
     assert_eq!(encode_paste("one\r\ntwo\n", false), b"one\rtwo\r");
     assert_eq!(
         encode_paste("one\x1b[201~\x03two\n", true),
-        b"\x1b[200~one[201~two\n\x1b[201~"
+        b"\x1b[200~one[201~\x03two\n\x1b[201~"
     );
 }
 
