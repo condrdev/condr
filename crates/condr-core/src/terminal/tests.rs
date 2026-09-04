@@ -754,18 +754,18 @@ fn osc_cwd_parser_handles_fragmented_st_and_bel_sequences() {
     let mut reported = Vec::new();
 
     parser.advance(b"noise\x1b]9", |osc| {
-        if let OscNine::Cwd(cwd) = osc {
+        if let OscReport::Cwd(cwd) = osc {
             reported.push(cwd)
         }
     });
     parser.advance(b";9;C:\\work space\x1b", |osc| {
-        if let OscNine::Cwd(cwd) = osc {
+        if let OscReport::Cwd(cwd) = osc {
             reported.push(cwd)
         }
     });
     assert!(reported.is_empty());
     parser.advance(b"\\tail\x1b]9;9;\"D:\\quoted\"\x07", |osc| {
-        if let OscNine::Cwd(cwd) = osc {
+        if let OscReport::Cwd(cwd) = osc {
             reported.push(cwd)
         }
     });
@@ -782,7 +782,7 @@ fn osc_cwd_parser_recovers_after_malformed_prefixes() {
     let mut reported = Vec::new();
 
     parser.advance(b"\x1b]9;8;ignored\x07\x1b]9;9;/valid\x07", |osc| {
-        if let OscNine::Cwd(cwd) = osc {
+        if let OscReport::Cwd(cwd) = osc {
             reported.push(cwd)
         }
     });
@@ -803,8 +803,28 @@ fn osc_nine_parser_reports_progress_parameters_verbatim() {
     assert_eq!(
         reported,
         [
-            OscNine::Progress("4;3;0".into()),
-            OscNine::Progress("4;0".into()),
+            OscReport::Progress("4;3;0".into()),
+            OscReport::Progress("4;0".into()),
+        ]
+    );
+}
+
+#[test]
+fn osc_seven_and_iterm_cwd_reports_are_decoded() {
+    let mut parser = OscCwdParser::default();
+    let mut reported = Vec::new();
+
+    parser.advance(
+        b"\x1b]7;file://localhost/tmp/with%20space\x07\x1b]7;file://elsewhere/nope\x07\x1b]7;file:///plain\x1b\\\x1b]1337;CurrentDir=/iterm\x07\x1b]1337;RemoteHost=x\x07",
+        |osc| reported.push(osc),
+    );
+
+    assert_eq!(
+        reported,
+        [
+            OscReport::Cwd(PathBuf::from("/tmp/with space")),
+            OscReport::Cwd(PathBuf::from("/plain")),
+            OscReport::Cwd(PathBuf::from("/iterm")),
         ]
     );
 }
@@ -825,12 +845,12 @@ fn parsed_cwd_reports_advance_the_observation_generation() {
     let mut parser = OscCwdParser::default();
 
     parser.advance(sequence.as_bytes(), |osc| {
-        if let OscNine::Cwd(cwd) = osc {
+        if let OscReport::Cwd(cwd) = osc {
             record_reported_cwd(&reported, cwd)
         }
     });
     parser.advance(sequence.as_bytes(), |osc| {
-        if let OscNine::Cwd(cwd) = osc {
+        if let OscReport::Cwd(cwd) = osc {
             record_reported_cwd(&reported, cwd)
         }
     });

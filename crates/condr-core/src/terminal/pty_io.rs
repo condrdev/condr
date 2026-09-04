@@ -737,8 +737,8 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
             Ok(0) => break Ok(()),
             Ok(read) => {
                 cwd_parser.advance(&bytes[..read], |osc| match osc {
-                    OscNine::Cwd(cwd) => record_reported_cwd(&reported_cwd, cwd),
-                    OscNine::Progress(progress) => {
+                    OscReport::Cwd(cwd) => record_reported_cwd(&reported_cwd, cwd),
+                    OscReport::Progress(progress) => {
                         notices
                             .lock()
                             .expect("terminal notices lock poisoned")
@@ -804,18 +804,19 @@ pub(super) enum OscCwdState {
     DiscardEscape,
 }
 
-/// The OSC 9 payloads Condr reads: ConEmu-style `9;<cwd>` and progress `4;<state>;<n>`.
-/// vte does not parse OSC 9, so this scanner runs over the raw bytes.
+/// The OSC payloads Condr reads itself because vte drops them: cwd reports as OSC 7
+/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`, plus ConEmu
+/// progress `9;4;<state>;<n>`. This scanner runs over the raw bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum OscNine {
+pub(super) enum OscReport {
     Cwd(PathBuf),
     Progress(String),
 }
 
 impl OscCwdParser {
-    const PREFIX: &'static [u8] = b"\x1b]9;";
+    const PREFIX: &'static [u8] = b"\x1b]";
 
-    pub(super) fn advance(&mut self, bytes: &[u8], mut report: impl FnMut(OscNine)) {
+    pub(super) fn advance(&mut self, bytes: &[u8], mut report: impl FnMut(OscReport)) {
         for &byte in bytes {
             match self.state {
                 OscCwdState::Ground => {
@@ -888,16 +889,26 @@ impl OscCwdParser {
         }
     }
 
-    pub(super) fn finish(&mut self, report: &mut impl FnMut(OscNine)) {
+    pub(super) fn finish(&mut self, report: &mut impl FnMut(OscReport)) {
         if let Ok(payload) = std::str::from_utf8(&self.payload) {
-            if let Some(cwd) = payload.strip_prefix("9;") {
+            if let Some(cwd) = payload.strip_prefix("9;9;") {
                 let cwd = cwd
                     .strip_prefix('"')
                     .and_then(|cwd| cwd.strip_suffix('"'))
                     .unwrap_or(cwd);
-                report(OscNine::Cwd(PathBuf::from(cwd)));
-            } else if payload.starts_with("4;") || payload == "4" {
-                report(OscNine::Progress(payload.to_owned()));
+                report(OscReport::Cwd(PathBuf::from(cwd)));
+            } else if let Some(progress) = payload
+                .strip_prefix("9;")
+                .filter(|progress| progress.starts_with("4;") || *progress == "4")
+            {
+                report(OscReport::Progress(progress.to_owned()));
+            } else if let Some(cwd) = payload.strip_prefix("7;").and_then(file_uri_cwd) {
+                report(OscReport::Cwd(cwd));
+            } else if let Some(cwd) = payload
+                .strip_prefix("1337;CurrentDir=")
+                .filter(|cwd| !cwd.is_empty())
+            {
+                report(OscReport::Cwd(PathBuf::from(cwd)));
             }
         }
         self.reset();
@@ -907,6 +918,47 @@ impl OscCwdParser {
         self.payload.clear();
         self.state = OscCwdState::Ground;
     }
+}
+
+/// OSC 7 carries `file://[host]/path`; only this machine's paths are usable.
+fn file_uri_cwd(uri: &str) -> Option<PathBuf> {
+    let rest = uri.trim().strip_prefix("file://")?;
+    let path = match rest.find('/') {
+        Some(0) => rest,
+        Some(slash) => {
+            let host = &rest[..slash];
+            if !host.eq_ignore_ascii_case("localhost") {
+                return None;
+            }
+            &rest[slash..]
+        }
+        None => return None,
+    };
+    let path = percent_decode(path)?;
+    #[cfg(windows)]
+    let path = {
+        let bytes = path.as_bytes();
+        let drive = bytes.len() >= 3 && bytes[1].is_ascii_alphabetic() && bytes[2] == b':';
+        if drive { &path[1..] } else { path.as_str() }.replace('/', "\\")
+    };
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn percent_decode(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 pub(super) fn io_loop(io: TerminalIoLoop) -> io::Result<()> {
