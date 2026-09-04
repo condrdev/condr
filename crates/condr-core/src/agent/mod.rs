@@ -720,6 +720,8 @@ const PROCESS_RECHECK_UNIDENTIFIED: Duration = Duration::from_millis(500);
 /// does after its acquisition window.
 const PROCESS_ACQUISITION_WINDOW: Duration = Duration::from_secs(8);
 const PROCESS_RECHECK_QUIET: Duration = Duration::from_secs(30);
+/// Activity after this much silence opens a new acquisition window (herdr's idle reset).
+const PROCESS_ACQUISITION_IDLE_RESET: Duration = Duration::from_secs(2);
 
 /// What the process probe saw in the terminal's job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -811,6 +813,7 @@ pub struct AgentDetector {
     startup_grace_until: Option<Instant>,
     last_process_probe: Option<Instant>,
     last_activity: Option<Instant>,
+    acquisition_started: Option<Instant>,
     /// OSC evidence left by the previous agent; ignored until it changes.
     stale_osc_title: Option<String>,
     stale_osc_progress: Option<String>,
@@ -836,6 +839,7 @@ impl AgentDetector {
             startup_grace_until: None,
             last_process_probe: None,
             last_activity: None,
+            acquisition_started: None,
             stale_osc_title: None,
             stale_osc_progress: None,
         }
@@ -860,6 +864,14 @@ impl AgentDetector {
     /// foreground change (`activity`) is recent, then every 30 s until the next one.
     pub fn wants_process_probe(&mut self, now: Instant, force: bool, activity: bool) -> bool {
         if force || activity || self.last_activity.is_none() {
+            // Continuous output does not slide the window; only activity after a
+            // quiet spell opens a new one.
+            let quiet = self
+                .last_activity
+                .is_none_or(|at| now.duration_since(at) >= PROCESS_ACQUISITION_IDLE_RESET);
+            if quiet {
+                self.acquisition_started = Some(now);
+            }
             self.last_activity = Some(now);
         }
         if force || self.exit_pending {
@@ -868,7 +880,7 @@ impl AgentDetector {
         let interval = if self.agent.is_some() {
             PROCESS_RECHECK_IDENTIFIED
         } else if self
-            .last_activity
+            .acquisition_started
             .is_some_and(|at| now.duration_since(at) < PROCESS_ACQUISITION_WINDOW)
         {
             PROCESS_RECHECK_UNIDENTIFIED
@@ -1282,6 +1294,16 @@ mod tests {
         detector.observe_process(ProcessProbeResult::ShellOnly, "", "", quiet + half_second);
         assert!(detector.wants_process_probe(quiet + half_second * 2, false, false));
         assert!(detector.wants_process_probe(quiet + half_second * 2, true, false));
+
+        // Continuous output does not keep the window open past its 8 s.
+        let mut detector = AgentDetector::new();
+        let mut at = start;
+        while at < start + PROCESS_ACQUISITION_WINDOW + half_second {
+            detector.wants_process_probe(at, false, true);
+            detector.observe_process(ProcessProbeResult::Unidentified, "", "", at);
+            at += half_second;
+        }
+        assert!(!detector.wants_process_probe(at, false, true));
     }
 
     #[test]

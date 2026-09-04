@@ -229,12 +229,27 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         // Debounced like the font: the Server persists every value it receives, so a
-        // half-typed path must not reach config.toml or the next new terminal.
-        let shell = shell.to_owned();
+        // half-typed path must not reach config.toml or the next new terminal. A value
+        // for another Server still goes out before this one replaces it.
+        if self
+            .pending_shell
+            .as_ref()
+            .is_some_and(|(pending_key, _)| *pending_key != key)
+        {
+            self.flush_server_shell();
+        }
+        self.pending_shell = Some((key, shell.to_owned()));
         self._shell_save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
-            let _ = this.update(cx, |this, _| this.send_server_shell(key, &shell));
+            let _ = this.update(cx, |this, _| this.flush_server_shell());
         }));
+    }
+
+    /// Sends the debounced Shell value now, if one is waiting.
+    pub(super) fn flush_server_shell(&mut self) {
+        if let Some((key, shell)) = self.pending_shell.take() {
+            self.send_server_shell(key, &shell);
+        }
     }
 
     fn send_server_shell(&mut self, key: ConnectionKey, shell: &str) {

@@ -295,6 +295,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                 pane_id,
                 range,
                 dragging: false,
+                committed: false,
             });
 
             let (generation, server_id, session_id, mut terminal_view) = {

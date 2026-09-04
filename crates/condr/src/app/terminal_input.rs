@@ -251,9 +251,13 @@ impl Condr {
                 display_offset,
             }),
             dragging: click_count == 1,
+            committed: false,
         });
         // A single click clears the Server-tracked selection; a word or line becomes it.
-        self.terminal_command(key, pane_id, TerminalCommand::Select(multi_click_range));
+        let sent = self.terminal_command(key, pane_id, TerminalCommand::Select(multi_click_range));
+        if sent && let Some(selection) = &mut self.terminal_selection {
+            selection.committed = multi_click_range.is_some();
+        }
         cx.notify();
     }
 
@@ -301,11 +305,14 @@ impl Condr {
                 .map_or(0, |terminal| terminal.view.size.columns);
             // The Server keeps the finished drag attached to its text; the local copy
             // stays as the fallback for a Client that may not mutate.
-            self.terminal_command(
+            let sent = self.terminal_command(
                 key,
                 pane_id,
                 TerminalCommand::Select(range.selected_cell_range(columns).map(|_| range)),
             );
+            if sent && let Some(selection) = &mut self.terminal_selection {
+                selection.committed = true;
+            }
         }
     }
 
@@ -378,7 +385,9 @@ impl Condr {
         let local = self
             .terminal_selection
             .filter(|selection| selection.connection_key == key && selection.pane_id == pane_id);
-        if let Some(local) = local.filter(|selection| selection.dragging) {
+        // A drag in progress, or a selection the Server never received (a Client that
+        // cannot mutate), is local; a committed one only bridges until the next frame.
+        if let Some(local) = local.filter(|selection| selection.dragging || !selection.committed) {
             return Some((local.range, false));
         }
         self.terminal(key, pane_id)

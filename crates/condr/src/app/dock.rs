@@ -30,6 +30,8 @@ pub(super) struct LocalTerminalSelection {
     pub(super) pane_id: PaneId,
     pub(super) range: TerminalSelection,
     pub(super) dragging: bool,
+    /// Sent to the Server; the next frame for this Pane replaces it with the Server's.
+    pub(super) committed: bool,
 }
 
 #[derive(Clone, Copy)]

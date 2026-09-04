@@ -835,6 +835,9 @@ impl OscCwdParser {
                         }
                     } else if byte == Self::PREFIX[0] {
                         self.state = OscCwdState::Prefix(1);
+                    } else if matched == 1 && matches!(byte, b'P' | b'X' | b'^' | b'_') {
+                        // DCS/SOS/PM/APC: whatever looks like an OSC inside is payload.
+                        self.state = OscCwdState::Discard;
                     } else {
                         self.state = OscCwdState::Ground;
                     }
@@ -1008,6 +1011,8 @@ pub(super) fn io_loop(io: TerminalIoLoop) -> io::Result<()> {
     Ok(())
 }
 
+const PTY_RESIZE_RETRY_DELAY: Duration = Duration::from_millis(50);
+
 pub(super) fn resize_loop(
     control: Arc<ResizeControl>,
     master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
@@ -1023,22 +1028,28 @@ pub(super) fn resize_loop(
         let master = master
             .upgrade()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "PTY was closed"))?;
-        // A single failed ioctl must not kill the worker: the VT grid already
-        // resized and the next request retries against the same PTY.
-        let _ = resize_terminal_and_pty(
+        // A failed ioctl must not kill the worker. The VT grid is already at the new
+        // size, so retry the PTY once shortly after instead of leaving the two apart.
+        let resize_pty = |pty_size: PtySize| {
+            master
+                .lock()
+                .expect("PTY master lock poisoned")
+                .resize(pty_size)
+                .map_err(other_error)
+        };
+        if resize_terminal_and_pty(
             &terminal,
             &current_size,
             &revision,
             &updates,
             size,
-            |_, pty_size| {
-                master
-                    .lock()
-                    .expect("PTY master lock poisoned")
-                    .resize(pty_size)
-                    .map_err(other_error)
-            },
-        );
+            |_, pty_size| resize_pty(pty_size),
+        )
+        .is_err()
+        {
+            thread::sleep(PTY_RESIZE_RETRY_DELAY);
+            let _ = resize_pty(size.into());
+        }
     }
     Ok(())
 }

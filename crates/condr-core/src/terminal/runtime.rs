@@ -91,16 +91,17 @@ impl TerminalRuntime {
             .map_err(other_error)?;
         let reader = pair.master.try_clone_reader().map_err(other_error)?;
         #[cfg(unix)]
-        let (reader, reader_cancel) = {
+        let (reader, reader_cancel, exit_signal) = {
             let poll_fd = duplicate_master_fd(&*pair.master)?;
             let (cancel, cancel_reader) = UnixStream::pair()?;
+            let exit_signal = cancel.try_clone()?;
             let reader: Box<dyn Read + Send> = Box::new(UnixPtyReader {
                 reader,
                 poll_fd,
                 cancel: cancel_reader,
                 drain_reads: None,
             });
-            (reader, cancel)
+            (reader, cancel, exit_signal)
         };
         #[cfg(unix)]
         let (writer, writer_cancel) = unix_pty_writer(&*pair.master)?;
@@ -217,17 +218,30 @@ impl TerminalRuntime {
             }
         };
 
-        let child = Arc::new(Mutex::new(Some(child)));
-        #[cfg(unix)]
-        let exit_signal = reader_cancel.try_clone()?;
         #[cfg(not(unix))]
         let exit_signal = update_sender.clone();
-        let _ = thread::Builder::new()
+        let child = Arc::new(Mutex::new(Some(child)));
+        if let Err(error) = thread::Builder::new()
             .name("condr-pty-child-watch".into())
             .spawn({
                 let child = Arc::downgrade(&child);
                 move || child_exit_watch(child, exit_signal)
-            });
+            })
+        {
+            input.stop();
+            resize.stop();
+            writer_stopping.store(true, Ordering::Release);
+            #[cfg(unix)]
+            let _ = writer_cancel.shutdown(Shutdown::Both);
+            #[cfg(unix)]
+            let _ = reader_cancel.shutdown(Shutdown::Both);
+            let _ = writer_thread.join();
+            let _ = resize_thread.join();
+            let _ = reader_thread.join();
+            let mut child = lock_child(&child).take();
+            let _ = shutdown_process_tree(process, child.as_deref_mut());
+            return Err(error);
+        }
 
         Ok(Self {
             terminal,

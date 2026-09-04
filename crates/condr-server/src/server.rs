@@ -858,6 +858,9 @@ impl RuntimeState {
     fn clear_controller_terminal_state(&mut self) {
         for runtime in self.terminals.values() {
             let _ = runtime.release_mouse();
+            // The selection belongs to the controller (ADR 0008); a successor must not
+            // inherit or copy it.
+            let _ = runtime.execute(TerminalCommand::Select(None));
         }
         self.clear_terminal_focus();
         for pane_id in std::mem::take(&mut self.pending_terminal_bells) {

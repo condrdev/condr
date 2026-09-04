@@ -16,9 +16,9 @@ use condr_core::protocol::{
     TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
 };
 use condr_core::{
-    AgentDisplayState, AgentSnapshot, AgentTracker, PaneDirection, PaneId, PaneLayout, Session,
-    SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
-    TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
+    AgentDisplayState, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId, PaneLayout,
+    Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand,
+    TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSize,
     TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
@@ -580,6 +580,8 @@ pub(crate) struct Condr {
     /// The pending debounced font save; replacing it cancels the previous one.
     _font_save: Option<Task<()>>,
     _shell_save: Option<Task<()>>,
+    /// The Shell value waiting for its debounce, and the Server it belongs to.
+    pending_shell: Option<(ConnectionKey, String)>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     app_error: Option<String>,
@@ -663,6 +665,7 @@ impl Condr {
             if this._font_save.is_some() {
                 this.save_terminal_font();
             }
+            this.flush_server_shell();
             async {}
         });
         let mut this = Self {
@@ -705,6 +708,7 @@ impl Condr {
             _settings_window_closed: None,
             _font_save: None,
             _shell_save: None,
+            pending_shell: None,
             _quit_subscription: quit_subscription,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,

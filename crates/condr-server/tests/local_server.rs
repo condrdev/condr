@@ -418,7 +418,8 @@ impl Drop for ServerGuard {
 }
 
 fn wait_for_stop(endpoint: &Endpoint) {
-    for _ in 0..100 {
+    // 5 s: under a full parallel `cargo test --workspace` the 1 s budget flaked.
+    for _ in 0..500 {
         if endpoint.connect().is_err() {
             return;
         }

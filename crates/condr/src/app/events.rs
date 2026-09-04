@@ -665,7 +665,15 @@ impl Condr {
                             self.connections[index]
                                 .agent_trackers
                                 .entry(pane_id)
-                                .and_modify(|tracker| tracker.update(agent.state, visible))
+                                .and_modify(|tracker| {
+                                    // Unknown is only published for a new process; it
+                                    // must not carry the previous generation's done.
+                                    if agent.state == AgentState::Unknown {
+                                        *tracker = AgentTracker::new(agent.state);
+                                    } else {
+                                        tracker.update(agent.state, visible);
+                                    }
+                                })
                                 .or_insert_with(|| AgentTracker::new(agent.state));
                         } else {
                             self.connections[index].agents.remove(&pane_id);
@@ -737,10 +745,15 @@ impl Condr {
                     && selection.connection_key == key
                     && pane_ids.contains(&selection.pane_id)
                 {
-                    selection.range.display_offset = self.connections[index].terminals
-                        [&selection.pane_id]
-                        .view
-                        .display_offset;
+                    if selection.committed {
+                        // The Server's frame now carries this selection.
+                        self.terminal_selection = None;
+                    } else {
+                        selection.range.display_offset = self.connections[index].terminals
+                            [&selection.pane_id]
+                            .view
+                            .display_offset;
+                    }
                 }
                 if self.last_terminal_mouse_motion.is_some_and(|motion| {
                     motion.connection_key == key
