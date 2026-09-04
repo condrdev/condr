@@ -124,6 +124,7 @@ fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
         })
         .collect::<Vec<_>>();
     TerminalView {
+        selection: None,
         revision,
         size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
         display_offset: 0,
@@ -406,6 +407,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
         .focused_pane()
         .id();
     let view = |revision| TerminalView {
+        selection: None,
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
@@ -531,6 +533,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
     state.publish_terminal(
         pane_id,
         TerminalViewFrame::Delta(condr_core::TerminalViewDelta {
+            selection: None,
             base_revision: 0,
             revision: 1,
             display_offset: 0,
@@ -545,6 +548,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
     state.publish_terminal(
         pane_id,
         TerminalViewFrame::Delta(condr_core::TerminalViewDelta {
+            selection: None,
             base_revision: 1,
             revision: 2,
             display_offset: 0,
@@ -583,6 +587,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
     state.publish_terminal(
         pane_id,
         TerminalViewFrame::Delta(condr_core::TerminalViewDelta {
+            selection: None,
             base_revision: 2,
             revision: 3,
             display_offset: 0,
@@ -868,6 +873,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
         .focused_pane()
         .id();
     let large_view = |revision| TerminalView {
+        selection: None,
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
@@ -929,6 +935,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
     let expected = PaneTerminalFrame {
         pane_id,
         frame: TerminalViewFrame::Full(TerminalView {
+            selection: None,
             revision: 9,
             size: TerminalSize::new(1, 1),
             display_offset: 0,
@@ -985,6 +992,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
         .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
         .unwrap();
     let large_view = |revision| TerminalView {
+        selection: None,
         revision,
         size: TerminalSize::new(1, 1),
         display_offset: 0,

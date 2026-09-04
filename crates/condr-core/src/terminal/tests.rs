@@ -58,6 +58,7 @@ fn frame_test_view(revision: u64, text: &str) -> TerminalView {
         cells.push(blank_cell());
     }
     TerminalView {
+        selection: None,
         revision,
         size: TerminalSize::new(1, columns.max(1)),
         display_offset: 0,
@@ -688,6 +689,34 @@ fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
 }
 
 #[test]
+fn server_selection_follows_scrolled_output_and_still_copies_it() {
+    let size = TerminalSize::new(3, 10);
+    let (event_proxy, _replies, _notices) = TerminalEventProxy::new(Arc::new(Mutex::new(size)));
+    let mut terminal = Term::new(Config::default(), &size, event_proxy);
+    let mut parser: Processor = Processor::new();
+    parser.advance(&mut terminal, b"alpha\r\nbeta\r\ngamma");
+    let position = |row, column, side| TerminalPosition { row, column, side };
+    let selection = TerminalSelection {
+        start: position(1, 0, TerminalSide::Left),
+        end: position(1, 3, TerminalSide::Right),
+        display_offset: 0,
+    };
+
+    terminal.selection = Some(super::runtime::grid_selection(&terminal, selection));
+    assert_eq!(viewport_selection(&terminal, size), Some(selection));
+    assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+
+    parser.advance(&mut terminal, b"\r\ndelta");
+    let moved = viewport_selection(&terminal, size).unwrap();
+    assert_eq!((moved.start.row, moved.end.row), (0, 0));
+    assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+
+    parser.advance(&mut terminal, b"\r\nepsilon");
+    assert_eq!(viewport_selection(&terminal, size), None);
+    assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+}
+
+#[test]
 fn paste_respects_bracketed_mode_and_filters_control_markers() {
     assert_eq!(encode_paste("one\r\ntwo\n", false), b"one\rtwo\r");
     assert_eq!(
@@ -936,6 +965,7 @@ fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
         cell.hyperlink = Some(uri.into());
     }
     let delta = TerminalViewDelta {
+        selection: None,
         base_revision: 7,
         revision: 8,
         display_offset: 0,
@@ -972,6 +1002,7 @@ fn link_free_deltas_take_the_budget_fast_path_without_changing_results() {
     let mut plain = budgeted.clone();
     let mut hyperlinks = TerminalHyperlinkBudget::new(&mut budgeted);
     let delta = TerminalViewDelta {
+        selection: None,
         base_revision: 1,
         revision: 2,
         display_offset: 0,
@@ -1015,6 +1046,7 @@ fn retained_hyperlinks_share_storage_across_sparse_deltas() {
         .apply_delta(
             &mut view,
             TerminalViewDelta {
+                selection: None,
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
@@ -1059,6 +1091,7 @@ fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
         .into(),
     );
     let delta = TerminalViewDelta {
+        selection: None,
         base_revision: 6,
         revision: 7,
         display_offset: 0,
@@ -1175,6 +1208,7 @@ fn visually_identical_terminal_revision_does_not_create_a_frame() {
 fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
     let mut view = frame_test_view(4, "abcd");
     let gap = TerminalViewFrame::Delta(TerminalViewDelta {
+        selection: None,
         base_revision: 5,
         revision: 6,
         display_offset: 0,
@@ -1191,6 +1225,7 @@ fn terminal_delta_rejects_revision_gaps_and_invalid_runs() {
     ));
 
     let invalid = TerminalViewFrame::Delta(TerminalViewDelta {
+        selection: None,
         base_revision: 4,
         revision: 5,
         display_offset: 0,
@@ -1281,6 +1316,7 @@ fn terminal_view_selects_words_by_display_column() {
         cells[column].text = ch.to_string().into();
     }
     let view = TerminalView {
+        selection: None,
         revision: 1,
         size,
         display_offset: 3,
@@ -1305,6 +1341,7 @@ fn terminal_view_selects_words_by_display_column() {
 #[test]
 fn terminal_view_selects_a_complete_line() {
     let view = TerminalView {
+        selection: None,
         revision: 1,
         size: TerminalSize::new(3, 10),
         display_offset: 2,

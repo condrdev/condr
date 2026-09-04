@@ -117,6 +117,7 @@ fn terminal_view(revision: u64, text: &str) -> TerminalView {
         .map(|character| terminal_cell(&character.to_string()))
         .collect::<Vec<_>>();
     TerminalView {
+        selection: None,
         revision,
         size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
         display_offset: 0,
@@ -617,6 +618,7 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
         PaneTerminalFrame {
             pane_id: first_pane,
             frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                selection: None,
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
@@ -631,6 +633,7 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
         PaneTerminalFrame {
             pane_id: second_pane,
             frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                selection: None,
                 base_revision: 99,
                 revision: 100,
                 display_offset: 0,
@@ -673,6 +676,7 @@ fn terminal_frame_batch_bounds_hyperlinks_across_retained_deltas() {
         vec![PaneTerminalFrame {
             pane_id,
             frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                selection: None,
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
@@ -716,6 +720,7 @@ fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
         vec![PaneTerminalFrame {
             pane_id,
             frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                selection: None,
                 base_revision: 1,
                 revision: 2,
                 display_offset: 0,
@@ -922,6 +927,7 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
     let mut second_cell = terminal_cell("Y");
     second_cell.hyperlink = Some(uri.into());
     let first = TerminalViewDelta {
+        selection: None,
         base_revision: 1,
         revision: 2,
         display_offset: 0,
@@ -933,6 +939,7 @@ fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
         }],
     };
     let second = TerminalViewDelta {
+        selection: None,
         base_revision: 2,
         revision: 3,
         display_offset: 0,
@@ -1064,6 +1071,7 @@ fn visual_slot_publish_is_atomic_across_panes() {
     };
     let delta = |base_revision, text| {
         TerminalViewFrame::Delta(TerminalViewDelta {
+            selection: None,
             base_revision,
             revision: base_revision + 1,
             display_offset: 0,
@@ -1155,6 +1163,7 @@ fn bootstrap_generation_discards_an_old_visual_signal() {
 #[test]
 fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
     let previous = TerminalViewDelta {
+        selection: None,
         base_revision: 4,
         revision: 5,
         display_offset: 0,
@@ -1166,6 +1175,7 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
         }],
     };
     let next = TerminalViewDelta {
+        selection: None,
         base_revision: 5,
         revision: 6,
         display_offset: 3,

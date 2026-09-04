@@ -260,7 +260,16 @@ impl TerminalRuntime {
 
     pub fn write(&self, bytes: impl Into<Vec<u8>>) -> io::Result<()> {
         self.scroll_to_bottom();
+        self.clear_selection();
         self.input.try_write(bytes.into())
+    }
+
+    fn clear_selection(&self) {
+        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        if terminal.selection.take().is_some() {
+            drop(terminal);
+            publish_view(&self.revision, &self.update_sender);
+        }
     }
 
     pub fn take_updates(&mut self) -> Option<mpsc::Receiver<TerminalUpdate>> {
@@ -358,6 +367,10 @@ impl TerminalRuntime {
             }
             TerminalCommand::Scroll(scroll) => {
                 self.scroll(scroll);
+                Ok(None)
+            }
+            TerminalCommand::Select(selection) => {
+                self.select(selection);
                 Ok(None)
             }
             TerminalCommand::Copy { selection } => Ok(self.copy_range(selection)),
@@ -705,19 +718,26 @@ impl TerminalRuntime {
         }
     }
 
-    pub fn copy_range(&self, selection: TerminalSelection) -> Option<String> {
+    pub fn copy_range(&self, selection: Option<TerminalSelection>) -> Option<String> {
         let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        let start_side = side(selection.start.side);
-        let start = viewport_point(&terminal, selection.start, selection.display_offset);
-        let end_side = side(selection.end.side);
-        let end = viewport_point(&terminal, selection.end, selection.display_offset);
+        let Some(selection) = selection else {
+            return terminal.selection_to_string();
+        };
         let previous = terminal.selection.take();
-        let mut range = Selection::new(SelectionType::Simple, start, start_side);
-        range.update(end, end_side);
-        terminal.selection = Some(range);
+        terminal.selection = Some(grid_selection(&terminal, selection));
         let text = terminal.selection_to_string();
         terminal.selection = previous;
         text
+    }
+
+    /// Hands the selection to alacritty, which rotates it with scrolled output and drops
+    /// it on resize or screen swaps, so the published viewport selection stays on the
+    /// text the user picked.
+    fn select(&self, selection: Option<TerminalSelection>) {
+        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        terminal.selection = selection.map(|selection| grid_selection(&terminal, selection));
+        drop(terminal);
+        publish_view(&self.revision, &self.update_sender);
     }
 
     fn scroll_to_bottom(&self) {
@@ -826,6 +846,14 @@ impl TerminalRuntime {
             combine_cleanup_results(writer_result, resize_result, "stop terminal resizer");
         combine_cleanup_results(writer_and_resize, reader_result, "stop terminal reader")
     }
+}
+
+pub(super) fn grid_selection(terminal: &Terminal, selection: TerminalSelection) -> Selection {
+    let start = viewport_point(terminal, selection.start, selection.display_offset);
+    let end = viewport_point(terminal, selection.end, selection.display_offset);
+    let mut range = Selection::new(SelectionType::Simple, start, side(selection.start.side));
+    range.update(end, side(selection.end.side));
+    range
 }
 
 type SharedChild = Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>;
@@ -1189,6 +1217,7 @@ impl TerminalViewSource {
                     display_offset,
                     mouse_tracking,
                     cursor,
+                    selection: viewport_selection(&terminal, size),
                     runs,
                 }))
             }

@@ -411,6 +411,7 @@ pub(super) fn merge_terminal_deltas(
         display_offset: next.display_offset,
         mouse_tracking: next.mouse_tracking,
         cursor: next.cursor,
+        selection: next.selection,
         runs,
     })
 }

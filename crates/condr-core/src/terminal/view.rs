@@ -78,6 +78,9 @@ pub struct TerminalView {
     pub mouse_tracking: TerminalMouseTracking,
     pub cells: Vec<TerminalCell>,
     pub cursor: Option<TerminalCursor>,
+    /// The Server-tracked selection clipped to this viewport. alacritty keeps it attached
+    /// to its text while output scrolls, which a viewport-anchored Client copy cannot.
+    pub selection: Option<TerminalSelection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -93,6 +96,7 @@ pub struct TerminalViewDelta {
     pub display_offset: u32,
     pub mouse_tracking: TerminalMouseTracking,
     pub cursor: Option<TerminalCursor>,
+    pub selection: Option<TerminalSelection>,
     pub runs: Vec<TerminalCellRun>,
 }
 
@@ -120,6 +124,7 @@ struct WireTerminalView {
     hyperlinks: Vec<SmolStr>,
     cells: Vec<WireTerminalCell>,
     cursor: Option<TerminalCursor>,
+    selection: Option<TerminalSelection>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,6 +134,7 @@ struct WireTerminalViewDelta {
     display_offset: u32,
     mouse_tracking: TerminalMouseTracking,
     cursor: Option<TerminalCursor>,
+    selection: Option<TerminalSelection>,
     hyperlinks: Vec<SmolStr>,
     runs: Vec<WireTerminalCellRun>,
 }
@@ -465,6 +471,7 @@ impl Serialize for TerminalView {
             hyperlinks: hyperlinks.values,
             cells,
             cursor: self.cursor,
+            selection: self.selection,
         }
         .serialize(serializer)
     }
@@ -485,6 +492,7 @@ impl<'de> Deserialize<'de> for TerminalView {
             mouse_tracking: wire.mouse_tracking,
             cells,
             cursor: wire.cursor,
+            selection: wire.selection,
         })
     }
 }
@@ -513,6 +521,7 @@ impl Serialize for TerminalViewDelta {
             display_offset: self.display_offset,
             mouse_tracking: self.mouse_tracking,
             cursor: self.cursor,
+            selection: self.selection,
             hyperlinks: hyperlinks.values,
             runs,
         }
@@ -544,6 +553,7 @@ impl<'de> Deserialize<'de> for TerminalViewDelta {
             display_offset: wire.display_offset,
             mouse_tracking: wire.mouse_tracking,
             cursor: wire.cursor,
+            selection: wire.selection,
             runs,
         })
     }
@@ -651,7 +661,8 @@ impl TerminalView {
 
         let metadata_changed = previous.display_offset != current.display_offset
             || previous.mouse_tracking != current.mouse_tracking
-            || previous.cursor != current.cursor;
+            || previous.cursor != current.cursor
+            || previous.selection != current.selection;
         if changed_cells == 0 && !metadata_changed {
             return None;
         }
@@ -665,6 +676,7 @@ impl TerminalView {
             display_offset: current.display_offset,
             mouse_tracking: current.mouse_tracking,
             cursor: current.cursor,
+            selection: current.selection,
             runs,
         }))
     }
@@ -731,6 +743,7 @@ impl TerminalView {
         self.display_offset = delta.display_offset;
         self.mouse_tracking = delta.mouse_tracking;
         self.cursor = delta.cursor;
+        self.selection = delta.selection;
     }
 }
 
@@ -1025,8 +1038,11 @@ pub enum TerminalCommand {
     Focus(bool),
     Resize(TerminalSize),
     Scroll(TerminalScroll),
+    /// Replaces the Server-tracked selection; `None` clears it.
+    Select(Option<TerminalSelection>),
+    /// Copies the Server-tracked selection, or an explicit viewport range.
     Copy {
-        selection: TerminalSelection,
+        selection: Option<TerminalSelection>,
     },
 }
 
@@ -1147,7 +1163,54 @@ pub(super) fn snapshot_terminal(
         mouse_tracking: TerminalMouseTracking::from_term_mode(*terminal.mode()),
         cells,
         cursor,
+        selection: viewport_selection(terminal, size),
     }
+}
+
+/// The Server-tracked selection as inclusive viewport cells, or `None` when it is empty
+/// or entirely scrolled out of view.
+pub(super) fn viewport_selection(
+    terminal: &Terminal,
+    size: TerminalSize,
+) -> Option<TerminalSelection> {
+    let range = terminal.selection.as_ref()?.to_range(terminal)?;
+    let display_offset = i64::try_from(terminal.grid().display_offset()).ok()?;
+    let last_row = i64::from(size.rows.checked_sub(1)?);
+    let last_column = size.columns.checked_sub(1)?;
+    let start_row = i64::from(range.start.line.0) + display_offset;
+    let end_row = i64::from(range.end.line.0) + display_offset;
+    if end_row < 0 || start_row > last_row {
+        return None;
+    }
+    let (start_row, start_column) = if start_row < 0 {
+        (0, 0)
+    } else {
+        (
+            start_row,
+            u16::try_from(range.start.column.0).unwrap_or(u16::MAX),
+        )
+    };
+    let (end_row, end_column) = if end_row > last_row {
+        (last_row, last_column)
+    } else {
+        (
+            end_row,
+            u16::try_from(range.end.column.0).unwrap_or(u16::MAX),
+        )
+    };
+    Some(TerminalSelection {
+        start: TerminalPosition {
+            row: u16::try_from(start_row).ok()?,
+            column: start_column.min(last_column),
+            side: TerminalSide::Left,
+        },
+        end: TerminalPosition {
+            row: u16::try_from(end_row).ok()?,
+            column: end_column.min(last_column),
+            side: TerminalSide::Right,
+        },
+        display_offset: u32::try_from(display_offset).ok()?,
+    })
 }
 
 #[derive(Default)]

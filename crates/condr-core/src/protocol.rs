@@ -1216,6 +1216,7 @@ mod tests {
         PaneTerminalSnapshot {
             pane_id,
             view: TerminalView {
+                selection: None,
                 revision: 11,
                 size: crate::TerminalSize::new(1, 1),
                 display_offset: 0,

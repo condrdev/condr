@@ -622,7 +622,7 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
     assert_eq!(
         runtime
             .execute(TerminalCommand::Copy {
-                selection: condr_core::TerminalSelection {
+                selection: Some(condr_core::TerminalSelection {
                     start: TerminalPosition {
                         row: 0,
                         column: 0,
@@ -634,7 +634,7 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
                         side: TerminalSide::Right,
                     },
                     display_offset: view.display_offset,
-                },
+                }),
             })
             .unwrap(),
         Some("alpha".into())

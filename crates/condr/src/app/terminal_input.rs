@@ -251,6 +251,8 @@ impl Condr {
             }),
             dragging: click_count == 1,
         });
+        // A single click clears the Server-tracked selection; a word or line becomes it.
+        self.terminal_command(key, pane_id, TerminalCommand::Select(multi_click_range));
         cx.notify();
     }
 
@@ -289,8 +291,20 @@ impl Condr {
         if let Some(selection) = &mut self.terminal_selection
             && selection.connection_key == key
             && selection.pane_id == pane_id
+            && selection.dragging
         {
             selection.dragging = false;
+            let range = selection.range;
+            let columns = self
+                .terminal(key, pane_id)
+                .map_or(0, |terminal| terminal.view.size.columns);
+            // The Server keeps the finished drag attached to its text; the local copy
+            // stays as the fallback for a Client that may not mutate.
+            self.terminal_command(
+                key,
+                pane_id,
+                TerminalCommand::Select(range.selected_cell_range(columns).map(|_| range)),
+            );
         }
     }
 
@@ -343,14 +357,33 @@ impl Condr {
         }
     }
 
+    /// The selection to draw and copy: the local one while dragging, otherwise the
+    /// Server-tracked one, which follows the text as output scrolls.
     pub(super) fn selection_for(
         &self,
         key: ConnectionKey,
         pane_id: PaneId,
     ) -> Option<TerminalSelection> {
-        self.terminal_selection
-            .filter(|selection| selection.connection_key == key && selection.pane_id == pane_id)
-            .map(|selection| selection.range)
+        self.effective_selection(key, pane_id)
+            .map(|(selection, _)| selection)
+    }
+
+    /// The selection and whether the Server tracks it.
+    fn effective_selection(
+        &self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+    ) -> Option<(TerminalSelection, bool)> {
+        let local = self
+            .terminal_selection
+            .filter(|selection| selection.connection_key == key && selection.pane_id == pane_id);
+        if let Some(local) = local.filter(|selection| selection.dragging) {
+            return Some((local.range, false));
+        }
+        self.terminal(key, pane_id)
+            .and_then(|terminal| terminal.view.selection)
+            .map(|selection| (selection, true))
+            .or(local.map(|local| (local.range, false)))
     }
 
     pub(super) fn copy_terminal_selection(
@@ -359,7 +392,7 @@ impl Condr {
         pane_id: PaneId,
         _cx: &mut Context<Self>,
     ) -> bool {
-        let Some(selection) = self.selection_for(key, pane_id) else {
+        let Some((selection, server_tracked)) = self.effective_selection(key, pane_id) else {
             return false;
         };
         let Some(columns) = self
@@ -372,6 +405,8 @@ impl Condr {
             return false;
         }
 
+        // The Server's own selection also covers rows scrolled out of the viewport.
+        let selection = (!server_tracked).then_some(selection);
         self.terminal_command(key, pane_id, TerminalCommand::Copy { selection })
     }
 

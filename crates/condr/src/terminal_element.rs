@@ -1706,6 +1706,7 @@ mod tests {
         cells.push(cell(" ", None));
         cells.extend("http://b".chars().map(|c| cell(&c.to_string(), None)));
         let view = TerminalView {
+            selection: None,
             revision: 1,
             size: TerminalSize::new(1, cells.len() as u16),
             display_offset: 0,
@@ -1750,6 +1751,7 @@ mod tests {
         cells[15].flags |= WRAPLINE;
         cells.extend("com/path".chars().map(|text| cell(text, 0)));
         let view = TerminalView {
+            selection: None,
             revision: 1,
             size: TerminalSize::new(3, 8),
             display_offset: 0,

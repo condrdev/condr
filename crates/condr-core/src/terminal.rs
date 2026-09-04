@@ -103,7 +103,7 @@ pub use runtime::{
 };
 use view::{
     SnapshotHyperlinks, TerminalDamageBaseline, publish_view, side, snapshot_terminal,
-    terminal_cell, terminal_cursor, viewport_point,
+    terminal_cell, terminal_cursor, viewport_point, viewport_selection,
 };
 pub use view::{
     TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor,

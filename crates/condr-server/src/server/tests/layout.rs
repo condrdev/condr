@@ -820,7 +820,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         session_id,
         pane_id,
         TerminalCommand::Copy {
-            selection: condr_core::TerminalSelection {
+            selection: Some(condr_core::TerminalSelection {
                 start: TerminalPosition {
                     row: 0,
                     column: 0,
@@ -832,7 +832,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
                     side: TerminalSide::Right,
                 },
                 display_offset: scrolled.display_offset,
-            },
+            }),
         },
     );
     let copied = wait_for_message(
