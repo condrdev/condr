@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -128,22 +129,34 @@ struct TerminalRenderCacheKey {
     palette: TerminalPalette,
 }
 
-#[derive(Clone, PartialEq)]
+/// What decides a cell's shaped glyphs: keyed by content, not grid position, so a line
+/// that scrolls up one row, or the same prompt on another Pane row, hits the cache
+/// (issue #22 kept per-cell shaping; this is its "cache by content" follow-up).
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct TerminalCellShapeKey {
     text: SmolStr,
-    foreground: Hsla,
+    /// `Hsla` bit patterns; colors reaching here are already exact.
+    foreground: [u32; 4],
     flags: u16,
 }
 
-struct CachedTerminalCell {
-    key: TerminalCellShapeKey,
+struct CachedShape {
     line: ShapedLine,
+    /// The last `prepare` generation that used this entry.
+    used: u64,
 }
+
+/// Entries unused for this many frames are dropped once the table grows past the grid.
+const SHAPE_CACHE_RETAIN_FRAMES: u64 = 120;
 
 #[derive(Default)]
 pub(crate) struct TerminalRenderCache {
     key: Option<TerminalRenderCacheKey>,
-    cells: Vec<Option<CachedTerminalCell>>,
+    shapes: HashMap<TerminalCellShapeKey, CachedShape>,
+    generation: u64,
+    cell_count: usize,
+    /// Reused across frames so a redraw does not reallocate the positioned-cell list.
+    scratch_cells: Vec<ShapedCell>,
     #[cfg(all(test, feature = "test-support"))]
     shaped_cells: usize,
 }
@@ -159,41 +172,55 @@ impl TerminalRenderCache {
     fn prepare(&mut self, key: TerminalRenderCacheKey, cell_count: usize) {
         if self.key.as_ref() != Some(&key) {
             self.key = Some(key);
-            self.cells.clear();
-            self.cells.resize_with(cell_count, || None);
+            self.shapes.clear();
+        }
+        self.cell_count = cell_count;
+        self.generation += 1;
+        // Bounded: sweep stale entries only when the table outgrows a few screens.
+        if self.shapes.len() > cell_count.saturating_mul(4).max(1024) {
+            let stale_before = self.generation.saturating_sub(SHAPE_CACHE_RETAIN_FRAMES);
+            self.shapes.retain(|_, shape| shape.used >= stale_before);
         }
     }
 
     fn shaped_line(
         &mut self,
-        index: usize,
         text: &SmolStr,
         foreground: Hsla,
         flags: u16,
         shape: impl FnOnce() -> ShapedLine,
     ) -> ShapedLine {
-        if let Some(cached) = self.cells[index].as_ref()
-            && cached.key.text == *text
-            && cached.key.foreground == foreground
-            && cached.key.flags == flags
-        {
+        let key = TerminalCellShapeKey {
+            text: text.clone(),
+            foreground: [foreground.h, foreground.s, foreground.l, foreground.a].map(f32::to_bits),
+            flags,
+        };
+        if let Some(cached) = self.shapes.get_mut(&key) {
+            cached.used = self.generation;
             return cached.line.clone();
         }
 
         let line = shape();
-        self.cells[index] = Some(CachedTerminalCell {
-            key: TerminalCellShapeKey {
-                text: text.clone(),
-                foreground,
-                flags,
+        self.shapes.insert(
+            key,
+            CachedShape {
+                line: line.clone(),
+                used: self.generation,
             },
-            line: line.clone(),
-        });
+        );
         #[cfg(all(test, feature = "test-support"))]
         {
             self.shaped_cells += 1;
         }
         line
+    }
+
+    /// An empty positioned-cell list with last frame's capacity.
+    fn take_cells(&mut self) -> Vec<ShapedCell> {
+        let mut cells = std::mem::take(&mut self.scratch_cells);
+        cells.clear();
+        cells.reserve(self.cell_count);
+        cells
     }
 }
 
@@ -424,7 +451,6 @@ impl Element for TerminalElement {
             .cloned()
             .unwrap_or_default();
         let mut quads = vec![fill(bounds, palette.background)];
-        let mut cells = Vec::with_capacity(self.props.terminal.cells.len());
         let cache_key = TerminalRenderCacheKey {
             runtime_epoch: self.props.runtime_epoch,
             size: self.props.terminal.size,
@@ -434,6 +460,7 @@ impl Element for TerminalElement {
         };
         let mut render_cache = self.props.render_cache.borrow_mut();
         render_cache.prepare(cache_key, self.props.terminal.cells.len());
+        let mut cells = render_cache.take_cells();
         let mut block_regions = Vec::new();
         let mut background_regions: Vec<BlockRegion> = Vec::new();
         let mut contrast_memo = ContrastMemo::default();
@@ -539,33 +566,31 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                let line =
-                    render_cache.shaped_line(cache_index, &cell.text, foreground, flags, || {
-                        let font = cell_font(style.font(), flags);
-                        let underline = (flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
-                            thickness: px(1.),
-                            color: Some(foreground),
-                            wavy: flags & UNDERCURL != 0,
-                        });
-                        let strikethrough =
-                            (flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
-                                thickness: px(1.),
-                                color: Some(foreground),
-                            });
-                        window.text_system().shape_line(
-                            cell.text.as_str().into(),
-                            font_size,
-                            &[TextRun {
-                                len: cell.text.len(),
-                                font,
-                                color: foreground,
-                                background_color: None,
-                                underline,
-                                strikethrough,
-                            }],
-                            None,
-                        )
+                let line = render_cache.shaped_line(&cell.text, foreground, flags, || {
+                    let font = cell_font(style.font(), flags);
+                    let underline = (flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
+                        thickness: px(1.),
+                        color: Some(foreground),
+                        wavy: flags & UNDERCURL != 0,
                     });
+                    let strikethrough = (flags & STRIKEOUT != 0).then_some(StrikethroughStyle {
+                        thickness: px(1.),
+                        color: Some(foreground),
+                    });
+                    window.text_system().shape_line(
+                        cell.text.as_str().into(),
+                        font_size,
+                        &[TextRun {
+                            len: cell.text.len(),
+                            font,
+                            color: foreground,
+                            background_color: None,
+                            underline,
+                            strikethrough,
+                        }],
+                        None,
+                    )
+                });
                 cells.push(ShapedCell {
                     origin: cell_bounds.origin,
                     line,
@@ -757,6 +782,9 @@ impl Element for TerminalElement {
                     )
                     .ok();
             }
+            // The positioned cells are done; hand the allocation back for the next frame.
+            self.props.render_cache.borrow_mut().scratch_cells =
+                std::mem::take(&mut prepaint.cells);
             for quad in prepaint.overlay_quads.iter().cloned() {
                 window.paint_quad(quad);
             }
@@ -1793,7 +1821,6 @@ mod tests {
         let foreground: Hsla = rgb(0xffffff).into();
         cache.prepare(key.clone(), 2);
         cache.shaped_line(
-            0,
             &SmolStr::new_inline("x"),
             foreground,
             0,
@@ -1801,20 +1828,59 @@ mod tests {
         );
         assert_eq!(cache.shaped_cells(), 1);
 
-        cache.prepare(key, 2);
-        cache.shaped_line(0, &SmolStr::new_inline("x"), foreground, 0, || {
+        // Content-keyed: the same cell one frame later, or after scrolling to another
+        // row, reuses its shaped line; only new content shapes.
+        cache.prepare(key.clone(), 2);
+        cache.shaped_line(&SmolStr::new_inline("x"), foreground, 0, || {
             panic!("unchanged cell should reuse its shaped line")
         });
         assert_eq!(cache.shaped_cells(), 1);
-
         cache.shaped_line(
-            0,
             &SmolStr::new_inline("y"),
             foreground,
             0,
             ShapedLine::default,
         );
         assert_eq!(cache.shaped_cells(), 2);
+
+        // A different color or style is different content.
+        let dim: Hsla = rgb(0x888888).into();
+        cache.shaped_line(&SmolStr::new_inline("x"), dim, 0, ShapedLine::default);
+        cache.shaped_line(
+            &SmolStr::new_inline("x"),
+            foreground,
+            BOLD,
+            ShapedLine::default,
+        );
+        assert_eq!(cache.shaped_cells(), 4);
+
+        // Entries fall out only after they go unused for many frames.
+        for _ in 0..SHAPE_CACHE_RETAIN_FRAMES + 1 {
+            cache.prepare(key.clone(), 1);
+            cache.shaped_line(&SmolStr::new_inline("y"), foreground, 0, || {
+                panic!("a hot entry must survive the sweep")
+            });
+        }
+        for index in 0..2048u32 {
+            cache.shaped_line(
+                &SmolStr::from(index.to_string()),
+                foreground,
+                0,
+                ShapedLine::default,
+            );
+        }
+        cache.prepare(key, 1);
+        cache.shaped_line(
+            &SmolStr::new_inline("x"),
+            foreground,
+            0,
+            ShapedLine::default,
+        );
+        assert_eq!(
+            cache.shaped_cells(),
+            4 + 2048 + 1,
+            "stale x was swept and reshaped"
+        );
     }
 
     #[test]
