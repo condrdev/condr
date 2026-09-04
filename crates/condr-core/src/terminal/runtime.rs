@@ -704,6 +704,13 @@ impl TerminalRuntime {
         bottom_text(&terminal)
     }
 
+    /// The last `lines` rows of the active screen and its scrollback, oldest first,
+    /// with trailing blank rows dropped. Ignores the viewport scroll position.
+    pub fn recent_text(&self, lines: usize) -> String {
+        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        recent_text(&terminal, lines)
+    }
+
     pub fn agent_probe(&self) -> Option<TerminalAgentProbe> {
         self.master.as_ref()?;
         Some(TerminalAgentProbe {
@@ -1454,35 +1461,61 @@ impl TerminalAgentProbe {
     }
 }
 
+/// The whole screen, trailing blank rows dropped; what agent detection classifies.
 fn bottom_text(terminal: &Terminal) -> String {
-    let mut lines = Vec::with_capacity(terminal.screen_lines());
-    for row in 0..terminal.screen_lines() {
-        let row = &terminal.grid()[Line(row as i32)];
-        let mut line = String::new();
-        for column in 0..terminal.columns() {
-            let cell = &row[Column(column)];
-            if cell
-                .flags
-                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-            {
-                continue;
-            }
-            if cell.flags.contains(Flags::HIDDEN) {
-                line.push(' ');
-            } else {
-                line.push(cell.c);
-                if let Some(zerowidth) = cell.zerowidth() {
-                    line.extend(zerowidth);
-                }
-            }
-        }
-        line.truncate(line.trim_end_matches(' ').len());
-        lines.push(line);
-    }
+    let mut lines: Vec<String> = (0..terminal.screen_lines() as i32)
+        .map(|row| row_text(terminal, Line(row)))
+        .collect();
     while lines.last().is_some_and(String::is_empty) {
         lines.pop();
     }
     lines.join("\n")
+}
+
+/// The last `lines` rows that end at the last row with any content, reaching into
+/// scrollback when the screen alone holds fewer. Asking for five rows of a fresh shell
+/// whose prompt sits at the top therefore returns the prompt, not the blank bottom.
+fn recent_text(terminal: &Terminal, lines: usize) -> String {
+    let top = -(terminal.grid().history_size() as i32);
+    let mut last = terminal.screen_lines() as i32 - 1;
+    while last >= top && row_text(terminal, Line(last)).is_empty() {
+        last -= 1;
+    }
+    if last < top {
+        return String::new();
+    }
+    let first = (last + 1)
+        .saturating_sub(i32::try_from(lines).unwrap_or(i32::MAX))
+        .max(top);
+    (first..=last)
+        .map(|row| row_text(terminal, Line(row)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One grid row as text, wide-character spacers skipped and trailing spaces trimmed.
+fn row_text(terminal: &Terminal, line: Line) -> String {
+    let row = &terminal.grid()[line];
+    let mut text = String::new();
+    for column in 0..terminal.columns() {
+        let cell = &row[Column(column)];
+        if cell
+            .flags
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            continue;
+        }
+        if cell.flags.contains(Flags::HIDDEN) {
+            text.push(' ');
+        } else {
+            text.push(cell.c);
+            if let Some(zerowidth) = cell.zerowidth() {
+                text.extend(zerowidth);
+            }
+        }
+    }
+    text.truncate(text.trim_end_matches(' ').len());
+    text
 }
 
 impl Drop for TerminalRuntime {

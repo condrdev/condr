@@ -226,6 +226,71 @@ impl ClientConnection {
         Ok(())
     }
 
+    /// Sends terminal input and confirms the Server took it. Input itself gets no reply,
+    /// so a Ping follows it: an `Error` arriving before the Pong belongs to the input.
+    pub fn terminal(&mut self, pane_id: PaneId, command: TerminalCommand) -> io::Result<()> {
+        let server_id = self.bootstrap.server_id;
+        let nonce = self.next_request_id;
+        self.next_request_id += 1;
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::Terminal {
+                server_id,
+                session_id: self.bootstrap.session_id,
+                pane_id,
+                command,
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::Ping { server_id, nonce },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        loop {
+            match condr_core::protocol::read_message(&mut self.stream)
+                .map_err(|error| io::Error::other(error.to_string()))?
+            {
+                ServerMessage::Pong {
+                    nonce: answered, ..
+                } if answered == nonce => return Ok(()),
+                ServerMessage::Error { message } => return Err(io::Error::other(message)),
+                ServerMessage::ControlDenied { reason, .. } => {
+                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, reason));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The last `lines` rows of a Pane, scrollback included.
+    pub fn read_pane(&mut self, pane_id: PaneId, lines: u32) -> io::Result<String> {
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::ReadPane {
+                server_id: self.bootstrap.server_id,
+                session_id: self.bootstrap.session_id,
+                pane_id,
+                lines,
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        loop {
+            match condr_core::protocol::read_message(&mut self.stream)
+                .map_err(|error| io::Error::other(error.to_string()))?
+            {
+                ServerMessage::PaneText {
+                    pane_id: read,
+                    text,
+                } if read == pane_id => {
+                    return Ok(text);
+                }
+                ServerMessage::Error { message } => return Err(io::Error::other(message)),
+                _ => {}
+            }
+        }
+    }
+
     /// Sends one Layout command and waits for its outcome: the Session sequence it landed
     /// at, or the Server's reason for rejecting it. Session control is not needed (ADR
     /// 0009). Unrelated messages that arrive first are skipped.

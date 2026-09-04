@@ -955,6 +955,18 @@ impl Tab {
         &self.layout
     }
 
+    /// Where every Pane sits, in layout order.
+    pub fn pane_rects(&self) -> Vec<PaneRect> {
+        let mut rects = Vec::with_capacity(self.panes.len());
+        collect_pane_rects(&self.layout, 0.0, 0.0, 1.0, 1.0, &mut rects);
+        rects
+    }
+
+    /// The Pane that focus, swap and resize in `direction` would reach.
+    pub fn neighbor(&self, pane_id: PaneId, direction: PaneDirection) -> Option<PaneId> {
+        neighbor_pane_id(&self.layout, pane_id, direction)
+    }
+
     pub fn zoomed_pane_id(&self) -> Option<PaneId> {
         self.zoomed_pane
     }
@@ -1074,13 +1086,15 @@ fn first_pane_id(layout: &PaneLayout) -> PaneId {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PaneRect {
-    id: PaneId,
-    left: f32,
-    top: f32,
-    right: f32,
-    bottom: f32,
+/// A Pane's place in its Tab, as fractions of the Tab area (0 to 1). An edge at 0 or 1
+/// touches the Tab's border.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaneRect {
+    pub id: PaneId,
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
 }
 
 fn neighbor_pane_id(

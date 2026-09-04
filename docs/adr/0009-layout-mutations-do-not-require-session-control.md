@@ -4,4 +4,6 @@ Session control stays exclusive and keeps guarding what it was introduced for: t
 
 The reason is the `condr` CLI. Agent orchestration means a program inside a Pane asks the Server to open a Workspace, add a Tab or split a Pane while the GUI is connected and holds control. Gating layout on control would make that impossible, or force the CLI to steal control from the person typing. The GUI already treats structure as Server-owned and projects events from any origin, so a second structural author costs it nothing.
 
-Consequences: `layout_authority_error` no longer checks the controller. The GUI keeps acquiring control for its terminals, and a read-only viewer still cannot type, but it can rearrange the layout. Collaborative editing of terminal input remains deferred, as ADR 0003 states.
+The same applies to a terminal's byte stream. `TerminalCommand::Text`, `Paste` and `Key` are accepted from any client, because prompting an agent in another Pane is the point of the CLI, and `ClientMessage::ReadPane` returns a Pane's recent text to whoever asks. What stays with the controller is the state that describes one viewer: focus, mouse reporting, resize, scroll position and selection.
+
+Consequences: `layout_authority_error` no longer checks the controller, and the terminal handler gates only the viewer-state commands on it. The GUI keeps acquiring control for its terminals. A second GUI without control can now type into a Pane; that is interleaved input, not collaborative editing, which remains deferred as ADR 0003 states.

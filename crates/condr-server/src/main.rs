@@ -26,6 +26,9 @@ enum Command {
     /// Tabs of the Server this Pane belongs to
     #[command(subcommand)]
     Tab(cli::TabCommand),
+    /// Panes of the Server this Pane belongs to: split, read and type into terminals
+    #[command(subcommand)]
+    Pane(cli::PaneCommand),
 }
 
 #[derive(Subcommand)]
@@ -88,6 +91,7 @@ fn main() {
         Command::Server(command) => dispatch(command),
         Command::Workspace(command) => cli::run_workspace(command),
         Command::Tab(command) => cli::run_tab(command),
+        Command::Pane(command) => cli::run_pane(command),
     });
 }
 

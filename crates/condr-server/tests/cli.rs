@@ -140,6 +140,134 @@ fn workspace_and_tab_commands_drive_a_live_server() {
         Some(2)
     );
 
+    // Panes: split the Tab's Pane in the background, type into the new one, read it back.
+    let root_pane = created["root_pane"]["pane_id"].as_u64().unwrap();
+    let root_pane_arg = root_pane.to_string();
+    let split = ok(
+        &endpoint_path,
+        &["pane", "split", &root_pane_arg, "--direction", "right"],
+    );
+    let new_pane = split["pane"]["pane_id"].as_u64().unwrap();
+    assert_ne!(new_pane, root_pane);
+    assert_eq!(split["pane"]["tab_id"], first_tab);
+    assert_eq!(split["pane"]["focused"], false, "--focus was not given");
+    assert_eq!(split["pane"]["agent_status"], "unknown");
+    let new_pane_arg = new_pane.to_string();
+    assert_eq!(
+        ok(
+            &endpoint_path,
+            &["pane", "list", "--workspace", &workspace_arg]
+        )["panes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        ok(&endpoint_path, &["pane", "focus", &new_pane_arg])["pane"]["focused"],
+        true
+    );
+    // Rearrangements report whether anything moved.
+    let left = ok(
+        &endpoint_path,
+        &["pane", "focus", &new_pane_arg, "--direction", "left"],
+    );
+    assert_eq!(left["pane"]["pane_id"], root_pane);
+    assert_eq!(left["changed"], true);
+    assert_eq!(
+        ok(
+            &endpoint_path,
+            &["pane", "focus", &root_pane_arg, "--direction", "up"]
+        )["changed"],
+        false,
+        "nothing above the root Pane"
+    );
+    assert_eq!(
+        ok(
+            &endpoint_path,
+            &["pane", "resize", &root_pane_arg, "--direction", "right"]
+        )["changed"],
+        true
+    );
+    let swapped = ok(
+        &endpoint_path,
+        &["pane", "swap", &root_pane_arg, "--direction", "right"],
+    );
+    assert_eq!(swapped["changed"], true);
+    let zoomed = ok(&endpoint_path, &["pane", "zoom", &new_pane_arg, "--on"]);
+    assert_eq!(zoomed["pane"]["zoomed"], true);
+    assert_eq!(zoomed["changed"], true);
+    assert_eq!(
+        ok(&endpoint_path, &["pane", "zoom", &new_pane_arg, "--on"])["changed"],
+        false
+    );
+    assert_eq!(
+        ok(&endpoint_path, &["pane", "zoom", &new_pane_arg])["pane"]["zoomed"],
+        false
+    );
+    // After the swap the new Pane is on the left, so its right neighbor is the root.
+    let layout = ok(&endpoint_path, &["pane", "layout", &new_pane_arg]);
+    assert_eq!(layout["tab_id"], first_tab);
+    assert_eq!(layout["pane"]["neighbors"]["right"], root_pane);
+    assert_eq!(layout["pane"]["neighbors"]["left"], Value::Null);
+    assert_eq!(layout["pane"]["edges"]["left"], 0.0);
+    assert_eq!(layout["pane"]["edges"]["top"], 0.0);
+    assert_eq!(layout["pane"]["edges"]["bottom"], 1.0);
+    assert!(layout["pane"]["edges"]["right"].as_f64().unwrap() < 1.0);
+    assert_eq!(layout["panes"].as_array().unwrap().len(), 2);
+    assert_eq!(layout["tree"]["split"], "horizontal");
+    assert_eq!(layout["tree"]["first"]["pane"], new_pane);
+    assert_eq!(layout["tree"]["second"]["pane"], root_pane);
+    // The shell echoes what it is sent; the marker must show up in the read text.
+    assert_eq!(
+        ok(
+            &endpoint_path,
+            &["pane", "send-text", &new_pane_arg, "condr-cli-marker"]
+        )["ok"],
+        true
+    );
+    // A cold shell can take seconds to start and echo.
+    let mut text = String::new();
+    for _ in 0..300 {
+        let output = condr(
+            &endpoint_path,
+            &["pane", "read", &new_pane_arg, "--lines", "5"],
+        );
+        assert!(output.status.success());
+        text = String::from_utf8(output.stdout).unwrap();
+        if text.contains("condr-cli-marker") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(text.contains("condr-cli-marker"), "read text: {text:?}");
+    assert_eq!(
+        ok(
+            &endpoint_path,
+            &["pane", "send-keys", &new_pane_arg, "ctrl+u", "esc"]
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        err(
+            &endpoint_path,
+            &["pane", "send-keys", &new_pane_arg, "hyper+x"]
+        )["code"],
+        "invalid_key"
+    );
+    assert_eq!(
+        err(&endpoint_path, &["pane", "read", "424242"])["code"],
+        "pane_not_found"
+    );
+    assert_eq!(
+        err(&endpoint_path, &["pane", "current"])["code"],
+        "no_current_pane"
+    );
+    assert_eq!(
+        ok(&endpoint_path, &["pane", "close", &new_pane_arg])["ok"],
+        true
+    );
+
     assert_eq!(ok(&endpoint_path, &["tab", "close", &tab_arg])["ok"], true);
     assert_eq!(
         ok(&endpoint_path, &["tab", "list"])["tabs"]

@@ -604,6 +604,16 @@ pub(super) fn handle_client(
             } => {
                 let mut state = state.lock().expect("server state lock poisoned");
                 let is_copy = matches!(&command, TerminalCommand::Copy { .. });
+                // Reading and typing are open to every client, the CLI in a Pane
+                // included (ADR 0009); focus, mouse, resize, scroll and selection stay
+                // with the controller because they describe one viewer's state.
+                let needs_control = !matches!(
+                    &command,
+                    TerminalCommand::Copy { .. }
+                        | TerminalCommand::Text(_)
+                        | TerminalCommand::Paste(_)
+                        | TerminalCommand::Key { .. }
+                );
                 let focus = match &command {
                     TerminalCommand::Focus(focused) => Some(*focused),
                     _ => None,
@@ -629,7 +639,7 @@ pub(super) fn handle_client(
                             message: "Server is stopping".into(),
                         },
                     )
-                } else if !is_copy && state.active_controller != Some(client_id) {
+                } else if needs_control && state.active_controller != Some(client_id) {
                     queue_message(
                         &outbound,
                         ServerMessage::ControlDenied {
@@ -689,6 +699,36 @@ pub(super) fn handle_client(
                                 message: error.to_string(),
                             },
                         ),
+                    }
+                }
+            }
+            ClientMessage::ReadPane {
+                server_id,
+                session_id,
+                pane_id,
+                lines,
+            } => {
+                let state = state.lock().expect("server state lock poisoned");
+                let error = if server_id != state.server_id {
+                    Some("unknown Server")
+                } else if session_id != state.session_id {
+                    Some("unknown Session")
+                } else if !state.terminals.contains_key(&pane_id) {
+                    Some("unknown Pane")
+                } else {
+                    None
+                };
+                match error {
+                    Some(message) => queue_message(
+                        &outbound,
+                        ServerMessage::Error {
+                            message: message.into(),
+                        },
+                    ),
+                    None => {
+                        let text = state.terminals[&pane_id].recent_text(lines as usize);
+                        drop(state);
+                        queue_message(&outbound, ServerMessage::PaneText { pane_id, text })
                     }
                 }
             }

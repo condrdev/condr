@@ -19,8 +19,8 @@ pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,
 };
 pub use session::{
-    CloseOutcome, Pane, PaneDirection, PaneId, PaneLayout, Session, SplitDirection, Tab, TabId,
-    Workspace, WorkspaceId, WorktreeAssociation,
+    CloseOutcome, Pane, PaneDirection, PaneId, PaneLayout, PaneRect, Session, SplitDirection, Tab,
+    TabId, Workspace, WorkspaceId, WorktreeAssociation,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
 pub use terminal::{

@@ -80,6 +80,14 @@ pub enum ClientMessage {
         pane_id: PaneId,
         command: TerminalCommand,
     },
+    /// The last `lines` rows of a Pane as plain text, scrollback included: how the CLI
+    /// and agents read a terminal. No Session control needed.
+    ReadPane {
+        server_id: ServerId,
+        session_id: SessionId,
+        pane_id: PaneId,
+        lines: u32,
+    },
     /// Replaces the Server's shell preference; blank restores the system default.
     /// Any client may do this, no Session control needed.
     SetServerSettings {
@@ -369,6 +377,12 @@ pub enum ServerMessage {
     TerminalCopied {
         pane_id: PaneId,
         text: Option<String>,
+    },
+    /// The reply to [`ClientMessage::ReadPane`]: rows joined by newline, trailing blank
+    /// rows dropped.
+    PaneText {
+        pane_id: PaneId,
+        text: String,
     },
     /// A program in the Pane copied text with OSC 52; every subscribed client receives it.
     TerminalClipboard {

@@ -967,6 +967,8 @@ impl Condr {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 IncomingEffect::default()
             }
+            // Only the CLI asks for Pane text.
+            ServerMessage::PaneText { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
                 self.mark_disconnected(key, index, "Server stopped".into())
             }
