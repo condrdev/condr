@@ -641,6 +641,26 @@ fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
             false,
             b"\x1b\r",
         ),
+        // Only exactly Shift+Enter is LF; Ctrl+Shift+Enter falls back to CR (herdr).
+        (
+            TerminalKey::Enter,
+            TerminalModifiers {
+                shift: true,
+                ..none
+            },
+            false,
+            b"\n",
+        ),
+        (
+            TerminalKey::Enter,
+            TerminalModifiers {
+                control: true,
+                shift: true,
+                ..none
+            },
+            false,
+            b"\r",
+        ),
         (
             TerminalKey::Enter,
             TerminalModifiers {
@@ -769,7 +789,18 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         // Event types add the press suffix and put legacy-form keys in kitty form.
         (ch("c"), control, events, b"\x1b[99;5:1u"),
         (TerminalKey::Left, none, events, b"\x1b[1;1:1D"),
-        (TerminalKey::Function(3), control, events, b"\x1b[13;5:1~"),
+        (TerminalKey::Function(3), control, events, b"\x1b[1;5:1R"),
+        // Without a modifier field only the plain legacy sequences are valid.
+        (TerminalKey::Up, none, all, b"\x1b[A"),
+        (TerminalKey::Function(1), none, all, b"\x1bOP"),
+        (TerminalKey::Function(5), none, all, b"\x1b[15~"),
+        // Alternate keys alone do not disambiguate Escape.
+        (
+            TerminalKey::Escape,
+            none,
+            TermMode::REPORT_ALTERNATE_KEYS,
+            b"\x1b",
+        ),
         (TerminalKey::Enter, none, events, b"\r"),
         // Report-all reports text keys with alternate and associated text.
         (ch("a"), none, all, b"\x1b[97;1;97u"),

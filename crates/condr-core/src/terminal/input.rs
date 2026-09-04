@@ -63,6 +63,16 @@ fn encode_kitty_key(
             return None;
         }
         TerminalKey::Function(number) if !(1..=20).contains(number) => return None,
+        // Escape is rewritten only by disambiguation (or a mode that reports every key);
+        // alternate keys or associated text alone keep the plain byte.
+        TerminalKey::Escape
+            if !modified
+                && !report_all
+                && !event_types
+                && !modes.contains(TermMode::DISAMBIGUATE_ESC_CODES) =>
+        {
+            return None;
+        }
         _ => {}
     }
 
@@ -73,7 +83,19 @@ fn encode_kitty_key(
         + 4 * u8::from(modifiers.control)
         + 8 * u8::from(modifiers.platform);
     let mods = kitty_modifier_field(modifier, event_types);
-    let legacy_form = |prefix: u8, final_byte: char| format!("\x1b[{prefix};{mods}{final_byte}");
+    // Keys with legacy CSI forms keep them; without a modifier field the plain legacy
+    // sequence is the only valid one (`CSI 1;A` is not).
+    let legacy_form = |prefix: u8, final_byte: char| {
+        if !mods.is_empty() {
+            format!("\x1b[{prefix};{mods}{final_byte}")
+        } else if final_byte == '~' {
+            format!("\x1b[{prefix}~")
+        } else if matches!(final_byte, 'P' | 'Q' | 'R' | 'S') {
+            format!("\x1bO{final_byte}")
+        } else {
+            format!("\x1b[{final_byte}")
+        }
+    };
     let csi_u = |codepoint: u32| format!("\x1b[{codepoint}{}u", modifier_suffix(&mods));
     let sequence = match key {
         TerminalKey::Up => legacy_form(1, 'A'),
@@ -88,7 +110,7 @@ fn encode_kitty_key(
         TerminalKey::PageDown => legacy_form(6, '~'),
         TerminalKey::Function(1) => legacy_form(1, 'P'),
         TerminalKey::Function(2) => legacy_form(1, 'Q'),
-        TerminalKey::Function(3) => legacy_form(13, '~'),
+        TerminalKey::Function(3) => legacy_form(1, 'R'),
         TerminalKey::Function(4) => legacy_form(1, 'S'),
         TerminalKey::Function(number) => {
             const TILDE_CODES: [u8; 16] = [
@@ -190,8 +212,11 @@ pub(super) fn encode_key(
 
     let modifier = modifier_code(modifiers);
     let sequence = match key {
-        // Shift+Enter sends LF (Ctrl+J), which agent CLIs treat as newline.
-        TerminalKey::Enter if modifiers.shift => "\n".into(),
+        // Exactly Shift+Enter sends LF (Ctrl+J), which agent CLIs treat as newline; other
+        // modified Enters fall back to CR like herdr (Alt adds its ESC prefix below).
+        TerminalKey::Enter if modifiers.shift && !modifiers.control && !modifiers.alt => {
+            "\n".into()
+        }
         TerminalKey::Enter => "\r".into(),
         TerminalKey::Tab if modifiers.shift => "\x1b[Z".into(),
         TerminalKey::Tab => "\t".into(),

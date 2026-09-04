@@ -859,14 +859,13 @@ fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
         terminal_clipboard_shortcut(&Keystroke::parse(keys).unwrap(), has_selection)
     };
 
-    assert_eq!(
-        shortcut("ctrl-shift-c", false),
-        Some(TerminalClipboardShortcut::Copy)
-    );
-    assert_eq!(
-        shortcut("ctrl-shift-v", false),
-        Some(TerminalClipboardShortcut::Paste)
-    );
+    // Ctrl+Shift+C/V: clipboard on Linux/Windows; on macOS every Ctrl chord is PTY input.
+    let control_shift_copy =
+        (!cfg!(target_os = "macos")).then_some(TerminalClipboardShortcut::Copy);
+    let control_shift_paste =
+        (!cfg!(target_os = "macos")).then_some(TerminalClipboardShortcut::Paste);
+    assert_eq!(shortcut("ctrl-shift-c", false), control_shift_copy);
+    assert_eq!(shortcut("ctrl-shift-v", false), control_shift_paste);
     assert_eq!(
         shortcut("ctrl-insert", false),
         Some(TerminalClipboardShortcut::Copy)

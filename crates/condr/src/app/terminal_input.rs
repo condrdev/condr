@@ -552,8 +552,9 @@ impl Condr {
             cx.stop_propagation();
             return;
         }
-        if modifiers.platform && !modifiers.control && !modifiers.alt {
-            // Cmd/Win chords without a binding are never terminal input; let them propagate.
+        if modifiers.platform {
+            // Cmd/Win chords without a binding are never terminal input (legacy encoding
+            // has no way to carry the modifier, so Cmd+Ctrl+C must not become ETX).
             return;
         }
         let key_code = terminal_key_for(stroke);
@@ -613,14 +614,16 @@ pub(super) fn terminal_key_for(stroke: &Keystroke) -> Option<TerminalKey> {
     if named.is_some() || !(modifiers.control || modifiers.alt) {
         return named;
     }
-    let key_char = stroke
+    let printable = stroke
         .key_char
         .as_deref()
-        .filter(|text| text.chars().count() == 1);
-    if cfg!(target_os = "macos") && !modifiers.control && key_char.is_some() {
-        // Option produced a character (ß, €, [ on non-US layouts): let it be typed.
+        .filter(|text| !text.is_empty() && text.chars().all(|ch| !ch.is_control()));
+    if cfg!(target_os = "macos") && !modifiers.control && printable.is_some() {
+        // Option produced text (ß, €, [ on non-US layouts, or a composed sequence): let
+        // it be typed.
         return None;
     }
+    let key_char = printable.filter(|text| text.chars().count() == 1);
     let text = match key_char {
         Some(text) => text.to_owned(),
         None => match stroke.key.as_str() {
@@ -666,7 +669,10 @@ pub(super) fn terminal_clipboard_shortcut(
     let command_only =
         cfg!(target_os = "macos") && modifiers.platform && !modifiers.control && !modifiers.shift;
     let control_only = modifiers.control && !modifiers.platform && !modifiers.shift;
-    let control_shift = modifiers.control && !modifiers.platform && modifiers.shift;
+    // Ctrl+Shift+C/V is the Linux/Windows terminal convention; macOS has Cmd and keeps
+    // every Ctrl chord for the PTY, as Zed and herdr do.
+    let control_shift =
+        !cfg!(target_os = "macos") && modifiers.control && !modifiers.platform && modifiers.shift;
     let shift_only = modifiers.shift && !modifiers.control && !modifiers.platform;
 
     match stroke.key.as_str() {
