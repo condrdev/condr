@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::kbd::Kbd;
 use gpui_component::tab::{Tab, TabBar};
 
 // Sized in rems so the window zooms with the base font, resolved against the main
@@ -589,6 +590,7 @@ impl Render for SettingsWindow {
                 // Matches the main window's sidebar.
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(appearance_page(&self.owner, &settings, &self.color_scheme))
+                .page(shortcuts_page())
                 .page(licenses_page(&self.licenses)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
@@ -922,6 +924,65 @@ fn appearance_page(
         )
 }
 
+/// A labelled action, as one row of the Shortcuts page.
+type Shortcut = (&'static str, &'static dyn Action);
+
+/// The fixed shortcuts, grouped as the page shows them. The keys themselves are read
+/// from the keymap at render time, so this list can never disagree with `bind_keys`.
+pub(super) const SHORTCUTS: &[(&str, &[Shortcut])] = &[
+    ("Application", &[("Open Settings", &OpenSettings)]),
+    (
+        "Tabs",
+        &[
+            ("New tab", &NewTab),
+            ("Next tab", &NextTab),
+            ("Previous tab", &PreviousTab),
+        ],
+    ),
+    (
+        "Panes",
+        &[
+            ("Split right", &SplitRight),
+            ("Split down", &SplitDown),
+            ("Close pane", &ClosePane),
+            ("Toggle zoom", &ToggleZoom),
+            ("Focus left", &FocusLeft),
+            ("Focus right", &FocusRight),
+            ("Focus up", &FocusUp),
+            ("Focus down", &FocusDown),
+            ("Resize left", &ResizeLeft),
+            ("Resize right", &ResizeRight),
+            ("Resize up", &ResizeUp),
+            ("Resize down", &ResizeDown),
+        ],
+    ),
+];
+
+/// The key context `bind_keys` registers the shortcuts under.
+pub(super) const SHORTCUT_CONTEXT: &str = "Condr";
+
+/// Read-only: shortcuts are fixed per platform, so this page only shows them.
+fn shortcuts_page() -> SettingPage {
+    SettingPage::new("Shortcuts")
+        .icon(IconName::LayoutDashboard)
+        .groups(SHORTCUTS.iter().map(|(title, rows)| {
+            rows.iter().fold(
+                SettingGroup::new().title(*title),
+                |group, (label, action)| {
+                    group.item(SettingItem::new(
+                        *label,
+                        SettingField::render(move |_, window, _| {
+                            div().children(
+                                Kbd::binding_for_action(*action, Some(SHORTCUT_CONTEXT), window)
+                                    .map(|kbd| kbd.outline()),
+                            )
+                        }),
+                    ))
+                },
+            )
+        }))
+}
+
 /// Preferences a Server owns, edited for one connection at a time. Only the shell so
 /// far; the Server picker sits in the tab bar.
 fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
@@ -1004,6 +1065,29 @@ mod tests {
             apply_appearance(Appearance::Light, None, cx);
             assert_eq!(cx.theme().mono_font_family.as_ref(), "Cascadia Mono");
             assert_eq!(cx.theme().mono_font_size, gpui::px(17.));
+        });
+    }
+
+    /// A listed action without a binding would render an empty row.
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn every_listed_shortcut_has_a_binding_on_this_platform(cx: &mut gpui::TestAppContext) {
+        cx.update(super::super::startup::bind_keys);
+        let window = cx.add_empty_window();
+        window.update(|window, _| {
+            for (_, rows) in super::SHORTCUTS {
+                for (label, action) in *rows {
+                    assert!(
+                        gpui_component::kbd::Kbd::binding_for_action(
+                            *action,
+                            Some(super::SHORTCUT_CONTEXT),
+                            window
+                        )
+                        .is_some(),
+                        "{label} has no binding"
+                    );
+                }
+            }
         });
     }
 
