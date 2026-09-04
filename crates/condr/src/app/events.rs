@@ -277,7 +277,6 @@ impl Condr {
         if connection.status != ConnectionStatus::Connected
             || connection.controlling
             || connection.control_retry_scheduled
-            || connection.control_retry_attempts >= MAX_CONTROL_RETRY_ATTEMPTS
         {
             return;
         }
@@ -286,10 +285,13 @@ impl Condr {
         };
         let generation = connection.connect_generation;
         connection.control_retry_scheduled = true;
+        let delay = CONTROL_RETRY_DELAY
+            .saturating_mul(1 << connection.control_retry_attempts.min(8))
+            .min(MAX_CONTROL_RETRY_DELAY);
         connection.control_retry_attempts = connection.control_retry_attempts.saturating_add(1);
 
         cx.spawn(async move |owner, cx| {
-            cx.background_executor().timer(CONTROL_RETRY_DELAY).await;
+            cx.background_executor().timer(delay).await;
             owner
                 .update(cx, |this, cx| {
                     let Some(connection) = this.connection_mut(key) else {
@@ -781,20 +783,14 @@ impl Condr {
                         self.pending_sizes.remove(&pending_key);
                     }
                 }
-                let active_surface = self
-                    .active_dock_surface
-                    .filter(|surface_key| surface_key.connection_key == key)
-                    .and_then(|surface_key| self.dock_surfaces.get(&surface_key));
-                let notify = self.active_connection == key
-                    && active_surface.is_none_or(|surface| {
-                        pane_ids
-                            .iter()
-                            .any(|pane_id| surface.pane_ids.contains(pane_id))
-                    });
-                IncomingEffect {
-                    notify,
-                    ..IncomingEffect::default()
+                // A visual frame redraws only the Panels it touched; re-rendering the
+                // root would rebuild the sidebar and every Pane's chrome per frame.
+                for pane_id in &pane_ids {
+                    if let Some(panel) = self.panels.get(&(key, *pane_id)) {
+                        panel.update(cx, |_, cx| cx.notify());
+                    }
                 }
+                IncomingEffect::default()
             }
             ServerMessage::ControlGranted {
                 server_id,

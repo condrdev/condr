@@ -136,7 +136,9 @@ const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
 const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
 const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
 const CONTROL_RETRY_DELAY: Duration = Duration::from_millis(50);
-const MAX_CONTROL_RETRY_ATTEMPTS: u8 = 20;
+/// Retries double up to this while another client holds control; they never give up
+/// while the connection stays up, so a controller that leaves seconds later is noticed.
+const MAX_CONTROL_RETRY_DELAY: Duration = Duration::from_secs(2);
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);

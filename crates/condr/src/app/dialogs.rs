@@ -6,7 +6,7 @@ impl Condr {
         title: &'static str,
         ok_text: &'static str,
         initial: String,
-        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> bool + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -27,7 +27,7 @@ impl Condr {
         &mut self,
         title: String,
         ok_text: &'static str,
-        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> bool + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -63,7 +63,10 @@ impl Condr {
             self.prompt_server_path(
                 title,
                 ok_text,
-                move |this, path, window, cx| apply(this, PathBuf::from(path), window, cx),
+                move |this, path, window, cx| {
+                    apply(this, PathBuf::from(path), window, cx);
+                    true
+                },
                 window,
                 cx,
             );
@@ -96,7 +99,7 @@ impl Condr {
         field_label: Option<SharedString>,
         placeholder: Option<SharedString>,
         trim_value: bool,
-        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> bool + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -162,11 +165,14 @@ impl Condr {
                             return false;
                         };
                         let apply = apply.clone();
-                        let _ = owner.update(cx, |this, cx| {
-                            apply(this, value, window, cx);
-                            cx.notify();
-                        });
-                        true
+                        // A rejected value keeps the dialog and the typed text.
+                        owner
+                            .update(cx, |this, cx| {
+                                let accepted = apply(this, value, window, cx);
+                                cx.notify();
+                                accepted
+                            })
+                            .unwrap_or(true)
                     })
             });
             input.update(cx, |input, cx| {
@@ -185,7 +191,8 @@ impl Condr {
                 if let Ok(address) = value.parse::<SocketAddr>() {
                     let endpoint = Endpoint::tcp(address);
                     if this.connections.iter().any(|c| c.endpoint == endpoint) {
-                        return;
+                        this.app_error = Some("Server already added".into());
+                        return false;
                     }
                     this.app_error = None;
                     let key = this.next_connection_key;
@@ -200,8 +207,10 @@ impl Condr {
                     this.active_connection = key;
                     this.target_pane = None;
                     _ = this.start_connect(key);
+                    true
                 } else {
                     this.app_error = Some("Invalid server address".into());
+                    false
                 }
             },
             window,
@@ -225,6 +234,7 @@ impl Condr {
                     connection.label = name;
                     this.save_servers();
                 }
+                true
             },
             window,
             cx,
@@ -290,6 +300,7 @@ impl Condr {
             name,
             move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
+                true
             },
             window,
             cx,
@@ -318,6 +329,7 @@ impl Condr {
                     window,
                     cx,
                 );
+                true
             },
             window,
             cx,
@@ -420,15 +432,10 @@ impl Condr {
             name,
             move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });
+                true
             },
             window,
             cx,
         );
-    }
-
-    pub(super) fn dismiss_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if window.has_active_dialog(cx) {
-            window.close_dialog(cx);
-        }
     }
 }

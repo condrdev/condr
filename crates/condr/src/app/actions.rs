@@ -10,7 +10,11 @@ macro_rules! action_handlers {
                     window: &mut Window,
                     cx: &mut Context<Self>,
                 ) {
-                    self.dismiss_dialog(window, cx);
+                    // A modal dialog owns the keyboard: Ctrl+Shift+W while renaming must
+                    // not close a Pane behind it (herdr routes modal input first).
+                    if window.has_active_dialog(cx) {
+                        return;
+                    }
                     #[allow(unused_variables)]
                     let ($this, $window, $cx) = (self, window, cx);
                     $body

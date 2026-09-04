@@ -505,7 +505,7 @@ impl Condr {
             return;
         };
         let stroke = &event.keystroke;
-        if should_defer_to_character_input(event) {
+        if should_defer_to_character_input(event) || window.has_active_dialog(cx) {
             return;
         }
         if let Some(action) = fixed_shortcut(stroke) {
