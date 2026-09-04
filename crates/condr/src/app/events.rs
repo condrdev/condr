@@ -745,10 +745,14 @@ impl Condr {
                     && selection.connection_key == key
                     && pane_ids.contains(&selection.pane_id)
                 {
-                    if selection.committed {
-                        // The Server's frame now carries this selection.
+                    let server_selection = self.connections[index].terminals[&selection.pane_id]
+                        .view
+                        .selection;
+                    if selection.committed && server_selection.is_some() {
+                        // The Server's frame now carries this selection; a frame that was
+                        // already in flight before the Select keeps the local bridge.
                         self.terminal_selection = None;
-                    } else {
+                    } else if !selection.committed {
                         selection.range.display_offset = self.connections[index].terminals
                             [&selection.pane_id]
                             .view

@@ -1167,8 +1167,10 @@ pub(super) fn snapshot_terminal(
     }
 }
 
-/// The Server-tracked selection as inclusive viewport cells, or `None` when it is empty
-/// or entirely scrolled out of view.
+/// The Server-tracked selection as inclusive viewport cells, or `None` when there is none.
+/// A selection that exists but is entirely scrolled out of view is reported one row past
+/// the grid (`row == size.rows`): it matches no cell, so nothing is painted, yet the
+/// Client still knows a copy would succeed.
 pub(super) fn viewport_selection(
     terminal: &Terminal,
     size: TerminalSize,
@@ -1180,7 +1182,19 @@ pub(super) fn viewport_selection(
     let start_row = i64::from(range.start.line.0) + display_offset;
     let end_row = i64::from(range.end.line.0) + display_offset;
     if end_row < 0 || start_row > last_row {
-        return None;
+        let hidden = |column| TerminalPosition {
+            row: size.rows,
+            column,
+            side: TerminalSide::Left,
+        };
+        return Some(TerminalSelection {
+            start: hidden(0),
+            end: TerminalPosition {
+                side: TerminalSide::Right,
+                ..hidden(last_column)
+            },
+            display_offset: u32::try_from(display_offset).ok()?,
+        });
     }
     let (start_row, start_column) = if start_row < 0 {
         (0, 0)

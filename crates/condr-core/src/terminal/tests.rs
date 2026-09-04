@@ -712,8 +712,15 @@ fn server_selection_follows_scrolled_output_and_still_copies_it() {
     assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
 
     parser.advance(&mut terminal, b"\r\nepsilon");
-    assert_eq!(viewport_selection(&terminal, size), None);
+    // Scrolled out of view: still reported (so a copy is offered) but matches no cell.
+    let hidden = viewport_selection(&terminal, size).unwrap();
+    assert_eq!((hidden.start.row, hidden.end.row), (size.rows, size.rows));
+    assert!(hidden.selected_cell_range(size.columns).is_some());
+    assert!((0..size.rows).all(|row| !hidden.contains_cell(row, 0, size.columns)));
     assert_eq!(terminal.selection_to_string().as_deref(), Some("beta"));
+
+    terminal.selection = None;
+    assert_eq!(viewport_selection(&terminal, size), None);
 }
 
 #[test]
@@ -910,6 +917,20 @@ fn osc_nine_parser_reports_progress_parameters_verbatim() {
             OscReport::Progress("4;0".into()),
         ]
     );
+}
+
+#[test]
+fn osc_inside_a_control_string_is_payload_until_st() {
+    let mut parser = OscCwdParser::default();
+    let mut reported = Vec::new();
+
+    // A DCS carrying a BEL and a fake OSC, split across reads, then a real OSC.
+    parser.advance(b"\x1bPq\x07\x1b]7;file:///fake\x07 more", |osc| {
+        reported.push(osc)
+    });
+    parser.advance(b"\x1b\\\x1b]7;file:///real\x07", |osc| reported.push(osc));
+
+    assert_eq!(reported, [OscReport::Cwd(PathBuf::from("/real"))]);
 }
 
 #[test]

@@ -1357,6 +1357,10 @@ fn push_selection_quads(
     let Some((start, end)) = selection.selected_cell_range(terminal_size.columns) else {
         return;
     };
+    if start > last_cell {
+        // A Server selection scrolled entirely out of view: exists, paints nothing.
+        return;
+    }
     let start = start.min(last_cell);
     let end = end.min(last_cell);
 

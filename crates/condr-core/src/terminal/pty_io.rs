@@ -802,6 +802,9 @@ pub(super) enum OscCwdState {
     PayloadEscape,
     Discard,
     DiscardEscape,
+    /// Inside DCS/SOS/PM/APC, which only ST ends; BEL is payload there.
+    ControlString,
+    ControlStringEscape,
 }
 
 /// The OSC payloads Condr reads itself because vte drops them: cwd reports as OSC 7
@@ -837,7 +840,7 @@ impl OscCwdParser {
                         self.state = OscCwdState::Prefix(1);
                     } else if matched == 1 && matches!(byte, b'P' | b'X' | b'^' | b'_') {
                         // DCS/SOS/PM/APC: whatever looks like an OSC inside is payload.
-                        self.state = OscCwdState::Discard;
+                        self.state = OscCwdState::ControlString;
                     } else {
                         self.state = OscCwdState::Ground;
                     }
@@ -877,6 +880,16 @@ impl OscCwdParser {
                     b'\\' => self.reset(),
                     0x1b => {}
                     _ => self.state = OscCwdState::Discard,
+                },
+                OscCwdState::ControlString => {
+                    if byte == 0x1b {
+                        self.state = OscCwdState::ControlStringEscape;
+                    }
+                }
+                OscCwdState::ControlStringEscape => match byte {
+                    b'\\' => self.reset(),
+                    0x1b => {}
+                    _ => self.state = OscCwdState::ControlString,
                 },
             }
         }

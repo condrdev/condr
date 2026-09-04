@@ -228,18 +228,22 @@ impl TerminalRuntime {
                 move || child_exit_watch(child, exit_signal)
             })
         {
+            // Same order as `stop_process_and_io`: the process tree goes first, and on
+            // ConPTY the master is released so the reader, which has no cancel, unblocks.
             input.stop();
             resize.stop();
             writer_stopping.store(true, Ordering::Release);
             #[cfg(unix)]
             let _ = writer_cancel.shutdown(Shutdown::Both);
+            let mut child = lock_child(&child).take();
+            let _ = shutdown_process_tree(process, child.as_deref_mut());
             #[cfg(unix)]
             let _ = reader_cancel.shutdown(Shutdown::Both);
+            #[cfg(not(unix))]
+            drop(master);
             let _ = writer_thread.join();
             let _ = resize_thread.join();
             let _ = reader_thread.join();
-            let mut child = lock_child(&child).take();
-            let _ = shutdown_process_tree(process, child.as_deref_mut());
             return Err(error);
         }
 

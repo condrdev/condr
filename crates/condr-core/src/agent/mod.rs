@@ -869,7 +869,8 @@ impl AgentDetector {
             let quiet = self
                 .last_activity
                 .is_none_or(|at| now.duration_since(at) >= PROCESS_ACQUISITION_IDLE_RESET);
-            if quiet {
+            // A foreground-group change is a new job, so it always opens a window.
+            if quiet || force {
                 self.acquisition_started = Some(now);
             }
             self.last_activity = Some(now);
@@ -930,6 +931,8 @@ impl AgentDetector {
                     self.reset_agent();
                     self.stale_osc_title = Some(osc_title.to_owned());
                     self.stale_osc_progress = Some(osc_progress.to_owned());
+                    // The shell is back in front: a replacement may start any moment.
+                    self.acquisition_started = Some(now);
                     return AgentPublish::Cleared;
                 }
                 let exited = match result {
@@ -949,6 +952,8 @@ impl AgentDetector {
                     self.reset_agent();
                     self.stale_osc_title = Some(osc_title.to_owned());
                     self.stale_osc_progress = Some(osc_progress.to_owned());
+                    // The shell is back in front: a replacement may start any moment.
+                    self.acquisition_started = Some(now);
                     return AgentPublish::Cleared;
                 }
                 self.published = Some(AgentState::Idle);
@@ -1304,6 +1309,26 @@ mod tests {
             at += half_second;
         }
         assert!(!detector.wants_process_probe(at, false, true));
+    }
+
+    #[test]
+    fn a_cleared_agent_reopens_the_fast_probe_window_for_its_replacement() {
+        let mut detector = AgentDetector::new();
+        let start = Instant::now();
+        detector.wants_process_probe(start, false, false);
+        detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), "", "", start);
+        // A long-running agent outlives the acquisition window it was found in.
+        let gone = start + PROCESS_ACQUISITION_WINDOW * 4;
+        detector.observe_process(ProcessProbeResult::ShellOnly, "", "", gone);
+        assert!(detector.wants_process_probe(gone, false, false));
+        assert_eq!(
+            detector.observe_process(ProcessProbeResult::ShellOnly, "", "", gone),
+            AgentPublish::Cleared
+        );
+
+        // A wrapper restarting the agent a second later is still on the fast cadence.
+        let half_second = Duration::from_millis(500);
+        assert!(detector.wants_process_probe(gone + half_second, false, false));
     }
 
     #[test]
