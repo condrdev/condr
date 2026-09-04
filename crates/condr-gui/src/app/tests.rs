@@ -155,25 +155,45 @@ fn reordering_connections_moves_the_dragged_server_into_the_target_slot() {
         |connections: &Vec<ServerConnection>| connections.iter().map(|c| c.key).collect::<Vec<_>>();
 
     let mut connections = vec![connection(1), connection(2), connection(3)];
-    assert!(reorder_connection(&mut connections, 3, 1));
+    assert!(reorder_connection(&mut connections, 3, 1, false));
     assert_eq!(keys(&connections), [3, 1, 2]);
 
-    assert!(reorder_connection(&mut connections, 3, 2));
+    assert!(reorder_connection(&mut connections, 3, 2, true));
     assert_eq!(keys(&connections), [1, 2, 3]);
 
     assert!(
-        !reorder_connection(&mut connections, 2, 2),
+        !reorder_connection(&mut connections, 2, 2, false),
         "dropping a server on itself should not change the order"
     );
     assert!(
-        !reorder_connection(&mut connections, 9, 1),
+        !reorder_connection(&mut connections, 1, 2, false),
+        "dropping just before the next item is where it already is"
+    );
+    assert!(
+        !reorder_connection(&mut connections, 9, 1, false),
         "an unknown dragged key should be ignored"
     );
     assert!(
-        !reorder_connection(&mut connections, 1, 9),
+        !reorder_connection(&mut connections, 1, 9, true),
         "an unknown target key should be ignored"
     );
     assert_eq!(keys(&connections), [1, 2, 3]);
+}
+
+#[test]
+fn drop_index_inserts_before_or_after_the_target_in_the_list_without_the_source() {
+    use super::sidebar::drop_index;
+    // Moving right: the removal shifts the target left by one.
+    assert_eq!(drop_index(0, 2, false), Some(1));
+    assert_eq!(drop_index(0, 2, true), Some(2));
+    // Moving left: indexes are unaffected by the removal.
+    assert_eq!(drop_index(2, 0, false), Some(0));
+    assert_eq!(drop_index(2, 0, true), Some(1));
+    // Both sides of the source's own slot are no-ops.
+    assert_eq!(drop_index(1, 1, false), None);
+    assert_eq!(drop_index(1, 1, true), None);
+    assert_eq!(drop_index(1, 0, true), None);
+    assert_eq!(drop_index(1, 2, false), None);
 }
 
 #[test]

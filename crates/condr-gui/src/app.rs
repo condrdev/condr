@@ -582,6 +582,8 @@ pub(crate) struct Condr {
     _shell_save: Option<Task<()>>,
     /// The Shell value waiting for its debounce, and the Server it belongs to.
     pending_shell: Option<(ConnectionKey, String)>,
+    /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
+    drop_target: Option<sidebar::DropTarget>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     app_error: Option<String>,
@@ -709,6 +711,7 @@ impl Condr {
             _font_save: None,
             _shell_save: None,
             pending_shell: None,
+            drop_target: None,
             _quit_subscription: quit_subscription,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,

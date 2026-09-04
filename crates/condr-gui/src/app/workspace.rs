@@ -1,4 +1,4 @@
-use super::sidebar::DragPreview;
+use super::sidebar::{DragPreview, DropTarget, attach_drop_target, drop_index};
 use super::*;
 
 #[derive(Clone)]
@@ -68,15 +68,29 @@ impl Condr {
             .flatten()
             .map(|surface| surface.area.clone());
         let closes_workspace = workspace.tabs().len() == 1;
+        // Drop handlers need the source index of the dragged Tab.
+        let tab_ids = Rc::new(
+            workspace
+                .tabs()
+                .iter()
+                .map(|tab| tab.id())
+                .collect::<Vec<_>>(),
+        );
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
             let activate_owner = cx.weak_entity();
             let menu_owner = cx.weak_entity();
-            h_flex()
+            let target = DropTarget::Tab {
+                key,
+                tab_id,
+                after: false,
+            };
+            let tab_row = h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
                 .when(can_mutate, |this| {
                     let drop_owner = cx.weak_entity();
+                    let tab_ids = tab_ids.clone();
                     this.on_drag(
                         DraggedTab {
                             key,
@@ -90,28 +104,44 @@ impl Condr {
                             cx.new(|_| DragPreview { icon: None, name })
                         },
                     )
-                    .drag_over::<DraggedTab>(|style, _, _, cx| {
-                        style.bg(cx.theme().accent.opacity(0.8))
-                    })
                     .on_drop(move |dragged: &DraggedTab, _, cx| {
-                        if dragged.key != key
-                            || dragged.workspace_id != workspace_id
-                            || dragged.tab_id == tab_id
-                        {
-                            return;
-                        }
-                        let dragged_tab = dragged.tab_id;
                         let _ = drop_owner.update(cx, |this, _| {
-                            this.send_layout_to(
-                                key,
-                                LayoutCommand::MoveTab {
-                                    tab_id: dragged_tab,
-                                    target_index: tab_index as u32,
-                                },
-                            );
+                            let after = this.take_drop_after(target);
+                            if dragged.key != key || dragged.workspace_id != workspace_id {
+                                return;
+                            }
+                            let Some(source) = tab_ids.iter().position(|id| *id == dragged.tab_id)
+                            else {
+                                return;
+                            };
+                            if let Some(index) = drop_index(source, tab_index, after) {
+                                this.send_layout_to(
+                                    key,
+                                    LayoutCommand::MoveTab {
+                                        tab_id: dragged.tab_id,
+                                        target_index: index as u32,
+                                    },
+                                );
+                            }
                         });
                     })
-                })
+                });
+            let move_owner = cx.weak_entity();
+            let tab_row = if can_mutate {
+                attach_drop_target::<DraggedTab, _>(
+                    tab_row,
+                    true,
+                    self.drop_indicator_for(target, cx),
+                    move |half, cx| {
+                        let _ = move_owner
+                            .update(cx, |this, cx| this.set_drop_target(target, half, cx));
+                    },
+                    cx,
+                )
+            } else {
+                tab_row
+            };
+            tab_row
                 .child(
                     Button::new(("tab", tab_id.as_u64()))
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))

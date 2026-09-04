@@ -227,6 +227,155 @@ impl CondrSidebarIcon {
     }
 }
 
+/// Where a drag would land if released now: the item under the pointer and which side
+/// of it. The item gets the theme's drop tint and a 2px line on that side, as Zed does.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum DropTarget {
+    Tab {
+        key: ConnectionKey,
+        tab_id: TabId,
+        after: bool,
+    },
+    Workspace {
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        after: bool,
+    },
+    Server {
+        key: ConnectionKey,
+        after: bool,
+    },
+}
+
+impl DropTarget {
+    fn after(self) -> bool {
+        match self {
+            Self::Tab { after, .. }
+            | Self::Workspace { after, .. }
+            | Self::Server { after, .. } => after,
+        }
+    }
+
+    fn with_after(self, after: bool) -> Self {
+        match self {
+            Self::Tab { key, tab_id, .. } => Self::Tab { key, tab_id, after },
+            Self::Workspace {
+                key, workspace_id, ..
+            } => Self::Workspace {
+                key,
+                workspace_id,
+                after,
+            },
+            Self::Server { key, .. } => Self::Server { key, after },
+        }
+    }
+}
+
+/// Which half of `bounds` the pointer is in (`true` = right or bottom), `None` outside.
+pub(super) fn drop_half(
+    position: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+    horizontal: bool,
+) -> Option<bool> {
+    bounds.contains(&position).then(|| {
+        if horizontal {
+            position.x >= bounds.center().x
+        } else {
+            position.y >= bounds.center().y
+        }
+    })
+}
+
+/// The index a dragged item (at `source`) moves to when dropped on the near or far side
+/// of the item at `target`, in the list after the source is removed. `None` when the
+/// drop leaves the order as it is.
+pub(super) fn drop_index(source: usize, target: usize, after: bool) -> Option<usize> {
+    let mut index = target + usize::from(after);
+    if source < index {
+        index -= 1;
+    }
+    (index != source).then_some(index)
+}
+
+/// The insertion line, positioned on the edge of a `relative()` parent.
+fn drop_indicator(horizontal: bool, after: bool, cx: &App) -> Div {
+    let line = div().absolute().rounded_full().bg(cx.theme().primary);
+    match (horizontal, after) {
+        (true, false) => line.top_0().bottom_0().w(px(2.)).left(px(-1.)),
+        (true, true) => line.top_0().bottom_0().w(px(2.)).right(px(-1.)),
+        (false, false) => line.left_0().right_0().h(px(2.)).top(px(-1.)),
+        (false, true) => line.left_0().right_0().h(px(2.)).bottom(px(-1.)),
+    }
+}
+
+/// Makes `element` a drop target for drags of type `D`: it reports which half the
+/// pointer is over while a drag moves (`None` once it leaves) and draws the insertion
+/// line when `indicator` says it is the current target.
+pub(super) fn attach_drop_target<D: 'static, E: InteractiveElement + ParentElement + Styled>(
+    element: E,
+    horizontal: bool,
+    indicator: Option<bool>,
+    on_move: impl Fn(Option<bool>, &mut App) + 'static,
+    cx: &App,
+) -> E {
+    let element = element
+        .relative()
+        // The hovered item takes the theme's drop tint; the line says which side.
+        .drag_over::<D>(|style, _, _, cx| style.bg(cx.theme().tokens.drop_target))
+        .on_drag_move::<D>(move |event, _, cx| {
+            on_move(
+                drop_half(event.event.position, event.bounds, horizontal),
+                cx,
+            )
+        });
+    match indicator {
+        Some(after) => element.child(drop_indicator(horizontal, after, cx)),
+        None => element,
+    }
+}
+
+impl Condr {
+    /// Records the pointer's half over `target` (`half` is `None` once it left that
+    /// item; only the current target clears itself then).
+    pub(super) fn set_drop_target(
+        &mut self,
+        target: DropTarget,
+        half: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        let next = match half {
+            Some(after) => Some(target.with_after(after)),
+            None if self.drop_target.map(|current| current.with_after(false))
+                == Some(target.with_after(false)) =>
+            {
+                None
+            }
+            None => return,
+        };
+        if self.drop_target != next {
+            self.drop_target = next;
+            cx.notify();
+        }
+    }
+
+    /// The side recorded for `target` when the drop happens, clearing the indicator.
+    pub(super) fn take_drop_after(&mut self, target: DropTarget) -> bool {
+        self.drop_target
+            .take()
+            .filter(|current| current.with_after(false) == target.with_after(false))
+            .is_some_and(DropTarget::after)
+    }
+
+    /// Which side of `target` the indicator shows, if it is the current target and a
+    /// drag is still in progress.
+    pub(super) fn drop_indicator_for(&self, target: DropTarget, cx: &App) -> Option<bool> {
+        self.drop_target
+            .filter(|_| cx.has_active_drag())
+            .filter(|current| current.with_after(false) == target.with_after(false))
+            .map(DropTarget::after)
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct DraggedWorkspace {
     pub(super) key: ConnectionKey,
@@ -286,7 +435,12 @@ pub(super) struct CondrSidebarTreeItem {
     context_menu: Option<SidebarContextMenuBuilder>,
     drag: Option<DraggedWorkspace>,
     on_drop: Option<SidebarDropHandler>,
+    /// Which side the insertion line shows on, when this item is the drop target.
+    drop_indicator: Option<bool>,
+    on_drop_move: Option<SidebarDropMoveHandler>,
 }
+
+pub(super) type SidebarDropMoveHandler = Rc<dyn Fn(Option<bool>, &mut App)>;
 
 impl FluentBuilder for CondrSidebarTreeItem {}
 
@@ -314,11 +468,24 @@ impl CondrSidebarTreeItem {
             context_menu: None,
             drag: None,
             on_drop: None,
+            drop_indicator: None,
+            on_drop_move: None,
         }
     }
 
     pub(super) fn draggable(mut self, drag: DraggedWorkspace) -> Self {
         self.drag = Some(drag);
+        self
+    }
+
+    /// Shows the insertion line on `indicator`'s side and reports pointer halves.
+    pub(super) fn drop_target(
+        mut self,
+        indicator: Option<bool>,
+        on_move: impl Fn(Option<bool>, &mut App) + 'static,
+    ) -> Self {
+        self.drop_indicator = indicator;
+        self.on_drop_move = Some(Rc::new(on_move));
         self
     }
 
@@ -410,6 +577,8 @@ impl CondrSidebarTreeItem {
             context_menu,
             drag,
             on_drop,
+            drop_indicator,
+            on_drop_move,
         } = self;
         let is_submenu = !children.is_empty();
         let open_state = reserve_toggle_space.then(|| {
@@ -603,11 +772,20 @@ impl CondrSidebarTreeItem {
                 })
             })
             .when_some(on_drop, |this, on_drop| {
-                this.drag_over::<DraggedWorkspace>(|style, _, _, cx| {
-                    style.bg(cx.theme().sidebar_accent.opacity(0.8))
+                this.on_drop(move |dragged: &DraggedWorkspace, window, cx| {
+                    on_drop(dragged, window, cx)
                 })
-                .on_drop(move |dragged: &DraggedWorkspace, window, cx| on_drop(dragged, window, cx))
             });
+        let row = match on_drop_move {
+            Some(on_move) => attach_drop_target::<DraggedWorkspace, _>(
+                row,
+                false,
+                drop_indicator,
+                move |half, cx| on_move(half, cx),
+                cx,
+            ),
+            None => row,
+        };
         let row = if let Some(context_menu) = context_menu {
             row.context_menu(move |menu, window, cx| context_menu(menu, window, cx))
                 .into_any_element()
@@ -646,6 +824,8 @@ pub(super) struct CondrSidebarSection {
     context_menu: Option<SidebarContextMenuBuilder>,
     drag: Option<DraggedServer>,
     on_drop: Option<SidebarServerDropHandler>,
+    drop_indicator: Option<bool>,
+    on_drop_move: Option<SidebarDropMoveHandler>,
 }
 
 impl CondrSidebarSection {
@@ -666,11 +846,24 @@ impl CondrSidebarSection {
             context_menu: None,
             drag: None,
             on_drop: None,
+            drop_indicator: None,
+            on_drop_move: None,
         }
     }
 
     pub(super) fn draggable(mut self, drag: DraggedServer) -> Self {
         self.drag = Some(drag);
+        self
+    }
+
+    /// Shows the insertion line above or below the whole section and reports halves.
+    pub(super) fn drop_target(
+        mut self,
+        indicator: Option<bool>,
+        on_move: impl Fn(Option<bool>, &mut App) + 'static,
+    ) -> Self {
+        self.drop_indicator = indicator;
+        self.on_drop_move = Some(Rc::new(on_move));
         self
     }
 
@@ -763,12 +956,6 @@ impl SidebarItem for CondrSidebarSection {
                         name: name.clone(),
                     })
                 })
-            })
-            .when_some(self.on_drop, |this, on_drop| {
-                this.drag_over::<DraggedServer>(|style, _, _, cx| {
-                    style.bg(cx.theme().sidebar_accent.opacity(0.8))
-                })
-                .on_drop(move |dragged: &DraggedServer, window, cx| on_drop(dragged, window, cx))
             });
         let heading = if let Some(context_menu) = self.context_menu {
             heading
@@ -778,19 +965,39 @@ impl SidebarItem for CondrSidebarSection {
             heading.into_any_element()
         };
 
-        v_flex().relative().pb_3().when(!self.collapsed, |this| {
-            this.child(heading)
-                .child(v_flex().w_full().gap_1().children(rendered_items))
-        })
+        // The whole section is the drop zone for another Server, so the line lands
+        // above its heading or below its last Workspace.
+        let section = v_flex().relative().pb_3();
+        let section = match self.on_drop_move {
+            Some(on_move) => attach_drop_target::<DraggedServer, _>(
+                section,
+                false,
+                self.drop_indicator,
+                move |half, cx| on_move(half, cx),
+                cx,
+            ),
+            None => section,
+        };
+        section
+            .when_some(self.on_drop, |this, on_drop| {
+                this.on_drop(move |dragged: &DraggedServer, window, cx| {
+                    on_drop(dragged, window, cx)
+                })
+            })
+            .when(!self.collapsed, |this| {
+                this.child(heading)
+                    .child(v_flex().w_full().gap_1().children(rendered_items))
+            })
     }
 }
 
-/// Moves the dragged connection into the target connection's slot. Returns
+/// Moves the dragged connection before or after the target connection. Returns
 /// whether the order changed.
 pub(super) fn reorder_connection(
     connections: &mut Vec<ServerConnection>,
     dragged: ConnectionKey,
     target: ConnectionKey,
+    after: bool,
 ) -> bool {
     let Some(from) = connections.iter().position(|c| c.key == dragged) else {
         return false;
@@ -798,17 +1005,17 @@ pub(super) fn reorder_connection(
     let Some(to) = connections.iter().position(|c| c.key == target) else {
         return false;
     };
-    if from == to {
+    let Some(to) = drop_index(from, to, after) else {
         return false;
-    }
+    };
     let connection = connections.remove(from);
     connections.insert(to, connection);
     true
 }
 
 impl Condr {
-    fn move_server(&mut self, dragged: ConnectionKey, target: ConnectionKey) {
-        if reorder_connection(&mut self.connections, dragged, target) {
+    fn move_server(&mut self, dragged: ConnectionKey, target: ConnectionKey, after: bool) {
+        if reorder_connection(&mut self.connections, dragged, target, after) {
             // ponytail: the saved order only covers TCP servers, so the local
             // server always loads first again after a restart.
             self.save_servers();
@@ -819,12 +1026,21 @@ impl Condr {
         let owner = cx.weak_entity();
         let items = self.connections.iter().map(|connection| {
             let key = connection.key;
+            let server_target = DropTarget::Server { key, after: false };
             let active_server = key == self.active_connection;
             let connected = connection.can_mutate();
             let workspaces = Session::restore(connection.snapshot.clone())
                 .ok()
                 .map(|session| {
                     let active_workspace = self.presented_workspace_id(key, &session);
+                    // Drop handlers need the source index of the dragged Workspace.
+                    let workspace_ids = Rc::new(
+                        session
+                            .workspaces()
+                            .iter()
+                            .map(|workspace| workspace.id())
+                            .collect::<Vec<_>>(),
+                    );
                     session
                         .workspaces()
                         .iter()
@@ -921,23 +1137,49 @@ impl Condr {
                             .disable(!connected)
                             .when(connected, |item| {
                                 let drop_owner = owner.clone();
+                                let move_owner = owner.clone();
+                                let target = DropTarget::Workspace {
+                                    key,
+                                    workspace_id,
+                                    after: false,
+                                };
+                                let workspace_ids = workspace_ids.clone();
                                 item.draggable(DraggedWorkspace {
                                     key,
                                     workspace_id,
                                     name: workspace_name.clone().into(),
                                 })
+                                .drop_target(
+                                    self.drop_indicator_for(target, cx),
+                                    move |half, cx| {
+                                        let _ = move_owner.update(cx, |this, cx| {
+                                            this.set_drop_target(target, half, cx)
+                                        });
+                                    },
+                                )
                                 .on_drop(move |dragged, _, cx| {
-                                    if dragged.key != key || dragged.workspace_id == workspace_id {
-                                        return;
-                                    }
                                     let _ = drop_owner.update(cx, |this, _| {
-                                        this.send_layout_to(
-                                            key,
-                                            LayoutCommand::MoveWorkspace {
-                                                workspace_id: dragged.workspace_id,
-                                                target_index: workspace_index as u32,
-                                            },
-                                        );
+                                        let after = this.take_drop_after(target);
+                                        if dragged.key != key {
+                                            return;
+                                        }
+                                        let Some(source) = workspace_ids
+                                            .iter()
+                                            .position(|id| *id == dragged.workspace_id)
+                                        else {
+                                            return;
+                                        };
+                                        if let Some(index) =
+                                            drop_index(source, workspace_index, after)
+                                        {
+                                            this.send_layout_to(
+                                                key,
+                                                LayoutCommand::MoveWorkspace {
+                                                    workspace_id: dragged.workspace_id,
+                                                    target_index: index as u32,
+                                                },
+                                            );
+                                        }
                                     });
                                 })
                             })
@@ -1093,14 +1335,19 @@ impl Condr {
                 key,
                 name: connection.label.clone().into(),
             })
+            .drop_target(self.drop_indicator_for(server_target, cx), {
+                let move_owner = owner.clone();
+                move |half, cx| {
+                    let _ = move_owner
+                        .update(cx, |this, cx| this.set_drop_target(server_target, half, cx));
+                }
+            })
             .on_drop({
                 let drop_owner = owner.clone();
                 move |dragged, _, cx| {
-                    if dragged.key == key {
-                        return;
-                    }
                     let _ = drop_owner.update(cx, |this, cx| {
-                        this.move_server(dragged.key, key);
+                        let after = this.take_drop_after(server_target);
+                        this.move_server(dragged.key, key, after);
                         cx.notify();
                     });
                 }
