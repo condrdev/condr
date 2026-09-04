@@ -139,7 +139,8 @@ fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
+    let target = crate::persistence::resolve_write_target(path);
+    atomicwrites::AtomicFile::new(&target, atomicwrites::AllowOverwrite)
         .write(|file| file.write_all(document.to_string().as_bytes()))
         .map_err(|error| match error {
             atomicwrites::Error::Internal(error) | atomicwrites::Error::User(error) => error,

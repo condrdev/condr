@@ -226,7 +226,9 @@ fn write_values(
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    AtomicFile::new(path, AllowOverwrite)
+    // A symlinked config.toml (dotfiles) is updated through its target, not replaced.
+    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    AtomicFile::new(&target, AllowOverwrite)
         .write_with_options(|file| file.write_all(text.as_bytes()), options)
         .map_err(io::Error::from)
 }

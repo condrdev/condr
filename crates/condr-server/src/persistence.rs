@@ -40,6 +40,13 @@ struct WorkerState {
     stopping: bool,
 }
 
+/// Where an atomic replace of `path` must land: a symlinked file (dotfiles, a snapshot
+/// kept elsewhere) is updated through its target instead of being replaced by a regular
+/// file. A dangling link is replaced as is.
+pub(crate) fn resolve_write_target(path: &std::path::Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 impl SnapshotPersistence {
     pub(crate) fn open(path: PathBuf) -> io::Result<Self> {
         Self::open_inner(path, DEFAULT_DEBOUNCE)
@@ -71,7 +78,7 @@ impl SnapshotPersistence {
             })?
             .to_os_string();
         fs::create_dir_all(parent)?;
-        let path = fs::canonicalize(parent)?.join(file_name);
+        let path = resolve_write_target(&fs::canonicalize(parent)?.join(file_name));
 
         let lock_path = adjacent_lock_path(&path);
         let mut lock_options = OpenOptions::new();
@@ -326,6 +333,33 @@ fn adjacent_lock_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn write_target_follows_a_symlinked_file() {
+        let root = std::env::temp_dir().join(format!(
+            "condr-write-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("real.toml");
+        std::fs::write(&target, "").unwrap();
+        let link = root.join("link.toml");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            super::resolve_write_target(&link),
+            std::fs::canonicalize(&target).unwrap()
+        );
+        let dangling = root.join("dangling.toml");
+        std::os::unix::fs::symlink(root.join("missing"), &dangling).unwrap();
+        assert_eq!(super::resolve_write_target(&dangling), dangling);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use condr_core::Session;
