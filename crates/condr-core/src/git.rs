@@ -259,7 +259,13 @@ fn branch_slug(branch: &str) -> String {
             slug.push('-');
         }
     }
-    slug.trim_matches('-').to_owned()
+    let slug = slug.trim_matches('-');
+    // A branch made only of non-ASCII characters would otherwise land on the container itself.
+    if slug.is_empty() {
+        "worktree".to_owned()
+    } else {
+        slug.to_owned()
+    }
 }
 
 fn git_command(cwd: &Path) -> Command {

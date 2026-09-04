@@ -184,10 +184,15 @@ fn loaded_manifest(agent: AgentKind) -> Option<&'static LoadedManifest> {
 }
 
 /// Classifies one screen for `agent`. Known agents whose manifest matches nothing are
-/// `Idle`; the `visible_*` flags only survive when they agree with the state.
+/// `Idle`; an agent identified only by process (herdr drives those through lifecycle
+/// hooks) stays `Unknown` rather than claiming an Idle nobody observed. The `visible_*`
+/// flags only survive when they agree with the state.
 pub fn detect(agent: AgentKind, input: DetectionInput<'_>) -> AgentDetection {
     let Some(loaded) = loaded_manifest(agent) else {
-        return AgentDetection::idle_fallback();
+        return AgentDetection {
+            state: AgentState::Unknown,
+            ..AgentDetection::idle_fallback()
+        };
     };
     let mut matched: Option<&ManifestRule> = None;
     for (rule, gate) in &loaded.rules {

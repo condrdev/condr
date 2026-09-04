@@ -878,8 +878,10 @@ impl AgentDetector {
         match result {
             ProcessProbeResult::Agent(agent) => {
                 self.consecutive_misses = 0;
-                self.exit_pending = false;
-                if previous == Some(agent) {
+                // The same kind reappearing after its Idle went out is a new process, not
+                // the old one; it must not inherit the published Idle or the OSC evidence.
+                let replaces_exited = std::mem::take(&mut self.exit_pending);
+                if previous == Some(agent) && !replaces_exited {
                     return AgentPublish::Nothing;
                 }
                 self.agent = Some(agent);
@@ -895,8 +897,11 @@ impl AgentDetector {
                     return AgentPublish::Nothing;
                 };
                 if self.exit_pending {
-                    // The Idle went out on the previous tick; now the identity goes.
+                    // The Idle went out on the previous tick; now the identity goes. What
+                    // the old agent left in the OSC title must not classify its successor.
                     self.reset_agent();
+                    self.stale_osc_title = Some(osc_title.to_owned());
+                    self.stale_osc_progress = Some(osc_progress.to_owned());
                     return AgentPublish::Cleared;
                 }
                 let exited = match result {
@@ -914,6 +919,8 @@ impl AgentDetector {
                 self.pending_idle.clear();
                 if self.published == Some(AgentState::Idle) {
                     self.reset_agent();
+                    self.stale_osc_title = Some(osc_title.to_owned());
+                    self.stale_osc_progress = Some(osc_progress.to_owned());
                     return AgentPublish::Cleared;
                 }
                 self.published = Some(AgentState::Idle);
@@ -939,13 +946,11 @@ impl AgentDetector {
         self.pending_idle.clear();
         self.startup_grace_until = Some(now + AGENT_STARTUP_GRACE_WINDOW);
         // A replacement agent must not inherit the previous one's OSC evidence; a first
-        // acquisition keeps what its own process already emitted.
+        // acquisition keeps what its own process already emitted, minus whatever a
+        // cleared predecessor left behind.
         if previous.is_some() {
             self.stale_osc_title = Some(osc_title.to_owned());
             self.stale_osc_progress = Some(osc_progress.to_owned());
-        } else {
-            self.stale_osc_title = None;
-            self.stale_osc_progress = None;
         }
     }
 
@@ -1206,6 +1211,39 @@ mod tests {
             AgentPublish::Cleared
         );
         assert_eq!(detector.agent(), None);
+    }
+
+    #[test]
+    fn a_same_kind_restart_after_a_published_exit_is_a_new_agent() {
+        let mut detector = AgentDetector::new();
+        let now = Instant::now();
+        detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), "", "", now);
+        assert_eq!(
+            detector.observe_process(ProcessProbeResult::ShellOnly, "", "", now),
+            AgentPublish::Snapshot(AgentSnapshot {
+                kind: AgentKind::Codex,
+                state: AgentState::Idle,
+            })
+        );
+
+        // The Idle went out; a new codex appears before the identity is cleared.
+        assert_eq!(
+            detector.observe_process(
+                ProcessProbeResult::Agent(AgentKind::Codex),
+                "old title",
+                "",
+                now
+            ),
+            AgentPublish::Snapshot(AgentSnapshot {
+                kind: AgentKind::Codex,
+                state: AgentState::Unknown,
+            })
+        );
+        assert!(
+            !detector.wants_screen(true, now),
+            "startup grace must restart"
+        );
+        assert_eq!(detector.stale_osc_title.as_deref(), Some("old title"));
     }
 
     #[test]

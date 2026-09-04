@@ -45,6 +45,7 @@ const ACCEPT_POLL: Duration = Duration::from_millis(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const STOP_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 const EVENT_HISTORY_LIMIT: usize = 256;
+const MAX_SHELL_SETTING_BYTES: usize = 4 * 1024;
 /// Process cwd reads are rate-limited behind terminal output; agent detection has its
 /// own cadence inside `TerminalAgentProbe`.
 const CWD_SCAN_INTERVAL: Duration = Duration::from_millis(500);
@@ -807,15 +808,30 @@ impl RuntimeState {
         if self.settings.shell == shell {
             return false;
         }
-        self.settings.shell = shell.to_owned();
-        if let Some(path) = self.config_path.as_deref()
+        // The value rides in every ServerSettingsChanged event and Bootstrap header, which
+        // must keep fitting a protocol frame; a shell path is never anywhere near this.
+        let rejection = if shell.len() > MAX_SHELL_SETTING_BYTES {
+            Some(format!(
+                "shell setting exceeds {MAX_SHELL_SETTING_BYTES} bytes"
+            ))
+        } else if let Some(path) = self.config_path.as_deref()
             && let Err(error) = save_shell(path, shell)
         {
-            eprintln!(
-                "condr-server: failed to save the shell preference to {}: {error}",
+            Some(format!(
+                "failed to save the shell preference to {}: {error}",
                 path.display()
-            );
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = rejection {
+            eprintln!("condr-server: {message}");
+            return origin.is_some_and(|(_, writer)| {
+                frame_message(&ServerMessage::Error { message })
+                    .is_ok_and(|data| writer.send_reliable(data).is_err())
+            });
         }
+        self.settings.shell = shell.to_owned();
         self.publish_event(
             SessionEvent::ServerSettingsChanged {
                 settings: self.settings.clone(),
