@@ -199,7 +199,17 @@ impl ClientConnection {
         Self::handshake(endpoint.connect()?, client_name)
     }
 
-    fn handshake(mut stream: EndpointStream, client_name: impl Into<String>) -> io::Result<Self> {
+    fn handshake(stream: EndpointStream, client_name: impl Into<String>) -> io::Result<Self> {
+        Self::handshake_bootstrap(Self::welcome(stream, client_name)?)
+    }
+
+    /// Hello/Welcome only: enough to know a compatible Server answers, without pulling
+    /// its whole Bootstrap. The local probe uses this so startup does not transfer every
+    /// terminal view once for the probe and again for the real connection.
+    pub(super) fn welcome(
+        mut stream: EndpointStream,
+        client_name: impl Into<String>,
+    ) -> io::Result<EndpointStream> {
         stream.set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))?;
         condr_core::protocol::write_message(
             &mut stream,
@@ -223,6 +233,10 @@ impl ClientConnection {
                 ));
             }
         }
+        Ok(stream)
+    }
+
+    fn handshake_bootstrap(mut stream: EndpointStream) -> io::Result<Self> {
         let bootstrap = match condr_core::protocol::read_message(&mut stream)
             .map_err(|error| io::Error::other(error.to_string()))?
         {

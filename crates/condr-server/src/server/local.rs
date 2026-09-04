@@ -187,8 +187,7 @@ pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
 }
 
 pub(super) fn probe_protocol(stream: EndpointStream) -> io::Result<()> {
-    let _ = ClientConnection::handshake(stream, "condr-probe")?;
-    Ok(())
+    ClientConnection::welcome(stream, "condr-probe").map(drop)
 }
 
 /// Checks whether a protocol-compatible server is reachable at the endpoint.
