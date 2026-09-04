@@ -13,7 +13,13 @@ pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
         return Some(Box::new(OpenSettings));
     }
     let modifiers = stroke.modifiers;
-    if modifiers.platform || modifiers.function {
+    if modifiers.function {
+        return None;
+    }
+    if cfg!(target_os = "macos") {
+        return macos_fixed_shortcut(stroke);
+    }
+    if modifiers.platform {
         return None;
     }
     if !modifiers.control && modifiers.alt {
@@ -49,28 +55,91 @@ pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
     }
 }
 
+/// macOS: the application modifier is Cmd (Terminal.app/iTerm2 conventions), which can
+/// never reach the PTY, so Ctrl and Option stay whole for the shell: Option+Arrow moves
+/// by word, Option+Shift+= types ±, Ctrl+Shift+T reaches the program.
+fn macos_fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
+    let modifiers = stroke.modifiers;
+    let key = stroke.key.as_str();
+    if !modifiers.platform {
+        // Ctrl+Tab has no legacy encoding anyway, so it keeps switching Tabs here too.
+        return match (modifiers.control, modifiers.alt, modifiers.shift, key) {
+            (true, false, false, "tab") => Some(Box::new(NextTab)),
+            (true, false, true, "tab") => Some(Box::new(PreviousTab)),
+            _ => None,
+        };
+    }
+    if modifiers.control && modifiers.alt {
+        return None;
+    }
+    // GPUI reports Cmd+Shift+] as Cmd+} (shift folded into the character).
+    let shifted = modifiers.shift;
+    match (modifiers.control, modifiers.alt, key) {
+        (false, false, "t") if !shifted => Some(Box::new(NewTab)),
+        (false, false, "w") if !shifted => Some(Box::new(ClosePane)),
+        (false, false, "d") if !shifted => Some(Box::new(SplitRight)),
+        (false, false, "d") => Some(Box::new(SplitDown)),
+        (false, false, "enter") if shifted => Some(Box::new(ToggleZoom)),
+        (false, false, "}") => Some(Box::new(NextTab)),
+        (false, false, "]") if shifted => Some(Box::new(NextTab)),
+        (false, false, "{") => Some(Box::new(PreviousTab)),
+        (false, false, "[") if shifted => Some(Box::new(PreviousTab)),
+        (false, true, "left") if !shifted => Some(Box::new(FocusLeft)),
+        (false, true, "right") if !shifted => Some(Box::new(FocusRight)),
+        (false, true, "up") if !shifted => Some(Box::new(FocusUp)),
+        (false, true, "down") if !shifted => Some(Box::new(FocusDown)),
+        (true, false, "left") if !shifted => Some(Box::new(ResizeLeft)),
+        (true, false, "right") if !shifted => Some(Box::new(ResizeRight)),
+        (true, false, "up") if !shifted => Some(Box::new(ResizeUp)),
+        (true, false, "down") if !shifted => Some(Box::new(ResizeDown)),
+        _ => None,
+    }
+}
+
 pub(super) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
         KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
-        KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
         // `secondary` is Cmd on macOS and Ctrl elsewhere.
         KeyBinding::new("secondary-,", OpenSettings, Some("Condr")),
-        KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
-        KeyBinding::new("alt-shift-=", SplitRight, Some("Condr")),
-        KeyBinding::new("alt-shift--", SplitDown, Some("Condr")),
-        KeyBinding::new("alt-left", FocusLeft, Some("Condr")),
-        KeyBinding::new("alt-right", FocusRight, Some("Condr")),
-        KeyBinding::new("alt-up", FocusUp, Some("Condr")),
-        KeyBinding::new("alt-down", FocusDown, Some("Condr")),
-        KeyBinding::new("alt-shift-left", ResizeLeft, Some("Condr")),
-        KeyBinding::new("alt-shift-right", ResizeRight, Some("Condr")),
-        KeyBinding::new("alt-shift-up", ResizeUp, Some("Condr")),
-        KeyBinding::new("alt-shift-down", ResizeDown, Some("Condr")),
-        KeyBinding::new("alt-shift-enter", ToggleZoom, Some("Condr")),
     ]);
+    if cfg!(target_os = "macos") {
+        cx.bind_keys([
+            KeyBinding::new("cmd-t", NewTab, Some("Condr")),
+            KeyBinding::new("cmd-w", ClosePane, Some("Condr")),
+            KeyBinding::new("cmd-}", NextTab, Some("Condr")),
+            KeyBinding::new("cmd-{", PreviousTab, Some("Condr")),
+            KeyBinding::new("cmd-d", SplitRight, Some("Condr")),
+            KeyBinding::new("cmd-shift-d", SplitDown, Some("Condr")),
+            KeyBinding::new("cmd-alt-left", FocusLeft, Some("Condr")),
+            KeyBinding::new("cmd-alt-right", FocusRight, Some("Condr")),
+            KeyBinding::new("cmd-alt-up", FocusUp, Some("Condr")),
+            KeyBinding::new("cmd-alt-down", FocusDown, Some("Condr")),
+            KeyBinding::new("cmd-ctrl-left", ResizeLeft, Some("Condr")),
+            KeyBinding::new("cmd-ctrl-right", ResizeRight, Some("Condr")),
+            KeyBinding::new("cmd-ctrl-up", ResizeUp, Some("Condr")),
+            KeyBinding::new("cmd-ctrl-down", ResizeDown, Some("Condr")),
+            KeyBinding::new("cmd-shift-enter", ToggleZoom, Some("Condr")),
+        ]);
+    } else {
+        cx.bind_keys([
+            KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
+            KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
+            KeyBinding::new("alt-shift-=", SplitRight, Some("Condr")),
+            KeyBinding::new("alt-shift--", SplitDown, Some("Condr")),
+            KeyBinding::new("alt-left", FocusLeft, Some("Condr")),
+            KeyBinding::new("alt-right", FocusRight, Some("Condr")),
+            KeyBinding::new("alt-up", FocusUp, Some("Condr")),
+            KeyBinding::new("alt-down", FocusDown, Some("Condr")),
+            KeyBinding::new("alt-shift-left", ResizeLeft, Some("Condr")),
+            KeyBinding::new("alt-shift-right", ResizeRight, Some("Condr")),
+            KeyBinding::new("alt-shift-up", ResizeUp, Some("Condr")),
+            KeyBinding::new("alt-shift-down", ResizeDown, Some("Condr")),
+            KeyBinding::new("alt-shift-enter", ToggleZoom, Some("Condr")),
+        ]);
+    }
 }
 
 pub(super) fn connect_to_server_with<T>(

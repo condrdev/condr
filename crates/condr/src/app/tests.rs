@@ -16,8 +16,8 @@ use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::ClientTerminal;
 use super::{
-    ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, OpenSettings, PreviousTab,
-    ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
+    ClientIo, ClosePane, CondrAssets, ConnectionStatus, FocusLeft, NewTab, NextTab, OpenSettings,
+    PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
     TerminalClipboardShortcut, TerminalVisualSlot, ToggleZoom, accepted_text_input,
     agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
     clear_pending_sizes_for_bootstrap, connect_to_server_with,
@@ -830,17 +830,44 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
             .as_any()
             .is::<PreviousTab>()
     );
-    assert!(action("alt-shift-=").unwrap().as_any().is::<SplitRight>());
-    assert!(action("alt-shift--").unwrap().as_any().is::<SplitDown>());
-    assert!(action("alt-+").unwrap().as_any().is::<SplitRight>());
-    assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
-    assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
-    assert!(
-        action("alt-shift-enter")
-            .unwrap()
-            .as_any()
-            .is::<ToggleZoom>()
-    );
+    if cfg!(target_os = "macos") {
+        // Cmd is the application modifier; Ctrl and Option belong to the shell.
+        assert!(action("cmd-t").unwrap().as_any().is::<NewTab>());
+        assert!(action("cmd-w").unwrap().as_any().is::<ClosePane>());
+        assert!(action("cmd-d").unwrap().as_any().is::<SplitRight>());
+        assert!(action("cmd-shift-d").unwrap().as_any().is::<SplitDown>());
+        assert!(action("cmd-}").unwrap().as_any().is::<NextTab>());
+        assert!(action("cmd-{").unwrap().as_any().is::<PreviousTab>());
+        assert!(action("cmd-alt-left").unwrap().as_any().is::<FocusLeft>());
+        assert!(action("cmd-ctrl-left").is_some());
+        assert!(
+            action("cmd-shift-enter")
+                .unwrap()
+                .as_any()
+                .is::<ToggleZoom>()
+        );
+        assert!(action("alt-left").is_none(), "Option+Left moves by word");
+        assert!(action("alt-shift-=").is_none(), "Option+Shift+= types ±");
+        assert!(
+            action("ctrl-shift-t").is_none(),
+            "Ctrl chords reach the PTY"
+        );
+        assert!(action("cmd-shift-t").is_none());
+        assert!(action("cmd-ctrl-alt-left").is_none());
+    } else {
+        assert!(action("alt-shift-=").unwrap().as_any().is::<SplitRight>());
+        assert!(action("alt-shift--").unwrap().as_any().is::<SplitDown>());
+        assert!(action("alt-+").unwrap().as_any().is::<SplitRight>());
+        assert!(action("alt-_").unwrap().as_any().is::<SplitDown>());
+        assert!(action("alt-left").unwrap().as_any().is::<FocusLeft>());
+        assert!(
+            action("alt-shift-enter")
+                .unwrap()
+                .as_any()
+                .is::<ToggleZoom>()
+        );
+        assert!(action("cmd-t").is_none());
+    }
     assert!(action("alt-enter").is_none());
     // Settings must open even while a terminal owns the keystroke, on the platform's
     // own chord: Cmd+, on macOS, Ctrl+, elsewhere.
