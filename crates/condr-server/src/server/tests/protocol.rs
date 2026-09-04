@@ -1360,13 +1360,11 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
 
 #[test]
 fn tcp_endpoint_uses_the_same_handshake_and_bootstrap() {
-    let server = BoundServer::bind(ServerConfig::ephemeral(Endpoint::tcp(
-        "127.0.0.1:0".parse().unwrap(),
-    )))
-    .unwrap();
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
     let handle = server.handle();
-    let address = server.local_addr().unwrap().unwrap();
-    let endpoint = Endpoint::tcp(address);
+    let endpoint = server.endpoint().clone();
     let thread = thread::spawn(move || server.run());
     let mut stream = connect_and_bootstrap(&endpoint);
     condr_core::protocol::write_message(
@@ -1382,6 +1380,93 @@ fn tcp_endpoint_uses_the_same_handshake_and_bootstrap() {
     );
     drop(stream);
     thread.join().unwrap().unwrap();
+}
+
+#[test]
+fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
+    use crate::noise::{self, ServerIdentity, StaticKey};
+
+    let directory = std::env::temp_dir().join(format!(
+        "condr-server-revoke-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let identity = ServerIdentity::load_or_create(&directory).unwrap();
+    let host = TcpEndpoint {
+        address: "127.0.0.1:0".parse().unwrap(),
+        server_key: identity.public_key(),
+        client_key: noise::host_client_key(&directory).unwrap(),
+        invite: None,
+    };
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(Endpoint::tcp(host)).with_identity(identity))
+            .unwrap();
+    let handle = server.handle();
+    let Endpoint::Tcp(host) = server.endpoint().clone() else {
+        panic!("expected a TCP endpoint");
+    };
+    let thread = thread::spawn(move || server.run());
+
+    // A new device pairs with the invite, then reconnects on its key alone.
+    let device_key = StaticKey::generate().unwrap();
+    let device = |invite| {
+        Endpoint::tcp(TcpEndpoint {
+            address: host.address,
+            server_key: host.server_key,
+            client_key: device_key.clone(),
+            invite,
+        })
+    };
+    let invite = noise::create_invite(&directory).unwrap();
+    let mut first = connect_and_bootstrap(&device(Some(invite.secret)));
+    assert_eq!(noise::read_authorized(&directory).unwrap().len(), 1);
+    let mut second = connect_and_bootstrap(&device(None));
+
+    // A paired device is not the host and may not revoke anyone.
+    let prefix = device_key.public().to_hex()[..12].to_owned();
+    condr_core::protocol::write_message(
+        &mut second,
+        &ClientMessage::RevokeDevice {
+            key_prefix: prefix.clone(),
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        read_server(&mut second),
+        ServerMessage::Error { message } if message.contains("only the Server host")
+    ));
+
+    // The host revokes: the file refuses the next handshake, the message drops both
+    // live connections.
+    assert_eq!(noise::revoke(&directory, &prefix).unwrap(), 1);
+    let mut admin = connect_and_bootstrap(&Endpoint::tcp(host.clone()));
+    condr_core::protocol::write_message(
+        &mut admin,
+        &ClientMessage::RevokeDevice {
+            key_prefix: prefix.clone(),
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        read_server(&mut admin),
+        ServerMessage::DevicesRevoked { disconnected: 2 }
+    ));
+    for stream in [&mut first, &mut second] {
+        stream
+            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        assert!(condr_core::protocol::read_message::<_, ServerMessage>(stream).is_err());
+    }
+    let error = match ClientConnection::connect(&device(None), "revoked") {
+        Ok(_) => panic!("a revoked device reconnected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+
+    handle.stop();
+    drop((first, second, admin));
+    thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(directory);
 }
 
 #[cfg(target_os = "linux")]
@@ -1405,12 +1490,11 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     run_git(&repository, &["commit", "-m", "initial"]);
     run_git(&repository, &["branch", "-M", "main"]);
 
-    let server = BoundServer::bind(ServerConfig::ephemeral(Endpoint::tcp(
-        "127.0.0.1:0".parse().unwrap(),
-    )))
-    .unwrap();
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
     let handle = server.handle();
-    let endpoint = Endpoint::tcp(server.local_addr().unwrap().unwrap());
+    let endpoint = server.endpoint().clone();
     let thread = thread::spawn(move || server.run());
 
     let connection = ClientConnection::connect(&endpoint, "tcp-controller").unwrap();

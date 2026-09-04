@@ -1,4 +1,6 @@
 use super::*;
+use crate::app::tests::tcp;
+use condr_server::StaticKey;
 
 #[test]
 fn stale_connection_result_cannot_replace_the_current_attempt() {
@@ -19,7 +21,7 @@ fn stale_connection_result_cannot_replace_the_current_attempt() {
                 ConnectionResult {
                     key: 1,
                     generation: original_generation,
-                    endpoint: Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
+                    endpoint: tcp("127.0.0.1:9"),
                     result: Err("stale failure".into()),
                 },
                 window,
@@ -604,10 +606,16 @@ fn added_server_survives_gui_restart() {
         window.update(|window, cx| {
             view.update(cx, |this, cx| this.prompt_add_server(window, cx));
         });
-        submit_text_dialog(window, "127.0.0.1:4242");
+        submit_text_dialog(
+            window,
+            &format!(
+                "{}@127.0.0.1:4242",
+                StaticKey::from_private([7; 32]).public()
+            ),
+        );
         assert!(window.read(|app| {
             view.read(app).connections.iter().any(|connection| {
-                connection.endpoint == Endpoint::tcp("127.0.0.1:4242".parse().unwrap())
+                connection.endpoint.tcp_address() == Some("127.0.0.1:4242".parse().unwrap())
             })
         }));
     }
@@ -625,7 +633,7 @@ fn added_server_survives_gui_restart() {
     let view = view_holder.borrow_mut().take().unwrap();
     assert!(window.read(|app| {
         view.read(app).connections.iter().any(|connection| {
-            connection.endpoint == Endpoint::tcp("127.0.0.1:4242".parse().unwrap())
+            connection.endpoint.tcp_address() == Some("127.0.0.1:4242".parse().unwrap())
         })
     }));
 }

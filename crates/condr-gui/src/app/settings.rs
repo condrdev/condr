@@ -396,11 +396,7 @@ fn server_choices(owner: &WeakEntity<Condr>, cx: &App) -> (Vec<ConnectionKey>, V
                         .count()
                         > 1;
                     let label = if duplicated {
-                        let endpoint = match &connection.endpoint {
-                            Endpoint::Local(path) => path.display().to_string(),
-                            Endpoint::Tcp(address) => address.to_string(),
-                        };
-                        format!("{} ({endpoint})", connection.label)
+                        format!("{} ({})", connection.label, connection.endpoint)
                     } else {
                         connection.label.clone()
                     };

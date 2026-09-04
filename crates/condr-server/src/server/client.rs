@@ -47,6 +47,23 @@ pub(super) fn handle_client(
         return;
     }
 
+    // Reading Hello proved the peer held its invite, if it used one; record the device
+    // before it learns anything about this Server.
+    if let Err(error) = stream.complete_pairing(&hello.client_name) {
+        let _ = send_error(&mut stream, &state, &format!("pairing failed: {error}"));
+        return;
+    }
+    // A TCP peer stays addressable by its device key until it leaves, so revoking that
+    // key can close the connection from another client's thread.
+    if let Some(peer_key) = stream.peer_key() {
+        let Ok(peer) = stream.try_clone() else { return };
+        state
+            .lock()
+            .expect("server state lock poisoned")
+            .tcp_peers
+            .insert(client_id, (peer_key, peer));
+    }
+
     if send_message(
         &mut stream,
         &ServerMessage::Welcome {
@@ -773,6 +790,24 @@ pub(super) fn handle_client(
                     true
                 }
             }
+            ClientMessage::RevokeDevice { key_prefix } => {
+                let response = if !stream.may_administer() {
+                    ServerMessage::Error {
+                        message: "only the Server host may revoke devices".into(),
+                    }
+                } else {
+                    let state = state.lock().expect("server state lock poisoned");
+                    let mut disconnected = 0;
+                    for (id, (key, peer)) in &state.tcp_peers {
+                        if *id != client_id && key.matches_prefix(&key_prefix) {
+                            let _ = peer.shutdown();
+                            disconnected += 1;
+                        }
+                    }
+                    ServerMessage::DevicesRevoked { disconnected }
+                };
+                queue_message(&outbound, response)
+            }
             ClientMessage::Detach => true,
             ClientMessage::Hello(Hello { .. }) => false,
         };
@@ -799,6 +834,7 @@ pub(super) fn handle_client(
 
     let mut state = state.lock().expect("server state lock poisoned");
     state.subscribers.remove(&client_id);
+    state.tcp_peers.remove(&client_id);
     if state.active_controller == Some(client_id) {
         state.clear_controller_terminal_state();
         state.active_controller = None;

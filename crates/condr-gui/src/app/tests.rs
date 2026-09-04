@@ -11,7 +11,7 @@ use condr_core::{
     TerminalHyperlinkBudget, TerminalMouseTracking, TerminalSize, TerminalView, TerminalViewDelta,
     TerminalViewFrame,
 };
-use condr_server::Endpoint;
+use condr_server::{Endpoint, StaticKey, TcpEndpoint};
 use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::ClientTerminal;
@@ -50,12 +50,18 @@ fn terminal_hyperlink_budgets(
         .collect()
 }
 
+/// A TCP endpoint with fixed keys, so two calls with one address compare equal.
+pub(super) fn tcp(address: &str) -> Endpoint {
+    Endpoint::tcp(TcpEndpoint {
+        address: address.parse().unwrap(),
+        server_key: StaticKey::from_private([7; 32]).public(),
+        client_key: StaticKey::from_private([9; 32]),
+        invite: None,
+    })
+}
+
 fn connection_with_io() -> ServerConnection {
-    let mut connection = ServerConnection::new(
-        1,
-        "test".into(),
-        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
-    );
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
     connection.server_id = Some(ServerId(1));
     connection.runtime_epoch = Some(RuntimeEpoch(2));
@@ -108,7 +114,7 @@ fn server_connection_preserves_start_error_and_final_concurrent_probe() {
     );
     assert_eq!(concurrent.unwrap(), "connected concurrently");
 
-    let remote = Endpoint::tcp("127.0.0.1:4242".parse().unwrap());
+    let remote = tcp("127.0.0.1:4242");
     let (connected_endpoint, connected) = connect_to_server_with(
         remote.clone(),
         || panic!("remote endpoints must not start the local server"),
@@ -149,7 +155,7 @@ fn pane_id() -> condr_core::PaneId {
 
 #[test]
 fn reordering_connections_moves_the_dragged_server_into_the_target_slot() {
-    let endpoint = || Endpoint::Tcp("127.0.0.1:4242".parse().unwrap());
+    let endpoint = || tcp("127.0.0.1:4242");
     let connection = |key: u64| ServerConnection::new(key, format!("server-{key}"), endpoint());
     let keys =
         |connections: &Vec<ServerConnection>| connections.iter().map(|c| c.key).collect::<Vec<_>>();
@@ -265,11 +271,7 @@ fn condr_assets_include_the_prototype_agent_status_icons() {
 
 #[test]
 fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubscribes() {
-    let mut connection = ServerConnection::new(
-        1,
-        "test".into(),
-        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
-    );
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
     connection.server_id = Some(ServerId(1));
     connection.runtime_epoch = Some(RuntimeEpoch(2));
@@ -377,11 +379,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
 
 #[test]
 fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
-    let mut connection = ServerConnection::new(
-        1,
-        "test".into(),
-        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
-    );
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
     connection.server_id = Some(ServerId(1));
     connection.runtime_epoch = Some(RuntimeEpoch(2));
@@ -416,11 +414,7 @@ fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
 
 #[test]
 fn a_dropped_active_subscription_requests_an_authoritative_bootstrap() {
-    let mut connection = ServerConnection::new(
-        1,
-        "test".into(),
-        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
-    );
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
     connection.server_id = Some(ServerId(1));
     connection.session_id = Some(SessionId(3));
@@ -443,11 +437,7 @@ fn a_dropped_active_subscription_requests_an_authoritative_bootstrap() {
 
 #[test]
 fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
-    let mut connection = ServerConnection::new(
-        1,
-        "test".into(),
-        Endpoint::tcp("127.0.0.1:9".parse().unwrap()),
-    );
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
     connection.server_id = Some(ServerId(1));
     connection.runtime_epoch = Some(RuntimeEpoch(2));

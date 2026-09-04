@@ -7,6 +7,8 @@ use atomicwrites::{AllowOverwrite, AtomicFile};
 use gpui::SharedString;
 use serde::Deserialize;
 
+use condr_server::{PublicKey, StaticKey, TcpEndpoint};
+
 use super::{Appearance, Condr, Endpoint, TerminalFont};
 
 const APPEARANCE_KEY: &str = "appearance";
@@ -17,10 +19,24 @@ const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
 
+/// One `[[client.servers]]` entry. The Server's public key is what makes a saved TCP
+/// Server trustworthy; invites are one-time and never written here.
 #[derive(Deserialize)]
 pub(super) struct SavedServer {
     pub name: String,
     pub address: SocketAddr,
+    pub server_key: String,
+}
+
+impl SavedServer {
+    pub(super) fn endpoint(&self, device_key: &StaticKey) -> io::Result<Endpoint> {
+        Ok(Endpoint::tcp(TcpEndpoint {
+            address: self.address,
+            server_key: PublicKey::parse(&self.server_key)?,
+            client_key: device_key.clone(),
+            invite: None,
+        }))
+    }
 }
 
 pub(super) fn default_path() -> Option<PathBuf> {
@@ -95,12 +111,13 @@ impl Condr {
             return;
         };
         let servers = self.connections.iter().filter_map(|connection| {
-            let Endpoint::Tcp(address) = &connection.endpoint else {
+            let Endpoint::Tcp(tcp) = &connection.endpoint else {
                 return None;
             };
             Some(SavedServer {
                 name: connection.label.clone(),
-                address: *address,
+                address: tcp.address,
+                server_key: tcp.server_key.to_hex(),
             })
         });
         if let Err(error) = write_servers(path, servers) {
@@ -159,6 +176,7 @@ fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) ->
         let mut table = toml_edit::Table::new();
         table["name"] = toml_edit::value(server.name);
         table["address"] = toml_edit::value(server.address.to_string());
+        table["server_key"] = toml_edit::value(server.server_key);
         saved.push(table);
     }
     write_client_value(path, SERVERS_KEY, toml_edit::Item::ArrayOfTables(saved))
@@ -286,6 +304,7 @@ mod tests {
             [SavedServer {
                 name: "Linux".into(),
                 address: "127.0.0.1:4242".parse().unwrap(),
+                server_key: "0".repeat(64),
             }],
         )
         .unwrap();
@@ -314,6 +333,7 @@ mod tests {
             [SavedServer {
                 name: "Linux".into(),
                 address: "127.0.0.1:4242".parse().unwrap(),
+                server_key: "0".repeat(64),
             }],
         )
         .unwrap();
@@ -418,6 +438,7 @@ appearance = 'light'   # was system
 [[client.servers]]
 name = 'Linux'
 address = '127.0.0.1:4242'
+server_key = '0000000000000000000000000000000000000000000000000000000000000000'
 ";
         fs::write(&path, original).unwrap();
 
@@ -458,6 +479,7 @@ address = '127.0.0.1:4242'
             [SavedServer {
                 name: "Linux".into(),
                 address: "127.0.0.1:4242".parse().unwrap(),
+                server_key: "0".repeat(64),
             }],
         )
         .unwrap();

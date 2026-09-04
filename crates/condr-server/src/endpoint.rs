@@ -1,7 +1,9 @@
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 #[cfg(windows)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -10,18 +12,35 @@ use std::time::Duration;
 use atomicwrites::{AtomicFile, DisallowOverwrite};
 use interprocess::local_socket::traits::Listener as _;
 
+use crate::noise::{NoiseStream, PublicKey, Secret, ServerIdentity, StaticKey};
+
 pub type LocalListener = interprocess::local_socket::Listener;
 pub type LocalStream = interprocess::local_socket::Stream;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Endpoint {
     Local(PathBuf),
-    Tcp(SocketAddr),
+    Tcp(TcpEndpoint),
+}
+
+/// Everything a Client needs to reach one TCP Server: where it listens, whose static key
+/// it must present, which device key to speak with, and the invite that pairs a device
+/// the Server does not know yet. The Server binds with the same value, so its own
+/// `server_key` and `client_key` are the host identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TcpEndpoint {
+    pub address: SocketAddr,
+    pub server_key: PublicKey,
+    pub client_key: StaticKey,
+    pub invite: Option<Secret>,
 }
 
 pub enum EndpointListener {
     Local(LocalEndpointListener),
-    Tcp(TcpListener),
+    Tcp {
+        listener: TcpListener,
+        identity: Arc<ServerIdentity>,
+    },
 }
 
 pub struct LocalEndpointListener {
@@ -41,7 +60,41 @@ enum LocalEndpointOwnership {
 
 pub enum EndpointStream {
     Local(LocalStream),
-    Tcp(TcpStream),
+    Tcp(NoiseStream),
+}
+
+impl TcpEndpoint {
+    /// Parses `<server key>[.<invite>]@host:port`, the text an invite hands to a person.
+    pub fn parse(text: &str, client_key: StaticKey) -> io::Result<Self> {
+        let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
+        let (credentials, address) = text
+            .trim()
+            .rsplit_once('@')
+            .ok_or_else(|| invalid("expected <server key>[.<invite>]@host:port"))?;
+        let address = address
+            .parse::<SocketAddr>()
+            .map_err(|_| invalid("invalid host:port"))?;
+        let (server_key, invite) = match credentials.split_once('.') {
+            Some((key, invite)) => (key, Some(Secret::parse(invite)?)),
+            None => (credentials, None),
+        };
+        Ok(Self {
+            address,
+            server_key: PublicKey::parse(server_key)?,
+            client_key,
+            invite,
+        })
+    }
+
+    /// The text a paired Client stores or a Pane program reads: `<server key>@host:port`.
+    pub fn locator(&self) -> String {
+        format!("{}@{}", self.server_key, self.address)
+    }
+
+    pub fn with_address(mut self, address: SocketAddr) -> Self {
+        self.address = address;
+        self
+    }
 }
 
 impl Endpoint {
@@ -49,40 +102,66 @@ impl Endpoint {
         Self::Local(path.into())
     }
 
-    pub fn tcp(address: SocketAddr) -> Self {
-        Self::Tcp(address)
+    pub fn tcp(endpoint: TcpEndpoint) -> Self {
+        Self::Tcp(endpoint)
     }
 
-    pub fn bind(&self) -> io::Result<EndpointListener> {
+    /// Binds the listener. A TCP Server answers with `identity`, whose public key must be
+    /// the one the endpoint advertises.
+    pub fn bind(&self, identity: Option<Arc<ServerIdentity>>) -> io::Result<EndpointListener> {
         match self {
             Self::Local(path) => bind_local(path).map(EndpointListener::Local),
-            Self::Tcp(address) => TcpListener::bind(address).map(EndpointListener::Tcp),
+            Self::Tcp(tcp) => {
+                let identity = identity.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "a TCP endpoint needs a Server identity",
+                    )
+                })?;
+                if identity.public_key() != tcp.server_key {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "the TCP endpoint advertises a different Server key than the identity",
+                    ));
+                }
+                Ok(EndpointListener::Tcp {
+                    listener: TcpListener::bind(tcp.address)?,
+                    identity,
+                })
+            }
         }
     }
 
     pub fn connect(&self) -> io::Result<EndpointStream> {
         match self {
             Self::Local(path) => connect_local(path).map(EndpointStream::Local),
-            Self::Tcp(address) => TcpStream::connect(address).map(EndpointStream::Tcp),
+            Self::Tcp(tcp) => NoiseStream::initiator(
+                TcpStream::connect(tcp.address)?,
+                &tcp.server_key,
+                &tcp.client_key,
+                tcp.invite.as_ref(),
+            )
+            .map(EndpointStream::Tcp),
         }
     }
 
     /// The value a Pane's `CONDR_SOCKET_PATH` carries: the socket or pipe path, or
-    /// `tcp://host:port` for a TCP Server.
+    /// `tcp://<server key>@host:port` for a TCP Server.
     pub fn env_value(&self) -> String {
         match self {
             Self::Local(path) => path.to_string_lossy().into_owned(),
-            Self::Tcp(address) => format!("tcp://{address}"),
+            Self::Tcp(tcp) => format!("tcp://{}", tcp.locator()),
         }
     }
 
-    /// The inverse of [`Self::env_value`]: how a Pane program finds its own Server.
-    pub fn from_env_value(value: &str) -> io::Result<Self> {
+    /// The inverse of [`Self::env_value`]: how a Pane program finds its own Server. A TCP
+    /// locator needs `client_key`, the host device key the Server always accepts.
+    pub fn from_env_value(
+        value: &str,
+        client_key: impl FnOnce() -> io::Result<StaticKey>,
+    ) -> io::Result<Self> {
         match value.strip_prefix("tcp://") {
-            Some(address) => address
-                .parse::<SocketAddr>()
-                .map(Self::Tcp)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error)),
+            Some(locator) => TcpEndpoint::parse(locator, client_key()?).map(Self::Tcp),
             None if value.is_empty() => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "empty endpoint",
@@ -95,6 +174,23 @@ impl Endpoint {
         match self {
             Self::Local(path) => Some(path),
             Self::Tcp(_) => None,
+        }
+    }
+
+    pub fn tcp_address(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Local(_) => None,
+            Self::Tcp(tcp) => Some(tcp.address),
+        }
+    }
+}
+
+/// The endpoint without any key material: a path, or `tcp://host:port`.
+impl fmt::Display for Endpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Local(path) => write!(f, "{}", path.display()),
+            Self::Tcp(tcp) => write!(f, "tcp://{}", tcp.address),
         }
     }
 }
@@ -111,19 +207,21 @@ impl EndpointListener {
                     ListenerNonblockingMode::Both
                 })
             }
-            Self::Tcp(listener) => listener.set_nonblocking(nonblocking),
+            Self::Tcp { listener, .. } => listener.set_nonblocking(nonblocking),
         }
     }
 
+    /// Accepts one connection. The TCP handshake runs on the stream's first use, on the
+    /// client's own thread, so a slow peer cannot stall accepting.
     pub fn accept(&self) -> io::Result<EndpointStream> {
         match self {
             Self::Local(local) => local.listener.accept().map(EndpointStream::Local),
-            Self::Tcp(listener) => {
+            Self::Tcp { listener, identity } => {
                 let (stream, _) = listener.accept()?;
                 // Accepted sockets inherit nonblocking mode on Windows. Client handlers use
                 // blocking framed reads, so normalize the stream on every platform.
                 stream.set_nonblocking(false)?;
-                Ok(EndpointStream::Tcp(stream))
+                NoiseStream::responder(stream, Arc::clone(identity)).map(EndpointStream::Tcp)
             }
         }
     }
@@ -131,14 +229,14 @@ impl EndpointListener {
     pub fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
         match self {
             Self::Local(_) => Ok(None),
-            Self::Tcp(listener) => listener.local_addr().map(Some),
+            Self::Tcp { listener, .. } => listener.local_addr().map(Some),
         }
     }
 
     pub fn cleanup(&self) -> io::Result<()> {
         match self {
             Self::Local(local) => local.cleanup(),
-            Self::Tcp(_) => Ok(()),
+            Self::Tcp { .. } => Ok(()),
         }
     }
 }
@@ -191,6 +289,40 @@ impl EndpointStream {
         }
     }
 
+    /// Records a TCP peer that connected with an invite as an authorized device; a no-op
+    /// for local and already-paired peers. Call after its first message was read.
+    pub fn complete_pairing(&self, client_name: &str) -> io::Result<()> {
+        match self {
+            Self::Local(_) => Ok(()),
+            Self::Tcp(stream) => stream.complete_pairing(client_name),
+        }
+    }
+
+    /// The static key of a TCP peer; `None` for local connections.
+    pub fn peer_key(&self) -> Option<PublicKey> {
+        match self {
+            Self::Local(_) => None,
+            Self::Tcp(stream) => stream.remote_public_key(),
+        }
+    }
+
+    /// Whether the peer may administer the Server: every local connection, and a TCP
+    /// peer speaking with the Server host's own device key.
+    pub fn may_administer(&self) -> bool {
+        match self {
+            Self::Local(_) => true,
+            Self::Tcp(stream) => stream.peer_is_host(),
+        }
+    }
+
+    /// Closes a TCP connection for all of its clones; local streams close on drop.
+    pub fn shutdown(&self) -> io::Result<()> {
+        match self {
+            Self::Local(_) => Ok(()),
+            Self::Tcp(stream) => stream.shutdown(),
+        }
+    }
+
     pub fn set_handshake_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         match self {
             Self::Local(stream) => {
@@ -201,7 +333,7 @@ impl EndpointStream {
                     Err(error) => Err(error),
                 }
             }
-            Self::Tcp(stream) => stream.set_read_timeout(timeout),
+            Self::Tcp(stream) => stream.socket().set_read_timeout(timeout),
         }
     }
 }
@@ -508,7 +640,7 @@ mod tests {
         let ready = PathBuf::from(
             std::env::var_os(CHILD_READY_ENV).expect("bind child has a ready-file path"),
         );
-        let _listener = Endpoint::local(path).bind().unwrap();
+        let _listener = Endpoint::local(path).bind(None).unwrap();
         fs::write(ready, b"ready").unwrap();
         loop {
             std::thread::sleep(Duration::from_secs(1));
@@ -566,7 +698,7 @@ mod tests {
         }
 
         let endpoint = Endpoint::local(&path);
-        let error = match endpoint.bind() {
+        let error = match endpoint.bind(None) {
             Ok(_) => panic!("a second process unexpectedly acquired the bind lock"),
             Err(error) => error,
         };
@@ -576,7 +708,7 @@ mod tests {
 
         child.terminate();
         assert!(path.exists(), "crashed owner should leave a stale endpoint");
-        let replacement = endpoint.bind().unwrap();
+        let replacement = endpoint.bind(None).unwrap();
         assert!(endpoint.connect().is_ok());
         assert!(local_bind_lock_path(&path).exists());
 
@@ -589,7 +721,7 @@ mod tests {
     fn local_endpoint_round_trips() {
         let path = test_path("round-trip");
         let endpoint = Endpoint::local(&path);
-        let listener = endpoint.bind().unwrap();
+        let listener = endpoint.bind(None).unwrap();
         listener.set_nonblocking(true).unwrap();
         let stream = endpoint.connect().unwrap();
 
@@ -623,7 +755,7 @@ mod tests {
         let stale_path = test_path("stale-marker");
         fs::write(&stale_path, local_endpoint_marker()).unwrap();
         let stale_endpoint = Endpoint::local(&stale_path);
-        let listener = stale_endpoint.bind().unwrap();
+        let listener = stale_endpoint.bind(None).unwrap();
         assert!(stale_endpoint.connect().is_ok());
         drop(listener);
         cleanup_test_artifacts(&stale_path);
@@ -631,7 +763,7 @@ mod tests {
         let file_path = test_path("regular-file");
         fs::write(&file_path, b"keep me").unwrap();
         let file_endpoint = Endpoint::local(&file_path);
-        let error = match file_endpoint.bind() {
+        let error = match file_endpoint.bind(None) {
             Ok(_) => panic!("a non-Condr marker was unexpectedly replaced"),
             Err(error) => error,
         };
@@ -645,10 +777,10 @@ mod tests {
     fn windows_bind_lock_rejects_a_second_live_owner() {
         let path = test_path("live-lock");
         let endpoint = Endpoint::local(&path);
-        let listener = endpoint.bind().unwrap();
+        let listener = endpoint.bind(None).unwrap();
         let marker = fs::read(&path).unwrap();
 
-        let error = match endpoint.bind() {
+        let error = match endpoint.bind(None) {
             Ok(_) => panic!("a second listener unexpectedly acquired the bind lock"),
             Err(error) => error,
         };
@@ -667,7 +799,7 @@ mod tests {
 
         let path = test_path("permissions");
         let endpoint = Endpoint::local(&path);
-        let listener = endpoint.bind().unwrap();
+        let listener = endpoint.bind(None).unwrap();
 
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
@@ -693,7 +825,7 @@ mod tests {
         drop(stale_listener);
         assert!(path.exists());
 
-        let replacement = endpoint.bind().unwrap();
+        let replacement = endpoint.bind(None).unwrap();
         assert!(path.exists());
         let stream = endpoint.connect().unwrap();
 
@@ -714,7 +846,7 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let inode = fs::metadata(&path).unwrap().ino();
 
-        let error = match endpoint.bind() {
+        let error = match endpoint.bind(None) {
             Ok(_) => panic!("a second listener unexpectedly replaced the live endpoint"),
             Err(error) => error,
         };
@@ -744,7 +876,7 @@ mod tests {
             .map(|_| {
                 let sender = sender.clone();
                 let endpoint = endpoint.clone();
-                std::thread::spawn(move || sender.send(endpoint.bind()).unwrap())
+                std::thread::spawn(move || sender.send(endpoint.bind(None)).unwrap())
             })
             .collect::<Vec<_>>();
         drop(sender);
@@ -775,7 +907,7 @@ mod tests {
 
         let path = test_path("ownership");
         let endpoint = Endpoint::local(&path);
-        let original = endpoint.bind().unwrap();
+        let original = endpoint.bind(None).unwrap();
         let original_inode = fs::metadata(&path).unwrap().ino();
 
         fs::remove_file(&path).unwrap();
@@ -800,7 +932,7 @@ mod tests {
         fs::write(&path, b"keep me").unwrap();
         let endpoint = Endpoint::local(&path);
 
-        let error = match endpoint.bind() {
+        let error = match endpoint.bind(None) {
             Ok(_) => panic!("a regular file was unexpectedly replaced"),
             Err(error) => error,
         };

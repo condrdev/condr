@@ -210,9 +210,9 @@ impl Condr {
         else {
             return (false, false);
         };
-        if !pending
+        if pending
             .applied_sequence
-            .is_some_and(|applied| applied <= sequence)
+            .is_none_or(|applied| applied > sequence)
         {
             return (false, false);
         }
@@ -515,10 +515,20 @@ impl Condr {
         }) {
             return;
         }
+        let mut paired = false;
         let application = if let Some(connection) = self.connection_mut(key) {
             connection.endpoint = endpoint;
             match Self::install_connection(connection, result, window, cx) {
-                Ok(application) => Some(application),
+                Ok(application) => {
+                    // The Server accepted the invite and recorded this device; from now on
+                    // the device key alone is the credential.
+                    if let Endpoint::Tcp(tcp) = &mut connection.endpoint
+                        && tcp.invite.take().is_some()
+                    {
+                        paired = true;
+                    }
+                    Some(application)
+                }
                 Err(error) => {
                     connection.status = ConnectionStatus::Disconnected;
                     connection.error = Some(error);
@@ -528,6 +538,9 @@ impl Condr {
         } else {
             None
         };
+        if paired {
+            self.save_servers();
+        }
         if let Some(application) = application {
             let presentation_before = self.pending_presentation_request;
             _ = self.clear_pending_projections_for(key);
@@ -1059,8 +1072,10 @@ impl Condr {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 IncomingEffect::default()
             }
-            // Only the CLI asks for Pane text.
-            ServerMessage::PaneText { .. } => IncomingEffect::default(),
+            // Only the CLI asks for Pane text or revokes devices.
+            ServerMessage::PaneText { .. } | ServerMessage::DevicesRevoked { .. } => {
+                IncomingEffect::default()
+            }
             ServerMessage::ServerStopping => {
                 self.mark_disconnected(key, index, "Server stopped".into())
             }

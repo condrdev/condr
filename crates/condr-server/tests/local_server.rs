@@ -300,13 +300,22 @@ fn lifecycle_commands_manage_a_detached_server() {
     let address = listener.local_addr().unwrap();
     drop(listener);
     let server = env!("CARGO_BIN_EXE_condr");
-    let endpoint = Endpoint::tcp(address);
+    // The child processes keep their identity in the test directory; this test connects
+    // as that host's own device key, which the Server always accepts.
+    let identity = condr_server::ServerIdentity::load_or_create(&data_directory).unwrap();
+    let endpoint = Endpoint::tcp(condr_server::TcpEndpoint {
+        address,
+        server_key: identity.public_key(),
+        client_key: condr_server::noise::host_client_key(&data_directory).unwrap(),
+        invite: None,
+    });
     let guard = ServerGuard(endpoint.clone());
 
     let start = Command::new(server)
         .args(["server", "start"])
         .arg("--listen")
         .arg(address.to_string())
+        .env("CONDR_CONFIG_DIR", &data_directory)
         .arg("--snapshot")
         .arg(&snapshot_path)
         .env("CONDR_SOCKET_PATH", &socket_path)
@@ -337,6 +346,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         .args(["server", "status"])
         .arg("--listen")
         .arg(address.to_string())
+        .env("CONDR_CONFIG_DIR", &data_directory)
         .status()
         .unwrap();
     assert!(status.success(), "status failed: {status}");
@@ -345,6 +355,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         .args(["server", "start"])
         .arg("--listen")
         .arg(address.to_string())
+        .env("CONDR_CONFIG_DIR", &data_directory)
         .arg("--snapshot")
         .arg(&snapshot_path)
         .env("CONDR_SOCKET_PATH", &socket_path)
@@ -359,6 +370,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         .args(["server", "stop"])
         .arg("--listen")
         .arg(address.to_string())
+        .env("CONDR_CONFIG_DIR", &data_directory)
         .status()
         .unwrap();
     assert!(stop.success(), "stop failed: {stop}");
@@ -369,6 +381,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         .args(["server", "status"])
         .arg("--listen")
         .arg(address.to_string())
+        .env("CONDR_CONFIG_DIR", &data_directory)
         .status()
         .unwrap();
     assert_eq!(stopped_status.code(), Some(1));

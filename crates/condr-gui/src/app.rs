@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::SocketAddr;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -22,7 +21,7 @@ use condr_core::{
     TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSize,
     TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
-use condr_server::{ClientConnection, Endpoint, ServerConfig};
+use condr_server::{ClientConnection, Endpoint, ServerConfig, StaticKey, TcpEndpoint};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -542,6 +541,8 @@ impl ServerConnection {
 
 pub(crate) struct Condr {
     client_config_path: Option<PathBuf>,
+    /// This device's static key for TCP Servers, kept beside `config.toml`.
+    device_key: StaticKey,
     connections: Vec<ServerConnection>,
     active_connection: ConnectionKey,
     next_connection_key: ConnectionKey,
@@ -618,12 +619,36 @@ impl Condr {
             connection.error = Some(error);
         }
 
+        // Without a config file there is nowhere to keep a device key, so such a GUI gets
+        // a fresh one per run; the key only matters for TCP Servers, which need the file
+        // anyway.
+        let (device_key, key_error) = match client_config_path
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map_or_else(StaticKey::generate, condr_server::noise::host_client_key)
+        {
+            Ok(key) => (key, None),
+            Err(error) => (
+                StaticKey::from_private([0; 32]),
+                Some(format!("Failed to load the device key: {error}")),
+            ),
+        };
         let (saved_servers, config_error) = client_config_path
             .as_deref()
             .map_or_else(|| Ok(Vec::new()), config::load_servers)
+            .and_then(|servers| {
+                servers
+                    .into_iter()
+                    .map(|server| {
+                        server
+                            .endpoint(&device_key)
+                            .map(|endpoint| (server.name, endpoint))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
             .map_or_else(
                 |error| (Vec::new(), Some(format!("Failed to load config: {error}"))),
-                |servers| (servers, None),
+                |servers| (servers, key_error),
             );
         let appearance = client_config_path
             .as_deref()
@@ -638,12 +663,8 @@ impl Condr {
             .and_then(|path| config::load_terminal_color_scheme(path).ok())
             .unwrap_or_default();
         let mut connections = vec![connection];
-        for (index, server) in saved_servers.into_iter().enumerate() {
-            connections.push(ServerConnection::new(
-                index as u64 + 2,
-                server.name,
-                Endpoint::tcp(server.address),
-            ));
+        for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
+            connections.push(ServerConnection::new(index as u64 + 2, name, endpoint));
         }
         let next_connection_key = connections.len() as u64 + 1;
 
@@ -672,6 +693,7 @@ impl Condr {
         });
         let mut this = Self {
             client_config_path,
+            device_key,
             connections,
             active_connection: 1,
             next_connection_key,

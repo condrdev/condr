@@ -2,7 +2,12 @@ use std::path::PathBuf;
 
 const DIRECTORY_NAME: &str = "condr";
 
+/// Condr's configuration directory: `CONDR_CONFIG_DIR` when set, else the platform's.
+/// It also holds the Server identity and the device key of this host.
 pub fn config_directory() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("CONDR_CONFIG_DIR") {
+        return Some(PathBuf::from(path));
+    }
     dirs::config_dir().map(|root| root.join(DIRECTORY_NAME))
 }
 

@@ -1,8 +1,10 @@
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use condr_server::{Endpoint, ServerConfig};
+use condr_server::noise::{self, ServerIdentity};
+use condr_server::{Endpoint, ServerConfig, TcpEndpoint};
 
 mod cli;
 
@@ -62,6 +64,18 @@ enum ServerCommand {
         #[arg(long)]
         detached: bool,
     },
+    /// Print a one-time invite that pairs a new device with this host's TCP Server
+    Invite,
+    /// List the devices paired with this host's TCP Server
+    Clients,
+    /// Revoke a paired device by its key, or a unique prefix of it, and drop its live
+    /// connections to the Server at the endpoint
+    Revoke {
+        #[command(flatten)]
+        endpoint: EndpointArgs,
+        #[arg(value_name = "KEY")]
+        key: String,
+    },
 }
 
 /// `--endpoint` and `--listen` are alternatives; neither means the platform default.
@@ -71,19 +85,31 @@ struct EndpointArgs {
     /// Local socket or named pipe path
     #[arg(long, value_name = "PATH")]
     endpoint: Option<PathBuf>,
-    /// TCP address to listen on, normally loopback behind an SSH tunnel
+    /// TCP address to listen on; every TCP connection authenticates with this host's keys
     #[arg(long, value_name = "ADDR")]
     listen: Option<SocketAddr>,
 }
 
 impl EndpointArgs {
-    fn resolve(self) -> Endpoint {
+    fn resolve(self) -> io::Result<Endpoint> {
         match (self.endpoint, self.listen) {
-            (Some(path), _) => Endpoint::local(path),
-            (None, Some(address)) => Endpoint::tcp(address),
-            (None, None) => ServerConfig::default().endpoint,
+            (Some(path), _) => Ok(Endpoint::local(path)),
+            (None, Some(address)) => tcp_endpoint(address),
+            (None, None) => Ok(ServerConfig::default().endpoint),
         }
     }
+}
+
+/// The TCP endpoint of this host's Server as its own CLI connects to it.
+fn tcp_endpoint(address: SocketAddr) -> io::Result<Endpoint> {
+    let directory = noise::identity_directory()?;
+    let identity = ServerIdentity::load_or_create(&directory)?;
+    Ok(Endpoint::tcp(TcpEndpoint {
+        address,
+        server_key: identity.public_key(),
+        client_key: noise::host_client_key(&directory)?,
+        invite: None,
+    }))
 }
 
 fn main() {
@@ -96,65 +122,114 @@ fn main() {
 }
 
 fn dispatch(command: ServerCommand) -> i32 {
+    match run_server_command(command) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("condr-server: {error}");
+            1
+        }
+    }
+}
+
+fn run_server_command(command: ServerCommand) -> io::Result<()> {
     match command {
         ServerCommand::Start { endpoint, snapshot } => {
-            match condr_server::ensure_server(server_config(endpoint.resolve(), snapshot)) {
-                Ok(endpoint) => {
-                    println!("condr-server: running at {}", endpoint_text(&endpoint));
-                    0
-                }
-                Err(error) => {
-                    eprintln!("condr-server: failed to start: {error}");
-                    1
-                }
+            let endpoint = endpoint.resolve()?;
+            let endpoint = condr_server::ensure_server(server_config(endpoint, snapshot)).map_err(
+                |error| io::Error::new(error.kind(), format!("failed to start: {error}")),
+            )?;
+            println!("condr-server: running at {endpoint}");
+            if let Endpoint::Tcp(tcp) = &endpoint {
+                println!("condr-server: Server key {}", tcp.server_key);
+                println!("condr-server: pair another device with `condr server invite`");
             }
+            Ok(())
         }
         ServerCommand::Status { endpoint } => {
-            let endpoint = endpoint.resolve();
+            let endpoint = endpoint.resolve()?;
             match condr_server::probe_server(&endpoint) {
                 Ok(()) => {
-                    println!("condr-server: running at {}", endpoint_text(&endpoint));
-                    0
+                    println!("condr-server: running at {endpoint}");
+                    Ok(())
                 }
                 Err(error) => {
                     println!("condr-server: not running ({error})");
-                    1
+                    Err(io::Error::new(io::ErrorKind::NotConnected, "not running"))
                 }
             }
         }
-        ServerCommand::Stop { endpoint } => match condr_server::stop_server(&endpoint.resolve()) {
-            Ok(()) => {
-                println!("condr-server: stopping");
-                0
-            }
-            Err(error) => {
-                eprintln!("condr-server: failed to stop: {error}");
-                1
-            }
-        },
+        ServerCommand::Stop { endpoint } => {
+            condr_server::stop_server(&endpoint.resolve()?).map_err(|error| {
+                io::Error::new(error.kind(), format!("failed to stop: {error}"))
+            })?;
+            println!("condr-server: stopping");
+            Ok(())
+        }
         ServerCommand::Run {
             endpoint,
             snapshot,
             detached,
         } => {
+            let endpoint = endpoint.resolve()?;
             if detached {
                 #[cfg(unix)]
-                if let Err(error) = nix::unistd::setsid() {
-                    eprintln!("condr-server: failed to detach from the parent session: {error}");
-                    return 1;
-                }
+                nix::unistd::setsid().map_err(|error| {
+                    io::Error::other(format!("failed to detach from the parent session: {error}"))
+                })?;
                 eprintln!(
                     "condr-server: detached process {} starting",
                     std::process::id()
                 );
             }
-            match condr_server::run(server_config(endpoint.resolve(), snapshot)) {
-                Ok(()) => 0,
-                Err(error) => {
-                    eprintln!("condr-server: {error}");
-                    1
-                }
+            condr_server::run(server_config(endpoint, snapshot))
+        }
+        ServerCommand::Invite => {
+            let directory = noise::identity_directory()?;
+            let identity = ServerIdentity::load_or_create(&directory)?;
+            let invite = noise::create_invite(&directory)?;
+            println!(
+                "condr-server: invite valid for {} minutes; in Condr, Add Server with",
+                noise::INVITE_TTL.as_secs() / 60
+            );
+            println!(
+                "  {}.{}@<host>:<port>",
+                identity.public_key(),
+                invite.secret.to_hex()
+            );
+            Ok(())
+        }
+        ServerCommand::Clients => {
+            let directory = noise::identity_directory()?;
+            let clients = noise::read_authorized(&directory)?;
+            if clients.is_empty() {
+                println!("condr-server: no paired devices");
             }
+            for client in clients {
+                println!("{} {} {}", client.key, client.paired_at, client.name);
+            }
+            Ok(())
+        }
+        ServerCommand::Revoke { endpoint, key } => {
+            let directory = noise::identity_directory()?;
+            let removed = noise::revoke(&directory, &key)?;
+            if removed == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("no paired device matches {key}"),
+                ));
+            }
+            println!("condr-server: revoked {removed} device(s)");
+            // The file already refuses their next handshake; a running Server also drops
+            // the connections they hold now.
+            match condr_server::revoke_devices(&endpoint.resolve()?, &key) {
+                Ok(disconnected) => {
+                    println!("condr-server: closed {disconnected} live connection(s)")
+                }
+                Err(error) => println!(
+                    "condr-server: no running Server reached ({error}); live connections, if any, stay up until they reconnect"
+                ),
+            }
+            Ok(())
         }
     }
 }
@@ -165,13 +240,6 @@ fn server_config(endpoint: Endpoint, snapshot_path: Option<PathBuf>) -> ServerCo
         config = config.with_snapshot_path(path);
     }
     config
-}
-
-fn endpoint_text(endpoint: &Endpoint) -> String {
-    match endpoint {
-        Endpoint::Local(path) => path.display().to_string(),
-        Endpoint::Tcp(address) => address.to_string(),
-    }
 }
 
 #[cfg(test)]
@@ -199,10 +267,8 @@ mod tests {
         .unwrap() else {
             panic!("expected start");
         };
-        assert_eq!(
-            endpoint.resolve(),
-            Endpoint::tcp("127.0.0.1:4242".parse().unwrap())
-        );
+        assert_eq!(endpoint.listen, Some("127.0.0.1:4242".parse().unwrap()));
+        assert_eq!(endpoint.endpoint, None);
         assert_eq!(snapshot, Some("state.snapshot".into()));
 
         let ServerCommand::Run {
@@ -211,14 +277,23 @@ mod tests {
         else {
             panic!("expected run");
         };
-        assert_eq!(endpoint.resolve(), Endpoint::local("test.sock"));
+        assert_eq!(endpoint.resolve().unwrap(), Endpoint::local("test.sock"));
         assert!(detached);
 
         let ServerCommand::Status { endpoint } = parse(&["status"]).unwrap() else {
             panic!("expected status");
         };
-        assert_eq!(endpoint.resolve(), ServerConfig::default().endpoint);
+        assert_eq!(
+            endpoint.resolve().unwrap(),
+            ServerConfig::default().endpoint
+        );
         assert!(matches!(parse(&["stop"]), Ok(ServerCommand::Stop { .. })));
+        assert!(matches!(parse(&["invite"]), Ok(ServerCommand::Invite)));
+        assert!(matches!(parse(&["clients"]), Ok(ServerCommand::Clients)));
+        assert!(matches!(
+            parse(&["revoke", "abcd"]),
+            Ok(ServerCommand::Revoke { key, .. }) if key == "abcd"
+        ));
     }
 
     #[test]
@@ -240,5 +315,6 @@ mod tests {
         assert!(parse(&["status", "--snapshot", "state.snapshot"]).is_err());
         assert!(parse(&["start", "--detached"]).is_err());
         assert!(parse(&["start", "--listen", "not-an-address"]).is_err());
+        assert!(parse(&["revoke"]).is_err());
     }
 }

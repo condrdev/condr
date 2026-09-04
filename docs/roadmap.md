@@ -161,14 +161,13 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 
 ### M3：Secure Direct Remote
 
-这是对外宣传 remote 的硬门槛。当前 trusted TCP/SSH 配置适合 MVP 和技术用户内测，不能直接当作公网安全产品。
+这是对外宣传 remote 的硬门槛。M1 已按 WireGuard 模型落地了传输层认证与加密（[ADR 0011](adr/0011-tcp-endpoints-authenticate-like-wireguard.md)）：Server 与设备各持久 X25519 静态密钥，`Noise_IKpsk2` 握手，`condr server invite` 生成 10 分钟有效的一次性 invite 配对新设备，`condr server clients|revoke` 管理设备。以下为仍未完成的部分。
 
 **核心交付**
 
-- Server 持久化身份和公钥指纹；使用成熟的 TLS/SSH/Noise 实现，不自创密码学。
-- 由 Server owner 通过 CLI 或 GUI 生成一次性、短时有效的 invite code/QR；首次连接显示指纹并要求人类确认。
-- Client 生成设备密钥，长期凭据保存在 OS Keychain/Keystore，而不是 URL、日志或普通配置文本中。
-- 提供设备列表、过期、撤销、轮换、审计和限速。
+- 首次连接在 GUI 中显示指纹并要求人类确认；invite 支持 QR。
+- 设备密钥迁入 OS Keychain/Keystore，而不是配置目录中的文件。
+- 设备过期、密钥轮换、审计和限速。
 - 认证与授权分开，至少定义 `observe`、`input`、`layout`、`workspace/git`、`server_admin`、`clipboard/sensitive`、`agent_automation` capability。
 - 未完成授权前不得发送 Bootstrap、Terminal 内容、剪贴板或 Agent 数据；默认仍是单用户、一个 active controller。
 

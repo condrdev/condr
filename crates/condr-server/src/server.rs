@@ -23,7 +23,10 @@ use condr_core::{
 };
 
 use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};
-use crate::endpoint::{Endpoint, EndpointListener, EndpointStream, default_socket_path};
+use crate::endpoint::{
+    Endpoint, EndpointListener, EndpointStream, TcpEndpoint, default_socket_path,
+};
+use crate::noise::{ServerIdentity, StaticKey};
 use crate::persistence::{SnapshotLoad, SnapshotPersistence};
 
 mod bootstrap;
@@ -38,7 +41,7 @@ use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
 use local::{default_snapshot_path, runtime_epoch, stable_endpoint_id};
-pub use local::{ensure_local_server, ensure_server, probe_server, stop_server};
+pub use local::{ensure_local_server, ensure_server, probe_server, revoke_devices, stop_server};
 use terminal_monitor::*;
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
@@ -83,6 +86,8 @@ pub struct ServerConfig {
     snapshot_path: Option<PathBuf>,
     /// The Server's own `config.toml`; `None` keeps settings in memory only.
     config_path: Option<PathBuf>,
+    /// The key a TCP Server answers with; `None` loads the host identity at bind time.
+    identity: Option<Arc<ServerIdentity>>,
 }
 
 impl Default for ServerConfig {
@@ -150,13 +155,14 @@ fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
 impl ServerConfig {
     pub fn new(endpoint: Endpoint) -> Self {
         let snapshot_path = match &endpoint {
-            Endpoint::Tcp(address) if address.port() == 0 => None,
+            Endpoint::Tcp(tcp) if tcp.address.port() == 0 => None,
             _ => default_snapshot_path(&endpoint),
         };
         Self {
             endpoint,
             snapshot_path,
             config_path: condr_core::config_directory().map(|root| root.join("config.toml")),
+            identity: None,
         }
     }
 
@@ -165,7 +171,32 @@ impl ServerConfig {
             endpoint,
             snapshot_path: None,
             config_path: None,
+            identity: None,
         }
+    }
+
+    /// A TCP Server with a fresh identity that accepts exactly one fresh device key, and
+    /// no persistence. [`BoundServer::endpoint`] then connects as that device.
+    pub fn ephemeral_tcp(address: std::net::SocketAddr) -> io::Result<Self> {
+        let client_key = StaticKey::generate()?;
+        let identity = ServerIdentity::ephemeral()?.with_authorized(client_key.public());
+        let endpoint = Endpoint::tcp(TcpEndpoint {
+            address,
+            server_key: identity.public_key(),
+            client_key,
+            invite: None,
+        });
+        Ok(Self {
+            endpoint,
+            snapshot_path: None,
+            config_path: None,
+            identity: Some(Arc::new(identity)),
+        })
+    }
+
+    pub fn with_identity(mut self, identity: ServerIdentity) -> Self {
+        self.identity = Some(Arc::new(identity));
+        self
     }
 
     pub fn with_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -334,6 +365,12 @@ impl ClientConnection {
         mut stream: EndpointStream,
         client_name: impl Into<String>,
     ) -> io::Result<EndpointStream> {
+        // A refused handshake surfaces as an I/O error with its own kind; keep it so
+        // callers can tell "not authorized" from a framing problem.
+        let io_error = |error: FramingError| match error {
+            FramingError::Io(error) => error,
+            other => io::Error::other(other.to_string()),
+        };
         stream.set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))?;
         condr_core::protocol::write_message(
             &mut stream,
@@ -342,9 +379,9 @@ impl ClientConnection {
                 client_name: client_name.into(),
             }),
         )
-        .map_err(|error| io::Error::other(error.to_string()))?;
-        let welcome: ServerMessage = condr_core::protocol::read_message(&mut stream)
-            .map_err(|error| io::Error::other(error.to_string()))?;
+        .map_err(io_error)?;
+        let welcome: ServerMessage =
+            condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
         match welcome {
             ServerMessage::Welcome { error: None, .. } => {}
             ServerMessage::Welcome {
@@ -440,6 +477,7 @@ impl ServerHandle {
 
 pub struct BoundServer {
     listener: EndpointListener,
+    endpoint: Endpoint,
     stop: Arc<AtomicBool>,
     lifecycle: Arc<ServerLifecycle>,
     state: Arc<Mutex<RuntimeState>>,
@@ -448,11 +486,22 @@ pub struct BoundServer {
 
 impl BoundServer {
     pub fn bind(config: ServerConfig) -> io::Result<Self> {
-        let listener = config.endpoint.bind()?;
+        let identity = match (&config.endpoint, config.identity) {
+            (Endpoint::Local(_), _) => None,
+            (Endpoint::Tcp(_), Some(identity)) => Some(identity),
+            (Endpoint::Tcp(_), None) => Some(Arc::new(ServerIdentity::load_or_create(
+                &crate::noise::identity_directory()?,
+            )?)),
+        };
+        let listener = config.endpoint.bind(identity)?;
         listener.set_nonblocking(true)?;
+        // An OS-assigned port becomes concrete here; Panes and tests need the real one.
+        let endpoint = match (&config.endpoint, listener.local_addr()?) {
+            (Endpoint::Tcp(tcp), Some(address)) => Endpoint::tcp(tcp.clone().with_address(address)),
+            _ => config.endpoint.clone(),
+        };
         let (state, startup_terminals) =
-            match RuntimeState::recover(&config.endpoint, config.snapshot_path, config.config_path)
-            {
+            match RuntimeState::recover(&endpoint, config.snapshot_path, config.config_path) {
                 Ok(restored) => restored,
                 Err(error) => {
                     let _ = listener.cleanup();
@@ -461,6 +510,7 @@ impl BoundServer {
             };
         Ok(Self {
             listener,
+            endpoint,
             stop: Arc::new(AtomicBool::new(false)),
             lifecycle: Arc::new(ServerLifecycle::default()),
             state: Arc::new(Mutex::new(state)),
@@ -478,6 +528,12 @@ impl BoundServer {
 
     pub fn local_addr(&self) -> io::Result<Option<std::net::SocketAddr>> {
         self.listener.local_addr()
+    }
+
+    /// The endpoint as bound, with the real port. For a TCP Server it also carries the
+    /// device key a test client connects with.
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
     }
 
     pub fn run(self) -> io::Result<()> {
@@ -749,6 +805,8 @@ struct RuntimeState {
     focused_terminal: Option<PaneId>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
+    /// Live TCP peers by client id, so a revocation can drop their connections.
+    tcp_peers: std::collections::HashMap<u64, (crate::noise::PublicKey, EndpointStream)>,
     persistence: Option<SnapshotPersistence>,
     settings: ServerSettings,
     config_path: Option<PathBuf>,
@@ -934,6 +992,7 @@ impl RuntimeState {
             focused_terminal: None,
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
+            tcp_peers: std::collections::HashMap::new(),
             persistence,
             settings,
             config_path,

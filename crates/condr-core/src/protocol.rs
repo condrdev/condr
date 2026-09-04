@@ -97,6 +97,12 @@ pub enum ClientMessage {
     StopServer {
         server_id: ServerId,
     },
+    /// Drops the live TCP connections of every paired device whose public key starts
+    /// with `key_prefix`. Only the Server host may send it; the authorized list itself is
+    /// a file the host edits directly.
+    RevokeDevice {
+        key_prefix: String,
+    },
     Detach,
 }
 
@@ -397,6 +403,10 @@ pub enum ServerMessage {
         text: String,
     },
     ServerStopping,
+    /// How many live connections a `RevokeDevice` request closed.
+    DevicesRevoked {
+        disconnected: u32,
+    },
     Error {
         message: String,
     },

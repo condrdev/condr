@@ -84,11 +84,10 @@ fn start_server() -> (TestServer, Endpoint) {
 }
 
 fn start_tcp_server() -> (TestServer, Endpoint) {
-    let server = BoundServer::bind(ServerConfig::ephemeral(Endpoint::tcp(
-        "127.0.0.1:0".parse().unwrap(),
-    )))
-    .unwrap();
-    let endpoint = Endpoint::tcp(server.local_addr().unwrap().unwrap());
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let endpoint = server.endpoint().clone();
     let handle = server.handle();
     let thread = std::thread::spawn(move || server.run());
     (

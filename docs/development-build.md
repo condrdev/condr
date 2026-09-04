@@ -47,7 +47,7 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 
 ### Pane 内的环境变量
 
-Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径，TCP Server 为 `tcp://host:port`），并把 `condr` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
+Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径，TCP Server 为 `tcp://<server key>@host:port`，Pane 内的 CLI 用本机 `client-key` 连回），并把 `condr` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
 
 ### Agent 状态检测规则
 
@@ -99,7 +99,7 @@ archive=$(find "$PWD/condr-download" -name "condr-linux-${arch}-*.tar.gz" -print
 tar -C condr-download -xzf "$archive"
 ```
 
-使用 loopback listener 后台启动远端 Server，避免暴露未鉴权端口。默认 snapshot 和 log 会写入 XDG state 目录：
+后台启动远端 Server。每个 TCP 连接都经过 WireGuard 式的双向密钥认证与加密，因此监听地址可以是 loopback 配合 SSH tunnel，也可以直接是局域网地址。首次启动会在配置目录生成 `server-key` 与 `client-key`；默认 snapshot 和 log 会写入 XDG state 目录：
 
 ```bash
 ./condr-download/condr/condr server start --listen 127.0.0.1:4242
@@ -107,13 +107,19 @@ tar -C condr-download -xzf "$archive"
 
 调试或交给外部服务管理器时，使用 `server run --listen 127.0.0.1:4242` 在前台运行。
 
-在 Windows 建立 SSH tunnel：
+在 Windows 建立 SSH tunnel（直接监听局域网地址时可省略）：
 
 ```powershell
 ssh -N -L 4242:127.0.0.1:4242 <linux-host>
 ```
 
-然后在 Condr 中添加 TCP Server `127.0.0.1:4242`。停止 Server 时，在 Linux 的另一个 shell 运行：
+在 Linux 上为这台 Windows 设备生成一次性 invite，它 10 分钟内有效，只能使用一次：
+
+```bash
+./condr-download/condr/condr server invite
+```
+
+把它打印的 `<server key>.<invite>@<host>:<port>` 中的 `<host>:<port>` 换成 `127.0.0.1:4242`，粘贴到 Condr 的 Add Server 对话框。第一次连接成功后，设备的公钥就记录在 Server 的 `authorized-clients` 里，之后重连不再需要 invite。`condr server clients` 列出已配对设备，`condr server revoke --listen 127.0.0.1:4242 <key 前缀>` 撤销一台设备：先改写名单文件，再连上运行中的 Server 断开该设备的存活连接。停止 Server 时，在 Linux 的另一个 shell 运行：
 
 ```bash
 ./condr-download/condr/condr server stop --listen 127.0.0.1:4242

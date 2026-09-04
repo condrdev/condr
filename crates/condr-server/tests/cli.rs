@@ -235,12 +235,16 @@ fn workspace_and_tab_commands_drive_a_live_server() {
         );
         assert!(output.status.success());
         text = String::from_utf8(output.stdout).unwrap();
-        if text.contains("condr-cli-marker") {
+        // A long prompt can wrap the marker across two rows; compare without row breaks.
+        if text.replace(['\r', '\n'], "").contains("condr-cli-marker") {
             break;
         }
         thread::sleep(Duration::from_millis(50));
     }
-    assert!(text.contains("condr-cli-marker"), "read text: {text:?}");
+    assert!(
+        text.replace(['\r', '\n'], "").contains("condr-cli-marker"),
+        "read text: {text:?}"
+    );
     assert_eq!(
         ok(
             &endpoint_path,

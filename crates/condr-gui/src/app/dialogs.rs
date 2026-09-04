@@ -183,33 +183,37 @@ impl Condr {
     }
 
     pub(super) fn prompt_add_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // `<server key>[.<invite>]@host:port`, as `condr server invite` prints it. The
+        // invite is only carried in memory until the first connection pairs this device.
         self.prompt_text(
-            "Add Server",
+            "Add Server (server-key[.invite]@host:port)",
             "Add",
-            "127.0.0.1:7341".into(),
-            |this, value, _, _| {
-                if let Ok(address) = value.parse::<SocketAddr>() {
-                    let endpoint = Endpoint::tcp(address);
-                    if this.connections.iter().any(|c| c.endpoint == endpoint) {
+            String::new(),
+            |this, value, _, _| match TcpEndpoint::parse(&value, this.device_key.clone()) {
+                Ok(tcp) => {
+                    if this
+                        .connections
+                        .iter()
+                        .any(|c| c.endpoint.tcp_address() == Some(tcp.address))
+                    {
                         this.app_error = Some("Server already added".into());
                         return false;
                     }
                     this.app_error = None;
                     let key = this.next_connection_key;
                     this.next_connection_key += 1;
-                    this.connections.push(ServerConnection::new(
-                        key,
-                        address.to_string(),
-                        endpoint,
-                    ));
+                    let label = tcp.address.to_string();
+                    this.connections
+                        .push(ServerConnection::new(key, label, Endpoint::tcp(tcp)));
                     this.save_servers();
                     this.pending_presentation_request = None;
                     this.active_connection = key;
                     this.target_pane = None;
                     _ = this.start_connect(key);
                     true
-                } else {
-                    this.app_error = Some("Invalid server address".into());
+                }
+                Err(error) => {
+                    this.app_error = Some(format!("Invalid server: {error}"));
                     false
                 }
             },

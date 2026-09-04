@@ -5,7 +5,13 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 ## Language
 
 **Server**:
-A long-lived Condr runtime that owns one or more Sessions and their Terminals. A local Server is the same Server started on the GUI machine; closing a Client does not stop it or its work.
+A long-lived Condr runtime that owns one or more Sessions and their Terminals. A local Server is the same Server started on the GUI machine; closing a Client does not stop it or its work. Over TCP a Server has a persistent static key and accepts only paired Devices, as ADR 0011 describes.
+
+**Device**:
+A Client installation identified by its own persistent static key, stored beside its `config.toml`. The Server host's own Device is always authorized; any other Device is paired once through an Invite and listed in the Server's `authorized-clients` until revoked.
+
+**Invite**:
+A one-time secret that `condr server invite` creates for ten minutes. Pasted into Add Server as `<server key>.<invite>@host:port`, it lets one unknown Device complete the handshake and become authorized; it is never stored by the Client.
 _Avoid_: Local backend, GUI runtime
 
 **Client**:

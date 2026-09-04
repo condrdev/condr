@@ -41,7 +41,7 @@ pub(super) fn stable_endpoint_id(endpoint: &Endpoint) -> u64 {
             let path = path.clone();
             format!("local:{}", path.to_string_lossy())
         }
-        Endpoint::Tcp(address) => format!("tcp:{address}"),
+        Endpoint::Tcp(tcp) => format!("tcp:{}", tcp.address),
     };
     text.bytes().fold(0xcbf29ce484222325, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
@@ -62,7 +62,7 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
 
 pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     let endpoint = config.endpoint.clone();
-    if matches!(&endpoint, Endpoint::Tcp(address) if address.port() == 0) {
+    if matches!(&endpoint, Endpoint::Tcp(tcp) if tcp.address.port() == 0) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "a detached TCP server requires a non-zero port",
@@ -104,8 +104,8 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
         Endpoint::Local(path) => {
             command.arg("--endpoint").arg(path);
         }
-        Endpoint::Tcp(address) => {
-            command.arg("--listen").arg(address.to_string());
+        Endpoint::Tcp(tcp) => {
+            command.arg("--listen").arg(tcp.address.to_string());
         }
     }
     if let Some(path) = config.snapshot_path() {
@@ -190,6 +190,33 @@ pub(super) fn probe_protocol(stream: EndpointStream) -> io::Result<()> {
 /// Checks whether a protocol-compatible server is reachable at the endpoint.
 pub fn probe_server(endpoint: &Endpoint) -> io::Result<()> {
     probe_protocol(endpoint.connect()?)
+}
+
+/// Asks the running Server to drop the live connections of devices whose key starts with
+/// `key_prefix`; returns how many it closed. The caller has already edited the
+/// authorized list, so those devices cannot come back.
+pub fn revoke_devices(endpoint: &Endpoint, key_prefix: &str) -> io::Result<u32> {
+    let client = ClientConnection::connect(endpoint, "condr-revoke")?;
+    let mut stream = client.into_stream();
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::RevokeDevice {
+            key_prefix: key_prefix.to_owned(),
+        },
+    )
+    .map_err(|error| io::Error::other(error.to_string()))?;
+    match condr_core::protocol::read_message(&mut stream)
+        .map_err(|error| io::Error::other(error.to_string()))?
+    {
+        ServerMessage::DevicesRevoked { disconnected } => Ok(disconnected),
+        ServerMessage::Error { message } => {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
+        }
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected revoke response: {other:?}"),
+        )),
+    }
 }
 
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {

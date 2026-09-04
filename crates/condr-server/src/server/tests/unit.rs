@@ -26,7 +26,9 @@ fn local_endpoint_identity_normalizes_relative_paths() {
 
 #[test]
 fn an_os_assigned_tcp_port_is_ephemeral_without_an_explicit_snapshot() {
-    let endpoint = Endpoint::tcp("127.0.0.1:0".parse().unwrap());
+    let endpoint = ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap())
+        .unwrap()
+        .endpoint;
 
     assert!(
         ServerConfig::new(endpoint.clone())
