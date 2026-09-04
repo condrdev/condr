@@ -795,7 +795,7 @@ fn paste_respects_bracketed_mode_and_filters_control_markers() {
     assert_eq!(encode_paste("one\r\ntwo\n", false), b"one\rtwo\r");
     assert_eq!(
         encode_paste("one\x1b[201~\x03two\n", true),
-        b"\x1b[200~one[201~\x03two\n\x1b[201~"
+        b"\x1b[200~one[201~two\n\x1b[201~"
     );
 }
 

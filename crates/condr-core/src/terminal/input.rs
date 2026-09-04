@@ -2,8 +2,8 @@ use super::*;
 
 pub(super) fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     if bracketed {
-        // Only ESC is stripped so pasted text cannot forge the closing marker.
-        let text = text.replace('\x1b', "");
+        // Like Alacritty: ESC cannot forge the closing marker and ETX never interrupts.
+        let text = text.replace(['\x1b', '\x03'], "");
         format!("\x1b[200~{text}\x1b[201~").into_bytes()
     } else {
         text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
