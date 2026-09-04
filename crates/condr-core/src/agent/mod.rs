@@ -715,6 +715,11 @@ const AGENT_STARTUP_GRACE_WINDOW: Duration = Duration::from_secs(3);
 const AGENT_MISS_CONFIRMATION_ATTEMPTS: u8 = 6;
 const PROCESS_RECHECK_IDENTIFIED: Duration = Duration::from_secs(5);
 const PROCESS_RECHECK_UNIDENTIFIED: Duration = Duration::from_millis(500);
+/// How long after output or a foreground change an unidentified terminal keeps the fast
+/// cadence; after that a quiet shell is only re-enumerated on the slow fallback, as herdr
+/// does after its acquisition window.
+const PROCESS_ACQUISITION_WINDOW: Duration = Duration::from_secs(8);
+const PROCESS_RECHECK_QUIET: Duration = Duration::from_secs(30);
 
 /// What the process probe saw in the terminal's job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -805,6 +810,7 @@ pub struct AgentDetector {
     pending_idle: PendingIdleConfirmation,
     startup_grace_until: Option<Instant>,
     last_process_probe: Option<Instant>,
+    last_activity: Option<Instant>,
     /// OSC evidence left by the previous agent; ignored until it changes.
     stale_osc_title: Option<String>,
     stale_osc_progress: Option<String>,
@@ -829,6 +835,7 @@ impl AgentDetector {
             pending_idle: PendingIdleConfirmation::default(),
             startup_grace_until: None,
             last_process_probe: None,
+            last_activity: None,
             stale_osc_title: None,
             stale_osc_progress: None,
         }
@@ -849,15 +856,24 @@ impl AgentDetector {
 
     /// Whether this tick should read the process table. Identified agents are
     /// re-checked every 5 s (a job change may force an earlier check through
-    /// `force`); an unidentified terminal is checked every 500 ms.
-    pub fn wants_process_probe(&self, now: Instant, force: bool) -> bool {
+    /// `force`); an unidentified terminal is checked every 500 ms while output or a
+    /// foreground change (`activity`) is recent, then every 30 s until the next one.
+    pub fn wants_process_probe(&mut self, now: Instant, force: bool, activity: bool) -> bool {
+        if force || activity || self.last_activity.is_none() {
+            self.last_activity = Some(now);
+        }
         if force || self.exit_pending {
             return true;
         }
         let interval = if self.agent.is_some() {
             PROCESS_RECHECK_IDENTIFIED
-        } else {
+        } else if self
+            .last_activity
+            .is_some_and(|at| now.duration_since(at) < PROCESS_ACQUISITION_WINDOW)
+        {
             PROCESS_RECHECK_UNIDENTIFIED
+        } else {
+            PROCESS_RECHECK_QUIET
         };
         self.last_process_probe
             .is_none_or(|checked| now.duration_since(checked) >= interval)
@@ -1205,7 +1221,7 @@ mod tests {
                 state: AgentState::Idle,
             })
         );
-        assert!(detector.wants_process_probe(gone, false));
+        assert!(detector.wants_process_probe(gone, false, false));
         assert_eq!(
             detector.observe_process(ProcessProbeResult::ShellOnly, "", "", gone),
             AgentPublish::Cleared
@@ -1244,6 +1260,28 @@ mod tests {
             "startup grace must restart"
         );
         assert_eq!(detector.stale_osc_title.as_deref(), Some("old title"));
+    }
+
+    #[test]
+    fn a_quiet_shell_leaves_the_fast_probe_cadence_until_something_happens() {
+        let mut detector = AgentDetector::new();
+        let start = Instant::now();
+        assert!(detector.wants_process_probe(start, false, false));
+        detector.observe_process(ProcessProbeResult::ShellOnly, "", "", start);
+        let half_second = Duration::from_millis(500);
+        assert!(detector.wants_process_probe(start + half_second, false, false));
+        detector.observe_process(ProcessProbeResult::ShellOnly, "", "", start + half_second);
+
+        let quiet = start + PROCESS_ACQUISITION_WINDOW + half_second;
+        detector.observe_process(ProcessProbeResult::ShellOnly, "", "", quiet);
+        assert!(!detector.wants_process_probe(quiet + half_second, false, false));
+        assert!(detector.wants_process_probe(quiet + PROCESS_RECHECK_QUIET, false, false));
+
+        // Output reopens the window; a foreground change probes at once.
+        assert!(detector.wants_process_probe(quiet + half_second, false, true));
+        detector.observe_process(ProcessProbeResult::ShellOnly, "", "", quiet + half_second);
+        assert!(detector.wants_process_probe(quiet + half_second * 2, false, false));
+        assert!(detector.wants_process_probe(quiet + half_second * 2, true, false));
     }
 
     #[test]

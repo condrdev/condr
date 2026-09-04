@@ -697,6 +697,7 @@ impl TerminalRuntime {
             revision: Arc::clone(&self.revision),
             detector: AgentDetector::new(),
             screen_revision: None,
+            activity_revision: None,
             #[cfg(unix)]
             last_foreground_group: None,
         })
@@ -1329,6 +1330,8 @@ pub struct TerminalAgentProbe {
     detector: AgentDetector,
     /// The terminal revision the last screen read saw; unchanged means skip the read.
     screen_revision: Option<u64>,
+    /// The terminal revision the last tick saw; new output keeps process probing fast.
+    activity_revision: Option<u64>,
     #[cfg(unix)]
     last_foreground_group: Option<UnixPid>,
 }
@@ -1348,7 +1351,13 @@ impl TerminalAgentProbe {
         let now = Instant::now();
         let (osc_title, osc_progress) = self.osc_evidence();
         let foreground_changed = self.foreground_changed();
-        if self.detector.wants_process_probe(now, foreground_changed) {
+        let revision = self.revision.load(Ordering::Acquire);
+        let output_changed = self.activity_revision != Some(revision);
+        self.activity_revision = Some(revision);
+        if self
+            .detector
+            .wants_process_probe(now, foreground_changed, output_changed)
+        {
             let result = self.probe_process();
             match self
                 .detector
@@ -1362,7 +1371,6 @@ impl TerminalAgentProbe {
                 AgentPublish::Cleared => return Some(None),
             }
         }
-        let revision = self.revision.load(Ordering::Acquire);
         let screen_changed = self.screen_revision != Some(revision);
         if !self.detector.wants_screen(screen_changed, now) {
             return None;
