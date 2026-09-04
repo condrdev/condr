@@ -364,15 +364,32 @@ pub(super) enum SettingsTab {
 type ServerSelect = SelectState<SearchableVec<SharedString>>;
 
 /// Connection keys and labels in sidebar order, for the Server picker.
+/// The picker identifies a Server by its label, so two Servers sharing a name get the
+/// endpoint appended to stay distinguishable.
 fn server_choices(owner: &WeakEntity<Condr>, cx: &App) -> (Vec<ConnectionKey>, Vec<SharedString>) {
     owner
         .upgrade()
         .map(|owner| {
-            owner
-                .read(cx)
-                .connections
+            let connections = &owner.read(cx).connections;
+            connections
                 .iter()
-                .map(|connection| (connection.key, SharedString::from(connection.label.clone())))
+                .map(|connection| {
+                    let duplicated = connections
+                        .iter()
+                        .filter(|other| other.label == connection.label)
+                        .count()
+                        > 1;
+                    let label = if duplicated {
+                        let endpoint = match &connection.endpoint {
+                            Endpoint::Local(path) => path.display().to_string(),
+                            Endpoint::Tcp(address) => address.to_string(),
+                        };
+                        format!("{} ({endpoint})", connection.label)
+                    } else {
+                        connection.label.clone()
+                    };
+                    (connection.key, SharedString::from(label))
+                })
                 .unzip()
         })
         .unwrap_or_default()
@@ -488,6 +505,12 @@ impl SettingsWindow {
         let (keys, labels) = server_choices(&self.owner, cx);
         if labels == self.server_labels && keys == self.server_keys {
             return;
+        }
+        // A removed Server falls back to the first one, shell draft included.
+        if !keys.contains(&self.selected_server)
+            && let Some(&first) = keys.first()
+        {
+            self.select_server(first, cx);
         }
         let selected = keys
             .iter()
