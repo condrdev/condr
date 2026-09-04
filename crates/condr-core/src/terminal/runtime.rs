@@ -16,7 +16,7 @@ pub struct TerminalRuntime {
     input: TerminalInput,
     reported_mouse_press: Mutex<Option<ReportedMousePress>>,
     resize: Arc<ResizeControl>,
-    child: Option<Box<dyn Child + Send + Sync>>,
+    child: SharedChild,
     process_shutdown: ProcessShutdownState,
     reader: Option<JoinHandle<io::Result<()>>>,
     writer: Option<JoinHandle<io::Result<()>>>,
@@ -217,6 +217,18 @@ impl TerminalRuntime {
             }
         };
 
+        let child = Arc::new(Mutex::new(Some(child)));
+        #[cfg(unix)]
+        let exit_signal = reader_cancel.try_clone()?;
+        #[cfg(not(unix))]
+        let exit_signal = update_sender.clone();
+        let _ = thread::Builder::new()
+            .name("condr-pty-child-watch".into())
+            .spawn({
+                let child = Arc::downgrade(&child);
+                move || child_exit_watch(child, exit_signal)
+            });
+
         Ok(Self {
             terminal,
             master: Some(master),
@@ -233,7 +245,7 @@ impl TerminalRuntime {
             input,
             reported_mouse_press: Mutex::new(None),
             resize,
-            child: Some(child),
+            child,
             process_shutdown: ProcessShutdownState::default(),
             reader: Some(reader_thread),
             writer: Some(writer_thread),
@@ -265,7 +277,7 @@ impl TerminalRuntime {
         TerminalCwdProbe {
             #[cfg(unix)]
             master: self.master.as_ref().map(Arc::downgrade),
-            process: if self.child.is_some() {
+            process: if lock_child(&self.child).is_some() {
                 self.process
             } else {
                 ProcessProbe::new(None)
@@ -283,7 +295,12 @@ impl TerminalRuntime {
                     .lock()
                     .expect("terminal state lock poisoned")
                     .mode();
-                if modifiers.shift
+                let only_shift = modifiers
+                    == TerminalModifiers {
+                        shift: true,
+                        ..TerminalModifiers::default()
+                    };
+                if only_shift
                     && !modes.contains(TermMode::ALT_SCREEN)
                     && matches!(key, TerminalKey::PageUp | TerminalKey::PageDown)
                 {
@@ -713,19 +730,21 @@ impl TerminalRuntime {
     }
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
-        let status = self
-            .child
-            .as_mut()
-            .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?
-            .wait()?;
-        self.child = None;
+        let status = {
+            let mut child = lock_child(&self.child);
+            let status = child
+                .as_mut()
+                .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?
+                .wait()?;
+            *child = None;
+            status
+        };
         self.finish_io()?;
         Ok(status)
     }
 
     pub fn shutdown(&mut self) -> io::Result<ExitStatus> {
-        let mut child = self
-            .child
+        let mut child = lock_child(&self.child)
             .take()
             .ok_or_else(|| io::Error::other("terminal child exit was already reported"))?;
         let status = self.stop_process_and_io(Some(&mut *child))?;
@@ -734,7 +753,7 @@ impl TerminalRuntime {
 
     /// Stops the Terminal runtime and releases its PTY resources. Repeated calls are harmless.
     pub fn close(&mut self) -> io::Result<()> {
-        if self.child.is_some() {
+        if lock_child(&self.child).is_some() {
             self.shutdown().map(drop)
         } else {
             self.stop_process_and_io(None).map(drop)
@@ -807,6 +826,48 @@ impl TerminalRuntime {
             combine_cleanup_results(writer_result, resize_result, "stop terminal resizer");
         combine_cleanup_results(writer_and_resize, reader_result, "stop terminal reader")
     }
+}
+
+type SharedChild = Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>;
+
+fn lock_child(child: &SharedChild) -> MutexGuard<'_, Option<Box<dyn Child + Send + Sync>>> {
+    child.lock().expect("terminal child lock poisoned")
+}
+
+const CHILD_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Notices the shell exiting even while a descendant keeps the PTY slave open, like
+/// herdr's child watcher. PTY EOF alone would then never come, so the pane would look
+/// alive forever and the child would stay unreaped. On Unix the watcher cancels the
+/// reader, which drains the remaining bytes and publishes the exit in order; ConPTY has
+/// no cancel, so the exit is published directly and `close` releases the reader.
+fn child_exit_watch(
+    child: Weak<Mutex<Option<Box<dyn Child + Send + Sync>>>>,
+    #[cfg(unix)] exit_signal: UnixStream,
+    #[cfg(not(unix))] exit_signal: mpsc::Sender<TerminalUpdate>,
+) {
+    loop {
+        let Some(child) = child.upgrade() else {
+            return;
+        };
+        {
+            let mut child = lock_child(&child);
+            let Some(child) = child.as_mut() else {
+                // Reaped by `wait` or `shutdown`.
+                return;
+            };
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {}
+                Err(_) => return,
+            }
+        }
+        thread::sleep(CHILD_EXIT_POLL_INTERVAL);
+    }
+    #[cfg(unix)]
+    let _ = exit_signal.shutdown(Shutdown::Both);
+    #[cfg(not(unix))]
+    let _ = exit_signal.send(TerminalUpdate::Exited);
 }
 
 fn live_mouse_position(

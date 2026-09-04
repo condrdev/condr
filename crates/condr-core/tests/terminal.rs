@@ -428,6 +428,34 @@ fn close_cancels_a_reader_when_a_descendant_keeps_the_slave_open() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn shell_exit_is_published_while_a_descendant_keeps_the_slave_open() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        "trap '' HUP; sleep 30 & printf 'last-words\r\n'; exit 0",
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    let updates = runtime.take_updates().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match updates.recv_timeout(remaining) {
+            Ok(TerminalUpdate::Exited) => break,
+            Ok(_) => {}
+            Err(_) => panic!("shell exit was not published while `sleep` held the PTY open"),
+        }
+    }
+    assert!(
+        runtime.visible_text().contains("last-words"),
+        "output written before exit was dropped: {:?}",
+        runtime.visible_text()
+    );
+    runtime.close().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn close_keeps_reading_until_a_delayed_hangup_tail_is_published() {
     let mut command = CommandBuilder::new("/bin/sh");
     command.args([
