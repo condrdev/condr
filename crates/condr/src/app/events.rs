@@ -655,8 +655,9 @@ impl Condr {
                         }
                     }
                     SessionEvent::AgentChanged { pane_id, agent } => {
-                        let visible = self.active_connection == key
-                            && self.target_pane == Some((key, pane_id));
+                        // `focused_terminal` is None while the window is inactive, so a
+                        // completion behind another window still shows as done.
+                        let visible = self.focused_terminal == Some((key, pane_id));
                         if let Some(agent) = agent {
                             self.connections[index].agents.insert(pane_id, agent);
                             self.connections[index]

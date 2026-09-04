@@ -197,9 +197,10 @@ impl Condr {
             .flatten();
         if focused != self.focused_terminal {
             self.focused_terminal = focused;
-            if let Some((key, pane_id)) = focused
-                && self.clear_pane_attention(key, pane_id)
-            {
+            if let Some((key, pane_id)) = focused {
+                // Returning to the window shows this Pane: its completion has been seen.
+                self.mark_pane_seen(key, pane_id);
+                self.clear_pane_attention(key, pane_id);
                 cx.notify();
             }
         }
