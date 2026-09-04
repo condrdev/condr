@@ -968,7 +968,7 @@ impl Condr {
                 IncomingEffect::default()
             }
             ServerMessage::ServerStopping => {
-                self.mark_disconnected(key, index, "condr-server stopped".into())
+                self.mark_disconnected(key, index, "Server stopped".into())
             }
             ServerMessage::Subscribed {
                 server_id,

@@ -17,8 +17,8 @@ env:
   RUST_VERSION: 1.95.0
 
 jobs:
-  linux-server:
-    name: Linux server (${{ matrix.arch }})
+  linux:
+    name: Linux server and CLI (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -36,28 +36,28 @@ jobs:
           rustup default "$RUST_VERSION"
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-      - name: Build server
+      - name: Build condr
         run: cargo build --release --locked -p condr-server
-      - name: Smoke test server
-        run: target/release/condr-server --help
-      - name: Package server
+      - name: Smoke test condr
+        run: target/release/condr server --help
+      - name: Package condr
         run: |
           short_sha="${GITHUB_SHA::12}"
-          package="condr-server-linux-${{ matrix.arch }}-${short_sha}"
+          package="condr-linux-${{ matrix.arch }}-${short_sha}"
           mkdir -p dist/condr
-          install -m 755 target/release/condr-server dist/condr/condr-server
+          install -m 755 target/release/condr dist/condr/condr
           install -m 644 LICENSE dist/condr/LICENSE
           printf '%s\n' "$GITHUB_SHA" > dist/condr/BUILD-COMMIT
           tar -C dist -czf "dist/${package}.tar.gz" condr
       - uses: actions/upload-artifact@v7
         with:
-          name: condr-server-linux-${{ matrix.arch }}
+          name: condr-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 1
 
   windows-bundle:
-    name: Windows GUI and server (x86_64)
+    name: Windows GUI, server and CLI (x86_64)
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7
@@ -68,26 +68,19 @@ jobs:
           rustup default $env:RUST_VERSION
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-      - name: Build GUI and server
-        run: cargo build --release --locked -p condr -p condr-server
-      - name: Smoke test server
-        run: target\release\condr-server.exe --help
-      - name: Smoke test CLI shim
-        shell: pwsh
-        run: |
-          Copy-Item "target\release\condr-shim.exe" "target\release\condr.com"
-          target\release\condr.com --version
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: Package GUI and server
+      - name: Build GUI and condr
+        run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Smoke test condr
+        run: target\release\condr.exe server --help
+      - name: Package GUI and condr
         shell: pwsh
         run: |
           $shortSha = $env:GITHUB_SHA.Substring(0, 12)
           $package = "condr-windows-x86_64-$shortSha"
           $stage = Join-Path "dist" "condr"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target\release\condr-gui.exe" $stage
           Copy-Item "target\release\condr.exe" $stage
-          Copy-Item "target\release\condr.com" $stage
-          Copy-Item "target\release\condr-server.exe" $stage
           Copy-Item "LICENSE" $stage
           Set-Content -Encoding ascii -Path (Join-Path $stage "BUILD-COMMIT") -Value $env:GITHUB_SHA
           Compress-Archive -Path $stage -DestinationPath "dist\$package.zip"
@@ -101,7 +94,7 @@ jobs:
   publish:
     name: Update rolling prerelease
     needs:
-      - linux-server
+      - linux
       - windows-bundle
     runs-on: ubuntu-24.04
     permissions:
@@ -115,15 +108,15 @@ jobs:
         run: |
           short_sha="${GITHUB_SHA::12}"
           test -f "dist/condr-windows-x86_64-${short_sha}.zip"
-          test -f "dist/condr-server-linux-x86_64-${short_sha}.tar.gz"
-          test -f "dist/condr-server-linux-aarch64-${short_sha}.tar.gz"
+          test -f "dist/condr-linux-x86_64-${short_sha}.tar.gz"
+          test -f "dist/condr-linux-aarch64-${short_sha}.tar.gz"
       - name: Publish Development Build
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           short_sha="${GITHUB_SHA::12}"
-          notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; update the Windows bundle and Linux server together."
+          notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; update the Windows bundle and the Linux build together."
 
           if gh release view dev >/dev/null 2>&1; then
             gh release upload dev dist/* --clobber

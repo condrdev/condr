@@ -37,10 +37,7 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
         .env(WORKSPACE_ENV, &workspace_path)
         .env("CONDR_SOCKET_PATH", &endpoint_path)
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
-        .env(
-            "CONDR_SERVER_EXECUTABLE",
-            env!("CARGO_BIN_EXE_condr-server"),
-        )
+        .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
         .output()
         .unwrap();
 
@@ -263,10 +260,7 @@ fn auto_started_server_survives_launcher_exit() {
         .env(DETACHED_HELPER_ENV, "1")
         .env("CONDR_SOCKET_PATH", &endpoint_path)
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
-        .env(
-            "CONDR_SERVER_EXECUTABLE",
-            env!("CARGO_BIN_EXE_condr-server"),
-        )
+        .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
         .status()
         .unwrap();
     assert!(status.success(), "launcher helper failed: {status}");
@@ -305,12 +299,12 @@ fn lifecycle_commands_manage_a_detached_server() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
-    let server = env!("CARGO_BIN_EXE_condr-server");
+    let server = env!("CARGO_BIN_EXE_condr");
     let endpoint = Endpoint::tcp(address);
     let guard = ServerGuard(endpoint.clone());
 
     let start = Command::new(server)
-        .arg("start")
+        .args(["server", "start"])
         .arg("--listen")
         .arg(address.to_string())
         .arg("--snapshot")
@@ -340,7 +334,7 @@ fn lifecycle_commands_manage_a_detached_server() {
     drop(client);
 
     let status = Command::new(server)
-        .arg("status")
+        .args(["server", "status"])
         .arg("--listen")
         .arg(address.to_string())
         .status()
@@ -348,7 +342,7 @@ fn lifecycle_commands_manage_a_detached_server() {
     assert!(status.success(), "status failed: {status}");
 
     let second_start = Command::new(server)
-        .arg("start")
+        .args(["server", "start"])
         .arg("--listen")
         .arg(address.to_string())
         .arg("--snapshot")
@@ -362,7 +356,7 @@ fn lifecycle_commands_manage_a_detached_server() {
     );
 
     let stop = Command::new(server)
-        .arg("stop")
+        .args(["server", "stop"])
         .arg("--listen")
         .arg(address.to_string())
         .status()
@@ -372,7 +366,7 @@ fn lifecycle_commands_manage_a_detached_server() {
     guard.disarm();
 
     let stopped_status = Command::new(server)
-        .arg("status")
+        .args(["server", "status"])
         .arg("--listen")
         .arg(address.to_string())
         .status()

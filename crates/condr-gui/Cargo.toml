@@ -1,20 +1,15 @@
 [package]
-name = "condr"
+name = "condr-gui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
-default-run = "condr"
 
 [[bin]]
-name = "condr"
+name = "condr-gui"
 path = "src/main.rs"
-
-[[bin]]
-name = "condr-shim"
-path = "src/shim.rs"
 
 [features]
 test-support = ["gpui/test-support"]
@@ -22,7 +17,6 @@ test-support = ["gpui/test-support"]
 [dependencies]
 async-channel.workspace = true
 atomicwrites.workspace = true
-clap.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true
@@ -34,6 +28,5 @@ smol_str.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 
-[lints.rust]
-# workspace 级别是 forbid;本 crate 降为 deny,唯一豁免是 cli.rs 的 AttachConsole FFI。
-unsafe_code = "deny"
+[lints]
+workspace = true

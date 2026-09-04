@@ -4,7 +4,7 @@
 
 Condr MVP is a native GUI client for organizing ordinary shell terminals across one or more connected Servers, Workspaces, Tabs, and split Panes. An agent CLI is an optional process that the user starts inside a Terminal; Condr never selects or launches one automatically.
 
-The GUI discovers an existing local `condr-server` or starts the same standalone server used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Workspace…`, which prompts for an absolute Root Directory in that Server's filesystem namespace; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
+The GUI discovers an existing local Server or starts one with `condr server run`, the same binary used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Workspace…`, which prompts for an absolute Root Directory in that Server's filesystem namespace; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
 
 ## Architecture Boundary
 
@@ -14,7 +14,7 @@ The GUI discovers an existing local `condr-server` or starts the same standalone
 | `condr-server` | Stable Server identity, Session registry, live Terminal runtimes, protocol endpoint, client synchronization, Session Snapshot persistence | GPUI rendering, window focus, local-only behavior |
 | `condr` | Connections to one or more Servers, local Server discovery/start, GPUI window and terminal element, input routing, Start Page, sidebar, Tab row, Dock projection | Authoritative domain state, PTY ownership, implicit Server shutdown |
 
-`condr-core` and `condr-server` run Tokio; `condr` uses the GPUI executor. The wire protocol is transport-independent: length-prefixed `bincode + serde` frames, a `Hello`/`Welcome` handshake, strict protocol-version rejection, and bounded frame sizes. Local connections use a private `interprocess` endpoint (Unix domain socket or Windows named pipe); remote MVP connections use an explicitly configured trusted TCP endpoint, normally a Server loopback listener forwarded through an external SSH TCP tunnel. Both paths carry the same protocol and server behavior; the local Server does not expose a public listener, and application authentication/authorization is deferred.
+`condr-core` and `condr-server` run Tokio; `condr-gui` uses the GPUI executor. The wire protocol is transport-independent: length-prefixed `bincode + serde` frames, a `Hello`/`Welcome` handshake, strict protocol-version rejection, and bounded frame sizes. Local connections use a private `interprocess` endpoint (Unix domain socket or Windows named pipe); remote MVP connections use an explicitly configured trusted TCP endpoint, normally a Server loopback listener forwarded through an external SSH TCP tunnel. Both paths carry the same protocol and server behavior; the local Server does not expose a public listener, and application authentication/authorization is deferred.
 
 The Server continues consuming PTY output and updating VT state with no clients connected. Reconnecting to a running Server first receives a one-shot authoritative bootstrap (stable Server identity plus runtime epoch, Session/layout state, active selections, focus, cwd, each Pane's live terminal view, foreground shell/Agent identity and status), then subscribes to ordered reliable events and a coalesced terminal visual stream; no shell or Agent is recreated. The identity/epoch pair lets the GUI distinguish a live reconnect from a replacement Server after restart. The server owns the event order and is the only authority for layout mutations. MVP has one active controller per Server/Session; a newly attached controller may supersede the previous one, while collaborative multi-client control is not guaranteed. This connection synchronization is distinct from durable Session Snapshot restore after a Server restart.
 
@@ -51,11 +51,11 @@ Run:
 cargo fmt --all -- --check
 cargo clippy -p condr-core -p condr-server --all-targets -- -D warnings
 cargo test -p condr-core -p condr-server
-cargo test -p condr --features test-support
+cargo test -p condr-gui --features test-support
 ```
 
 The GUI test-support suite runs headless with GPUI's `TestPlatform`, but starts a real
-`condr-server` over a local IPC endpoint. It drives the same Root, buttons, keyboard
+Server (`condr server run`) over a local IPC endpoint. It drives the same Root, buttons, keyboard
 shortcuts, Session/Layout protocol, PTY, and terminal rendering path as the desktop client;
 it does not replace the small Windows ConPTY/window-manager smoke test.
 
@@ -84,7 +84,7 @@ Record the Windows version, commit, Rust toolchain, shell, GPU, Server endpoint,
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace
-cargo run -p condr
+cargo run -p condr-gui
 ```
 
 - First launch discovers or starts one detached local Server, shows Start Page, and starts no shell. `New Workspace…` uses the native directory picker for Local and a Server-path text field for TCP/SSH-tunnel connections, then opens a shell in the validated absolute Root Directory. It does not launch an agent CLI.

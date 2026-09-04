@@ -44,12 +44,12 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 
 ### 架构与工程结构
 
-Condr 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `condr-server` 后连接:
+Condr 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `condr server` 后连接。编排能力全部在 Server,所以 CLI 和 Server 是同一个二进制 `condr`;GUI 是独立二进制 `condr-gui`,只是 Server 的一个 client:
 
 ```
 crates/condr-core    # 领域、协议、PTY、VT、agent 检测、Git — 无 GUI 依赖,headless 可测
-crates/condr-server  # 独立进程,拥有 Session、Terminal runtime、持久化与连接
-crates/condr     # 纯 client,连接一个或多个 server,负责 GPUI 渲染
+crates/condr-server  # 产出 `condr`:Server 进程(`condr server …`)与 CLI 子命令;拥有 Session、Terminal runtime、持久化与连接
+crates/condr-gui     # 产出 `condr-gui`:纯 client,连接一个或多个 server,负责 GPUI 渲染
 ```
 
 GUI 关闭只断开连接。server、PTY、agent 与 Session 继续运行;重新打开 GUI 时优先连接已有本地 server。停止 server 是显式操作。
@@ -91,7 +91,7 @@ cargo fmt              # 格式化
 - 终端视觉更新使用独立于可靠 Session event cursor 的 per-client stream:每个 client writer 只有一个可丢弃的批量视觉槽,可靠消息优先。只有视觉帧成功入槽后才能推进该 client 的 baseline;槽满时只记录待刷新的 Pane,writer drain 后必须从 Server 权威 VT 状态重新生成最新帧。Bootstrap 必须清空排队视觉帧并重置 baseline;GUI 检测到 revision gap 时只请求一次新 Bootstrap。
 - 小范围终端变化不得使整屏 shaping cache 失效。缓存按 cell/row/run 的实际内容与样式失效;避免逐帧整屏字符串分配、整屏 shaping 和不必要的逐 cell paint。全量 view 成为瓶颈时,优先引入 per-client baseline/damage 增量,同时保持 reconnect bootstrap 正确。
 - 拖选进行中等纯 GUI 交互必须留在 Client 本地;拖选结束后的选择交给 Server 的 VT 跟踪(随输出滚动、resize/alt screen 时清除),视图帧携带裁剪到 viewport 的选择,Client 绘制它并用它复制。持续终端输出时也要复用未变化的渲染缓存,不能只优化静止画面。
-- 普通开发命令 `cargo run -p condr` 也必须具备可用帧率。不要移除根 `Cargo.toml` 中 GPUI、文本 shaping、VT 和 Condr 热路径的 dev profile 优化,除非有等效替代并完成 Windows 实测。
+- 普通开发命令 `cargo run -p condr-gui` 也必须具备可用帧率。不要移除根 `Cargo.toml` 中 GPUI、文本 shaping、VT 和 Condr 热路径的 dev profile 优化,除非有等效替代并完成 Windows 实测。
 - 性能相关变更至少覆盖:burst wakeup 合并到最新 revision、尾帧不丢、跨 revision 未变化 cell 不重复 shaping、真实 GPUI 拖选。静止终端上的单次拖选测试不足以证明性能;Windows 验收还需在代表性 agent 动画/高频输出下手动观察交互和帧率。
 - 优化前先定位 parse、snapshot/serialization、事件队列、prepaint/shaping、paint 中的实际热点。可以参考 herdr 的 render baseline/frame coalescing;Zed `terminal`/`terminal_view` 仅可参考思路,继续遵守 GPL-3.0 代码禁止复制的许可证边界。
 

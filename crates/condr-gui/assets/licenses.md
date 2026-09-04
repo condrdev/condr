@@ -211,7 +211,7 @@ the assets and Rust crates it ships with.
 ## Terminal color schemes
 
 Copied from iTerm2-Color-Schemes, https://github.com/mbadolato/iTerm2-Color-Schemes.
-See crates/condr/assets/color_schemes/README.md for the exact upstream commit.
+See crates/condr-gui/assets/color_schemes/README.md for the exact upstream commit.
 
 MIT License
 

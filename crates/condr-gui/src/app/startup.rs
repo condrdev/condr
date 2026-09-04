@@ -158,8 +158,7 @@ pub(super) fn connect_to_server_with<T>(
             (connected_endpoint, result)
         }
         Err(error) => {
-            let discovery_error =
-                format!("Failed to start or discover local condr-server: {error}");
+            let discovery_error = format!("Failed to start or discover the local Server: {error}");
             let result = connect(&endpoint).map_err(|_| discovery_error);
             (endpoint, result)
         }

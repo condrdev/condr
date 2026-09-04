@@ -6,7 +6,7 @@ Condr 在私有 GitHub 仓库中维护一个滚动的 `Development Build` Pre-re
 
 - `dev` 是可变 tag，指向当前选定的 `main` commit。
 - 普通 commit 和 push 不发布；只有移动并推送 `dev` tag 才触发 GitHub Actions。
-- 每次发布同时生成 Windows x86_64 GUI/Server bundle、Linux x86_64 Server 和 Linux aarch64 Server。
+- 每次发布同时生成 Windows x86_64 bundle（`condr-gui` + `condr`）、Linux x86_64 和 Linux aarch64 的 `condr`（Server + CLI）。
 - 三个 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨开发版本兼容承诺，必须一起更新。
 
@@ -38,13 +38,16 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，但 Pane 的 cwd 只能靠进程探测。
 
-### `condr` 命令行
+### 两个二进制
 
-`condr` 在三个平台上都是同一个二进制：不带参数启动 GUI，带参数是 CLI（目前只有 `--help`、`--version`，#27 的子命令陆续加入）。Linux / macOS 无特殊处理。Windows 上它是 GUI 子系统程序，双击不会出现控制台；CLI 模式先 `AttachConsole` 到父 shell 的控制台再输出，所以 Git Bash、脚本和捕获输出的 agent 都正常；cmd 和交互式 PowerShell 不等待 GUI 子系统进程，所以 Windows bundle 里还有一个 console 子系统的壳 `condr.com`：`PATHEXT` 里 `.com` 排在 `.exe` 前，shell 里敲 `condr` 命中它，它以相同参数运行 `condr.exe`、等待并转发退出码；不带参数时只拉起 GUI 就返回。双击和快捷方式仍直接打开 `condr.exe`。本地开发时 Cargo 产出的是 `condr-shim.exe`，需要 `Copy-Item targetdebugndr-shim.exe targetdebugndr.com`。
+- `condr`：Server 和命令行。`condr server start|status|stop|run` 管理 Server；#27 的 `pane` / `agent` 子命令陆续加入。编排能力全部在 Server，所以 CLI 和 Server 是同一个二进制，无头 Linux 只需部署这一个文件。
+- `condr-gui`：GUI，只是 Server 的一个 client。它发现已有的本地 Server，或者用同目录下的 `condr server run` 启动一个。
+
+三个平台一致。Windows 上 `condr-gui.exe` 是 GUI 子系统程序，双击不出现控制台；`condr.exe` 是普通控制台程序。安装器和快捷方式负责把 GUI 以 Condr 的名字露给用户。
 
 ### Pane 内的环境变量
 
-Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径，TCP Server 为 `tcp://host:port`），并把 `condr-server` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
+Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径，TCP Server 为 `tcp://host:port`），并把 `condr` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
 
 ### Agent 状态检测规则
 
@@ -77,9 +80,9 @@ $archive = Get-ChildItem .\condr-download\condr-windows-x86_64-*.zip | Select-Ob
 Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
 ```
 
-运行 `condr-dev\condr\condr.exe` 启动 GUI；在 shell 里用 `condr-dev\condr\condr.com --help` 走命令行。`condr-server.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者从该目录启动一个新的 Server。需要显式管理 Server 时，使用同目录下的 `condr-server.exe start|status|stop|run`。
+运行 `condr-dev\condr\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr\condr.exe server start|status|stop|run`。
 
-更新前先运行 `condr-server.exe stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
+更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
 ## Linux Server
 
@@ -91,18 +94,18 @@ Linux artifacts are built on Ubuntu 22.04 and require glibc 2.35 or newer.
 arch=$(uname -m)
 mkdir -p condr-download
 gh release download dev --repo condrdev/condr --dir condr-download \
-  --pattern "condr-server-linux-${arch}-*.tar.gz" --clobber
-archive=$(find "$PWD/condr-download" -name "condr-server-linux-${arch}-*.tar.gz" -print -quit)
+  --pattern "condr-linux-${arch}-*.tar.gz" --clobber
+archive=$(find "$PWD/condr-download" -name "condr-linux-${arch}-*.tar.gz" -print -quit)
 tar -C condr-download -xzf "$archive"
 ```
 
 使用 loopback listener 后台启动远端 Server，避免暴露未鉴权端口。默认 snapshot 和 log 会写入 XDG state 目录：
 
 ```bash
-./condr-download/condr/condr-server start --listen 127.0.0.1:4242
+./condr-download/condr/condr server start --listen 127.0.0.1:4242
 ```
 
-调试或交给外部服务管理器时，使用 `run --listen 127.0.0.1:4242` 在前台运行。
+调试或交给外部服务管理器时，使用 `server run --listen 127.0.0.1:4242` 在前台运行。
 
 在 Windows 建立 SSH tunnel：
 
@@ -113,7 +116,7 @@ ssh -N -L 4242:127.0.0.1:4242 <linux-host>
 然后在 Condr 中添加 TCP Server `127.0.0.1:4242`。停止 Server 时，在 Linux 的另一个 shell 运行：
 
 ```bash
-./condr-download/condr/condr-server stop --listen 127.0.0.1:4242
+./condr-download/condr/condr server stop --listen 127.0.0.1:4242
 ```
 
 ## 更新检查

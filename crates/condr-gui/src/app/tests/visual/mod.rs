@@ -13,9 +13,9 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneId, PaneLayout, Session, TabId,
-    TerminalCell, TerminalColor, TerminalCommand, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMousePosition, TerminalMouseTracking, TerminalPosition, TerminalSelection,
-    TerminalSide, TerminalSize, TerminalView, TerminalViewFrame, WorkspaceId,
+    TerminalCell, TerminalColor, TerminalCommand, TerminalMousePosition, TerminalMouseTracking,
+    TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
+    TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 use gpui::{
@@ -30,9 +30,9 @@ use gpui_component::{ActiveTheme as _, Root, WindowExt as _};
 use super::super::{
     Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
     DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
-    PendingWorkspaceSelection, ReportedTerminalMouseMotion, ServerConnection, TerminalFont,
-    TerminalPalette, color_scheme_is_dirty, default_window_options, reset_color_scheme,
-    select_appearance, select_server_shell, select_settings_server, select_terminal_font_family,
+    PendingWorkspaceSelection, ServerConnection, TerminalFont, TerminalPalette,
+    color_scheme_is_dirty, default_window_options, reset_color_scheme, select_appearance,
+    select_server_shell, select_settings_server, select_terminal_font_family,
     select_terminal_font_size, selected_appearance, server_shell, step_terminal_font_size,
     terminal_font_family, terminal_font_size,
 };

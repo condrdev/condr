@@ -1,4 +1,9 @@
 use super::*;
+// Only the unix-only right-click test builds a reported motion by hand.
+#[cfg(unix)]
+use super::super::super::ReportedTerminalMouseMotion;
+#[cfg(unix)]
+use condr_core::{TerminalMouseButton, TerminalMouseEvent};
 
 #[cfg(unix)]
 #[test]

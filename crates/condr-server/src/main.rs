@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use condr_server::{Endpoint, ServerConfig};
 
-/// The Condr server: owns sessions, terminals and agents; the GUI is one of its clients.
+/// Condr: the Server and its command line. The Server owns sessions, terminals and
+/// agents; the GUI and the CLI subcommands are its clients.
 #[derive(Parser)]
-#[command(name = "condr-server", bin_name = "condr-server", version)]
+#[command(name = "condr", bin_name = "condr", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -14,6 +15,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage the Server on this machine
+    #[command(subcommand)]
+    Server(ServerCommand),
+}
+
+#[derive(Subcommand)]
+enum ServerCommand {
     /// Start a detached server unless one already answers at the endpoint
     Start {
         #[command(flatten)]
@@ -68,12 +76,13 @@ impl EndpointArgs {
 }
 
 fn main() {
-    std::process::exit(dispatch(Cli::parse().command));
+    let Command::Server(command) = Cli::parse().command;
+    std::process::exit(dispatch(command));
 }
 
-fn dispatch(command: Command) -> i32 {
+fn dispatch(command: ServerCommand) -> i32 {
     match command {
-        Command::Start { endpoint, snapshot } => {
+        ServerCommand::Start { endpoint, snapshot } => {
             match condr_server::ensure_server(server_config(endpoint.resolve(), snapshot)) {
                 Ok(endpoint) => {
                     println!("condr-server: running at {}", endpoint_text(&endpoint));
@@ -85,7 +94,7 @@ fn dispatch(command: Command) -> i32 {
                 }
             }
         }
-        Command::Status { endpoint } => {
+        ServerCommand::Status { endpoint } => {
             let endpoint = endpoint.resolve();
             match condr_server::probe_server(&endpoint) {
                 Ok(()) => {
@@ -98,7 +107,7 @@ fn dispatch(command: Command) -> i32 {
                 }
             }
         }
-        Command::Stop { endpoint } => match condr_server::stop_server(&endpoint.resolve()) {
+        ServerCommand::Stop { endpoint } => match condr_server::stop_server(&endpoint.resolve()) {
             Ok(()) => {
                 println!("condr-server: stopping");
                 0
@@ -108,7 +117,7 @@ fn dispatch(command: Command) -> i32 {
                 1
             }
         },
-        Command::Run {
+        ServerCommand::Run {
             endpoint,
             snapshot,
             detached,
@@ -154,14 +163,18 @@ fn endpoint_text(endpoint: &Endpoint) -> String {
 mod tests {
     use super::*;
 
-    fn parse(args: &[&str]) -> Result<Command, clap::Error> {
-        Cli::try_parse_from(std::iter::once("condr-server").chain(args.iter().copied()))
-            .map(|cli| cli.command)
+    fn parse(args: &[&str]) -> Result<ServerCommand, clap::Error> {
+        Cli::try_parse_from(["condr", "server"].into_iter().chain(args.iter().copied())).map(
+            |cli| {
+                let Command::Server(command) = cli.command;
+                command
+            },
+        )
     }
 
     #[test]
     fn lifecycle_commands_parse_their_supported_options() {
-        let Command::Start { endpoint, snapshot } = parse(&[
+        let ServerCommand::Start { endpoint, snapshot } = parse(&[
             "start",
             "--listen",
             "127.0.0.1:4242",
@@ -177,7 +190,7 @@ mod tests {
         );
         assert_eq!(snapshot, Some("state.snapshot".into()));
 
-        let Command::Run {
+        let ServerCommand::Run {
             endpoint, detached, ..
         } = parse(&["run", "--endpoint", "test.sock", "--detached"]).unwrap()
         else {
@@ -186,17 +199,19 @@ mod tests {
         assert_eq!(endpoint.resolve(), Endpoint::local("test.sock"));
         assert!(detached);
 
-        let Command::Status { endpoint } = parse(&["status"]).unwrap() else {
+        let ServerCommand::Status { endpoint } = parse(&["status"]).unwrap() else {
             panic!("expected status");
         };
         assert_eq!(endpoint.resolve(), ServerConfig::default().endpoint);
-        assert!(matches!(parse(&["stop"]), Ok(Command::Stop { .. })));
+        assert!(matches!(parse(&["stop"]), Ok(ServerCommand::Stop { .. })));
     }
 
     #[test]
     fn invalid_command_option_combinations_are_rejected() {
         assert!(parse(&[]).is_err());
         assert!(parse(&["launch"]).is_err());
+        // The lifecycle verbs only exist under `server`.
+        assert!(Cli::try_parse_from(["condr", "start"]).is_err());
         assert!(
             parse(&[
                 "run",

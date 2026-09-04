@@ -99,7 +99,7 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     })?;
     let stderr = log.try_clone()?;
     let mut command = Command::new(&server_executable);
-    command.arg("run");
+    command.args(["server", "run"]);
     match &endpoint {
         Endpoint::Local(path) => {
             command.arg("--endpoint").arg(path);
@@ -125,7 +125,7 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
         io::Error::new(
             error.kind(),
             format!(
-                "failed to start condr-server at {}: {error}",
+                "failed to start the Server with {}: {error}",
                 server_executable.display()
             ),
         )
@@ -169,11 +169,8 @@ pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
     }
 
     let current_executable = std::env::current_exe()?;
-    let server_name = if cfg!(windows) {
-        "condr-server.exe"
-    } else {
-        "condr-server"
-    };
+    // The Server and the CLI share the `condr` binary, which the GUI ships beside itself.
+    let server_name = if cfg!(windows) { "condr.exe" } else { "condr" };
     let sibling = current_executable
         .parent()
         .map(|parent| parent.join(server_name))
@@ -181,7 +178,7 @@ pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
     sibling.is_file().then_some(sibling).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "condr-server is not installed beside the GUI; build or install the standalone server",
+            "condr is not installed beside condr-gui; build or install the `condr` binary",
         )
     })
 }
