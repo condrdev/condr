@@ -171,7 +171,11 @@ fn terminal_drag_selection_updates_locally() {
                 .active_workspace()
                 .map(|workspace| workspace.active_tab().focused_pane().id())
         });
-        pane_id.is_some_and(|pane_id| window.debug_bounds(terminal_selector(pane_id)).is_some())
+        pane_id.is_some_and(|pane_id| {
+            // The terminal view arrives with its first frame, after the structure.
+            window.debug_bounds(terminal_selector(pane_id)).is_some()
+                && window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+        })
     }));
     let pane_id = pane_id.unwrap();
     let render_cache = window.read(|app| {
@@ -398,7 +402,11 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
                 .active_workspace()
                 .map(|workspace| workspace.active_tab().focused_pane().id())
         });
-        pane_id.is_some_and(|pane_id| window.debug_bounds(terminal_selector(pane_id)).is_some())
+        pane_id.is_some_and(|pane_id| {
+            // The terminal view arrives with its first frame, after the structure.
+            window.debug_bounds(terminal_selector(pane_id)).is_some()
+                && window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+        })
     }));
     let pane_id = pane_id.unwrap();
     window.update(|_, cx| {
@@ -526,7 +534,11 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
                 .active_workspace()
                 .map(|workspace| workspace.active_tab().focused_pane().id())
         });
-        pane_id.is_some_and(|pane_id| window.debug_bounds(terminal_selector(pane_id)).is_some())
+        pane_id.is_some_and(|pane_id| {
+            // The terminal view arrives with its first frame, after the structure.
+            window.debug_bounds(terminal_selector(pane_id)).is_some()
+                && window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+        })
     }));
     let pane_id = pane_id.unwrap();
 
@@ -733,7 +745,11 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                 .active_workspace()
                 .map(|workspace| workspace.active_tab().focused_pane().id())
         });
-        pane_id.is_some_and(|pane_id| window.debug_bounds(terminal_selector(pane_id)).is_some())
+        pane_id.is_some_and(|pane_id| {
+            // The terminal view arrives with its first frame, after the structure.
+            window.debug_bounds(terminal_selector(pane_id)).is_some()
+                && window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+        })
     }));
     let pane_id = pane_id.unwrap();
     let uri = "https://example.com/path";
