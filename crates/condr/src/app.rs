@@ -132,6 +132,26 @@ pub(super) struct TerminalComposition {
     pub(super) selected_range: Range<usize>,
 }
 
+/// A Pane's terminal as this Client holds it. The view is shared with the Panel that
+/// paints it, so a frame redraw clones a pointer, not the cell grid; frames mutate it in
+/// place through `Arc::make_mut` once the previous frame's element is gone.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ClientTerminal {
+    pub(super) view: Arc<condr_core::TerminalView>,
+    pub(super) exited: bool,
+    pub(super) title: Option<String>,
+}
+
+impl From<PaneTerminalSnapshot> for ClientTerminal {
+    fn from(snapshot: PaneTerminalSnapshot) -> Self {
+        Self {
+            view: Arc::new(snapshot.view),
+            exited: snapshot.exited,
+            title: snapshot.title,
+        }
+    }
+}
+
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
 const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
 const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
@@ -247,7 +267,7 @@ struct ServerConnection {
     session_id: Option<SessionId>,
     sequence: u64,
     snapshot: SessionSnapshot,
-    terminals: HashMap<PaneId, PaneTerminalSnapshot>,
+    terminals: HashMap<PaneId, ClientTerminal>,
     terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     agents: HashMap<PaneId, AgentSnapshot>,
     agent_trackers: HashMap<PaneId, AgentTracker>,
@@ -393,7 +413,7 @@ impl ServerConnection {
             let pane_id = terminal.pane_id;
             self.terminal_hyperlinks
                 .insert(pane_id, TerminalHyperlinkBudget::new(&mut terminal.view));
-            self.terminals.insert(pane_id, terminal);
+            self.terminals.insert(pane_id, terminal.into());
         }
         self.agents = bootstrap
             .agents
@@ -559,6 +579,7 @@ pub(crate) struct Condr {
     _settings_window_closed: Option<Subscription>,
     /// The pending debounced font save; replacing it cancels the previous one.
     _font_save: Option<Task<()>>,
+    _shell_save: Option<Task<()>>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     app_error: Option<String>,
@@ -683,6 +704,7 @@ impl Condr {
             settings_view: None,
             _settings_window_closed: None,
             _font_save: None,
+            _shell_save: None,
             _quit_subscription: quit_subscription,
             app_error: config_error,
             _window_activation_subscription: window_activation_subscription,

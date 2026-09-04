@@ -222,7 +222,22 @@ impl Condr {
 
     /// Asks a Server to store a new shell preference. The stored value comes back as a
     /// `ServerSettingsChanged` event; nothing is assumed locally.
-    pub(super) fn set_server_shell(&mut self, key: ConnectionKey, shell: &str) {
+    pub(super) fn set_server_shell(
+        &mut self,
+        key: ConnectionKey,
+        shell: &str,
+        cx: &mut Context<Self>,
+    ) {
+        // Debounced like the font: the Server persists every value it receives, so a
+        // half-typed path must not reach config.toml or the next new terminal.
+        let shell = shell.to_owned();
+        self._shell_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
+            let _ = this.update(cx, |this, _| this.send_server_shell(key, &shell));
+        }));
+    }
+
+    fn send_server_shell(&mut self, key: ConnectionKey, shell: &str) {
         let Some(connection) = self
             .connections
             .iter_mut()
@@ -233,8 +248,6 @@ impl Condr {
         let Some(server_id) = connection.server_id else {
             return;
         };
-        // ponytail: one message per keystroke; the Server ignores unchanged values.
-        // Debounce like the font save if remote round-trips ever show.
         connection.send(ClientMessage::SetServerSettings {
             server_id,
             shell: shell.to_owned(),
@@ -699,7 +712,7 @@ pub(super) fn select_server_shell(
         let key = this.selected_server;
         let _ = this
             .owner
-            .update(cx, |owner, _| owner.set_server_shell(key, &shell));
+            .update(cx, |owner, cx| owner.set_server_shell(key, &shell, cx));
     });
 }
 

@@ -255,7 +255,7 @@ impl Condr {
         &self,
         connection_key: ConnectionKey,
         pane_id: PaneId,
-    ) -> Option<&PaneTerminalSnapshot> {
+    ) -> Option<&ClientTerminal> {
         self.connection(connection_key)?.terminals.get(&pane_id)
     }
 

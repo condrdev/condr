@@ -256,7 +256,7 @@ pub(super) fn publish_terminal_batch(
 }
 
 pub(super) fn apply_terminal_frame_batch(
-    terminals: &mut HashMap<PaneId, PaneTerminalSnapshot>,
+    terminals: &mut HashMap<PaneId, ClientTerminal>,
     terminal_hyperlinks: &mut HashMap<PaneId, TerminalHyperlinkBudget>,
     panes: Vec<PaneTerminalFrame>,
 ) -> Result<Vec<PaneId>, ()> {
@@ -279,13 +279,13 @@ pub(super) fn apply_terminal_frame_batch(
         match pane.frame {
             TerminalViewFrame::Full(mut view) => {
                 terminal_hyperlinks.insert(pane.pane_id, TerminalHyperlinkBudget::new(&mut view));
-                terminal.view = view;
+                terminal.view = Arc::new(view);
             }
             TerminalViewFrame::Delta(delta) => {
                 terminal_hyperlinks
                     .get_mut(&pane.pane_id)
                     .expect("prevalidated terminal hyperlink budget still exists")
-                    .apply_delta(&mut terminal.view, delta)
+                    .apply_delta(Arc::make_mut(&mut terminal.view), delta)
                     .expect("prevalidated terminal delta remains valid");
             }
         }

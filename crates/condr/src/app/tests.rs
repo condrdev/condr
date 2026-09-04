@@ -13,6 +13,7 @@ use condr_core::{
 use condr_server::Endpoint;
 use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
+use super::ClientTerminal;
 use super::{
     ClientIo, CondrAssets, ConnectionStatus, FocusLeft, NextTab, OpenSettings, PreviousTab,
     ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
@@ -35,11 +36,16 @@ fn terminal_cell(text: &str) -> TerminalCell {
 }
 
 fn terminal_hyperlink_budgets(
-    terminals: &mut std::collections::HashMap<condr_core::PaneId, PaneTerminalSnapshot>,
+    terminals: &mut std::collections::HashMap<condr_core::PaneId, ClientTerminal>,
 ) -> std::collections::HashMap<condr_core::PaneId, TerminalHyperlinkBudget> {
     terminals
         .iter_mut()
-        .map(|(&pane_id, terminal)| (pane_id, TerminalHyperlinkBudget::new(&mut terminal.view)))
+        .map(|(&pane_id, terminal)| {
+            (
+                pane_id,
+                TerminalHyperlinkBudget::new(std::sync::Arc::make_mut(&mut terminal.view)),
+            )
+        })
         .collect()
 }
 
@@ -595,23 +601,23 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
     let mut terminals = std::collections::HashMap::from([
         (
             first_pane,
-            PaneTerminalSnapshot {
+            ClientTerminal::from(PaneTerminalSnapshot {
                 pane_id: first_pane,
                 view: first_view.clone(),
                 exited: false,
                 title: None,
                 attention: false,
-            },
+            }),
         ),
         (
             second_pane,
-            PaneTerminalSnapshot {
+            ClientTerminal::from(PaneTerminalSnapshot {
                 pane_id: second_pane,
                 view: second_view.clone(),
                 exited: false,
                 title: None,
                 attention: false,
-            },
+            }),
         ),
     ]);
     let batch = vec![
@@ -649,8 +655,8 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
     let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
 
     assert!(apply_terminal_frame_batch(&mut terminals, &mut terminal_hyperlinks, batch).is_err());
-    assert_eq!(terminals[&first_pane].view, first_view);
-    assert_eq!(terminals[&second_pane].view, second_view);
+    assert_eq!(*terminals[&first_pane].view, first_view);
+    assert_eq!(*terminals[&second_pane].view, second_view);
 }
 
 #[test]
@@ -658,13 +664,13 @@ fn terminal_frame_batch_bounds_hyperlinks_across_retained_deltas() {
     let pane_id = pane_id();
     let mut terminals = std::collections::HashMap::from([(
         pane_id,
-        PaneTerminalSnapshot {
+        ClientTerminal::from(PaneTerminalSnapshot {
             pane_id,
             view: terminal_view(1, "x"),
             exited: false,
             title: None,
             attention: false,
-        },
+        }),
     )]);
     let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
     let mut linked = terminal_cell("x");
@@ -702,13 +708,13 @@ fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
     view.cells[0].hyperlink = Some(uri.into());
     let mut terminals = std::collections::HashMap::from([(
         pane_id,
-        PaneTerminalSnapshot {
+        ClientTerminal::from(PaneTerminalSnapshot {
             pane_id,
             view,
             exited: false,
             title: None,
             attention: false,
-        },
+        }),
     )]);
     let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
     let mut linked = terminal_cell("b");

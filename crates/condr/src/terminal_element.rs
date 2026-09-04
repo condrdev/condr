@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use condr_core::protocol::RuntimeEpoch;
 use condr_core::{
@@ -99,7 +100,7 @@ pub(crate) struct TerminalElementProps {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) connection_key: ConnectionKey,
     pub(crate) pane_id: PaneId,
-    pub(crate) terminal: TerminalView,
+    pub(crate) terminal: Arc<TerminalView>,
     pub(crate) marked_text: Option<String>,
     pub(crate) selection: Option<TerminalSelection>,
     pub(crate) hovered_link: Option<HoveredTerminalLink>,
