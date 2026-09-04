@@ -195,7 +195,19 @@ fn bootstrap_for_session(connection: &ServerConnection, session: &Session) -> Se
             .expect("connected Server has a Session ID"),
         sequence: connection.sequence,
         snapshot: session.snapshot(),
-        terminals: connection.terminals.values().cloned().collect(),
+        terminals: connection
+            .terminals
+            .iter()
+            .map(
+                |(&pane_id, terminal)| condr_core::protocol::PaneTerminalSnapshot {
+                    pane_id,
+                    view: terminal.view.as_ref().clone(),
+                    exited: terminal.exited,
+                    title: terminal.title.clone(),
+                    attention: false,
+                },
+            )
+            .collect(),
         agents: connection
             .agents
             .iter()

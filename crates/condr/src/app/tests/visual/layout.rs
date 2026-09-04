@@ -1159,7 +1159,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                     connection.connect_generation,
                     connection.server_id.unwrap(),
                     connection.session_id.unwrap(),
-                    connection.terminals[&first_pane].view.clone(),
+                    connection.terminals[&first_pane].view.as_ref().clone(),
                 )
             };
             active_view.revision += 1;
@@ -1176,11 +1176,15 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 })),
                 cx,
             );
-            assert!(active.notify, "the mounted Dock must repaint for its Pane");
+            assert!(
+                !active.notify && !active.rebuild,
+                "a frame repaints its Panel entity only, never the root or the Dock"
+            );
 
             let inactive_pane = second_panes[0];
             let mut inactive_view = this.connection(1).unwrap().terminals[&inactive_pane]
                 .view
+                .as_ref()
                 .clone();
             inactive_view.revision += 1;
             let inactive = this.handle_incoming(
@@ -1514,6 +1518,12 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         " nu ",
         "the field keeps what was typed"
     );
+    // The value goes out after the same debounce as the font: let the task register its
+    // timer, then move the test clock past it.
+    window.run_until_parked();
+    window
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(300));
     assert!(
         wait_until_event_driven(window, |window| {
             window.read(|app| {
@@ -1525,6 +1535,10 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         "the Server must store the trimmed shell and publish it"
     );
     window.update(|_, cx| select_server_shell(&settings_view, "".into(), cx));
+    window.run_until_parked();
+    window
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(300));
     assert!(wait_until_event_driven(window, |window| {
         window.read(|app| {
             view.read(app)

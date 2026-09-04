@@ -253,10 +253,17 @@ impl Condr {
             dragging: click_count == 1,
             committed: false,
         });
-        // A single click clears the Server-tracked selection; a word or line becomes it.
-        let sent = self.terminal_command(key, pane_id, TerminalCommand::Select(multi_click_range));
-        if sent && let Some(selection) = &mut self.terminal_selection {
-            selection.committed = multi_click_range.is_some();
+        // A single click clears the Server-tracked selection (when there is one to clear);
+        // a word or line becomes it.
+        let server_selection = self
+            .terminal(key, pane_id)
+            .is_some_and(|terminal| terminal.view.selection.is_some());
+        if multi_click_range.is_some() || server_selection {
+            let sent =
+                self.terminal_command(key, pane_id, TerminalCommand::Select(multi_click_range));
+            if sent && let Some(selection) = &mut self.terminal_selection {
+                selection.committed = multi_click_range.is_some();
+            }
         }
         cx.notify();
     }

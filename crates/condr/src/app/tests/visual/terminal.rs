@@ -304,7 +304,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                     connection.connect_generation,
                     connection.server_id.unwrap(),
                     connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.clone(),
+                    connection.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             terminal_view.revision += 1;
@@ -340,7 +340,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
             pane_id: copied_pane,
             command: TerminalCommand::Copy { selection },
             ..
-        } if copied_pane == pane_id && selection.display_offset == 7
+        } if copied_pane == pane_id && selection.is_some_and(|selection| selection.display_offset == 7)
     ));
 }
 
@@ -440,7 +440,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
                     connection.connect_generation,
                     connection.server_id.unwrap(),
                     connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.clone(),
+                    connection.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             this.last_terminal_mouse_motion = Some(ReportedTerminalMouseMotion {
@@ -726,7 +726,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                     connection.connect_generation,
                     connection.server_id.unwrap(),
                     connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.clone(),
+                    connection.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             assert!(usize::from(terminal_view.size.columns) >= uri.len());
@@ -848,7 +848,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                     connection.connect_generation,
                     connection.server_id.unwrap(),
                     connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.clone(),
+                    connection.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             terminal_view.cells[usize::from(row) * usize::from(terminal_view.size.columns)
@@ -1188,6 +1188,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         hyperlink: None,
     };
     let terminal = TerminalView {
+        selection: None,
         revision: 1,
         size: TerminalSize::new(1, 2),
         display_offset: 0,
@@ -1244,6 +1245,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
 
     let linked_cache = Rc::new(RefCell::new(TerminalRenderCache::default()));
     let linked_block = TerminalView {
+        selection: None,
         revision: 2,
         size: TerminalSize::new(1, 1),
         display_offset: 0,
