@@ -116,7 +116,7 @@ fn local_server_helper() {
     let sequence = loop {
         if let ServerMessage::Event {
             sequence,
-            event: SessionEvent::LayoutChanged,
+            event: SessionEvent::LayoutChanged { .. },
             ..
         } = read_server(&mut first_stream)
         {
@@ -211,7 +211,7 @@ fn local_server_helper() {
     let sequence = loop {
         if let ServerMessage::Event {
             sequence,
-            event: SessionEvent::LayoutChanged,
+            event: SessionEvent::LayoutChanged { .. },
             ..
         } = read_server(&mut restarted_stream)
         {

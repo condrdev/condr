@@ -706,7 +706,8 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
     );
 
     state.begin_bootstrap(7);
-    state.publish_background(SessionEvent::LayoutChanged);
+    let event = state.layout_changed_event();
+    state.publish_background(event);
     state.broadcast_clipboard(pane_id, "during bootstrap".into());
     assert!(state.terminal_render_snapshot(7).is_none());
     assert_eq!(state.subscribers[&7].deferred_reliable.len(), 1);
@@ -726,7 +727,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
     assert!(matches!(
         event,
         ServerMessage::Event {
-            event: SessionEvent::LayoutChanged,
+            event: SessionEvent::LayoutChanged { .. },
             ..
         }
     ));

@@ -50,6 +50,7 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
             let generation = connection.connect_generation;
             let server_id = connection.server_id.unwrap();
             let session_id = connection.session_id.unwrap();
+            let snapshot = connection.snapshot.clone();
             assert!(connection.subscribed);
 
             for sequence in [
@@ -63,7 +64,10 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
                         server_id,
                         session_id,
                         sequence,
-                        event: SessionEvent::LayoutChanged,
+                        event: SessionEvent::LayoutChanged {
+                            snapshot: snapshot.clone(),
+                            zoomed_panes: Vec::new(),
+                        },
                     }),
                     cx,
                 );
@@ -92,6 +96,63 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
         }),
         "GUI did not restore its reliable subscription after a sequence gap"
     );
+}
+
+/// A layout change is applied from the event itself: no Bootstrap round trip, so the
+/// GUI never drops into the "not synchronized" state that dims every control.
+#[test]
+fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.connect_generation;
+            let server_id = connection.server_id.unwrap();
+            let session_id = connection.session_id.unwrap();
+            let sequence = connection.sequence + 1;
+            // The test Server starts empty; the event may announce a Workspace the GUI
+            // has never seen, exactly like a `condr workspace create` from a Pane.
+            let mut session = Session::restore(connection.snapshot.clone()).unwrap();
+            if session.active_workspace().is_none() {
+                session.create_workspace(std::env::temp_dir()).unwrap();
+            }
+            let tab_id = session.active_workspace().unwrap().active_tab().id();
+            assert!(session.rename_tab(tab_id, "renamed by event"));
+            let snapshot = session.snapshot();
+            assert!(connection.can_mutate());
+
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::Event {
+                    server_id,
+                    session_id,
+                    sequence,
+                    event: SessionEvent::LayoutChanged {
+                        snapshot: snapshot.clone(),
+                        zoomed_panes: Vec::new(),
+                    },
+                }),
+                cx,
+            );
+
+            let connection = this.connection(1).unwrap();
+            assert_eq!(
+                connection.snapshot, snapshot,
+                "the event's structure is applied"
+            );
+            assert_eq!(connection.sequence, sequence);
+            assert!(
+                connection.bootstrap_resync_session_id.is_none(),
+                "an in-sequence layout change must not request a Bootstrap"
+            );
+            assert!(connection.can_mutate(), "the UI stays enabled throughout");
+        });
+    });
 }
 
 #[test]

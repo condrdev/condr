@@ -177,6 +177,102 @@ impl Condr {
         active_projection_cleared
     }
 
+    /// Structure at `sequence` is now authoritative: projections whose Layout command
+    /// landed at or before it are settled. Returns whether the active surface's was.
+    fn resolve_projections_at(&mut self, key: ConnectionKey, sequence: u64) -> bool {
+        let active_surface = self.active_dock_surface;
+        let mut active_projection_resolved = false;
+        for (surface_key, surface) in &mut self.dock_surfaces {
+            if surface_key.connection_key == key
+                && surface
+                    .pending_projection_applied_sequence
+                    .is_some_and(|applied| applied <= sequence)
+            {
+                surface.pending_projection_request = None;
+                surface.pending_projection_applied_sequence = None;
+                active_projection_resolved |= active_surface == Some(*surface_key);
+            }
+        }
+        active_projection_resolved
+    }
+
+    /// Settles a pending Workspace selection whose command landed at or before
+    /// `sequence`: `(ready, failed)` for the active connection, both false otherwise.
+    fn resolve_pending_workspace_at(
+        &mut self,
+        key: ConnectionKey,
+        index: usize,
+        sequence: u64,
+    ) -> (bool, bool) {
+        let session = Session::restore(self.connections[index].snapshot.clone()).ok();
+        let (Some(pending), Some(session)) =
+            (self.pending_workspace_selection_for(key), session.as_ref())
+        else {
+            return (false, false);
+        };
+        if !pending
+            .applied_sequence
+            .is_some_and(|applied| applied <= sequence)
+        {
+            return (false, false);
+        }
+        self.pending_workspace_selections.remove(&key);
+        let should_present = self.pending_presentation_request == Some((key, pending.request_id));
+        if should_present {
+            self.pending_presentation_request = None;
+        }
+        let target_is_active = session.active_workspace_id() == Some(pending.workspace_id)
+            && pending.pane_id.is_none_or(|pane_id| {
+                session
+                    .active_workspace()
+                    .is_some_and(|workspace| workspace.active_tab().focused_pane().id() == pane_id)
+            });
+        if target_is_active {
+            if should_present {
+                self.active_connection = key;
+            }
+            (self.active_connection == key, false)
+        } else {
+            (false, self.active_connection == key)
+        }
+    }
+
+    /// The structure at `sequence` is applied: settle whatever waited for it, point the
+    /// target Pane at the new structure, and say whether the Dock needs rebuilding. Both
+    /// the `LayoutChanged` event and a late `LayoutApplied` end here.
+    fn settle_layout(
+        &mut self,
+        key: ConnectionKey,
+        index: usize,
+        sequence: u64,
+        layout_changed: bool,
+    ) -> IncomingEffect {
+        let active_projection_resolved = self.resolve_projections_at(key, sequence);
+        let (pending_workspace_ready, pending_workspace_failed) =
+            self.resolve_pending_workspace_at(key, index, sequence);
+        let preserve_visible_workspace = self.active_connection == key
+            && self.should_hold_active_surface()
+            && self
+                .active_dock_surface
+                .is_some_and(|surface| surface.connection_key == key);
+        let target_before_refresh = self.target_pane;
+        if !preserve_visible_workspace {
+            self.refresh_target_pane(key);
+        }
+        let target_changed =
+            self.active_connection == key && self.target_pane != target_before_refresh;
+        IncomingEffect {
+            rebuild: !preserve_visible_workspace
+                && (layout_changed
+                    || pending_workspace_ready
+                    || pending_workspace_failed
+                    || active_projection_resolved
+                    || target_changed),
+            rebuild_active: false,
+            notify: true,
+        }
+    }
+
     pub(super) fn clear_connection_gui_state(&mut self, key: ConnectionKey) {
         self.dock_surfaces
             .retain(|surface, _| surface.connection_key != key);
@@ -503,50 +599,10 @@ impl Condr {
                 }
 
                 let bootstrap_sequence = self.connections[index].sequence;
-                let active_surface = self.active_dock_surface;
-                let mut active_projection_resolved = false;
-                for (surface_key, surface) in &mut self.dock_surfaces {
-                    if surface_key.connection_key == key
-                        && surface
-                            .pending_projection_applied_sequence
-                            .is_some_and(|sequence| sequence <= bootstrap_sequence)
-                    {
-                        surface.pending_projection_request = None;
-                        surface.pending_projection_applied_sequence = None;
-                        active_projection_resolved |= active_surface == Some(*surface_key);
-                    }
-                }
-                let session = Session::restore(self.connections[index].snapshot.clone()).ok();
-                let mut pending_workspace_ready = false;
-                let mut pending_workspace_failed = false;
-                if let (Some(pending), Some(session)) =
-                    (self.pending_workspace_selection_for(key), session.as_ref())
-                    && pending
-                        .applied_sequence
-                        .is_some_and(|sequence| sequence <= bootstrap_sequence)
-                {
-                    self.pending_workspace_selections.remove(&key);
-                    let should_present =
-                        self.pending_presentation_request == Some((key, pending.request_id));
-                    if should_present {
-                        self.pending_presentation_request = None;
-                    }
-                    let target_is_active = session.active_workspace_id()
-                        == Some(pending.workspace_id)
-                        && pending.pane_id.is_none_or(|pane_id| {
-                            session.active_workspace().is_some_and(|workspace| {
-                                workspace.active_tab().focused_pane().id() == pane_id
-                            })
-                        });
-                    if target_is_active {
-                        if should_present {
-                            self.active_connection = key;
-                        }
-                        pending_workspace_ready = self.active_connection == key;
-                    } else {
-                        pending_workspace_failed = self.active_connection == key;
-                    }
-                }
+                let active_projection_resolved =
+                    self.resolve_projections_at(key, bootstrap_sequence);
+                let (pending_workspace_ready, pending_workspace_failed) =
+                    self.resolve_pending_workspace_at(key, index, bootstrap_sequence);
                 let preserve_visible_workspace = self.active_connection == key
                     && self.should_hold_active_surface()
                     && self
@@ -644,8 +700,37 @@ impl Condr {
                 self.connections[index].sequence = sequence;
                 let notify;
                 match event {
-                    SessionEvent::LayoutChanged => {
-                        notify = self.connections[index].request_snapshot();
+                    SessionEvent::LayoutChanged {
+                        snapshot,
+                        zoomed_panes,
+                    } => {
+                        // The event is the new structure; apply it in place. No Bootstrap
+                        // round trip, so the UI never enters the "not synchronized" state
+                        // and terminal views are untouched.
+                        let connection = &mut self.connections[index];
+                        let previous_layout = connection.dock_projection();
+                        connection.snapshot = snapshot;
+                        connection.zoomed_panes = zoomed_panes.into_iter().collect();
+                        let layout_changed = connection.dock_projection() != previous_layout;
+                        // Terminals of closed Panes go; a new Pane's terminal arrives with
+                        // its first full frame.
+                        if let Ok(session) = Session::restore(connection.snapshot.clone()) {
+                            let live: HashSet<PaneId> = session
+                                .workspaces()
+                                .iter()
+                                .flat_map(|workspace| workspace.tabs())
+                                .flat_map(|tab| tab.panes())
+                                .map(|pane| pane.id())
+                                .collect();
+                            connection
+                                .terminals
+                                .retain(|pane_id, _| live.contains(pane_id));
+                            connection
+                                .terminal_hyperlinks
+                                .retain(|pane_id, _| live.contains(pane_id));
+                        }
+                        self.prune_dock_cache(key);
+                        return self.settle_layout(key, index, sequence, layout_changed);
                     }
                     SessionEvent::TerminalExited { pane_id } => {
                         if let Some(terminal) = self.connections[index].terminals.get_mut(&pane_id)
@@ -905,6 +990,13 @@ impl Condr {
                     {
                         surface.pending_projection_applied_sequence = Some(sequence);
                     }
+                }
+                // The origin client gets the LayoutChanged event before this reply, so the
+                // structure is usually already in; settle against it now rather than waiting
+                // for a Bootstrap that no longer comes.
+                let applied = self.connections[index].sequence;
+                if applied >= sequence {
+                    return self.settle_layout(key, index, applied, false);
                 }
                 IncomingEffect::default()
             }

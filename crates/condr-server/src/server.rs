@@ -1463,13 +1463,25 @@ impl RuntimeState {
                 .iter()
                 .map(|(&workspace_id, repository)| workspace_git_snapshot(workspace_id, repository))
                 .collect(),
-            zoomed_panes: self
-                .session
-                .workspaces()
-                .iter()
-                .flat_map(|workspace| workspace.tabs())
-                .filter_map(|tab| tab.zoomed_pane_id())
-                .collect(),
+            zoomed_panes: self.zoomed_panes(),
+        }
+    }
+
+    fn zoomed_panes(&self) -> Vec<PaneId> {
+        self.session
+            .workspaces()
+            .iter()
+            .flat_map(|workspace| workspace.tabs())
+            .filter_map(|tab| tab.zoomed_pane_id())
+            .collect()
+    }
+
+    /// The event every structural change publishes: the new Snapshot and zoom state, so
+    /// clients apply it in place rather than re-fetching a Bootstrap.
+    fn layout_changed_event(&self) -> SessionEvent {
+        SessionEvent::LayoutChanged {
+            snapshot: self.session.snapshot(),
+            zoomed_panes: self.zoomed_panes(),
         }
     }
 
@@ -1484,7 +1496,7 @@ impl RuntimeState {
         origin: &ClientWriter,
         request_id: u64,
     ) -> bool {
-        let event = SessionEvent::LayoutChanged;
+        let event = self.layout_changed_event();
         if self.publish_event(event, Some((origin_client_id, origin))) {
             return true;
         }

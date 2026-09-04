@@ -266,22 +266,42 @@ pub(super) fn apply_terminal_frame_batch(
         if !seen.insert(pane.pane_id) {
             return Err(());
         }
-        let terminal = terminals.get(&pane.pane_id).ok_or(())?;
-        if !terminal_hyperlinks.contains_key(&pane.pane_id) {
-            return Err(());
+        match terminals.get(&pane.pane_id) {
+            Some(terminal) => {
+                if !terminal_hyperlinks.contains_key(&pane.pane_id) {
+                    return Err(());
+                }
+                terminal.view.validate_frame(&pane.frame).map_err(|_| ())?;
+            }
+            // A Pane the structure announced but whose terminal has not been seen yet:
+            // its first frame is a full view, which stands on its own.
+            None if matches!(pane.frame, TerminalViewFrame::Full(_)) => {}
+            None => return Err(()),
         }
-        terminal.view.validate_frame(&pane.frame).map_err(|_| ())?;
     }
     for pane in panes {
-        let terminal = terminals
-            .get_mut(&pane.pane_id)
-            .expect("prevalidated terminal still exists");
         match pane.frame {
             TerminalViewFrame::Full(mut view) => {
                 terminal_hyperlinks.insert(pane.pane_id, TerminalHyperlinkBudget::new(&mut view));
-                terminal.view = Arc::new(view);
+                let view = Arc::new(view);
+                match terminals.get_mut(&pane.pane_id) {
+                    Some(terminal) => terminal.view = view,
+                    None => {
+                        terminals.insert(
+                            pane.pane_id,
+                            ClientTerminal {
+                                view,
+                                exited: false,
+                                title: None,
+                            },
+                        );
+                    }
+                }
             }
             TerminalViewFrame::Delta(delta) => {
+                let terminal = terminals
+                    .get_mut(&pane.pane_id)
+                    .expect("prevalidated terminal still exists");
                 terminal_hyperlinks
                     .get_mut(&pane.pane_id)
                     .expect("prevalidated terminal hyperlink budget still exists")

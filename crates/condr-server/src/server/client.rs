@@ -649,12 +649,19 @@ pub(super) fn handle_client(
                         },
                     )
                 } else if state.session.pane(pane_id).is_none() {
-                    queue_message(
-                        &outbound,
-                        ServerMessage::Error {
-                            message: "unknown Pane".into(),
-                        },
-                    )
+                    // A focus change for a Pane that is already gone is not a fault: the
+                    // client tells us it stopped looking at a Tab it just closed, and the
+                    // close event has simply not reached it yet.
+                    if focus.is_some() {
+                        false
+                    } else {
+                        queue_message(
+                            &outbound,
+                            ServerMessage::Error {
+                                message: "unknown Pane".into(),
+                            },
+                        )
+                    }
                 } else if state.exited_terminals.contains(&pane_id) && focus.is_none() {
                     queue_message(
                         &outbound,

@@ -149,6 +149,59 @@ fn controller_can_acknowledge_attention_while_terminal_is_closing() {
     thread.join().unwrap().unwrap();
 }
 
+/// Closing a Tab from the GUI races its focus bookkeeping: the Pane is gone on the
+/// Server before the client's `Focus(false)` for it arrives. That is not an error worth
+/// showing; typing into a missing Pane still is.
+#[test]
+fn focus_changes_for_a_missing_pane_are_ignored_but_input_is_rejected() {
+    let (handle, endpoint, thread) = start();
+    let mut stream = connect_and_bootstrap(&endpoint);
+    let (server_id, session_id) = {
+        let state = handle.state.lock().unwrap();
+        (state.server_id, state.session_id)
+    };
+    acquire_control(&mut stream, session_id);
+    let missing = PaneId::from_u64(424_242);
+
+    for focused in [false, true] {
+        send_terminal(
+            &mut stream,
+            server_id,
+            session_id,
+            missing,
+            TerminalCommand::Focus(focused),
+        );
+    }
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Ping {
+            server_id,
+            nonce: 9,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        read_server(&mut stream),
+        ServerMessage::Pong { nonce: 9, .. }
+    ));
+
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        missing,
+        TerminalCommand::Text("ls".into()),
+    );
+    assert!(matches!(
+        read_server(&mut stream),
+        ServerMessage::Error { message } if message == "unknown Pane"
+    ));
+
+    handle.stop();
+    drop(stream);
+    thread.join().unwrap().unwrap();
+}
+
 #[test]
 fn oversized_client_frame_is_rejected_with_a_clear_error() {
     let (handle, endpoint, thread) = start();
@@ -199,7 +252,7 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         matches!(
             message,
             ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             }
         )
@@ -369,7 +422,8 @@ fn rejected_subscription_is_typed_and_removes_the_previous_subscriber() {
     {
         let mut state = handle.state.lock().unwrap();
         for _ in 0..=EVENT_HISTORY_LIMIT {
-            state.publish_background(SessionEvent::LayoutChanged);
+            let event = state.layout_changed_event();
+            state.publish_background(event);
         }
     }
     condr_core::protocol::write_message(
@@ -721,7 +775,7 @@ fn releasing_control_releases_reported_mouse_before_focus() {
         matches!(
             message,
             ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             }
         )
@@ -849,7 +903,7 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
             server_id: event_server,
             session_id: event_session,
             sequence: 1,
-            event: SessionEvent::LayoutChanged,
+            event: SessionEvent::LayoutChanged { .. },
         } if event_server == server_id && event_session == session_id
     ));
     assert_layout_applied(&mut first, server_id, session_id, 1, 1);
@@ -875,7 +929,7 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
         match condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap() {
             ServerMessage::Event {
                 sequence: 1,
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             } => {}
             ServerMessage::Event { .. } => {}
@@ -956,7 +1010,7 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
             match condr_core::protocol::read_message::<_, ServerMessage>(&mut controller).unwrap() {
                 ServerMessage::Event {
                     sequence,
-                    event: SessionEvent::LayoutChanged,
+                    event: SessionEvent::LayoutChanged { .. },
                     ..
                 } => {
                     snapshot_sequences.push(sequence);
@@ -984,7 +1038,7 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
             } => {
                 assert_eq!(sequence, previous_sequence + 1);
                 previous_sequence = sequence;
-                if event == SessionEvent::LayoutChanged {
+                if matches!(event, SessionEvent::LayoutChanged { .. }) {
                     replayed_snapshots.push(sequence);
                 }
             }
@@ -1095,7 +1149,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
         matches!(
             message,
             ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             }
         )
@@ -1230,7 +1284,7 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         matches!(
             message,
             ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             }
         )
@@ -1385,7 +1439,7 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
         matches!(
             message,
             ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             }
         )

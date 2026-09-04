@@ -282,9 +282,16 @@ pub struct TerminalFrameChunk {
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SessionEvent {
-    LayoutChanged,
+    /// The Session structure after a layout change. It carries the new structural
+    /// Snapshot (a few KB: ids, names, split trees) and the live zoom state, so a client
+    /// applies it in place instead of requesting a full Bootstrap and going dark until
+    /// that arrives.
+    LayoutChanged {
+        snapshot: SessionSnapshot,
+        zoomed_panes: Vec<PaneId>,
+    },
     TerminalExited {
         pane_id: PaneId,
     },

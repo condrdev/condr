@@ -832,6 +832,7 @@ pub(super) fn set_workspace_git(
     state
         .workspace_git_scanned_at
         .insert(workspace_id, Instant::now());
+    let changed = state.workspace_git.get(&workspace_id) != git.as_ref();
     match git {
         Some(repository) => {
             state.workspace_git.insert(workspace_id, repository);
@@ -839,6 +840,15 @@ pub(super) fn set_workspace_git(
         None => {
             state.workspace_git.remove(&workspace_id);
         }
+    }
+    // Clients learn Git state from events now that a layout change no longer makes
+    // them fetch a Bootstrap; a Workspace created on a repository announces it here.
+    if changed {
+        let git = state
+            .workspace_git
+            .get(&workspace_id)
+            .map(|repository| workspace_git_snapshot(workspace_id, repository));
+        state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
     }
 }
 

@@ -660,7 +660,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         matches!(
             message,
             ServerMessage::Event {
-                event: SessionEvent::LayoutChanged,
+                event: SessionEvent::LayoutChanged { .. },
                 ..
             }
         )
