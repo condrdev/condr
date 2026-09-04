@@ -76,6 +76,21 @@ impl Endpoint {
         }
     }
 
+    /// The inverse of [`Self::env_value`]: how a Pane program finds its own Server.
+    pub fn from_env_value(value: &str) -> io::Result<Self> {
+        match value.strip_prefix("tcp://") {
+            Some(address) => address
+                .parse::<SocketAddr>()
+                .map(Self::Tcp)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error)),
+            None if value.is_empty() => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "empty endpoint",
+            )),
+            None => Ok(Self::local(value)),
+        }
+    }
+
     pub fn as_local_path(&self) -> Option<&Path> {
         match self {
             Self::Local(path) => Some(path),

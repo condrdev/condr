@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use condr_server::{Endpoint, ServerConfig};
 
+mod cli;
+
 /// Condr: the Server and its command line. The Server owns sessions, terminals and
 /// agents; the GUI and the CLI subcommands are its clients.
 #[derive(Parser)]
@@ -18,6 +20,12 @@ enum Command {
     /// Manage the Server on this machine
     #[command(subcommand)]
     Server(ServerCommand),
+    /// Workspaces of the Server this Pane belongs to
+    #[command(subcommand)]
+    Workspace(cli::WorkspaceCommand),
+    /// Tabs of the Server this Pane belongs to
+    #[command(subcommand)]
+    Tab(cli::TabCommand),
 }
 
 #[derive(Subcommand)]
@@ -76,8 +84,11 @@ impl EndpointArgs {
 }
 
 fn main() {
-    let Command::Server(command) = Cli::parse().command;
-    std::process::exit(dispatch(command));
+    std::process::exit(match Cli::parse().command {
+        Command::Server(command) => dispatch(command),
+        Command::Workspace(command) => cli::run_workspace(command),
+        Command::Tab(command) => cli::run_tab(command),
+    });
 }
 
 fn dispatch(command: ServerCommand) -> i32 {
@@ -165,9 +176,9 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<ServerCommand, clap::Error> {
         Cli::try_parse_from(["condr", "server"].into_iter().chain(args.iter().copied())).map(
-            |cli| {
-                let Command::Server(command) = cli.command;
-                command
+            |cli| match cli.command {
+                Command::Server(command) => command,
+                _ => panic!("expected a server command"),
             },
         )
     }

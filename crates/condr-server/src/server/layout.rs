@@ -842,9 +842,11 @@ pub(super) fn set_workspace_git(
     }
 }
 
+/// Layout does not require Session control: control guards terminal input, while any
+/// client, the CLI in a Pane included, may change structure (ADR 0009).
 pub(super) fn layout_authority_error(
     state: &RuntimeState,
-    client_id: u64,
+    _client_id: u64,
     server_id: ServerId,
     session_id: SessionId,
     request_id: u64,
@@ -856,8 +858,6 @@ pub(super) fn layout_authority_error(
         Some("unknown Server")
     } else if session_id != state.session_id {
         Some("unknown Session")
-    } else if state.active_controller != Some(client_id) {
-        Some("acquire Session control before mutating layout")
     } else {
         None
     };

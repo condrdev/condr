@@ -193,6 +193,7 @@ pub struct ServerHandle {
 pub struct ClientConnection {
     stream: EndpointStream,
     bootstrap: SessionBootstrap,
+    next_request_id: u64,
 }
 
 impl ClientConnection {
@@ -202,6 +203,63 @@ impl ClientConnection {
 
     fn handshake(stream: EndpointStream, client_name: impl Into<String>) -> io::Result<Self> {
         Self::handshake_bootstrap(Self::welcome(stream, client_name)?)
+    }
+
+    /// The Session structure this connection last saw, from the Bootstrap.
+    pub fn session(&self) -> io::Result<Session> {
+        Session::restore(self.bootstrap.snapshot.clone())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+    }
+
+    /// Replaces the Bootstrap with a fresh one from the Server. The CLI uses this after a
+    /// mutation to report what was created; the connection never subscribes, so nothing
+    /// else arrives on the stream meanwhile.
+    pub fn refresh(&mut self) -> io::Result<()> {
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::SnapshotRequest {
+                session_id: self.bootstrap.session_id,
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        self.bootstrap = Self::read_bootstrap(&mut self.stream)?;
+        Ok(())
+    }
+
+    /// Sends one Layout command and waits for its outcome: the Session sequence it landed
+    /// at, or the Server's reason for rejecting it. Session control is not needed (ADR
+    /// 0009). Unrelated messages that arrive first are skipped.
+    pub fn layout(&mut self, command: LayoutCommand) -> io::Result<Result<u64, String>> {
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::Layout {
+                server_id: self.bootstrap.server_id,
+                session_id: self.bootstrap.session_id,
+                request_id,
+                command,
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        loop {
+            match condr_core::protocol::read_message(&mut self.stream)
+                .map_err(|error| io::Error::other(error.to_string()))?
+            {
+                ServerMessage::LayoutApplied {
+                    request_id: applied,
+                    sequence,
+                    ..
+                } if applied == request_id => return Ok(Ok(sequence)),
+                ServerMessage::LayoutRejected {
+                    request_id: rejected,
+                    reason,
+                    ..
+                } if rejected == request_id => return Ok(Err(reason)),
+                ServerMessage::Error { message } => return Err(io::Error::other(message)),
+                _ => {}
+            }
+        }
     }
 
     /// Hello/Welcome only: enough to know a compatible Server answers, without pulling
@@ -238,7 +296,18 @@ impl ClientConnection {
     }
 
     fn handshake_bootstrap(mut stream: EndpointStream) -> io::Result<Self> {
-        let bootstrap = match condr_core::protocol::read_message(&mut stream)
+        let bootstrap = Self::read_bootstrap(&mut stream)?;
+        let _ = stream.set_handshake_timeout(None);
+        Ok(Self {
+            stream,
+            bootstrap,
+            next_request_id: 1,
+        })
+    }
+
+    /// Reads one complete Bootstrap: the header followed by its batches.
+    fn read_bootstrap(stream: &mut EndpointStream) -> io::Result<SessionBootstrap> {
+        let bootstrap = match condr_core::protocol::read_message(stream)
             .map_err(|error| io::Error::other(error.to_string()))?
         {
             ServerMessage::Bootstrap(bootstrap) => bootstrap,
@@ -253,7 +322,7 @@ impl ClientConnection {
         let mut assembler = BootstrapAssembler::new(bootstrap)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         for _ in 0..batch_count {
-            let batch = match condr_core::protocol::read_message(&mut stream)
+            let batch = match condr_core::protocol::read_message(stream)
                 .map_err(|error| io::Error::other(error.to_string()))?
             {
                 ServerMessage::BootstrapBatch(batch) => batch,
@@ -268,11 +337,9 @@ impl ClientConnection {
                 .push(batch)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         }
-        let bootstrap = assembler
+        assembler
             .finish()
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let _ = stream.set_handshake_timeout(None);
-        Ok(Self { stream, bootstrap })
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
     pub fn bootstrap(&self) -> &SessionBootstrap {

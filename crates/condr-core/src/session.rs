@@ -37,12 +37,22 @@ pub struct TabId(u64);
 pub struct PaneId(u64);
 
 impl WorkspaceId {
+    /// The inverse of [`Self::as_u64`], for ids that arrive as CLI arguments.
+    pub const fn from_u64(value: u64) -> Self {
+        Self(value)
+    }
+
     pub const fn as_u64(self) -> u64 {
         self.0
     }
 }
 
 impl TabId {
+    /// The inverse of [`Self::as_u64`], for ids that arrive as CLI arguments.
+    pub const fn from_u64(value: u64) -> Self {
+        Self(value)
+    }
+
     pub const fn as_u64(self) -> u64 {
         self.0
     }

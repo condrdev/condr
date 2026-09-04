@@ -667,17 +667,26 @@ fn controller_is_exclusive_and_released_on_disconnect() {
         },
     )
     .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
-        ServerMessage::LayoutRejected {
-            server_id: rejected_server,
-            session_id: rejected_session,
-            request_id: 73,
-            reason,
-        } if rejected_server == server_id
-            && rejected_session == session_id
-            && reason == "acquire Session control before mutating layout"
-    ));
+    // Control is exclusive, but layout is not gated on it: the denied client still
+    // changes structure, as the CLI in a Pane does while the GUI holds control.
+    // The response follows the events the change raised on this subscribed stream.
+    let applied = std::iter::from_fn(|| {
+        Some(condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap())
+    })
+    .find(|message| !matches!(message, ServerMessage::Event { .. }))
+    .unwrap();
+    assert!(
+        matches!(
+            applied,
+            ServerMessage::LayoutApplied {
+                server_id: applied_server,
+                session_id: applied_session,
+                request_id: 73,
+                ..
+            } if applied_server == server_id && applied_session == session_id
+        ),
+        "{applied:?}"
+    );
     drop(first);
     thread::sleep(Duration::from_millis(20));
     acquire_control(&mut second, session_id);

@@ -25,6 +25,7 @@ gpui_platform = { version = "=0.1.0", git = "https://github.com/zed-industries/z
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "9890a77c2d427f05b2512f05ddc6cce84686f9a6" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "9890a77c2d427f05b2512f05ddc6cce84686f9a6" }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 smol_str = { version = "0.3.6", features = ["serde"] }
 regex = "1"
 toml = "1.0"

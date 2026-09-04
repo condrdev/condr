@@ -40,7 +40,7 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 
 ### 两个二进制
 
-- `condr`：Server 和命令行。`condr server start|status|stop|run` 管理 Server；#27 的 `pane` / `agent` 子命令陆续加入。编排能力全部在 Server，所以 CLI 和 Server 是同一个二进制，无头 Linux 只需部署这一个文件。
+- `condr`：Server 和命令行。`condr server start|status|stop|run` 管理 Server；`condr workspace …` 和 `condr tab …` 从 Pane 内改 Session 结构（成功打 JSON 到 stdout，失败 `{"error":{"code","message"}}` 到 stderr 并退出 1，用法错误退出 2；`--help` 列出子命令）；#27 的 `pane` / `agent` 子命令陆续加入。编排能力全部在 Server，所以 CLI 和 Server 是同一个二进制，无头 Linux 只需部署这一个文件。
 - `condr-gui`：GUI，只是 Server 的一个 client。它发现已有的本地 Server，或者用同目录下的 `condr server run` 启动一个。
 
 三个平台一致。Windows 上 `condr-gui.exe` 是 GUI 子系统程序，双击不出现控制台；`condr.exe` 是普通控制台程序。安装器和快捷方式负责把 GUI 以 Condr 的名字露给用户。
