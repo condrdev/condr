@@ -717,6 +717,80 @@ fn server_selection_follows_scrolled_output_and_still_copies_it() {
 }
 
 #[test]
+fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
+    let none = TerminalModifiers::default();
+    let shift = TerminalModifiers {
+        shift: true,
+        ..none
+    };
+    let control = TerminalModifiers {
+        control: true,
+        ..none
+    };
+    let alt = TerminalModifiers { alt: true, ..none };
+    let control_shift = TerminalModifiers {
+        control: true,
+        shift: true,
+        ..none
+    };
+    let disambiguate = TermMode::DISAMBIGUATE_ESC_CODES;
+    let events = disambiguate | TermMode::REPORT_EVENT_TYPES;
+    let all = disambiguate
+        | TermMode::REPORT_ALTERNATE_KEYS
+        | TermMode::REPORT_ALL_KEYS_AS_ESC
+        | TermMode::REPORT_ASSOCIATED_TEXT;
+    let ch = |text: &str| TerminalKey::Character(text.into());
+    let cases: &[(TerminalKey, TerminalModifiers, TermMode, &[u8])] = &[
+        // Legacy stays legacy without any kitty flag.
+        (TerminalKey::Enter, shift, TermMode::empty(), b"\n"),
+        // herdr parity under disambiguation.
+        (TerminalKey::Enter, shift, disambiguate, b"\x1b[13;2u"),
+        (TerminalKey::Enter, alt, disambiguate, b"\x1b[13;3u"),
+        (TerminalKey::Backspace, alt, disambiguate, b"\x1b[127;3u"),
+        (ch("a"), control_shift, disambiguate, b"\x1b[97;6u"),
+        (ch("L"), control_shift, disambiguate, b"\x1b[108;6u"),
+        (ch("c"), control, disambiguate, b"\x1b[99;5u"),
+        (ch("L"), shift, disambiguate, b"L"),
+        (ch("a"), none, disambiguate, b"a"),
+        (TerminalKey::Enter, none, disambiguate, b"\r"),
+        (TerminalKey::Tab, none, disambiguate, b"\t"),
+        (TerminalKey::Backspace, none, disambiguate, b"\x7f"),
+        (TerminalKey::Up, alt, disambiguate, b"\x1b[1;3A"),
+        (TerminalKey::Function(5), shift, disambiguate, b"\x1b[15;2~"),
+        // Escape follows the spec rather than herdr.
+        (TerminalKey::Escape, none, disambiguate, b"\x1b[27u"),
+        // Event types add the press suffix and put legacy-form keys in kitty form.
+        (ch("c"), control, events, b"\x1b[99;5:1u"),
+        (TerminalKey::Left, none, events, b"\x1b[1;1:1D"),
+        (TerminalKey::Function(3), control, events, b"\x1b[13;5:1~"),
+        (TerminalKey::Enter, none, events, b"\r"),
+        // Report-all reports text keys with alternate and associated text.
+        (ch("a"), none, all, b"\x1b[97;1;97u"),
+        (ch("L"), shift, all, b"\x1b[108:76;2;76u"),
+        (ch("c"), control, all, b"\x1b[99;5u"),
+        (TerminalKey::Enter, none, all, b"\x1b[13u"),
+        (
+            ch("c"),
+            control,
+            all | TermMode::REPORT_EVENT_TYPES,
+            b"\x1b[99;5:1u",
+        ),
+        (TerminalKey::BackTab, none, all, b"\x1b[9;2u"),
+    ];
+    for (key, modifiers, modes, expected) in cases {
+        assert_eq!(
+            encode_key_in_mode(key, *modifiers, *modes).unwrap(),
+            *expected,
+            "{key:?} {modifiers:?} {modes:?}"
+        );
+    }
+
+    assert_eq!(encode_text_in_mode("a", disambiguate), b"a");
+    assert_eq!(encode_text_in_mode("A", all), b"\x1b[97:65;2;65u");
+    assert_eq!(encode_text_in_mode("ab", all), b"ab");
+}
+
+#[test]
 fn paste_respects_bracketed_mode_and_filters_control_markers() {
     assert_eq!(encode_paste("one\r\ntwo\n", false), b"one\rtwo\r");
     assert_eq!(

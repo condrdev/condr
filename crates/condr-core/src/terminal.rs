@@ -93,7 +93,7 @@ mod view;
 pub use cursor_settle::CURSOR_POSITION_SETTLE;
 use cursor_settle::{CURSOR_POSITION_SETTLE_ENABLED, CursorSettle};
 
-use input::{encode_key, encode_paste};
+use input::{encode_key, encode_key_in_mode, encode_paste, encode_text_in_mode};
 use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 use process::*;
 use pty_io::*;

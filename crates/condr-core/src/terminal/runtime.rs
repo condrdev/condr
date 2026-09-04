@@ -319,16 +319,17 @@ impl TerminalRuntime {
                         _ => unreachable!(),
                     });
                 } else {
-                    self.write(encode_key(
-                        &key,
-                        modifiers,
-                        modes.contains(TermMode::APP_CURSOR),
-                    )?)?;
+                    self.write(encode_key_in_mode(&key, modifiers, modes)?)?;
                 }
                 Ok(None)
             }
             TerminalCommand::Text(text) => {
-                self.write(text.into_bytes())?;
+                let modes = *self
+                    .terminal
+                    .lock()
+                    .expect("terminal state lock poisoned")
+                    .mode();
+                self.write(encode_text_in_mode(&text, modes))?;
                 Ok(None)
             }
             TerminalCommand::Paste(text) => {
