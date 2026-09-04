@@ -223,13 +223,19 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
             // the connections they hold now.
             match condr_server::revoke_devices(&endpoint.resolve()?, &key) {
                 Ok(disconnected) => {
-                    println!("condr-server: closed {disconnected} live connection(s)")
+                    println!("condr-server: closed {disconnected} live connection(s)");
+                    Ok(())
                 }
-                Err(error) => println!(
-                    "condr-server: no running Server reached ({error}); live connections, if any, stay up until they reconnect"
-                ),
+                // The file edit stands, but nobody closed the device's live connections;
+                // a script must not read that as a complete revocation.
+                Err(error) => Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "revoked in authorized-clients, but no running Server was reached to \
+                         drop live connections: {error}"
+                    ),
+                )),
             }
-            Ok(())
         }
     }
 }

@@ -1418,9 +1418,19 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         })
     };
     let invite = noise::create_invite(&directory).unwrap();
-    let mut first = connect_and_bootstrap(&device(Some(invite.secret)));
+    let mut first = connect_and_bootstrap(&device(Some(invite.secret.clone())));
     assert_eq!(noise::read_authorized(&directory).unwrap().len(), 1);
+    // A Client that kept its invite past a successful pairing (it never saw the
+    // Bootstrap) is served as a paired device instead of failing forever.
+    drop(ClientConnection::connect(&device(Some(invite.secret)), "stale-invite").unwrap());
     let mut second = connect_and_bootstrap(&device(None));
+
+    // A connection that finished its handshake but has not sent Hello is not in the peer
+    // table yet; revoking while it waits must still refuse it once it speaks.
+    let mut delayed = device(None).connect().unwrap();
+    if let EndpointStream::Tcp(stream) = &mut delayed {
+        stream.handshake().unwrap();
+    }
 
     // A paired device is not the host and may not revoke anyone.
     let prefix = device_key.public().to_hex()[..12].to_owned();
@@ -1457,6 +1467,23 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
             .unwrap();
         assert!(condr_core::protocol::read_message::<_, ServerMessage>(stream).is_err());
     }
+    // The delayed device now sends Hello: the Server re-reads the list before serving it.
+    delayed
+        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    condr_core::protocol::write_message(
+        &mut delayed,
+        &ClientMessage::Hello(Hello {
+            version: PROTOCOL_VERSION,
+            client_name: "delayed".into(),
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        condr_core::protocol::read_message::<_, ServerMessage>(&mut delayed),
+        Ok(ServerMessage::Welcome { error: Some(message), .. }) if message == "device revoked"
+    ));
+    drop(delayed);
     let error = match ClientConnection::connect(&device(None), "revoked") {
         Ok(_) => panic!("a revoked device reconnected"),
         Err(error) => error,

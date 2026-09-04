@@ -229,7 +229,23 @@ pub struct ClientConnection {
 
 impl ClientConnection {
     pub fn connect(endpoint: &Endpoint, client_name: impl Into<String>) -> io::Result<Self> {
-        Self::handshake(endpoint.connect()?, client_name)
+        let client_name = client_name.into();
+        match Self::handshake(endpoint.connect()?, client_name.clone()) {
+            // The Server may already have recorded this device from an earlier attempt
+            // that broke before the Client saw its Bootstrap; it then expects the zero
+            // pre-shared key, so a refused invite is retried as a paired device.
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    && matches!(endpoint, Endpoint::Tcp(tcp) if tcp.invite.is_some()) =>
+            {
+                let Endpoint::Tcp(tcp) = endpoint else {
+                    unreachable!()
+                };
+                let paired = Endpoint::tcp(tcp.clone().without_invite());
+                Self::handshake(paired.connect()?, client_name).map_err(|_| error)
+            }
+            result => result,
+        }
     }
 
     fn handshake(stream: EndpointStream, client_name: impl Into<String>) -> io::Result<Self> {

@@ -97,13 +97,17 @@ impl StaticKey {
     }
 
     /// Reads the hex private key at `path`, or generates one and stores it owner-only.
+    /// Two processes creating the same key at once both end up with the one that won.
     pub fn load_or_create(path: &Path) -> io::Result<Self> {
-        match fs::read_to_string(path) {
-            Ok(text) => hex_decode(text.trim()).map(Self::from_private),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let key = Self::generate()?;
-                write_secret_file(path, &hex_encode(&key.private))?;
-                Ok(key)
+        if let Some(text) = read_secret_file(path)? {
+            return hex_decode(text.trim()).map(Self::from_private);
+        }
+        let key = Self::generate()?;
+        match write_secret_file(path, &hex_encode(&key.private)) {
+            Ok(()) => Ok(key),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let text = read_secret_file(path)?.ok_or(error)?;
+                hex_decode(text.trim()).map(Self::from_private)
             }
             Err(error) => Err(error),
         }
@@ -193,25 +197,34 @@ impl ServerIdentity {
         self.key.public()
     }
 
-    /// The pre-shared key to answer `remote` with, and whether that answer is a pairing
-    /// attempt. `None` refuses the peer.
-    fn psk_for(&self, remote: &PublicKey) -> io::Result<Option<(Secret, bool)>> {
+    /// Whether `remote` may connect without an invite, as of the store on disk right now.
+    pub fn is_authorized(&self, remote: &PublicKey) -> io::Result<bool> {
         if self.always_authorized.contains(remote) {
-            return Ok(Some((Secret([0; 32]), false)));
+            return Ok(true);
+        }
+        let Some(store) = &self.store else {
+            return Ok(false);
+        };
+        Ok(read_authorized(store)?
+            .iter()
+            .any(|client| client.key == *remote))
+    }
+
+    /// The pre-shared key to answer `remote` with: the zero key for an authorized device,
+    /// or the pending invite for an unknown one. `None` refuses the peer.
+    fn psk_for(&self, remote: &PublicKey) -> io::Result<Option<(Secret, Option<Secret>)>> {
+        if self.is_authorized(remote)? {
+            return Ok(Some((Secret([0; 32]), None)));
         }
         let Some(store) = &self.store else {
             return Ok(None);
         };
-        if read_authorized(store)?
-            .iter()
-            .any(|client| client.key == *remote)
-        {
-            return Ok(Some((Secret([0; 32]), false)));
-        }
-        Ok(read_invite(store)?.map(|invite| (invite.secret, true)))
+        Ok(read_invite(store)?.map(|invite| (invite.secret.clone(), Some(invite.secret))))
     }
 
-    fn complete_pairing(&self, remote: PublicKey, name: &str) -> io::Result<()> {
+    /// Records `remote` as paired, provided `invite` is still the pending one: the first
+    /// device to finish wins, and a stale invite cannot consume a newer one.
+    fn complete_pairing(&self, remote: PublicKey, name: &str, invite: &Secret) -> io::Result<()> {
         let store = self.store.as_deref().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -219,6 +232,9 @@ impl ServerIdentity {
             )
         })?;
         with_store_lock(store, || {
+            if read_invite(store)?.is_none_or(|current| current.secret != *invite) {
+                return Err(rejected("invite already used or expired"));
+            }
             let mut clients = read_authorized(store)?;
             if !clients.iter().any(|client| client.key == remote) {
                 clients.push(AuthorizedClient {
@@ -280,10 +296,8 @@ pub fn create_invite(directory: &Path) -> io::Result<Invite> {
 
 /// The pending invite, if one exists and has not expired.
 fn read_invite(directory: &Path) -> io::Result<Option<Invite>> {
-    let text = match fs::read_to_string(directory.join(INVITE_FILE)) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+    let Some(text) = read_secret_file(&directory.join(INVITE_FILE))? else {
+        return Ok(None);
     };
     let mut fields = text.split_whitespace();
     let (Some(secret), Some(expires_at)) = (fields.next(), fields.next()) else {
@@ -379,6 +393,33 @@ fn with_store_lock<T>(directory: &Path, f: impl FnOnce() -> io::Result<T>) -> io
     result
 }
 
+/// Reads a secret file, `None` when absent. On Unix a file readable by others is refused
+/// rather than trusted, since a leaked key must be replaced, not reused.
+fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
+    match fs::read_to_string(path) {
+        Ok(text) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                let mode = fs::metadata(path)?.permissions().mode() & 0o077;
+                if mode != 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "{} is readable by other users (mode {:o}); make it 0600 or delete it",
+                            path.display(),
+                            fs::metadata(path)?.permissions().mode() & 0o777
+                        ),
+                    ));
+                }
+            }
+            Ok(Some(text))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// Creates `path` owner-only and refuses to overwrite an existing file.
 fn write_secret_file(path: &Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
@@ -455,8 +496,8 @@ enum Noise {
         remote: PublicKey,
         /// Set on the Server side, so a connection knows whether its peer is the host.
         identity: Option<Arc<ServerIdentity>>,
-        /// Whether the peer is redeeming an invite that is not recorded yet.
-        pairing: bool,
+        /// The invite the peer is redeeming, until the pairing is recorded.
+        pairing: Option<Secret>,
         /// Whether a transport message from the peer has decrypted yet.
         verified: bool,
     },
@@ -542,16 +583,36 @@ impl NoiseStream {
         else {
             return Err(rejected("handshake incomplete"));
         };
-        match (*pairing, *verified, identity.as_ref()) {
-            (false, _, _) => Ok(()),
-            (true, false, _) => Err(rejected("invite not yet proven")),
-            (true, true, None) => Err(rejected("no Server identity to record the device")),
-            (true, true, Some(identity)) => {
-                identity.complete_pairing(*remote, name)?;
-                *pairing = false;
+        match (pairing.as_ref(), *verified, identity.as_ref()) {
+            (None, _, _) => Ok(()),
+            (Some(_), false, _) => Err(rejected("invite not yet proven")),
+            (Some(_), true, None) => Err(rejected("no Server identity to record the device")),
+            (Some(invite), true, Some(identity)) => {
+                identity.complete_pairing(*remote, name, invite)?;
+                *pairing = None;
                 Ok(())
             }
         }
+    }
+
+    /// Server side: whether the store still authorizes the peer. Read again after the
+    /// handshake so a device revoked meanwhile is refused before it is served.
+    pub fn peer_authorized(&self) -> io::Result<bool> {
+        match &*lock(&self.noise) {
+            Noise::Transport {
+                remote,
+                identity: Some(identity),
+                ..
+            } => identity.is_authorized(remote),
+            Noise::Transport { identity: None, .. } => Ok(true),
+            _ => Ok(false),
+        }
+    }
+
+    /// Runs the handshake now instead of on first use; tests use it to hold a
+    /// handshaken connection without sending anything.
+    pub fn handshake(&mut self) -> io::Result<()> {
+        self.ensure_transport()
     }
 
     /// The peer's static key once the handshake has run.
@@ -608,7 +669,7 @@ impl NoiseStream {
                         transport: Box::new(transport),
                         remote: server_key,
                         identity: None,
-                        pairing: false,
+                        pairing: None,
                         verified: true,
                     })
             }
@@ -948,6 +1009,58 @@ mod tests {
             read_invite(&directory).unwrap().is_none(),
             "invite is one-time"
         );
+
+        // A second device that finished its handshake with the same invite loses the
+        // race: the invite is gone by the time it proves itself.
+        let invite = create_invite(&directory).unwrap();
+        let first = StaticKey::generate().unwrap();
+        let second = StaticKey::generate().unwrap();
+        let (mut first_client, first_server) = pair(&identity, &first, Some(&invite.secret));
+        let (mut second_client, second_server) = pair(&identity, &second, Some(&invite.secret));
+        let first_server = serve(first_server, |server| {
+            server.read_exact(&mut [0; 2])?;
+            server.complete_pairing("first")
+        });
+        let second_server = serve(second_server, |server| {
+            server.read_exact(&mut [0; 2])?;
+            server.complete_pairing("second")
+        });
+        // Both handshakes complete while the invite is still pending; only the first
+        // device to prove itself gets recorded.
+        first_client.handshake().unwrap();
+        second_client.handshake().unwrap();
+        first_client.write_all(b"hi").unwrap();
+        first_client.flush().unwrap();
+        first_server.join().unwrap().unwrap();
+        second_client.write_all(b"hi").unwrap();
+        second_client.flush().unwrap();
+        assert_eq!(
+            second_server.join().unwrap().unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let paired = read_authorized(&directory).unwrap();
+        assert!(paired.iter().any(|client| client.key == first.public()));
+        assert!(!paired.iter().any(|client| client.key == second.public()));
+
+        // A handshake made with an older invite cannot pair after a newer invite replaced
+        // it, and does not consume the newer one.
+        let stale = create_invite(&directory).unwrap();
+        let late = StaticKey::generate().unwrap();
+        let (mut late_client, late_server) = pair(&identity, &late, Some(&stale.secret));
+        let late_server = serve(late_server, |server| {
+            server.read_exact(&mut [0; 2])?;
+            server.complete_pairing("late")
+        });
+        late_client.handshake().unwrap();
+        let fresh = create_invite(&directory).unwrap();
+        late_client.write_all(b"hi").unwrap();
+        late_client.flush().unwrap();
+        assert_eq!(
+            late_server.join().unwrap().unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(read_invite(&directory).unwrap(), Some(fresh));
+        let _ = fs::remove_file(directory.join(INVITE_FILE));
 
         // Paired: connects with the zero PSK, no invite needed.
         let (mut client, server) = pair(&identity, &device, None);

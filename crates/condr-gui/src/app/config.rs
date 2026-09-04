@@ -110,6 +110,11 @@ impl Condr {
         let Some(path) = self.client_config_path.as_deref() else {
             return;
         };
+        // Without a device key no saved TCP Server was loaded; rewriting the list now
+        // would erase them.
+        if self.device_key.is_none() {
+            return;
+        }
         let servers = self.connections.iter().filter_map(|connection| {
             let Endpoint::Tcp(tcp) = &connection.endpoint else {
                 return None;

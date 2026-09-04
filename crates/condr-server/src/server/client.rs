@@ -54,14 +54,31 @@ pub(super) fn handle_client(
         return;
     }
     // A TCP peer stays addressable by its device key until it leaves, so revoking that
-    // key can close the connection from another client's thread.
+    // key can close the connection from another client's thread. The store is read again
+    // under the same lock the revocation scan takes: a device revoked between its
+    // handshake and this point is refused here, one revoked later is found in the table.
     if let Some(peer_key) = stream.peer_key() {
         let Ok(peer) = stream.try_clone() else { return };
-        state
-            .lock()
-            .expect("server state lock poisoned")
-            .tcp_peers
-            .insert(client_id, (peer_key, peer));
+        let mut state_guard = state.lock().expect("server state lock poisoned");
+        match stream.peer_authorized() {
+            Ok(true) => {
+                state_guard.tcp_peers.insert(client_id, (peer_key, peer));
+            }
+            Ok(false) => {
+                drop(state_guard);
+                let _ = send_error(&mut stream, &state, "device revoked");
+                return;
+            }
+            Err(error) => {
+                drop(state_guard);
+                let _ = send_error(
+                    &mut stream,
+                    &state,
+                    &format!("authorization check failed: {error}"),
+                );
+                return;
+            }
+        }
     }
 
     if send_message(

@@ -95,6 +95,11 @@ impl TcpEndpoint {
         self.address = address;
         self
     }
+
+    pub fn without_invite(mut self) -> Self {
+        self.invite = None;
+        self
+    }
 }
 
 impl Endpoint {
@@ -303,6 +308,15 @@ impl EndpointStream {
         match self {
             Self::Local(_) => None,
             Self::Tcp(stream) => stream.remote_public_key(),
+        }
+    }
+
+    /// Whether the store still authorizes a TCP peer; local peers always are. Checked
+    /// again after the handshake so a device revoked meanwhile never gets served.
+    pub fn peer_authorized(&self) -> io::Result<bool> {
+        match self {
+            Self::Local(_) => Ok(true),
+            Self::Tcp(stream) => stream.peer_authorized(),
         }
     }
 

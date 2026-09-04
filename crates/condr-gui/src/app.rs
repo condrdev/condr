@@ -541,8 +541,10 @@ impl ServerConnection {
 
 pub(crate) struct Condr {
     client_config_path: Option<PathBuf>,
-    /// This device's static key for TCP Servers, kept beside `config.toml`.
-    device_key: StaticKey,
+    /// This device's static key for TCP Servers, kept beside `config.toml`. `None` when
+    /// it could not be loaded or created; TCP Servers are then unavailable rather than
+    /// reached with a key an attacker could predict.
+    device_key: Option<StaticKey>,
     connections: Vec<ServerConnection>,
     active_connection: ConnectionKey,
     next_connection_key: ConnectionKey,
@@ -627,21 +629,27 @@ impl Condr {
             .and_then(std::path::Path::parent)
             .map_or_else(StaticKey::generate, condr_server::noise::host_client_key)
         {
-            Ok(key) => (key, None),
+            Ok(key) => (Some(key), None),
             Err(error) => (
-                StaticKey::from_private([0; 32]),
-                Some(format!("Failed to load the device key: {error}")),
+                None,
+                Some(format!(
+                    "Failed to load the device key, so TCP Servers are unavailable: {error}"
+                )),
             ),
         };
         let (saved_servers, config_error) = client_config_path
             .as_deref()
             .map_or_else(|| Ok(Vec::new()), config::load_servers)
             .and_then(|servers| {
+                let Some(device_key) = &device_key else {
+                    // The key error above already explains why they are missing.
+                    return Ok(Vec::new());
+                };
                 servers
                     .into_iter()
                     .map(|server| {
                         server
-                            .endpoint(&device_key)
+                            .endpoint(device_key)
                             .map(|endpoint| (server.name, endpoint))
                     })
                     .collect::<Result<Vec<_>, _>>()

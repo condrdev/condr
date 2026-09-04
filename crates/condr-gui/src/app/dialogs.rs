@@ -189,7 +189,14 @@ impl Condr {
             "Add Server (server-key[.invite]@host:port)",
             "Add",
             String::new(),
-            |this, value, _, _| match TcpEndpoint::parse(&value, this.device_key.clone()) {
+            |this, value, _, _| match this
+                .device_key
+                .clone()
+                .ok_or_else(|| {
+                    std::io::Error::other("this device has no key; see the startup error")
+                })
+                .and_then(|device_key| TcpEndpoint::parse(&value, device_key))
+            {
                 Ok(tcp) => {
                     if this
                         .connections
