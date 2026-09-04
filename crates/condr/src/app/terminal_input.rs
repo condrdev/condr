@@ -556,35 +556,7 @@ impl Condr {
             // Cmd/Win chords without a binding are never terminal input; let them propagate.
             return;
         }
-        let key_code = match stroke.key.as_str() {
-            "enter" => Some(TerminalKey::Enter),
-            "tab" if modifiers.shift => Some(TerminalKey::BackTab),
-            "tab" => Some(TerminalKey::Tab),
-            "backspace" => Some(TerminalKey::Backspace),
-            "delete" => Some(TerminalKey::Delete),
-            "escape" => Some(TerminalKey::Escape),
-            "up" => Some(TerminalKey::Up),
-            "down" => Some(TerminalKey::Down),
-            "right" => Some(TerminalKey::Right),
-            "left" => Some(TerminalKey::Left),
-            "home" => Some(TerminalKey::Home),
-            "end" => Some(TerminalKey::End),
-            "pageup" => Some(TerminalKey::PageUp),
-            "pagedown" => Some(TerminalKey::PageDown),
-            "insert" => Some(TerminalKey::Insert),
-            key if key.len() > 1 && key.starts_with('f') => key[1..]
-                .parse::<u8>()
-                .ok()
-                .filter(|number| (1..=20).contains(number))
-                .map(TerminalKey::Function),
-            _ if modifiers.control || modifiers.alt => Some(TerminalKey::Character(
-                stroke
-                    .key_char
-                    .clone()
-                    .unwrap_or_else(|| stroke.key.clone()),
-            )),
-            _ => None,
-        };
+        let key_code = terminal_key_for(stroke);
         if let Some(key_code) = key_code {
             self.clear_selection(cx);
             self.restart_cursor_blink(key, pane_id, cx);
@@ -604,6 +576,67 @@ impl Condr {
             cx.stop_propagation();
         }
     }
+}
+
+/// The terminal key a GPUI keystroke stands for, or `None` when it is plain text (which
+/// arrives through the input handler) or not terminal input at all.
+///
+/// Platform notes: GPUI's `key` is the unshifted key name on every platform, `key_char` is
+/// what typing would produce. macOS fills `key_char` for Option chords ("ß" for option-s),
+/// so Option types characters like Terminal.app, iTerm2 and Zed do by default; Windows
+/// leaves `key_char` empty while Alt is held, so a shifted letter is uppercased here.
+pub(super) fn terminal_key_for(stroke: &Keystroke) -> Option<TerminalKey> {
+    let modifiers = stroke.modifiers;
+    let named = match stroke.key.as_str() {
+        "enter" => Some(TerminalKey::Enter),
+        "tab" if modifiers.shift => Some(TerminalKey::BackTab),
+        "tab" => Some(TerminalKey::Tab),
+        "backspace" => Some(TerminalKey::Backspace),
+        "delete" => Some(TerminalKey::Delete),
+        "escape" => Some(TerminalKey::Escape),
+        "up" => Some(TerminalKey::Up),
+        "down" => Some(TerminalKey::Down),
+        "right" => Some(TerminalKey::Right),
+        "left" => Some(TerminalKey::Left),
+        "home" => Some(TerminalKey::Home),
+        "end" => Some(TerminalKey::End),
+        "pageup" => Some(TerminalKey::PageUp),
+        "pagedown" => Some(TerminalKey::PageDown),
+        "insert" => Some(TerminalKey::Insert),
+        key if key.len() > 1 && key.starts_with('f') => key[1..]
+            .parse::<u8>()
+            .ok()
+            .filter(|number| (1..=20).contains(number))
+            .map(TerminalKey::Function),
+        _ => None,
+    };
+    if named.is_some() || !(modifiers.control || modifiers.alt) {
+        return named;
+    }
+    let key_char = stroke
+        .key_char
+        .as_deref()
+        .filter(|text| text.chars().count() == 1);
+    if cfg!(target_os = "macos") && !modifiers.control && key_char.is_some() {
+        // Option produced a character (ß, €, [ on non-US layouts): let it be typed.
+        return None;
+    }
+    let text = match key_char {
+        Some(text) => text.to_owned(),
+        None => match stroke.key.as_str() {
+            "space" => " ".to_owned(),
+            key if key.chars().count() == 1 => {
+                if modifiers.shift {
+                    key.to_ascii_uppercase()
+                } else {
+                    key.to_owned()
+                }
+            }
+            // capslock, pause, printscreen…: nothing a terminal can encode.
+            _ => return None,
+        },
+    };
+    Some(TerminalKey::Character(text))
 }
 
 pub(super) fn should_defer_to_character_input(event: &KeyDownEvent) -> bool {

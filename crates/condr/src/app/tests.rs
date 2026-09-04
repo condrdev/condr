@@ -1,5 +1,6 @@
-use super::terminal_input::next_hovered_link;
+use super::terminal_input::{next_hovered_link, terminal_key_for};
 use crate::terminal_element::HoveredTerminalLink;
+use condr_core::TerminalKey;
 use condr_core::protocol::{
     BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
     RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId,
@@ -898,6 +899,39 @@ fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
     );
     #[cfg(not(windows))]
     assert_eq!(shortcut("ctrl-v", false), None);
+}
+
+#[test]
+fn terminal_keys_follow_platform_keystroke_semantics() {
+    let key = |keys: &str| terminal_key_for(&Keystroke::parse(keys).unwrap());
+    let character = |text: &str| Some(TerminalKey::Character(text.into()));
+
+    // Plain text and shifted text arrive through the input handler, not as keys.
+    assert_eq!(key("s"), None);
+    assert_eq!(key("shift-s->S"), None);
+    assert_eq!(key("ctrl-c"), character("c"));
+    assert_eq!(key("ctrl-alt-c"), character("c"));
+    // Ctrl/Alt+Space are NUL and ESC SP, not the letters of "space".
+    assert_eq!(key("ctrl-space"), character(" "));
+    assert_eq!(key("alt-space"), character(" "));
+    // Windows leaves key_char empty under Alt: the shifted letter is still uppercase.
+    assert_eq!(key("alt-shift-s"), character("S"));
+    assert_eq!(key("alt-shift-s->S"), character("S"));
+    // Keys a terminal cannot encode are not turned into their names.
+    assert_eq!(key("ctrl-pause"), None);
+    assert_eq!(key("shift-tab"), Some(TerminalKey::BackTab));
+    assert_eq!(key("ctrl-f13"), Some(TerminalKey::Function(13)));
+
+    // macOS Option produces a character (ß), which is typed rather than sent as ESC ß;
+    // elsewhere Alt is Meta.
+    let option_s = key("alt-s->ß");
+    if cfg!(target_os = "macos") {
+        assert_eq!(option_s, None);
+        assert_eq!(key("ctrl-alt-s"), character("s"));
+    } else {
+        assert_eq!(option_s, character("ß"));
+        assert_eq!(key("alt-s->s"), character("s"));
+    }
 }
 
 #[test]

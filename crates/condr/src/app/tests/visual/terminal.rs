@@ -222,10 +222,34 @@ fn terminal_drag_selection_updates_locally() {
     );
 
     window.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
-    let completed = window.read(|app| view.read(app).terminal_selection.unwrap());
-    assert!(!completed.dragging);
-    assert_eq!(completed.range, dragging.range);
+    // The finished drag goes to the Server (ADR 0008); the local copy stands in until the
+    // Server's frame carries it, and the effective selection covers the same cells.
+    let columns = window.read(|app| {
+        view.read(app)
+            .terminal(1, pane_id)
+            .unwrap()
+            .view
+            .size
+            .columns
+    });
+    let dragged_cells = dragging.range.selected_cell_range(columns);
+    assert!(dragged_cells.is_some());
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            let condr = view.read(app);
+            condr.terminal(1, pane_id).unwrap().view.selection.is_some()
+                && condr
+                    .selection_for(1, pane_id)
+                    .and_then(|selection| selection.selected_cell_range(columns))
+                    == dragged_cells
+        })
+    }));
+    assert!(
+        window.read(|app| view.read(app).terminal_selection.is_none()),
+        "the local bridge is released once the Server's frame carries the selection"
+    );
 
+    // Keyboard input clears the selection, as Alacritty's frontend does.
     let revision = window.read(|app| view.read(app).terminal(1, pane_id).unwrap().view.revision);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -243,8 +267,9 @@ fn terminal_drag_selection_updates_locally() {
                 .is_some_and(|terminal| terminal.view.revision > revision)
         })
     }));
-    let after_output = window.read(|app| view.read(app).terminal_selection.unwrap());
-    assert_eq!(after_output.range, completed.range);
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| view.read(app).selection_for(1, pane_id).is_none())
+    }));
 }
 
 #[test]
