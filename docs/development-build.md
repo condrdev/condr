@@ -30,13 +30,15 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 被改动的那个值本身会按标准格式重写（`appearance = 'dark'` 变成 `appearance = "dark"`）。Server 列表是从当前连接整体重新生成的，所以 `[[client.servers]]` 各条目内部的手写格式和注释不保留；其外的内容不受影响。
 
+GUI、Server 和 CLI 共用配置事务：在解析后的真实文件旁取得 `config.toml.lock` 跨进程锁，锁覆盖读取、修改和写回，读取也使用同一把锁。已有符号链接保留，写入落到目标文件；通常原子替换，Windows 编辑器未共享删除权限时才在锁内原地写回。GUI 在事件循环启动前读取，后续保存按顺序放到后台，退出时等待未完成保存；Server 保存 Shell 时不会持有全局 Session 锁。手工编辑器不参与 Condr 的事务锁，仍应避免同时覆盖同一个设置。
+
 ### 终端 Shell
 
 `[server.terminal] shell` 指定 Server 在新终端里启动的程序，例如 `"nu"`、`"zsh"` 或 `"C:\\Program Files\\Git\\bin\\bash.exe"`。留空或不写时使用系统默认：Unix 取 `$SHELL`（不可执行时回退 passwd 记录），Windows 依次找 PATH 上的 `pwsh.exe`、`powershell.exe`，最后 `%ComSpec%`。
 
 这是每个 Server 各自的配置，存在该 Server 所在机器的 `config.toml` 里。Settings 的 Server 页先选 Server，再改 Shell；GUI 通过协议把值发给那台 Server，Server 写回自己的 `config.toml` 并广播新设置给所有 client。改动对下一个新终端生效，不必重启 Server；直接手改文件则需要重启 Server 才会读到。
 
-cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，但 Pane 的 cwd 只能靠进程探测。
+cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 Windows 上的 pwsh / powershell（prompt hook）。其他 shell 正常启动，Pane 的 cwd 来自进程探测或 shell 自己发送的 OSC 7；OSC 7 接受空主机名、localhost 和本机主机名，拒绝其他机器的路径。
 
 ### 两个二进制
 
@@ -44,6 +46,8 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 - `condr-gui`：GUI，只是 Server 的一个 client。它发现已有的本地 Server，或者用同目录下的 `condr server run` 启动一个。
 
 三个平台一致。Windows 上 `condr-gui.exe` 是 GUI 子系统程序，双击不出现控制台；`condr.exe` 是普通控制台程序。安装器和快捷方式负责把 GUI 以 Condr 的名字露给用户。
+
+CLI 查询结构时不会请求全部终端画面；`pane read --lines N` 只读取目标 Pane 的文本。创建 Workspace、Tab 或拆分 Pane 时，Server 在同一次操作中应用名称与 `--focus`，并返回实际创建的 ID；不带 `--focus` 时保留当前选择。`pane send-keys` 支持 F1–F20，整组键在发送前校验，F21–F24 会直接拒绝。
 
 ### Pane 内的环境变量
 
@@ -55,7 +59,7 @@ Server 用内嵌的 TOML manifest（来自 herdr，`crates/condr-core/src/agent/
 
 ### GUI 是单实例
 
-GUI 启动时在 runtime 目录取一把 `condr.lock` 独占文件锁；锁已被占用时第二个实例打印一行说明后直接退出，不会打开窗口。这条约束的存在理由是 Client 独占 `config.toml` 的读-改-写：两个 GUI 并发保存会互相丢键。锁在进程退出时释放，包括崩溃。
+GUI 启动时在 runtime 目录取一把 `condr.lock` 独占文件锁；锁已被占用时第二个实例打印一行说明后直接退出，不会打开窗口。它保证每个用户只有一个 GUI 实例；配置文件另有跨进程事务锁。锁在进程退出时释放，包括崩溃。
 
 Server 不受此限制 —— 每个 endpoint 本来就由 socket/named pipe 的绑定天然互斥。
 

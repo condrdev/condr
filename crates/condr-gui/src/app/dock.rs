@@ -290,9 +290,8 @@ impl Render for TerminalPanel {
                 });
                 let connection = app.connection(self.connection_key);
                 let terminal = app.terminal(self.connection_key, self.pane_id).cloned();
-                let pane_title = terminal
-                    .as_ref()
-                    .and_then(|terminal| terminal.title.clone())
+                let pane_title = connection
+                    .and_then(|connection| connection.terminal_titles.get(&self.pane_id).cloned())
                     .map(SharedString::from)
                     .or_else(|| {
                         connection

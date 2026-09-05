@@ -136,7 +136,15 @@ fn connected_condr_with(
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(move |window, cx| {
-        let view = cx.new(|cx| Condr::new(endpoint, initial, None, window, cx));
+        let view = cx.new(|cx| {
+            Condr::new(
+                endpoint,
+                initial,
+                config::LoadedConfig::read(None),
+                window,
+                cx,
+            )
+        });
         view_holder_for_window.borrow_mut().replace(view.clone());
         Root::new(view, window, cx)
     });
@@ -203,7 +211,7 @@ fn bootstrap_for_session(connection: &ServerConnection, session: &Session) -> Se
                     pane_id,
                     view: terminal.view.as_ref().clone(),
                     exited: terminal.exited,
-                    title: terminal.title.clone(),
+                    title: connection.terminal_titles.get(&pane_id).cloned(),
                     attention: false,
                 },
             )
@@ -363,3 +371,4 @@ mod connection;
 mod layout;
 mod terminal;
 mod workflows;
+use crate::app::config;

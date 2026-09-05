@@ -3,12 +3,11 @@
 //! a JSON error on stderr with exit 1, usage errors from clap with exit 2. Targets are
 //! the numeric ids the protocol and `CONDR_PANE_ID` already use.
 
-use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use clap::{Subcommand, ValueEnum};
-use condr_core::protocol::LayoutCommand;
+use condr_core::protocol::{LayoutCommand, LayoutResult};
 use condr_core::{
     AgentState, PaneDirection, PaneEnvironment, PaneId, PaneLayout, Session, SplitDirection, Tab,
     TabId, TerminalCommand, TerminalKey, TerminalModifiers, Workspace, WorkspaceId,
@@ -309,7 +308,7 @@ fn connect() -> Result<ClientConnection, CliError> {
         Ok(value) => Endpoint::from_env_value(&value)?,
         Err(_) => Endpoint::local(default_socket_path()),
     };
-    ClientConnection::connect(&endpoint, "condr-cli").map_err(|error| match error.kind() {
+    ClientConnection::connect_overview(&endpoint, "condr-cli").map_err(|error| match error.kind() {
         io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => CliError::new(
             "server_not_running",
             endpoint.describe_connect_error(&error),
@@ -321,10 +320,9 @@ fn connect() -> Result<ClientConnection, CliError> {
     })
 }
 
-fn apply(client: &mut ClientConnection, command: LayoutCommand) -> Result<(), CliError> {
+fn apply(client: &mut ClientConnection, command: LayoutCommand) -> Result<LayoutResult, CliError> {
     client
         .layout(command)?
-        .map(drop)
         .map_err(|reason| CliError::new("rejected", reason))
 }
 
@@ -398,12 +396,12 @@ fn pane_info(
     tab: &Tab,
     pane_id: PaneId,
 ) -> PaneInfo {
-    let bootstrap = client.bootstrap();
-    let terminal = bootstrap
+    let overview = client.overview();
+    let terminal = overview
         .terminals
         .iter()
         .find(|terminal| terminal.pane_id == pane_id);
-    let agent = bootstrap
+    let agent = overview
         .agents
         .iter()
         .find(|agent| agent.pane_id == pane_id)
@@ -414,7 +412,7 @@ fn pane_info(
         workspace_id: workspace.id().as_u64(),
         focused: tab.focused_pane().id() == pane_id,
         // Zoom is live state, not part of the structural Snapshot (ADR 0005).
-        zoomed: bootstrap.zoomed_panes.contains(&pane_id),
+        zoomed: overview.zoomed_panes.contains(&pane_id),
         cwd: tab
             .panes()
             .iter()
@@ -504,7 +502,7 @@ fn parse_key(spec: &str) -> Result<TerminalCommand, CliError> {
             if let Some(number) = lower
                 .strip_prefix('f')
                 .and_then(|digits| digits.parse::<u8>().ok())
-                .filter(|number| (1..=24).contains(number))
+                .filter(|number| (1..=20).contains(number))
             {
                 TerminalKey::Function(number)
             } else if key.chars().count() == 1 {
@@ -515,6 +513,25 @@ fn parse_key(spec: &str) -> Result<TerminalCommand, CliError> {
         }
     };
     Ok(TerminalCommand::Key { key, modifiers })
+}
+
+#[test]
+fn function_keys_are_validated_within_the_terminal_encoders_range() {
+    for number in 1..=20 {
+        assert!(matches!(
+            parse_key(&format!("ctrl+f{number}")),
+            Ok(TerminalCommand::Key { key: TerminalKey::Function(n), .. }) if n == number
+        ));
+    }
+    for number in [0, 21, 22, 23, 24, 255] {
+        let keys = ["a".to_owned(), format!("f{number}")];
+        assert!(
+            keys.iter()
+                .map(|key| parse_key(key))
+                .collect::<Result<Vec<_>, _>>()
+                .is_err()
+        );
+    }
 }
 
 fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, CliError> {
@@ -558,70 +575,21 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
                 Some(id) => id,
                 None => caller_pane()?,
             };
-            let before = client.session()?;
-            let (_, tab) = find_pane(&before, pane_id)?;
-            let known: HashSet<PaneId> = tab.panes().iter().map(|pane| pane.id()).collect();
-            let previous = (
-                before.active_workspace_id(),
-                before
-                    .active_workspace()
-                    .map(|workspace| workspace.active_tab().id()),
-                tab.focused_pane().id(),
-            );
-            let tab_id = tab.id();
-            apply(
+            find_pane(&client.session()?, pane_id)?;
+            let LayoutResult::PaneCreated { pane_id: new_pane } = apply(
                 client,
                 LayoutCommand::SplitPane {
                     pane_id: PaneId::from_u64(pane_id),
                     direction: direction.into(),
+                    focus,
                 },
-            )?;
-            client.refresh()?;
-            let new_pane = client
-                .session()?
-                .tab(tab_id)
-                .and_then(|tab| {
-                    tab.panes()
-                        .iter()
-                        .map(|pane| pane.id())
-                        .find(|id| !known.contains(id))
-                })
-                .ok_or_else(|| {
-                    CliError::new(
-                        "pane_split_failed",
-                        "the Server applied the command but reports no new Pane",
-                    )
-                })?;
-            // Splitting focuses the new Pane and activates its Tab and Workspace; without
-            // --focus the GUI goes back to where it was.
-            if !focus {
-                let (previous_workspace, previous_tab, previous_pane) = previous;
-                apply(
-                    client,
-                    LayoutCommand::FocusPane {
-                        pane_id: previous_pane,
-                    },
-                )?;
-                if let Some(previous_tab) = previous_tab
-                    && previous_tab != tab_id
-                {
-                    apply(
-                        client,
-                        LayoutCommand::ActivateTab {
-                            tab_id: previous_tab,
-                        },
-                    )?;
-                }
-                if let Some(previous_workspace) = previous_workspace {
-                    apply(
-                        client,
-                        LayoutCommand::ActivateWorkspace {
-                            workspace_id: previous_workspace,
-                        },
-                    )?;
-                }
-            }
-            client.refresh()?;
+            )?
+            else {
+                return Err(CliError::new(
+                    "pane_split_failed",
+                    "the Server returned no created Pane ID",
+                ));
+            };
             let session = client.session()?;
             let (workspace, tab) = find_pane(&session, new_pane.as_u64())?;
             Ok(json!({ "pane": pane_info(client, workspace, tab, new_pane) }))
@@ -633,7 +601,6 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             let pane_id = target_pane(pane_id)?;
             find_pane(&client.session()?, pane_id.as_u64())?;
             apply(client, LayoutCommand::FocusPane { pane_id })?;
-            client.refresh()?;
             let session = client.session()?;
             let (workspace, tab) = find_pane(&session, pane_id.as_u64())?;
             Ok(json!({ "pane": pane_info(client, workspace, tab, pane_id) }))
@@ -705,12 +672,11 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
         PaneCommand::Zoom { pane_id, on, off } => {
             let pane_id = target_pane(pane_id)?;
             find_pane(&client.session()?, pane_id.as_u64())?;
-            let zoomed = client.bootstrap().zoomed_panes.contains(&pane_id);
+            let zoomed = client.overview().zoomed_panes.contains(&pane_id);
             // The protocol only toggles; --on and --off skip the toggle when already there.
             let changed = !(on && zoomed || off && !zoomed);
             if changed {
                 apply(client, LayoutCommand::TogglePaneZoom { pane_id })?;
-                client.refresh()?;
             }
             let session = client.session()?;
             let (workspace, tab) = find_pane(&session, pane_id.as_u64())?;
@@ -734,7 +700,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
                 "workspace_id": workspace.id().as_u64(),
                 "tab_id": tab.id().as_u64(),
                 "focused_pane_id": tab.focused_pane().id().as_u64(),
-                "zoomed_pane_id": client.bootstrap().zoomed_panes.iter()
+                "zoomed_pane_id": client.overview().zoomed_panes.iter()
                     .find(|zoomed| tab.panes().iter().any(|pane| pane.id() == **zoomed))
                     .map(|zoomed| zoomed.as_u64()),
                 "pane": {
@@ -841,7 +807,6 @@ fn arrange(
     let tab_id = tab.id();
     let previous = (tab.layout().clone(), tab.focused_pane().id());
     apply(client, command)?;
-    client.refresh()?;
     let after = client.session()?;
     let tab = after
         .tab(tab_id)
@@ -879,40 +844,20 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
                 Some(cwd) => cwd,
                 None => std::env::current_dir()?,
             })?;
-            let before = client.session()?;
-            let previously_active = before.active_workspace_id();
-            let known: HashSet<WorkspaceId> =
-                before.workspaces().iter().map(Workspace::id).collect();
-            apply(client, LayoutCommand::CreateWorkspace { root_directory })?;
-            client.refresh()?;
-            let workspace_id = client
-                .session()?
-                .workspaces()
-                .iter()
-                .map(Workspace::id)
-                .find(|id| !known.contains(id))
-                .ok_or_else(|| {
-                    CliError::new(
-                        "workspace_create_failed",
-                        "the Server applied the command but reports no new Workspace",
-                    )
-                })?;
-            if let Some(name) = label {
-                apply(
-                    client,
-                    LayoutCommand::RenameWorkspace { workspace_id, name },
-                )?;
-            }
-            // Creation activates the new Workspace; without --focus the GUI stays put.
-            if !focus && let Some(previous) = previously_active {
-                apply(
-                    client,
-                    LayoutCommand::ActivateWorkspace {
-                        workspace_id: previous,
-                    },
-                )?;
-            }
-            client.refresh()?;
+            let LayoutResult::WorkspaceCreated { workspace_id, .. } = apply(
+                client,
+                LayoutCommand::CreateWorkspace {
+                    root_directory,
+                    name: label,
+                    focus,
+                },
+            )?
+            else {
+                return Err(CliError::new(
+                    "workspace_create_failed",
+                    "the Server returned no created Workspace ID",
+                ));
+            };
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id.as_u64())?;
             let tab = workspace.active_tab();
@@ -935,7 +880,6 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
                     workspace_id: WorkspaceId::from_u64(workspace_id),
                 },
             )?;
-            client.refresh()?;
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id)?;
             Ok(json!({ "workspace": workspace_info(&session, workspace) }))
@@ -952,7 +896,6 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
                     name: label,
                 },
             )?;
-            client.refresh()?;
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id)?;
             Ok(json!({ "workspace": workspace_info(&session, workspace) }))
@@ -1001,47 +944,20 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
                     .or(before.active_workspace_id())
                     .ok_or_else(|| CliError::new("workspace_not_found", "no active workspace"))?,
             };
-            let target = find_workspace(&before, workspace_id.as_u64())?;
-            let previously_active_workspace = before.active_workspace_id();
-            let previously_active_tab = target.active_tab().id();
-            let known: HashSet<TabId> = target.tabs().iter().map(Tab::id).collect();
-            apply(client, LayoutCommand::CreateTab { workspace_id })?;
-            client.refresh()?;
-            let tab_id = find_workspace(&client.session()?, workspace_id.as_u64())?
-                .tabs()
-                .iter()
-                .map(Tab::id)
-                .find(|id| !known.contains(id))
-                .ok_or_else(|| {
-                    CliError::new(
-                        "tab_create_failed",
-                        "the Server applied the command but reports no new Tab",
-                    )
-                })?;
-            if let Some(name) = label {
-                apply(client, LayoutCommand::RenameTab { tab_id, name })?;
-            }
-            // Creation activates the new Tab and its Workspace; without --focus both go
-            // back to where the GUI was.
-            if !focus {
-                apply(
-                    client,
-                    LayoutCommand::ActivateTab {
-                        tab_id: previously_active_tab,
-                    },
-                )?;
-                if let Some(previous) = previously_active_workspace
-                    && previous != workspace_id
-                {
-                    apply(
-                        client,
-                        LayoutCommand::ActivateWorkspace {
-                            workspace_id: previous,
-                        },
-                    )?;
-                }
-            }
-            client.refresh()?;
+            let LayoutResult::TabCreated { tab_id, .. } = apply(
+                client,
+                LayoutCommand::CreateTab {
+                    workspace_id,
+                    name: label,
+                    focus,
+                },
+            )?
+            else {
+                return Err(CliError::new(
+                    "tab_create_failed",
+                    "the Server returned no created Tab ID",
+                ));
+            };
             let session = client.session()?;
             let (workspace, tab) = find_tab(&session, tab_id.as_u64())?;
             Ok(json!({
@@ -1062,7 +978,6 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
                     tab_id: TabId::from_u64(tab_id),
                 },
             )?;
-            client.refresh()?;
             let session = client.session()?;
             let (workspace, tab) = find_tab(&session, tab_id)?;
             Ok(json!({ "tab": tab_info(workspace, tab) }))
@@ -1076,7 +991,6 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
                     name: label,
                 },
             )?;
-            client.refresh()?;
             let session = client.session()?;
             let (workspace, tab) = find_tab(&session, tab_id)?;
             Ok(json!({ "tab": tab_info(workspace, tab) }))

@@ -1,8 +1,9 @@
+#[cfg(test)]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::SharedString;
+use gpui_kit::{AppContext as _, Context, SharedString};
 use serde::Deserialize;
 
 use condr_server::{PublicKey, StaticKey, TcpEndpoint};
@@ -42,6 +43,84 @@ impl SavedServer {
 
 pub(super) fn default_path() -> Option<PathBuf> {
     condr_core::config_directory().map(|root| root.join("config.toml"))
+}
+
+pub(super) struct LoadedConfig {
+    pub path: Option<PathBuf>,
+    pub device_key: Option<StaticKey>,
+    pub servers: Vec<(String, Endpoint)>,
+    pub error: Option<String>,
+    pub appearance: Appearance,
+    pub terminal_font: TerminalFont,
+    pub terminal_color_scheme: SharedString,
+}
+
+impl LoadedConfig {
+    /// Read before starting the GUI event loop: the config and identity locks may wait.
+    pub(super) fn read(path: Option<PathBuf>) -> Self {
+        let (device_key, key_error) = match path
+            .as_deref()
+            .and_then(Path::parent)
+            .map_or_else(StaticKey::generate, condr_server::noise::load_device_key)
+        {
+            Ok(key) => (Some(key), None),
+            Err(error) => (
+                None,
+                Some(format!(
+                    "Failed to load the device key, so TCP Servers are unavailable: {error}"
+                )),
+            ),
+        };
+        let (servers, error) = path
+            .as_deref()
+            .map_or_else(|| Ok(Vec::new()), load_servers)
+            .and_then(|servers| {
+                let Some(device_key) = &device_key else {
+                    return Ok(Vec::new());
+                };
+                servers
+                    .into_iter()
+                    .map(|server| {
+                        server
+                            .endpoint(device_key)
+                            .map(|endpoint| (server.name, endpoint))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_or_else(
+                |error| {
+                    (
+                        Vec::new(),
+                        Some(format!(
+                            "Failed to load {}: {error}",
+                            path.as_deref().map_or_else(
+                                || "config.toml".to_owned(),
+                                |path| path.display().to_string()
+                            )
+                        )),
+                    )
+                },
+                |servers| (servers, key_error),
+            );
+        Self {
+            appearance: path
+                .as_deref()
+                .and_then(|path| load_appearance(path).ok())
+                .unwrap_or_default(),
+            terminal_font: path
+                .as_deref()
+                .and_then(|path| load_terminal_font(path).ok())
+                .unwrap_or_default(),
+            terminal_color_scheme: path
+                .as_deref()
+                .and_then(|path| load_terminal_color_scheme(path).ok())
+                .unwrap_or_default(),
+            path,
+            device_key,
+            servers,
+            error,
+        }
+    }
 }
 
 pub(super) fn load_servers(path: &Path) -> io::Result<Vec<SavedServer>> {
@@ -107,72 +186,90 @@ fn decode_servers(value: toml::Value) -> io::Result<Vec<SavedServer>> {
 }
 
 impl Condr {
-    pub(super) fn save_servers(&mut self) {
-        let Some(path) = self.client_config_path.as_deref() else {
-            return;
-        };
+    pub(super) fn save_servers(&mut self, cx: &mut Context<Self>) {
         // Without a device key no saved TCP Server was loaded; rewriting the list now
         // would erase them.
         if self.device_key.is_none() {
             return;
         }
-        let servers = self.connections.iter().filter_map(|connection| {
-            let Endpoint::Tcp(tcp) = &connection.endpoint else {
-                return None;
-            };
-            Some(SavedServer {
-                name: connection.label.clone(),
-                address: tcp.authority(),
-                server_key: tcp.server_key.to_hex(),
+        let servers = self
+            .connections
+            .iter()
+            .filter_map(|connection| {
+                let Endpoint::Tcp(tcp) = &connection.endpoint else {
+                    return None;
+                };
+                Some(SavedServer {
+                    name: connection.label.clone(),
+                    address: tcp.authority(),
+                    server_key: tcp.server_key.to_hex(),
+                })
             })
-        });
-        if let Err(error) = write_servers(path, servers) {
-            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
-        }
+            .collect::<Vec<_>>();
+        self.save_config(cx, move |path| write_servers(path, servers));
     }
 
-    pub(super) fn save_appearance(&mut self) {
-        let Some(path) = self.client_config_path.as_deref() else {
-            return;
-        };
+    pub(super) fn save_appearance(&mut self, cx: &mut Context<Self>) {
         let appearance = self.appearance;
-        if let Err(error) =
+        self.save_config(cx, move |path| {
             write_client_value(path, APPEARANCE_KEY, toml_edit::value(appearance.as_str()))
-        {
-            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
-        }
+        });
     }
 
-    pub(super) fn save_terminal_font(&mut self) {
-        let Some(path) = self.client_config_path.as_deref() else {
-            return;
-        };
+    pub(super) fn save_terminal_font(&mut self, cx: &mut Context<Self>) {
         let font = self.terminal_font.normalized();
-        if let Err(error) = write_values(
-            path,
-            &TERMINAL_TABLE,
-            vec![
-                (FONT_FAMILY_KEY, toml_edit::value(font.family.as_ref())),
-                (FONT_SIZE_KEY, toml_edit::value(f64::from(font.size))),
-            ],
-        ) {
-            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
-        }
+        self.save_config(cx, move |path| {
+            write_values(
+                path,
+                &TERMINAL_TABLE,
+                vec![
+                    (FONT_FAMILY_KEY, toml_edit::value(font.family.as_ref())),
+                    (FONT_SIZE_KEY, toml_edit::value(f64::from(font.size))),
+                ],
+            )
+        });
     }
 
-    pub(super) fn save_terminal_color_scheme(&mut self) {
-        let Some(path) = self.client_config_path.as_deref() else {
+    pub(super) fn save_terminal_color_scheme(&mut self, cx: &mut Context<Self>) {
+        let name = self.terminal_color_scheme.clone();
+        self.save_config(cx, move |path| {
+            write_value(
+                path,
+                &TERMINAL_TABLE,
+                COLOR_SCHEME_KEY,
+                toml_edit::value(name.as_ref()),
+            )
+        });
+    }
+
+    fn save_config(
+        &mut self,
+        cx: &mut Context<Self>,
+        write: impl FnOnce(&Path) -> io::Result<()> + Send + 'static,
+    ) {
+        let Some(path) = self.client_config_path.clone() else {
             return;
         };
-        let name = self.terminal_color_scheme.clone();
-        if let Err(error) = write_value(
-            path,
-            &TERMINAL_TABLE,
-            COLOR_SCHEME_KEY,
-            toml_edit::value(name.as_ref()),
-        ) {
-            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
-        }
+        let previous = self.config_save.take();
+        let (result_tx, result_rx) = async_channel::bounded(1);
+        // GPUI shutdown polls background work while the foreground queue is stopped.
+        self.config_save = Some(cx.background_spawn(async move {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            let result =
+                write(&path).map_err(|error| format!("Failed to save {}: {error}", path.display()));
+            let _ = result_tx.try_send(result);
+        }));
+        cx.spawn(async move |this, cx| {
+            if let Ok(Err(error)) = result_rx.recv().await {
+                let _ = this.update(cx, |this, cx| {
+                    this.app_error = Some(error);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 }
 
@@ -207,63 +304,19 @@ fn write_values(
     tables: &[&str],
     entries: Vec<(&str, toml_edit::Item)>,
 ) -> io::Result<()> {
-    let mut document = read_document(path)?;
-    let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
-    for name in tables {
-        table = table
-            .entry(name)
-            .or_insert(toml_edit::table())
-            .as_table_like_mut()
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{name} must be a table"),
-                )
-            })?;
-    }
-    for (key, value) in entries {
-        // `insert` replaces the key as well as the value, taking the comments around
-        // both with it. Overwriting an existing scalar in place keeps them.
-        match (
-            table.get_mut(key).and_then(toml_edit::Item::as_value_mut),
-            value.as_value(),
-        ) {
-            (Some(existing), Some(replacement)) => {
-                let decor = existing.decor().clone();
-                *existing = replacement.clone();
-                *existing.decor_mut() = decor;
-            }
-            _ => {
-                table.insert(key, value);
-            }
-        }
-    }
-    // Shared with the Server's writer: symlinks are followed, and a file another program
-    // holds open is written in place instead of failing.
-    condr_server::write_config_text(path, &document.to_string())
+    condr_server::update_config_values(
+        path,
+        tables,
+        entries.into_iter().map(|(key, value)| (key, Some(value))),
+    )
 }
 
 /// Reads for the typed load path. `toml` deserializes a hand-edited value into
 /// `SavedServer` and reports a useful error; `toml_edit` is only for writing back.
 fn read_root(path: &Path) -> io::Result<toml::Table> {
-    match read_config_text(path)? {
+    match condr_server::read_config_text(path)? {
         Some(text) => toml::from_str(&text).map_err(invalid_data),
         None => Ok(toml::Table::new()),
-    }
-}
-
-fn read_document(path: &Path) -> io::Result<toml_edit::DocumentMut> {
-    match read_config_text(path)? {
-        Some(text) => text.parse().map_err(invalid_data),
-        None => Ok(toml_edit::DocumentMut::new()),
-    }
-}
-
-fn read_config_text(path: &Path) -> io::Result<Option<String>> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
     }
 }
 

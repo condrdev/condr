@@ -188,6 +188,26 @@ impl Session {
         false
     }
 
+    /// Keeps existing selection and focus history when a staged creation does not request
+    /// focus. Newly created Workspaces/Tabs retain their valid initial selection.
+    pub fn preserve_selection_from(&mut self, previous: &Session) {
+        if let Some(active) = previous.active_workspace {
+            self.active_workspace = Some(active);
+        }
+        for workspace in &mut self.workspaces {
+            if let Some(old) = previous.workspace(workspace.id) {
+                workspace.active_tab = old.active_tab;
+                for tab in &mut workspace.tabs {
+                    if let Some(old) = old.tabs.iter().find(|old| old.id == tab.id) {
+                        tab.focused_pane = old.focused_pane;
+                        tab.focus_history.clone_from(&old.focus_history);
+                        tab.zoomed_pane = old.zoomed_pane;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn workspace(&self, workspace_id: WorkspaceId) -> Option<&Workspace> {
         self.workspaces
             .iter()

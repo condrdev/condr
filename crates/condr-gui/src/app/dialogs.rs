@@ -204,7 +204,7 @@ impl Condr {
             "Add Server (server-key[.invite]@host:port)",
             "Add",
             String::new(),
-            |this, value, _, _| match this
+            |this, value, _, cx| match this
                 .device_key
                 .clone()
                 .ok_or_else(|| {
@@ -227,7 +227,7 @@ impl Condr {
                     let label = tcp.authority();
                     this.connections
                         .push(ServerConnection::new(key, label, Endpoint::tcp(tcp)));
-                    this.save_servers();
+                    this.save_servers(cx);
                     this.pending_presentation_request = None;
                     this.active_connection = key;
                     this.target_pane = None;
@@ -412,7 +412,7 @@ impl Condr {
         tcp.port = port;
         let was_up = connection.status != ConnectionStatus::Disconnected;
         self.app_error = None;
-        self.save_servers();
+        self.save_servers(cx);
         if moved && was_up {
             self.disconnect_server(key);
             if self.start_connect(key) {

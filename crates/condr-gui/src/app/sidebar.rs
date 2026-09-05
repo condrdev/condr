@@ -1014,11 +1014,17 @@ pub(super) fn reorder_connection(
 }
 
 impl Condr {
-    fn move_server(&mut self, dragged: ConnectionKey, target: ConnectionKey, after: bool) {
+    fn move_server(
+        &mut self,
+        dragged: ConnectionKey,
+        target: ConnectionKey,
+        after: bool,
+        cx: &mut Context<Self>,
+    ) {
         if reorder_connection(&mut self.connections, dragged, target, after) {
             // ponytail: the saved order only covers TCP servers, so the local
             // server always loads first again after a restart.
-            self.save_servers();
+            self.save_servers(cx);
         }
     }
 
@@ -1348,7 +1354,7 @@ impl Condr {
                 move |dragged, _, cx| {
                     let _ = drop_owner.update(cx, |this, cx| {
                         let after = this.take_drop_after(server_target);
-                        this.move_server(dragged.key, key, after);
+                        this.move_server(dragged.key, key, after, cx);
                         cx.notify();
                     });
                 }

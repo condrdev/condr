@@ -1,9 +1,10 @@
 //! Versioned, transport-independent server/client protocol.
 //!
-//! The server owns the runtime. A client starts with [`ClientMessage::Hello`],
-//! receives a [`ServerMessage::Bootstrap`], and then consumes ordered reliable
-//! events plus coalesced terminal visual frames. The same framing works over
-//! local IPC and trusted TCP/SSH-tunnel transports.
+//! The server owns the runtime. [`ClientMessage::Hello`] receives only
+//! [`ServerMessage::Welcome`]. Clients explicitly request a lightweight overview
+//! or a complete Bootstrap, then optionally subscribe to ordered reliable events
+//! and coalesced terminal visual frames. The same framing works over local IPC
+//! and authenticated, encrypted TCP transports.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -54,6 +55,10 @@ pub enum ClientMessage {
     SnapshotRequest {
         session_id: SessionId,
     },
+    /// Structural and lifecycle metadata, without capturing terminal views or subscribing.
+    OverviewRequest {
+        session_id: SessionId,
+    },
     Subscribe {
         session_id: SessionId,
         after_sequence: u64,
@@ -97,11 +102,11 @@ pub enum ClientMessage {
     StopServer {
         server_id: ServerId,
     },
-    /// Drops the live TCP connections of every paired device whose public key starts
-    /// with `key_prefix`. Only the Server host may send it; the authorized list itself is
+    /// Drops the live TCP connections of the device identified by its full public key.
+    /// Only the Server host may send it; the authorized list itself is
     /// a file the host edits directly.
     RevokeDevice {
-        key_prefix: String,
+        key: String,
     },
     /// Asks which paired devices hold a live TCP connection right now. Server host only.
     ConnectedDevices,
@@ -112,6 +117,8 @@ pub enum ClientMessage {
 pub enum LayoutCommand {
     CreateWorkspace {
         root_directory: PathBuf,
+        name: Option<String>,
+        focus: bool,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -126,6 +133,8 @@ pub enum LayoutCommand {
     },
     CreateTab {
         workspace_id: WorkspaceId,
+        name: Option<String>,
+        focus: bool,
     },
     RenameWorkspace {
         workspace_id: WorkspaceId,
@@ -152,6 +161,7 @@ pub enum LayoutCommand {
     SplitPane {
         pane_id: PaneId,
         direction: SplitDirection,
+        focus: bool,
     },
     FocusPane {
         pane_id: PaneId,
@@ -185,6 +195,67 @@ pub enum LayoutCommand {
     CloseWorkspace {
         workspace_id: WorkspaceId,
     },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum LayoutResult {
+    #[default]
+    Changed,
+    WorkspaceCreated {
+        workspace_id: WorkspaceId,
+        tab_id: TabId,
+        pane_id: PaneId,
+    },
+    TabCreated {
+        tab_id: TabId,
+        pane_id: PaneId,
+    },
+    PaneCreated {
+        pane_id: PaneId,
+    },
+}
+
+/// A lightweight authoritative Session query for CLI inspection and orchestration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SessionOverview {
+    pub server_id: ServerId,
+    pub runtime_epoch: RuntimeEpoch,
+    pub session_id: SessionId,
+    pub sequence: u64,
+    pub snapshot: SessionSnapshot,
+    pub terminals: Vec<PaneTerminalMetadata>,
+    pub agents: Vec<PaneAgentSnapshot>,
+    pub zoomed_panes: Vec<PaneId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PaneTerminalMetadata {
+    pub pane_id: PaneId,
+    pub title: Option<String>,
+    pub exited: bool,
+}
+
+impl From<&SessionBootstrap> for SessionOverview {
+    fn from(bootstrap: &SessionBootstrap) -> Self {
+        Self {
+            server_id: bootstrap.server_id,
+            runtime_epoch: bootstrap.runtime_epoch,
+            session_id: bootstrap.session_id,
+            sequence: bootstrap.sequence,
+            snapshot: bootstrap.snapshot.clone(),
+            terminals: bootstrap
+                .terminals
+                .iter()
+                .map(|terminal| PaneTerminalMetadata {
+                    pane_id: terminal.pane_id,
+                    title: terminal.title.clone(),
+                    exited: terminal.exited,
+                })
+                .collect(),
+            agents: bootstrap.agents.clone(),
+            zoomed_panes: bootstrap.zoomed_panes.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -335,6 +406,13 @@ pub enum ServerMessage {
         error: Option<String>,
     },
     Bootstrap(BootstrapHeader),
+    /// Overview header with an empty terminal list; exactly one OverviewTerminals follows.
+    Overview(SessionOverview),
+    OverviewTerminals {
+        server_id: ServerId,
+        session_id: SessionId,
+        terminals: Vec<PaneTerminalMetadata>,
+    },
     BootstrapBatch(BootstrapBatch),
     Subscribed {
         server_id: ServerId,
@@ -388,6 +466,7 @@ pub enum ServerMessage {
         session_id: SessionId,
         request_id: u64,
         sequence: u64,
+        result: LayoutResult,
     },
     TerminalCopied {
         pane_id: PaneId,
@@ -810,12 +889,14 @@ mod tests {
     }
 
     #[test]
-    fn layout_command_round_trip_uses_the_existing_protocol_version() {
+    fn layout_command_round_trip_preserves_creation_options() {
         let message = ClientMessage::Layout {
             server_id: ServerId(4),
             session_id: SessionId(1),
             request_id: 9,
             command: LayoutCommand::CreateWorkspace {
+                name: Some("worker".into()),
+                focus: false,
                 root_directory: PathBuf::from("projects/condr"),
             },
         };
@@ -825,11 +906,10 @@ mod tests {
             read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
-    fn worktree_command_round_trip_keeps_protocol_version_one() {
+    fn worktree_command_round_trip_preserves_its_target() {
         let mut session = crate::Session::new();
         let parent_workspace_id = session
             .create_workspace(PathBuf::from("projects/condr"))
@@ -849,11 +929,10 @@ mod tests {
             read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
-    fn subscription_rejection_round_trip_keeps_protocol_version_one() {
+    fn subscription_rejection_round_trip_preserves_identity() {
         let message = ServerMessage::SubscriptionRejected {
             server_id: ServerId(4),
             session_id: SessionId(7),
@@ -865,11 +944,10 @@ mod tests {
             read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
-    fn snapshot_rejection_round_trip_keeps_protocol_version_one() {
+    fn snapshot_rejection_round_trip_preserves_identity() {
         let message = ServerMessage::SnapshotRejected {
             server_id: ServerId(4),
             session_id: SessionId(7),
@@ -881,7 +959,6 @@ mod tests {
             read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
@@ -898,7 +975,6 @@ mod tests {
             read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
@@ -908,6 +984,11 @@ mod tests {
             session_id: SessionId(7),
             request_id: 12,
             sequence: 31,
+            result: LayoutResult::WorkspaceCreated {
+                workspace_id: WorkspaceId::from_u64(21),
+                tab_id: TabId::from_u64(22),
+                pane_id: PaneId::from_u64(23),
+            },
         };
         let mut bytes = Vec::new();
         write_message(&mut bytes, &message).unwrap();
@@ -915,7 +996,6 @@ mod tests {
             read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
@@ -949,11 +1029,11 @@ mod tests {
             read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
             message
         );
-        assert_eq!(PROTOCOL_VERSION, 1);
     }
 
     #[test]
     fn incompatible_versions_are_rejected() {
+        assert_eq!(PROTOCOL_VERSION, 1);
         assert!(matches!(
             check_version(PROTOCOL_VERSION + 1),
             VersionCheck::Incompatible(_)

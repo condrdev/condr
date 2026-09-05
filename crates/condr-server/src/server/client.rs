@@ -1,5 +1,20 @@
 use super::*;
 
+struct PeerRegistration {
+    state: Arc<Mutex<RuntimeState>>,
+    client_id: u64,
+}
+
+impl Drop for PeerRegistration {
+    fn drop(&mut self) {
+        self.state
+            .lock()
+            .expect("server state lock poisoned")
+            .tcp_peers
+            .remove(&self.client_id);
+    }
+}
+
 pub(super) fn handle_client(
     mut stream: EndpointStream,
     client_id: u64,
@@ -57,12 +72,17 @@ pub(super) fn handle_client(
     // key can close the connection from another client's thread. The store is read again
     // under the same lock the revocation scan takes: a device revoked between its
     // handshake and this point is refused here, one revoked later is found in the table.
+    let mut peer_registration = None;
     if let Some(peer_key) = stream.peer_key() {
         let Ok(peer) = stream.try_clone() else { return };
         let mut state_guard = state.lock().expect("server state lock poisoned");
         match stream.peer_authorized() {
             Ok(true) => {
                 state_guard.tcp_peers.insert(client_id, (peer_key, peer));
+                peer_registration = Some(PeerRegistration {
+                    state: Arc::clone(&state),
+                    client_id,
+                });
                 drop(state_guard);
                 // Best effort: a failed bookkeeping write must not cost the connection.
                 let _ = stream.record_peer_seen();
@@ -96,9 +116,6 @@ pub(super) fn handle_client(
     )
     .is_err()
     {
-        return;
-    }
-    if send_bootstrap(&mut stream, &state).is_err() {
         return;
     }
     let _ = stream.set_handshake_timeout(None);
@@ -161,6 +178,62 @@ pub(super) fn handle_client(
         let should_close = match message {
             ClientMessage::SnapshotRequest { session_id } => {
                 queue_runtime_bootstrap(&state, client_id, session_id, &outbound)
+            }
+            ClientMessage::OverviewRequest { session_id } => {
+                let response = {
+                    let state = state.lock().expect("server state lock poisoned");
+                    if session_id == state.session_id {
+                        ServerMessage::Overview(SessionOverview {
+                            server_id: state.server_id,
+                            runtime_epoch: state.runtime_epoch,
+                            session_id: state.session_id,
+                            sequence: state.sequence,
+                            snapshot: state.session.snapshot(),
+                            terminals: state
+                                .terminals
+                                .keys()
+                                .filter(|pane_id| !state.closing_terminals.contains(pane_id))
+                                .map(|pane_id| PaneTerminalMetadata {
+                                    pane_id: *pane_id,
+                                    title: state.terminal_titles.get(pane_id).cloned(),
+                                    exited: state.exited_terminals.contains(pane_id),
+                                })
+                                .collect(),
+                            agents: state
+                                .agents
+                                .iter()
+                                .filter(|(pane_id, _)| {
+                                    !state.closing_terminals.contains(pane_id)
+                                        && !state.exited_terminals.contains(pane_id)
+                                })
+                                .map(|(pane_id, agent)| PaneAgentSnapshot {
+                                    pane_id: *pane_id,
+                                    agent: *agent,
+                                })
+                                .collect(),
+                            zoomed_panes: state.zoomed_panes(),
+                        })
+                    } else {
+                        ServerMessage::Error {
+                            message: "unknown Session".into(),
+                        }
+                    }
+                };
+                match response {
+                    ServerMessage::Overview(overview) => match frame_overview_messages(overview) {
+                        Ok(frames) => {
+                            outbound.send_reliable_batch(frames)
+                                == Err(ReliableSendError::Disconnected)
+                        }
+                        Err(error) => queue_message(
+                            &outbound,
+                            ServerMessage::Error {
+                                message: format!("cannot encode Session overview: {error}"),
+                            },
+                        ),
+                    },
+                    response => queue_message(&outbound, response),
+                }
             }
             ClientMessage::Subscribe {
                 session_id,
@@ -559,7 +632,10 @@ pub(super) fn handle_client(
                                                         removed_terminals =
                                                             effect.removed_terminals;
                                                         state.publish_layout_change(
-                                                            client_id, &outbound, request_id,
+                                                            client_id,
+                                                            &outbound,
+                                                            request_id,
+                                                            effect.result,
                                                         )
                                                     }
                                                     Err(reason) => queue_message(
@@ -615,8 +691,12 @@ pub(super) fn handle_client(
                                     Ok(effect) => {
                                         started_terminals.extend(effect.started_terminals);
                                         removed_terminals = effect.removed_terminals;
-                                        state
-                                            .publish_layout_change(client_id, &outbound, request_id)
+                                        state.publish_layout_change(
+                                            client_id,
+                                            &outbound,
+                                            request_id,
+                                            effect.result,
+                                        )
                                     }
                                     Err(reason) => queue_message(
                                         &outbound,
@@ -777,18 +857,7 @@ pub(super) fn handle_client(
                 }
             }
             ClientMessage::SetServerSettings { server_id, shell } => {
-                let mut state = state.lock().expect("server state lock poisoned");
-                if server_id != state.server_id {
-                    queue_message(
-                        &outbound,
-                        ServerMessage::Error {
-                            message: "unknown Server".into(),
-                        },
-                    )
-                } else {
-                    // An unchanged value publishes nothing; the client already shows it.
-                    state.set_shell(&shell, Some((client_id, &outbound)))
-                }
+                set_server_shell(&state, server_id, &shell, client_id, &outbound)
             }
             ClientMessage::StopServer { server_id } => {
                 let known_server = state.lock().expect("server state lock poisoned").server_id;
@@ -810,21 +879,25 @@ pub(super) fn handle_client(
                     true
                 }
             }
-            ClientMessage::RevokeDevice { key_prefix } => {
+            ClientMessage::RevokeDevice { key } => {
                 let response = if !stream.may_administer() {
                     ServerMessage::Error {
                         message: "only the Server host may revoke devices".into(),
                     }
-                } else {
+                } else if let Ok(key) = crate::noise::PublicKey::parse(&key) {
                     let state = state.lock().expect("server state lock poisoned");
                     let mut disconnected = 0;
-                    for (id, (key, peer)) in &state.tcp_peers {
-                        if *id != client_id && key.matches_prefix(&key_prefix) {
+                    for (id, (peer_key, peer)) in &state.tcp_peers {
+                        if *id != client_id && *peer_key == key {
                             let _ = peer.shutdown();
                             disconnected += 1;
                         }
                     }
                     ServerMessage::DevicesRevoked { disconnected }
+                } else {
+                    ServerMessage::Error {
+                        message: "expected a full device fingerprint".into(),
+                    }
                 };
                 queue_message(&outbound, response)
             }
@@ -872,15 +945,74 @@ pub(super) fn handle_client(
 
     let mut state = state.lock().expect("server state lock poisoned");
     state.subscribers.remove(&client_id);
-    state.tcp_peers.remove(&client_id);
     if state.active_controller == Some(client_id) {
         state.clear_controller_terminal_state();
         state.active_controller = None;
     }
     drop(state);
+    drop(peer_registration);
     if stopping_server {
         stop.store(true, Ordering::Release);
     }
     drop(outbound);
     let _ = writer.join();
+}
+
+fn set_server_shell(
+    state: &Arc<Mutex<RuntimeState>>,
+    server_id: ServerId,
+    shell: &str,
+    client_id: u64,
+    outbound: &ClientWriter,
+) -> bool {
+    let shell = shell.trim();
+    let settings_write = Arc::clone(
+        &state
+            .lock()
+            .expect("server state lock poisoned")
+            .settings_write,
+    );
+    // Keep disk completion and the published value in the same order across clients,
+    // without holding the Session lock during file or lock I/O.
+    let _write = settings_write.lock().expect("settings write lock poisoned");
+    let path = {
+        let state = state.lock().expect("server state lock poisoned");
+        if server_id != state.server_id {
+            return queue_message(
+                outbound,
+                ServerMessage::Error {
+                    message: "unknown Server".into(),
+                },
+            );
+        }
+        if shell.len() > MAX_SHELL_SETTING_BYTES {
+            return queue_message(
+                outbound,
+                ServerMessage::Error {
+                    message: format!("shell setting exceeds {MAX_SHELL_SETTING_BYTES} bytes"),
+                },
+            );
+        }
+        if state.settings.shell == shell {
+            return false;
+        }
+        state.config_path.clone()
+    };
+    if let Some(path) = path
+        && let Err(error) = save_shell(&path, shell)
+    {
+        return queue_message(
+            outbound,
+            ServerMessage::Error {
+                message: format!(
+                    "failed to save the shell preference to {}: {error}",
+                    path.display()
+                ),
+            },
+        );
+    }
+    state
+        .lock()
+        .expect("server state lock poisoned")
+        .set_shell(shell, Some((client_id, outbound)))
 }

@@ -23,10 +23,8 @@ pub(super) fn encode_key_in_mode(
     encode_key(key, modifiers, modes.contains(TermMode::APP_CURSOR))
 }
 
-/// Kitty keyboard protocol, press events only, aligned with herdr: plain text and
-/// unmodified Enter/Tab/Backspace stay legacy unless every key is to be reported, and
-/// keys with well-known xterm modified forms keep those. Only Escape follows the spec
-/// rather than herdr and becomes `CSI 27 u` under disambiguation.
+/// Kitty keyboard protocol, press events only. Functional keys use the specification's
+/// canonical CSI forms when disambiguation, event types or report-all is enabled.
 fn encode_kitty_key(
     key: &TerminalKey,
     modifiers: TerminalModifiers,
@@ -58,7 +56,7 @@ fn encode_kitty_key(
         | TerminalKey::PageUp
         | TerminalKey::PageDown
         | TerminalKey::Function(_)
-            if escape_only =>
+            if escape_only && !modes.contains(TermMode::DISAMBIGUATE_ESC_CODES) =>
         {
             return None;
         }
@@ -90,8 +88,6 @@ fn encode_kitty_key(
             format!("\x1b[{prefix};{mods}{final_byte}")
         } else if final_byte == '~' {
             format!("\x1b[{prefix}~")
-        } else if matches!(final_byte, 'P' | 'Q' | 'R' | 'S') {
-            format!("\x1bO{final_byte}")
         } else {
             format!("\x1b[{final_byte}")
         }
@@ -110,14 +106,13 @@ fn encode_kitty_key(
         TerminalKey::PageDown => legacy_form(6, '~'),
         TerminalKey::Function(1) => legacy_form(1, 'P'),
         TerminalKey::Function(2) => legacy_form(1, 'Q'),
-        TerminalKey::Function(3) => legacy_form(1, 'R'),
+        TerminalKey::Function(3) => legacy_form(13, '~'),
         TerminalKey::Function(4) => legacy_form(1, 'S'),
-        TerminalKey::Function(number) => {
-            const TILDE_CODES: [u8; 16] = [
-                15, 17, 18, 19, 20, 21, 23, 24, 25, 26, 28, 29, 31, 32, 33, 34,
-            ];
+        TerminalKey::Function(number @ 5..=12) => {
+            const TILDE_CODES: [u8; 8] = [15, 17, 18, 19, 20, 21, 23, 24];
             legacy_form(TILDE_CODES[usize::from(*number) - 5], '~')
         }
+        TerminalKey::Function(number) => csi_u(57376 + u32::from(*number) - 13),
         TerminalKey::Enter => csi_u(13),
         TerminalKey::Tab | TerminalKey::BackTab => csi_u(9),
         TerminalKey::Backspace => csi_u(127),

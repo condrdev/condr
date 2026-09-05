@@ -19,6 +19,8 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -90,6 +92,8 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -158,6 +162,8 @@ fn terminal_drag_selection_updates_locally() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -291,6 +297,8 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -304,7 +312,15 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                 .active_workspace()
                 .map(|workspace| workspace.active_tab().focused_pane().id())
         });
-        pane_id.is_some()
+        pane_id.is_some_and(|pane_id| {
+            window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .unwrap()
+                    .terminals
+                    .contains_key(&pane_id)
+            })
+        })
     }));
     let pane_id = pane_id.unwrap();
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
@@ -389,6 +405,8 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -521,6 +539,8 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -654,6 +674,8 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -742,6 +764,8 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -942,6 +966,8 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -1212,6 +1238,8 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: workspace_root.0.clone(),
             });
         });

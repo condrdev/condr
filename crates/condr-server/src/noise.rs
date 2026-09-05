@@ -356,8 +356,6 @@ pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            // `key paired-at last-seen name…`; a line written before last-seen existed has
-            // a name where the third number would be, and counts as seen when paired.
             let malformed = || {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -365,48 +363,43 @@ pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
                 )
             };
             let mut fields = line.splitn(4, ' ');
-            let (Some(key), Some(paired_at)) = (fields.next(), fields.next()) else {
+            let (Some(key), Some(paired_at), Some(last_seen), Some(name)) =
+                (fields.next(), fields.next(), fields.next(), fields.next())
+            else {
                 return Err(malformed());
-            };
-            let paired_at: u64 = paired_at.parse().map_err(|_| malformed())?;
-            let third = fields.next().unwrap_or_default();
-            let (last_seen, name) = match third.parse::<u64>() {
-                Ok(last_seen) => (last_seen, fields.next().unwrap_or_default().to_owned()),
-                Err(_) => (
-                    paired_at,
-                    [third, fields.next().unwrap_or_default()]
-                        .into_iter()
-                        .filter(|part| !part.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                ),
             };
             Ok(AuthorizedClient {
                 key: PublicKey::parse(key)?,
-                paired_at,
-                last_seen,
-                name,
+                paired_at: paired_at.parse().map_err(|_| malformed())?,
+                last_seen: last_seen.parse().map_err(|_| malformed())?,
+                name: name.to_owned(),
             })
         })
         .collect()
 }
 
-/// Removes every authorized client whose key starts with `prefix`; returns how many.
+/// Removes the unique client matching `prefix` and returns its full key.
+/// Ambiguity leaves the store untouched; an unmatched prefix returns `None`.
 /// This refuses their next handshake; `ClientMessage::RevokeDevice` closes the
 /// connections they hold now.
-pub fn revoke(directory: &Path, prefix: &str) -> io::Result<usize> {
+pub fn revoke(directory: &Path, prefix: &str) -> io::Result<Option<PublicKey>> {
     with_store_lock(directory, || {
-        let clients = read_authorized(directory)?;
-        let kept = clients
+        let mut clients = read_authorized(directory)?;
+        let mut matches = clients
             .iter()
-            .filter(|client| !client.key.matches_prefix(prefix))
-            .cloned()
-            .collect::<Vec<_>>();
-        let removed = clients.len() - kept.len();
-        if removed > 0 {
-            write_authorized(directory, &kept)?;
+            .filter(|client| client.key.matches_prefix(prefix));
+        let Some(key) = matches.next().map(|client| client.key) else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ambiguous device prefix; use a longer fingerprint",
+            ));
         }
-        Ok(removed)
+        clients.retain(|client| client.key != key);
+        write_authorized(directory, &clients)?;
+        Ok(Some(key))
     })
 }
 
@@ -529,6 +522,7 @@ pub struct NoiseStream {
     consumed: usize,
     /// Written bytes not yet encrypted; `flush` sends them as one record.
     pending: Vec<u8>,
+    ciphertext: Vec<u8>,
 }
 
 enum Noise {
@@ -602,6 +596,7 @@ impl NoiseStream {
             plaintext: Vec::new(),
             consumed: 0,
             pending: Vec::new(),
+            ciphertext: Vec::new(),
         }
     }
 
@@ -616,6 +611,7 @@ impl NoiseStream {
             plaintext: Vec::new(),
             consumed: 0,
             pending: Vec::new(),
+            ciphertext: Vec::new(),
         })
     }
 
@@ -674,7 +670,8 @@ impl NoiseStream {
 
     /// Runs the handshake now instead of on first use; tests use it to hold a
     /// handshaken connection without sending anything.
-    pub fn handshake(&mut self) -> io::Result<()> {
+    #[cfg(test)]
+    pub(crate) fn handshake(&mut self) -> io::Result<()> {
         self.ensure_transport()
     }
 
@@ -758,10 +755,9 @@ impl NoiseStream {
         Ok(())
     }
 
-    /// Encrypts the first `length` pending bytes into one record and writes it.
-    fn send_pending(&mut self, length: usize) -> io::Result<()> {
+    fn send_record(&mut self, plaintext: &[u8]) -> io::Result<()> {
         self.ensure_transport()?;
-        let mut record = vec![0; 2 + length + TAG_LEN];
+        self.ciphertext.resize(2 + plaintext.len() + TAG_LEN, 0);
         let written = {
             let noise = Arc::clone(&self.noise);
             let mut noise = lock(&noise);
@@ -769,13 +765,19 @@ impl NoiseStream {
                 return Err(rejected("handshake incomplete"));
             };
             transport
-                .write_message(&self.pending[..length], &mut record[2..])
+                .write_message(plaintext, &mut self.ciphertext[2..])
                 .map_err(noise_error)?
         };
-        self.pending.drain(..length);
-        record.truncate(2 + written);
-        record[..2].copy_from_slice(&(written as u16).to_be_bytes());
-        self.socket.write_all(&record)
+        self.ciphertext[..2].copy_from_slice(&(written as u16).to_be_bytes());
+        self.socket.write_all(&self.ciphertext[..2 + written])
+    }
+
+    fn send_pending(&mut self) -> io::Result<()> {
+        let mut pending = std::mem::take(&mut self.pending);
+        let result = self.send_record(&pending);
+        pending.clear();
+        self.pending = pending;
+        result
     }
 }
 
@@ -823,17 +825,26 @@ impl Read for NoiseStream {
 
 impl Write for NoiseStream {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.pending.extend_from_slice(buffer);
-        while self.pending.len() >= MAX_PLAINTEXT {
-            self.send_pending(MAX_PLAINTEXT)?;
+        let mut remaining = buffer;
+        if !self.pending.is_empty() {
+            let count = remaining.len().min(MAX_PLAINTEXT - self.pending.len());
+            self.pending.extend_from_slice(&remaining[..count]);
+            remaining = &remaining[count..];
+            if self.pending.len() == MAX_PLAINTEXT {
+                self.send_pending()?;
+            }
         }
+        let (records, remainder) = remaining.as_chunks::<MAX_PLAINTEXT>();
+        for record in records {
+            self.send_record(record)?;
+        }
+        self.pending.extend_from_slice(remainder);
         Ok(buffer.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        while !self.pending.is_empty() {
-            let length = self.pending.len().min(MAX_PLAINTEXT);
-            self.send_pending(length)?;
+        if !self.pending.is_empty() {
+            self.send_pending()?;
         }
         self.socket.flush()
     }
@@ -944,7 +955,7 @@ mod tests {
     fn authorized_peer_round_trips_records_larger_than_one_noise_message() {
         let (identity, client) = identity();
         let (mut client, server) = pair(&identity, &client, None);
-        let payload = (0..200_000_u32).map(|i| i as u8).collect::<Vec<_>>();
+        let payload = (0..2_000_000_u32).map(|i| i as u8).collect::<Vec<_>>();
         let expected = payload.clone();
         let echo = thread::spawn(move || {
             let mut server = server.join().unwrap().unwrap();
@@ -954,12 +965,50 @@ mod tests {
             server.write_all(b"ok").unwrap();
             server.flush().unwrap();
         });
-        client.write_all(&payload).unwrap();
+        client.write_all(&payload[..7]).unwrap();
+        client.write_all(&payload[7..1_500_000]).unwrap();
+        for fragment in payload[1_500_000..].chunks(997) {
+            client.write_all(fragment).unwrap();
+        }
+        assert!(client.pending.capacity() <= 2 * MAX_PLAINTEXT);
         client.flush().unwrap();
         let mut reply = [0; 2];
         client.read_exact(&mut reply).unwrap();
         assert_eq!(&reply, b"ok");
         echo.join().unwrap();
+    }
+
+    #[test]
+    fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-noise-revoke-{}-{}",
+            std::process::id(),
+            now()
+        ));
+        let first = PublicKey::parse(&format!("aa01{}", "00".repeat(30))).unwrap();
+        let second = PublicKey::parse(&format!("aa02{}", "00".repeat(30))).unwrap();
+        let clients = [first, second].map(|key| AuthorizedClient {
+            key,
+            paired_at: 1,
+            last_seen: 2,
+            name: "device".into(),
+        });
+        write_authorized(&directory, &clients).unwrap();
+        let before = fs::read(directory.join(AUTHORIZED_FILE)).unwrap();
+        assert_eq!(
+            revoke(&directory, "AA").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(fs::read(directory.join(AUTHORIZED_FILE)).unwrap(), before);
+        assert_eq!(revoke(&directory, "bb").unwrap(), None);
+        assert_eq!(revoke(&directory, "").unwrap(), None);
+        assert_eq!(fs::read(directory.join(AUTHORIZED_FILE)).unwrap(), before);
+        assert_eq!(revoke(&directory, "AA01").unwrap(), Some(first));
+        assert_eq!(
+            read_authorized(&directory).unwrap(),
+            vec![clients[1].clone()]
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -1125,7 +1174,7 @@ mod tests {
 
         assert_eq!(
             revoke(&directory, &device.public().to_hex()[..8]).unwrap(),
-            1
+            Some(device.public())
         );
         let (mut client, server) = pair(&identity, &device, None);
         let server = serve(server, |server| server.read(&mut [0; 16]).map(drop));
@@ -1140,7 +1189,7 @@ mod tests {
     }
 
     #[test]
-    fn authorized_clients_keep_last_seen_and_read_lines_written_without_it() {
+    fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
         let directory =
             std::env::temp_dir().join(format!("condr-noise-seen-{}-{}", std::process::id(), now()));
         fs::create_dir_all(&directory).unwrap();
@@ -1148,7 +1197,13 @@ mod tests {
         let new = StaticKey::generate().unwrap().public();
         fs::write(
             directory.join(AUTHORIZED_FILE),
-            format!("{old} 100 old laptop\n{new} 200 300 new laptop\n"),
+            format!("{old} 100 old laptop\n"),
+        )
+        .unwrap();
+        assert!(read_authorized(&directory).is_err());
+        fs::write(
+            directory.join(AUTHORIZED_FILE),
+            format!("{old} 100 100 old laptop\n{new} 200 300 new laptop\n"),
         )
         .unwrap();
 

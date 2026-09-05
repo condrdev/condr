@@ -3,110 +3,60 @@ use std::io;
 
 use super::*;
 
-/// macOS puts Settings on Cmd+`,`; the other platforms use Ctrl+`,`.
-fn is_settings_shortcut(stroke: &Keystroke) -> bool {
-    stroke.key == "," && stroke.modifiers == Modifiers::secondary_key()
+thread_local! {
+    static FIXED_BINDINGS: Vec<KeyBinding> = fixed_bindings();
 }
 
 pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
-    if is_settings_shortcut(stroke) {
-        return Some(Box::new(OpenSettings));
+    if stroke.modifiers.function {
+        return None;
     }
+    let mut normalized = stroke.clone();
     let modifiers = stroke.modifiers;
-    if modifiers.function {
-        return None;
-    }
-    if cfg!(target_os = "macos") {
-        return macos_fixed_shortcut(stroke);
-    }
-    if modifiers.platform {
-        return None;
-    }
-    if !modifiers.control && modifiers.alt {
+    if !cfg!(target_os = "macos") && !modifiers.control && !modifiers.platform && modifiers.alt {
         // Windows GPUI turns Shift+= / Shift+- into + / _ and clears Shift.
         let key_char = stroke.key_char.as_deref();
-        if (modifiers.shift && stroke.key == "=") || stroke.key == "+" || key_char == Some("+") {
-            return Some(Box::new(SplitRight));
-        }
-        if (modifiers.shift && stroke.key == "-") || stroke.key == "_" || key_char == Some("_") {
-            return Some(Box::new(SplitDown));
+        if stroke.key == "+" || key_char == Some("+") {
+            normalized.key = "=".into();
+            normalized.modifiers.shift = true;
+        } else if stroke.key == "_" || key_char == Some("_") {
+            normalized.key = "-".into();
+            normalized.modifiers.shift = true;
         }
     }
-    match (
-        modifiers.control,
-        modifiers.alt,
-        modifiers.shift,
-        stroke.key.as_str(),
-    ) {
-        (true, false, true, "t") => Some(Box::new(NewTab)),
-        (true, false, true, "w") => Some(Box::new(ClosePane)),
-        (true, false, false, "tab") => Some(Box::new(NextTab)),
-        (true, false, true, "tab") => Some(Box::new(PreviousTab)),
-        (false, true, false, "left") => Some(Box::new(FocusLeft)),
-        (false, true, false, "right") => Some(Box::new(FocusRight)),
-        (false, true, false, "up") => Some(Box::new(FocusUp)),
-        (false, true, false, "down") => Some(Box::new(FocusDown)),
-        (false, true, true, "left") => Some(Box::new(ResizeLeft)),
-        (false, true, true, "right") => Some(Box::new(ResizeRight)),
-        (false, true, true, "up") => Some(Box::new(ResizeUp)),
-        (false, true, true, "down") => Some(Box::new(ResizeDown)),
-        (false, true, true, "enter") => Some(Box::new(ToggleZoom)),
-        _ => None,
+    if cfg!(target_os = "macos") && modifiers.platform && !modifiers.control && !modifiers.alt {
+        // GPUI may fold Cmd+Shift+] / [ into Cmd+} / {.
+        match stroke.key.as_str() {
+            "]" if modifiers.shift => normalized.key = "}".into(),
+            "[" if modifiers.shift => normalized.key = "{".into(),
+            _ => {}
+        }
+        if matches!(normalized.key.as_str(), "{" | "}") {
+            normalized.modifiers.shift = false;
+        }
     }
+    // IME text is handled before this fallback; only the normalized command chord
+    // participates here, so produced text cannot strip Ctrl/Alt into another shortcut.
+    normalized.key_char = None;
+    FIXED_BINDINGS.with(|bindings| {
+        bindings
+            .iter()
+            .find(|binding| {
+                binding.match_keystrokes(std::slice::from_ref(&normalized)) == Some(false)
+            })
+            .map(|binding| binding.action().boxed_clone())
+    })
 }
 
-/// macOS: the application modifier is Cmd (Terminal.app/iTerm2 conventions), which can
-/// never reach the PTY, so Ctrl and Option stay whole for the shell: Option+Arrow moves
-/// by word, Option+Shift+= types ±, Ctrl+Shift+T reaches the program.
-fn macos_fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
-    let modifiers = stroke.modifiers;
-    let key = stroke.key.as_str();
-    if !modifiers.platform {
-        // Ctrl+Tab has no legacy encoding anyway, so it keeps switching Tabs here too.
-        return match (modifiers.control, modifiers.alt, modifiers.shift, key) {
-            (true, false, false, "tab") => Some(Box::new(NextTab)),
-            (true, false, true, "tab") => Some(Box::new(PreviousTab)),
-            _ => None,
-        };
-    }
-    if modifiers.control && modifiers.alt {
-        return None;
-    }
-    // GPUI reports Cmd+Shift+] as Cmd+} (shift folded into the character).
-    let shifted = modifiers.shift;
-    match (modifiers.control, modifiers.alt, key) {
-        (false, false, "t") if !shifted => Some(Box::new(NewTab)),
-        (false, false, "w") if !shifted => Some(Box::new(ClosePane)),
-        (false, false, "d") if !shifted => Some(Box::new(SplitRight)),
-        (false, false, "d") => Some(Box::new(SplitDown)),
-        (false, false, "enter") if shifted => Some(Box::new(ToggleZoom)),
-        (false, false, "}") => Some(Box::new(NextTab)),
-        (false, false, "]") if shifted => Some(Box::new(NextTab)),
-        (false, false, "{") => Some(Box::new(PreviousTab)),
-        (false, false, "[") if shifted => Some(Box::new(PreviousTab)),
-        (false, true, "left") if !shifted => Some(Box::new(FocusLeft)),
-        (false, true, "right") if !shifted => Some(Box::new(FocusRight)),
-        (false, true, "up") if !shifted => Some(Box::new(FocusUp)),
-        (false, true, "down") if !shifted => Some(Box::new(FocusDown)),
-        (true, false, "left") if !shifted => Some(Box::new(ResizeLeft)),
-        (true, false, "right") if !shifted => Some(Box::new(ResizeRight)),
-        (true, false, "up") if !shifted => Some(Box::new(ResizeUp)),
-        (true, false, "down") if !shifted => Some(Box::new(ResizeDown)),
-        _ => None,
-    }
-}
-
-pub(super) fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
-        KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
+fn fixed_bindings() -> Vec<KeyBinding> {
+    let mut bindings = vec![
         // `secondary` is Cmd on macOS and Ctrl elsewhere.
         KeyBinding::new("secondary-,", OpenSettings, Some("Condr")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
-    ]);
+    ];
     if cfg!(target_os = "macos") {
-        cx.bind_keys([
+        bindings.extend([
             KeyBinding::new("cmd-t", NewTab, Some("Condr")),
             KeyBinding::new("cmd-w", ClosePane, Some("Condr")),
             KeyBinding::new("cmd-}", NextTab, Some("Condr")),
@@ -124,7 +74,7 @@ pub(super) fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-shift-enter", ToggleZoom, Some("Condr")),
         ]);
     } else {
-        cx.bind_keys([
+        bindings.extend([
             KeyBinding::new("ctrl-shift-t", NewTab, Some("Condr")),
             KeyBinding::new("ctrl-shift-w", ClosePane, Some("Condr")),
             KeyBinding::new("alt-shift-=", SplitRight, Some("Condr")),
@@ -140,6 +90,15 @@ pub(super) fn bind_keys(cx: &mut App) {
             KeyBinding::new("alt-shift-enter", ToggleZoom, Some("Condr")),
         ]);
     }
+    bindings
+}
+
+pub(super) fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
+        KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
+    ]);
+    FIXED_BINDINGS.with(|bindings| cx.bind_keys(bindings.clone()));
 }
 
 pub(super) fn connect_to_server_with<T>(
@@ -182,9 +141,8 @@ pub(super) fn single_instance_lock_path() -> Option<PathBuf> {
 
 /// Takes the GUI's single-instance lock, which the caller must hold for the whole run.
 ///
-/// The Client owns `config.toml` and rewrites it in place, so a second GUI would race
-/// the first and drop whichever key it had not read. The lock is released when the
-/// process exits, including on a crash.
+/// Keeps one GUI per user. Config transactions have their own cross-process lock;
+/// this application lock is released when the process exits, including on a crash.
 pub(super) fn acquire_single_instance_lock() -> io::Result<File> {
     let path = single_instance_lock_path().ok_or_else(|| {
         io::Error::new(
@@ -225,7 +183,7 @@ pub(crate) fn run() {
         }
     };
     let (endpoint, initial) = connect_to_server(ServerConfig::default().local_endpoint());
-    let config_path = config::default_path();
+    let config = config::LoadedConfig::read(config::default_path());
     let app = gpui_kit::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {
@@ -236,7 +194,7 @@ pub(crate) fn run() {
             cx.open_window(window_options, |window, cx| {
                 // The drawn title bar carries no OS title; the taskbar still needs one.
                 window.set_window_title("Condr");
-                let view = cx.new(|cx| Condr::new(endpoint, initial, config_path, window, cx));
+                let view = cx.new(|cx| Condr::new(endpoint, initial, config, window, cx));
                 let root = cx.new(|cx| Root::new(view, window, cx));
                 window.resize(DEFAULT_WINDOW_SIZE);
                 root

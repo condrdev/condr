@@ -31,6 +31,8 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -128,6 +130,8 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: repository.clone(),
             });
         });
@@ -325,6 +329,8 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -343,6 +349,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
                 pane_id: agent_pane,
                 direction: SplitDirection::Horizontal,
             });
@@ -544,6 +551,8 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: first_root.0.clone(),
             });
         });
@@ -561,6 +570,8 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: second_root.0.clone(),
             });
         });
@@ -583,6 +594,8 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateTab {
+                name: None,
+                focus: true,
                 workspace_id: second_workspace,
             });
         });

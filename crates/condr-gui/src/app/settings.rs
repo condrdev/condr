@@ -175,7 +175,7 @@ impl Condr {
             return;
         }
         self.appearance = appearance;
-        self.save_appearance();
+        self.save_appearance(cx);
         let handle = self.window_handle;
         // Resolving System reads the Window's own appearance, which Linux reports more
         // reliably than the app-global one. GPUI takes the Window out of its table for
@@ -206,7 +206,7 @@ impl Condr {
             cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
             // Notify so a save error reaches the UI without waiting for another event.
             let _ = this.update(cx, |this, cx| {
-                this.save_terminal_font();
+                this.save_terminal_font(cx);
                 cx.notify();
             });
         }));
@@ -217,7 +217,7 @@ impl Condr {
             return;
         }
         self.terminal_color_scheme = name;
-        self.save_terminal_color_scheme();
+        self.save_terminal_color_scheme(cx);
         apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
     }
 

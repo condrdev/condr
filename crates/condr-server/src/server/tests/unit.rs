@@ -62,10 +62,15 @@ fn only_cwd_inheriting_layout_commands_require_process_observation() {
         .id();
 
     assert!(layout_command_needs_cwd_observation(
-        &LayoutCommand::CreateTab { workspace_id }
+        &LayoutCommand::CreateTab {
+            workspace_id,
+            name: None,
+            focus: true
+        }
     ));
     assert!(layout_command_needs_cwd_observation(
         &LayoutCommand::SplitPane {
+            focus: true,
             pane_id,
             direction: condr_core::SplitDirection::Horizontal,
         }

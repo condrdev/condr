@@ -3,6 +3,101 @@ use crate::app::tests::tcp;
 use condr_server::StaticKey;
 
 #[test]
+fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.connect_generation;
+            let server_id = connection.server_id.unwrap();
+            let session_id = connection.session_id.unwrap();
+            let sequence = connection.sequence;
+            let original = connection.snapshot.clone();
+            let mut session = Session::restore(original.clone()).unwrap();
+            session.create_workspace(std::env::temp_dir()).unwrap();
+            let pane_id = session
+                .active_workspace()
+                .unwrap()
+                .active_tab()
+                .focused_pane()
+                .id();
+            for (offset, event) in [
+                SessionEvent::LayoutChanged {
+                    snapshot: session.snapshot(),
+                    zoomed_panes: Vec::new(),
+                },
+                SessionEvent::TerminalTitleChanged {
+                    pane_id,
+                    title: Some("agent title".into()),
+                },
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::Event {
+                        server_id,
+                        session_id,
+                        sequence: sequence + offset as u64 + 1,
+                        event,
+                    }),
+                    cx,
+                );
+            }
+            assert!(!this.connection(1).unwrap().terminals.contains_key(&pane_id));
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::TerminalFrame(TerminalFrameBatch {
+                    server_id,
+                    session_id,
+                    panes: vec![PaneTerminalFrame {
+                        pane_id,
+                        frame: TerminalViewFrame::Full(crate::app::tests::terminal_view(
+                            1, "first",
+                        )),
+                    }],
+                })),
+                cx,
+            );
+            let connection = this.connection(1).unwrap();
+            assert_eq!(
+                connection.terminal_titles.get(&pane_id).map(String::as_str),
+                Some("agent title")
+            );
+            assert!(connection.terminals.contains_key(&pane_id));
+            assert!(connection.bootstrap_resync_session_id.is_none());
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::Event {
+                    server_id,
+                    session_id,
+                    sequence: sequence + 3,
+                    event: SessionEvent::LayoutChanged {
+                        snapshot: original,
+                        zoomed_panes: Vec::new(),
+                    },
+                }),
+                cx,
+            );
+            assert!(
+                !this
+                    .connection(1)
+                    .unwrap()
+                    .terminal_titles
+                    .contains_key(&pane_id)
+            );
+        });
+    });
+}
+
+#[test]
 fn stale_connection_result_cannot_replace_the_current_attempt() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
@@ -179,7 +274,7 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
     });
 
     let contender = ClientConnection::connect(&endpoint, "control-contender").unwrap();
-    let session_id = contender.bootstrap().session_id;
+    let session_id = contender.bootstrap().unwrap().session_id;
     let mut contender_stream = contender.into_stream();
     let deadline = Instant::now() + TEST_TIMEOUT;
     loop {
@@ -248,6 +343,8 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: workspace_root.0.clone(),
             });
         });
@@ -273,6 +370,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
                 pane_id,
                 direction: SplitDirection::Horizontal,
             });
@@ -432,6 +530,8 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: workspace_root.clone(),
             });
         });
@@ -588,7 +688,7 @@ fn added_server_survives_gui_restart() {
         let mut cx = TestAppContext::single();
         cx.update(gpui_kit::init);
         let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
-        let bootstrap = initial.bootstrap().clone();
+        let bootstrap = initial.bootstrap().unwrap().clone();
         assert_eq!(bootstrap.server_id, server.handle.server_id());
         let view_holder = Rc::new(RefCell::new(None));
         let view_holder_for_window = view_holder.clone();
@@ -597,7 +697,7 @@ fn added_server_survives_gui_restart() {
                 Condr::new(
                     endpoint.clone(),
                     Ok(initial),
-                    Some(config_path.clone()),
+                    config::LoadedConfig::read(Some(config_path.clone())),
                     window,
                     cx,
                 )
@@ -630,7 +730,15 @@ fn added_server_survives_gui_restart() {
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Condr::new(endpoint, Ok(initial), Some(config_path), window, cx));
+        let view = cx.new(|cx| {
+            Condr::new(
+                endpoint,
+                Ok(initial),
+                config::LoadedConfig::read(Some(config_path)),
+                window,
+                cx,
+            )
+        });
         view_holder_for_window.borrow_mut().replace(view.clone());
         Root::new(view, window, cx)
     });
@@ -762,6 +870,8 @@ fn server_events_wake_gui_without_polling_clock() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -797,7 +907,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
                 Condr::new(
                     endpoint.clone(),
                     Ok(initial),
-                    Some(config_path.clone()),
+                    config::LoadedConfig::read(Some(config_path.clone())),
                     window,
                     cx,
                 )
@@ -808,19 +918,50 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
         let view = view_holder.borrow_mut().take().unwrap();
         assert!(!window.update(|_, cx| cx.theme().is_dark()));
 
+        let config_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.0.join("config.toml.lock"))
+            .unwrap();
+        config_lock.lock().unwrap();
+        // UI callbacks must return while another process owns the config transaction.
+        for appearance in [Appearance::Dark, Appearance::Light, Appearance::Dark] {
+            window.update(|_, cx| {
+                view.update(cx, |this, cx| this.set_appearance(appearance, cx));
+            });
+        }
         window.update(|_, cx| {
-            view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx));
+            view.update(cx, |this, cx| {
+                this.set_terminal_font(
+                    TerminalFont {
+                        family: "Cascadia Mono".into(),
+                        size: 18.,
+                    },
+                    cx,
+                )
+            });
         });
         assert!(window.update(|_, cx| cx.theme().is_dark()));
         assert!(
             window.read(|app| view.read(app).app_error.is_none()),
             "saving the appearance must not report a config error"
         );
+        assert!(!config_path.exists());
+        drop(config_lock);
+        // Quitting before a task or debounce runs must flush the ordered queue.
+        cx.quit();
         assert!(
             std::fs::read_to_string(&config_path)
                 .unwrap()
                 .contains("appearance = \"dark\""),
             "the appearance must reach the client config file"
+        );
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .unwrap()
+                .contains("font_size = 18.0")
         );
     }
 
@@ -834,7 +975,15 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
     let (_root, window) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| Condr::new(endpoint, Ok(initial), Some(config_path), window, cx));
+        let view = cx.new(|cx| {
+            Condr::new(
+                endpoint,
+                Ok(initial),
+                config::LoadedConfig::read(Some(config_path)),
+                window,
+                cx,
+            )
+        });
         view_holder_for_window.borrow_mut().replace(view.clone());
         Root::new(view, window, cx)
     });
@@ -867,7 +1016,7 @@ fn font_changes_reach_the_config_once_the_debounce_elapses() {
             Condr::new(
                 endpoint.clone(),
                 Ok(initial),
-                Some(config_path.clone()),
+                config::LoadedConfig::read(Some(config_path.clone())),
                 window,
                 cx,
             )
@@ -932,7 +1081,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
             Condr::new(
                 endpoint.clone(),
                 Ok(initial),
-                Some(config_path.clone()),
+                config::LoadedConfig::read(Some(config_path.clone())),
                 window,
                 cx,
             )
@@ -950,6 +1099,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
     );
 
     window.update(|_, cx| select_appearance(&owner, "dark", cx));
+    window.run_until_parked();
     assert_eq!(
         window.read(|app| selected_appearance(&owner, app)),
         "dark",

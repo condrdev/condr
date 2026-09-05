@@ -4,7 +4,7 @@ mod client_writer;
 mod endpoint;
 pub mod noise;
 pub(crate) mod persistence;
-pub use persistence::write_config_text;
+pub use persistence::{read_config_text, update_config_values};
 mod server;
 
 pub use endpoint::{Endpoint, EndpointStream, TcpEndpoint, default_socket_path};

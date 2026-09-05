@@ -70,10 +70,10 @@ fn local_server_helper() {
 
     let guard = ServerGuard(first_endpoint.clone());
     let first = ClientConnection::connect(&first_endpoint, "first-process-client").unwrap();
-    let server_id = first.bootstrap().server_id;
-    let runtime_epoch = first.bootstrap().runtime_epoch;
-    let session_id = first.bootstrap().session_id;
-    let initial_sequence = first.bootstrap().sequence;
+    let server_id = first.bootstrap().unwrap().server_id;
+    let runtime_epoch = first.bootstrap().unwrap().runtime_epoch;
+    let session_id = first.bootstrap().unwrap().session_id;
+    let initial_sequence = first.bootstrap().unwrap().sequence;
     let mut first_stream = first.into_stream();
     first_stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
@@ -110,6 +110,8 @@ fn local_server_helper() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: workspace_root.clone(),
             },
         },
@@ -125,17 +127,18 @@ fn local_server_helper() {
             break sequence;
         }
     };
-    assert_eq!(
+    assert!(matches!(
         read_server(&mut first_stream),
         ServerMessage::LayoutApplied {
-            server_id,
-            session_id,
+            server_id: actual_server,
+            session_id: actual_session,
             request_id: 1,
-            sequence,
-        }
-    );
+            sequence: actual_sequence,
+            result: condr_core::protocol::LayoutResult::WorkspaceCreated { .. },
+        } if actual_server == server_id && actual_session == session_id && actual_sequence == sequence
+    ));
     let authoritative = ClientConnection::connect(&first_endpoint, "snapshot-reader").unwrap();
-    let expected_snapshot = authoritative.bootstrap().snapshot.clone();
+    let expected_snapshot = authoritative.bootstrap().unwrap().snapshot.clone();
     let expected_session = Session::restore(expected_snapshot.clone()).unwrap();
     assert_eq!(expected_session.workspaces().len(), 1);
     drop(authoritative);
@@ -144,8 +147,8 @@ fn local_server_helper() {
     let second_endpoint = ensure_local_server().unwrap();
     assert_eq!(second_endpoint, first_endpoint);
     let second = ClientConnection::connect(&second_endpoint, "second-process-client").unwrap();
-    assert_eq!(second.bootstrap().server_id, server_id);
-    assert_eq!(second.bootstrap().runtime_epoch, runtime_epoch);
+    assert_eq!(second.bootstrap().unwrap().server_id, server_id);
+    assert_eq!(second.bootstrap().unwrap().runtime_epoch, runtime_epoch);
     drop(second);
     drop(first_stream);
 
@@ -156,14 +159,15 @@ fn local_server_helper() {
     let restarted_endpoint = ensure_local_server().unwrap();
     let restarted_guard = ServerGuard(restarted_endpoint.clone());
     let restarted = ClientConnection::connect(&restarted_endpoint, "restarted-client").unwrap();
-    let restarted_sequence = restarted.bootstrap().sequence;
-    let restarted_session_id = restarted.bootstrap().session_id;
-    assert_eq!(restarted.bootstrap().server_id, server_id);
-    assert_ne!(restarted.bootstrap().runtime_epoch, runtime_epoch);
-    assert_eq!(restarted.bootstrap().snapshot, expected_snapshot);
-    assert_eq!(restarted.bootstrap().terminals.len(), 1);
-    assert!(restarted.bootstrap().agents.is_empty());
-    let restarted_session = Session::restore(restarted.bootstrap().snapshot.clone()).unwrap();
+    let restarted_sequence = restarted.bootstrap().unwrap().sequence;
+    let restarted_session_id = restarted.bootstrap().unwrap().session_id;
+    assert_eq!(restarted.bootstrap().unwrap().server_id, server_id);
+    assert_ne!(restarted.bootstrap().unwrap().runtime_epoch, runtime_epoch);
+    assert_eq!(restarted.bootstrap().unwrap().snapshot, expected_snapshot);
+    assert_eq!(restarted.bootstrap().unwrap().terminals.len(), 1);
+    assert!(restarted.bootstrap().unwrap().agents.is_empty());
+    let restarted_session =
+        Session::restore(restarted.bootstrap().unwrap().snapshot.clone()).unwrap();
     assert_eq!(
         restarted_session
             .workspaces()
@@ -227,6 +231,7 @@ fn local_server_helper() {
             session_id: restarted_session_id,
             request_id: 2,
             sequence,
+            result: Default::default(),
         }
     );
     drop(restarted_stream);
@@ -238,8 +243,11 @@ fn local_server_helper() {
     let empty_endpoint = ensure_local_server().unwrap();
     let empty_guard = ServerGuard(empty_endpoint.clone());
     let empty = ClientConnection::connect(&empty_endpoint, "empty-restart-client").unwrap();
-    assert_eq!(empty.bootstrap().snapshot, Session::new().snapshot());
-    assert!(empty.bootstrap().terminals.is_empty());
+    assert_eq!(
+        empty.bootstrap().unwrap().snapshot,
+        Session::new().snapshot()
+    );
+    assert!(empty.bootstrap().unwrap().terminals.is_empty());
     drop(empty);
     stop_server(&empty_endpoint).unwrap();
     wait_for_stop(&empty_endpoint);
@@ -272,9 +280,9 @@ fn auto_started_server_survives_launcher_exit() {
     let endpoint = Endpoint::local(&endpoint_path);
     let guard = ServerGuard(endpoint.clone());
     let client = ClientConnection::connect(&endpoint, "detached-process-check").unwrap();
-    let log_path = server_log_path(client.bootstrap().server_id);
+    let log_path = server_log_path(client.bootstrap().unwrap().server_id);
     #[cfg(unix)]
-    assert_is_session_leader(client.bootstrap().runtime_epoch);
+    assert_is_session_leader(client.bootstrap().unwrap().runtime_epoch);
     drop(client);
     stop_server(&endpoint).unwrap();
     wait_for_stop(&endpoint);
@@ -341,7 +349,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         String::from_utf8_lossy(&output.stderr)
     );
     let client = ClientConnection::connect(&endpoint, "log-path-check").unwrap();
-    let log_path = server_log_path(client.bootstrap().server_id);
+    let log_path = server_log_path(client.bootstrap().unwrap().server_id);
     drop(client);
 
     // The same Server answers on TCP: a remote device pairs with the invite the host

@@ -942,8 +942,17 @@ fn file_uri_cwd(uri: &str) -> Option<PathBuf> {
     let path = match rest.find('/') {
         Some(0) => rest,
         Some(slash) => {
-            let host = &rest[..slash];
-            if !host.eq_ignore_ascii_case("localhost") {
+            let host = percent_decode(&rest[..slash])?;
+            let host = host.trim_end_matches('.');
+            if !host.eq_ignore_ascii_case("localhost")
+                && !sysinfo::System::host_name().is_some_and(|local| {
+                    let local = local.trim_end_matches('.');
+                    host.eq_ignore_ascii_case(local)
+                        || local
+                            .split_once('.')
+                            .is_some_and(|(short, _)| host.eq_ignore_ascii_case(short))
+                })
+            {
                 return None;
             }
             &rest[slash..]
@@ -957,7 +966,7 @@ fn file_uri_cwd(uri: &str) -> Option<PathBuf> {
         let drive = bytes.len() >= 3 && bytes[1].is_ascii_alphabetic() && bytes[2] == b':';
         if drive { &path[1..] } else { path.as_str() }.replace('/', "\\")
     };
-    (!path.is_empty()).then(|| PathBuf::from(path))
+    (!path.is_empty() && !path.contains('\0')).then(|| PathBuf::from(path))
 }
 
 fn percent_decode(input: &str) -> Option<String> {

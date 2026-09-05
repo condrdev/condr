@@ -493,7 +493,11 @@ impl Condr {
     ) {
         self.send_presenting_layout_to(
             key,
-            LayoutCommand::CreateWorkspace { root_directory },
+            LayoutCommand::CreateWorkspace {
+                root_directory,
+                name: None,
+                focus: true,
+            },
             window,
             cx,
         );
@@ -538,7 +542,16 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.send_presenting_layout_to(key, LayoutCommand::CreateTab { workspace_id }, window, cx);
+        self.send_presenting_layout_to(
+            key,
+            LayoutCommand::CreateTab {
+                workspace_id,
+                name: None,
+                focus: true,
+            },
+            window,
+            cx,
+        );
     }
 
     pub(super) fn cycle_tab(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
@@ -561,7 +574,11 @@ impl Condr {
 
     pub(super) fn split(&mut self, direction: SplitDirection) {
         if let Some(pane_id) = self.focused_pane() {
-            self.send_layout(LayoutCommand::SplitPane { pane_id, direction });
+            self.send_layout(LayoutCommand::SplitPane {
+                pane_id,
+                direction,
+                focus: true,
+            });
         }
     }
 

@@ -7,11 +7,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use condr_core::protocol::{
     BootstrapAssembler, BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage,
-    FramingError, Hello, LayoutCommand, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
-    MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage, ServerSettings, SessionBootstrap,
-    SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk, VersionCheck,
-    WorkspaceGitSnapshot, check_version, encode_bootstrap_record, encode_pane_terminal_frame,
+    FramingError, Hello, LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES,
+    MAX_BOOTSTRAP_TOTAL_SIZE, MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION,
+    PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch,
+    ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
+    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, VersionCheck, WorkspaceGitSnapshot,
+    check_version, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentSnapshot, GitHeadFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
@@ -130,8 +131,8 @@ pub fn save_listen(path: &std::path::Path, listen: Option<std::net::SocketAddr>)
 }
 
 fn load_server_setting(path: &std::path::Path, key: &str) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()?
+    crate::persistence::read_config_text(path)
+        .ok()??
         .parse::<toml::Table>()
         .ok()?
         .get("server")?
@@ -146,8 +147,9 @@ fn load_shell(path: Option<&std::path::Path>) -> String {
     let Some(path) = path else {
         return String::new();
     };
-    std::fs::read_to_string(path)
+    crate::persistence::read_config_text(path)
         .ok()
+        .flatten()
         .and_then(|text| text.parse::<toml::Table>().ok())
         .and_then(|root| {
             root.get("server")?
@@ -186,37 +188,7 @@ fn save_setting(
     key: &str,
     value: Option<toml_edit::Item>,
 ) -> io::Result<()> {
-    let mut document = match std::fs::read_to_string(path) {
-        Ok(text) => text
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
-        Err(error) => return Err(error),
-    };
-    // Explicit tables, appended after the existing content; indexing would insert an
-    // inline table at the top, ahead of any leading comment.
-    let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
-    for name in tables {
-        table = table
-            .entry(name)
-            .or_insert(toml_edit::table())
-            .as_table_like_mut()
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{name} must be a table"),
-                )
-            })?;
-    }
-    match value {
-        Some(value) => {
-            table.insert(key, value);
-        }
-        None => {
-            table.remove(key);
-        }
-    }
-    crate::persistence::write_config_text(path, &document.to_string())
+    crate::persistence::update_config_values(path, tables, [(key, value)])
 }
 
 impl ServerConfig {
@@ -303,16 +275,32 @@ pub struct ServerHandle {
 
 pub struct ClientConnection {
     stream: EndpointStream,
-    bootstrap: SessionBootstrap,
+    bootstrap: Option<SessionBootstrap>,
+    overview: SessionOverview,
     next_request_id: u64,
 }
 
 impl ClientConnection {
     pub fn connect(endpoint: &Endpoint, client_name: impl Into<String>) -> io::Result<Self> {
-        let client_name = client_name.into();
-        match Self::handshake(endpoint.connect()?, client_name.clone()) {
+        Self::connect_with_state(endpoint, client_name.into(), true)
+    }
+
+    /// Connects for CLI inspection and mutations, without requesting terminal views.
+    pub fn connect_overview(
+        endpoint: &Endpoint,
+        client_name: impl Into<String>,
+    ) -> io::Result<Self> {
+        Self::connect_with_state(endpoint, client_name.into(), false)
+    }
+
+    fn connect_with_state(
+        endpoint: &Endpoint,
+        client_name: String,
+        terminal_views: bool,
+    ) -> io::Result<Self> {
+        match Self::handshake(endpoint.connect()?, client_name.clone(), terminal_views) {
             // The Server may already have recorded this device from an earlier attempt
-            // that broke before the Client saw its Bootstrap; it then expects the zero
+            // that broke before the Client completed its initial query; it expects the zero
             // pre-shared key, so a refused invite is retried as a paired device.
             Err(error)
                 if error.kind() == io::ErrorKind::PermissionDenied
@@ -322,48 +310,87 @@ impl ClientConnection {
                     unreachable!()
                 };
                 let paired = Endpoint::tcp(tcp.clone().without_invite());
-                Self::handshake(paired.connect()?, client_name).map_err(|_| error)
+                Self::handshake(paired.connect()?, client_name, terminal_views).map_err(|_| error)
             }
             result => result,
         }
     }
 
-    fn handshake(stream: EndpointStream, client_name: impl Into<String>) -> io::Result<Self> {
-        Self::handshake_bootstrap(Self::welcome(stream, client_name)?)
+    fn handshake(
+        stream: EndpointStream,
+        client_name: impl Into<String>,
+        terminal_views: bool,
+    ) -> io::Result<Self> {
+        let (mut stream, _, session_id) = Self::welcome(stream, client_name)?;
+        let request = if terminal_views {
+            ClientMessage::SnapshotRequest { session_id }
+        } else {
+            ClientMessage::OverviewRequest { session_id }
+        };
+        condr_core::protocol::write_message(&mut stream, &request)
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        let (bootstrap, overview) = if terminal_views {
+            let bootstrap = Self::read_bootstrap(&mut stream)?;
+            let overview = SessionOverview::from(&bootstrap);
+            (Some(bootstrap), overview)
+        } else {
+            let response = condr_core::protocol::read_message(&mut stream)
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            let ServerMessage::Overview(mut overview) = response else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unexpected overview response: {response:?}"),
+                ));
+            };
+            let response = condr_core::protocol::read_message(&mut stream)
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            match response {
+                ServerMessage::OverviewTerminals {
+                    server_id,
+                    session_id,
+                    terminals,
+                } if server_id == overview.server_id && session_id == overview.session_id => {
+                    overview.terminals = terminals;
+                }
+                response => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unexpected overview terminal response: {response:?}"),
+                    ));
+                }
+            }
+            (None, overview)
+        };
+        stream.set_handshake_timeout(None)?;
+        Ok(Self {
+            stream,
+            bootstrap,
+            overview,
+            next_request_id: 1,
+        })
     }
 
-    /// The Session structure this connection last saw, from the Bootstrap.
+    /// The last authoritative structure, updated from query responses and layout events.
     pub fn session(&self) -> io::Result<Session> {
-        Session::restore(self.bootstrap.snapshot.clone())
+        Session::restore(self.overview.snapshot.clone())
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
     }
 
-    /// Replaces the Bootstrap with a fresh one from the Server. The CLI uses this after a
-    /// mutation to report what was created; the connection never subscribes, so nothing
-    /// else arrives on the stream meanwhile.
-    pub fn refresh(&mut self) -> io::Result<()> {
-        condr_core::protocol::write_message(
-            &mut self.stream,
-            &ClientMessage::SnapshotRequest {
-                session_id: self.bootstrap.session_id,
-            },
-        )
-        .map_err(|error| io::Error::other(error.to_string()))?;
-        self.bootstrap = Self::read_bootstrap(&mut self.stream)?;
-        Ok(())
+    pub fn overview(&self) -> &SessionOverview {
+        &self.overview
     }
 
     /// Sends terminal input and confirms the Server took it. Input itself gets no reply,
     /// so a Ping follows it: an `Error` arriving before the Pong belongs to the input.
     pub fn terminal(&mut self, pane_id: PaneId, command: TerminalCommand) -> io::Result<()> {
-        let server_id = self.bootstrap.server_id;
+        let server_id = self.overview.server_id;
         let nonce = self.next_request_id;
         self.next_request_id += 1;
         condr_core::protocol::write_message(
             &mut self.stream,
             &ClientMessage::Terminal {
                 server_id,
-                session_id: self.bootstrap.session_id,
+                session_id: self.overview.session_id,
                 pane_id,
                 command,
             },
@@ -395,8 +422,8 @@ impl ClientConnection {
         condr_core::protocol::write_message(
             &mut self.stream,
             &ClientMessage::ReadPane {
-                server_id: self.bootstrap.server_id,
-                session_id: self.bootstrap.session_id,
+                server_id: self.overview.server_id,
+                session_id: self.overview.session_id,
                 pane_id,
                 lines,
             },
@@ -418,17 +445,15 @@ impl ClientConnection {
         }
     }
 
-    /// Sends one Layout command and waits for its outcome: the Session sequence it landed
-    /// at, or the Server's reason for rejecting it. Session control is not needed (ADR
-    /// 0009). Unrelated messages that arrive first are skipped.
-    pub fn layout(&mut self, command: LayoutCommand) -> io::Result<Result<u64, String>> {
+    /// Returns the command's actual created IDs, retaining its authoritative layout event.
+    pub fn layout(&mut self, command: LayoutCommand) -> io::Result<Result<LayoutResult, String>> {
         let request_id = self.next_request_id;
         self.next_request_id += 1;
         condr_core::protocol::write_message(
             &mut self.stream,
             &ClientMessage::Layout {
-                server_id: self.bootstrap.server_id,
-                session_id: self.bootstrap.session_id,
+                server_id: self.overview.server_id,
+                session_id: self.overview.session_id,
                 request_id,
                 command,
             },
@@ -440,9 +465,22 @@ impl ClientConnection {
             {
                 ServerMessage::LayoutApplied {
                     request_id: applied,
-                    sequence,
+                    result,
                     ..
-                } if applied == request_id => return Ok(Ok(sequence)),
+                } if applied == request_id => return Ok(Ok(result)),
+                ServerMessage::Event {
+                    sequence,
+                    event:
+                        SessionEvent::LayoutChanged {
+                            snapshot,
+                            zoomed_panes,
+                        },
+                    ..
+                } => {
+                    self.overview.sequence = sequence;
+                    self.overview.snapshot = snapshot;
+                    self.overview.zoomed_panes = zoomed_panes;
+                }
                 ServerMessage::LayoutRejected {
                     request_id: rejected,
                     reason,
@@ -460,7 +498,7 @@ impl ClientConnection {
     pub(super) fn welcome(
         mut stream: EndpointStream,
         client_name: impl Into<String>,
-    ) -> io::Result<EndpointStream> {
+    ) -> io::Result<(EndpointStream, ServerId, SessionId)> {
         // A refused handshake surfaces as an I/O error with its own kind; keep it so
         // callers can tell "not authorized" from a framing problem.
         let io_error = |error: FramingError| match error {
@@ -478,8 +516,13 @@ impl ClientConnection {
         .map_err(io_error)?;
         let welcome: ServerMessage =
             condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
-        match welcome {
-            ServerMessage::Welcome { error: None, .. } => {}
+        let (server_id, session_id) = match welcome {
+            ServerMessage::Welcome {
+                server_id,
+                session_id,
+                error: None,
+                ..
+            } => (server_id, session_id),
             ServerMessage::Welcome {
                 error: Some(error), ..
             } => return Err(io::Error::new(io::ErrorKind::InvalidData, error)),
@@ -489,18 +532,8 @@ impl ClientConnection {
                     format!("unexpected welcome response: {other:?}"),
                 ));
             }
-        }
-        Ok(stream)
-    }
-
-    fn handshake_bootstrap(mut stream: EndpointStream) -> io::Result<Self> {
-        let bootstrap = Self::read_bootstrap(&mut stream)?;
-        let _ = stream.set_handshake_timeout(None);
-        Ok(Self {
-            stream,
-            bootstrap,
-            next_request_id: 1,
-        })
+        };
+        Ok((stream, server_id, session_id))
     }
 
     /// Reads one complete Bootstrap: the header followed by its batches.
@@ -540,8 +573,9 @@ impl ClientConnection {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
-    pub fn bootstrap(&self) -> &SessionBootstrap {
-        &self.bootstrap
+    /// Initial Bootstrap, present only for `connect`, which requests terminal views.
+    pub fn bootstrap(&self) -> Option<&SessionBootstrap> {
+        self.bootstrap.as_ref()
     }
 
     pub fn into_stream(self) -> EndpointStream {
@@ -912,6 +946,8 @@ impl Drop for OperationGuard {
 }
 
 struct RuntimeState {
+    #[cfg(test)]
+    bootstrap_captures: std::sync::atomic::AtomicUsize,
     // ponytail: one Session behind one lock for MVP; split the registry/locks when concurrency requires it.
     server_id: ServerId,
     runtime_epoch: RuntimeEpoch,
@@ -939,6 +975,7 @@ struct RuntimeState {
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
     /// Live TCP peers by client id, so a revocation can drop their connections.
     tcp_peers: std::collections::HashMap<u64, (crate::noise::PublicKey, EndpointStream)>,
+    settings_write: Arc<Mutex<()>>,
     persistence: Option<SnapshotPersistence>,
     settings: ServerSettings,
     config_path: Option<PathBuf>,
@@ -1100,6 +1137,8 @@ impl RuntimeState {
         config_path: Option<PathBuf>,
     ) -> Self {
         Self {
+            #[cfg(test)]
+            bootstrap_captures: std::sync::atomic::AtomicUsize::new(0),
             server_id: ServerId(stable_endpoint_id(socket_path)),
             runtime_epoch: RuntimeEpoch(runtime_epoch()),
             session_id: SessionId(1),
@@ -1123,6 +1162,7 @@ impl RuntimeState {
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             tcp_peers: std::collections::HashMap::new(),
+            settings_write: Arc::new(Mutex::new(())),
             persistence,
             settings,
             config_path,
@@ -1137,35 +1177,11 @@ impl RuntimeState {
         }
     }
 
-    /// Stores the shell preference, writes it to `config.toml` when the Server has one,
-    /// and publishes the new settings to every client. Blank means the system default.
+    /// Publishes a shell preference after its serialized disk transaction succeeds.
     fn set_shell(&mut self, shell: &str, origin: Option<(u64, &ClientWriter)>) -> bool {
         let shell = shell.trim();
         if self.settings.shell == shell {
             return false;
-        }
-        // The value rides in every ServerSettingsChanged event and Bootstrap header, which
-        // must keep fitting a protocol frame; a shell path is never anywhere near this.
-        let rejection = if shell.len() > MAX_SHELL_SETTING_BYTES {
-            Some(format!(
-                "shell setting exceeds {MAX_SHELL_SETTING_BYTES} bytes"
-            ))
-        } else if let Some(path) = self.config_path.as_deref()
-            && let Err(error) = save_shell(path, shell)
-        {
-            Some(format!(
-                "failed to save the shell preference to {}: {error}",
-                path.display()
-            ))
-        } else {
-            None
-        };
-        if let Some(message) = rejection {
-            eprintln!("condr-server: {message}");
-            return origin.is_some_and(|(_, writer)| {
-                frame_message(&ServerMessage::Error { message })
-                    .is_ok_and(|data| writer.send_reliable(data).is_err())
-            });
         }
         self.settings.shell = shell.to_owned();
         self.publish_event(
@@ -1562,7 +1578,7 @@ impl RuntimeState {
             return Vec::new();
         }
         let pane_id = match command {
-            LayoutCommand::CreateTab { workspace_id } => self
+            LayoutCommand::CreateTab { workspace_id, .. } => self
                 .session
                 .workspace(*workspace_id)
                 .map(|workspace| workspace.active_tab().focused_pane().id()),
@@ -1607,6 +1623,8 @@ impl RuntimeState {
     }
 
     fn capture_bootstrap(&self) -> BootstrapCapture {
+        #[cfg(test)]
+        self.bootstrap_captures.fetch_add(1, Ordering::Relaxed);
         let mut terminals = Vec::new();
         for workspace in self.session.workspaces() {
             for tab in workspace.tabs() {
@@ -1678,6 +1696,7 @@ impl RuntimeState {
         origin_client_id: u64,
         origin: &ClientWriter,
         request_id: u64,
+        result: LayoutResult,
     ) -> bool {
         let event = self.layout_changed_event();
         if self.publish_event(event, Some((origin_client_id, origin))) {
@@ -1690,6 +1709,7 @@ impl RuntimeState {
                 session_id: self.session_id,
                 request_id,
                 sequence: self.sequence,
+                result,
             },
         )
     }

@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) struct LayoutEffect {
+    pub(super) result: LayoutResult,
     pub(super) started_terminals: Vec<StartedTerminal>,
     pub(super) removed_terminals: Vec<TerminalRuntime>,
 }
@@ -8,6 +9,8 @@ pub(super) struct LayoutEffect {
 pub(super) enum ExternalLayoutPlan {
     CreateWorkspace {
         root: PathBuf,
+        name: Option<String>,
+        focus: bool,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -37,6 +40,8 @@ pub(super) enum PreparedExternalLayout {
     CreateWorkspace {
         root: PathBuf,
         git: Option<GitRepository>,
+        name: Option<String>,
+        focus: bool,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -66,8 +71,14 @@ pub(super) fn external_layout_plan(
     command: &LayoutCommand,
 ) -> Result<Option<ExternalLayoutPlan>, String> {
     let plan = match command {
-        LayoutCommand::CreateWorkspace { root_directory } => ExternalLayoutPlan::CreateWorkspace {
+        LayoutCommand::CreateWorkspace {
+            root_directory,
+            name,
+            focus,
+        } => ExternalLayoutPlan::CreateWorkspace {
             root: root_directory.clone(),
+            name: name.clone(),
+            focus: *focus,
         },
         LayoutCommand::CreateWorktree {
             parent_workspace_id,
@@ -129,11 +140,13 @@ pub(super) fn prepare_external_layout(
     plan: ExternalLayoutPlan,
 ) -> Result<PreparedExternalLayout, String> {
     match plan {
-        ExternalLayoutPlan::CreateWorkspace { root } => {
+        ExternalLayoutPlan::CreateWorkspace { root, name, focus } => {
             validate_root_directory(&root)?;
             Ok(PreparedExternalLayout::CreateWorkspace {
                 git: discover_repository(&root).ok().flatten(),
                 root,
+                name,
+                focus,
             })
         }
         ExternalLayoutPlan::CreateWorktree {
@@ -414,27 +427,46 @@ pub(super) fn apply_layout_command(
     let mut candidate = state.session.clone();
     let mut new_pane = None;
     let mut closed = None;
+    let mut result = LayoutResult::Changed;
+    let mut preserve_selection = false;
 
     match command {
-        LayoutCommand::CreateWorkspace { root_directory } => {
+        LayoutCommand::CreateWorkspace {
+            root_directory,
+            name,
+            focus,
+        } => {
             let workspace_id = candidate
                 .create_workspace(root_directory)
                 .ok_or_else(|| "Session Workspace limit reached".to_string())?;
-            new_pane = Some(
-                candidate
-                    .workspace(workspace_id)
-                    .expect("new Workspace exists")
-                    .active_tab()
-                    .focused_pane()
-                    .id(),
-            );
+            if let Some(name) = name
+                && !candidate.rename_workspace(workspace_id, name)
+            {
+                return Err("empty Workspace name".into());
+            }
+            let tab = candidate
+                .workspace(workspace_id)
+                .expect("new Workspace exists")
+                .active_tab();
+            let pane_id = tab.focused_pane().id();
+            result = LayoutResult::WorkspaceCreated {
+                workspace_id,
+                tab_id: tab.id(),
+                pane_id,
+            };
+            new_pane = Some(pane_id);
+            preserve_selection = !focus;
         }
         LayoutCommand::CreateWorktree { .. }
         | LayoutCommand::OpenWorktree { .. }
         | LayoutCommand::RemoveWorktree { .. } => {
             return Err("worktree command was not prepared".into());
         }
-        LayoutCommand::CreateTab { workspace_id } => {
+        LayoutCommand::CreateTab {
+            workspace_id,
+            name,
+            focus,
+        } => {
             let tab_id = candidate
                 .create_tab(workspace_id)
                 .ok_or_else(|| "unknown Workspace or Session Tab limit reached".to_string())?;
@@ -445,6 +477,16 @@ pub(super) fn apply_layout_command(
                     .focused_pane()
                     .id(),
             );
+            if let Some(name) = name
+                && !candidate.rename_tab(tab_id, name)
+            {
+                return Err("empty Tab name".into());
+            }
+            result = LayoutResult::TabCreated {
+                tab_id,
+                pane_id: new_pane.unwrap(),
+            };
+            preserve_selection = !focus;
         }
         LayoutCommand::RenameWorkspace { workspace_id, name } => {
             if !candidate.rename_workspace(workspace_id, name) {
@@ -494,7 +536,11 @@ pub(super) fn apply_layout_command(
             }
             candidate.move_tab(tab_id, target_index as usize);
         }
-        LayoutCommand::SplitPane { pane_id, direction } => {
+        LayoutCommand::SplitPane {
+            pane_id,
+            direction,
+            focus,
+        } => {
             new_pane = Some(
                 candidate
                     .split_pane(pane_id, direction, 0.5)
@@ -502,6 +548,10 @@ pub(super) fn apply_layout_command(
                         "unknown Pane or Session Pane/layout depth limit reached".to_string()
                     })?,
             );
+            result = LayoutResult::PaneCreated {
+                pane_id: new_pane.unwrap(),
+            };
+            preserve_selection = !focus;
         }
         LayoutCommand::FocusPane { pane_id } => {
             if !candidate.focus_pane(pane_id) {
@@ -574,6 +624,9 @@ pub(super) fn apply_layout_command(
         }
     }
 
+    if preserve_selection {
+        candidate.preserve_selection_from(&state.session);
+    }
     let started = if let Some(pane_id) = new_pane {
         let cwd = candidate
             .pane(pane_id)
@@ -595,7 +648,9 @@ pub(super) fn apply_layout_command(
         None
     };
 
-    commit_layout_candidate(state, candidate, closed, started)
+    let mut effect = commit_layout_candidate(state, candidate, closed, started)?;
+    effect.result = result;
+    Ok(effect)
 }
 
 pub(super) fn layout_command_needs_cwd_observation(command: &LayoutCommand) -> bool {
@@ -646,6 +701,7 @@ pub(super) fn commit_layout_candidate(
         state.schedule_snapshot(next_snapshot);
     }
     Ok(LayoutEffect {
+        result: LayoutResult::Changed,
         started_terminals: started_terminals.into_iter().collect(),
         removed_terminals,
     })
@@ -656,17 +712,23 @@ pub(super) fn apply_prepared_external_layout(
     prepared: PreparedExternalLayout,
 ) -> Result<LayoutEffect, String> {
     match prepared {
-        PreparedExternalLayout::CreateWorkspace { root, git } => {
+        PreparedExternalLayout::CreateWorkspace {
+            root,
+            git,
+            name,
+            focus,
+        } => {
             let effect = apply_layout_command(
                 state,
                 LayoutCommand::CreateWorkspace {
                     root_directory: root,
+                    name,
+                    focus,
                 },
             )?;
-            let workspace_id = state
-                .session
-                .active_workspace_id()
-                .expect("created Workspace is active");
+            let LayoutResult::WorkspaceCreated { workspace_id, .. } = effect.result else {
+                unreachable!("created Workspace returns its identity")
+            };
             set_workspace_git(state, workspace_id, git);
             Ok(effect)
         }

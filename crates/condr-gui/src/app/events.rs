@@ -8,7 +8,7 @@ impl Condr {
         cx: &Context<Self>,
     ) -> Result<BootstrapApplication, String> {
         let client = result?;
-        let bootstrap = client.bootstrap().clone();
+        let bootstrap = client.bootstrap().unwrap().clone();
         let io = ClientIo::start(
             client,
             connection.key,
@@ -479,7 +479,7 @@ impl Condr {
         };
         let was_active = self.active_connection == key;
         self.connections.remove(index);
-        self.save_servers();
+        self.save_servers(cx);
         self.clear_connection_gui_state(key);
         self.clear_pending_workspace_selection_for(key);
         if was_active {
@@ -539,7 +539,7 @@ impl Condr {
             None
         };
         if paired {
-            self.save_servers();
+            self.save_servers(cx);
         }
         if let Some(application) = application {
             let presentation_before = self.pending_presentation_request;
@@ -741,6 +741,9 @@ impl Condr {
                             connection
                                 .terminal_hyperlinks
                                 .retain(|pane_id, _| live.contains(pane_id));
+                            connection
+                                .terminal_titles
+                                .retain(|pane_id, _| live.contains(pane_id));
                         }
                         self.prune_dock_cache(key);
                         return self.settle_layout(key, index, sequence, layout_changed);
@@ -790,14 +793,17 @@ impl Condr {
                         notify = true;
                     }
                     SessionEvent::TerminalTitleChanged { pane_id, title } => {
-                        // An unknown Pane's title arrives with its Bootstrap record instead.
-                        notify = match self.connections[index].terminals.get_mut(&pane_id) {
-                            Some(terminal) => {
-                                terminal.title = title;
-                                true
+                        // Reliable metadata can precede a new Pane's first visual frame.
+                        let titles = &mut self.connections[index].terminal_titles;
+                        match title {
+                            Some(title) => {
+                                titles.insert(pane_id, title);
                             }
-                            None => false,
-                        };
+                            None => {
+                                titles.remove(&pane_id);
+                            }
+                        }
+                        notify = true;
                     }
                     SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                         let focused = self.focused_terminal == Some((key, pane_id));
@@ -985,6 +991,7 @@ impl Condr {
                 session_id,
                 request_id,
                 sequence,
+                ..
             } => {
                 if self.connections[index].server_id != Some(server_id)
                     || self.connections[index].session_id != Some(session_id)
@@ -1073,7 +1080,9 @@ impl Condr {
                 IncomingEffect::default()
             }
             // Only the CLI asks for Pane text or administers devices.
-            ServerMessage::PaneText { .. }
+            ServerMessage::Overview(_)
+            | ServerMessage::OverviewTerminals { .. }
+            | ServerMessage::PaneText { .. }
             | ServerMessage::DevicesRevoked { .. }
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {

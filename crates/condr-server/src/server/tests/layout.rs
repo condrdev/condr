@@ -40,6 +40,8 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
             &mut state,
             &mut updates,
             LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: root.clone(),
             },
         ),
@@ -58,7 +60,11 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
     apply_for_test(
         &mut state,
         &mut updates,
-        LayoutCommand::CreateTab { workspace_id },
+        LayoutCommand::CreateTab {
+            workspace_id,
+            name: None,
+            focus: true,
+        },
     );
     let tab_two = state.session.active_workspace().unwrap().active_tab().id();
     let pane_two = state
@@ -88,6 +94,7 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         &mut state,
         &mut updates,
         LayoutCommand::SplitPane {
+            focus: true,
             pane_id: pane_two,
             direction: SplitDirection::Horizontal,
         },
@@ -165,6 +172,8 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         &mut state,
         &mut updates,
         LayoutCommand::CreateWorkspace {
+            name: None,
+            focus: true,
             root_directory: root,
         },
     );
@@ -268,6 +277,8 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
         &mut state,
         &mut updates,
         LayoutCommand::CreateWorkspace {
+            name: None,
+            focus: true,
             root_directory: repository.clone(),
         },
     );
@@ -348,6 +359,8 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
         &mut state,
         &mut updates,
         LayoutCommand::CreateWorkspace {
+            name: None,
+            focus: true,
             root_directory: repository.clone(),
         },
     );
@@ -634,7 +647,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
 
     let (handle, endpoint, thread) = start();
     let first_connection = ClientConnection::connect(&endpoint, "first-terminal").unwrap();
-    let first_bootstrap = first_connection.bootstrap().clone();
+    let first_bootstrap = first_connection.bootstrap().unwrap().clone();
     let server_id = first_bootstrap.server_id;
     let session_id = first_bootstrap.session_id;
     let mut first = first_connection.into_stream();
@@ -651,6 +664,8 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -699,7 +714,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     thread::sleep(Duration::from_millis(30));
 
     let second_connection = ClientConnection::connect(&endpoint, "second-terminal").unwrap();
-    let second_bootstrap = second_connection.bootstrap().clone();
+    let second_bootstrap = second_connection.bootstrap().unwrap().clone();
     assert_eq!(second_bootstrap.snapshot, snapshot_before_disconnect);
     let terminal = second_bootstrap
         .terminals

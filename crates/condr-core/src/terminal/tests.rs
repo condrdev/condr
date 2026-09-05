@@ -789,10 +789,25 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         // Event types add the press suffix and put legacy-form keys in kitty form.
         (ch("c"), control, events, b"\x1b[99;5:1u"),
         (TerminalKey::Left, none, events, b"\x1b[1;1:1D"),
-        (TerminalKey::Function(3), control, events, b"\x1b[1;5:1R"),
+        (TerminalKey::Function(3), control, events, b"\x1b[13;5:1~"),
         // Without a modifier field only the plain legacy sequences are valid.
         (TerminalKey::Up, none, all, b"\x1b[A"),
-        (TerminalKey::Function(1), none, all, b"\x1bOP"),
+        (TerminalKey::Function(1), none, all, b"\x1b[P"),
+        (TerminalKey::Function(3), none, all, b"\x1b[13~"),
+        (
+            TerminalKey::Function(3),
+            control,
+            disambiguate,
+            b"\x1b[13;5~",
+        ),
+        (
+            TerminalKey::Function(13),
+            none,
+            disambiguate,
+            b"\x1b[57376u",
+        ),
+        (TerminalKey::Function(20), control, all, b"\x1b[57383;5u"),
+        (TerminalKey::Function(3), none, TermMode::empty(), b"\x1bOR"),
         (TerminalKey::Function(5), none, all, b"\x1b[15~"),
         // Alternate keys alone do not disambiguate Escape.
         (
@@ -982,6 +997,38 @@ fn osc_seven_and_iterm_cwd_reports_are_decoded() {
             OscReport::Cwd(PathBuf::from("/iterm")),
         ]
     );
+}
+
+#[test]
+fn osc_seven_accepts_this_host_and_escaped_paths_but_rejects_foreign_hosts() {
+    let host = sysinfo::System::host_name().expect("test host has a name");
+    let mut parser = OscCwdParser::default();
+    let mut reported = Vec::new();
+    for authority in [
+        String::new(),
+        "LOCALHOST".into(),
+        host.to_uppercase(),
+        format!("{host}."),
+    ] {
+        let uri = format!("\x1b]7;file://{authority}/C:/with%20space/%23%25\x07");
+        parser.advance(uri.as_bytes(), |osc| reported.push(osc));
+    }
+    #[cfg(unix)]
+    let expected = PathBuf::from("/C:/with space/#%");
+    #[cfg(windows)]
+    let expected = PathBuf::from("C:\\with space\\#%");
+    assert_eq!(reported, vec![OscReport::Cwd(expected); 4]);
+    reported.clear();
+    for uri in [
+        "file://foreign.invalid/nope",
+        "file:///bad%xx",
+        "file:///nul%00path",
+    ] {
+        parser.advance(format!("\x1b]7;{uri}\x07").as_bytes(), |osc| {
+            reported.push(osc)
+        });
+    }
+    assert!(reported.is_empty());
 }
 
 #[test]

@@ -278,14 +278,13 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
         }
         ServerCommand::Revoke { key } => {
             let directory = identity_directory()?;
-            let removed = noise::revoke(&directory, &key)?;
-            if removed == 0 {
+            let Some(key) = noise::revoke(&directory, &key)? else {
                 return Err(failure(
                     format!("no paired device matches {key}"),
                     ["list paired devices with `condr server clients`".to_owned()],
                 ));
-            }
-            println!("condr-server: revoked {removed} device(s)");
+            };
+            println!("condr-server: revoked device {key}");
             // The file already refuses their next handshake; a running Server also drops
             // the connections they hold now.
             let endpoint = ServerConfig::default().local_endpoint();

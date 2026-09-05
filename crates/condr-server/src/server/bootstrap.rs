@@ -17,24 +17,18 @@ pub(super) fn queue_message(outbound: &ClientWriter, message: ServerMessage) -> 
     queue_response(outbound, message) == Err(ReliableSendError::Disconnected)
 }
 
-pub(super) fn send_bootstrap(
-    stream: &mut EndpointStream,
-    state: &Arc<Mutex<RuntimeState>>,
-) -> io::Result<()> {
-    let probes = state
-        .lock()
-        .expect("server state lock poisoned")
-        .terminal_cwd_probes();
-    let observations = observe_terminal_cwds(probes);
-    let capture = {
-        let mut state = state.lock().expect("server state lock poisoned");
-        state.record_terminal_cwd_observations(observations);
-        state.capture_bootstrap()
+pub(super) fn frame_overview_messages(mut overview: SessionOverview) -> io::Result<Vec<Vec<u8>>> {
+    // A near-limit structural snapshot and 1024 titles need separate frames. Neither
+    // frame contains VT cells, and the writer keeps the pair contiguous.
+    let terminals = ServerMessage::OverviewTerminals {
+        server_id: overview.server_id,
+        session_id: overview.session_id,
+        terminals: std::mem::take(&mut overview.terminals),
     };
-    for frame in frame_bootstrap_messages(capture.materialize())?.frames {
-        send_framed(stream, &frame)?;
-    }
-    Ok(())
+    Ok(vec![
+        frame_message(&ServerMessage::Overview(overview))?,
+        frame_message(&terminals)?,
+    ])
 }
 
 pub(super) fn queue_runtime_bootstrap(

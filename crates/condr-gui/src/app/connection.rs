@@ -292,7 +292,6 @@ pub(super) fn apply_terminal_frame_batch(
                             ClientTerminal {
                                 view,
                                 exited: false,
-                                title: None,
                             },
                         );
                     }

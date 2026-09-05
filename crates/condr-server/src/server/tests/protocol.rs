@@ -1,5 +1,267 @@
 use super::*;
 
+#[test]
+fn overview_frames_fit_near_the_snapshot_and_terminal_metadata_limits() {
+    let state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    let mut overview = SessionOverview::from(&state.bootstrap());
+    let mut session = Session::new();
+    let workspace = session.create_workspace(std::env::temp_dir()).unwrap();
+    session.rename_workspace(workspace, "x".repeat(MAX_PERSISTED_SNAPSHOT_BYTES - 4096));
+    overview.snapshot = session.snapshot();
+    validate_persistable_snapshot(&overview.snapshot).unwrap();
+    overview.terminals = (1..=1024)
+        .map(|id| PaneTerminalMetadata {
+            pane_id: PaneId::from_u64(id),
+            title: Some("\u{1f600}".repeat(256)),
+            exited: false,
+        })
+        .collect();
+    assert!(frame_message(&ServerMessage::Overview(overview.clone())).is_err());
+    let frames = frame_overview_messages(overview.clone()).unwrap();
+    assert_eq!(frames.len(), 2);
+    let ServerMessage::Overview(mut decoded) =
+        condr_core::protocol::read_message(&mut frames[0].as_slice()).unwrap()
+    else {
+        panic!("Overview header")
+    };
+    let ServerMessage::OverviewTerminals { terminals, .. } =
+        condr_core::protocol::read_message(&mut frames[1].as_slice()).unwrap()
+    else {
+        panic!("Overview terminal metadata")
+    };
+    decoded.terminals = terminals;
+    assert_eq!(decoded, overview);
+}
+
+#[test]
+fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
+    let (handle, endpoint, server_thread) = start();
+    let mut owner = ClientConnection::connect_overview(&endpoint, "owner").unwrap();
+    let create = |name: &str, focus| LayoutCommand::CreateWorkspace {
+        root_directory: std::env::temp_dir(),
+        name: Some(name.into()),
+        focus,
+    };
+    let LayoutResult::WorkspaceCreated {
+        workspace_id: anchor,
+        tab_id: anchor_tab,
+        pane_id: anchor_pane,
+    } = owner.layout(create("anchor", true)).unwrap().unwrap()
+    else {
+        panic!("Workspace result")
+    };
+    let first = ClientConnection::connect_overview(&endpoint, "first").unwrap();
+    let second = ClientConnection::connect_overview(&endpoint, "second").unwrap();
+    // The user's focus changes after both clients have read their initial structure.
+    let LayoutResult::WorkspaceCreated {
+        workspace_id: selected,
+        ..
+    } = owner.layout(create("selected", true)).unwrap().unwrap()
+    else {
+        panic!("Workspace result")
+    };
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let workers = [first, second]
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut client)| {
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                let name = format!("worker {index}");
+                let result = client
+                    .layout(LayoutCommand::CreateWorkspace {
+                        root_directory: std::env::temp_dir(),
+                        name: Some(name.clone()),
+                        focus: false,
+                    })
+                    .unwrap()
+                    .unwrap();
+                let LayoutResult::WorkspaceCreated {
+                    workspace_id,
+                    tab_id,
+                    pane_id,
+                } = result
+                else {
+                    panic!("Workspace result")
+                };
+                let session = client.session().unwrap();
+                assert_eq!(session.workspace(workspace_id).unwrap().name(), name);
+                assert_eq!(session.tab(tab_id).unwrap().focused_pane().id(), pane_id);
+                let LayoutResult::TabCreated { tab_id, pane_id } = client
+                    .layout(LayoutCommand::CreateTab {
+                        workspace_id: anchor,
+                        name: Some(name.clone()),
+                        focus: false,
+                    })
+                    .unwrap()
+                    .unwrap()
+                else {
+                    panic!("Tab result")
+                };
+                assert_eq!(client.session().unwrap().tab(tab_id).unwrap().name(), name);
+                assert_eq!(
+                    client
+                        .session()
+                        .unwrap()
+                        .tab(tab_id)
+                        .unwrap()
+                        .focused_pane()
+                        .id(),
+                    pane_id
+                );
+                let LayoutResult::PaneCreated { pane_id: split } = client
+                    .layout(LayoutCommand::SplitPane {
+                        pane_id: anchor_pane,
+                        direction: condr_core::SplitDirection::Horizontal,
+                        focus: false,
+                    })
+                    .unwrap()
+                    .unwrap()
+                else {
+                    panic!("Pane result")
+                };
+                assert!(
+                    client
+                        .session()
+                        .unwrap()
+                        .tab(anchor_tab)
+                        .unwrap()
+                        .panes()
+                        .iter()
+                        .any(|pane| pane.id() == split)
+                );
+                (workspace_id, tab_id, split)
+            })
+        })
+        .collect::<Vec<_>>();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_ne!(results[0].0, results[1].0);
+    assert_ne!(results[0].1, results[1].1);
+    assert_ne!(results[0].2, results[1].2);
+    let session = Session::restore(handle.snapshot()).unwrap();
+    assert_eq!(session.active_workspace_id(), Some(selected));
+    assert_eq!(
+        session.workspace(anchor).unwrap().active_tab().id(),
+        anchor_tab
+    );
+    assert_eq!(
+        session.tab(anchor_tab).unwrap().focused_pane().id(),
+        anchor_pane
+    );
+    let before = session.snapshot();
+    assert!(owner.layout(create(" ", false)).unwrap().is_err());
+    assert_eq!(
+        handle.snapshot(),
+        before,
+        "invalid name must not leave a Workspace behind"
+    );
+    drop(owner);
+    handle.stop();
+    server_thread.join().unwrap().unwrap();
+}
+
+#[test]
+fn lightweight_queries_and_admin_never_capture_terminal_views() {
+    let (handle, endpoint, server_thread) = start();
+    let mut client = ClientConnection::connect_overview(&endpoint, "inspect").unwrap();
+    let LayoutResult::WorkspaceCreated { pane_id, .. } = client
+        .layout(LayoutCommand::CreateWorkspace {
+            root_directory: std::env::temp_dir(),
+            name: None,
+            focus: true,
+        })
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("Workspace result")
+    };
+    assert!(client.bootstrap().is_none());
+    client.read_pane(pane_id, 5).unwrap();
+    probe_server(&endpoint).unwrap();
+    assert!(connected_devices(&endpoint).unwrap().is_empty());
+    assert_eq!(
+        revoke_devices(&endpoint, &StaticKey::generate().unwrap().public()).unwrap(),
+        0
+    );
+    let inspector = ClientConnection::connect_overview(&endpoint, "second inspect").unwrap();
+    assert_eq!(inspector.overview().terminals.len(), 1);
+    assert_eq!(
+        handle
+            .state
+            .lock()
+            .unwrap()
+            .bootstrap_captures
+            .load(Ordering::Relaxed),
+        0
+    );
+    let gui = ClientConnection::connect(&endpoint, "gui").unwrap();
+    assert_eq!(gui.bootstrap().unwrap().terminals.len(), 1);
+    assert_eq!(
+        handle
+            .state
+            .lock()
+            .unwrap()
+            .bootstrap_captures
+            .load(Ordering::Relaxed),
+        1
+    );
+    drop((client, inspector, gui));
+    stop_server(&endpoint).unwrap();
+    server_thread.join().unwrap().unwrap();
+    assert_eq!(
+        handle
+            .state
+            .lock()
+            .unwrap()
+            .bootstrap_captures
+            .load(Ordering::Relaxed),
+        1
+    );
+}
+
+#[test]
+fn tcp_peers_leave_the_table_when_initial_connections_are_abandoned() {
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let endpoint = server.endpoint().clone();
+    let handle = server.handle();
+    let server_thread = thread::spawn(move || server.run());
+    for index in 0..24 {
+        let mut stream = endpoint.connect().unwrap();
+        condr_core::protocol::write_message(
+            &mut stream,
+            &ClientMessage::Hello(Hello {
+                version: PROTOCOL_VERSION,
+                client_name: "abandoned".into(),
+            }),
+        )
+        .unwrap();
+        if index % 2 == 0 {
+            assert!(matches!(
+                read_server(&mut stream),
+                ServerMessage::Welcome { error: None, .. }
+            ));
+        }
+        stream.shutdown().unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !handle.state.lock().unwrap().tcp_peers.is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "abandoned TCP peer registration leaked"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    handle.stop();
+    server_thread.join().unwrap().unwrap();
+    assert!(handle.state.lock().unwrap().tcp_peers.is_empty());
+}
+
 #[cfg(target_os = "linux")]
 use condr_core::{
     TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
@@ -226,7 +488,7 @@ fn oversized_client_frame_is_rejected_with_a_clear_error() {
 fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
     let (handle, endpoint, thread) = start();
     let connection = ClientConnection::connect(&endpoint, "failed-workspace").unwrap();
-    let bootstrap = connection.bootstrap().clone();
+    let bootstrap = connection.bootstrap().unwrap().clone();
     let server_id = bootstrap.server_id;
     let session_id = bootstrap.session_id;
     let mut stream = connection.into_stream();
@@ -243,6 +505,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -291,6 +555,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         (
             42,
             LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: missing_root,
             },
             "cannot access root directory",
@@ -298,6 +564,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         (
             43,
             LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: PathBuf::from("relative-workspace-root"),
             },
             "must be an absolute path",
@@ -305,6 +573,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         (
             44,
             LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: regular_file.clone(),
             },
             "is not a directory",
@@ -716,6 +986,8 @@ fn controller_is_exclusive_and_released_on_disconnect() {
             session_id,
             request_id: 73,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -766,6 +1038,8 @@ fn releasing_control_releases_reported_mouse_before_focus() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -892,6 +1166,8 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -1001,6 +1277,8 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
                 session_id,
                 request_id,
                 command: LayoutCommand::CreateWorkspace {
+                    name: None,
+                    focus: true,
                     root_directory: std::env::temp_dir(),
                 },
             },
@@ -1078,7 +1356,7 @@ fn stop_message_ends_server_and_preserves_session_handle() {
 fn stop_message_ends_server_when_the_requesting_client_is_not_reading() {
     let (handle, endpoint, server_thread) = start();
     let connection = ClientConnection::connect(&endpoint, "blocked-stop-writer").unwrap();
-    let session_id = connection.bootstrap().session_id;
+    let session_id = connection.bootstrap().unwrap().session_id;
     let mut stream = connection.into_stream();
     stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))
@@ -1123,7 +1401,7 @@ fn stop_message_ends_server_when_the_requesting_client_is_not_reading() {
 fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
     let (handle, endpoint, server_thread) = start();
     let connection = ClientConnection::connect(&endpoint, "blocked-resize").unwrap();
-    let bootstrap = connection.bootstrap().clone();
+    let bootstrap = connection.bootstrap().unwrap().clone();
     let server_id = bootstrap.server_id;
     let session_id = bootstrap.session_id;
     let mut controller = connection.into_stream();
@@ -1140,6 +1418,8 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -1273,6 +1553,8 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: repository.clone(),
             },
         },
@@ -1432,7 +1714,7 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     condr_core::protocol::write_message(
         &mut second,
         &ClientMessage::RevokeDevice {
-            key_prefix: prefix.clone(),
+            key: device_key.public().to_hex(),
         },
     )
     .unwrap();
@@ -1453,11 +1735,14 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
 
     // The host revokes: the file refuses the next handshake, the message drops both
     // live connections.
-    assert_eq!(noise::revoke(&directory, &prefix).unwrap(), 1);
+    assert_eq!(
+        noise::revoke(&directory, &prefix).unwrap(),
+        Some(device_key.public())
+    );
     condr_core::protocol::write_message(
         &mut admin,
         &ClientMessage::RevokeDevice {
-            key_prefix: prefix.clone(),
+            key: device_key.public().to_hex(),
         },
     )
     .unwrap();
@@ -1529,7 +1814,7 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     let thread = thread::spawn(move || server.run());
 
     let connection = ClientConnection::connect(&endpoint, "tcp-controller").unwrap();
-    let bootstrap = connection.bootstrap().clone();
+    let bootstrap = connection.bootstrap().unwrap().clone();
     let server_id = bootstrap.server_id;
     let session_id = bootstrap.session_id;
     let mut stream = connection.into_stream();
@@ -1545,6 +1830,8 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
             session_id,
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: repository.clone(),
             },
         },
@@ -1595,13 +1882,18 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     });
 
     let reconnect = ClientConnection::connect(&endpoint, "tcp-reconnect").unwrap();
-    assert!(reconnect.bootstrap().agents.iter().any(|agent| {
+    assert!(reconnect.bootstrap().unwrap().agents.iter().any(|agent| {
         agent.pane_id == pane_id && agent.agent.kind == condr_core::AgentKind::Codex
     }));
     assert!(
-        reconnect.bootstrap().workspace_git.iter().any(|git| {
-            git.workspace_id == workspace_id && git.branch.as_deref() == Some("main")
-        })
+        reconnect
+            .bootstrap()
+            .unwrap()
+            .workspace_git
+            .iter()
+            .any(|git| {
+                git.workspace_id == workspace_id && git.branch.as_deref() == Some("main")
+            })
     );
 
     handle.stop();
@@ -1632,18 +1924,32 @@ fn server_settings_are_stored_published_and_reloaded() {
     wait_for_connection(&endpoint);
 
     let initial = ClientConnection::connect(&endpoint, "test").unwrap();
-    let server_id = initial.bootstrap().server_id;
-    let session_id = initial.bootstrap().session_id;
-    let sequence = initial.bootstrap().sequence;
-    assert_eq!(initial.bootstrap().settings.shell, "");
+    let server_id = initial.bootstrap().unwrap().server_id;
+    let session_id = initial.bootstrap().unwrap().session_id;
+    let sequence = initial.bootstrap().unwrap().sequence;
+    assert_eq!(initial.bootstrap().unwrap().settings.shell, "");
     assert!(
-        !initial.bootstrap().settings.default_shell.is_empty(),
+        !initial
+            .bootstrap()
+            .unwrap()
+            .settings
+            .default_shell
+            .is_empty(),
         "the Bootstrap names the system default shell"
     );
     drop(initial);
 
     let mut stream = connect_and_bootstrap(&endpoint);
     subscribe(&mut stream, session_id, sequence);
+    let config_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join("config.toml.lock"))
+        .unwrap();
+    config_lock.lock().unwrap();
+    let settings_write = Arc::clone(&handle.state.lock().unwrap().settings_write);
     condr_core::protocol::write_message(
         &mut stream,
         &ClientMessage::SetServerSettings {
@@ -1652,6 +1958,21 @@ fn server_settings_are_stored_published_and_reloaded() {
         },
     )
     .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while settings_write.try_lock().is_ok() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    let waiting_for_config = settings_write.try_lock().is_err();
+    let session_available = handle.state.try_lock().is_ok();
+    drop(config_lock);
+    assert!(
+        waiting_for_config,
+        "the setting should wait for the config transaction"
+    );
+    assert!(
+        session_available,
+        "disk I/O must not hold the global Session lock"
+    );
     let message = wait_for_message(&mut stream, |message| {
         matches!(
             message,
@@ -1682,7 +2003,7 @@ fn server_settings_are_stored_published_and_reloaded() {
     );
 
     let reconnected = ClientConnection::connect(&endpoint, "test").unwrap();
-    assert_eq!(reconnected.bootstrap().settings.shell, "nu");
+    assert_eq!(reconnected.bootstrap().unwrap().settings.shell, "nu");
     drop(reconnected);
     drop(stream);
     handle.stop();
@@ -1699,7 +2020,7 @@ fn server_settings_are_stored_published_and_reloaded() {
     wait_for_connection(&endpoint);
     let restarted = ClientConnection::connect(&endpoint, "test").unwrap();
     assert_eq!(
-        restarted.bootstrap().settings.shell,
+        restarted.bootstrap().unwrap().settings.shell,
         "nu",
         "a restarted Server reads the file back: {}",
         std::fs::read_to_string(&config_path).unwrap()

@@ -157,13 +157,14 @@ fn restart_falls_back_from_a_missing_pane_cwd_and_persists_the_repair() {
     let thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);
     let connection = ClientConnection::connect(&endpoint, "cwd-fallback").unwrap();
-    let repaired_session = Session::restore(connection.bootstrap().snapshot.clone()).unwrap();
+    let repaired_session =
+        Session::restore(connection.bootstrap().unwrap().snapshot.clone()).unwrap();
     assert_eq!(
         repaired_session.pane(pane_id).and_then(|pane| pane.cwd()),
         Some(workspace_root.as_path())
     );
-    assert_eq!(connection.bootstrap().terminals.len(), 3);
-    let repaired_snapshot = connection.bootstrap().snapshot.clone();
+    assert_eq!(connection.bootstrap().unwrap().terminals.len(), 3);
+    let repaired_snapshot = connection.bootstrap().unwrap().snapshot.clone();
 
     drop(connection);
     handle.stop();
@@ -222,7 +223,7 @@ fn restart_prunes_only_failed_panes_and_persists_the_repair() {
     let thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);
     let connection = ClientConnection::connect(&endpoint, "partial-restore").unwrap();
-    let bootstrap = connection.bootstrap();
+    let bootstrap = connection.bootstrap().unwrap();
     assert_eq!(bootstrap.terminals.len(), 1);
     assert_eq!(bootstrap.terminals[0].pane_id, surviving_pane);
     assert!(bootstrap.agents.is_empty());
@@ -282,8 +283,11 @@ fn wholly_unrestorable_snapshot_persists_start_page_state() {
     let thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);
     let connection = ClientConnection::connect(&endpoint, "empty-restore").unwrap();
-    assert_eq!(connection.bootstrap().snapshot, Session::new().snapshot());
-    assert!(connection.bootstrap().terminals.is_empty());
+    assert_eq!(
+        connection.bootstrap().unwrap().snapshot,
+        Session::new().snapshot()
+    );
+    assert!(connection.bootstrap().unwrap().terminals.is_empty());
 
     drop(connection);
     handle.stop();
@@ -356,7 +360,7 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
     let first_thread = thread::spawn(move || first_server.run());
     wait_for_connection(&first_endpoint);
     let first = ClientConnection::connect(&first_endpoint, "valid-worktree-restore").unwrap();
-    let first_session = Session::restore(first.bootstrap().snapshot.clone()).unwrap();
+    let first_session = Session::restore(first.bootstrap().unwrap().snapshot.clone()).unwrap();
     assert!(
         first_session
             .workspace(child_workspace_id)
@@ -383,7 +387,7 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
     let second_thread = thread::spawn(move || second_server.run());
     wait_for_connection(&second_endpoint);
     let second = ClientConnection::connect(&second_endpoint, "stale-worktree-restore").unwrap();
-    let repaired = Session::restore(second.bootstrap().snapshot.clone()).unwrap();
+    let repaired = Session::restore(second.bootstrap().unwrap().snapshot.clone()).unwrap();
     assert!(
         repaired
             .workspace(child_workspace_id)
@@ -445,7 +449,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     let first_thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);
     let first = ClientConnection::connect(&endpoint, "restart-first").unwrap();
-    let initial = first.bootstrap().clone();
+    let initial = first.bootstrap().unwrap().clone();
     let first_server_id = initial.server_id;
     let first_epoch = initial.runtime_epoch;
     let session_id = initial.session_id;
@@ -483,6 +487,8 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
             assert_layout_applied(&mut stream, first_server_id, session_id, 1, sequence);
         };
         mutate(LayoutCommand::CreateWorkspace {
+            name: None,
+            focus: true,
             root_directory: workspace_root.clone(),
         });
         let (workspace_id, tab_id, first_pane) = {
@@ -503,6 +509,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
             name: "Persistent Tab".into(),
         });
         mutate(LayoutCommand::SplitPane {
+            focus: true,
             pane_id: first_pane,
             direction: SplitDirection::Horizontal,
         });
@@ -618,7 +625,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     let replacement_thread = thread::spawn(move || replacement.run());
     wait_for_connection(&endpoint);
     let restored = ClientConnection::connect(&endpoint, "restart-second").unwrap();
-    let bootstrap = restored.bootstrap().clone();
+    let bootstrap = restored.bootstrap().unwrap().clone();
     assert_eq!(bootstrap.server_id, first_server_id);
     assert_ne!(bootstrap.runtime_epoch, first_epoch);
     // A fresh runtime starts its event log empty; the restarted shells may already have
@@ -758,8 +765,8 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
     let thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);
     let connection = ClientConnection::connect(&endpoint, "exit-cwd").unwrap();
-    let server_id = connection.bootstrap().server_id;
-    let session_id = connection.bootstrap().session_id;
+    let server_id = connection.bootstrap().unwrap().server_id;
+    let session_id = connection.bootstrap().unwrap().session_id;
     let mut stream = connection.into_stream();
     stream
         .set_handshake_timeout(Some(Duration::from_secs(5)))

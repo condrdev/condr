@@ -194,17 +194,14 @@ pub fn probe_server(endpoint: &Endpoint) -> io::Result<()> {
     probe_protocol(endpoint.connect()?)
 }
 
-/// Asks the running Server to drop the live connections of devices whose key starts with
-/// `key_prefix`; returns how many it closed. The caller has already edited the
+/// Asks the running Server to drop the live connections of a device by its full key;
+/// returns how many it closed. The caller has already edited the
 /// authorized list, so those devices cannot come back.
-pub fn revoke_devices(endpoint: &Endpoint, key_prefix: &str) -> io::Result<u32> {
-    let client = ClientConnection::connect(endpoint, "condr-revoke")?;
-    let mut stream = client.into_stream();
+pub fn revoke_devices(endpoint: &Endpoint, key: &crate::noise::PublicKey) -> io::Result<u32> {
+    let (mut stream, _, _) = ClientConnection::welcome(endpoint.connect()?, "condr-revoke")?;
     condr_core::protocol::write_message(
         &mut stream,
-        &ClientMessage::RevokeDevice {
-            key_prefix: key_prefix.to_owned(),
-        },
+        &ClientMessage::RevokeDevice { key: key.to_hex() },
     )
     .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)
@@ -223,8 +220,7 @@ pub fn revoke_devices(endpoint: &Endpoint, key_prefix: &str) -> io::Result<u32> 
 
 /// The hex keys of paired devices holding a live TCP connection to the running Server.
 pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
-    let client = ClientConnection::connect(endpoint, "condr-clients")?;
-    let mut stream = client.into_stream();
+    let (mut stream, _, _) = ClientConnection::welcome(endpoint.connect()?, "condr-clients")?;
     condr_core::protocol::write_message(&mut stream, &ClientMessage::ConnectedDevices)
         .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)
@@ -242,9 +238,7 @@ pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
 }
 
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {
-    let client = ClientConnection::connect(endpoint, "condr-stop")?;
-    let server_id = client.bootstrap.server_id;
-    let mut stream = client.into_stream();
+    let (mut stream, server_id, _) = ClientConnection::welcome(endpoint.connect()?, "condr-stop")?;
     condr_core::protocol::write_message(&mut stream, &ClientMessage::StopServer { server_id })
         .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)

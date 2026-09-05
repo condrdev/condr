@@ -140,7 +140,6 @@ pub(super) struct TerminalComposition {
 pub(super) struct ClientTerminal {
     pub(super) view: Arc<condr_core::TerminalView>,
     pub(super) exited: bool,
-    pub(super) title: Option<String>,
 }
 
 impl From<PaneTerminalSnapshot> for ClientTerminal {
@@ -148,7 +147,6 @@ impl From<PaneTerminalSnapshot> for ClientTerminal {
         Self {
             view: Arc::new(snapshot.view),
             exited: snapshot.exited,
-            title: snapshot.title,
         }
     }
 }
@@ -267,6 +265,7 @@ struct ServerConnection {
     sequence: u64,
     snapshot: SessionSnapshot,
     terminals: HashMap<PaneId, ClientTerminal>,
+    terminal_titles: HashMap<PaneId, String>,
     terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     agents: HashMap<PaneId, AgentSnapshot>,
     agent_trackers: HashMap<PaneId, AgentTracker>,
@@ -336,6 +335,7 @@ impl ServerConnection {
             sequence: 0,
             snapshot: Session::new().snapshot(),
             terminals: HashMap::new(),
+            terminal_titles: HashMap::new(),
             terminal_hyperlinks: HashMap::new(),
             agents: HashMap::new(),
             agent_trackers: HashMap::new(),
@@ -407,9 +407,13 @@ impl ServerConnection {
             .filter_map(|terminal| terminal.attention.then_some(terminal.pane_id))
             .collect();
         self.terminals.clear();
+        self.terminal_titles.clear();
         self.terminal_hyperlinks.clear();
         for mut terminal in bootstrap.terminals {
             let pane_id = terminal.pane_id;
+            if let Some(title) = terminal.title.take() {
+                self.terminal_titles.insert(pane_id, title);
+            }
             self.terminal_hyperlinks
                 .insert(pane_id, TerminalHyperlinkBudget::new(&mut terminal.view));
             self.terminals.insert(pane_id, terminal.into());
@@ -541,6 +545,7 @@ impl ServerConnection {
 
 pub(crate) struct Condr {
     client_config_path: Option<PathBuf>,
+    config_save: Option<Task<()>>,
     /// This device's static key for TCP Servers, kept beside `config.toml`. `None` when
     /// it could not be loaded or created; TCP Servers are then unavailable rather than
     /// reached with a key an attacker could predict.
@@ -609,7 +614,7 @@ impl Condr {
     fn new(
         endpoint: Endpoint,
         initial: Result<ClientConnection, String>,
-        client_config_path: Option<PathBuf>,
+        config: config::LoadedConfig,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -621,66 +626,15 @@ impl Condr {
             connection.error = Some(error);
         }
 
-        // Without a config file there is nowhere to keep a device key, so such a GUI gets
-        // a fresh one per run; the key only matters for TCP Servers, which need the file
-        // anyway.
-        let (device_key, key_error) = match client_config_path
-            .as_deref()
-            .and_then(std::path::Path::parent)
-            .map_or_else(StaticKey::generate, condr_server::noise::load_device_key)
-        {
-            Ok(key) => (Some(key), None),
-            Err(error) => (
-                None,
-                Some(format!(
-                    "Failed to load the device key, so TCP Servers are unavailable: {error}"
-                )),
-            ),
-        };
-        let (saved_servers, config_error) = client_config_path
-            .as_deref()
-            .map_or_else(|| Ok(Vec::new()), config::load_servers)
-            .and_then(|servers| {
-                let Some(device_key) = &device_key else {
-                    // The key error above already explains why they are missing.
-                    return Ok(Vec::new());
-                };
-                servers
-                    .into_iter()
-                    .map(|server| {
-                        server
-                            .endpoint(device_key)
-                            .map(|endpoint| (server.name, endpoint))
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .map_or_else(
-                |error| {
-                    (
-                        Vec::new(),
-                        Some(format!(
-                            "Failed to load {}: {error}",
-                            client_config_path.as_deref().map_or_else(
-                                || "config.toml".to_owned(),
-                                |path| path.display().to_string()
-                            )
-                        )),
-                    )
-                },
-                |servers| (servers, key_error),
-            );
-        let appearance = client_config_path
-            .as_deref()
-            .and_then(|path| config::load_appearance(path).ok())
-            .unwrap_or_default();
-        let terminal_font = client_config_path
-            .as_deref()
-            .and_then(|path| config::load_terminal_font(path).ok())
-            .unwrap_or_default();
-        let terminal_color_scheme = client_config_path
-            .as_deref()
-            .and_then(|path| config::load_terminal_color_scheme(path).ok())
-            .unwrap_or_default();
+        let config::LoadedConfig {
+            path: client_config_path,
+            device_key,
+            servers: saved_servers,
+            error: config_error,
+            appearance,
+            terminal_font,
+            terminal_color_scheme,
+        } = config;
         let mut connections = vec![connection];
         for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
             connections.push(ServerConnection::new(index as u64 + 2, name, endpoint));
@@ -702,16 +656,22 @@ impl Condr {
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
-        let quit_subscription = cx.on_app_quit(|this, _| {
+        let quit_subscription = cx.on_app_quit(|this, cx| {
             // A change made less than a debounce before quitting is still saved.
             if this._font_save.is_some() {
-                this.save_terminal_font();
+                this.save_terminal_font(cx);
             }
             this.flush_server_shell();
-            async {}
+            let pending = this.config_save.take();
+            async move {
+                if let Some(pending) = pending {
+                    pending.await;
+                }
+            }
         });
         let mut this = Self {
             client_config_path,
+            config_save: None,
             device_key,
             connections,
             active_connection: 1,

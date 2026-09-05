@@ -47,14 +47,98 @@ pub(crate) fn resolve_write_target(path: &std::path::Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Writes the hand-editable `config.toml` in place, owner-only on Unix. People keep this
-/// file open in an editor, and on Windows that refuses the atomic replace Snapshots use;
-/// the file is a few lines rewritten whole, so a crash mid-write costs a default config,
-/// not data that cannot be typed again.
-pub fn write_config_text(path: &std::path::Path, text: &str) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
+struct ConfigTransaction {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl ConfigTransaction {
+    fn open(path: &Path) -> io::Result<Self> {
+        let path = std::path::absolute(path)?;
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "config path has no parent")
+        })?;
         fs::create_dir_all(parent)?;
+        let path =
+            resolve_write_target(&fs::canonicalize(parent)?.join(path.file_name().ok_or_else(
+                || io::Error::new(io::ErrorKind::InvalidInput, "config path must name a file"),
+            )?));
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(adjacent_lock_path(&path))?;
+        lock.lock()?;
+        Ok(Self { path, _lock: lock })
     }
+
+    fn read(&self) -> io::Result<Option<String>> {
+        match fs::read_to_string(&self.path) {
+            Ok(text) => Ok(Some(text)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Reads under the same cross-process lock as updates, including Windows in-place saves.
+/// Call on a background thread when used by an interactive client.
+pub fn read_config_text(path: &Path) -> io::Result<Option<String>> {
+    ConfigTransaction::open(path)?.read()
+}
+
+/// Updates keys in one TOML table as one serialized transaction; `None` removes a key.
+/// Unchanged values, comments and formatting remain in the document.
+pub fn update_config_values(
+    path: &Path,
+    tables: &[&str],
+    entries: impl IntoIterator<Item = (impl AsRef<str>, Option<toml_edit::Item>)>,
+) -> io::Result<()> {
+    let transaction = ConfigTransaction::open(path)?;
+    let mut document = transaction
+        .read()?
+        .unwrap_or_default()
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
+    for name in tables {
+        table = table
+            .entry(name)
+            .or_insert(toml_edit::table())
+            .as_table_like_mut()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{name} must be a table"),
+                )
+            })?;
+    }
+    for (key, value) in entries {
+        let key = key.as_ref();
+        let Some(value) = value else {
+            table.remove(key);
+            continue;
+        };
+        match (
+            table.get_mut(key).and_then(toml_edit::Item::as_value_mut),
+            value.as_value(),
+        ) {
+            (Some(existing), Some(replacement)) => {
+                let decor = existing.decor().clone();
+                *existing = replacement.clone();
+                *existing.decor_mut() = decor;
+            }
+            _ => {
+                table.insert(key, value);
+            }
+        }
+    }
+    write_config_text(&transaction.path, &document.to_string())
+}
+
+/// The caller holds the config transaction lock through persistence.
+fn write_config_text(path: &Path, text: &str) -> io::Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -62,9 +146,22 @@ pub fn write_config_text(path: &std::path::Path, text: &str) -> io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    let mut file = options.open(path)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
+    let result = atomic_replace(path, options, |file| file.write_all(text.as_bytes()));
+    #[cfg(windows)]
+    if let Err(error) = &result
+        && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+    {
+        // Editors may omit FILE_SHARE_DELETE. All Condr readers hold the transaction
+        // lock, so this fallback cannot expose partial TOML to another Condr process.
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
+        file.write_all(text.as_bytes())?;
+        return file.sync_all();
+    }
+    result
 }
 
 impl SnapshotPersistence {
@@ -389,6 +486,96 @@ mod tests {
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
     #[test]
+    #[ignore = "spawned by config_transactions_preserve_concurrent_process_updates"]
+    fn config_child_update() {
+        let path = PathBuf::from(std::env::var_os("CONDR_TEST_CONFIG_TRANSACTION_PATH").unwrap());
+        let key = std::env::var("CONDR_TEST_CONFIG_TRANSACTION_KEY").unwrap();
+        for value in 0..80 {
+            update_config_values(&path, &["client"], [(&key, Some(toml_edit::value(value)))])
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn config_transactions_preserve_concurrent_process_updates() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("config.toml");
+        let initial = format!(
+            "# keep comment\n[server]\nlisten = '127.0.0.1:42' # keep suffix\n[client]\nmarker = '{}'\n",
+            "x".repeat(65536)
+        );
+        fs::write(&path, &initial).unwrap();
+        #[cfg(unix)]
+        let alias = {
+            let alias = directory.path().join("linked.toml");
+            std::os::unix::fs::symlink(&path, &alias).unwrap();
+            alias
+        };
+        #[cfg(not(unix))]
+        let alias = path.clone();
+        let mut children = [(&path, "appearance"), (&alias, "font_size")].map(|(path, key)| {
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "persistence::tests::config_child_update",
+                ])
+                .env("CONDR_TEST_CONFIG_TRANSACTION_PATH", path)
+                .env("CONDR_TEST_CONFIG_TRANSACTION_KEY", key)
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap()
+        });
+        for _ in 0..160 {
+            let text = read_config_text(&path).unwrap().unwrap();
+            let root: toml::Table = text.parse().unwrap();
+            assert_eq!(root["client"]["marker"].as_str().unwrap().len(), 65536);
+        }
+        for child in &mut children {
+            assert!(child.wait().unwrap().success());
+        }
+        let text = read_config_text(&path).unwrap().unwrap();
+        let root: toml::Table = text.parse().unwrap();
+        assert_eq!(root["client"]["appearance"].as_integer(), Some(79));
+        assert_eq!(root["client"]["font_size"].as_integer(), Some(79));
+        assert!(
+            text.starts_with("# keep comment\n[server]\nlisten = '127.0.0.1:42' # keep suffix")
+        );
+        #[cfg(unix)]
+        assert!(fs::symlink_metadata(alias).unwrap().is_symlink());
+    }
+
+    #[test]
+    fn config_updates_keep_scalar_comments_and_reject_malformed_documents() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("config.toml");
+        fs::write(
+            &path,
+            "[server.terminal]\n# shell comment\nshell = 'old' # trailing\n",
+        )
+        .unwrap();
+        update_config_values(
+            &path,
+            &["server", "terminal"],
+            [("shell", Some(toml_edit::value("new")))],
+        )
+        .unwrap();
+        let text = read_config_text(&path).unwrap().unwrap();
+        assert!(text.contains("# shell comment"));
+        assert!(text.contains("# trailing"));
+        fs::write(&path, "[broken").unwrap();
+        assert!(
+            update_config_values(
+                &path,
+                &["client"],
+                [("appearance", Some(toml_edit::value("dark")))]
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[broken");
+    }
+
+    #[test]
     fn missing_empty_and_corrupt_snapshots_are_classified() {
         let directory = TestDirectory::new();
         let path = directory.path().join("session.bin");
@@ -505,7 +692,7 @@ mod tests {
         ));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("config.toml");
-        fs::write(&path, "old").unwrap();
+        fs::write(&path, "[client]\nappearance = 'light'\n").unwrap();
         // FILE_SHARE_READ | FILE_SHARE_WRITE, no FILE_SHARE_DELETE: what a typical editor holds.
         let holder = OpenOptions::new()
             .read(true)
@@ -513,8 +700,17 @@ mod tests {
             .open(&path)
             .unwrap();
 
-        super::write_config_text(&path, "new").unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        update_config_values(
+            &path,
+            &["client"],
+            [("appearance", Some(toml_edit::value("dark")))],
+        )
+        .unwrap();
+        let text = read_config_text(&path).unwrap().unwrap();
+        assert_eq!(
+            text.parse::<toml::Table>().unwrap()["client"]["appearance"].as_str(),
+            Some("dark")
+        );
 
         drop(holder);
         let _ = fs::remove_dir_all(directory);

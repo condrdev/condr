@@ -95,6 +95,8 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: workspace_root.0.clone(),
             });
         });
@@ -121,6 +123,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
                 pane_id,
                 direction: SplitDirection::Horizontal,
             });
@@ -232,6 +235,8 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -444,6 +449,8 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: first_root.0.clone(),
             });
         });
@@ -470,6 +477,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
                 pane_id: first_pane,
                 direction: SplitDirection::Horizontal,
             });
@@ -495,6 +503,8 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
                 root_directory: second_root.0.clone(),
             });
         });
@@ -522,6 +532,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
                 pane_id: second_pane,
                 direction: SplitDirection::Horizontal,
             });
@@ -774,6 +785,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 1,
                 generation,
                 Incoming::Message(ServerMessage::LayoutApplied {
+                    result: Default::default(),
                     server_id,
                     session_id,
                     request_id: u64::MAX,
@@ -836,6 +848,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 1,
                 generation,
                 Incoming::Message(ServerMessage::LayoutApplied {
+                    result: Default::default(),
                     server_id,
                     session_id,
                     request_id: STALE_RATIO_REQUEST,
@@ -862,6 +875,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 1,
                 generation,
                 Incoming::Message(ServerMessage::LayoutApplied {
+                    result: Default::default(),
                     server_id,
                     session_id,
                     request_id: LATEST_RATIO_REQUEST,
@@ -1009,6 +1023,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 1,
                 a_generation,
                 Incoming::Message(ServerMessage::LayoutApplied {
+                    result: Default::default(),
                     server_id: a_server_id,
                     session_id: a_session_id,
                     request_id: A_REQUEST,

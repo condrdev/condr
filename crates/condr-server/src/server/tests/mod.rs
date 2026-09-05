@@ -92,35 +92,9 @@ fn wait_for_connection(endpoint: &Endpoint) {
 }
 
 fn connect_and_bootstrap(endpoint: &Endpoint) -> EndpointStream {
-    let mut stream = endpoint.connect().unwrap();
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientMessage::Hello(Hello {
-            version: PROTOCOL_VERSION,
-            client_name: "test".into(),
-        }),
-    )
-    .unwrap();
-    let welcome: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
-    assert!(matches!(
-        welcome,
-        ServerMessage::Welcome { error: None, .. }
-    ));
-    let bootstrap: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
-    let ServerMessage::Bootstrap(header) = bootstrap else {
-        panic!("expected Bootstrap header");
-    };
-    let batch_count = header.batch_count;
-    let mut assembler = BootstrapAssembler::new(header).unwrap();
-    for _ in 0..batch_count {
-        let message: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
-        let ServerMessage::BootstrapBatch(batch) = message else {
-            panic!("expected Bootstrap batch");
-        };
-        assembler.push(batch).unwrap();
-    }
-    assembler.finish().unwrap();
-    stream
+    ClientConnection::connect(endpoint, "test")
+        .unwrap()
+        .into_stream()
 }
 
 fn acquire_control(stream: &mut EndpointStream, session_id: SessionId) {
@@ -246,6 +220,7 @@ fn assert_layout_applied(
             session_id: applied_session,
             request_id: applied_request,
             sequence: applied_sequence,
+            ..
         } if applied_server == server_id
             && applied_session == session_id
             && applied_request == request_id

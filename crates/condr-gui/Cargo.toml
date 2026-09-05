@@ -16,7 +16,6 @@ test-support = ["gpui-kit/test-support"]
 
 [dependencies]
 async-channel.workspace = true
-atomicwrites.workspace = true
 gpui-kit.workspace = true
 condr-core = { path = "../condr-core" }
 condr-server = { path = "../condr-server" }
