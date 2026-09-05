@@ -1,9 +1,8 @@
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write as _};
+use std::fs;
+use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use atomicwrites::{AllowOverwrite, AtomicFile};
 use gpui::SharedString;
 use serde::Deserialize;
 
@@ -237,23 +236,9 @@ fn write_values(
             }
         }
     }
-    let text = document.to_string();
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    // A symlinked config.toml (dotfiles) is updated through its target, not replaced.
-    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    AtomicFile::new(&target, AllowOverwrite)
-        .write_with_options(|file| file.write_all(text.as_bytes()), options)
-        .map_err(io::Error::from)
+    // Shared with the Server's writer: symlinks are followed, and a file another program
+    // holds open is written in place instead of failing.
+    condr_server::write_config_text(path, &document.to_string())
 }
 
 /// Reads for the typed load path. `toml` deserializes a hand-edited value into

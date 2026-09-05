@@ -141,15 +141,7 @@ fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
             })?;
     }
     table.insert("shell", toml_edit::value(shell));
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let target = crate::persistence::resolve_write_target(path);
-    atomicwrites::AtomicFile::new(&target, atomicwrites::AllowOverwrite)
-        .write(|file| file.write_all(document.to_string().as_bytes()))
-        .map_err(|error| match error {
-            atomicwrites::Error::Internal(error) | atomicwrites::Error::User(error) => error,
-        })
+    crate::persistence::write_config_text(path, &document.to_string())
 }
 
 impl ServerConfig {
