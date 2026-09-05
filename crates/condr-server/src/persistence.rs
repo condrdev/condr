@@ -47,15 +47,14 @@ pub(crate) fn resolve_write_target(path: &std::path::Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Writes the hand-editable `config.toml`, owner-only on Unix. It is replaced atomically
-/// when possible; when another program holds the file open, which on Windows makes the
-/// replace fail with access denied (an editor showing the file is enough), the text is
-/// written in place instead so the change is not lost.
+/// Writes the hand-editable `config.toml` in place, owner-only on Unix. People keep this
+/// file open in an editor, and on Windows that refuses the atomic replace Snapshots use;
+/// the file is a few lines rewritten whole, so a crash mid-write costs a default config,
+/// not data that cannot be typed again.
 pub fn write_config_text(path: &std::path::Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let target = resolve_write_target(path);
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -63,19 +62,9 @@ pub fn write_config_text(path: &std::path::Path, text: &str) -> io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    let atomic = atomicwrites::AtomicFile::new(&target, atomicwrites::AllowOverwrite)
-        .write_with_options(|file| file.write_all(text.as_bytes()), options.clone())
-        .map_err(|error| match error {
-            atomicwrites::Error::Internal(error) | atomicwrites::Error::User(error) => error,
-        });
-    match atomic {
-        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-            let mut file = options.open(&target)?;
-            file.write_all(text.as_bytes())?;
-            file.sync_all()
-        }
-        result => result,
-    }
+    let mut file = options.open(path)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()
 }
 
 impl SnapshotPersistence {
@@ -499,11 +488,11 @@ mod tests {
         persistence.shutdown().unwrap();
     }
 
-    /// An editor showing config.toml keeps it open without delete sharing, which makes
-    /// the atomic replace fail; the save must still land.
+    /// An editor showing config.toml keeps it open without delete sharing, which would
+    /// refuse a replace; the in-place save must still land.
     #[cfg(windows)]
     #[test]
-    fn config_write_falls_back_to_in_place_while_another_program_holds_the_file() {
+    fn config_write_lands_while_another_program_holds_the_file() {
         use std::os::windows::fs::OpenOptionsExt as _;
 
         let directory = std::env::temp_dir().join(format!(
