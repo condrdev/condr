@@ -172,7 +172,7 @@ pub(super) fn connect_to_server(
 ) -> (Endpoint, Result<ClientConnection, String>) {
     connect_to_server_with(endpoint, condr_server::ensure_local_server, |endpoint| {
         ClientConnection::connect(endpoint, condr_server::noise::device_name())
-            .map_err(|error| error.to_string())
+            .map_err(|error| endpoint.describe_connect_error(&error))
     })
 }
 

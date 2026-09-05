@@ -175,6 +175,26 @@ impl Endpoint {
         }
     }
 
+    /// A failed connect in words. A missing socket file and a refused TCP connect both
+    /// mean nobody is listening; the raw OS text says neither that nor which endpoint.
+    pub fn describe_connect_error(&self, error: &io::Error) -> String {
+        match error.kind() {
+            io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
+                format!("no Server is listening at {self}")
+            }
+            io::ErrorKind::PermissionDenied => {
+                format!("the Server at {self} refused this device: {error}")
+            }
+            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => {
+                format!("the Server at {self} did not answer in time")
+            }
+            io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable => {
+                format!("{self} is unreachable from this machine")
+            }
+            _ => format!("could not connect to {self}: {error}"),
+        }
+    }
+
     pub fn as_local_path(&self) -> Option<&Path> {
         match self {
             Self::Local(path) => Some(path),

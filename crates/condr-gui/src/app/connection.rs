@@ -448,6 +448,32 @@ pub(super) struct ClientIo {
     pub(super) _incoming_task: Task<()>,
 }
 
+/// Why the connection ended, for the sidebar. A closed socket is the normal way a
+/// Server goes away and is said plainly; only genuine protocol faults keep their detail.
+fn disconnect_reason(error: &condr_core::protocol::FramingError) -> String {
+    use condr_core::protocol::FramingError;
+    match error {
+        FramingError::UnexpectedEof => "the Server closed the connection".into(),
+        FramingError::Io(error) => match error.kind() {
+            std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::NotConnected => "the Server closed the connection".into(),
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+                "the Server stopped answering".into()
+            }
+            std::io::ErrorKind::PermissionDenied => {
+                format!("the Server refused this device: {error}")
+            }
+            _ => format!("connection error: {error}"),
+        },
+        FramingError::Oversized { .. } | FramingError::Codec(_) => {
+            format!("protocol error: {error}")
+        }
+    }
+}
+
 impl ClientIo {
     pub(super) fn start(
         connection: ClientConnection,
@@ -470,8 +496,8 @@ impl ClientIo {
             .spawn(move || {
                 while let Ok(message) = outgoing_rx.recv() {
                     if let Err(error) = condr_core::protocol::write_message(&mut writer, &message) {
-                        let _ =
-                            writer_events.send_blocking(Incoming::Disconnected(error.to_string()));
+                        let _ = writer_events
+                            .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
                         break;
                     }
                 }
@@ -489,7 +515,7 @@ impl ClientIo {
                         Ok(message) => message,
                         Err(error) => {
                             let _ = incoming_tx
-                                .send_blocking(Incoming::Disconnected(error.to_string()));
+                                .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
                             break;
                         }
                     };

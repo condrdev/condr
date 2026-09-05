@@ -655,7 +655,18 @@ impl Condr {
                     .collect::<Result<Vec<_>, _>>()
             })
             .map_or_else(
-                |error| (Vec::new(), Some(format!("Failed to load config: {error}"))),
+                |error| {
+                    (
+                        Vec::new(),
+                        Some(format!(
+                            "Failed to load {}: {error}",
+                            client_config_path.as_deref().map_or_else(
+                                || "config.toml".to_owned(),
+                                |path| path.display().to_string()
+                            )
+                        )),
+                    )
+                },
                 |servers| (servers, key_error),
             );
         let appearance = client_config_path

@@ -315,8 +315,11 @@ fn connect() -> Result<ClientConnection, CliError> {
     ClientConnection::connect(&endpoint, "condr-cli").map_err(|error| match error.kind() {
         io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => CliError::new(
             "server_not_running",
-            format!("no Server at {endpoint}: {error}"),
+            endpoint.describe_connect_error(&error),
         ),
+        io::ErrorKind::PermissionDenied => {
+            CliError::new("not_authorized", endpoint.describe_connect_error(&error))
+        }
         _ => error.into(),
     })
 }

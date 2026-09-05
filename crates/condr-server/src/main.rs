@@ -134,16 +134,12 @@ fn dispatch(command: ServerCommand) -> i32 {
 /// A connection failure in words: a missing socket file or a refused TCP connect both
 /// mean nobody is listening, and the raw OS error hides which endpoint was tried.
 fn connect_problem(endpoint: &Endpoint, error: &io::Error) -> String {
-    match error.kind() {
-        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
-            let hint = match endpoint {
-                Endpoint::Local(_) => "; a TCP Server needs --listen <addr>",
-                Endpoint::Tcp(_) => "",
-            };
-            format!("no Server is listening at {endpoint}{hint}")
+    let problem = endpoint.describe_connect_error(error);
+    match (endpoint, error.kind()) {
+        (Endpoint::Local(_), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) => {
+            format!("{problem}; a TCP Server needs --listen <addr>")
         }
-        io::ErrorKind::PermissionDenied => format!("{endpoint} refused this device: {error}"),
-        _ => format!("{endpoint}: {error}"),
+        _ => problem,
     }
 }
 

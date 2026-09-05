@@ -125,7 +125,7 @@ impl Condr {
             })
         });
         if let Err(error) = write_servers(path, servers) {
-            self.app_error = Some(format!("Failed to save config: {error}"));
+            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
         }
     }
 
@@ -137,7 +137,7 @@ impl Condr {
         if let Err(error) =
             write_client_value(path, APPEARANCE_KEY, toml_edit::value(appearance.as_str()))
         {
-            self.app_error = Some(format!("Failed to save config: {error}"));
+            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
         }
     }
 
@@ -154,7 +154,7 @@ impl Condr {
                 (FONT_SIZE_KEY, toml_edit::value(f64::from(font.size))),
             ],
         ) {
-            self.app_error = Some(format!("Failed to save config: {error}"));
+            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
         }
     }
 
@@ -169,7 +169,7 @@ impl Condr {
             COLOR_SCHEME_KEY,
             toml_edit::value(name.as_ref()),
         ) {
-            self.app_error = Some(format!("Failed to save config: {error}"));
+            self.app_error = Some(format!("Failed to save {}: {error}", path.display()));
         }
     }
 }
