@@ -123,7 +123,7 @@ fn main() {
 
 fn dispatch(command: ServerCommand) -> i32 {
     match run_server_command(command) {
-        Ok(()) => 0,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("condr-server: {error}");
             1
@@ -131,7 +131,24 @@ fn dispatch(command: ServerCommand) -> i32 {
     }
 }
 
-fn run_server_command(command: ServerCommand) -> io::Result<()> {
+/// A connection failure in words: a missing socket file or a refused TCP connect both
+/// mean nobody is listening, and the raw OS error hides which endpoint was tried.
+fn connect_problem(endpoint: &Endpoint, error: &io::Error) -> String {
+    match error.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
+            let hint = match endpoint {
+                Endpoint::Local(_) => "; a TCP Server needs --listen <addr>",
+                Endpoint::Tcp(_) => "",
+            };
+            format!("no Server is listening at {endpoint}{hint}")
+        }
+        io::ErrorKind::PermissionDenied => format!("{endpoint} refused this device: {error}"),
+        _ => format!("{endpoint}: {error}"),
+    }
+}
+
+/// Runs one `condr server …` command; `Ok` carries the process exit code.
+fn run_server_command(command: ServerCommand) -> io::Result<i32> {
     match command {
         ServerCommand::Start { endpoint, snapshot } => {
             let endpoint = endpoint.resolve()?;
@@ -143,27 +160,34 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
                 println!("condr-server: Server key {}", tcp.server_key);
                 println!("condr-server: pair another device with `condr server invite`");
             }
-            Ok(())
+            Ok(0)
         }
         ServerCommand::Status { endpoint } => {
             let endpoint = endpoint.resolve()?;
             match condr_server::probe_server(&endpoint) {
                 Ok(()) => {
                     println!("condr-server: running at {endpoint}");
-                    Ok(())
+                    Ok(0)
                 }
                 Err(error) => {
-                    println!("condr-server: not running ({error})");
-                    Err(io::Error::new(io::ErrorKind::NotConnected, "not running"))
+                    println!(
+                        "condr-server: not running: {}",
+                        connect_problem(&endpoint, &error)
+                    );
+                    Ok(1)
                 }
             }
         }
         ServerCommand::Stop { endpoint } => {
-            condr_server::stop_server(&endpoint.resolve()?).map_err(|error| {
-                io::Error::new(error.kind(), format!("failed to stop: {error}"))
+            let endpoint = endpoint.resolve()?;
+            condr_server::stop_server(&endpoint).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("failed to stop: {}", connect_problem(&endpoint, &error)),
+                )
             })?;
             println!("condr-server: stopping");
-            Ok(())
+            Ok(0)
         }
         ServerCommand::Run {
             endpoint,
@@ -181,7 +205,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
                     std::process::id()
                 );
             }
-            condr_server::run(server_config(endpoint, snapshot))
+            condr_server::run(server_config(endpoint, snapshot)).map(|()| 0)
         }
         ServerCommand::Invite => {
             let directory = noise::identity_directory()?;
@@ -196,14 +220,14 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
                 identity.public_key(),
                 invite.secret.to_hex()
             );
-            Ok(())
+            Ok(0)
         }
         ServerCommand::Clients => {
             let directory = noise::identity_directory()?;
             let clients = noise::read_authorized(&directory)?;
             if clients.is_empty() {
                 println!("condr-server: no paired devices");
-                return Ok(());
+                return Ok(0);
             }
             let name_width = clients
                 .iter()
@@ -221,7 +245,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
                 );
             }
             println!("revoke a device with `condr server revoke <key or prefix>`");
-            Ok(())
+            Ok(0)
         }
         ServerCommand::Revoke { endpoint, key } => {
             let directory = noise::identity_directory()?;
@@ -235,18 +259,19 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
             println!("condr-server: revoked {removed} device(s)");
             // The file already refuses their next handshake; a running Server also drops
             // the connections they hold now.
-            match condr_server::revoke_devices(&endpoint.resolve()?, &key) {
+            let endpoint = endpoint.resolve()?;
+            match condr_server::revoke_devices(&endpoint, &key) {
                 Ok(disconnected) => {
                     println!("condr-server: closed {disconnected} live connection(s)");
-                    Ok(())
+                    Ok(0)
                 }
                 // The file edit stands, but nobody closed the device's live connections;
                 // a script must not read that as a complete revocation.
                 Err(error) => Err(io::Error::new(
                     error.kind(),
                     format!(
-                        "revoked in authorized-clients, but no running Server was reached to \
-                         drop live connections: {error}"
+                        "live connections were not dropped: {}",
+                        connect_problem(&endpoint, &error)
                     ),
                 )),
             }
