@@ -69,10 +69,10 @@ enum ServerCommand {
     Invite,
     /// List the devices paired over TCP
     Clients,
-    /// Revoke a paired device by its key, or a unique prefix of it, and drop its live
-    /// connections
+    /// Revoke a paired device by its fingerprint, or a unique prefix of it, and drop its
+    /// live connections
     Revoke {
-        #[arg(value_name = "KEY")]
+        #[arg(value_name = "FINGERPRINT")]
         key: String,
     },
 }
@@ -264,7 +264,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .max()
                 .unwrap_or(0)
                 .max("NAME".len());
-            println!("{:<name_width$}  {:<14}  KEY", "NAME", "LAST SEEN");
+            println!("{:<name_width$}  {:<14}  FINGERPRINT", "NAME", "LAST SEEN");
             for client in clients {
                 let seen = if connected.contains(&client.key.to_hex()) {
                     "connected".to_owned()
@@ -273,7 +273,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 };
                 println!("{:<name_width$}  {seen:<14}  {}", client.name, client.key);
             }
-            println!("revoke a device with `condr server revoke <key or prefix>`");
+            println!("revoke a device with `condr server revoke <fingerprint or prefix>`");
             Ok(0)
         }
         ServerCommand::Revoke { key } => {
