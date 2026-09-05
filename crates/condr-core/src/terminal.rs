@@ -84,6 +84,7 @@ exec "$1" --rcfile /dev/fd/3 -i
 
 mod cursor_settle;
 mod input;
+mod launch;
 mod mouse;
 mod process;
 mod pty_io;

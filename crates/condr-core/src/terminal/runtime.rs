@@ -1,8 +1,8 @@
 use super::*;
 
 pub struct TerminalRuntime {
-    terminal: Arc<Mutex<Terminal>>,
-    master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
+    pub(super) terminal: Arc<Mutex<Terminal>>,
+    pub(super) master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
     pub(super) process: ProcessProbe,
     pub(super) last_known_cwd: Arc<Mutex<Option<PathBuf>>>,
     reported_cwd: Arc<Mutex<ReportedCwd>>,
@@ -1368,6 +1368,11 @@ impl TerminalAgentProbe {
 
     pub fn agent(&self) -> Option<AgentKind> {
         self.detector.agent()
+    }
+
+    /// Unlike the display snapshot, this excludes the final Idle published on exit.
+    pub fn running_agent(&self) -> Option<AgentKind> {
+        self.detector.running_agent()
     }
 
     /// One detection tick. `Some(None)` means the agent left; `Some(Some(_))` is a new

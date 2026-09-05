@@ -30,12 +30,14 @@ use crate::endpoint::{
 use crate::noise::{ServerIdentity, StaticKey};
 use crate::persistence::{SnapshotLoad, SnapshotPersistence};
 
+mod agents;
 mod bootstrap;
 mod client;
 mod layout;
 mod local;
 mod terminal_monitor;
 
+use agents::AgentControl;
 use bootstrap::*;
 use client::*;
 use layout::*;
@@ -445,6 +447,37 @@ impl ClientConnection {
         }
     }
 
+    pub fn agent(
+        &mut self,
+        command: condr_core::protocol::AgentCommand,
+    ) -> io::Result<Result<condr_core::protocol::AgentResponse, condr_core::protocol::AgentError>>
+    {
+        condr_core::protocol::write_message(
+            &mut self.stream,
+            &ClientMessage::Agent {
+                server_id: self.overview.server_id,
+                session_id: self.overview.session_id,
+                command,
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        loop {
+            match condr_core::protocol::read_message(&mut self.stream)
+                .map_err(|error| io::Error::other(error.to_string()))?
+            {
+                ServerMessage::AgentResult { result } => return Ok(result),
+                ServerMessage::Error { message } => return Err(io::Error::other(message)),
+                ServerMessage::SubscriptionRejected { reason, .. } => {
+                    return Err(io::Error::other(reason));
+                }
+                ServerMessage::ServerStopping => {
+                    return Err(io::Error::other("Server is stopping"));
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Returns the command's actual created IDs, retaining its authoritative layout event.
     pub fn layout(&mut self, command: LayoutCommand) -> io::Result<Result<LayoutResult, String>> {
         let request_id = self.next_request_id;
@@ -725,7 +758,15 @@ impl BoundServer {
 
         let mut run_result = Ok(());
         let mut next_client_id = 1_u64;
+        let mut agent_expiry_due = Instant::now();
         'accept: while !self.stop.load(Ordering::Acquire) {
+            if Instant::now() >= agent_expiry_due {
+                self.state
+                    .lock()
+                    .expect("server state lock poisoned")
+                    .expire_agent_operations(Instant::now());
+                agent_expiry_due = Instant::now() + Duration::from_millis(50);
+            }
             let mut accepted = false;
             for listener in std::iter::once(&self.local).chain(self.tcp.as_ref()) {
                 match listener.accept() {
@@ -757,6 +798,7 @@ impl BoundServer {
         self.lifecycle.wait_for_operations();
         let mut terminals = {
             let mut state = self.state.lock().expect("server state lock poisoned");
+            state.stop_agent_waits();
             state.terminal_instances.clear();
             std::mem::take(&mut state.terminals)
         };
@@ -961,6 +1003,7 @@ struct RuntimeState {
     closing_terminals: std::collections::HashSet<PaneId>,
     exited_terminals: std::collections::HashSet<PaneId>,
     agents: std::collections::HashMap<PaneId, AgentSnapshot>,
+    agent_control: AgentControl,
     terminal_titles: std::collections::HashMap<PaneId, String>,
     /// BEL attention is controller-only because PTY focus has one authoritative owner.
     pending_terminal_bells: std::collections::HashSet<PaneId>,
@@ -1151,6 +1194,7 @@ impl RuntimeState {
             closing_terminals: std::collections::HashSet::new(),
             exited_terminals: std::collections::HashSet::new(),
             agents: std::collections::HashMap::new(),
+            agent_control: AgentControl::default(),
             terminal_titles: std::collections::HashMap::new(),
             pending_terminal_bells: std::collections::HashSet::new(),
             workspace_git: std::collections::HashMap::new(),
@@ -1382,6 +1426,7 @@ impl RuntimeState {
     ) -> StartedTerminal {
         let instance_id = self.next_terminal_instance;
         self.next_terminal_instance = self.next_terminal_instance.wrapping_add(1).max(1);
+        self.forget_agent_control(pane_id);
         let probe = runtime
             .agent_probe()
             .expect("new Terminal has an agent probe");
@@ -1453,6 +1498,7 @@ impl RuntimeState {
         }
         let view = runtime.view();
         self.terminal_instances.remove(&pane_id);
+        self.forget_agent_control(pane_id);
         self.closing_terminals.remove(&pane_id);
         self.terminals.insert(pane_id, runtime);
         self.publish_terminal(pane_id, TerminalViewFrame::Full(view));

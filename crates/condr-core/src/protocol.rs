@@ -93,6 +93,12 @@ pub enum ClientMessage {
         pane_id: PaneId,
         lines: u32,
     },
+    /// Agent orchestration is owned by the Server, including name resolution and waits.
+    Agent {
+        server_id: ServerId,
+        session_id: SessionId,
+        command: AgentCommand,
+    },
     /// Replaces the Server's shell preference; blank restores the system default.
     /// Any client may do this, no Session control needed.
     SetServerSettings {
@@ -111,6 +117,51 @@ pub enum ClientMessage {
     /// Asks which paired devices hold a live TCP connection right now. Server host only.
     ConnectedDevices,
     Detach,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum AgentCommand {
+    Available,
+    List,
+    Start {
+        name: String,
+        kind: crate::AgentKind,
+        pane_id: PaneId,
+        args: Vec<String>,
+        timeout_ms: u64,
+    },
+    Prompt {
+        target: String,
+        text: String,
+        until: Option<Vec<crate::AgentState>>,
+        timeout_ms: u64,
+    },
+    Wait {
+        target: String,
+        until: Vec<crate::AgentState>,
+        timeout_ms: u64,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub pane_id: PaneId,
+    pub name: Option<String>,
+    pub agent: AgentSnapshot,
+    pub launch_pending: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum AgentResponse {
+    Available(Vec<crate::agent_discovery::AgentInstallation>),
+    List(Vec<AgentInfo>),
+    Ready(AgentInfo),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentError {
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -477,6 +528,9 @@ pub enum ServerMessage {
     PaneText {
         pane_id: PaneId,
         text: String,
+    },
+    AgentResult {
+        result: Result<AgentResponse, AgentError>,
     },
     /// A program in the Pane copied text with OSC 52; every subscribed client receives it.
     TerminalClipboard {

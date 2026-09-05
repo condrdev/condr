@@ -64,6 +64,10 @@ fn workspace_and_tab_commands_drive_a_live_server() {
         ok(&endpoint_path, &["workspace", "list"])["workspaces"],
         Value::Array(vec![])
     );
+    assert_eq!(
+        ok(&endpoint_path, &["agent", "list"])["agents"],
+        Value::Array(vec![])
+    );
 
     let root_text = root.to_str().unwrap();
     let created = ok(

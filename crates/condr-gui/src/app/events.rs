@@ -1079,10 +1079,11 @@ impl Condr {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 IncomingEffect::default()
             }
-            // Only the CLI asks for Pane text or administers devices.
+            // Only the CLI asks for Pane text, waits for agents, or administers devices.
             ServerMessage::Overview(_)
             | ServerMessage::OverviewTerminals { .. }
             | ServerMessage::PaneText { .. }
+            | ServerMessage::AgentResult { .. }
             | ServerMessage::DevicesRevoked { .. }
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {

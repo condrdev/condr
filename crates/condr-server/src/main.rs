@@ -31,6 +31,9 @@ enum Command {
     /// Panes of the Server this Pane belongs to: split, read and type into terminals
     #[command(subcommand)]
     Pane(cli::PaneCommand),
+    /// Agents detected in Panes and their prompt lifecycle
+    #[command(subcommand)]
+    Agent(cli::AgentCommand),
 }
 
 /// One Server per machine. It always answers on its private local socket; `--listen`
@@ -83,6 +86,7 @@ fn main() {
         Command::Workspace(command) => cli::run_workspace(command),
         Command::Tab(command) => cli::run_tab(command),
         Command::Pane(command) => cli::run_pane(command),
+        Command::Agent(command) => cli::run_agent(command),
     });
 }
 

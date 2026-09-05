@@ -1,4 +1,5 @@
 mod agent;
+pub mod agent_discovery;
 mod git;
 mod paths;
 pub mod protocol;

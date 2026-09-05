@@ -112,6 +112,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                             state.record_terminal_cwds([(pane_id, cwd)]);
                         }
                         state.exited_terminals.insert(pane_id);
+                        state.forget_agent_control(pane_id);
                         state.publish_background(SessionEvent::TerminalExited { pane_id });
                         state.clear_terminal_title(pane_id);
                         if state.agents.remove(&pane_id).is_some() {
@@ -179,6 +180,7 @@ fn probe_terminal(
                     state.record_terminal_cwds([(pane_id, cwd)]);
                 }
                 if let Some(next) = agent_update {
+                    state.agent_process_update(pane_id, agent_probe.running_agent());
                     apply_agent_refresh(&mut state, pane_id, next);
                 }
             }
@@ -308,6 +310,7 @@ pub(super) fn apply_agent_refresh(
 ) {
     let previous = state.agents.get(&pane_id).copied();
     if previous == next {
+        state.complete_agent_waits();
         return;
     }
     match next {
@@ -322,6 +325,7 @@ pub(super) fn apply_agent_refresh(
         pane_id,
         agent: next,
     });
+    state.agent_state_changed(pane_id);
 }
 
 pub(super) fn apply_terminal_notices(

@@ -856,6 +856,39 @@ pub(super) fn handle_client(
                     }
                 }
             }
+            ClientMessage::Agent {
+                server_id,
+                session_id,
+                command,
+            } => {
+                let installations = if matches!(
+                    command,
+                    condr_core::protocol::AgentCommand::Available
+                        | condr_core::protocol::AgentCommand::Start { .. }
+                ) {
+                    condr_core::agent_discovery::discover()
+                } else {
+                    Vec::new()
+                };
+                let mut state = state.lock().expect("server state lock poisoned");
+                if server_id != state.server_id
+                    || session_id != state.session_id
+                    || lifecycle.is_stopping()
+                {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::AgentResult {
+                            result: Err(condr_core::protocol::AgentError {
+                                code: "invalid_agent_request".into(),
+                                message: "unknown Server/Session or Server is stopping".into(),
+                            }),
+                        },
+                    );
+                } else {
+                    state.handle_agent(client_id, &outbound, command, installations);
+                }
+                false
+            }
             ClientMessage::SetServerSettings { server_id, shell } => {
                 set_server_shell(&state, server_id, &shell, client_id, &outbound)
             }
@@ -944,6 +977,7 @@ pub(super) fn handle_client(
     }
 
     let mut state = state.lock().expect("server state lock poisoned");
+    state.agent_control.waiters.remove(&client_id);
     state.subscribers.remove(&client_id);
     if state.active_controller == Some(client_id) {
         state.clear_controller_terminal_state();

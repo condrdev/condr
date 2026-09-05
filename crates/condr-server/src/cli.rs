@@ -1,7 +1,7 @@
-//! `condr workspace …` and `condr tab …`: how a program in a Pane changes the Session it
-//! lives in. Shaped after herdr's CLI: the same command groups and verbs, JSON on stdout,
-//! a JSON error on stderr with exit 1, usage errors from clap with exit 2. Targets are
-//! the numeric ids the protocol and `CONDR_PANE_ID` already use.
+//! `condr workspace …`, `condr tab …`, and `condr agent …`: how a program in a Pane
+//! changes or coordinates the Session it lives in. Shaped after herdr's CLI: JSON on
+//! stdout, a JSON error on stderr with exit 1, and usage errors from clap with exit 2.
+//! Agent targets are numeric Pane ids or names assigned by `agent start`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use clap::{Subcommand, ValueEnum};
 use condr_core::protocol::{LayoutCommand, LayoutResult};
 use condr_core::{
-    AgentState, PaneDirection, PaneEnvironment, PaneId, PaneLayout, Session, SplitDirection, Tab,
-    TabId, TerminalCommand, TerminalKey, TerminalModifiers, Workspace, WorkspaceId,
+    AgentKind, AgentState, PaneDirection, PaneEnvironment, PaneId, PaneLayout, Session,
+    SplitDirection, Tab, TabId, TerminalCommand, TerminalKey, TerminalModifiers, Workspace,
+    WorkspaceId,
 };
 use condr_server::{ClientConnection, Endpoint, default_socket_path};
 use serde::Serialize;
@@ -18,6 +19,7 @@ use serde_json::{Value, json};
 
 /// How many rows `pane read` returns by default, as herdr does.
 const DEFAULT_READ_LINES: u32 = 80;
+const DEFAULT_AGENT_WAIT_MS: u64 = 120_000;
 
 #[derive(Subcommand)]
 pub(crate) enum PaneCommand {
@@ -187,17 +189,56 @@ pub(crate) enum TabCommand {
     Close { tab_id: u64 },
 }
 
+#[derive(Subcommand)]
+pub(crate) enum AgentCommand {
+    /// List native agent CLIs available on the Server's PATH
+    Available,
+    /// List agents currently detected in Panes
+    List,
+    /// Start a named agent in an existing idle shell and wait until it is ready
+    Start {
+        name: String,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        pane: u64,
+        #[arg(long, default_value_t = 30_000)]
+        timeout: u64,
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+    /// Send a prompt to an agent; optionally wait for a settled state
+    Prompt {
+        target: String,
+        text: String,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long = "until", requires = "wait")]
+        until: Vec<String>,
+        #[arg(long, requires = "wait")]
+        timeout: Option<u64>,
+    },
+    /// Wait for an agent to reach a state
+    Wait {
+        target: String,
+        #[arg(long = "until")]
+        until: Vec<String>,
+        #[arg(long, default_value_t = DEFAULT_AGENT_WAIT_MS)]
+        timeout: u64,
+    },
+}
+
 /// What stderr gets: `{"error":{"code":…,"message":…}}`.
 #[derive(Serialize)]
 struct CliError {
-    code: &'static str,
+    code: String,
     message: String,
 }
 
 impl CliError {
     fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            code,
+            code: code.into(),
             message: message.into(),
         }
     }
@@ -368,6 +409,10 @@ pub(crate) fn run_pane(command: PaneCommand) -> i32 {
         };
     }
     run(|client| pane(client, command))
+}
+
+pub(crate) fn run_agent(command: AgentCommand) -> i32 {
+    run(|client| agent(client, command))
 }
 
 #[derive(Serialize)]
@@ -763,6 +808,122 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             Ok(json!({ "ok": true }))
         }
     }
+}
+
+fn agent(client: &mut ClientConnection, command: AgentCommand) -> Result<Value, CliError> {
+    use condr_core::protocol::{AgentCommand as Request, AgentResponse};
+    let request = match command {
+        AgentCommand::Available => Request::Available,
+        AgentCommand::List => Request::List,
+        AgentCommand::Start {
+            name,
+            kind,
+            pane,
+            timeout,
+            args,
+        } => Request::Start {
+            name,
+            kind: AgentKind::parse_label(&kind).ok_or_else(|| {
+                CliError::new("unknown_agent_kind", format!("unknown agent kind {kind}"))
+            })?,
+            pane_id: PaneId::from_u64(pane),
+            args,
+            timeout_ms: timeout,
+        },
+        AgentCommand::Prompt {
+            target,
+            text,
+            wait,
+            until,
+            timeout,
+        } => Request::Prompt {
+            target,
+            text,
+            until: wait.then(|| parse_until(&until)).transpose()?,
+            timeout_ms: timeout.unwrap_or(DEFAULT_AGENT_WAIT_MS),
+        },
+        AgentCommand::Wait {
+            target,
+            until,
+            timeout,
+        } => Request::Wait {
+            target,
+            until: parse_until(&until)?,
+            timeout_ms: timeout,
+        },
+    };
+    let retry_until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let response = loop {
+        let response = client.agent(request.clone())?;
+        // A new shell can still be initializing. Retrying is safe only when the
+        // Server explicitly rejected the launch before enqueueing any input.
+        if matches!(request, Request::Start { .. })
+            && response
+                .as_ref()
+                .is_err_and(|error| error.code == "pane_busy")
+            && std::time::Instant::now() < retry_until
+        {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            continue;
+        }
+        break response;
+    }
+    .map_err(|error| CliError {
+        code: error.code,
+        message: error.message,
+    })?;
+    match response {
+        AgentResponse::Available(agents) => Ok(json!({
+            "agents": agents.into_iter().map(|entry| json!({
+                "agent": entry.kind.id(),
+                "label": entry.kind.label(),
+                "command": entry.kind.executable(),
+                "executable": entry.executable,
+            })).collect::<Vec<_>>()
+        })),
+        AgentResponse::List(agents) => Ok(json!({
+            "agents": agents.into_iter().map(agent_info).collect::<Vec<_>>()
+        })),
+        AgentResponse::Ready(agent) => Ok(json!({ "agent": agent_info(agent) })),
+    }
+}
+
+fn agent_info(info: condr_core::protocol::AgentInfo) -> Value {
+    json!({
+        "pane_id": info.pane_id.as_u64(),
+        "name": info.name,
+        "agent": info.agent.kind.id(),
+        "agent_status": agent_state_name(info.agent.state),
+        "launch_pending": info.launch_pending,
+    })
+}
+
+fn agent_state_name(state: AgentState) -> &'static str {
+    match state {
+        AgentState::Unknown => "unknown",
+        AgentState::Idle => "idle",
+        AgentState::Working => "working",
+        AgentState::Blocked => "blocked",
+    }
+}
+
+fn parse_until(values: &[String]) -> Result<Vec<AgentState>, CliError> {
+    if values.is_empty() {
+        return Ok(vec![AgentState::Idle, AgentState::Blocked]);
+    }
+    values
+        .iter()
+        .map(|value| match value.as_str() {
+            "unknown" => Ok(AgentState::Unknown),
+            "idle" => Ok(AgentState::Idle),
+            "working" => Ok(AgentState::Working),
+            "blocked" => Ok(AgentState::Blocked),
+            _ => Err(CliError::new(
+                "invalid_agent_state",
+                format!("unknown agent state {value}"),
+            )),
+        })
+        .collect()
 }
 
 /// The split tree as JSON: `{"pane": id}` leaves under `{"split": "horizontal"|"vertical",

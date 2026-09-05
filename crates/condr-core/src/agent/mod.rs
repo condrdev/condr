@@ -849,6 +849,11 @@ impl AgentDetector {
         self.agent
     }
 
+    /// The live occupant, excluding its one-tick completion notification after exit.
+    pub fn running_agent(&self) -> Option<AgentKind> {
+        self.agent.filter(|_| !self.exit_pending)
+    }
+
     /// How long the caller should wait before the next tick.
     pub fn poll_interval(&self) -> Duration {
         if self.pending_idle.active() {

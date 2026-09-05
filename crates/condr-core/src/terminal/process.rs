@@ -10,7 +10,7 @@ pub(super) struct ProcessProbe {
 
 pub(super) struct ProcessSnapshot {
     system: System,
-    refreshed_at: Option<Instant>,
+    pub(super) refreshed_at: Option<Instant>,
 }
 
 impl ProcessSnapshot {
