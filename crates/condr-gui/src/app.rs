@@ -577,6 +577,7 @@ pub(crate) struct Condr {
     terminal_composition: Option<TerminalComposition>,
     window_handle: AnyWindowHandle,
     appearance: Appearance,
+    fps_monitor: bool,
     /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
     /// only dragging the handle does.
     sidebar_width: Pixels,
@@ -632,6 +633,7 @@ impl Condr {
             servers: saved_servers,
             error: config_error,
             appearance,
+            fps_monitor,
             terminal_font,
             terminal_color_scheme,
         } = config;
@@ -703,6 +705,7 @@ impl Condr {
             terminal_composition: None,
             window_handle: window.window_handle(),
             appearance,
+            fps_monitor,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             terminal_font,
             terminal_color_scheme,

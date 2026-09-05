@@ -170,6 +170,16 @@ pub(super) fn sync_theme_with_system(window: &mut Window, cx: &mut App) {
 }
 
 impl Condr {
+    pub(super) fn set_fps_monitor(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.fps_monitor == enabled {
+            return;
+        }
+        self.fps_monitor = enabled;
+        self.save_fps_monitor(cx);
+        cx.notify();
+        cx.refresh_windows();
+    }
+
     pub(super) fn set_appearance(&mut self, appearance: Appearance, cx: &mut Context<Self>) {
         if self.appearance == appearance {
             return;
@@ -587,6 +597,7 @@ impl Render for SettingsWindow {
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(appearance_page(&self.owner, &settings, &self.color_scheme))
                 .page(shortcuts_page())
+                .page(developer_page(&self.owner))
                 .page(licenses_page(&self.licenses)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
@@ -917,6 +928,33 @@ fn appearance_page(
                     )
                     .description("Terminal color schemes."),
                 ),
+        )
+}
+
+fn developer_page(owner: &WeakEntity<Condr>) -> SettingPage {
+    let value_owner = owner.clone();
+    let set_owner = owner.clone();
+    SettingPage::new("Developer")
+        .icon(IconName::Inspector)
+        .group(
+            SettingGroup::new().title("Diagnostics").item(
+                SettingItem::new(
+                    "FPS monitor",
+                    SettingField::switch(
+                        move |cx| {
+                            value_owner
+                                .upgrade()
+                                .is_some_and(|owner| owner.read(cx).fps_monitor)
+                        },
+                        move |enabled, cx| {
+                            let _ = set_owner
+                                .update(cx, |owner, cx| owner.set_fps_monitor(enabled, cx));
+                        },
+                    )
+                    .default_value(false),
+                )
+                .description("Show GPUI frame rate and resource telemetry."),
+            ),
         )
 }
 

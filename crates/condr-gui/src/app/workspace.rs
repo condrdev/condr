@@ -1,5 +1,6 @@
 use super::sidebar::{DragPreview, DropTarget, attach_drop_target, drop_index};
 use super::*;
+use gpui_fps::fps_monitor;
 
 #[derive(Clone)]
 struct DraggedTab {
@@ -526,6 +527,7 @@ impl Render for Condr {
             .into_any_element();
         div()
             .key_context("Condr")
+            .relative()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_action(cx.listener(Self::action_terminal_tab))
@@ -621,6 +623,7 @@ impl Render for Condr {
                     .child(workspace),
             )
             .children(dialog_layer)
+            .when(self.fps_monitor, |this| this.child(fps_monitor(window, cx)))
     }
 }
 

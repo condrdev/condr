@@ -11,6 +11,7 @@ use condr_server::{PublicKey, StaticKey, TcpEndpoint};
 use super::{Appearance, Condr, Endpoint, TerminalFont};
 
 const APPEARANCE_KEY: &str = "appearance";
+const FPS_MONITOR_KEY: &str = "fps_monitor";
 const SERVERS_KEY: &str = "servers";
 /// `[client.terminal]` holds every Terminal preference.
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
@@ -51,6 +52,7 @@ pub(super) struct LoadedConfig {
     pub servers: Vec<(String, Endpoint)>,
     pub error: Option<String>,
     pub appearance: Appearance,
+    pub fps_monitor: bool,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
 }
@@ -107,6 +109,10 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_appearance(path).ok())
                 .unwrap_or_default(),
+            fps_monitor: path
+                .as_deref()
+                .and_then(|path| load_fps_monitor(path).ok())
+                .unwrap_or(false),
             terminal_font: path
                 .as_deref()
                 .and_then(|path| load_terminal_font(path).ok())
@@ -134,6 +140,13 @@ pub(super) fn load_appearance(path: &Path) -> io::Result<Appearance> {
         .and_then(toml::Value::as_str)
         .map(Appearance::from_str)
         .unwrap_or_default())
+}
+
+pub(super) fn load_fps_monitor(path: &Path) -> io::Result<bool> {
+    Ok(read_client_value(path, FPS_MONITOR_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false))
 }
 
 /// A missing or malformed key keeps its default so the terminal always has a font.
@@ -213,6 +226,13 @@ impl Condr {
         let appearance = self.appearance;
         self.save_config(cx, move |path| {
             write_client_value(path, APPEARANCE_KEY, toml_edit::value(appearance.as_str()))
+        });
+    }
+
+    pub(super) fn save_fps_monitor(&mut self, cx: &mut Context<Self>) {
+        let enabled = self.fps_monitor;
+        self.save_config(cx, move |path| {
+            write_client_value(path, FPS_MONITOR_KEY, toml_edit::value(enabled))
         });
     }
 
@@ -393,6 +413,22 @@ mod tests {
 
         write_client_value(&path, APPEARANCE_KEY, toml_edit::value("solarized")).unwrap();
         assert_eq!(load_appearance(&path).unwrap(), Appearance::System);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn fps_monitor_defaults_off_and_round_trips() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-fps-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert!(!load_fps_monitor(&path).unwrap());
+        write_client_value(&path, FPS_MONITOR_KEY, toml_edit::value(true)).unwrap();
+        assert!(load_fps_monitor(&path).unwrap());
         fs::remove_dir_all(directory).unwrap();
     }
 
