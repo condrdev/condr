@@ -2,9 +2,9 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
+use condr_server::ServerConfig;
 use condr_server::noise::{self, ServerIdentity};
-use condr_server::{Endpoint, ServerConfig, TcpEndpoint};
 
 mod cli;
 
@@ -19,7 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Manage the Server on this machine
+    /// Manage this machine's Server
     #[command(subcommand)]
     Server(ServerCommand),
     /// Workspaces of the Server this Pane belongs to
@@ -33,30 +33,31 @@ enum Command {
     Pane(cli::PaneCommand),
 }
 
+/// One Server per machine. It always answers on its private local socket; `--listen`
+/// adds a TCP address for other devices and remembers it in `config.toml`.
 #[derive(Subcommand)]
 enum ServerCommand {
-    /// Start a detached server unless one already answers at the endpoint
+    /// Start the Server detached unless it is already running
     Start {
-        #[command(flatten)]
-        endpoint: EndpointArgs,
+        /// Also listen on this TCP address from now on (saved to config.toml)
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<SocketAddr>,
         /// Where the session snapshot is persisted
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
     },
-    /// Report whether a server answers at the endpoint
-    Status {
-        #[command(flatten)]
-        endpoint: EndpointArgs,
-    },
-    /// Ask the server at the endpoint to shut down
-    Stop {
-        #[command(flatten)]
-        endpoint: EndpointArgs,
-    },
-    /// Run the server in the foreground
+    /// Report whether the Server is running
+    Status,
+    /// Ask the Server to shut down
+    Stop,
+    /// Run the Server in the foreground
     Run {
-        #[command(flatten)]
-        endpoint: EndpointArgs,
+        /// Local socket or named pipe path; defaults to the platform path
+        #[arg(long, value_name = "PATH")]
+        endpoint: Option<PathBuf>,
+        /// Also listen on this TCP address, overriding config.toml for this run
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<SocketAddr>,
         /// Where the session snapshot is persisted
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
@@ -64,52 +65,16 @@ enum ServerCommand {
         #[arg(long)]
         detached: bool,
     },
-    /// Print a one-time invite that pairs a new device with this host's TCP Server
+    /// Print a one-time invite that pairs a new device over TCP
     Invite,
-    /// List the devices paired with this host's TCP Server
+    /// List the devices paired over TCP
     Clients,
     /// Revoke a paired device by its key, or a unique prefix of it, and drop its live
-    /// connections to the Server at the endpoint
+    /// connections
     Revoke {
-        #[command(flatten)]
-        endpoint: EndpointArgs,
         #[arg(value_name = "KEY")]
         key: String,
     },
-}
-
-/// `--endpoint` and `--listen` are alternatives; neither means the platform default.
-#[derive(Args)]
-#[group(multiple = false)]
-struct EndpointArgs {
-    /// Local socket or named pipe path
-    #[arg(long, value_name = "PATH")]
-    endpoint: Option<PathBuf>,
-    /// TCP address to listen on; every TCP connection authenticates with this host's keys
-    #[arg(long, value_name = "ADDR")]
-    listen: Option<SocketAddr>,
-}
-
-impl EndpointArgs {
-    fn resolve(self) -> io::Result<Endpoint> {
-        match (self.endpoint, self.listen) {
-            (Some(path), _) => Ok(Endpoint::local(path)),
-            (None, Some(address)) => tcp_endpoint(address),
-            (None, None) => Ok(ServerConfig::default().endpoint),
-        }
-    }
-}
-
-/// The TCP endpoint of this host's Server as its own CLI connects to it.
-fn tcp_endpoint(address: SocketAddr) -> io::Result<Endpoint> {
-    let directory = identity_directory()?;
-    let identity = load_identity(&directory)?;
-    Ok(Endpoint::tcp(TcpEndpoint {
-        address,
-        server_key: identity.public_key(),
-        client_key: noise::host_client_key(&directory)?,
-        invite: None,
-    }))
 }
 
 fn main() {
@@ -126,7 +91,6 @@ fn main() {
 /// ```text
 /// condr-server: failed to stop
 ///   no Server is listening at /run/user/1000/condr/condr.sock
-///   for a TCP Server, pass --listen <addr>
 /// ```
 fn dispatch(command: ServerCommand) -> i32 {
     match run_server_command(command) {
@@ -159,60 +123,87 @@ fn failure(headline: impl Into<String>, details: impl IntoIterator<Item = String
     io::Error::other(text)
 }
 
-/// Why a connect failed, then what to do about it. A missing socket file or a refused
-/// TCP connect both mean nobody is listening; the raw OS error hides which endpoint.
-fn explain_connect(endpoint: &Endpoint, error: &io::Error) -> Vec<String> {
-    let mut lines = vec![endpoint.describe_connect_error(error)];
-    if let (Endpoint::Local(_), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) =
-        (endpoint, error.kind())
-    {
-        lines.push("for a TCP Server, pass --listen <addr>".into());
-    }
-    lines
-}
-
 /// Runs one `condr server …` command; `Ok` carries the process exit code.
 fn run_server_command(command: ServerCommand) -> io::Result<i32> {
     match command {
-        ServerCommand::Start { endpoint, snapshot } => {
-            let endpoint = endpoint.resolve()?;
-            let endpoint = condr_server::ensure_server(server_config(endpoint, snapshot))
+        ServerCommand::Start { listen, snapshot } => {
+            let mut config = ServerConfig::default();
+            let already_running = condr_server::probe_server(&config.local_endpoint()).is_ok();
+            if let Some(address) = listen {
+                let path = config_path()?;
+                condr_server::save_listen(&path, Some(address)).map_err(|error| {
+                    failure(
+                        format!("could not save the listen address to {}", path.display()),
+                        [error.to_string()],
+                    )
+                })?;
+                config.listen = Some(address);
+            }
+            if let Some(path) = snapshot {
+                config = config.with_snapshot_path(path);
+            }
+            let endpoint = condr_server::ensure_server(config.clone())
                 .map_err(|error| failure("failed to start the Server", [error.to_string()]))?;
             println!("condr-server: running at {endpoint}");
-            if let Endpoint::Tcp(tcp) = &endpoint {
-                println!("condr-server: Server key {}", tcp.server_key);
-                println!("condr-server: pair another device with `condr server invite`");
+            match (config.listen, already_running) {
+                (Some(address), false) => {
+                    println!("condr-server: also listening at tcp://{address}");
+                    println!("condr-server: pair another device with `condr server invite`");
+                }
+                (Some(address), true) => {
+                    println!(
+                        "condr-server: the running Server keeps its previous TCP listener; \
+                         restart it to listen at tcp://{address}"
+                    );
+                }
+                (None, _) => {}
             }
             Ok(0)
         }
-        ServerCommand::Status { endpoint } => {
-            let endpoint = endpoint.resolve()?;
+        ServerCommand::Status => {
+            let config = ServerConfig::default();
+            let endpoint = config.local_endpoint();
             match condr_server::probe_server(&endpoint) {
                 Ok(()) => {
                     println!("condr-server: running at {endpoint}");
+                    if let Some(address) = config.listen {
+                        println!("condr-server: configured to listen at tcp://{address}");
+                    }
                     Ok(0)
                 }
                 Err(error) => {
-                    let mut lines = vec!["not running".to_owned()];
-                    lines.extend(explain_connect(&endpoint, &error));
-                    report("condr-server", &lines.join("\n"));
+                    report(
+                        "condr-server",
+                        &format!("not running\n{}", endpoint.describe_connect_error(&error)),
+                    );
                     Ok(1)
                 }
             }
         }
-        ServerCommand::Stop { endpoint } => {
-            let endpoint = endpoint.resolve()?;
-            condr_server::stop_server(&endpoint)
-                .map_err(|error| failure("failed to stop", explain_connect(&endpoint, &error)))?;
+        ServerCommand::Stop => {
+            let endpoint = ServerConfig::default().local_endpoint();
+            condr_server::stop_server(&endpoint).map_err(|error| {
+                failure("failed to stop", [endpoint.describe_connect_error(&error)])
+            })?;
             println!("condr-server: stopping");
             Ok(0)
         }
         ServerCommand::Run {
             endpoint,
+            listen,
             snapshot,
             detached,
         } => {
-            let endpoint = endpoint.resolve()?;
+            let mut config = match endpoint {
+                Some(path) => ServerConfig::at_socket(path),
+                None => ServerConfig::default(),
+            };
+            if let Some(address) = listen {
+                config.listen = Some(address);
+            }
+            if let Some(path) = snapshot {
+                config = config.with_snapshot_path(path);
+            }
             if detached {
                 #[cfg(unix)]
                 nix::unistd::setsid().map_err(|error| {
@@ -223,7 +214,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     std::process::id()
                 );
             }
-            condr_server::run(server_config(endpoint, snapshot))
+            condr_server::run(config)
                 .map(|()| 0)
                 .map_err(|error| failure("the Server stopped with an error", [error.to_string()]))
         }
@@ -231,15 +222,24 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             let directory = identity_directory()?;
             let identity = load_identity(&directory)?;
             let invite = noise::create_invite(&directory)?;
+            let port = ServerConfig::default()
+                .listen
+                .map_or_else(|| "<port>".to_owned(), |address| address.port().to_string());
             println!(
                 "condr-server: invite valid for {} minutes; in Condr, Add Server with",
                 noise::INVITE_TTL.as_secs() / 60
             );
             println!(
-                "  {}.{}@<host>:<port>",
+                "  {}.{}@<host>:{port}",
                 identity.public_key(),
                 invite.secret.to_hex()
             );
+            if port == "<port>" {
+                println!(
+                    "condr-server: no TCP listener is configured yet; start one with \
+                     `condr server start --listen <addr>`"
+                );
+            }
             Ok(0)
         }
         ServerCommand::Clients => {
@@ -267,7 +267,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             println!("revoke a device with `condr server revoke <key or prefix>`");
             Ok(0)
         }
-        ServerCommand::Revoke { endpoint, key } => {
+        ServerCommand::Revoke { key } => {
             let directory = identity_directory()?;
             let removed = noise::revoke(&directory, &key)?;
             if removed == 0 {
@@ -279,7 +279,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             println!("condr-server: revoked {removed} device(s)");
             // The file already refuses their next handshake; a running Server also drops
             // the connections they hold now.
-            let endpoint = endpoint.resolve()?;
+            let endpoint = ServerConfig::default().local_endpoint();
             match condr_server::revoke_devices(&endpoint, &key) {
                 Ok(disconnected) => {
                     println!("condr-server: closed {disconnected} live connection(s)");
@@ -289,11 +289,15 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 // a script must not read that as a complete revocation.
                 Err(error) => Err(failure(
                     "revoked in authorized-clients, but its live connections were not dropped",
-                    explain_connect(&endpoint, &error),
+                    [endpoint.describe_connect_error(&error)],
                 )),
             }
         }
     }
+}
+
+fn config_path() -> io::Result<PathBuf> {
+    identity_directory().map(|directory| directory.join("config.toml"))
 }
 
 fn identity_directory() -> io::Result<PathBuf> {
@@ -335,14 +339,6 @@ fn ago(unix_seconds: u64) -> String {
     format!("{amount} {unit}{} ago", if amount == 1 { "" } else { "s" })
 }
 
-fn server_config(endpoint: Endpoint, snapshot_path: Option<PathBuf>) -> ServerConfig {
-    let mut config = ServerConfig::new(endpoint);
-    if let Some(path) = snapshot_path {
-        config = config.with_snapshot_path(path);
-    }
-    config
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,7 +354,7 @@ mod tests {
 
     #[test]
     fn lifecycle_commands_parse_their_supported_options() {
-        let ServerCommand::Start { endpoint, snapshot } = parse(&[
+        let ServerCommand::Start { listen, snapshot } = parse(&[
             "start",
             "--listen",
             "127.0.0.1:4242",
@@ -368,32 +364,29 @@ mod tests {
         .unwrap() else {
             panic!("expected start");
         };
-        assert_eq!(endpoint.listen, Some("127.0.0.1:4242".parse().unwrap()));
-        assert_eq!(endpoint.endpoint, None);
+        assert_eq!(listen, Some("127.0.0.1:4242".parse().unwrap()));
         assert_eq!(snapshot, Some("state.snapshot".into()));
 
         let ServerCommand::Run {
-            endpoint, detached, ..
+            endpoint,
+            listen,
+            detached,
+            ..
         } = parse(&["run", "--endpoint", "test.sock", "--detached"]).unwrap()
         else {
             panic!("expected run");
         };
-        assert_eq!(endpoint.resolve().unwrap(), Endpoint::local("test.sock"));
+        assert_eq!(endpoint, Some("test.sock".into()));
+        assert_eq!(listen, None);
         assert!(detached);
 
-        let ServerCommand::Status { endpoint } = parse(&["status"]).unwrap() else {
-            panic!("expected status");
-        };
-        assert_eq!(
-            endpoint.resolve().unwrap(),
-            ServerConfig::default().endpoint
-        );
-        assert!(matches!(parse(&["stop"]), Ok(ServerCommand::Stop { .. })));
+        assert!(matches!(parse(&["status"]), Ok(ServerCommand::Status)));
+        assert!(matches!(parse(&["stop"]), Ok(ServerCommand::Stop)));
         assert!(matches!(parse(&["invite"]), Ok(ServerCommand::Invite)));
         assert!(matches!(parse(&["clients"]), Ok(ServerCommand::Clients)));
         assert!(matches!(
             parse(&["revoke", "abcd"]),
-            Ok(ServerCommand::Revoke { key, .. }) if key == "abcd"
+            Ok(ServerCommand::Revoke { key }) if key == "abcd"
         ));
     }
 
@@ -418,17 +411,10 @@ mod tests {
         assert!(parse(&["launch"]).is_err());
         // The lifecycle verbs only exist under `server`.
         assert!(Cli::try_parse_from(["condr", "start"]).is_err());
-        assert!(
-            parse(&[
-                "run",
-                "--endpoint",
-                "test.sock",
-                "--listen",
-                "127.0.0.1:4242"
-            ])
-            .is_err()
-        );
-        assert!(parse(&["status", "--snapshot", "state.snapshot"]).is_err());
+        // Only `run` takes an explicit socket path; the others use the host's Server.
+        assert!(parse(&["start", "--endpoint", "test.sock"]).is_err());
+        assert!(parse(&["status", "--listen", "127.0.0.1:4242"]).is_err());
+        assert!(parse(&["stop", "--snapshot", "state.snapshot"]).is_err());
         assert!(parse(&["start", "--detached"]).is_err());
         assert!(parse(&["start", "--listen", "not-an-address"]).is_err());
         assert!(parse(&["revoke"]).is_err());

@@ -85,7 +85,8 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
             std::fs::write(&path, bytes).unwrap();
         }
         let (state, startup_terminals) =
-            RuntimeState::recover(&test_endpoint(), Some(path), None).unwrap();
+            RuntimeState::recover(test_endpoint().as_local_path().unwrap(), Some(path), None)
+                .unwrap();
         assert_eq!(
             state.session.snapshot(),
             Session::new().snapshot(),
@@ -134,7 +135,8 @@ fn restart_falls_back_from_a_missing_pane_cwd_and_persists_the_repair() {
 
     let endpoint = test_endpoint();
     let server = BoundServer::bind(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     assert_eq!(server.startup_terminals.len(), 3);
@@ -211,7 +213,8 @@ fn restart_prunes_only_failed_panes_and_persists_the_repair() {
 
     let endpoint = test_endpoint();
     let server = BoundServer::bind(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     assert_eq!(server.startup_terminals.len(), 1);
@@ -270,7 +273,8 @@ fn wholly_unrestorable_snapshot_persists_start_page_state() {
 
     let endpoint = test_endpoint();
     let server = BoundServer::bind(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     assert!(server.startup_terminals.is_empty());
@@ -344,7 +348,8 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
 
     let first_endpoint = test_endpoint();
     let first_server = BoundServer::bind(
-        ServerConfig::new(first_endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(first_endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     let first_handle = first_server.handle();
@@ -370,7 +375,8 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
 
     let second_endpoint = test_endpoint();
     let second_server = BoundServer::bind(
-        ServerConfig::new(second_endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(second_endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     let second_handle = second_server.handle();
@@ -431,7 +437,8 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     let endpoint = test_endpoint();
 
     let server = BoundServer::bind(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     let first_handle = server.handle();
@@ -593,7 +600,8 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
 
     // The first server's socket path and bind lock are released as its thread winds down;
     // under parallel test load that can trail the join briefly, so retry the address race.
-    let replacement_config = ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path);
+    let replacement_config = ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+        .with_snapshot_path(snapshot_path);
     let bind_deadline = Instant::now() + Duration::from_secs(5);
     let replacement = loop {
         match BoundServer::bind(replacement_config.clone()) {
@@ -742,7 +750,8 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
 
     let endpoint = test_endpoint();
     let server = BoundServer::bind(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     )
     .unwrap();
     let handle = server.handle();

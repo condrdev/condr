@@ -147,7 +147,7 @@ pub(super) fn connect_to_server_with<T>(
     ensure_local_server: impl FnOnce() -> std::io::Result<Endpoint>,
     connect: impl FnOnce(&Endpoint) -> Result<T, String>,
 ) -> (Endpoint, Result<T, String>) {
-    if endpoint != ServerConfig::default().endpoint {
+    if endpoint != ServerConfig::default().local_endpoint() {
         let result = connect(&endpoint);
         return (endpoint, result);
     }
@@ -224,7 +224,7 @@ pub(crate) fn run() {
             return;
         }
     };
-    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint);
+    let (endpoint, initial) = connect_to_server(ServerConfig::default().local_endpoint());
     let config_path = config::default_path();
     let app = gpui_platform::application().with_assets(CondrAssets::new());
 

@@ -91,7 +91,7 @@ fn server_path_input_preserves_valid_whitespace() {
 
 #[test]
 fn server_connection_preserves_start_error_and_final_concurrent_probe() {
-    let local = condr_server::ServerConfig::default().endpoint;
+    let local = condr_server::ServerConfig::default().local_endpoint();
     let (_, failed) = connect_to_server_with(
         local.clone(),
         || {

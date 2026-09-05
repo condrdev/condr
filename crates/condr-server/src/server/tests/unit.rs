@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn snapshot_paths_use_platform_state_and_endpoint_identity() {
-    let socket = snapshot_path_for_endpoint(&Endpoint::local("condr.sock")).unwrap();
-    let pipe = snapshot_path_for_endpoint(&Endpoint::local("condr.pipe")).unwrap();
+    let socket = snapshot_path_for_endpoint(std::path::Path::new("condr.sock")).unwrap();
+    let pipe = snapshot_path_for_endpoint(std::path::Path::new("condr.pipe")).unwrap();
     let state_directory = condr_core::state_directory().unwrap();
 
     assert_eq!(socket.parent(), Some(state_directory.as_path()));
@@ -18,25 +18,29 @@ fn snapshot_paths_use_platform_state_and_endpoint_identity() {
 #[cfg(unix)]
 #[test]
 fn local_endpoint_identity_normalizes_relative_paths() {
-    let relative = Endpoint::local("condr.sock");
-    let absolute = Endpoint::local(std::path::absolute("condr.sock").unwrap());
+    let relative = std::path::Path::new("condr.sock");
+    let absolute = std::path::absolute(relative).unwrap();
 
-    assert_eq!(stable_endpoint_id(&relative), stable_endpoint_id(&absolute));
+    assert_eq!(stable_endpoint_id(relative), stable_endpoint_id(&absolute));
 }
 
+/// The TCP listener is an extra door to the same Server: its address plays no part in
+/// the Server identity or where the Snapshot lives.
 #[test]
-fn an_os_assigned_tcp_port_is_ephemeral_without_an_explicit_snapshot() {
-    let endpoint = ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap())
-        .unwrap()
-        .endpoint;
+fn a_tcp_listener_does_not_change_the_server_identity_or_snapshot() {
+    let socket = std::path::Path::new("condr.sock");
+    let plain = ServerConfig::at_socket(socket);
+    let listening = ServerConfig::at_socket(socket).with_listen("127.0.0.1:4242".parse().unwrap());
 
+    assert_eq!(plain.snapshot_path(), listening.snapshot_path());
     assert!(
-        ServerConfig::new(endpoint.clone())
+        ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap())
+            .unwrap()
             .snapshot_path()
             .is_none()
     );
     assert_eq!(
-        ServerConfig::new(endpoint)
+        ServerConfig::ephemeral(socket)
             .with_snapshot_path("explicit.snapshot")
             .snapshot_path(),
         Some(std::path::Path::new("explicit.snapshot"))
@@ -147,7 +151,7 @@ fn latest_terminal_view(mut view: TerminalView) -> LatestTerminalView {
 
 #[test]
 fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -184,7 +188,7 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
 
 #[test]
 fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state.active_controller = Some(1);
     state
         .session
@@ -530,7 +534,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
         cell
     };
     let initial = terminal_test_view(0, &"x".repeat(LINK_COUNT + 1));
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state.publish_terminal(pane_id, TerminalViewFrame::Full(initial));
     state.publish_terminal(
         pane_id,
@@ -615,7 +619,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
 #[test]
 fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_it() {
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -680,7 +684,7 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
 #[test]
 fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -750,7 +754,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
 #[test]
 fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -789,7 +793,7 @@ fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
 #[test]
 fn full_render_slot_regenerates_the_latest_tail_after_drain() {
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -1066,7 +1070,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
 #[test]
 fn untransportable_durable_mutations_leave_the_session_unchanged() {
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     let workspace_id = state
         .session
         .create_workspace(std::env::temp_dir())
@@ -1106,7 +1110,7 @@ fn non_utf8_terminal_cwd_does_not_poison_the_durable_snapshot() {
     use std::os::unix::ffi::OsStringExt as _;
 
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -1133,7 +1137,7 @@ fn invalid_terminal_cwd_does_not_discard_valid_sibling_observations() {
     use std::os::unix::ffi::OsStringExt as _;
 
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -1187,7 +1191,7 @@ fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
     std::fs::create_dir_all(&stale).unwrap();
 
     let endpoint = test_endpoint();
-    let mut state = RuntimeState::new(&endpoint);
+    let mut state = RuntimeState::new(endpoint.as_local_path().unwrap());
     state
         .session
         .create_workspace(initial.clone())

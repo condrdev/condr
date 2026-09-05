@@ -1,48 +1,46 @@
 use super::*;
 
 use std::fs::{self, OpenOptions};
+use std::path::Path;
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
 #[cfg(windows)]
 use windows_spawn::{Command, CreationFlags, SpawnOptions, Stdio};
 
-pub(super) fn default_snapshot_path(endpoint: &Endpoint) -> Option<PathBuf> {
+pub(super) fn default_snapshot_path(socket_path: &Path) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("CONDR_SNAPSHOT_PATH")
         && !path.is_empty()
     {
         return Some(PathBuf::from(path));
     }
-    snapshot_path_for_endpoint(endpoint)
+    snapshot_path_for_endpoint(socket_path)
 }
 
-pub(super) fn snapshot_path_for_endpoint(endpoint: &Endpoint) -> Option<PathBuf> {
-    endpoint_file(condr_core::state_directory(), endpoint, "snapshot")
+pub(super) fn snapshot_path_for_endpoint(socket_path: &Path) -> Option<PathBuf> {
+    endpoint_file(condr_core::state_directory(), socket_path, "snapshot")
 }
 
 fn endpoint_file(
     directory: Option<PathBuf>,
-    endpoint: &Endpoint,
+    socket_path: &Path,
     extension: &str,
 ) -> Option<PathBuf> {
     directory.map(|directory| {
         directory.join(format!(
             "condr-server-{:016x}.{extension}",
-            stable_endpoint_id(endpoint)
+            stable_endpoint_id(socket_path)
         ))
     })
 }
 
-pub(super) fn stable_endpoint_id(endpoint: &Endpoint) -> u64 {
-    let text = match endpoint {
-        Endpoint::Local(path) => {
-            #[cfg(unix)]
-            let path = std::path::absolute(path).unwrap_or_else(|_| path.clone());
-            #[cfg(not(unix))]
-            let path = path.clone();
-            format!("local:{}", path.to_string_lossy())
-        }
-        Endpoint::Tcp(tcp) => format!("tcp:{}", tcp.address),
-    };
+/// The Server identity is its local socket path; the TCP listener is an extra door
+/// to the same Server and does not change it.
+pub(super) fn stable_endpoint_id(socket_path: &Path) -> u64 {
+    #[cfg(unix)]
+    let path = std::path::absolute(socket_path).unwrap_or_else(|_| socket_path.to_path_buf());
+    #[cfg(not(unix))]
+    let path = socket_path.to_path_buf();
+    let text = format!("local:{}", path.to_string_lossy());
     text.bytes().fold(0xcbf29ce484222325, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     })
@@ -60,14 +58,10 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
     ensure_server(ServerConfig::default())
 }
 
+/// Connects to the host's Server, starting it detached first if nothing answers on its
+/// socket. Returns the local endpoint to talk to it on.
 pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
-    let endpoint = config.endpoint.clone();
-    if matches!(&endpoint, Endpoint::Tcp(tcp) if tcp.address.port() == 0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "a detached TCP server requires a non-zero port",
-        ));
-    }
+    let endpoint = config.local_endpoint();
     if let Ok(stream) = endpoint.connect() {
         match probe_protocol(stream) {
             Ok(()) => return Ok(endpoint),
@@ -77,7 +71,7 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     }
 
     let server_executable = resolve_server_executable()?;
-    let log_path = server_log_path(&endpoint)?;
+    let log_path = server_log_path(&config.socket_path)?;
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -100,13 +94,9 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     let stderr = log.try_clone()?;
     let mut command = Command::new(&server_executable);
     command.args(["server", "run"]);
-    match &endpoint {
-        Endpoint::Local(path) => {
-            command.arg("--endpoint").arg(path);
-        }
-        Endpoint::Tcp(tcp) => {
-            command.arg("--listen").arg(tcp.address.to_string());
-        }
+    command.arg("--endpoint").arg(&config.socket_path);
+    if let Some(address) = config.listen {
+        command.arg("--listen").arg(address.to_string());
     }
     if let Some(path) = config.snapshot_path() {
         command.arg("--snapshot").arg(path);
@@ -148,8 +138,8 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
     ))
 }
 
-fn server_log_path(endpoint: &Endpoint) -> io::Result<PathBuf> {
-    endpoint_file(condr_core::log_directory(), endpoint, "log").ok_or_else(|| {
+fn server_log_path(socket_path: &Path) -> io::Result<PathBuf> {
+    endpoint_file(condr_core::log_directory(), socket_path, "log").ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
             "no platform log directory is available",

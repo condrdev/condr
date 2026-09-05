@@ -627,7 +627,7 @@ impl Condr {
         let (device_key, key_error) = match client_config_path
             .as_deref()
             .and_then(std::path::Path::parent)
-            .map_or_else(StaticKey::generate, condr_server::noise::host_client_key)
+            .map_or_else(StaticKey::generate, condr_server::noise::load_device_key)
         {
             Ok(key) => (Some(key), None),
             Err(error) => (

@@ -1392,27 +1392,25 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         unique_suffix()
     ));
     let identity = ServerIdentity::load_or_create(&directory).unwrap();
-    let host = TcpEndpoint {
-        address: "127.0.0.1:0".parse().unwrap(),
-        server_key: identity.public_key(),
-        client_key: noise::host_client_key(&directory).unwrap(),
-        invite: None,
-    };
-    let server =
-        BoundServer::bind(ServerConfig::ephemeral(Endpoint::tcp(host)).with_identity(identity))
-            .unwrap();
+    let server_key = identity.public_key();
+    let server = BoundServer::bind(
+        ServerConfig::ephemeral(directory.join("condr.sock"))
+            .with_listen("127.0.0.1:0".parse().unwrap())
+            .with_identity(identity),
+    )
+    .unwrap();
     let handle = server.handle();
-    let Endpoint::Tcp(host) = server.endpoint().clone() else {
-        panic!("expected a TCP endpoint");
-    };
+    let address = server.local_addr().unwrap().unwrap();
+    // Administration happens on the host, over the local socket.
+    let host = server.endpoint().clone();
     let thread = thread::spawn(move || server.run());
 
     // A new device pairs with the invite, then reconnects on its key alone.
     let device_key = StaticKey::generate().unwrap();
     let device = |invite| {
         Endpoint::tcp(TcpEndpoint {
-            address: host.address,
-            server_key: host.server_key,
+            address,
+            server_key,
             client_key: device_key.clone(),
             invite,
         })
@@ -1449,7 +1447,7 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     // The host revokes: the file refuses the next handshake, the message drops both
     // live connections.
     assert_eq!(noise::revoke(&directory, &prefix).unwrap(), 1);
-    let mut admin = connect_and_bootstrap(&Endpoint::tcp(host.clone()));
+    let mut admin = connect_and_bootstrap(&host);
     condr_core::protocol::write_message(
         &mut admin,
         &ClientMessage::RevokeDevice {
@@ -1619,9 +1617,10 @@ fn server_settings_are_stored_published_and_reloaded() {
     let config_path = directory.join("config.toml");
     std::fs::write(&config_path, "# keep me\n[client]\nappearance = \"dark\"\n").unwrap();
     let endpoint = test_endpoint();
-    let server =
-        BoundServer::bind(ServerConfig::ephemeral(endpoint.clone()).with_config_path(&config_path))
-            .unwrap();
+    let server = BoundServer::bind(
+        ServerConfig::ephemeral(endpoint.as_local_path().unwrap()).with_config_path(&config_path),
+    )
+    .unwrap();
     let handle = server.handle();
     let thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);
@@ -1685,9 +1684,10 @@ fn server_settings_are_stored_published_and_reloaded() {
 
     // A fresh Server reads the preference back from the file.
     let endpoint = test_endpoint();
-    let server =
-        BoundServer::bind(ServerConfig::ephemeral(endpoint.clone()).with_config_path(&config_path))
-            .unwrap();
+    let server = BoundServer::bind(
+        ServerConfig::ephemeral(endpoint.as_local_path().unwrap()).with_config_path(&config_path),
+    )
+    .unwrap();
     let handle = server.handle();
     let thread = thread::spawn(move || server.run());
     wait_for_connection(&endpoint);

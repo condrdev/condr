@@ -44,7 +44,7 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 
 ### 架构与工程结构
 
-Condr 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `condr server` 后连接。编排能力全部在 Server,所以 CLI 和 Server 是同一个二进制 `condr`;GUI 是独立二进制 `condr-gui`,只是 Server 的一个 client:
+Condr 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `condr server` 后连接。一台机器只有一个 Server:它始终监听本地私有 socket,配置了 `[server] listen` 时再额外监听一个 TCP 地址,两者服务同一份 Session(见 ADR 0012)。编排能力全部在 Server,所以 CLI 和 Server 是同一个二进制 `condr`;GUI 是独立二进制 `condr-gui`,只是 Server 的一个 client:
 
 ```
 crates/condr-core    # 领域、协议、PTY、VT、agent 检测、Git — 无 GUI 依赖,headless 可测

@@ -422,7 +422,8 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
     let endpoint = Endpoint::local(directory.0.join("server.sock"));
     let snapshot_path = directory.0.join("session.snapshot");
     let server = start_server_with_config(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path.clone()),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path.clone()),
     );
 
     let mut cx = TestAppContext::single();
@@ -507,8 +508,10 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
     }));
     server.stop();
 
-    let mut replacement =
-        start_server_with_config(ServerConfig::new(endpoint).with_snapshot_path(snapshot_path));
+    let mut replacement = start_server_with_config(
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path),
+    );
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
             this.start_connect(1);
@@ -646,7 +649,8 @@ fn corrupt_snapshot_connects_to_an_operable_start_page() {
     let snapshot_path = directory.0.join("session.snapshot");
     std::fs::write(&snapshot_path, b"not a Condr snapshot").unwrap();
     let server = start_server_with_config(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path),
     );
 
     let mut cx = TestAppContext::single();

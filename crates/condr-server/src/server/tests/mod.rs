@@ -30,7 +30,8 @@ fn run_git(cwd: &std::path::Path, args: &[&str]) {
 
 fn start() -> (ServerHandle, Endpoint, thread::JoinHandle<io::Result<()>>) {
     let endpoint = test_endpoint();
-    let server = BoundServer::bind(ServerConfig::ephemeral(endpoint.clone())).unwrap();
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(endpoint.as_local_path().unwrap())).unwrap();
     let handle = server.handle();
     let thread = thread::spawn(move || server.run());
     for _ in 0..100 {

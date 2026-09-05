@@ -15,7 +15,7 @@ const DETACHED_HELPER_ENV: &str = "CONDR_DETACHED_SERVER_TEST_HELPER";
 #[test]
 fn default_server_endpoint_is_private_and_local() {
     assert!(matches!(
-        ServerConfig::default().endpoint,
+        ServerConfig::default().local_endpoint(),
         Endpoint::Local(_)
     ));
 }
@@ -300,25 +300,23 @@ fn lifecycle_commands_manage_a_detached_server() {
     let address = listener.local_addr().unwrap();
     drop(listener);
     let server = env!("CARGO_BIN_EXE_condr");
-    // The child processes keep their identity in the test directory; this test connects
-    // as that host's own device key, which the Server always accepts.
-    let identity = condr_server::ServerIdentity::load_or_create(&data_directory).unwrap();
-    let endpoint = Endpoint::tcp(condr_server::TcpEndpoint {
-        address,
-        server_key: identity.public_key(),
-        client_key: condr_server::noise::host_client_key(&data_directory).unwrap(),
-        invite: None,
-    });
+    // Every child process shares the test's config directory and socket, as the commands
+    // on one host do; `start --listen` persists the TCP address there.
+    let condr = |args: &[&str]| {
+        let mut command = Command::new(server);
+        command
+            .args(args)
+            .env("CONDR_CONFIG_DIR", &data_directory)
+            .env("CONDR_SOCKET_PATH", &socket_path);
+        command
+    };
+    let endpoint = Endpoint::local(&socket_path);
     let guard = ServerGuard(endpoint.clone());
 
-    let start = Command::new(server)
-        .args(["server", "start"])
-        .arg("--listen")
+    let start = condr(&["server", "start", "--listen"])
         .arg(address.to_string())
-        .env("CONDR_CONFIG_DIR", &data_directory)
         .arg("--snapshot")
         .arg(&snapshot_path)
-        .env("CONDR_SOCKET_PATH", &socket_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -342,23 +340,46 @@ fn lifecycle_commands_manage_a_detached_server() {
     let log_path = server_log_path(client.bootstrap().server_id);
     drop(client);
 
-    let status = Command::new(server)
-        .args(["server", "status"])
-        .arg("--listen")
-        .arg(address.to_string())
-        .env("CONDR_CONFIG_DIR", &data_directory)
-        .status()
-        .unwrap();
+    // The same Server answers on TCP: a remote device pairs with the invite the host
+    // prints, and afterwards connects on its key alone.
+    let invite = condr(&["server", "invite"]).output().unwrap();
+    assert!(
+        invite.status.success(),
+        "invite failed\nstderr:\n{}",
+        String::from_utf8_lossy(&invite.stderr)
+    );
+    let invite_text = String::from_utf8(invite.stdout).unwrap();
+    let locator = invite_text
+        .lines()
+        .map(str::trim)
+        .find(|line| line.contains("@<host>:"))
+        .unwrap_or_else(|| panic!("invite output names no locator:\n{invite_text}"))
+        .replace("<host>", &address.ip().to_string());
+    assert!(
+        locator.ends_with(&format!(":{}", address.port())),
+        "the invite names the configured port: {locator}"
+    );
+    let device_key = condr_server::StaticKey::generate().unwrap();
+    let paired =
+        Endpoint::tcp(condr_server::TcpEndpoint::parse(&locator, device_key.clone()).unwrap());
+    drop(ClientConnection::connect(&paired, "laptop").unwrap());
+    let Endpoint::Tcp(tcp) = paired else {
+        unreachable!()
+    };
+    let paired = Endpoint::tcp(tcp.without_invite());
+    drop(ClientConnection::connect(&paired, "laptop").unwrap());
+    let clients = condr(&["server", "clients"]).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&clients.stdout).contains("laptop"),
+        "clients output lists the paired device:\n{}",
+        String::from_utf8_lossy(&clients.stdout)
+    );
+
+    let status = condr(&["server", "status"]).status().unwrap();
     assert!(status.success(), "status failed: {status}");
 
-    let second_start = Command::new(server)
-        .args(["server", "start"])
-        .arg("--listen")
-        .arg(address.to_string())
-        .env("CONDR_CONFIG_DIR", &data_directory)
-        .arg("--snapshot")
+    let second_start = condr(&["server", "start", "--snapshot"])
         .arg(&snapshot_path)
-        .env("CONDR_SOCKET_PATH", &socket_path)
         .status()
         .unwrap();
     assert!(
@@ -366,24 +387,12 @@ fn lifecycle_commands_manage_a_detached_server() {
         "second start failed: {second_start}"
     );
 
-    let stop = Command::new(server)
-        .args(["server", "stop"])
-        .arg("--listen")
-        .arg(address.to_string())
-        .env("CONDR_CONFIG_DIR", &data_directory)
-        .status()
-        .unwrap();
+    let stop = condr(&["server", "stop"]).status().unwrap();
     assert!(stop.success(), "stop failed: {stop}");
     wait_for_stop(&endpoint);
     guard.disarm();
 
-    let stopped_status = Command::new(server)
-        .args(["server", "status"])
-        .arg("--listen")
-        .arg(address.to_string())
-        .env("CONDR_CONFIG_DIR", &data_directory)
-        .status()
-        .unwrap();
+    let stopped_status = condr(&["server", "status"]).status().unwrap();
     assert_eq!(stopped_status.code(), Some(1));
 
     let _ = std::fs::remove_file(log_path);

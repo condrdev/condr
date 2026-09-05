@@ -49,7 +49,8 @@ fn workspace_and_tab_commands_drive_a_live_server() {
     let root = std::env::temp_dir().join(format!("condr-cli-root-{suffix}"));
     std::fs::create_dir_all(&root).unwrap();
     let endpoint = Endpoint::local(&endpoint_path);
-    let server = BoundServer::bind(ServerConfig::ephemeral(endpoint.clone())).unwrap();
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral(endpoint.as_local_path().unwrap())).unwrap();
     let handle = server.handle();
     let server_thread = thread::spawn(move || server.run());
     for _ in 0..100 {

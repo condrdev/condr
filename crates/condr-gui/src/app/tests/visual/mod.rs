@@ -79,7 +79,8 @@ fn start_server() -> (TestServer, Endpoint) {
         std::process::id(),
         NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
     )));
-    let server = start_server_with_config(ServerConfig::ephemeral(endpoint.clone()));
+    let server =
+        start_server_with_config(ServerConfig::ephemeral(endpoint.as_local_path().unwrap()));
     (server, endpoint)
 }
 

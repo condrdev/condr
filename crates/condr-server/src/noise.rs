@@ -167,15 +167,14 @@ pub struct Invite {
 }
 
 impl ServerIdentity {
-    /// The identity stored in `directory`: `server-key` for the Server itself and
-    /// `client-key` for the CLI and GUI on this host, which are always authorized.
+    /// The identity stored in `directory`: `server-key`, plus the paired devices and the
+    /// pending invite kept beside it. Processes on the host itself use the local socket,
+    /// so no device is authorized by default.
     pub fn load_or_create(directory: &Path) -> io::Result<Self> {
-        let key = StaticKey::load_or_create(&directory.join(SERVER_KEY_FILE))?;
-        let host_client = host_client_key(directory)?;
         Ok(Self {
-            key,
+            key: StaticKey::load_or_create(&directory.join(SERVER_KEY_FILE))?,
             store: Some(directory.to_path_buf()),
-            always_authorized: vec![host_client.public()],
+            always_authorized: Vec::new(),
         })
     }
 
@@ -287,8 +286,8 @@ pub fn device_name() -> String {
         .unwrap_or_else(|| "condr".to_owned())
 }
 
-/// The device key the CLI and GUI on this host connect with.
-pub fn host_client_key(directory: &Path) -> io::Result<StaticKey> {
+/// The device key a GUI keeps beside its `config.toml` and presents to TCP Servers.
+pub fn load_device_key(directory: &Path) -> io::Result<StaticKey> {
     StaticKey::load_or_create(&directory.join(CLIENT_KEY_FILE))
 }
 
@@ -634,19 +633,6 @@ impl NoiseStream {
         match &*lock(&self.noise) {
             Noise::Transport { remote, .. } => Some(*remote),
             _ => None,
-        }
-    }
-
-    /// Server side: whether the peer is a device of the Server host itself, which is
-    /// what `condr server …` administration runs as.
-    pub fn peer_is_host(&self) -> bool {
-        match &*lock(&self.noise) {
-            Noise::Transport {
-                remote,
-                identity: Some(identity),
-                ..
-            } => identity.always_authorized.contains(remote),
-            _ => false,
         }
     }
 

@@ -35,7 +35,8 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
 
     let endpoint = Endpoint::local(snapshot_root.0.join("server.sock"));
     let server = start_server_with_config(
-        ServerConfig::new(endpoint.clone()).with_snapshot_path(snapshot_path),
+        ServerConfig::at_socket(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path),
     );
     let mut cx = TestAppContext::single();
     cx.update(gpui_component::init);

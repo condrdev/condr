@@ -80,20 +80,61 @@ struct TerminalMonitor {
     lifecycle: Arc<ServerLifecycle>,
 }
 
+/// One Server per host: it always answers on a private local socket, and on a TCP
+/// address as well when `[server] listen` is configured. Both reach the same Session.
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
-    pub endpoint: Endpoint,
+    pub socket_path: PathBuf,
+    pub listen: Option<std::net::SocketAddr>,
     snapshot_path: Option<PathBuf>,
     /// The Server's own `config.toml`; `None` keeps settings in memory only.
     config_path: Option<PathBuf>,
-    /// The key a TCP Server answers with; `None` loads the host identity at bind time.
+    /// The key the TCP listener answers with; `None` loads the host identity at bind time.
     identity: Option<Arc<ServerIdentity>>,
+    /// The device key `ephemeral_tcp` authorized, so tests can connect over TCP.
+    test_device: Option<StaticKey>,
 }
 
 impl Default for ServerConfig {
+    /// The host's Server: default socket, and the TCP address `config.toml` names, if any.
     fn default() -> Self {
-        Self::new(Endpoint::local(default_socket_path()))
+        let config_path = condr_core::config_directory().map(|root| root.join("config.toml"));
+        let socket_path = default_socket_path();
+        Self {
+            listen: load_listen(config_path.as_deref()),
+            snapshot_path: default_snapshot_path(&socket_path),
+            socket_path,
+            config_path,
+            identity: None,
+            test_device: None,
+        }
     }
+}
+
+/// `[server] listen` from `config.toml`: the TCP address the Server also answers on.
+/// Absent, blank or malformed means no TCP listener.
+pub fn load_listen(path: Option<&std::path::Path>) -> Option<std::net::SocketAddr> {
+    load_server_setting(path?, "listen")?.trim().parse().ok()
+}
+
+/// Persists `[server] listen`, or removes it for `None`.
+pub fn save_listen(path: &std::path::Path, listen: Option<std::net::SocketAddr>) -> io::Result<()> {
+    save_server_setting(
+        path,
+        "listen",
+        listen.map(|address| toml_edit::value(address.to_string())),
+    )
+}
+
+fn load_server_setting(path: &std::path::Path, key: &str) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()?
+        .parse::<toml::Table>()
+        .ok()?
+        .get("server")?
+        .get(key)?
+        .as_str()
+        .map(str::to_owned)
 }
 
 /// `[server.terminal] shell` from the Server's `config.toml`, blank when unset or the
@@ -118,6 +159,30 @@ fn load_shell(path: Option<&std::path::Path>) -> String {
 /// Writes `[server.terminal] shell` back, keeping the rest of the hand-editable file
 /// (other keys, comments, formatting) as it was.
 fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
+    save_setting(
+        path,
+        &["server", "terminal"],
+        "shell",
+        Some(toml_edit::value(shell)),
+    )
+}
+
+fn save_server_setting(
+    path: &std::path::Path,
+    key: &str,
+    value: Option<toml_edit::Item>,
+) -> io::Result<()> {
+    save_setting(path, &["server"], key, value)
+}
+
+/// Sets or, for `None`, removes one key under `tables` in `config.toml`, leaving every
+/// other key, comment and line as written.
+fn save_setting(
+    path: &std::path::Path,
+    tables: &[&str],
+    key: &str,
+    value: Option<toml_edit::Item>,
+) -> io::Result<()> {
     let mut document = match std::fs::read_to_string(path) {
         Ok(text) => text
             .parse::<toml_edit::DocumentMut>()
@@ -125,10 +190,10 @@ fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => toml_edit::DocumentMut::new(),
         Err(error) => return Err(error),
     };
-    // Explicit `[server.terminal]` tables, appended after the existing content; indexing
-    // would insert an inline table at the top, ahead of any leading comment.
+    // Explicit tables, appended after the existing content; indexing would insert an
+    // inline table at the top, ahead of any leading comment.
     let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
-    for name in ["server", "terminal"] {
+    for name in tables {
         table = table
             .entry(name)
             .or_insert(toml_edit::table())
@@ -140,55 +205,75 @@ fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
                 )
             })?;
     }
-    table.insert("shell", toml_edit::value(shell));
+    match value {
+        Some(value) => {
+            table.insert(key, value);
+        }
+        None => {
+            table.remove(key);
+        }
+    }
     crate::persistence::write_config_text(path, &document.to_string())
 }
 
 impl ServerConfig {
-    pub fn new(endpoint: Endpoint) -> Self {
-        let snapshot_path = match &endpoint {
-            Endpoint::Tcp(tcp) if tcp.address.port() == 0 => None,
-            _ => default_snapshot_path(&endpoint),
-        };
+    /// The host's Server on a specific socket, with the default snapshot for that socket.
+    pub fn at_socket(socket_path: impl Into<PathBuf>) -> Self {
+        let socket_path = socket_path.into();
         Self {
-            endpoint,
-            snapshot_path,
+            listen: None,
+            snapshot_path: default_snapshot_path(&socket_path),
+            socket_path,
             config_path: condr_core::config_directory().map(|root| root.join("config.toml")),
             identity: None,
+            test_device: None,
         }
     }
 
-    pub fn ephemeral(endpoint: Endpoint) -> Self {
+    /// A Server on `socket_path` with no persistence and no TCP listener.
+    pub fn ephemeral(socket_path: impl Into<PathBuf>) -> Self {
         Self {
-            endpoint,
+            socket_path: socket_path.into(),
+            listen: None,
             snapshot_path: None,
             config_path: None,
             identity: None,
+            test_device: None,
         }
     }
 
-    /// A TCP Server with a fresh identity that accepts exactly one fresh device key, and
-    /// no persistence. [`BoundServer::endpoint`] then connects as that device.
+    /// An ephemeral Server that also listens on `address` with a fresh identity accepting
+    /// exactly one fresh device key. [`BoundServer::endpoint`] then connects as that device.
     pub fn ephemeral_tcp(address: std::net::SocketAddr) -> io::Result<Self> {
         let client_key = StaticKey::generate()?;
         let identity = ServerIdentity::ephemeral()?.with_authorized(client_key.public());
-        let endpoint = Endpoint::tcp(TcpEndpoint {
-            address,
-            server_key: identity.public_key(),
-            client_key,
-            invite: None,
-        });
+        let socket_path = std::env::temp_dir().join(format!(
+            "condr-tcp-{}-{}.sock",
+            std::process::id(),
+            runtime_epoch()
+        ));
         Ok(Self {
-            endpoint,
+            socket_path,
+            listen: Some(address),
             snapshot_path: None,
             config_path: None,
             identity: Some(Arc::new(identity)),
+            test_device: Some(client_key),
         })
+    }
+
+    pub fn with_listen(mut self, address: std::net::SocketAddr) -> Self {
+        self.listen = Some(address);
+        self
     }
 
     pub fn with_identity(mut self, identity: ServerIdentity) -> Self {
         self.identity = Some(Arc::new(identity));
         self
+    }
+
+    pub fn local_endpoint(&self) -> Endpoint {
+        Endpoint::local(&self.socket_path)
     }
 
     pub fn with_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -484,7 +569,10 @@ impl ServerHandle {
 }
 
 pub struct BoundServer {
-    listener: EndpointListener,
+    local: EndpointListener,
+    tcp: Option<EndpointListener>,
+    /// What a test client connects to: the TCP listener as the test device when there is
+    /// one, else the local socket.
     endpoint: Endpoint,
     stop: Arc<AtomicBool>,
     lifecycle: Arc<ServerLifecycle>,
@@ -494,30 +582,54 @@ pub struct BoundServer {
 
 impl BoundServer {
     pub fn bind(config: ServerConfig) -> io::Result<Self> {
-        let identity = match (&config.endpoint, config.identity) {
-            (Endpoint::Local(_), _) => None,
-            (Endpoint::Tcp(_), Some(identity)) => Some(identity),
-            (Endpoint::Tcp(_), None) => Some(Arc::new(ServerIdentity::load_or_create(
-                &crate::noise::identity_directory()?,
-            )?)),
-        };
-        let listener = config.endpoint.bind(identity)?;
-        listener.set_nonblocking(true)?;
-        // An OS-assigned port becomes concrete here; Panes and tests need the real one.
-        let endpoint = match (&config.endpoint, listener.local_addr()?) {
-            (Endpoint::Tcp(tcp), Some(address)) => Endpoint::tcp(tcp.clone().with_address(address)),
-            _ => config.endpoint.clone(),
-        };
-        let (state, startup_terminals) =
-            match RuntimeState::recover(&endpoint, config.snapshot_path, config.config_path) {
-                Ok(restored) => restored,
+        let local = EndpointListener::local(&config.socket_path)?;
+        local.set_nonblocking(true)?;
+        let mut endpoint = Endpoint::local(&config.socket_path);
+        let mut tcp = None;
+        if let Some(address) = config.listen {
+            let identity = match config.identity {
+                Some(identity) => identity,
+                None => Arc::new(ServerIdentity::load_or_create(
+                    &crate::noise::identity_directory()?,
+                )?),
+            };
+            let listener = match EndpointListener::tcp(address, Arc::clone(&identity)) {
+                Ok(listener) => listener,
                 Err(error) => {
-                    let _ = listener.cleanup();
-                    return Err(error);
+                    let _ = local.cleanup();
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!("failed to listen on tcp://{address}: {error}"),
+                    ));
                 }
             };
+            listener.set_nonblocking(true)?;
+            if let (Some(client_key), Ok(Some(address))) =
+                (config.test_device, listener.local_addr())
+            {
+                endpoint = Endpoint::tcp(TcpEndpoint {
+                    address,
+                    server_key: identity.public_key(),
+                    client_key,
+                    invite: None,
+                });
+            }
+            tcp = Some(listener);
+        }
+        let (state, startup_terminals) = match RuntimeState::recover(
+            &config.socket_path,
+            config.snapshot_path,
+            config.config_path,
+        ) {
+            Ok(restored) => restored,
+            Err(error) => {
+                let _ = local.cleanup();
+                return Err(error);
+            }
+        };
         Ok(Self {
-            listener,
+            local,
+            tcp,
             endpoint,
             stop: Arc::new(AtomicBool::new(false)),
             lifecycle: Arc::new(ServerLifecycle::default()),
@@ -534,12 +646,15 @@ impl BoundServer {
         }
     }
 
+    /// The TCP address actually bound, once `listen` asked for one.
     pub fn local_addr(&self) -> io::Result<Option<std::net::SocketAddr>> {
-        self.listener.local_addr()
+        self.tcp
+            .as_ref()
+            .map_or(Ok(None), EndpointListener::local_addr)
     }
 
-    /// The endpoint as bound, with the real port. For a TCP Server it also carries the
-    /// device key a test client connects with.
+    /// The endpoint a test client connects to: TCP as the authorized test device when
+    /// `ephemeral_tcp` configured one, else the local socket.
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
@@ -577,23 +692,30 @@ impl BoundServer {
 
         let mut run_result = Ok(());
         let mut next_client_id = 1_u64;
-        while !self.stop.load(Ordering::Acquire) {
-            match self.listener.accept() {
-                Ok(stream) => {
-                    let client_id = next_client_id;
-                    next_client_id = next_client_id.wrapping_add(1);
-                    let state = Arc::clone(&self.state);
-                    let stop = Arc::clone(&self.stop);
-                    let lifecycle = Arc::clone(&self.lifecycle);
-                    thread::spawn(move || handle_client(stream, client_id, state, stop, lifecycle));
+        'accept: while !self.stop.load(Ordering::Acquire) {
+            let mut accepted = false;
+            for listener in std::iter::once(&self.local).chain(self.tcp.as_ref()) {
+                match listener.accept() {
+                    Ok(stream) => {
+                        accepted = true;
+                        let client_id = next_client_id;
+                        next_client_id = next_client_id.wrapping_add(1);
+                        let state = Arc::clone(&self.state);
+                        let stop = Arc::clone(&self.stop);
+                        let lifecycle = Arc::clone(&self.lifecycle);
+                        thread::spawn(move || {
+                            handle_client(stream, client_id, state, stop, lifecycle)
+                        });
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(error) => {
+                        run_result = Err(error);
+                        break 'accept;
+                    }
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(ACCEPT_POLL);
-                }
-                Err(error) => {
-                    run_result = Err(error);
-                    break;
-                }
+            }
+            if !accepted {
+                thread::sleep(ACCEPT_POLL);
             }
         }
 
@@ -639,7 +761,10 @@ impl BoundServer {
         }
         drop(persistence);
         drop(terminals);
-        let cleanup_result = self.listener.cleanup();
+        let cleanup_result = self
+            .local
+            .cleanup()
+            .and(self.tcp.as_ref().map_or(Ok(()), EndpointListener::cleanup));
         if let Err(error) = &cleanup_result {
             eprintln!("condr-server: endpoint cleanup failed: {error}");
         }
@@ -958,27 +1083,25 @@ struct SequencedEvent {
 
 impl RuntimeState {
     #[cfg(test)]
-    fn new(endpoint: &Endpoint) -> Self {
+    fn new(socket_path: &std::path::Path) -> Self {
         Self::with_session(
-            endpoint,
+            socket_path,
             Session::new(),
             None,
             ServerSettings::default(),
             None,
-            String::new(),
         )
     }
 
     fn with_session(
-        endpoint: &Endpoint,
+        socket_path: &std::path::Path,
         session: Session,
         persistence: Option<SnapshotPersistence>,
         settings: ServerSettings,
         config_path: Option<PathBuf>,
-        socket_path: String,
     ) -> Self {
         Self {
-            server_id: ServerId(stable_endpoint_id(endpoint)),
+            server_id: ServerId(stable_endpoint_id(socket_path)),
             runtime_epoch: RuntimeEpoch(runtime_epoch()),
             session_id: SessionId(1),
             sequence: 0,
@@ -1004,7 +1127,7 @@ impl RuntimeState {
             persistence,
             settings,
             config_path,
-            socket_path,
+            socket_path: socket_path.to_string_lossy().into_owned(),
         }
     }
 
@@ -1079,7 +1202,7 @@ impl RuntimeState {
     }
 
     fn recover(
-        endpoint: &Endpoint,
+        socket_path: &std::path::Path,
         snapshot_path: Option<PathBuf>,
         config_path: Option<PathBuf>,
     ) -> io::Result<(Self, Vec<StartedTerminal>)> {
@@ -1089,7 +1212,7 @@ impl RuntimeState {
         };
         let launch = ShellLaunch {
             shell: settings.shell.clone(),
-            socket_path: endpoint.env_value(),
+            socket_path: socket_path.to_string_lossy().into_owned(),
         };
         let persistence = snapshot_path.map(SnapshotPersistence::open).transpose()?;
         let mut session = Session::new();
@@ -1211,14 +1334,8 @@ impl RuntimeState {
                 .expect("restored Pane remains until it is pruned");
         }
 
-        let mut state = Self::with_session(
-            endpoint,
-            session,
-            persistence,
-            settings,
-            config_path,
-            endpoint.env_value(),
-        );
+        let mut state =
+            Self::with_session(socket_path, session, persistence, settings, config_path);
         let workspace_roots = state
             .session
             .workspaces()

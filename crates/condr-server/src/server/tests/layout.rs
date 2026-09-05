@@ -31,7 +31,7 @@ fn apply_for_test(
 fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
     use condr_core::{PaneDirection, PaneLayout, SplitDirection};
 
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     let mut updates = Vec::new();
     let root = std::env::temp_dir();
 
@@ -261,7 +261,7 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
     run_git(&repository, &["add", "README.md"]);
     run_git(&repository, &["commit", "-m", "initial"]);
 
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state.worktree_root = Some(temp.join("worktrees"));
     let mut updates = Vec::new();
     apply_for_test(
@@ -341,7 +341,7 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     run_git(&repository, &["add", "README.md"]);
     run_git(&repository, &["commit", "-m", "initial"]);
 
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state.worktree_root = Some(temp.join("worktrees"));
     let mut updates = Vec::new();
     apply_for_test(
@@ -448,7 +448,7 @@ fn stopping_server_rolls_back_a_prepared_worktree() {
     run_git(&repository, &["add", "README.md"]);
     run_git(&repository, &["commit", "-m", "initial"]);
 
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state.worktree_root = Some(temp.join("worktrees"));
     state.active_controller = Some(7);
     let parent_workspace_id = state
@@ -505,7 +505,7 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
     run_git(&repository, &["add", "README.md"]);
     run_git(&repository, &["commit", "-m", "initial"]);
 
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     let workspace_id = state
         .session
         .create_workspace(repository.clone())
@@ -586,7 +586,7 @@ fn opening_an_already_open_worktree_records_parent_membership() {
         ],
     );
 
-    let mut state = RuntimeState::new(&test_endpoint());
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     let parent_workspace_id = state
         .session
         .create_workspace(repository.clone())

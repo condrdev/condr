@@ -306,10 +306,7 @@ fn caller_workspace(session: &Session) -> Option<WorkspaceId> {
 /// talks to the machine's default local Server.
 fn connect() -> Result<ClientConnection, CliError> {
     let endpoint = match std::env::var(PaneEnvironment::SOCKET_PATH) {
-        // A TCP Server always accepts the device key of its own host.
-        Ok(value) => Endpoint::from_env_value(&value, || {
-            condr_server::noise::host_client_key(&condr_server::noise::identity_directory()?)
-        })?,
+        Ok(value) => Endpoint::from_env_value(&value)?,
         Err(_) => Endpoint::local(default_socket_path()),
     };
     ClientConnection::connect(&endpoint, "condr-cli").map_err(|error| match error.kind() {
