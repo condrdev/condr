@@ -610,12 +610,8 @@ impl BoundServer {
             if let (Some(client_key), Ok(Some(address))) =
                 (config.test_device, listener.local_addr())
             {
-                endpoint = Endpoint::tcp(TcpEndpoint {
-                    address,
-                    server_key: identity.public_key(),
-                    client_key,
-                    invite: None,
-                });
+                endpoint =
+                    Endpoint::tcp(TcpEndpoint::at(address, identity.public_key(), client_key));
             }
             tcp = Some(listener);
         }

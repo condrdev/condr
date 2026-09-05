@@ -9,7 +9,17 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.prompt_rename_server_on(1, "Local".into(), window, cx)
+            this.prompt_text(
+                "Rename Server",
+                "Save",
+                "Local".into(),
+                |this, name, _, _| {
+                    this.connection_mut(1).unwrap().label = name;
+                    true
+                },
+                window,
+                cx,
+            )
         });
     });
     submit_text_dialog(window, "Build Server");

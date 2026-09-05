@@ -201,7 +201,7 @@ impl Condr {
                     if this
                         .connections
                         .iter()
-                        .any(|c| c.endpoint.tcp_address() == Some(tcp.address))
+                        .any(|c| c.endpoint.tcp_host_port() == Some((tcp.host.as_str(), tcp.port)))
                     {
                         this.app_error = Some("Server already added".into());
                         return false;
@@ -209,7 +209,7 @@ impl Condr {
                     this.app_error = None;
                     let key = this.next_connection_key;
                     this.next_connection_key += 1;
-                    let label = tcp.address.to_string();
+                    let label = tcp.authority();
                     this.connections
                         .push(ServerConnection::new(key, label, Endpoint::tcp(tcp)));
                     this.save_servers();
@@ -229,27 +229,162 @@ impl Condr {
         );
     }
 
-    pub(super) fn prompt_rename_server_on(
+    /// Edits a TCP Server's name, host and port. The Server key is its identity and is
+    /// shown but not editable: a different key is a different Server, added with an
+    /// invite. The Local Server has nothing to edit and never gets this dialog.
+    pub(super) fn prompt_edit_server_on(
         &mut self,
         key: ConnectionKey,
-        name: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prompt_text(
-            "Rename Server",
-            "Save",
-            name,
-            move |this, name, _, _| {
-                if let Some(connection) = this.connection_mut(key) {
-                    connection.label = name;
-                    this.save_servers();
-                }
-                true
-            },
-            window,
-            cx,
-        );
+        let Some((label, tcp)) =
+            self.connection(key)
+                .and_then(|connection| match &connection.endpoint {
+                    Endpoint::Tcp(tcp) => Some((connection.label.clone(), tcp.clone())),
+                    Endpoint::Local(_) => None,
+                })
+        else {
+            return;
+        };
+        let fields = [
+            ("Name", label),
+            ("Host", tcp.host.clone()),
+            ("Port", tcp.port.to_string()),
+        ]
+        .map(|(field_label, initial)| {
+            (
+                SharedString::from(field_label),
+                cx.new(|cx| InputState::new(window, cx).default_value(initial)),
+            )
+        });
+        let fingerprint = SharedString::from(format!("Server key {}", tcp.server_key));
+        let owner = cx.weak_entity();
+        window.defer(cx, move |window, cx| {
+            let inputs_for_content = fields.clone();
+            let inputs_for_ok = fields.clone();
+            let owner = owner.clone();
+            window.open_dialog(cx, move |dialog, _, _| {
+                let inputs_for_content = inputs_for_content.clone();
+                let inputs_for_ok = inputs_for_ok.clone();
+                let fingerprint = fingerprint.clone();
+                let owner = owner.clone();
+                dialog
+                    .title("Edit Server")
+                    .content(move |content, _, _| {
+                        let mut form = v_flex().gap_2();
+                        for (field_label, input) in &inputs_for_content {
+                            form = form.child(
+                                v_flex()
+                                    .gap_1()
+                                    .child(div().text_sm().child(field_label.clone()))
+                                    .child(Input::new(input).w_full()),
+                            );
+                        }
+                        content.child(
+                            form.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(gpui::opaque_grey(0.5, 1.0))
+                                    .child(fingerprint.clone()),
+                            ),
+                        )
+                    })
+                    .footer(
+                        DialogFooter::new()
+                            .child(
+                                Button::new("dialog-cancel")
+                                    .debug_selector(|| "dialog-cancel".into())
+                                    .label("Cancel")
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(Cancel), cx)
+                                    }),
+                            )
+                            .child(
+                                Button::new("dialog-primary-action")
+                                    .debug_selector(|| "dialog-primary-action".into())
+                                    .primary()
+                                    .label("Save")
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(Confirm { secondary: false }),
+                                            cx,
+                                        )
+                                    }),
+                            ),
+                    )
+                    .on_ok(move |_, window, cx| {
+                        let [name, host, port] = inputs_for_ok
+                            .each_ref()
+                            .map(|(_, input)| input.read(cx).value().trim().to_string());
+                        // A rejected value keeps the dialog and the typed text.
+                        owner
+                            .update(cx, |this, cx| {
+                                let accepted =
+                                    this.apply_server_edit(key, &name, &host, &port, window, cx);
+                                cx.notify();
+                                accepted
+                            })
+                            .unwrap_or(true)
+                    })
+            });
+            fields[0].1.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.select_all(window, cx);
+            });
+        });
+    }
+
+    /// Applies an Edit Server dialog. A changed host or port reconnects the Server at the
+    /// new address; the Server key stays. False keeps the dialog open with an error.
+    pub(super) fn apply_server_edit(
+        &mut self,
+        key: ConnectionKey,
+        name: &str,
+        host: &str,
+        port: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let (host, port) = match TcpEndpoint::split_authority(&format!("{host}:{port}")) {
+            Ok(authority) => authority,
+            Err(error) => {
+                self.app_error = Some(format!("Invalid server address: {error}"));
+                return false;
+            }
+        };
+        if name.is_empty() {
+            self.app_error = Some("The Server needs a name".into());
+            return false;
+        }
+        if self.connections.iter().any(|connection| {
+            connection.key != key
+                && connection.endpoint.tcp_host_port() == Some((host.as_str(), port))
+        }) {
+            self.app_error = Some("Another Server already uses this address".into());
+            return false;
+        }
+        let Some(connection) = self.connection_mut(key) else {
+            return true;
+        };
+        let Endpoint::Tcp(tcp) = &mut connection.endpoint else {
+            return true;
+        };
+        connection.label = name.to_owned();
+        let moved = (tcp.host.as_str(), tcp.port) != (host.as_str(), port);
+        tcp.host = host;
+        tcp.port = port;
+        let was_up = connection.status != ConnectionStatus::Disconnected;
+        self.app_error = None;
+        self.save_servers();
+        if moved && was_up {
+            self.disconnect_server(key);
+            if self.start_connect(key) {
+                self.refresh_target_pane(self.active_connection);
+                self.rebuild_dock(window, cx);
+            }
+        }
+        true
     }
 
     pub(super) fn confirm_delete_server_on(

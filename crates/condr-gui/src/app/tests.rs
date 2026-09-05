@@ -52,12 +52,11 @@ fn terminal_hyperlink_budgets(
 
 /// A TCP endpoint with fixed keys, so two calls with one address compare equal.
 pub(super) fn tcp(address: &str) -> Endpoint {
-    Endpoint::tcp(TcpEndpoint {
-        address: address.parse().unwrap(),
-        server_key: StaticKey::from_private([7; 32]).public(),
-        client_key: StaticKey::from_private([9; 32]),
-        invite: None,
-    })
+    Endpoint::tcp(TcpEndpoint::at(
+        address.parse().unwrap(),
+        StaticKey::from_private([7; 32]).public(),
+        StaticKey::from_private([9; 32]),
+    ))
 }
 
 fn connection_with_io() -> ServerConnection {

@@ -708,7 +708,17 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.prompt_rename_server_on(1, "Local".into(), window, cx)
+            this.prompt_text(
+                "Rename Server",
+                "Save",
+                "Local".into(),
+                |this, name, _, _| {
+                    this.connection_mut(1).unwrap().label = name;
+                    true
+                },
+                window,
+                cx,
+            )
         });
     });
     window.run_until_parked();

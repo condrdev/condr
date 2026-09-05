@@ -1305,6 +1305,7 @@ impl Condr {
             let server_menu_owner = owner.clone();
             let server_name = connection.label.clone();
             let status = connection.status;
+            let is_local = connection.endpoint.as_local_path().is_some();
             let new_workspace_label = connection.label.clone();
             let descendant_selected = workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
             CondrSidebarSection::new(
@@ -1353,25 +1354,26 @@ impl Condr {
                 }
             })
             .context_menu(move |menu, _, _| {
-                let rename_owner = server_menu_owner.clone();
+                let edit_owner = server_menu_owner.clone();
                 let connection_owner = server_menu_owner.clone();
                 let delete_owner = server_menu_owner.clone();
-                let rename_name = server_name.clone();
                 let delete_name = server_name.clone();
                 let (connection_label, connection_disabled) = match status {
                     ConnectionStatus::Connected => ("Disconnect", false),
                     ConnectionStatus::Disconnected => ("Connect", false),
                     ConnectionStatus::Connecting => ("Connecting…", true),
                 };
-                menu.item(
-                    PopupMenuItem::new("Rename Server…").on_click(move |_, window, cx| {
-                        let name = rename_name.clone();
-                        let _ = rename_owner.update(cx, |this, cx| {
-                            this.prompt_rename_server_on(key, name, window, cx)
-                        });
-                    }),
-                )
-                .item(
+                // The Local Server is this machine's own: nothing to edit, nothing to
+                // delete, only its connection to toggle.
+                let menu = if is_local {
+                    menu
+                } else {
+                    menu.item(PopupMenuItem::new("Edit").on_click(move |_, window, cx| {
+                        let _ = edit_owner
+                            .update(cx, |this, cx| this.prompt_edit_server_on(key, window, cx));
+                    }))
+                };
+                let menu = menu.item(
                     PopupMenuItem::new(connection_label)
                         .disabled(connection_disabled)
                         .on_click(move |_, window, cx| {
@@ -1394,16 +1396,20 @@ impl Condr {
                                 cx.notify();
                             });
                         }),
-                )
-                .separator()
-                .item(
-                    PopupMenuItem::new("Delete Server").on_click(move |_, window, cx| {
-                        let name = delete_name.clone();
-                        let _ = delete_owner.update(cx, |this, cx| {
-                            this.confirm_delete_server_on(key, name, window, cx)
-                        });
-                    }),
-                )
+                );
+                if is_local {
+                    menu
+                } else {
+                    menu.separator()
+                        .item(
+                            PopupMenuItem::new("Delete Server").on_click(move |_, window, cx| {
+                                let name = delete_name.clone();
+                                let _ = delete_owner.update(cx, |this, cx| {
+                                    this.confirm_delete_server_on(key, name, window, cx)
+                                });
+                            }),
+                        )
+                }
             })
             .on_click(move |_, window, cx| {
                 let _ = select_owner.update(cx, |this, cx| this.select_server(key, window, cx));

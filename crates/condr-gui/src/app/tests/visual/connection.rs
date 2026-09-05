@@ -617,9 +617,10 @@ fn added_server_survives_gui_restart() {
             ),
         );
         assert!(window.read(|app| {
-            view.read(app).connections.iter().any(|connection| {
-                connection.endpoint.tcp_address() == Some("127.0.0.1:4242".parse().unwrap())
-            })
+            view.read(app)
+                .connections
+                .iter()
+                .any(|connection| connection.endpoint.tcp_host_port() == Some(("127.0.0.1", 4242)))
         }));
     }
 
@@ -635,9 +636,10 @@ fn added_server_survives_gui_restart() {
     });
     let view = view_holder.borrow_mut().take().unwrap();
     assert!(window.read(|app| {
-        view.read(app).connections.iter().any(|connection| {
-            connection.endpoint.tcp_address() == Some("127.0.0.1:4242".parse().unwrap())
-        })
+        view.read(app)
+            .connections
+            .iter()
+            .any(|connection| connection.endpoint.tcp_host_port() == Some(("127.0.0.1", 4242)))
     }));
 }
 
@@ -685,7 +687,17 @@ fn text_dialog_actions_are_compact_and_submit() {
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.prompt_rename_server_on(1, "Local".into(), window, cx)
+            this.prompt_text(
+                "Rename Server",
+                "Save",
+                "Local".into(),
+                |this, name, _, _| {
+                    this.connection_mut(1).unwrap().label = name;
+                    true
+                },
+                window,
+                cx,
+            )
         });
     });
     submit_text_dialog(window, "Build Server");
@@ -694,6 +706,50 @@ fn text_dialog_actions_are_compact_and_submit() {
         window.read(|app| view.read(app).connection(1).unwrap().label.clone()),
         "Build Server"
     );
+}
+
+#[test]
+fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_component::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.connections
+                .push(ServerConnection::new(2, "lab".into(), tcp("10.0.0.5:4242")));
+            assert!(this.apply_server_edit(2, "Lab box", "lab.local", "5555", window, cx));
+            let connection = this.connection(2).unwrap();
+            assert_eq!(connection.label, "Lab box");
+            assert_eq!(
+                connection.endpoint.tcp_host_port(),
+                Some(("lab.local", 5555))
+            );
+            assert!(
+                !this.apply_server_edit(2, "", "lab.local", "5555", window, cx),
+                "a blank name is refused"
+            );
+            assert!(
+                !this.apply_server_edit(2, "Lab box", "lab.local", "0", window, cx),
+                "port 0 is refused"
+            );
+            assert!(this.app_error.is_some());
+
+            // The Local Server has no edit dialog at all.
+            this.prompt_edit_server_on(1, window, cx);
+        });
+    });
+    window.run_until_parked();
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.prompt_edit_server_on(2, window, cx));
+    });
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    assert!(window.update(|window, cx| window.has_focused_input(cx)));
 }
 
 #[test]

@@ -1408,12 +1408,9 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     // A new device pairs with the invite, then reconnects on its key alone.
     let device_key = StaticKey::generate().unwrap();
     let device = |invite| {
-        Endpoint::tcp(TcpEndpoint {
-            address,
-            server_key,
-            client_key: device_key.clone(),
-            invite,
-        })
+        let mut tcp = TcpEndpoint::at(address, server_key, device_key.clone());
+        tcp.invite = invite;
+        Endpoint::tcp(tcp)
     };
     let invite = noise::create_invite(&directory).unwrap();
     let mut first = connect_and_bootstrap(&device(Some(invite.secret.clone())));

@@ -29,7 +29,9 @@ pub enum Endpoint {
 /// `server_key` and `client_key` are the host identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TcpEndpoint {
-    pub address: SocketAddr,
+    /// A host name or IP address, resolved when connecting.
+    pub host: String,
+    pub port: u16,
     pub server_key: PublicKey,
     pub client_key: StaticKey,
     pub invite: Option<Secret>,
@@ -67,28 +69,62 @@ impl TcpEndpoint {
     /// Parses `<server key>[.<invite>]@host:port`, the text an invite hands to a person.
     pub fn parse(text: &str, client_key: StaticKey) -> io::Result<Self> {
         let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
-        let (credentials, address) = text
+        let (credentials, authority) = text
             .trim()
             .rsplit_once('@')
             .ok_or_else(|| invalid("expected <server key>[.<invite>]@host:port"))?;
-        let address = address
-            .parse::<SocketAddr>()
-            .map_err(|_| invalid("invalid host:port"))?;
+        let (host, port) = Self::split_authority(authority)?;
         let (server_key, invite) = match credentials.split_once('.') {
             Some((key, invite)) => (key, Some(Secret::parse(invite)?)),
             None => (credentials, None),
         };
         Ok(Self {
-            address,
+            host,
+            port,
             server_key: PublicKey::parse(server_key)?,
             client_key,
             invite,
         })
     }
 
-    pub fn with_address(mut self, address: SocketAddr) -> Self {
-        self.address = address;
-        self
+    /// Splits `host:port`; the host may be a name, an IPv4 address or a bracketed IPv6
+    /// address.
+    pub fn split_authority(authority: &str) -> io::Result<(String, u16)> {
+        let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
+        let (host, port) = authority
+            .trim()
+            .rsplit_once(':')
+            .ok_or_else(|| invalid("expected host:port"))?;
+        let host = host.trim_start_matches('[').trim_end_matches(']').trim();
+        if host.is_empty() {
+            return Err(invalid("the host is empty"));
+        }
+        let port = port
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0)
+            .ok_or_else(|| invalid("the port must be a number from 1 to 65535"))?;
+        Ok((host.to_owned(), port))
+    }
+
+    /// A Server bound at `address`, as its own tests connect to it.
+    pub fn at(address: SocketAddr, server_key: PublicKey, client_key: StaticKey) -> Self {
+        Self {
+            host: address.ip().to_string(),
+            port: address.port(),
+            server_key,
+            client_key,
+            invite: None,
+        }
+    }
+
+    /// `host:port`, with an IPv6 host in brackets.
+    pub fn authority(&self) -> String {
+        if self.host.contains(':') {
+            format!("[{}]:{}", self.host, self.port)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
     }
 
     pub fn without_invite(mut self) -> Self {
@@ -110,7 +146,7 @@ impl Endpoint {
         match self {
             Self::Local(path) => connect_local(path).map(EndpointStream::Local),
             Self::Tcp(tcp) => NoiseStream::initiator(
-                TcpStream::connect(tcp.address)?,
+                TcpStream::connect((tcp.host.as_str(), tcp.port))?,
                 &tcp.server_key,
                 &tcp.client_key,
                 tcp.invite.as_ref(),
@@ -158,10 +194,11 @@ impl Endpoint {
         }
     }
 
-    pub fn tcp_address(&self) -> Option<SocketAddr> {
+    /// The host and port of a TCP endpoint, which identify a saved Server in the GUI.
+    pub fn tcp_host_port(&self) -> Option<(&str, u16)> {
         match self {
             Self::Local(_) => None,
-            Self::Tcp(tcp) => Some(tcp.address),
+            Self::Tcp(tcp) => Some((tcp.host.as_str(), tcp.port)),
         }
     }
 }
@@ -171,7 +208,7 @@ impl fmt::Display for Endpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Local(path) => write!(f, "{}", path.display()),
-            Self::Tcp(tcp) => write!(f, "tcp://{}", tcp.address),
+            Self::Tcp(tcp) => write!(f, "tcp://{}", tcp.authority()),
         }
     }
 }

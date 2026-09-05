@@ -1,6 +1,5 @@
 use std::fs;
 use std::io;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use gpui::SharedString;
@@ -23,14 +22,17 @@ const COLOR_SCHEME_KEY: &str = "color_scheme";
 #[derive(Deserialize)]
 pub(super) struct SavedServer {
     pub name: String,
-    pub address: SocketAddr,
+    /// `host:port`; the host may be a name.
+    pub address: String,
     pub server_key: String,
 }
 
 impl SavedServer {
     pub(super) fn endpoint(&self, device_key: &StaticKey) -> io::Result<Endpoint> {
+        let (host, port) = TcpEndpoint::split_authority(&self.address)?;
         Ok(Endpoint::tcp(TcpEndpoint {
-            address: self.address,
+            host,
+            port,
             server_key: PublicKey::parse(&self.server_key)?,
             client_key: device_key.clone(),
             invite: None,
@@ -120,7 +122,7 @@ impl Condr {
             };
             Some(SavedServer {
                 name: connection.label.clone(),
-                address: tcp.address,
+                address: tcp.authority(),
                 server_key: tcp.server_key.to_hex(),
             })
         });
@@ -179,7 +181,7 @@ fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) ->
     for server in servers {
         let mut table = toml_edit::Table::new();
         table["name"] = toml_edit::value(server.name);
-        table["address"] = toml_edit::value(server.address.to_string());
+        table["address"] = toml_edit::value(server.address);
         table["server_key"] = toml_edit::value(server.server_key);
         saved.push(table);
     }
@@ -304,7 +306,7 @@ mod tests {
         let servers = load_servers(&path).unwrap();
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].name, "Linux");
-        assert_eq!(servers[0].address, "127.0.0.1:4242".parse().unwrap());
+        assert_eq!(servers[0].address, "127.0.0.1:4242");
         fs::remove_dir_all(directory).unwrap();
     }
 
