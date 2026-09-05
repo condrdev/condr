@@ -129,13 +129,25 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    Err(io::Error::new(
-        io::ErrorKind::TimedOut,
-        format!(
-            "condr-server did not become ready; see {}",
-            log_path.display()
-        ),
-    ))
+    // The child reports why it gave up in its log; a person reading the failure should
+    // not have to go and find it.
+    let mut message = format!(
+        "condr-server did not become ready; see {}",
+        log_path.display()
+    );
+    if let Ok(log) = fs::read_to_string(&log_path) {
+        let tail = log
+            .lines()
+            .rev()
+            .take_while(|line| !line.contains("detached process"))
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>();
+        for line in tail.into_iter().rev() {
+            message.push('\n');
+            message.push_str(line.trim_start_matches("condr-server: ").trim());
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::TimedOut, message))
 }
 
 fn server_log_path(socket_path: &Path) -> io::Result<PathBuf> {
