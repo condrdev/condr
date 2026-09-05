@@ -165,6 +165,10 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             let endpoint = config.local_endpoint();
             match condr_server::probe_server(&endpoint) {
                 Ok(()) => {
+                    // First, so it lines up with the Fingerprint field in the GUI's Edit
+                    // Server dialog for a side-by-side check.
+                    let identity = load_identity(&identity_directory()?)?;
+                    println!("condr-server: fingerprint {}", identity.public_key());
                     println!("condr-server: running at {endpoint}");
                     if let Some(address) = config.listen {
                         println!("condr-server: configured to listen at tcp://{address}");

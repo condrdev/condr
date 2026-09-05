@@ -282,17 +282,10 @@ impl Condr {
             (SharedString::from("Host"), host),
             (SharedString::from("Port"), port),
         ];
-        // 64 hex digits do not fit one dialog line; spaced into groups of 16 the text
-        // wraps at a group boundary instead of leaving a four-character tail.
-        let grouped_key = tcp
-            .server_key
-            .to_hex()
-            .as_bytes()
-            .chunks(16)
-            .map(|group| std::str::from_utf8(group).unwrap_or_default())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let fingerprint = SharedString::from(format!("Server key {grouped_key}"));
+        // The fingerprint is shown in a read-only field: one line that scrolls sideways
+        // and can be selected to compare against `condr server status`.
+        let fingerprint =
+            cx.new(|cx| InputState::new(window, cx).default_value(tcp.server_key.to_hex()));
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let inputs_for_content = fields.clone();
@@ -326,10 +319,10 @@ impl Condr {
                                         .child(field(port).w_24().flex_none()),
                                 )
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(gpui::opaque_grey(0.5, 1.0))
-                                        .child(fingerprint.clone()),
+                                    v_flex()
+                                        .gap_1()
+                                        .child(div().text_sm().child("Fingerprint"))
+                                        .child(Input::new(&fingerprint).readonly(true).w_full()),
                                 ),
                         )
                     })
