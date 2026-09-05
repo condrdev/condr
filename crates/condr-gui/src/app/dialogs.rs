@@ -1,5 +1,20 @@
 use super::*;
 
+/// What the Host field lets you type: host-name and IP characters, at most 253 of them.
+/// Brackets allow a literal IPv6 address; completeness is judged on Save.
+pub(super) fn host_text_is_plausible(text: &str) -> bool {
+    text.chars().count() <= 253
+        && text.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | ':' | '[' | ']')
+        })
+}
+
+/// What the Port field lets you type: nothing yet, or a number a `u16` holds. The
+/// standard parser already refuses signs, letters, spaces and anything past 65535.
+pub(super) fn port_text_is_plausible(text: &str) -> bool {
+    text.is_empty() || text.parse::<u16>().is_ok()
+}
+
 impl Condr {
     pub(super) fn prompt_text(
         &mut self,
@@ -247,17 +262,26 @@ impl Condr {
         else {
             return;
         };
-        let fields = [
-            ("Name", label),
-            ("Host", tcp.host.clone()),
-            ("Port", tcp.port.to_string()),
-        ]
-        .map(|(field_label, initial)| {
-            (
-                SharedString::from(field_label),
-                cx.new(|cx| InputState::new(window, cx).default_value(initial)),
-            )
+        // Typing is limited to what the field can hold: a host name or address, a port
+        // number. Whether the result is complete is checked on Save.
+        let name = cx.new(|cx| InputState::new(window, cx).default_value(label));
+        let host = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(tcp.host.clone())
+                .placeholder("host or IP")
+                .validate(|text, _| host_text_is_plausible(text))
         });
+        let port = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(tcp.port.to_string())
+                .placeholder("port")
+                .validate(|text, _| port_text_is_plausible(text))
+        });
+        let fields = [
+            (SharedString::from("Name"), name),
+            (SharedString::from("Host"), host),
+            (SharedString::from("Port"), port),
+        ];
         let fingerprint = SharedString::from(format!("Server key {}", tcp.server_key));
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
@@ -272,22 +296,31 @@ impl Condr {
                 dialog
                     .title("Edit Server")
                     .content(move |content, _, _| {
-                        let mut form = v_flex().gap_2();
-                        for (field_label, input) in &inputs_for_content {
-                            form = form.child(
-                                v_flex()
-                                    .gap_1()
-                                    .child(div().text_sm().child(field_label.clone()))
-                                    .child(Input::new(input).w_full()),
-                            );
-                        }
+                        let field = |(label, input): &(SharedString, Entity<InputState>)| {
+                            v_flex()
+                                .gap_1()
+                                .child(div().text_sm().child(label.clone()))
+                                .child(Input::new(input).w_full())
+                        };
+                        let [name, host, port] = &inputs_for_content;
                         content.child(
-                            form.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(gpui::opaque_grey(0.5, 1.0))
-                                    .child(fingerprint.clone()),
-                            ),
+                            v_flex()
+                                .gap_2()
+                                .child(field(name))
+                                // Host and port belong together, as `host:port` reads.
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .items_end()
+                                        .child(field(host).flex_1())
+                                        .child(field(port).w_24().flex_none()),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(gpui::opaque_grey(0.5, 1.0))
+                                        .child(fingerprint.clone()),
+                                ),
                         )
                     })
                     .footer(

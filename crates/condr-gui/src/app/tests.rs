@@ -59,6 +59,31 @@ pub(super) fn tcp(address: &str) -> Endpoint {
     ))
 }
 
+#[test]
+fn edit_server_fields_only_accept_host_and_port_shaped_text() {
+    use super::dialogs::{host_text_is_plausible, port_text_is_plausible};
+
+    for host in [
+        "",
+        "jpdev",
+        "lab.local",
+        "10.0.0.5",
+        "[fe80::1]",
+        "my-box-2",
+    ] {
+        assert!(host_text_is_plausible(host), "{host:?}");
+    }
+    for host in ["lab local", "jpdev/", "h@st", "ab_c", &"x".repeat(254)] {
+        assert!(!host_text_is_plausible(host), "{host:?}");
+    }
+    for port in ["", "1", "4242", "65535"] {
+        assert!(port_text_is_plausible(port), "{port:?}");
+    }
+    for port in ["65536", "123456", "-1", "42a", " 1"] {
+        assert!(!port_text_is_plausible(port), "{port:?}");
+    }
+}
+
 fn connection_with_io() -> ServerConnection {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
