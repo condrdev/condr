@@ -203,10 +203,24 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
             let clients = noise::read_authorized(&directory)?;
             if clients.is_empty() {
                 println!("condr-server: no paired devices");
+                return Ok(());
             }
+            let name_width = clients
+                .iter()
+                .map(|client| client.name.chars().count())
+                .max()
+                .unwrap_or(0)
+                .max("NAME".len());
+            println!("{:<name_width$}  {:<14}  KEY", "NAME", "PAIRED");
             for client in clients {
-                println!("{} {} {}", client.key, client.paired_at, client.name);
+                println!(
+                    "{:<name_width$}  {:<14}  {}",
+                    client.name,
+                    ago(client.paired_at),
+                    client.key
+                );
             }
+            println!("revoke a device with `condr server revoke <key or prefix>`");
             Ok(())
         }
         ServerCommand::Revoke { endpoint, key } => {
@@ -238,6 +252,21 @@ fn run_server_command(command: ServerCommand) -> io::Result<()> {
             }
         }
     }
+}
+
+/// "3 hours ago" for a Unix timestamp; coarse on purpose, a device list is not a log.
+fn ago(unix_seconds: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let elapsed = now.saturating_sub(unix_seconds);
+    let (amount, unit) = match elapsed {
+        0..60 => return "just now".into(),
+        60..3_600 => (elapsed / 60, "minute"),
+        3_600..86_400 => (elapsed / 3_600, "hour"),
+        _ => (elapsed / 86_400, "day"),
+    };
+    format!("{amount} {unit}{} ago", if amount == 1 { "" } else { "s" })
 }
 
 fn server_config(endpoint: Endpoint, snapshot_path: Option<PathBuf>) -> ServerConfig {
@@ -300,6 +329,21 @@ mod tests {
             parse(&["revoke", "abcd"]),
             Ok(ServerCommand::Revoke { key, .. }) if key == "abcd"
         ));
+    }
+
+    #[test]
+    fn pairing_age_reads_as_a_coarse_relative_time() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(ago(now), "just now");
+        assert_eq!(ago(now - 60), "1 minute ago");
+        assert_eq!(ago(now - 5 * 60), "5 minutes ago");
+        assert_eq!(ago(now - 3 * 3_600), "3 hours ago");
+        assert_eq!(ago(now - 86_400), "1 day ago");
+        assert_eq!(ago(now - 40 * 86_400), "40 days ago");
+        assert_eq!(ago(now + 100), "just now", "a clock skew is not the future");
     }
 
     #[test]
