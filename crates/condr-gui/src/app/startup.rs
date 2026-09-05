@@ -195,7 +195,7 @@ pub(super) fn acquire_single_instance_lock() -> io::Result<File> {
     lock_exclusively(&path)
 }
 
-// `Path` alone would resolve to `gpui::Path`.
+// `Path` alone would resolve to `gpui_kit::Path`.
 pub(super) fn lock_exclusively(path: &std::path::Path) -> io::Result<File> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -226,10 +226,10 @@ pub(crate) fn run() {
     };
     let (endpoint, initial) = connect_to_server(ServerConfig::default().local_endpoint());
     let config_path = config::default_path();
-    let app = gpui_platform::application().with_assets(CondrAssets::new());
+    let app = gpui_kit::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         bind_keys(cx);
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {

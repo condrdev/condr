@@ -105,7 +105,7 @@ Any crash, deadlock, data loss, shell input/output failure, accidental Server sh
 
 The release candidate must include:
 
-- A locked `Cargo.lock` and the reviewed GPUI/gpui-component revisions.
+- A locked `Cargo.lock` for the crates.io `gpui-kit` release, with its matching GPUI packages resolved transitively.
 - Passing Linux command output from the required commit.
 - A completed Windows checklist with environment details and screenshots or a short recording of local reconnect, the remote Linux Server, terminal/layout/worktree flows, and Server restart.
 - Updated `CONTEXT.md` and ADRs when implementation discovers a domain change. Behavioral changes require updating this acceptance plan before merge.

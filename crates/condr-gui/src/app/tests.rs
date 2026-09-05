@@ -12,7 +12,7 @@ use condr_core::{
     TerminalViewFrame,
 };
 use condr_server::{Endpoint, StaticKey, TcpEndpoint};
-use gpui::{AssetSource as _, KeyDownEvent, Keystroke, Task};
+use gpui_kit::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::ClientTerminal;
 use super::{
@@ -267,18 +267,23 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
 }
 
 #[test]
-fn condr_assets_include_the_prototype_agent_status_icons() {
+fn condr_assets_include_custom_and_kit_icons() {
     let assets = CondrAssets::new();
+    let listed = assets.list("icons/").unwrap();
     for path in [
         "icons/circle.svg",
         "icons/circle-filled.svg",
         "icons/circle-alert.svg",
+        "icons/server-plus.svg",
+        "icons/info.svg",
+        "icons/settings.svg",
     ] {
         let bytes = assets
             .load(path)
             .unwrap()
-            .expect("Condr status icon should be embedded");
-        assert!(bytes.starts_with(b"<svg"));
+            .expect("Condr and GPUI Kit icons should be embedded");
+        assert!(bytes.starts_with(b"<svg"), "invalid SVG asset: {path}");
+        assert!(listed.iter().any(|listed| listed.as_ref() == path));
     }
     let listed = assets.list("icons/circle").unwrap();
     assert!(

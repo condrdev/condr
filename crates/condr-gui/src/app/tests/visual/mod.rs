@@ -18,14 +18,14 @@ use condr_core::{
     TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
-use gpui::{
+use gpui_kit::{
     AppContext as _, Background, ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent,
     MouseUpEvent, Task, TestAppContext, VisualTestContext, point, px, size,
 };
 
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
-use gpui_component::dialog::Confirm;
-use gpui_component::{ActiveTheme as _, Root, WindowExt as _};
+use gpui_kit::component::dialog::Confirm;
+use gpui_kit::component::{ActiveTheme as _, Root, WindowExt as _};
 
 use super::super::{
     Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,

@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use gpui::SharedString;
+use gpui_kit::SharedString;
 use serde::Deserialize;
 
 use condr_server::{PublicKey, StaticKey, TcpEndpoint};

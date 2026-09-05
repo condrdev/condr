@@ -22,27 +22,29 @@ use condr_core::{
     TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{ClientConnection, Endpoint, ServerConfig, StaticKey, TcpEndpoint};
-use gpui::prelude::FluentBuilder;
-use gpui::*;
-use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
-use gpui_component::dock::{
+use gpui_kit::assets::Assets;
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
+use gpui_kit::component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
     PanelState, TabGroupRenderer, TilesRenderer,
 };
-use gpui_component::input::{Editor, EditorState, Input, InputState};
-use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
-use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
-use gpui_component::sidebar::{Sidebar, SidebarCollapsible, SidebarItem};
-use gpui_component::theme::{Theme, ThemeMode};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{
+use gpui_kit::component::input::{Editor, EditorState, Input, InputState};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
+use gpui_kit::component::setting::{
+    SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+};
+use gpui_kit::component::sidebar::{Sidebar, SidebarCollapsible, SidebarItem};
+use gpui_kit::component::theme::{Theme, ThemeMode};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName, IconNamed,
     IndexPath, Root, Selectable as _, Sizable as _, StyledExt as _, TitleBar, WindowExt as _,
     h_flex, v_flex,
 };
-use gpui_component_assets::Assets;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 use crate::terminal_element::{
     HoveredTerminalLink, TerminalElement, TerminalElementProps, TerminalPalette,
@@ -182,9 +184,7 @@ struct CondrAssets {
 
 impl CondrAssets {
     fn new() -> Self {
-        Self {
-            base: Assets::new(""),
-        }
+        Self { base: Assets }
     }
 }
 

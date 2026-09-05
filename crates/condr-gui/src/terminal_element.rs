@@ -10,7 +10,7 @@ use condr_core::{
     TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
     TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
 };
-use gpui::{
+use gpui_kit::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, Font, Global, GlobalElementId, Hitbox,
     HitboxBehavior, Hsla, InputHandler, InspectorElementId, IntoElement, LayoutId,

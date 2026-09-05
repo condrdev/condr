@@ -11,7 +11,7 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         super::super::super::startup::bind_keys(cx);
     });
     let (view, window, _server) = connected_condr(&mut cx);
@@ -84,7 +84,7 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
 fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -152,7 +152,7 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
 fn terminal_drag_selection_updates_locally() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -285,7 +285,7 @@ fn terminal_drag_selection_updates_locally() {
 fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -383,7 +383,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
 fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -515,7 +515,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
 fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -647,7 +647,7 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
 fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (server, endpoint) = start_tcp_server();
     let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
 
@@ -736,7 +736,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
 fn terminal_link_hover_and_modified_click_open_the_url() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -936,7 +936,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
 fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -1207,7 +1207,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
     let _serial_guard = acquire_visual_test_lock();
     let workspace_root = TestDirectory::new("selected-block-elements");
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -1227,7 +1227,7 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
     let pane_id = pane_id.unwrap();
 
     // A scheme with a selection text color, as Gruvbox and most of the collection have.
-    let selection_text: gpui::Hsla = gpui::rgb(0x123456).into();
+    let selection_text: gpui_kit::Hsla = gpui_kit::rgb(0x123456).into();
     let palette = TerminalPalette {
         selection_text: Some(selection_text),
         ..TerminalPalette::default()

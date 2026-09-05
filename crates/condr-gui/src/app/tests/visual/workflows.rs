@@ -4,7 +4,7 @@ use super::*;
 fn rename_dialogs_commit_server_workspace_and_tab_names() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|window, cx| {
@@ -123,7 +123,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
     );
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, server) = connected_condr(&mut cx);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -320,7 +320,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
 fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -470,7 +470,7 @@ fn tcp_paths_use_server_side_text_dialogs() {
 
     let (server, endpoint) = start_tcp_server();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
     window.update(|window, cx| _ = window.draw(cx));
     let new_workspace = window
@@ -538,7 +538,7 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     let first_root = TestDirectory::new("reorder-first");
     let second_root = TestDirectory::new("reorder-second");
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -685,7 +685,7 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
 fn new_workspace_round_trip_updates_gui_from_real_server() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, server) = connected_condr(&mut cx);
     let button = window
         .debug_bounds("new-terminal-workspace")
@@ -999,7 +999,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
 fn visual_context_can_resize_condr_window() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (_, window, _server) = connected_condr(&mut cx);
     window.simulate_resize(size(px(1280.), px(720.)));
     let bounds = window

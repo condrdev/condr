@@ -1,6 +1,6 @@
 use super::*;
-use gpui_component::kbd::Kbd;
-use gpui_component::tab::{Tab, TabBar};
+use gpui_kit::component::kbd::Kbd;
+use gpui_kit::component::tab::{Tab, TabBar};
 
 // Sized in rems so the window zooms with the base font, resolved against the main
 // window's rem size when it opens.
@@ -23,7 +23,7 @@ fn settings_window_bounds(window: &Window, size: Size<Pixels>, cx: &App) -> Boun
     let main = window.bounds();
     let screen = window.display(cx).map(|display| display.visible_bounds());
     let size = match &screen {
-        Some(screen) => gpui::size(
+        Some(screen) => gpui_kit::size(
             size.width.min(screen.size.width),
             size.height.min(screen.size.height),
         ),
@@ -663,7 +663,7 @@ pub(super) fn select_appearance(owner: &WeakEntity<Condr>, value: &str, cx: &mut
 }
 
 // The field callbacks below are named so tests can drive them the way the widgets
-// do; the widgets themselves belong to gpui-component and expose no test hooks.
+// do; the widgets themselves belong to GPUI Kit and expose no test hooks.
 
 /// What the Font field shows: the value as typed in this window.
 pub(super) fn terminal_font_family(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
@@ -1004,9 +1004,9 @@ fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
 
 #[cfg(test)]
 mod tests {
-    // Not `use super::*`: it would glob in `gpui::test` and shadow the built-in attribute.
+    // Not `use super::*`: it would glob in `gpui_kit::test` and shadow the built-in attribute.
     #[cfg(feature = "test-support")]
-    use gpui_component::ActiveTheme as _;
+    use gpui_kit::component::ActiveTheme as _;
 
     use super::{Appearance, TerminalFont};
     #[cfg(feature = "test-support")]
@@ -1048,10 +1048,10 @@ mod tests {
     }
 
     #[cfg(feature = "test-support")]
-    #[gpui::test]
-    fn the_terminal_font_survives_an_appearance_change(cx: &mut gpui::TestAppContext) {
+    #[gpui_kit::test]
+    fn the_terminal_font_survives_an_appearance_change(cx: &mut gpui_kit::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             let font = TerminalFont {
                 family: "Cascadia Mono".into(),
                 size: 17.,
@@ -1060,21 +1060,21 @@ mod tests {
             apply_appearance(Appearance::Dark, None, cx);
             apply_appearance(Appearance::Light, None, cx);
             assert_eq!(cx.theme().mono_font_family.as_ref(), "Cascadia Mono");
-            assert_eq!(cx.theme().mono_font_size, gpui::px(17.));
+            assert_eq!(cx.theme().mono_font_size, gpui_kit::px(17.));
         });
     }
 
     /// A listed action without a binding would render an empty row.
     #[cfg(feature = "test-support")]
-    #[gpui::test]
-    fn every_listed_shortcut_has_a_binding_on_this_platform(cx: &mut gpui::TestAppContext) {
+    #[gpui_kit::test]
+    fn every_listed_shortcut_has_a_binding_on_this_platform(cx: &mut gpui_kit::TestAppContext) {
         cx.update(super::super::startup::bind_keys);
         let window = cx.add_empty_window();
         window.update(|window, _| {
             for (_, rows) in super::SHORTCUTS {
                 for (label, action) in *rows {
                     assert!(
-                        gpui_component::kbd::Kbd::binding_for_action(
+                        gpui_kit::component::kbd::Kbd::binding_for_action(
                             *action,
                             Some(super::SHORTCUT_CONTEXT),
                             window
@@ -1088,10 +1088,10 @@ mod tests {
     }
 
     #[cfg(feature = "test-support")]
-    #[gpui::test]
-    fn applying_an_appearance_pins_the_theme_mode(cx: &mut gpui::TestAppContext) {
+    #[gpui_kit::test]
+    fn applying_an_appearance_pins_the_theme_mode(cx: &mut gpui_kit::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
 
             apply_appearance(Appearance::Dark, None, cx);
             assert!(cx.theme().is_dark());

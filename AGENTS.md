@@ -23,7 +23,7 @@ Condr 用原生 GUI 解决:跨端、轻量、快。
 
 ## 技术栈
 
-- **Rust** + **GPUI**(Zed 的 UI 框架)+ **[gpui-component](https://github.com/longbridge/gpui-component)**(组件库)
+- **Rust** + **[GPUI Kit](https://github.com/longbridge/gpui-kit)**(统一导出 GPUI、基础层、组件和资源)
 - Agent 后端:嵌入原生 agent CLI(如 Claude Code)作为子进程,而非自己实现对话循环
 
 ### 技术选型(已定,尽量与 herdr 对齐)
@@ -36,11 +36,11 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 - **异步:server/core 用 tokio**(对齐 herdr);**GUI 用 GPUI 自带 executor**,两者通过协议连接。
 - **传输:版本化二进制协议 over transport adapters**。协议使用 `bincode + serde` 长度前缀帧与严格版本握手;本地优先使用 `interprocess` 的 Unix domain socket / Windows named pipe,远程通过 TCP endpoint 接入同一协议,每个 TCP 连接都用 WireGuard 式的 `Noise_IKpsk2`(`snow`)做双向静态密钥认证与加密,新设备靠一次性 invite 配对(见 ADR 0011);capability 授权后置。Server 默认只暴露本地私有 endpoint,不监听公网。
 - **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
-- **终端渲染:自研 GPUI element**(项目最大自研件)— gpui-component 无终端组件。
-- **布局:gpui-component 的 Dock** → 映射 workspace/tab/pane 模型。
+- **终端渲染:自研 GPUI element**(项目最大自研件)— GPUI Kit 无终端组件。
+- **布局:GPUI Kit 的 Dock**(`gpui_kit::component::dock`) → 映射 workspace/tab/pane 模型。
 - **Agent 状态检测:** 移植 herdr 的实现:进程表识别 agent,底部屏幕文本 + OSC 标题/进度交给内嵌的 TOML manifest(`crates/condr-core/src/agent/manifests/`,与 herdr 上游逐字同步)按 priority/region 规则分类 idle/working/blocked,再经 herdr 同款迟滞(startup grace、Working→Idle 确认、6 次未命中)后发布;GUI 在此之上叠加 done。本地覆盖:`<config dir>/agent-detection/<id>.toml`。
 - **git worktree:shell out 调 `git`**,不引 git2。
-- **依赖:gpui 与 gpui-component 均为 git 依赖,锁定 rev**(gpui 不在 crates.io)。
+- **依赖:只声明 crates.io 的 `gpui-kit = "0.6"`**。GPUI 类型使用 `gpui_kit::*`,组件使用 `gpui_kit::component`,资源使用 `gpui_kit::assets`;通过 `gpui_kit::application()` 创建应用、`gpui_kit::init(cx)` 初始化。底层匹配的 `gpui-pre` 系列由 Kit 管理,所有实际版本由 `Cargo.lock` 锁定,无需直接声明 GPUI/平台/组件/资源 crates。GUI 测试通过 `gpui-kit/test-support` 启用。
 
 ### 架构与工程结构
 

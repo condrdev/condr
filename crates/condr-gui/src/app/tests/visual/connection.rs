@@ -6,7 +6,7 @@ use condr_server::StaticKey;
 fn stale_connection_result_cannot_replace_the_current_attempt() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|window, cx| {
@@ -42,7 +42,7 @@ fn stale_connection_result_cannot_replace_the_current_attempt() {
 fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     let original_sequence = window.read(|app| view.read(app).connection(1).unwrap().sequence);
@@ -106,7 +106,7 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
 fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -161,7 +161,7 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
 fn denied_replacement_connection_retries_after_the_controller_releases() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     let endpoint = window.read(|app| {
         view.read(app)
@@ -243,7 +243,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
     let _serial_guard = acquire_visual_test_lock();
     let workspace_root = TestDirectory::new("reconnect-cached-dock");
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -427,7 +427,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
     );
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, mut server) = connected_condr_with(&mut cx, server, endpoint.clone());
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -586,7 +586,7 @@ fn added_server_survives_gui_restart() {
 
     {
         let mut cx = TestAppContext::single();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
         let bootstrap = initial.bootstrap().clone();
         assert_eq!(bootstrap.server_id, server.handle.server_id());
@@ -625,7 +625,7 @@ fn added_server_survives_gui_restart() {
     }
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
@@ -656,7 +656,7 @@ fn corrupt_snapshot_connects_to_an_operable_start_page() {
     );
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
     assert!(window.read(|app| {
         view.read(app)
@@ -682,7 +682,7 @@ fn corrupt_snapshot_connects_to_an_operable_start_page() {
 fn text_dialog_actions_are_compact_and_submit() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|window, cx| {
@@ -712,7 +712,7 @@ fn text_dialog_actions_are_compact_and_submit() {
 fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|window, cx| {
@@ -756,7 +756,7 @@ fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
 fn server_events_wake_gui_without_polling_clock() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -788,7 +788,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
 
     {
         let mut cx = TestAppContext::single();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
         let view_holder = Rc::new(RefCell::new(None));
         let view_holder_for_window = view_holder.clone();
@@ -825,10 +825,10 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
     }
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     assert!(
         !cx.update(|cx| cx.theme().is_dark()),
-        "gpui_component::init starts every process in Light"
+        "gpui_kit::init starts every process in Light"
     );
     let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
@@ -858,7 +858,7 @@ fn font_changes_reach_the_config_once_the_debounce_elapses() {
     let (server, endpoint) = start_server();
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();
@@ -923,7 +923,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
     let (server, endpoint) = start_server();
 
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
     let view_holder = Rc::new(RefCell::new(None));
     let view_holder_for_window = view_holder.clone();

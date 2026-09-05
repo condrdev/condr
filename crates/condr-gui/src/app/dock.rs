@@ -103,7 +103,7 @@ impl DockAreaRenderer for CondrDockRenderer {
 
     fn split_frame(
         &self,
-        node: gpui_component::dock::NodeId,
+        node: gpui_kit::component::dock::NodeId,
         _: Axis,
         _: &mut Window,
         _: &mut App,
@@ -130,7 +130,7 @@ pub(super) struct CondrTabGroupRenderer;
 impl TabGroupRenderer for CondrTabGroupRenderer {
     fn frame(
         &self,
-        _: &gpui_component::dock::TabGroupContext,
+        _: &gpui_kit::component::dock::TabGroupContext,
         _: &mut Window,
         _: &mut App,
     ) -> Stateful<Div> {
@@ -144,7 +144,7 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
 
     fn content_frame(
         &self,
-        _: &gpui_component::dock::TabGroupContext,
+        _: &gpui_kit::component::dock::TabGroupContext,
         _: &mut Window,
         _: &mut App,
     ) -> Stateful<Div> {
@@ -158,7 +158,7 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
 
     fn render_tab_bar(
         &self,
-        _: &gpui_component::dock::TabGroupContext,
+        _: &gpui_kit::component::dock::TabGroupContext,
         _: &mut Window,
         _: &mut App,
     ) -> AnyElement {
@@ -175,7 +175,7 @@ impl TilesRenderer for CondrTilesRenderer {
 
     fn render_drag_bar(
         &self,
-        _: &gpui_component::dock::TileContext,
+        _: &gpui_kit::component::dock::TileContext,
         _: &mut Window,
         _: &mut App,
     ) -> AnyElement {

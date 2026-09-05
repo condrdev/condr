@@ -204,7 +204,7 @@ impl CondrSidebarIcon {
                 .justify_center()
                 .text_xs()
                 .font_medium()
-                .text_color(gpui::white())
+                .text_color(gpui_kit::white())
                 .child(initial)
                 .into_any_element(),
         };

@@ -6,7 +6,7 @@
 //! where WCAG 2.x ratios misjudge terminal themes. Lc 45 is the accepted
 //! floor for large fluent text and matches what other terminals default to.
 
-use gpui::Hsla;
+use gpui_kit::Hsla;
 
 // sRGB linearization exponent and luminance coefficients.
 const TRC: f32 = 2.4;
@@ -156,7 +156,7 @@ fn with_adjusted_lightness(foreground: Hsla, background: Hsla, minimum: f32) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::hsla;
+    use gpui_kit::hsla;
 
     const BLACK: Hsla = hsla(0.0, 0.0, 0.0, 1.0);
     const WHITE: Hsla = hsla(0.0, 0.0, 1.0, 1.0);

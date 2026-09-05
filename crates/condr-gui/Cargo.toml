@@ -12,15 +12,12 @@ name = "condr-gui"
 path = "src/main.rs"
 
 [features]
-test-support = ["gpui/test-support"]
+test-support = ["gpui-kit/test-support"]
 
 [dependencies]
 async-channel.workspace = true
 atomicwrites.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component.workspace = true
-gpui-component-assets.workspace = true
+gpui-kit.workspace = true
 condr-core = { path = "../condr-core" }
 condr-server = { path = "../condr-server" }
 serde.workspace = true

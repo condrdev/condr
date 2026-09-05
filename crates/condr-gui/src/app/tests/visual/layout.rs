@@ -5,8 +5,10 @@ fn default_window_options_create_1280_by_720_window() {
     let _serial_guard = acquire_visual_test_lock();
     let app = TestAppContext::single();
     let handle = app.update(|cx| {
-        cx.open_window(default_window_options(cx), |_, cx| cx.new(|_| gpui::Empty))
-            .unwrap()
+        cx.open_window(default_window_options(cx), |_, cx| {
+            cx.new(|_| gpui_kit::Empty)
+        })
+        .unwrap()
     });
     let window = VisualTestContext::from_window(*handle.deref(), &app).into_mut();
     let bounds = window.update(|window, _| window.bounds());
@@ -39,7 +41,7 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
             .with_snapshot_path(snapshot_path),
     );
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
     window.update(|window, cx| _ = window.draw(cx));
 
@@ -88,7 +90,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     let _serial_guard = acquire_visual_test_lock();
     let workspace_root = TestDirectory::new("readonly-dock-resize");
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -198,7 +200,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
 fn sidebar_header_and_tree_controls_match_the_prototype() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|window, cx| _ = window.draw(cx));
 
@@ -359,7 +361,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
 fn server_workspace_button_and_only_tab_close_round_trip() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     let add_server = window
@@ -436,7 +438,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     let first_root = TestDirectory::new("cached-dock-first");
     let second_root = TestDirectory::new("cached-dock-second");
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
     window.update(|_, cx| {
@@ -1352,7 +1354,7 @@ fn the_settings_button_opens_a_separate_window_that_applies_a_theme_mode() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         super::super::super::startup::bind_keys(cx);
     });
     let (view, window, _server) = connected_condr(&mut cx);
@@ -1416,7 +1418,7 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         super::super::super::startup::bind_keys(cx);
     });
     let (view, window, _server) = connected_condr(&mut cx);
@@ -1595,7 +1597,7 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
 fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|window, cx| _ = window.draw(cx));
 

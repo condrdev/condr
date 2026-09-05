@@ -1,7 +1,7 @@
 //! Built-in terminal color schemes, vendored from iTerm2-Color-Schemes in Alacritty's
 //! TOML layout. Only the chosen scheme is parsed; the names come for free.
 
-use gpui::{Hsla, rgb};
+use gpui_kit::{Hsla, rgb};
 use serde::Deserialize;
 
 use crate::terminal_element::TerminalPalette;
