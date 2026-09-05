@@ -165,12 +165,14 @@ pub(super) fn connect_to_server_with<T>(
     }
 }
 
+/// The GUI introduces itself by host name, so a paired device is recognisable in
+/// `condr server clients`.
 pub(super) fn connect_to_server(
     endpoint: Endpoint,
-    client_name: &'static str,
 ) -> (Endpoint, Result<ClientConnection, String>) {
     connect_to_server_with(endpoint, condr_server::ensure_local_server, |endpoint| {
-        ClientConnection::connect(endpoint, client_name).map_err(|error| error.to_string())
+        ClientConnection::connect(endpoint, condr_server::noise::device_name())
+            .map_err(|error| error.to_string())
     })
 }
 
@@ -222,7 +224,7 @@ pub(crate) fn run() {
             return;
         }
     };
-    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint, "condr");
+    let (endpoint, initial) = connect_to_server(ServerConfig::default().endpoint);
     let config_path = config::default_path();
     let app = gpui_platform::application().with_assets(CondrAssets::new());
 

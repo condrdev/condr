@@ -273,6 +273,20 @@ pub fn identity_directory() -> io::Result<PathBuf> {
     })
 }
 
+/// How a GUI introduces itself in `Hello`, and so how a paired device is listed: the
+/// host name, or `condr` when the system does not report one.
+pub fn device_name() -> String {
+    #[cfg(windows)]
+    let host = std::env::var("COMPUTERNAME").ok();
+    #[cfg(unix)]
+    let host = nix::unistd::gethostname()
+        .ok()
+        .map(|name| name.to_string_lossy().into_owned());
+    host.map(|host| host.trim().to_owned())
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "condr".to_owned())
+}
+
 /// The device key the CLI and GUI on this host connect with.
 pub fn host_client_key(directory: &Path) -> io::Result<StaticKey> {
     StaticKey::load_or_create(&directory.join(CLIENT_KEY_FILE))
