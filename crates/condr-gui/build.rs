@@ -4,7 +4,10 @@ use std::path::Path;
 use std::{env, fs};
 
 fn main() {
-    let schemes = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/color_schemes");
+    // Read at run time, not `env!` at compile time: a compiled-in path goes stale when the
+    // checkout moves, and cargo has no reason to rebuild the script for that.
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set");
+    let schemes = Path::new(&manifest_dir).join("assets/color_schemes");
     println!("cargo:rerun-if-changed={}", schemes.display());
 
     let mut files = fs::read_dir(&schemes)
