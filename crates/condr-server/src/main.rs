@@ -102,8 +102,8 @@ impl EndpointArgs {
 
 /// The TCP endpoint of this host's Server as its own CLI connects to it.
 fn tcp_endpoint(address: SocketAddr) -> io::Result<Endpoint> {
-    let directory = noise::identity_directory()?;
-    let identity = ServerIdentity::load_or_create(&directory)?;
+    let directory = identity_directory()?;
+    let identity = load_identity(&directory)?;
     Ok(Endpoint::tcp(TcpEndpoint {
         address,
         server_key: identity.public_key(),
@@ -121,26 +121,54 @@ fn main() {
     });
 }
 
+/// Every failure prints as a headline followed by indented detail lines:
+///
+/// ```text
+/// condr-server: failed to stop
+///   no Server is listening at /run/user/1000/condr/condr.sock
+///   for a TCP Server, pass --listen <addr>
+/// ```
 fn dispatch(command: ServerCommand) -> i32 {
     match run_server_command(command) {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("condr-server: {error}");
+            report("condr-server", &error.to_string());
             1
         }
     }
 }
 
-/// A connection failure in words: a missing socket file or a refused TCP connect both
-/// mean nobody is listening, and the raw OS error hides which endpoint was tried.
-fn connect_problem(endpoint: &Endpoint, error: &io::Error) -> String {
-    let problem = endpoint.describe_connect_error(error);
-    match (endpoint, error.kind()) {
-        (Endpoint::Local(_), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) => {
-            format!("{problem}; a TCP Server needs --listen <addr>")
+/// Prints `headline` prefixed with `prefix`, then each following line indented.
+fn report(prefix: &str, text: &str) {
+    for (index, line) in text.lines().enumerate() {
+        if index == 0 {
+            eprintln!("{prefix}: {line}");
+        } else {
+            eprintln!("  {line}");
         }
-        _ => problem,
     }
+}
+
+/// An error whose message is a headline plus detail lines, as [`report`] prints them.
+fn failure(headline: impl Into<String>, details: impl IntoIterator<Item = String>) -> io::Error {
+    let mut text = headline.into();
+    for detail in details {
+        text.push('\n');
+        text.push_str(&detail);
+    }
+    io::Error::other(text)
+}
+
+/// Why a connect failed, then what to do about it. A missing socket file or a refused
+/// TCP connect both mean nobody is listening; the raw OS error hides which endpoint.
+fn explain_connect(endpoint: &Endpoint, error: &io::Error) -> Vec<String> {
+    let mut lines = vec![endpoint.describe_connect_error(error)];
+    if let (Endpoint::Local(_), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) =
+        (endpoint, error.kind())
+    {
+        lines.push("for a TCP Server, pass --listen <addr>".into());
+    }
+    lines
 }
 
 /// Runs one `condr server …` command; `Ok` carries the process exit code.
@@ -148,9 +176,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
     match command {
         ServerCommand::Start { endpoint, snapshot } => {
             let endpoint = endpoint.resolve()?;
-            let endpoint = condr_server::ensure_server(server_config(endpoint, snapshot)).map_err(
-                |error| io::Error::new(error.kind(), format!("failed to start: {error}")),
-            )?;
+            let endpoint = condr_server::ensure_server(server_config(endpoint, snapshot))
+                .map_err(|error| failure("failed to start the Server", [error.to_string()]))?;
             println!("condr-server: running at {endpoint}");
             if let Endpoint::Tcp(tcp) = &endpoint {
                 println!("condr-server: Server key {}", tcp.server_key);
@@ -166,22 +193,17 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     Ok(0)
                 }
                 Err(error) => {
-                    println!(
-                        "condr-server: not running: {}",
-                        connect_problem(&endpoint, &error)
-                    );
+                    let mut lines = vec!["not running".to_owned()];
+                    lines.extend(explain_connect(&endpoint, &error));
+                    report("condr-server", &lines.join("\n"));
                     Ok(1)
                 }
             }
         }
         ServerCommand::Stop { endpoint } => {
             let endpoint = endpoint.resolve()?;
-            condr_server::stop_server(&endpoint).map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!("failed to stop: {}", connect_problem(&endpoint, &error)),
-                )
-            })?;
+            condr_server::stop_server(&endpoint)
+                .map_err(|error| failure("failed to stop", explain_connect(&endpoint, &error)))?;
             println!("condr-server: stopping");
             Ok(0)
         }
@@ -201,11 +223,13 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     std::process::id()
                 );
             }
-            condr_server::run(server_config(endpoint, snapshot)).map(|()| 0)
+            condr_server::run(server_config(endpoint, snapshot))
+                .map(|()| 0)
+                .map_err(|error| failure("the Server stopped with an error", [error.to_string()]))
         }
         ServerCommand::Invite => {
-            let directory = noise::identity_directory()?;
-            let identity = ServerIdentity::load_or_create(&directory)?;
+            let directory = identity_directory()?;
+            let identity = load_identity(&directory)?;
             let invite = noise::create_invite(&directory)?;
             println!(
                 "condr-server: invite valid for {} minutes; in Condr, Add Server with",
@@ -219,7 +243,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             Ok(0)
         }
         ServerCommand::Clients => {
-            let directory = noise::identity_directory()?;
+            let directory = identity_directory()?;
             let clients = noise::read_authorized(&directory)?;
             if clients.is_empty() {
                 println!("condr-server: no paired devices");
@@ -244,12 +268,12 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             Ok(0)
         }
         ServerCommand::Revoke { endpoint, key } => {
-            let directory = noise::identity_directory()?;
+            let directory = identity_directory()?;
             let removed = noise::revoke(&directory, &key)?;
             if removed == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
+                return Err(failure(
                     format!("no paired device matches {key}"),
+                    ["list paired devices with `condr server clients`".to_owned()],
                 ));
             }
             println!("condr-server: revoked {removed} device(s)");
@@ -263,16 +287,37 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 }
                 // The file edit stands, but nobody closed the device's live connections;
                 // a script must not read that as a complete revocation.
-                Err(error) => Err(io::Error::new(
-                    error.kind(),
-                    format!(
-                        "live connections were not dropped: {}",
-                        connect_problem(&endpoint, &error)
-                    ),
+                Err(error) => Err(failure(
+                    "revoked in authorized-clients, but its live connections were not dropped",
+                    explain_connect(&endpoint, &error),
                 )),
             }
         }
     }
+}
+
+fn identity_directory() -> io::Result<PathBuf> {
+    noise::identity_directory().map_err(|error| {
+        failure(
+            "no directory to keep this host's keys in",
+            [
+                error.to_string(),
+                "set CONDR_CONFIG_DIR to a private directory".to_owned(),
+            ],
+        )
+    })
+}
+
+fn load_identity(directory: &std::path::Path) -> io::Result<ServerIdentity> {
+    ServerIdentity::load_or_create(directory).map_err(|error| {
+        failure(
+            format!(
+                "could not load the Server identity in {}",
+                directory.display()
+            ),
+            [error.to_string()],
+        )
+    })
 }
 
 /// "3 hours ago" for a Unix timestamp; coarse on purpose, a device list is not a log.
