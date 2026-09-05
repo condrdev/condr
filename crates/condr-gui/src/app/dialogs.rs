@@ -282,7 +282,17 @@ impl Condr {
             (SharedString::from("Host"), host),
             (SharedString::from("Port"), port),
         ];
-        let fingerprint = SharedString::from(format!("Server key {}", tcp.server_key));
+        // 64 hex digits do not fit one dialog line; spaced into groups of 16 the text
+        // wraps at a group boundary instead of leaving a four-character tail.
+        let grouped_key = tcp
+            .server_key
+            .to_hex()
+            .as_bytes()
+            .chunks(16)
+            .map(|group| std::str::from_utf8(group).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let fingerprint = SharedString::from(format!("Server key {grouped_key}"));
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let inputs_for_content = fields.clone();
