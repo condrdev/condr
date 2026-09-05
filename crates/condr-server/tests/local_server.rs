@@ -36,6 +36,8 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
         .env(HELPER_ENV, "1")
         .env(WORKSPACE_ENV, &workspace_path)
         .env("CONDR_SOCKET_PATH", &endpoint_path)
+        // The host's own config.toml may name a TCP listener that is already in use.
+        .env("CONDR_CONFIG_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
         .output()
@@ -259,6 +261,8 @@ fn auto_started_server_survives_launcher_exit() {
         .arg("--nocapture")
         .env(DETACHED_HELPER_ENV, "1")
         .env("CONDR_SOCKET_PATH", &endpoint_path)
+        // The host's own config.toml may name a TCP listener that is already in use.
+        .env("CONDR_CONFIG_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
         .status()
