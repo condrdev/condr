@@ -1072,10 +1072,10 @@ impl Condr {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 IncomingEffect::default()
             }
-            // Only the CLI asks for Pane text or revokes devices.
-            ServerMessage::PaneText { .. } | ServerMessage::DevicesRevoked { .. } => {
-                IncomingEffect::default()
-            }
+            // Only the CLI asks for Pane text or administers devices.
+            ServerMessage::PaneText { .. }
+            | ServerMessage::DevicesRevoked { .. }
+            | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
                 self.mark_disconnected(key, index, "Server stopped".into())
             }

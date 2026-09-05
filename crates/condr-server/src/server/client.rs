@@ -63,6 +63,9 @@ pub(super) fn handle_client(
         match stream.peer_authorized() {
             Ok(true) => {
                 state_guard.tcp_peers.insert(client_id, (peer_key, peer));
+                drop(state_guard);
+                // Best effort: a failed bookkeeping write must not cost the connection.
+                let _ = stream.record_peer_seen();
             }
             Ok(false) => {
                 drop(state_guard);
@@ -822,6 +825,24 @@ pub(super) fn handle_client(
                         }
                     }
                     ServerMessage::DevicesRevoked { disconnected }
+                };
+                queue_message(&outbound, response)
+            }
+            ClientMessage::ConnectedDevices => {
+                let response = if !stream.may_administer() {
+                    ServerMessage::Error {
+                        message: "only the Server host may list connected devices".into(),
+                    }
+                } else {
+                    let state = state.lock().expect("server state lock poisoned");
+                    let mut keys = state
+                        .tcp_peers
+                        .values()
+                        .map(|(key, _)| key.to_hex())
+                        .collect::<Vec<_>>();
+                    keys.sort();
+                    keys.dedup();
+                    ServerMessage::ConnectedDevices { keys }
                 };
                 queue_message(&outbound, response)
             }

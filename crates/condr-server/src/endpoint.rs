@@ -309,6 +309,14 @@ impl EndpointStream {
         }
     }
 
+    /// Records that a TCP peer connected now, for `condr server clients`.
+    pub fn record_peer_seen(&self) -> io::Result<()> {
+        match self {
+            Self::Local(_) => Ok(()),
+            Self::Tcp(stream) => stream.record_seen(),
+        }
+    }
+
     /// Whether the peer may administer the Server: only a local connection, which means a
     /// process on the Server host itself.
     pub fn may_administer(&self) -> bool {

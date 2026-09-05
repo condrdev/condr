@@ -221,6 +221,26 @@ pub fn revoke_devices(endpoint: &Endpoint, key_prefix: &str) -> io::Result<u32> 
     }
 }
 
+/// The hex keys of paired devices holding a live TCP connection to the running Server.
+pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
+    let client = ClientConnection::connect(endpoint, "condr-clients")?;
+    let mut stream = client.into_stream();
+    condr_core::protocol::write_message(&mut stream, &ClientMessage::ConnectedDevices)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    match condr_core::protocol::read_message(&mut stream)
+        .map_err(|error| io::Error::other(error.to_string()))?
+    {
+        ServerMessage::ConnectedDevices { keys } => Ok(keys),
+        ServerMessage::Error { message } => {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
+        }
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected connected-devices response: {other:?}"),
+        )),
+    }
+}
+
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {
     let client = ClientConnection::connect(endpoint, "condr-stop")?;
     let server_id = client.bootstrap.server_id;

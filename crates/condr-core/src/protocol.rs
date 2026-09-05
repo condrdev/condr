@@ -103,6 +103,8 @@ pub enum ClientMessage {
     RevokeDevice {
         key_prefix: String,
     },
+    /// Asks which paired devices hold a live TCP connection right now. Server host only.
+    ConnectedDevices,
     Detach,
 }
 
@@ -406,6 +408,10 @@ pub enum ServerMessage {
     /// How many live connections a `RevokeDevice` request closed.
     DevicesRevoked {
         disconnected: u32,
+    },
+    /// The hex public keys of devices connected over TCP right now.
+    ConnectedDevices {
+        keys: Vec<String>,
     },
     Error {
         message: String,

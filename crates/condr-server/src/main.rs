@@ -249,20 +249,25 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 println!("condr-server: no paired devices");
                 return Ok(0);
             }
+            // A Server that is not running has no live connections; every device then
+            // shows when it was last seen.
+            let connected =
+                condr_server::connected_devices(&ServerConfig::default().local_endpoint())
+                    .unwrap_or_default();
             let name_width = clients
                 .iter()
                 .map(|client| client.name.chars().count())
                 .max()
                 .unwrap_or(0)
                 .max("NAME".len());
-            println!("{:<name_width$}  {:<14}  KEY", "NAME", "PAIRED");
+            println!("{:<name_width$}  {:<14}  KEY", "NAME", "LAST SEEN");
             for client in clients {
-                println!(
-                    "{:<name_width$}  {:<14}  {}",
-                    client.name,
-                    ago(client.paired_at),
-                    client.key
-                );
+                let seen = if connected.contains(&client.key.to_hex()) {
+                    "connected".to_owned()
+                } else {
+                    ago(client.last_seen)
+                };
+                println!("{:<name_width$}  {seen:<14}  {}", client.name, client.key);
             }
             println!("revoke a device with `condr server revoke <key or prefix>`");
             Ok(0)

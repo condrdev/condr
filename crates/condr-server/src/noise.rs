@@ -156,6 +156,8 @@ pub struct ServerIdentity {
 pub struct AuthorizedClient {
     pub key: PublicKey,
     pub paired_at: u64,
+    /// When the device last completed a handshake, as Unix seconds.
+    pub last_seen: u64,
     pub name: String,
 }
 
@@ -209,6 +211,21 @@ impl ServerIdentity {
             .any(|client| client.key == *remote))
     }
 
+    /// Notes that `remote` connected now; a device the store does not list is ignored.
+    pub fn record_seen(&self, remote: &PublicKey) -> io::Result<()> {
+        let Some(store) = &self.store else {
+            return Ok(());
+        };
+        with_store_lock(store, || {
+            let mut clients = read_authorized(store)?;
+            let Some(client) = clients.iter_mut().find(|client| client.key == *remote) else {
+                return Ok(());
+            };
+            client.last_seen = now();
+            write_authorized(store, &clients)
+        })
+    }
+
     /// The pre-shared key to answer `remote` with: the zero key for an authorized device,
     /// or the pending invite for an unknown one. `None` refuses the peer.
     fn psk_for(&self, remote: &PublicKey) -> io::Result<Option<(Secret, Option<Secret>)>> {
@@ -236,9 +253,11 @@ impl ServerIdentity {
             }
             let mut clients = read_authorized(store)?;
             if !clients.iter().any(|client| client.key == remote) {
+                let paired_at = now();
                 clients.push(AuthorizedClient {
                     key: remote,
-                    paired_at: now(),
+                    paired_at,
+                    last_seen: paired_at,
                     name: name.split_whitespace().collect::<Vec<_>>().join(" "),
                 });
                 write_authorized(store, &clients)?;
@@ -337,22 +356,36 @@ pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let mut fields = line.splitn(3, ' ');
-            let (Some(key), Some(paired_at)) = (fields.next(), fields.next()) else {
-                return Err(io::Error::new(
+            // `key paired-at last-seen name…`; a line written before last-seen existed has
+            // a name where the third number would be, and counts as seen when paired.
+            let malformed = || {
+                io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("malformed authorized-clients line: {line}"),
-                ));
+                )
+            };
+            let mut fields = line.splitn(4, ' ');
+            let (Some(key), Some(paired_at)) = (fields.next(), fields.next()) else {
+                return Err(malformed());
+            };
+            let paired_at: u64 = paired_at.parse().map_err(|_| malformed())?;
+            let third = fields.next().unwrap_or_default();
+            let (last_seen, name) = match third.parse::<u64>() {
+                Ok(last_seen) => (last_seen, fields.next().unwrap_or_default().to_owned()),
+                Err(_) => (
+                    paired_at,
+                    [third, fields.next().unwrap_or_default()]
+                        .into_iter()
+                        .filter(|part| !part.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
             };
             Ok(AuthorizedClient {
                 key: PublicKey::parse(key)?,
-                paired_at: paired_at.parse().map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("malformed authorized-clients line: {line}"),
-                    )
-                })?,
-                name: fields.next().unwrap_or_default().to_owned(),
+                paired_at,
+                last_seen,
+                name,
             })
         })
         .collect()
@@ -380,7 +413,12 @@ pub fn revoke(directory: &Path, prefix: &str) -> io::Result<usize> {
 fn write_authorized(directory: &Path, clients: &[AuthorizedClient]) -> io::Result<()> {
     let text = clients
         .iter()
-        .map(|client| format!("{} {} {}\n", client.key, client.paired_at, client.name))
+        .map(|client| {
+            format!(
+                "{} {} {} {}\n",
+                client.key, client.paired_at, client.last_seen, client.name
+            )
+        })
         .collect::<String>();
     fs::create_dir_all(directory)?;
     let target = crate::persistence::resolve_write_target(&directory.join(AUTHORIZED_FILE));
@@ -619,6 +657,18 @@ impl NoiseStream {
             } => identity.is_authorized(remote),
             Noise::Transport { identity: None, .. } => Ok(true),
             _ => Ok(false),
+        }
+    }
+
+    /// Server side: records that the peer connected now.
+    pub fn record_seen(&self) -> io::Result<()> {
+        match &*lock(&self.noise) {
+            Noise::Transport {
+                remote,
+                identity: Some(identity),
+                ..
+            } => identity.record_seen(remote),
+            _ => Ok(()),
         }
     }
 
@@ -1086,6 +1136,34 @@ mod tests {
                 .is_err()
         );
         assert!(server.join().unwrap().is_err());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn authorized_clients_keep_last_seen_and_read_lines_written_without_it() {
+        let directory =
+            std::env::temp_dir().join(format!("condr-noise-seen-{}-{}", std::process::id(), now()));
+        fs::create_dir_all(&directory).unwrap();
+        let old = StaticKey::generate().unwrap().public();
+        let new = StaticKey::generate().unwrap().public();
+        fs::write(
+            directory.join(AUTHORIZED_FILE),
+            format!("{old} 100 old laptop\n{new} 200 300 new laptop\n"),
+        )
+        .unwrap();
+
+        let clients = read_authorized(&directory).unwrap();
+        assert_eq!((clients[0].paired_at, clients[0].last_seen), (100, 100));
+        assert_eq!(clients[0].name, "old laptop");
+        assert_eq!((clients[1].paired_at, clients[1].last_seen), (200, 300));
+        assert_eq!(clients[1].name, "new laptop");
+
+        let identity = ServerIdentity::load_or_create(&directory).unwrap();
+        identity.record_seen(&old).unwrap();
+        let clients = read_authorized(&directory).unwrap();
+        assert!(clients[0].last_seen >= now() - 5);
+        assert_eq!(clients[0].name, "old laptop", "rewriting keeps the name");
+        assert_eq!(clients[1].last_seen, 300, "other devices are untouched");
         let _ = fs::remove_dir_all(directory);
     }
 

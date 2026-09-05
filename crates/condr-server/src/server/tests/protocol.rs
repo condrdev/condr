@@ -1444,10 +1444,19 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         ServerMessage::Error { message } if message.contains("only the Server host")
     ));
 
+    // The host sees the device connected, and its last-seen time was written at pairing.
+    let mut admin = connect_and_bootstrap(&host);
+    condr_core::protocol::write_message(&mut admin, &ClientMessage::ConnectedDevices).unwrap();
+    assert!(matches!(
+        read_server(&mut admin),
+        ServerMessage::ConnectedDevices { keys } if keys == vec![device_key.public().to_hex()]
+    ));
+    let paired = noise::read_authorized(&directory).unwrap();
+    assert!(paired[0].last_seen >= paired[0].paired_at);
+
     // The host revokes: the file refuses the next handshake, the message drops both
     // live connections.
     assert_eq!(noise::revoke(&directory, &prefix).unwrap(), 1);
-    let mut admin = connect_and_bootstrap(&host);
     condr_core::protocol::write_message(
         &mut admin,
         &ClientMessage::RevokeDevice {
