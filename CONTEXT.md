@@ -5,7 +5,7 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 ## Language
 
 **Server**:
-A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0012 describes. Closing a Client does not stop it or its work. Over TCP a Server has a persistent static key and accepts only paired Devices, as ADR 0011 describes.
+A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server has a persistent static key and accepts only paired Devices, as ADR 0011 describes.
 
 **Device**:
 A Client installation on another machine, identified by its own persistent static key stored beside its `config.toml`. A Device is paired once through an Invite and listed in the Server's `authorized-clients` until revoked; Clients on the Server's own machine use the local socket and need no pairing.
