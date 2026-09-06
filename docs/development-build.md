@@ -61,6 +61,8 @@ Server 用内嵌的 TOML manifest（来自 herdr，`crates/condr-core/src/agent/
 
 ### Agent 探测与启动
 
+`condr --skill` 原样输出内嵌的精简 [Condr skill](../skills/condr/SKILL.md)，无需 Server 或 Pane 环境，也不会连接或启动 Server。文档只维护 `skills/condr/SKILL.md` 一份，修改后重新构建二进制即可更新；具体参数以各命令的 `--help` 为准。
+
 ```bash
 condr agent available
 condr agent start worker --kind codex --pane 2 -- --model gpt-5

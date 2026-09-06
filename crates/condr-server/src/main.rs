@@ -11,10 +11,19 @@ mod cli;
 /// Condr: the Server and its command line. The Server owns sessions, terminals and
 /// agents; the GUI and the CLI subcommands are its clients.
 #[derive(Parser)]
-#[command(name = "condr", bin_name = "condr", version)]
+#[command(
+    name = "condr",
+    bin_name = "condr",
+    version,
+    arg_required_else_help = true,
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
+    /// Print the bundled agent skill without connecting to a Server
+    #[arg(long)]
+    skill: bool,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -90,13 +99,20 @@ enum ServerCommand {
 }
 
 fn main() {
-    std::process::exit(match Cli::parse().command {
-        Command::Server(command) => dispatch(command),
-        Command::Workspace(command) => cli::run_workspace(command),
-        Command::Tab(command) => cli::run_tab(command),
-        Command::Pane(command) => cli::run_pane(command),
-        Command::Agent(command) => cli::run_agent(command),
-    });
+    let cli = Cli::parse();
+    if cli.skill {
+        print!("{}", include_str!("../../../skills/condr/SKILL.md"));
+        return;
+    }
+    std::process::exit(
+        match cli.command.expect("subcommand required without --skill") {
+            Command::Server(command) => dispatch(command),
+            Command::Workspace(command) => cli::run_workspace(command),
+            Command::Tab(command) => cli::run_tab(command),
+            Command::Pane(command) => cli::run_pane(command),
+            Command::Agent(command) => cli::run_agent(command),
+        },
+    );
 }
 
 /// Every failure prints as a headline followed by indented detail lines:
@@ -381,7 +397,7 @@ mod tests {
     fn parse(args: &[&str]) -> Result<ServerCommand, clap::Error> {
         Cli::try_parse_from(["condr", "server"].into_iter().chain(args.iter().copied())).map(
             |cli| match cli.command {
-                Command::Server(command) => command,
+                Some(Command::Server(command)) => command,
                 _ => panic!("expected a server command"),
             },
         )
@@ -475,5 +491,7 @@ mod tests {
         assert!(parse(&["start", "--detached"]).is_err());
         assert!(parse(&["start", "--listen", "not-an-address"]).is_err());
         assert!(parse(&["revoke"]).is_err());
+        assert!(Cli::try_parse_from(["condr", "--skill", "server", "stop"]).is_err());
+        assert!(Cli::try_parse_from(["condr", "server", "stop", "--skill"]).is_err());
     }
 }

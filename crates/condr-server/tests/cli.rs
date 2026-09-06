@@ -39,6 +39,30 @@ fn err(endpoint: &Path, args: &[&str]) -> Value {
 }
 
 #[test]
+fn skill_prints_the_bundled_document_without_a_server() {
+    let root = std::env::temp_dir().join(format!("condr-skill-{}", uuid::Uuid::new_v4()));
+    let output = Command::new(env!("CARGO_BIN_EXE_condr"))
+        .arg("--skill")
+        .env("CONDR_SOCKET_PATH", root.join("absent.sock"))
+        .env("CONDR_CONFIG_DIR", &root)
+        .env("CONDR_SERVER_EXECUTABLE", root.join("absent-server"))
+        .env_remove("CONDR_ENV")
+        .env_remove("CONDR_PANE_ID")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        output.stdout,
+        include_bytes!("../../../skills/condr/SKILL.md")
+    );
+    assert!(
+        !root.exists(),
+        "printing the skill initialized runtime files"
+    );
+}
+
+#[test]
 fn workspace_and_tab_commands_drive_a_live_server() {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
