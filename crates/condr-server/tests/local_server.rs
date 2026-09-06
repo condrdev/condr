@@ -319,7 +319,9 @@ fn lifecycle_commands_manage_a_detached_server() {
         command
             .args(args)
             .env("CONDR_CONFIG_DIR", &data_directory)
-            .env("CONDR_SOCKET_PATH", &socket_path);
+            .env("CONDR_SOCKET_PATH", &socket_path)
+            .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
+            .env_remove("CONDR_PANE_ID");
         command
     };
     let endpoint = Endpoint::local(&socket_path);
@@ -399,13 +401,76 @@ fn lifecycle_commands_manage_a_detached_server() {
         "second start failed: {second_start}"
     );
 
+    let mut client = ClientConnection::connect_overview(&endpoint, "before-restart").unwrap();
+    let epoch = client.overview().runtime_epoch;
+    let server_id = client.overview().server_id;
+    client
+        .layout(LayoutCommand::CreateWorkspace {
+            root_directory: data_directory.clone(),
+            name: Some("restart-test".into()),
+            focus: false,
+        })
+        .unwrap()
+        .unwrap();
+    let snapshot = client.overview().snapshot.clone();
+    drop(client);
+
+    // A Pane-owned CLI would be killed during shutdown, so reject before stopping.
+    let pane_restart = condr(&["server", "restart"])
+        .env("CONDR_PANE_ID", "1")
+        .output()
+        .unwrap();
+    assert_eq!(pane_restart.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&pane_restart.stderr).contains("outside Condr"));
+    assert_eq!(
+        ClientConnection::connect_overview(&endpoint, "still-running")
+            .unwrap()
+            .overview()
+            .runtime_epoch,
+        epoch
+    );
+
+    let restart = condr(&["server", "restart"]).output().unwrap();
+    assert!(
+        restart.status.success(),
+        "restart failed: {}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    let client = ClientConnection::connect_overview(&endpoint, "after-restart").unwrap();
+    assert_ne!(client.overview().runtime_epoch, epoch);
+    assert_eq!(client.overview().server_id, server_id);
+    assert_eq!(client.overview().snapshot, snapshot);
+    // Configured TCP and pairing identity survive the same restart.
+    let remote = ClientConnection::connect_overview(&paired, "laptop").unwrap();
+    assert_eq!(
+        remote.overview().runtime_epoch,
+        client.overview().runtime_epoch
+    );
+    drop(remote);
+    drop(client);
+
     let stop = condr(&["server", "stop"]).status().unwrap();
     assert!(stop.success(), "stop failed: {stop}");
     wait_for_stop(&endpoint);
-    guard.disarm();
 
     let stopped_status = condr(&["server", "status"]).status().unwrap();
     assert_eq!(stopped_status.code(), Some(1));
+
+    let restart = condr(&["server", "restart", "--snapshot"])
+        .arg(&snapshot_path)
+        .output()
+        .unwrap();
+    assert!(
+        restart.status.success(),
+        "restart of stopped Server failed: {}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    let client = ClientConnection::connect_overview(&endpoint, "started-by-restart").unwrap();
+    assert_eq!(client.overview().snapshot, snapshot);
+    drop(client);
+    stop_server(&endpoint).unwrap();
+    wait_for_stop(&endpoint);
+    guard.disarm();
 
     let _ = std::fs::remove_file(log_path);
     std::fs::remove_dir_all(data_directory).unwrap();

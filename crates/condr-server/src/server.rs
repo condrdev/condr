@@ -44,8 +44,8 @@ use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
 pub use local::{
-    connected_devices, ensure_local_server, ensure_server, probe_server, revoke_devices,
-    stop_server,
+    connected_devices, ensure_local_server, ensure_server, probe_server, restart_server,
+    revoke_devices, stop_server,
 };
 use local::{default_snapshot_path, runtime_epoch, stable_endpoint_id};
 use terminal_monitor::*;

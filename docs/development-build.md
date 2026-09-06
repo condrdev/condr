@@ -42,10 +42,12 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 
 ### 两个二进制
 
-- `condr`：Server 和命令行。`condr server start|status|stop|run` 管理 Server；`condr workspace …`、`condr tab …`、`condr pane …` 从 Pane 内改 Session 结构、读终端文本（`pane read`，直接打纯文本）和向终端输入（`pane run` / `send-text` / `send-keys`）；`condr agent available|list|start|prompt|wait` 探测、启动和编排 agent。成功打 JSON 到 stdout，失败 `{"error":{"code","message"}}` 到 stderr 并退出 1，用法错误退出 2；`--help` 列出子命令。编排能力全部在 Server，所以 CLI 和 Server 是同一个二进制，无头 Linux 只需部署这一个文件。
+- `condr`：Server 和命令行。`condr server start|restart|status|stop|run` 管理 Server；`condr workspace …`、`condr tab …`、`condr pane …` 从 Pane 内改 Session 结构、读终端文本（`pane read`，直接打纯文本）和向终端输入（`pane run` / `send-text` / `send-keys`）；`condr agent available|list|start|prompt|wait` 探测、启动和编排 agent。成功打 JSON 到 stdout，失败 `{"error":{"code","message"}}` 到 stderr 并退出 1，用法错误退出 2；`--help` 列出子命令。编排能力全部在 Server，所以 CLI 和 Server 是同一个二进制，无头 Linux 只需部署这一个文件。
 - `condr-gui`：GUI，只是 Server 的一个 client。它发现已有的本地 Server，或者用同目录下的 `condr server run` 启动一个。
 
 三个平台一致。Windows 上 `condr-gui.exe` 是 GUI 子系统程序，双击不出现控制台；`condr.exe` 是普通控制台程序。安装器和快捷方式负责把 GUI 以 Condr 的名字露给用户。
+
+在 Condr 外部终端执行 `condr server restart`，先停止当前 Server，等待 PTY 关闭、快照写回和 endpoint 释放，再启动后台 Server；尚未运行时直接启动。支持 `start` 同款 `--listen`、`--snapshot`，未指定时读取配置和环境；此前通过命令行指定的自定义快照路径需再次提供，或设置 `CONDR_SNAPSHOT_PATH`。关闭超过 30 秒时报错，不启动替代进程。重启恢复布局和 cwd，agent 进程不会恢复。在 Condr Pane 内执行会提前拒绝，因为关闭 Server 会终止发起重启的 CLI。
 
 CLI 查询结构时不会请求全部终端画面；`pane read --lines N` 只读取目标 Pane 的文本。创建 Workspace、Tab 或拆分 Pane 时，Server 在同一次操作中应用名称与 `--focus`，并返回实际创建的 ID；不带 `--focus` 时保留当前选择。`pane send-keys` 支持 F1–F20，整组键在发送前校验，F21–F24 会直接拒绝。
 
@@ -104,7 +106,7 @@ $archive = Get-ChildItem .\condr-download\condr-windows-x86_64-*.zip | Select-Ob
 Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
 ```
 
-运行 `condr-dev\condr\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr\condr.exe server start|status|stop|run`。
+运行 `condr-dev\condr\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr\condr.exe server start|restart|status|stop|run`。
 
 更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 

@@ -11,8 +11,8 @@ pub use endpoint::{Endpoint, EndpointStream, TcpEndpoint, default_socket_path};
 pub use noise::{PublicKey, Secret, ServerIdentity, StaticKey};
 pub use server::{
     BoundServer, ClientConnection, ServerConfig, ServerHandle, connected_devices,
-    ensure_local_server, ensure_server, load_listen, probe_server, revoke_devices, save_listen,
-    stop_server,
+    ensure_local_server, ensure_server, load_listen, probe_server, restart_server, revoke_devices,
+    save_listen, stop_server,
 };
 
 /// Binds the configured server and runs until an explicit stop request.

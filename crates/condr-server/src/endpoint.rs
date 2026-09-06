@@ -479,7 +479,7 @@ fn bind_local(path: &Path) -> io::Result<LocalEndpointListener> {
     }
 }
 
-fn acquire_local_bind_lock(path: &Path) -> io::Result<File> {
+pub(crate) fn acquire_local_bind_lock(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true);
     #[cfg(unix)]

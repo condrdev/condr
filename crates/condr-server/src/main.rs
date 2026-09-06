@@ -49,6 +49,15 @@ enum ServerCommand {
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
     },
+    /// Stop the Server, wait for shutdown, then start it detached
+    Restart {
+        /// Also listen on this TCP address from now on (saved to config.toml)
+        #[arg(long, value_name = "ADDR")]
+        listen: Option<SocketAddr>,
+        /// Where the session snapshot is persisted
+        #[arg(long, value_name = "PATH")]
+        snapshot: Option<PathBuf>,
+    },
     /// Report whether the Server is running
     Status,
     /// Ask the Server to shut down
@@ -129,10 +138,19 @@ fn failure(headline: impl Into<String>, details: impl IntoIterator<Item = String
 
 /// Runs one `condr server …` command; `Ok` carries the process exit code.
 fn run_server_command(command: ServerCommand) -> io::Result<i32> {
+    let restart = matches!(command, ServerCommand::Restart { .. });
     match command {
-        ServerCommand::Start { listen, snapshot } => {
+        ServerCommand::Start { listen, snapshot } | ServerCommand::Restart { listen, snapshot } => {
+            // Shutdown terminates every Pane's process tree, including a restart CLI
+            // running inside it, before that CLI could launch the replacement Server.
+            if restart && std::env::var_os("CONDR_PANE_ID").is_some() {
+                return Err(io::Error::other(
+                    "run `condr server restart` from a terminal outside Condr; shutdown stops every Pane",
+                ));
+            }
             let mut config = ServerConfig::default();
-            let already_running = condr_server::probe_server(&config.local_endpoint()).is_ok();
+            let already_running =
+                !restart && condr_server::probe_server(&config.local_endpoint()).is_ok();
             if let Some(address) = listen {
                 let path = config_path()?;
                 condr_server::save_listen(&path, Some(address)).map_err(|error| {
@@ -146,8 +164,13 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             if let Some(path) = snapshot {
                 config = config.with_snapshot_path(path);
             }
-            let endpoint = condr_server::ensure_server(config.clone())
-                .map_err(|error| failure("failed to start the Server", [error.to_string()]))?;
+            let endpoint = if restart {
+                condr_server::restart_server(config.clone())
+                    .map_err(|error| failure("failed to restart the Server", [error.to_string()]))?
+            } else {
+                condr_server::ensure_server(config.clone())
+                    .map_err(|error| failure("failed to start the Server", [error.to_string()]))?
+            };
             println!("condr-server: running at {endpoint}");
             match (config.listen, already_running) {
                 (Some(address), false) => {
@@ -379,6 +402,26 @@ mod tests {
         assert_eq!(listen, Some("127.0.0.1:4242".parse().unwrap()));
         assert_eq!(snapshot, Some("state.snapshot".into()));
 
+        let ServerCommand::Restart { listen, snapshot } = parse(&[
+            "restart",
+            "--listen",
+            "127.0.0.1:4243",
+            "--snapshot",
+            "restart.snapshot",
+        ])
+        .unwrap() else {
+            panic!("expected restart");
+        };
+        assert_eq!(listen, Some("127.0.0.1:4243".parse().unwrap()));
+        assert_eq!(snapshot, Some("restart.snapshot".into()));
+        assert!(matches!(
+            parse(&["restart"]),
+            Ok(ServerCommand::Restart {
+                listen: None,
+                snapshot: None
+            })
+        ));
+
         let ServerCommand::Run {
             endpoint,
             listen,
@@ -425,6 +468,8 @@ mod tests {
         assert!(Cli::try_parse_from(["condr", "start"]).is_err());
         // Only `run` takes an explicit socket path; the others use the host's Server.
         assert!(parse(&["start", "--endpoint", "test.sock"]).is_err());
+        assert!(parse(&["restart", "--endpoint", "test.sock"]).is_err());
+        assert!(parse(&["restart", "--detached"]).is_err());
         assert!(parse(&["status", "--listen", "127.0.0.1:4242"]).is_err());
         assert!(parse(&["stop", "--snapshot", "state.snapshot"]).is_err());
         assert!(parse(&["start", "--detached"]).is_err());

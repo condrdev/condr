@@ -58,6 +58,45 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
     ensure_server(ServerConfig::default())
 }
 
+/// Stops the host's Server and waits for its listener ownership to be released before
+/// starting a replacement. An absent Server is started normally.
+pub fn restart_server(config: ServerConfig) -> io::Result<Endpoint> {
+    resolve_server_executable()?;
+    let endpoint = config.local_endpoint();
+    match stop_server(&endpoint) {
+        Ok(()) => {}
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return ensure_server(config);
+        }
+        Err(error) => return Err(error),
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        // The bind lock outlives PTY shutdown and the final Snapshot flush. Polling
+        // it also avoids filling a socket backlog after the accept loop has stopped.
+        match crate::endpoint::acquire_local_bind_lock(&config.socket_path) {
+            Ok(lock) => {
+                drop(lock);
+                return ensure_server(config);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
+            Err(error) => return Err(error),
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Server did not finish shutting down within 30 seconds; no replacement was started",
+            ));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Connects to the host's Server, starting it detached first if nothing answers on its
 /// socket. Returns the local endpoint to talk to it on.
 pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
