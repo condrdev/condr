@@ -7,6 +7,8 @@ description: Operate Condr sessions through the condr CLI, including workspaces,
 
 Condr organizes Workspaces into Tabs and terminal Panes. Each Pane runs a shell, command, or agent CLI.
 
+If a child shell resets PATH, invoke `"$CONDR_BIN_PATH"` instead of `condr` (PowerShell: `& $env:CONDR_BIN_PATH`). Panes inherit this absolute executable path from the Server.
+
 Discover syntax with `condr --help`, `condr <group> --help`, or `condr <group> <command> --help`. Always include `--help` when exploring: `workspace create` alone creates a Workspace.
 
 ## Commands
@@ -34,7 +36,7 @@ All commands below start with `condr`.
 
 ## Targets and Results
 
-- Inside Condr (`CONDR_ENV=1`), `CONDR_SOCKET_PATH` selects the Server; `CONDR_PANE_ID` identifies the caller. Omitted optional Pane targets mean the caller; use explicit IDs for other Panes.
+- Inside Condr (`CONDR_ENV=1`), `CONDR_SOCKET_PATH` selects the Server; `CONDR_PANE_ID` identifies the caller. The command sandbox must permit access to this socket. Omitted optional Pane targets mean the caller; use explicit IDs for other Panes.
 - Read IDs from responses: creation returns `.workspace`, `.tab`, and/or `.root_pane`; splitting returns `.pane.pane_id`. Create/split preserve GUI focus unless `--focus` is requested.
 - Agent targets are names assigned by `start` or numeric Pane IDs. Names match `[a-z][a-z0-9_-]{0,31}`, are unique, and last until exit or Server restart.
 - Workspace/Tab/Pane/Agent commands return JSON, except `pane read` returns text. Their failures emit `.error.code` and `.error.message` JSON to stderr, exiting 1; usage errors exit 2. Server administration uses text.

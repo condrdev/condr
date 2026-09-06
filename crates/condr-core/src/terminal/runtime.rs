@@ -952,6 +952,7 @@ impl PaneEnvironment {
     pub const ENV: &'static str = "CONDR_ENV";
     pub const PANE_ID: &'static str = "CONDR_PANE_ID";
     pub const SOCKET_PATH: &'static str = "CONDR_SOCKET_PATH";
+    pub const BIN_PATH: &'static str = "CONDR_BIN_PATH";
 
     /// Sets the `CONDR_*` variables and puts the directory holding this executable in
     /// front of `PATH`, so a portable or `cargo run` build has `condr` on the Pane's PATH
@@ -960,6 +961,9 @@ impl PaneEnvironment {
         command.env(Self::ENV, "1");
         command.env(Self::PANE_ID, self.pane_id.as_u64().to_string());
         command.env(Self::SOCKET_PATH, &self.socket_path);
+        if let Ok(executable) = std::env::current_exe() {
+            command.env(Self::BIN_PATH, executable);
+        }
         if let Some(path) = prepend_executable_directory(
             command
                 .get_env("PATH")
@@ -1108,6 +1112,10 @@ mod shell_tests {
         assert_eq!(
             command.get_env("CONDR_SOCKET_PATH").unwrap(),
             "/run/condr.sock"
+        );
+        assert_eq!(
+            command.get_env("CONDR_BIN_PATH").unwrap(),
+            std::env::current_exe().unwrap().as_os_str()
         );
         let path = command.get_env("PATH").unwrap().to_owned();
         let mut entries = std::env::split_paths(&path);

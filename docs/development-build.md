@@ -53,7 +53,9 @@ CLI 查询结构时不会请求全部终端画面；`pane read --lines N` 只读
 
 ### Pane 内的环境变量
 
-Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径；Server 与 Pane 同机，即使 Server 也监听 TCP，Pane 内的 CLI 仍走本地 socket），并把 `condr` 所在目录前置到 `PATH`。Pane 内的程序（后续的 `condr` CLI、agent hook）靠这三个变量找到自己的 Server 和 Pane；便携版和 `cargo run` 下不需要安装步骤就能在 Pane 内直接执行 `condr`。
+Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>`、`CONDR_SOCKET_PATH=<endpoint>`（本地 socket / named pipe 路径；Server 与 Pane 同机，即使 Server 也监听 TCP，Pane 内的 CLI 仍走本地 socket），并把 `condr` 所在目录前置到 `PATH`。另注入 `CONDR_BIN_PATH=<condr 的绝对路径>`：agent 执行命令时的登录 shell 可能重设 PATH，此时用 `"$CONDR_BIN_PATH"`（PowerShell：`& $env:CONDR_BIN_PATH`）调用同一二进制，包括 `--skill`，无需额外安装。此做法参考 Herdr `5158adab10b6dcfea9370782043392f80fa0643c` 的 `src/integration/env.rs`，该文件适用 Apache-2.0，无额外 notice。
+
+Agent 的命令沙箱需要允许访问上述 socket。Linux 实测 Codex 0.153.4 的 `workspace-write` 默认网络限制会使连接失败，返回 `Operation not permitted`。本轮验收通过单次启动参数 `-s workspace-write -c sandbox_workspace_write.network_access=true` 允许连接，保留文件写入限制；该选项也会允许出站网络，应按所需权限配置，详见 [Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。Condr 不修改 agent 的沙箱策略或全局配置。
 
 ### Agent 状态检测规则
 

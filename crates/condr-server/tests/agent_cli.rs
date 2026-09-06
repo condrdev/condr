@@ -140,6 +140,34 @@ impl Drop for Server {
 }
 
 #[test]
+fn pane_cli_survives_a_child_shell_path_reset() {
+    let server = Server::start();
+    let pane = server.pane();
+    server.ok(&[
+        "pane",
+        "run",
+        &pane,
+        r#"/bin/sh -lc 'PATH=/usr/bin:/bin; export PATH; "$CONDR_BIN_PATH" pane current > pane-current.json'"#,
+    ]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let current = loop {
+        if let Some(current) = std::fs::read(server.root.join("pane-current.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        {
+            break current;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Pane CLI failed after PATH reset: {}",
+            String::from_utf8_lossy(&server.run(&["pane", "read", &pane]).stdout)
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(current["pane"]["pane_id"], pane.parse::<u64>().unwrap());
+}
+
+#[test]
 fn discovers_on_server_starts_once_and_prompts_by_name() {
     let server = Server::start();
     let agents = server.ok(&["agent", "available"]);
