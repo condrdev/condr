@@ -26,6 +26,7 @@ impl Drop for ControlInputPermit {
 
 pub(super) struct QueuedInput {
     pub(super) bytes: Vec<u8>,
+    submit_split: Option<usize>,
     _user_permit: Option<UserInputPermit>,
     _control_permit: Option<ControlInputPermit>,
     terminal_replies: Option<Arc<Mutex<TerminalReplyState>>>,
@@ -101,6 +102,16 @@ impl TerminalInput {
     }
 
     pub(super) fn try_write(&self, bytes: Vec<u8>) -> io::Result<()> {
+        self.try_write_user(bytes, None)
+    }
+
+    pub(super) fn try_submit(&self, mut text: Vec<u8>, enter: Vec<u8>) -> io::Result<()> {
+        let split = text.len();
+        text.extend(enter);
+        self.try_write_user(text, Some(split))
+    }
+
+    fn try_write_user(&self, bytes: Vec<u8>, submit_split: Option<usize>) -> io::Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -135,6 +146,7 @@ impl TerminalInput {
             })?;
         let input = QueuedInput {
             bytes,
+            submit_split,
             _user_permit: Some(UserInputPermit {
                 bytes: bytes_len,
                 pending_bytes: Arc::clone(&self.pending_bytes),
@@ -187,6 +199,7 @@ impl TerminalInput {
         replies.token_queued = true;
         let input = QueuedInput {
             bytes,
+            submit_split: None,
             _user_permit: None,
             _control_permit: None,
             terminal_replies: Some(Arc::clone(&self.terminal_replies)),
@@ -233,6 +246,7 @@ impl TerminalInput {
             })?;
         let input = QueuedInput {
             bytes,
+            submit_split: None,
             _user_permit: None,
             _control_permit: Some(ControlInputPermit {
                 pending_entries: Arc::clone(&self.pending_control_entries),
@@ -1003,12 +1017,13 @@ pub(super) fn io_loop(io: TerminalIoLoop) -> io::Result<()> {
         }
         let QueuedInput {
             mut bytes,
+            submit_split,
             _user_permit,
             _control_permit,
             terminal_replies,
         } = queued;
         loop {
-            if let Err(error) = writer.write_all(&bytes).and_then(|()| writer.flush()) {
+            if let Err(error) = write_queued_input(&mut *writer, &bytes, submit_split, &stopping) {
                 drop(input);
                 if stopping.load(Ordering::Acquire) {
                     return Ok(());
@@ -1029,6 +1044,39 @@ pub(super) fn io_loop(io: TerminalIoLoop) -> io::Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+// ConPTY delivers large pastes as individual input events; native Codex needs a
+// longer settling interval than the bracketed-paste path on Unix.
+const SUBMIT_DELAY: Duration = Duration::from_millis(if cfg!(windows) { 1000 } else { 300 });
+
+fn write_queued_input(
+    writer: &mut dyn Write,
+    bytes: &[u8],
+    submit_split: Option<usize>,
+    stopping: &AtomicBool,
+) -> io::Result<()> {
+    let (text, enter) = bytes.split_at(submit_split.unwrap_or(bytes.len()));
+    writer.write_all(text)?;
+    writer.flush()?;
+    if !enter.is_empty() {
+        // A TUI's paste detector can absorb an immediate Enter. Keep the whole
+        // submission in one queue entry so another client's input cannot interleave.
+        let deadline = Instant::now() + SUBMIT_DELAY;
+        loop {
+            if stopping.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            thread::sleep(remaining.min(Duration::from_millis(10)));
+        }
+        writer.write_all(enter)?;
+        writer.flush()?;
     }
     Ok(())
 }

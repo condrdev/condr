@@ -57,6 +57,8 @@ Server 启动每个 Pane 的 shell 时注入 `CONDR_ENV=1`、`CONDR_PANE_ID=<id>
 
 Agent 的命令沙箱需要允许访问上述 socket。Linux 实测 Codex 0.153.4 的 `workspace-write` 默认网络限制会使连接失败，返回 `Operation not permitted`。本轮验收通过单次启动参数 `-s workspace-write -c sandbox_workspace_write.network_access=true` 允许连接，保留文件写入限制；该选项也会允许出站网络，应按所需权限配置，详见 [Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。Condr 不修改 agent 的沙箱策略或全局配置。
 
+Windows 原生 Codex 0.153.4 的 `workspace-write` 在本机实测中无法访问 Condr 私有命名管道，返回 `not_authorized` / `Access denied (os error 5)`，上述 Linux 网络选项不能解决。Windows 独立临时 Server 验收使用单次启动参数 `--no-alt-screen -s danger-full-access -a never`；该模式取消 Codex 命令沙箱限制，不能当作默认配置，Condr 不会自动注入。权限含义见 [Codex 审批与安全](https://learn.chatgpt.com/docs/agent-approvals-security)。
+
 ### Agent 状态检测规则
 
 Server 用内嵌的 TOML manifest（来自 herdr，`crates/condr-core/src/agent/manifests/`）判断 agent 的 idle / working / blocked。某个 agent 的规则不合适时，把修改后的 manifest 放到 `<config dir>/agent-detection/<id>.toml`（`id` 如 `claude`、`codex`），Server 启动时会用它替换内嵌版本；文件不合法时忽略并在 stderr 说明。
@@ -76,6 +78,8 @@ condr agent wait worker --until idle --until blocked --timeout 120000
 `condr-core::agent_discovery` 独立于 Pane 的进程/状态检测，按 Server 当前 PATH 查找 23 种已知 agent 的原生 CLI，返回类型和可执行文件的绝对路径；`AgentKind::executable()` 统一处理 `cursor-agent`、`kiro-cli` 等命令名。Unix 检查文件执行位，Windows 查找 `.exe` / `.cmd` / `.bat` / `.ps1`；保留 symlink/shim 路径。每次查询重新扫描，不运行 CLI、不调用 `--version`、不安装 hook，也不搜索 PATH 外的安装目录或 shell alias。通过 TCP 连接时探测的仍是目标 Server。后续 hook 集成可直接复用此模块；找到文件不代表已登录或 hook 已配置。
 
 `start` 只使用已有 Pane 的空闲 shell，保留 cwd 和环境，以探测到的绝对路径启动。支持 sh/bash/dash/zsh/ksh/mksh/fish 和 PowerShell；其它 shell 暂不支持自动启动。参数按实际 shell 引用，编码后的整条启动命令最多 4094 字节，拒绝控制字符；Windows batch shim 的参数另外拒绝 shell 元字符。命令和回车一次入队，不会拆成两次 client 请求。Shell 尚在初始化时 CLI 最多重试 2 秒，只重试 Server 确认未发送输入的请求。
+
+`start` / `prompt` 的文本与 Enter 共用一个有界输入队列任务。Writer 写完文本后，Unix 等待 300 ms、Windows 等待 1 秒再发 Enter，避免原生 CLI 把 Enter 吸收为粘贴内容；期间其它输入不能插入这次提交，停止 Terminal 会取消尚未发送的 Enter。普通键盘输入不增加等待。延迟提交思路参考 Herdr `9a2a7af5402f2bc67ab24c8b4c14c6dd20a43bb2` 的 `src/app/api/agents.rs`（Apache-2.0，文件无额外 notice）；Windows 的较长间隔来自 Condr 的原生 Codex 验证。
 
 名字遵循 `[a-z][a-z0-9_-]{0,31}`，Server 内唯一；启动中即保留，GUI/CLI 断开不会释放，进程退出、Terminal 替换或 Server 重启时释放，不进入 Session Snapshot。`prompt` / `wait` 的目标是名字或数字 Pane id，不把 agent 类型当名字解析。`prompt` 只接受 idle agent；`--wait` 必须观察到提交后的状态变化，不能用提交前的 idle 立即成功。
 

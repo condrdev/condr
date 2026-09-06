@@ -282,6 +282,20 @@ impl TerminalRuntime {
         self.input.try_write(bytes.into())
     }
 
+    /// Paste and delayed Enter share one queue entry, so another client cannot split them.
+    pub fn submit(&self, text: &str) -> io::Result<()> {
+        let modes = *self
+            .terminal
+            .lock()
+            .expect("terminal state lock poisoned")
+            .mode();
+        let bytes = encode_paste(text, modes.contains(TermMode::BRACKETED_PASTE));
+        let enter = encode_key_in_mode(&TerminalKey::Enter, TerminalModifiers::default(), modes)?;
+        self.scroll_to_bottom();
+        self.clear_selection();
+        self.input.try_submit(bytes, enter)
+    }
+
     fn clear_selection(&self) {
         let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
         if terminal.selection.take().is_some() {

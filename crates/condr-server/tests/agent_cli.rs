@@ -1,5 +1,4 @@
-#![cfg(unix)]
-
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
@@ -25,15 +24,24 @@ impl Server {
         std::fs::create_dir_all(&bin).unwrap();
         let config = root.join("config/condr");
         std::fs::create_dir_all(&config).unwrap();
+        let shell = if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            "/bin/sh"
+        };
         std::fs::write(
             config.join("config.toml"),
-            "[server.terminal]\nshell = '/bin/sh'\n",
+            format!("[server.terminal]\nshell = '{shell}'\n"),
         )
         .unwrap();
-        let executable = bin.join("codex");
-        std::fs::write(
-            &executable,
-            r#"#!/bin/sh
+        let executable = bin.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        #[cfg(windows)]
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        #[cfg(unix)]
+        {
+            std::fs::write(
+                &executable,
+                r#"#!/bin/sh
 printf 'started\n' >> "$CONDR_TEST_STARTS"
 printf '%s\n' "$@" > "$CONDR_TEST_ARGS"
 case "$1" in
@@ -50,21 +58,26 @@ while IFS= read -r line; do
   printf '\033]0;Ready\007'
 done
 "#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        #[cfg(windows)]
+        let path = std::env::join_paths(
+            std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
         )
         .unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        let path =
+            std::env::join_paths([bin, PathBuf::from("/usr/bin"), PathBuf::from("/bin")]).unwrap();
         let endpoint = Endpoint::local(root.join("server.sock"));
         let child = Command::new(env!("CARGO_BIN_EXE_condr"))
             .args(["server", "run", "--endpoint"])
             .arg(endpoint.as_local_path().unwrap())
             .arg("--snapshot")
             .arg(root.join("session.bin"))
-            .env("XDG_CONFIG_HOME", root.join("config"))
-            .env(
-                "PATH",
-                std::env::join_paths([bin, PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
-                    .unwrap(),
-            )
+            .env("CONDR_CONFIG_DIR", config)
+            .env("PATH", path)
             .env("CONDR_TEST_STARTS", root.join("starts"))
             .env("CONDR_TEST_ARGS", root.join("args"))
             .env("CONDR_TEST_PROMPTS", root.join("prompts"))
@@ -86,6 +99,28 @@ done
     }
 
     fn command(&self, args: &[&str]) -> Command {
+        // The Windows fixture is this test executable renamed to codex.exe. Exact
+        // test filters after `--` carry arbitrary native arguments to the helper.
+        #[cfg(windows)]
+        let args = if args.starts_with(&["agent", "start"]) {
+            let split = args
+                .iter()
+                .position(|arg| *arg == "--")
+                .unwrap_or(args.len());
+            let mut launch = args[..split].to_vec();
+            launch.extend([
+                "--",
+                "--exact",
+                "windows_agent_fixture",
+                "--nocapture",
+                "--test-threads=1",
+                "--",
+            ]);
+            launch.extend(args.get(split + 1..).unwrap_or_default());
+            launch
+        } else {
+            args.to_vec()
+        };
         let mut command = Command::new(env!("CARGO_BIN_EXE_condr"));
         command
             .args(args)
@@ -139,16 +174,64 @@ impl Drop for Server {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_agent_fixture() {
+    use std::io::{BufRead as _, Write as _};
+
+    if std::env::current_exe().unwrap().file_name().unwrap() != "codex.exe" {
+        return;
+    }
+    let append = |key: &str, text: &str| {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::var_os(key).unwrap())
+            .unwrap();
+        writeln!(file, "{text}").unwrap();
+    };
+    let title = |text: &str| {
+        print!("\x1b]0;{text}\x07");
+        std::io::stdout().flush().unwrap();
+    };
+    let args = std::env::args()
+        .skip_while(|arg| arg != "--")
+        .skip(1)
+        .collect::<Vec<_>>();
+    append("CONDR_TEST_STARTS", "started");
+    std::fs::write(
+        std::env::var_os("CONDR_TEST_ARGS").unwrap(),
+        format!("{}\n", args.join("\n")),
+    )
+    .unwrap();
+    match args.first().map(String::as_str) {
+        Some("--exit") => return,
+        Some("--blocked") => title("Action Required"),
+        Some("--working") => title("\u{280b} Working"),
+        _ => title("Ready"),
+    }
+    for line in std::io::stdin().lock().lines() {
+        let line = line.unwrap();
+        append("CONDR_TEST_PROMPTS", &line);
+        if line == "quit" {
+            return;
+        }
+        title("\u{280b} Working");
+        thread::sleep(Duration::from_secs(1));
+        title("Ready");
+    }
+}
+
 #[test]
 fn pane_cli_survives_a_child_shell_path_reset() {
     let server = Server::start();
     let pane = server.pane();
-    server.ok(&[
-        "pane",
-        "run",
-        &pane,
-        r#"/bin/sh -lc 'PATH=/usr/bin:/bin; export PATH; "$CONDR_BIN_PATH" pane current > pane-current.json'"#,
-    ]);
+    let command = if cfg!(windows) {
+        r#"$env:PATH = $env:SystemRoot; & $env:CONDR_BIN_PATH pane current | Out-File -Encoding ascii pane-current.json"#
+    } else {
+        r#"/bin/sh -lc 'PATH=/usr/bin:/bin; export PATH; "$CONDR_BIN_PATH" pane current > pane-current.json'"#
+    };
+    server.ok(&["pane", "run", &pane, command]);
     let deadline = Instant::now() + Duration::from_secs(5);
     let current = loop {
         if let Some(current) = std::fs::read(server.root.join("pane-current.json"))
@@ -179,7 +262,12 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
         .unwrap();
     assert_eq!(
         codex["executable"],
-        server.root.join("bin directory/codex").to_str().unwrap()
+        server
+            .root
+            .join("bin directory")
+            .join(if cfg!(windows) { "codex.exe" } else { "codex" })
+            .to_str()
+            .unwrap()
     );
     let pane = server.pane();
     let args = [
@@ -310,7 +398,9 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
             "--timeout",
             "8000"
         ]),
-        "agent_not_running"
+        "agent_not_running",
+        "{}",
+        String::from_utf8_lossy(&server.run(&["pane", "read", &pane]).stdout)
     );
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {

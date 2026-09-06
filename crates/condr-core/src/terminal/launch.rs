@@ -32,22 +32,6 @@ impl TerminalRuntime {
         self.submit(&command)
     }
 
-    /// Paste and Enter are one queued write, so another client cannot split them.
-    pub fn submit(&self, text: &str) -> io::Result<()> {
-        let modes = *self
-            .terminal
-            .lock()
-            .expect("terminal state lock poisoned")
-            .mode();
-        let mut bytes = encode_paste(text, modes.contains(TermMode::BRACKETED_PASTE));
-        bytes.extend(encode_key_in_mode(
-            &TerminalKey::Enter,
-            TerminalModifiers::default(),
-            modes,
-        )?);
-        self.write(bytes)
-    }
-
     /// A fresh process check for orchestration; display detection may intentionally lag.
     pub fn running_agent(&self) -> Option<AgentKind> {
         process_snapshot().refreshed_at = None;
@@ -212,15 +196,15 @@ mod tests {
 
     #[test]
     fn command_arguments_are_literals_and_controls_are_rejected() {
-        let args = vec![
-            "".into(),
-            "one two".into(),
-            "a'b\"c".into(),
-            "$(touch /unwanted); $HOME".into(),
-            "end\\".into(),
-        ];
         #[cfg(unix)]
         {
+            let args = vec![
+                "".into(),
+                "one two".into(),
+                "a'b\"c".into(),
+                "$(touch /unwanted); $HOME".into(),
+                "end\\".into(),
+            ];
             let script = shell_command(
                 "sh",
                 "printf",

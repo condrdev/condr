@@ -13,17 +13,17 @@ pub(super) struct ProcessSnapshot {
     pub(super) refreshed_at: Option<Instant>,
 }
 
-impl ProcessSnapshot {
-    /// Reads command lines for `pids` only and returns the table for identification.
-    fn with_command_lines(&mut self, pids: &[Pid]) -> &System {
-        if !pids.is_empty() {
-            self.system.refresh_processes_specifics(
-                ProcessesToUpdate::Some(pids),
-                ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
-            );
-        }
-        &self.system
+/// Keep partial refreshes out of the shared table: sysinfo 0.31 leaves their
+/// `updated` flags set, retaining exited processes through the next full refresh.
+fn command_line_processes(pids: &[Pid]) -> System {
+    let mut system = System::new();
+    if !pids.is_empty() {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(pids),
+            ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+        );
     }
+    system
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -334,7 +334,7 @@ impl ProcessProbe {
         let Some(foreground_group) = self.foreground_group(master) else {
             return ProcessProbeResult::Unidentified;
         };
-        let mut processes = process_snapshot();
+        let processes = process_snapshot();
         // Phase one is the cheap table (no command lines); phase two reads command lines for
         // the foreground group only, leader first.
         let Some(leader) = u32::try_from(foreground_group.as_raw())
@@ -351,7 +351,8 @@ impl ProcessProbe {
                     .and_then(|pid| getpgid(Some(UnixPid::from_raw(pid))).ok())
                     == Some(foreground_group)
         }));
-        let system = processes.with_command_lines(&members);
+        drop(processes);
+        let system = command_line_processes(&members);
         if let Some(agent) = system.process(leader).and_then(identify_process) {
             return ProcessProbeResult::Agent(agent);
         }
@@ -386,7 +387,7 @@ impl ProcessProbe {
             return ProcessProbeResult::Unidentified;
         };
         let shell_pid = Pid::from_u32(shell_pid);
-        let mut processes = process_snapshot();
+        let processes = process_snapshot();
         if processes
             .system
             .process(shell_pid)
@@ -408,7 +409,8 @@ impl ProcessProbe {
         if descendants.is_empty() {
             return ProcessProbeResult::ShellOnly;
         }
-        let system = processes.with_command_lines(&descendants);
+        drop(processes);
+        let system = command_line_processes(&descendants);
         let candidates = descendants
             .iter()
             .filter_map(|pid| {
@@ -417,7 +419,7 @@ impl ProcessProbe {
             })
             .collect::<Vec<_>>();
         root_agent(&candidates, |ancestor, descendant| {
-            descendant_depth(system, descendant, ancestor).is_some()
+            descendant_depth(&system, descendant, ancestor).is_some()
         })
         .map_or(ProcessProbeResult::Unidentified, ProcessProbeResult::Agent)
     }
@@ -453,7 +455,7 @@ pub(super) fn process_snapshot() -> std::sync::MutexGuard<'static, ProcessSnapsh
         .refreshed_at
         .is_none_or(|refreshed| now.duration_since(refreshed) >= PROCESS_REFRESH_INTERVAL)
     {
-        // Names, parents, and start times only; see `with_command_lines`.
+        // Names, parents, and start times only; see `command_line_processes`.
         snapshot
             .system
             .refresh_processes_specifics(ProcessesToUpdate::All, ProcessRefreshKind::new());

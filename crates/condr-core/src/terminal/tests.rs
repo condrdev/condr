@@ -35,6 +35,75 @@ impl Write for BlockingRecordingWriter {
 
 struct FailingWriter;
 
+struct ObservedWriter(mpsc::Sender<(Vec<u8>, Instant)>);
+
+impl Write for ObservedWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.send((bytes.to_vec(), Instant::now())).unwrap();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn submission_delays_enter_without_interleaving_other_input() {
+    let (input, receiver) = TerminalInput::channel();
+    let (written, writes) = mpsc::channel();
+    input
+        .try_submit(b"prompt".to_vec(), b"\r".to_vec())
+        .unwrap();
+    let io = thread::spawn(move || {
+        io_loop(TerminalIoLoop {
+            writer: Box::new(ObservedWriter(written)),
+            input: receiver,
+            stopping: Arc::new(AtomicBool::new(false)),
+        })
+    });
+    let (text, pasted_at) = writes.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(text, b"prompt");
+    input.try_write(b"next".to_vec()).unwrap();
+    drop(input);
+    let (enter, submitted_at) = writes.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(enter, b"\r");
+    assert!(submitted_at.duration_since(pasted_at) >= Duration::from_millis(300));
+    assert_eq!(
+        writes.recv_timeout(Duration::from_secs(2)).unwrap().0,
+        b"next"
+    );
+    io.join().unwrap().unwrap();
+}
+
+#[test]
+fn stopping_cancels_the_enter_of_a_pending_submission() {
+    let (input, receiver) = TerminalInput::channel();
+    let stopping = Arc::new(AtomicBool::new(false));
+    let (written, writes) = mpsc::channel();
+    input
+        .try_submit(b"prompt".to_vec(), b"\r".to_vec())
+        .unwrap();
+    let io = thread::spawn({
+        let stopping = Arc::clone(&stopping);
+        move || {
+            io_loop(TerminalIoLoop {
+                writer: Box::new(ObservedWriter(written)),
+                input: receiver,
+                stopping,
+            })
+        }
+    });
+    assert_eq!(
+        writes.recv_timeout(Duration::from_secs(2)).unwrap().0,
+        b"prompt"
+    );
+    stopping.store(true, Ordering::Release);
+    drop(input);
+    io.join().unwrap().unwrap();
+    assert!(writes.try_recv().is_err());
+}
+
 impl Write for FailingWriter {
     fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
         Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed"))
