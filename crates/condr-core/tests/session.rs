@@ -549,6 +549,49 @@ fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
         second
     );
     assert!(session.resize_pane(second, PaneDirection::Left, 0.1));
+
+    // H(first, V(second, third)) -> H(V(first, third), second): move reshapes the tree.
+    assert!(!session.move_pane(third, third, PaneDirection::Down));
+    assert!(session.move_pane(third, first, PaneDirection::Down));
+    let layout = session.tab(tab_id).unwrap().layout().clone();
+    let PaneLayout::Split {
+        direction: SplitDirection::Horizontal,
+        first: left,
+        second: right,
+        ..
+    } = layout
+    else {
+        panic!("expected a horizontal root, got {layout:?}");
+    };
+    assert_eq!(*right, PaneLayout::Pane(second));
+    assert_eq!(
+        *left,
+        PaneLayout::Split {
+            direction: SplitDirection::Vertical,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Pane(first)),
+            second: Box::new(PaneLayout::Pane(third)),
+        }
+    );
+    // Up places the moved Pane first; the tree goes back to H(first, V(third, second)).
+    // The surviving root split keeps the ratio the resize above left it with.
+    assert!(session.move_pane(third, second, PaneDirection::Up));
+    assert_eq!(
+        *session.tab(tab_id).unwrap().layout(),
+        PaneLayout::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.4,
+            first: Box::new(PaneLayout::Pane(first)),
+            second: Box::new(PaneLayout::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(PaneLayout::Pane(third)),
+                second: Box::new(PaneLayout::Pane(second)),
+            }),
+        }
+    );
+    assert!(session.move_pane(third, second, PaneDirection::Down));
+
     assert!(session.swap_pane(second, PaneDirection::Down));
     assert_eq!(
         session

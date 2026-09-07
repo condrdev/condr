@@ -70,6 +70,17 @@ pub(crate) enum PaneCommand {
         #[arg(long, value_enum)]
         direction: Side,
     },
+    /// Detach a Pane and reattach it beside another Pane in the same Tab
+    Move {
+        /// Defaults to the calling Pane
+        pane_id: Option<u64>,
+        /// The Pane to attach beside
+        #[arg(long)]
+        to: u64,
+        /// Which side of --to the moved Pane lands on
+        #[arg(long, value_enum)]
+        side: Side,
+    },
     /// Zoom a Pane to fill its Tab, or back; toggles unless --on or --off is given
     Zoom {
         /// Defaults to the calling Pane
@@ -705,6 +716,24 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
                 LayoutCommand::SwapPane {
                     pane_id,
                     direction: direction.into(),
+                },
+            )?;
+            let session = client.session()?;
+            let (workspace, tab) = find_pane(&session, pane_id.as_u64())?;
+            Ok(json!({
+                "pane": pane_info(client, workspace, tab, pane_id),
+                "changed": changed,
+            }))
+        }
+        PaneCommand::Move { pane_id, to, side } => {
+            let pane_id = target_pane(pane_id)?;
+            let (changed, _) = arrange(
+                client,
+                pane_id,
+                LayoutCommand::MovePane {
+                    pane_id,
+                    target_pane_id: PaneId::from_u64(to),
+                    side: side.into(),
                 },
             )?;
             let session = client.session()?;

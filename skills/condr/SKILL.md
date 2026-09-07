@@ -22,6 +22,7 @@ All commands below start with `condr`.
 | `pane layout` | Inspect splits, dimensions, and neighbors. |
 | `pane split` | Open a sibling shell right or down, inheriting cwd. |
 | `pane focus`, `pane resize`, `pane swap`, `pane zoom` | Select, resize, exchange neighbors, or toggle full-Tab view. |
+| `pane move` | Detach a Pane and reattach it beside another Pane (`--to <id> --side left\|right\|up\|down`); this is how the split tree is reshaped. |
 | `pane close` | Stop and remove a Pane; the last Pane also closes its Tab. |
 | `pane read` | Read recent terminal rows, including scrollback. |
 | `pane send-text`, `pane send-keys`, `pane run` | Type without Enter, send keys, or submit a shell command. |

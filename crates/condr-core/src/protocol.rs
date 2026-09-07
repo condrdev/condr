@@ -234,6 +234,12 @@ pub enum LayoutCommand {
         pane_id: PaneId,
         direction: PaneDirection,
     },
+    /// Detach a Pane and reattach it beside `target_pane_id` on `side`, in the same Tab.
+    MovePane {
+        pane_id: PaneId,
+        target_pane_id: PaneId,
+        side: PaneDirection,
+    },
     TogglePaneZoom {
         pane_id: PaneId,
     },

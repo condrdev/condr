@@ -159,6 +159,31 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
             direction: PaneDirection::Left,
         },
     );
+    assert!(
+        apply_layout_command(
+            &mut state,
+            LayoutCommand::MovePane {
+                pane_id: pane_three,
+                target_pane_id: pane_three,
+                side: PaneDirection::Down,
+            },
+        )
+        .is_err()
+    );
+    apply_for_test(
+        &mut state,
+        &mut updates,
+        LayoutCommand::MovePane {
+            pane_id: pane_three,
+            target_pane_id: pane_two,
+            side: PaneDirection::Up,
+        },
+    );
+    assert!(matches!(
+        state.session.tab(tab_two).unwrap().layout(),
+        PaneLayout::Split { direction: SplitDirection::Vertical, first, .. }
+            if **first == PaneLayout::Pane(pane_three)
+    ));
     apply_for_test(
         &mut state,
         &mut updates,

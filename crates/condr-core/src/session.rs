@@ -330,11 +330,15 @@ impl Session {
         }
         let new_pane_id = PaneId(reserve_ids(1)?);
         let tab = &mut workspace.tabs[tab_ix];
+        let side = match direction {
+            SplitDirection::Horizontal => PaneDirection::Right,
+            SplitDirection::Vertical => PaneDirection::Down,
+        };
         if !split_layout(
             &mut tab.layout,
             pane_id,
             new_pane_id,
-            direction,
+            side,
             valid_split_ratio(ratio),
         ) {
             return None;
@@ -671,6 +675,32 @@ impl Session {
             return false;
         };
         swap_layout_panes(&mut tab.layout, pane_id, neighbor);
+        true
+    }
+
+    /// Detaches `pane_id` from its Tab layout and reattaches it beside `target` on `side`,
+    /// like tmux `join-pane`. Both Panes must share a Tab; a Tab's only Pane cannot move.
+    pub fn move_pane(&mut self, pane_id: PaneId, target: PaneId, side: PaneDirection) -> bool {
+        if pane_id == target {
+            return false;
+        }
+        let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
+            return false;
+        };
+        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        if !tab.panes.iter().any(|pane| pane.id == target) {
+            return false;
+        }
+        let Some(mut layout) = remove_from_layout(&tab.layout, pane_id) else {
+            return false;
+        };
+        if pane_layout_depth(&layout, target, 1).is_none_or(|d| d >= MAX_SNAPSHOT_LAYOUT_DEPTH) {
+            return false;
+        }
+        if !split_layout(&mut layout, target, pane_id, side, 0.5) {
+            return false;
+        }
+        tab.layout = layout;
         true
     }
 
@@ -1032,27 +1062,36 @@ fn workspace_name(root_directory: &Path) -> String {
         })
 }
 
+/// Attaches `new_pane` beside `target` on the given side of a fresh split.
 fn split_layout(
     layout: &mut PaneLayout,
     target: PaneId,
     new_pane: PaneId,
-    direction: SplitDirection,
+    side: PaneDirection,
     ratio: f32,
 ) -> bool {
     match layout {
         PaneLayout::Pane(id) if *id == target => {
+            let direction = match side {
+                PaneDirection::Left | PaneDirection::Right => SplitDirection::Horizontal,
+                PaneDirection::Up | PaneDirection::Down => SplitDirection::Vertical,
+            };
+            let (first, second) = match side {
+                PaneDirection::Left | PaneDirection::Up => (new_pane, target),
+                PaneDirection::Right | PaneDirection::Down => (target, new_pane),
+            };
             *layout = PaneLayout::Split {
                 direction,
                 ratio,
-                first: Box::new(PaneLayout::Pane(target)),
-                second: Box::new(PaneLayout::Pane(new_pane)),
+                first: Box::new(PaneLayout::Pane(first)),
+                second: Box::new(PaneLayout::Pane(second)),
             };
             true
         }
         PaneLayout::Pane(_) => false,
         PaneLayout::Split { first, second, .. } => {
-            split_layout(first, target, new_pane, direction, ratio)
-                || split_layout(second, target, new_pane, direction, ratio)
+            split_layout(first, target, new_pane, side, ratio)
+                || split_layout(second, target, new_pane, side, ratio)
         }
     }
 }

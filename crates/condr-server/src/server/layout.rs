@@ -595,6 +595,20 @@ pub(super) fn apply_layout_command(
             }
             candidate.swap_pane(pane_id, direction);
         }
+        LayoutCommand::MovePane {
+            pane_id,
+            target_pane_id,
+            side,
+        } => {
+            if candidate.pane(pane_id).is_none() || candidate.pane(target_pane_id).is_none() {
+                return Err("unknown Pane".into());
+            }
+            if !candidate.move_pane(pane_id, target_pane_id, side) {
+                return Err(
+                    "Panes must differ, share a Tab, and leave the Tab another Pane".into(),
+                );
+            }
+        }
         LayoutCommand::TogglePaneZoom { pane_id } => {
             if candidate.pane(pane_id).is_none() {
                 return Err("unknown Pane".into());
