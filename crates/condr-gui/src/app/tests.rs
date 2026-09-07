@@ -20,9 +20,9 @@ use gpui_kit::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 use super::ClientTerminal;
 use super::{
-    ClientIo, ClosePane, CondrAssets, ConnectionStatus, FocusLeft, NewTab, NextTab, OpenSettings,
-    PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
-    TerminalClipboardShortcut, TerminalVisualSlot, ToggleZoom, accepted_text_input,
+    ActivateTab, ClientIo, ClosePane, CondrAssets, ConnectionStatus, FocusLeft, NewTab, NextTab,
+    OpenSettings, PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown,
+    SplitRight, TerminalClipboardShortcut, TerminalVisualSlot, ToggleZoom, accepted_text_input,
     agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
     clear_pending_sizes_for_bootstrap, connect_to_server_with,
     enforce_terminal_chunk_reliable_fence, fixed_shortcut, lock_exclusively, merge_terminal_deltas,
@@ -38,6 +38,44 @@ fn terminal_cell(text: &str) -> TerminalCell {
         flags: 0,
         hyperlink: None,
     }
+}
+
+#[test]
+fn tab_labels_follow_workspace_order_and_only_include_user_names() {
+    let mut session = Session::new();
+    let first_workspace = session.create_workspace("projects/first".into()).unwrap();
+    let first_tab = session.active_workspace().unwrap().active_tab().id();
+    let second_tab = session.create_tab(first_workspace).unwrap();
+    let third_tab = session.create_tab(first_workspace).unwrap();
+    let second_workspace = session.create_workspace("projects/second".into()).unwrap();
+    let labels = |session: &Session, workspace_id| {
+        session
+            .workspace(workspace_id)
+            .unwrap()
+            .tabs()
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| super::workspace::tab_label(index, tab.name()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(labels(&session, first_workspace), ["1", "2", "3"]);
+    assert_eq!(labels(&session, second_workspace), ["1"]);
+
+    // A user name that resembles an old default is still a real name.
+    assert!(session.rename_tab(second_tab, "Tab 2"));
+    assert_eq!(labels(&session, first_workspace), ["1", "2  Tab 2", "3"]);
+    assert!(session.move_tab(second_tab, 0));
+    assert_eq!(labels(&session, first_workspace), ["1  Tab 2", "2", "3"]);
+    assert!(session.close_tab(first_tab).is_some());
+    assert_eq!(labels(&session, first_workspace), ["1  Tab 2", "2"]);
+    assert!(session.move_tab(third_tab, 0));
+    assert_eq!(labels(&session, first_workspace), ["1", "2  Tab 2"]);
+
+    let mut restored = Session::restore(session.snapshot()).unwrap();
+    assert_eq!(labels(&restored, first_workspace), ["1", "2  Tab 2"]);
+    assert_eq!(labels(&restored, second_workspace), ["1"]);
+    restored.create_tab(first_workspace).unwrap();
+    assert_eq!(labels(&restored, first_workspace), ["1", "2  Tab 2", "3"]);
 }
 
 fn terminal_hyperlink_budgets(
@@ -974,6 +1012,41 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
         assert!(action("cmd-,").is_none());
     }
     assert!(action("ctrl-p").is_none());
+}
+
+#[test]
+fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "alt"
+    };
+    for number in 1..=9 {
+        let action = fixed_shortcut(&Keystroke::parse(&format!("{modifier}-{number}")).unwrap())
+            .expect("each numbered Tab has a shortcut");
+        assert_eq!(
+            action.as_any().downcast_ref::<ActivateTab>(),
+            Some(&ActivateTab { index: number - 1 })
+        );
+    }
+    for chord in [
+        format!("{modifier}-0"),
+        format!("{modifier}-shift-1"),
+        "ctrl-1".into(),
+        "ctrl-alt-1".into(),
+        "1".into(),
+        if cfg!(target_os = "macos") {
+            "alt-1"
+        } else {
+            "cmd-1"
+        }
+        .into(),
+    ] {
+        assert!(
+            fixed_shortcut(&Keystroke::parse(&chord).unwrap()).is_none(),
+            "{chord}"
+        );
+    }
 }
 
 #[test]

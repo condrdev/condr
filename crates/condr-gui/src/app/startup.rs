@@ -55,6 +55,18 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
     ];
+    let tab_modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "alt"
+    };
+    bindings.extend((0..9).map(|index| {
+        KeyBinding::new(
+            &format!("{tab_modifier}-{}", index + 1),
+            ActivateTab { index },
+            Some("Condr"),
+        )
+    }));
     if cfg!(target_os = "macos") {
         bindings.extend([
             KeyBinding::new("cmd-t", NewTab, Some("Condr")),

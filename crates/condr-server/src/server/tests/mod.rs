@@ -67,14 +67,13 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
             Option::<condr_core::WorktreeAssociation>::None,
             vec![(
                 tab_id,
-                "Tab 1".to_string(),
+                String::new(),
                 vec![(pane_id, Some(root))],
                 pane_id,
                 Vec::<PaneId>::new(),
-                (0u32, vec![(0u32, pane_id)]),
+                (u32::MAX, vec![(0u32, pane_id)]),
             )],
             tab_id,
-            u64::MAX,
         )],
         Some(workspace_id),
     ))

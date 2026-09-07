@@ -4,7 +4,7 @@
 
 Condr MVP is a native GUI client for organizing ordinary shell terminals across one or more connected Servers, Workspaces, Tabs, and split Panes. An agent CLI is an optional process that the user starts inside a Terminal; Condr never selects or launches one automatically.
 
-The GUI discovers an existing local Server or starts one with `condr server run`, the same binary used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Workspace…`, which prompts for an absolute Root Directory in that Server's filesystem namespace; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
+The GUI discovers an existing local Server or starts one with `condr server run`, the same binary used remotely, then connects through the common protocol. Closing the GUI only disconnects the client: Servers, Sessions, PTYs, and agents continue running. A selected Server with no Workspaces shows a Start Page with `New Workspace`, which prompts for an absolute Root Directory in that Server's filesystem namespace; a non-empty selected Server shows its Server/Workspace/Agent hierarchy, Tab row, and active Pane layout.
 
 ## Architecture Boundary
 
@@ -87,7 +87,7 @@ cargo build --workspace
 cargo run -p condr-gui
 ```
 
-- First launch discovers or starts one detached local Server, shows Start Page, and starts no shell. `New Workspace…` uses the native directory picker for Local and a Server-path text field for TCP/SSH-tunnel connections, then opens a shell in the validated absolute Root Directory. It does not launch an agent CLI.
+- First launch discovers or starts one detached local Server, shows Start Page, and starts no shell. `New Workspace` uses the native directory picker for Local and a Server-path text field for TCP/SSH-tunnel connections, then opens a shell in the validated absolute Root Directory. It does not launch an agent CLI.
 - PowerShell or the configured shell accepts typing, Enter, Backspace, navigation keys, Ctrl+C, ANSI color, bracketed paste, UTF-8/wide text, long scrolling output, selection, and clipboard copy.
 - Rapid window and divider resizing updates the shell's reported rows/columns without freezing, blanking, or leaving stale regions.
 - Start an identifiable long-running command and a representative Agent, close the GUI, and verify the Server, shell, and Agent remain alive. Reopen the GUI and verify it reconnects to the same Server/Session, restores the complete layout, and shows the Agent in its original Pane with current terminal content; only explicit Server stop terminates and reaps the child.

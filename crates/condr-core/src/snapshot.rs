@@ -37,7 +37,6 @@ pub(crate) struct WorkspaceSnapshot {
     #[serde(deserialize_with = "deserialize_tabs")]
     pub(crate) tabs: Vec<TabSnapshot>,
     pub(crate) active_tab: TabId,
-    pub(crate) next_tab_number: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

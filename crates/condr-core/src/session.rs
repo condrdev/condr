@@ -15,7 +15,6 @@ use crate::snapshot::{
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_STABLE_ID: u64 = u64::MAX / 2;
 const MAX_NEXT_STABLE_ID_EXCLUSIVE: u64 = MAX_STABLE_ID + 1;
-const MAX_NEXT_TAB_NUMBER_EXCLUSIVE: u64 = u64::MAX - 1;
 
 fn reserve_ids(count: u64) -> Option<u64> {
     debug_assert!(count > 0);
@@ -108,7 +107,6 @@ pub struct Workspace {
     worktree: Option<WorktreeAssociation>,
     tabs: Vec<Tab>,
     active_tab: TabId,
-    next_tab_number: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -247,7 +245,7 @@ impl Session {
             worktree: None,
             tabs: vec![Tab {
                 id: tab_id,
-                name: "Tab 1".into(),
+                name: String::new(),
                 panes: vec![Pane {
                     id: pane_id,
                     cwd: Some(root_directory),
@@ -258,7 +256,6 @@ impl Session {
                 zoomed_pane: None,
             }],
             active_tab: tab_id,
-            next_tab_number: 2,
         };
 
         self.workspaces.push(workspace);
@@ -281,17 +278,12 @@ impl Session {
             .cwd
             .clone()
             .unwrap_or_else(|| workspace.root_directory.clone());
-        let tab_number = workspace.next_tab_number;
-        let next_tab_number = tab_number
-            .checked_add(1)
-            .filter(|next| *next < MAX_NEXT_TAB_NUMBER_EXCLUSIVE)?;
         let first_id = reserve_ids(2)?;
         let tab_id = TabId(first_id);
         let pane_id = PaneId(first_id + 1);
-        workspace.next_tab_number = next_tab_number;
         workspace.tabs.push(Tab {
             id: tab_id,
-            name: format!("Tab {tab_number}"),
+            name: String::new(),
             panes: vec![Pane {
                 id: pane_id,
                 cwd: Some(cwd),
@@ -769,7 +761,6 @@ impl Session {
                         })
                         .collect(),
                     active_tab: workspace.active_tab,
-                    next_tab_number: workspace.next_tab_number,
                 })
                 .collect(),
             active_workspace: self.active_workspace,
@@ -810,7 +801,6 @@ impl Session {
                 worktree: workspace.worktree,
                 tabs,
                 active_tab: workspace.active_tab,
-                next_tab_number: workspace.next_tab_number,
             });
         }
         let session = Self {
@@ -865,18 +855,12 @@ impl Session {
             {
                 return Err(SnapshotError::Invalid("active Tab is missing"));
             }
-            if workspace.next_tab_number <= workspace.tabs.len() as u64
-                || workspace.next_tab_number >= MAX_NEXT_TAB_NUMBER_EXCLUSIVE
-            {
-                return Err(SnapshotError::Invalid("invalid next Tab number"));
-            }
-
             for tab in &workspace.tabs {
                 validate_id(tab.id.0, &mut max_id)?;
                 if !tab_ids.insert(tab.id) {
                     return Err(SnapshotError::Invalid("duplicate Tab ID"));
                 }
-                if tab.name.is_empty() || tab.panes.is_empty() {
+                if tab.panes.is_empty() {
                     return Err(SnapshotError::Invalid("invalid Tab"));
                 }
 
@@ -982,6 +966,8 @@ impl Tab {
         self.id
     }
 
+    /// The user-provided name, or empty for an unnamed Tab. Its display number
+    /// comes from its current position in the Workspace, not its stable ID.
     pub fn name(&self) -> &str {
         &self.name
     }

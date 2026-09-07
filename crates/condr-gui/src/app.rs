@@ -125,6 +125,12 @@ actions!(
     ]
 );
 
+#[derive(Clone, Debug, PartialEq, Action)]
+#[action(namespace = condr, no_json)]
+struct ActivateTab {
+    index: usize,
+}
+
 pub(crate) type ConnectionKey = u64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

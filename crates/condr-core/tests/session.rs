@@ -25,7 +25,7 @@ fn creating_workspace_commits_a_complete_initial_tree() {
     assert_eq!(workspace.tabs().len(), 1);
 
     let tab = workspace.active_tab();
-    assert_eq!(tab.name(), "Tab 1");
+    assert_eq!(tab.name(), "");
     assert_eq!(tab.panes().len(), 1);
 
     let pane = tab.focused_pane();
@@ -53,7 +53,7 @@ fn new_tab_follows_focused_pane_cwd_without_changing_workspace_root() {
     let workspace = session.active_workspace().expect("workspace is active");
     assert_eq!(workspace.root_directory(), root_directory.as_path());
     assert_eq!(workspace.active_tab().id(), tab_id);
-    assert_eq!(workspace.active_tab().name(), "Tab 2");
+    assert_eq!(workspace.active_tab().name(), "");
     assert_eq!(
         workspace.active_tab().focused_pane().cwd(),
         Some(pane_cwd.as_path())
@@ -255,6 +255,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
     let restored = Session::restore(decoded).expect("snapshot is valid");
 
     assert_eq!(restored.active_workspace_id(), Some(second_workspace_id));
+    assert_eq!(restored.active_workspace().unwrap().active_tab().name(), "");
     assert_eq!(
         restored
             .workspaces()
@@ -671,25 +672,16 @@ fn snapshot_codec_enforces_the_eight_mebibyte_limit_in_both_directions() {
 }
 
 #[test]
-fn restore_rejects_exhausted_tab_numbers_and_stable_ids() {
-    let mut session = Session::new();
-    let workspace_id = session
-        .create_workspace(PathBuf::from("projects/condr"))
-        .expect("Workspace capacity");
-    let tab = session.active_workspace().unwrap().active_tab();
-    let tab_id = tab.id().as_u64();
-    let pane_id = tab.focused_pane().id().as_u64();
-    let exhausted_tab_number =
-        encoded_snapshot(workspace_id.as_u64(), tab_id, pane_id, u64::MAX - 1);
-    let exhausted_stable_id = encoded_snapshot(u64::MAX - 2, tab_id, pane_id, 2);
-
-    for bytes in [exhausted_tab_number, exhausted_stable_id] {
-        let snapshot = SessionSnapshot::from_bytes(&bytes).expect("schema decodes");
-        assert!(matches!(
-            Session::restore(snapshot),
-            Err(SnapshotError::Invalid(_))
-        ));
-    }
+fn restore_rejects_exhausted_stable_ids() {
+    let bytes = encode_session(vec![encoded_workspace(
+        u64::MAX - 2,
+        vec![encoded_tab(11, vec![12], EncodedLayout::pane(12))],
+    )]);
+    let snapshot = SessionSnapshot::from_bytes(&bytes).expect("schema decodes");
+    assert_eq!(
+        Session::restore(snapshot).expect_err("stable ID is exhausted"),
+        SnapshotError::Invalid("invalid stable ID")
+    );
 }
 
 #[test]
@@ -709,20 +701,6 @@ fn restore_rejects_invalid_historical_worktree_parent_ids() {
             SnapshotError::Invalid("invalid stable ID")
         );
     }
-}
-
-#[test]
-fn create_tab_refuses_to_advance_an_extreme_counter() {
-    let bytes = encoded_snapshot(10, 11, 12, u64::MAX - 2);
-    let snapshot = SessionSnapshot::from_bytes(&bytes).expect("schema decodes");
-    let mut session = Session::restore(snapshot).expect("counter still has a valid value");
-    let before = session.snapshot();
-
-    assert_eq!(
-        session.create_tab(session.active_workspace_id().unwrap()),
-        None
-    );
-    assert_eq!(session.snapshot(), before);
 }
 
 #[test]
@@ -1004,34 +982,6 @@ fn restore_enforces_a_64_level_layout_depth_limit() {
     );
 }
 
-fn encoded_snapshot(workspace_id: u64, tab_id: u64, pane_id: u64, next_tab_number: u64) -> Vec<u8> {
-    let root = PathBuf::from("projects/condr");
-    bincode::serialize(&EncodedSession {
-        version: 1,
-        workspaces: vec![EncodedWorkspace {
-            id: workspace_id,
-            name: "condr".into(),
-            root_directory: root.clone(),
-            worktree: None,
-            tabs: vec![EncodedTab {
-                id: tab_id,
-                name: "Tab 1".into(),
-                panes: vec![EncodedPane {
-                    id: pane_id,
-                    cwd: Some(root),
-                }],
-                focused_pane: pane_id,
-                focus_history: Vec::new(),
-                layout: EncodedLayout::pane(pane_id),
-            }],
-            active_tab: tab_id,
-            next_tab_number,
-        }],
-        active_workspace: Some(workspace_id),
-    })
-    .unwrap()
-}
-
 fn encode_session(workspaces: Vec<EncodedWorkspace>) -> Vec<u8> {
     let active_workspace = workspaces.first().map(|workspace| workspace.id);
     bincode::serialize(&EncodedSession {
@@ -1049,7 +999,6 @@ fn encoded_workspace(id: u64, tabs: Vec<EncodedTab>) -> EncodedWorkspace {
         root_directory: PathBuf::from(format!("projects/{id}")),
         worktree: None,
         active_tab: tabs.first().expect("test Workspace has a Tab").id,
-        next_tab_number: tabs.len() as u64 + 1,
         tabs,
     }
 }
@@ -1105,7 +1054,6 @@ struct EncodedWorkspace {
     worktree: Option<EncodedWorktree>,
     tabs: Vec<EncodedTab>,
     active_tab: u64,
-    next_tab_number: u64,
 }
 
 #[derive(serde::Serialize)]

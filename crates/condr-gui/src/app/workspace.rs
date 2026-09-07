@@ -10,6 +10,15 @@ struct DraggedTab {
     name: SharedString,
 }
 
+pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
+    let number = tab_index + 1;
+    if name.is_empty() {
+        number.to_string()
+    } else {
+        format!("{number}  {name}")
+    }
+}
+
 impl Condr {
     pub(super) fn render_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(connection) = self.active_connection() else {
@@ -43,7 +52,7 @@ impl Condr {
                         .debug_selector(|| "new-terminal-workspace".into())
                         .primary()
                         .icon(IconName::SquareTerminal)
-                        .label("New Workspace…")
+                        .label("New Workspace")
                         .disabled(!can_mutate)
                         .on_click(move |_, window, cx| {
                             let _ = new_owner.update(cx, |this, cx| {
@@ -80,6 +89,7 @@ impl Condr {
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
+            let tab_label = tab_label(tab_index, &tab_name);
             let activate_owner = cx.weak_entity();
             let menu_owner = cx.weak_entity();
             let target = DropTarget::Tab {
@@ -89,6 +99,7 @@ impl Condr {
             };
             let tab_row = h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
+                .flex_shrink_0()
                 .when(can_mutate, |this| {
                     let drop_owner = cx.weak_entity();
                     let tab_ids = tab_ids.clone();
@@ -97,7 +108,7 @@ impl Condr {
                             key,
                             workspace_id,
                             tab_id,
-                            name: tab.name().to_owned().into(),
+                            name: tab_label.clone().into(),
                         },
                         move |drag, _, _, cx| {
                             cx.stop_propagation();
@@ -148,8 +159,11 @@ impl Condr {
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
                         .ghost()
                         .small()
+                        .min_w(px(64.))
+                        .max_w(px(128.))
                         .selected(tab_id == active_tab)
-                        .label(tab.name().to_owned())
+                        .label(tab_label.clone())
+                        .tooltip(tab_label)
                         .disabled(!can_mutate)
                         .on_click(move |_, window, cx| {
                             let _ = activate_owner.update(cx, |this, cx| {
@@ -162,7 +176,7 @@ impl Condr {
                     let close_owner = menu_owner.clone();
                     let rename_name = tab_name.clone();
                     menu.item(
-                        PopupMenuItem::new("Rename Tab…")
+                        PopupMenuItem::new("Rename Tab")
                             .disabled(!can_mutate)
                             .on_click(move |_, window, cx| {
                                 let name = rename_name.clone();
@@ -544,6 +558,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_close_workspace))
             .on_action(cx.listener(Self::action_next_tab))
             .on_action(cx.listener(Self::action_previous_tab))
+            .on_action(cx.listener(Self::action_activate_tab))
             .on_action(cx.listener(Self::action_split_right))
             .on_action(cx.listener(Self::action_split_down))
             .on_action(cx.listener(Self::action_focus_left))

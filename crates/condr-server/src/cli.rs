@@ -183,7 +183,7 @@ pub(crate) enum TabCommand {
     Create {
         #[arg(long, value_name = "ID")]
         workspace: Option<u64>,
-        /// Name shown on the Tab; defaults to "Tab N"
+        /// Optional Tab name; unnamed Tabs show only their Workspace position in the GUI
         #[arg(long, value_name = "TEXT")]
         label: Option<String>,
         /// Switch the GUI to the new Tab instead of leaving it in the background

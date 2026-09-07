@@ -554,6 +554,27 @@ impl Condr {
         );
     }
 
+    pub(super) fn activate_tab_at_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.active_session() else {
+            return;
+        };
+        let key = self.active_connection;
+        let Some(workspace) = self
+            .presented_workspace_id(key, &session)
+            .and_then(|id| session.workspace(id))
+        else {
+            return;
+        };
+        if let Some(tab) = workspace.tabs().get(index) {
+            self.activate_tab_on(key, tab.id(), window, cx);
+        }
+    }
+
     pub(super) fn cycle_tab(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.active_session() else {
             return;

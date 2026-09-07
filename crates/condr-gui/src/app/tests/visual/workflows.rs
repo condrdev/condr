@@ -1,6 +1,133 @@
 use super::*;
 
 #[test]
+fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("numbered-tabs");
+    let mut session = Session::new();
+    session.create_workspace(std::env::temp_dir()).unwrap();
+    let workspace_id = session.create_workspace(directory.0.clone()).unwrap();
+    let first_tab = session.active_workspace().unwrap().active_tab().id();
+    let second_tab = session.create_tab(workspace_id).unwrap();
+    assert!(session.rename_tab(first_tab, "Named Tab"));
+    let snapshot_path = directory.0.join("session.snapshot");
+    std::fs::write(&snapshot_path, session.snapshot().to_bytes().unwrap()).unwrap();
+    let endpoint = Endpoint::local(directory.0.join("server.sock"));
+    let server = start_server_with_config(
+        ServerConfig::ephemeral(endpoint.as_local_path().unwrap())
+            .with_snapshot_path(snapshot_path),
+    );
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, server) = connected_condr_with(&mut cx, server, endpoint);
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "alt"
+    };
+    let selected = |window: &mut VisualTestContext, tab_id| {
+        window.read(|app| {
+            let condr = view.read(app);
+            condr
+                .active_dock_surface
+                .is_some_and(|surface| surface.tab_id == tab_id)
+                && condr.active_session().is_some_and(|session| {
+                    session.active_workspace().is_some_and(|workspace| {
+                        workspace.id() == workspace_id && workspace.active_tab().id() == tab_id
+                    })
+                })
+        })
+    };
+    assert!(wait_until(window, |window| selected(window, second_tab)));
+
+    for (number, tab_id) in [(1, first_tab), (2, second_tab)] {
+        window.simulate_keystrokes(&format!("{modifier}-{number}"));
+        assert!(wait_until(window, |window| selected(window, tab_id)));
+        assert_eq!(
+            Session::restore(server.handle.snapshot())
+                .unwrap()
+                .active_workspace()
+                .unwrap()
+                .active_tab()
+                .id(),
+            tab_id
+        );
+    }
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::MoveTab {
+                tab_id: second_tab,
+                target_index: 0,
+            });
+        });
+    });
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .unwrap()
+                .workspace(workspace_id)
+                .unwrap()
+                .tabs()[0]
+                .id()
+                == second_tab
+        })
+    }));
+    for (number, tab_id) in [(2, first_tab), (1, second_tab)] {
+        window.simulate_keystrokes(&format!("{modifier}-{number}"));
+        assert!(wait_until(window, |window| selected(window, tab_id)));
+    }
+    let pane_id = window.read(|app| view.read(app).target_pane.unwrap().1);
+    let terminal = window.debug_bounds(terminal_selector(pane_id)).unwrap();
+    window.simulate_click(terminal.center(), Modifiers::default());
+    window.run_until_parked();
+
+    // Capture requests to prove that even missing numbers never become PTY input.
+    let (outgoing, received) = std::sync::mpsc::channel();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1).unwrap().io = Some(ClientIo {
+                outgoing,
+                _incoming_task: Task::ready(()),
+            });
+        });
+    });
+    window.simulate_keystrokes(&format!("{modifier}-9"));
+    window.run_until_parked();
+    assert!(selected(window, second_tab));
+    assert!(received.try_iter().next().is_none());
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.prompt_rename_tab(window, cx));
+    });
+    window.run_until_parked();
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    window.simulate_keystrokes(&format!("{modifier}-2"));
+    window.run_until_parked();
+    assert!(selected(window, second_tab));
+    assert!(received.try_iter().next().is_none());
+    window.simulate_keystrokes("escape");
+    window.run_until_parked();
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+
+    window.simulate_keystrokes(&format!("{modifier}-2"));
+    window.run_until_parked();
+    let messages = received.try_iter().collect::<Vec<_>>();
+    assert!(
+        matches!(
+            messages.as_slice(),
+            [ClientMessage::Layout { command: LayoutCommand::ActivateTab { tab_id }, .. }]
+                if *tab_id == first_tab
+        ),
+        "the shortcut must emit one layout command and no terminal input: {messages:?}"
+    );
+}
+
+#[test]
 fn rename_dialogs_commit_server_workspace_and_tab_names() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
@@ -75,9 +202,7 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
     );
 
     window.update(|window, cx| {
-        view.update(cx, |this, cx| {
-            this.prompt_rename_tab_on(1, tab_id, "Tab 1".into(), window, cx)
-        });
+        view.update(cx, |this, cx| this.prompt_rename_tab(window, cx));
     });
     submit_text_dialog(window, "Build Tab");
     let tab_renamed = wait_until(window, |window| {

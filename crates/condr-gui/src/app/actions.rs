@@ -1,5 +1,19 @@
 use super::*;
 
+impl Condr {
+    pub(super) fn action_activate_tab(
+        &mut self,
+        action: &ActivateTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        self.activate_tab_at_index(action.index, window, cx);
+    }
+}
+
 macro_rules! action_handlers {
     ($($name:ident($action:ty) |$this:ident, $window:ident, $cx:ident| $body:block)*) => {
         impl Condr {

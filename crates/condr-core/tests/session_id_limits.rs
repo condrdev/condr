@@ -16,7 +16,7 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
             worktree: None,
             tabs: vec![EncodedTab {
                 id: MAX_STABLE_ID - 1,
-                name: "Tab 1".into(),
+                name: String::new(),
                 panes: vec![EncodedPane {
                     id: MAX_STABLE_ID,
                     cwd: Some(PathBuf::from("projects/boundary")),
@@ -29,7 +29,6 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
                 },
             }],
             active_tab: MAX_STABLE_ID - 1,
-            next_tab_number: 2,
         }],
         active_workspace: Some(MAX_STABLE_ID - 2),
     })
@@ -72,7 +71,6 @@ struct EncodedWorkspace {
     worktree: Option<()>,
     tabs: Vec<EncodedTab>,
     active_tab: u64,
-    next_tab_number: u64,
 }
 
 #[derive(Serialize)]

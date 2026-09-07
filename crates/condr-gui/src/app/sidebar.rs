@@ -1281,7 +1281,7 @@ impl Condr {
                                 let open_name = workspace_name.clone();
                                 let remove_name = workspace_name.clone();
                                 let menu = menu.item(
-                                    PopupMenuItem::new("Rename Workspace…")
+                                    PopupMenuItem::new("Rename Workspace")
                                         .disabled(!connected)
                                         .on_click(move |_, window, cx| {
                                             let name = rename_name.clone();
@@ -1299,7 +1299,7 @@ impl Condr {
                                 let menu = if supports_worktrees {
                                     menu.separator()
                                         .item(
-                                            PopupMenuItem::new("Create Worktree…")
+                                            PopupMenuItem::new("Create Worktree")
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = create_name.clone();
@@ -1315,7 +1315,7 @@ impl Condr {
                                                 }),
                                         )
                                         .item(
-                                            PopupMenuItem::new("Open Existing Worktree…")
+                                            PopupMenuItem::new("Open Existing Worktree")
                                                 .disabled(!connected)
                                                 .on_click(move |_, window, cx| {
                                                     let name = open_name.clone();
@@ -1335,7 +1335,7 @@ impl Condr {
                                 };
                                 let menu = if managed_worktree {
                                     menu.separator().item(
-                                        PopupMenuItem::new("Remove Worktree…")
+                                        PopupMenuItem::new("Remove Worktree")
                                             .disabled(!connected)
                                             .on_click(move |_, window, cx| {
                                                 let name = remove_name.clone();
@@ -1400,7 +1400,7 @@ impl Condr {
                 format!("server-heading-{key}"),
                 move |_, _| {
                     let owner = new_workspace_owner.clone();
-                    let tooltip = format!("New Workspace on {new_workspace_label}…");
+                    let tooltip = format!("New Workspace on {new_workspace_label}");
                     Button::new(("new-workspace", key))
                         .debug_selector(move || format!("new-workspace-server-{key}"))
                         .ghost()
@@ -1536,8 +1536,8 @@ impl Condr {
                             .ghost()
                             .small()
                             .icon(IconName::Settings)
-                            .tooltip("Settings…")
-                            .accessibility_label("Settings…")
+                            .tooltip("Settings")
+                            .accessibility_label("Settings")
                             .on_click(move |_, window, cx| {
                                 let _ = settings_owner
                                     .update(cx, |this, cx| this.open_settings(window, cx));
