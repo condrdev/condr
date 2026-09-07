@@ -1281,6 +1281,7 @@ dependencies = [
  "condr-server",
  "gpui-fps",
  "gpui-kit",
+ "image",
  "serde",
  "smol_str",
  "toml 1.1.4+spec-1.1.0",

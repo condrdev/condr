@@ -777,6 +777,44 @@ pub(super) fn clipboard_image_format(
     })
 }
 
+/// Prepare images on the connection's writer thread, preserving input order without
+/// decoding on the UI thread. BMP clipboard data needs PNG for Agent image readers.
+pub(super) fn prepare_clipboard_image(
+    format: &mut condr_core::protocol::ClipboardImageFormat,
+    bytes: &mut Vec<u8>,
+) -> Result<(), String> {
+    use condr_core::protocol::{ClipboardImageFormat, MAX_CLIPBOARD_IMAGE_BYTES};
+
+    if bytes.len() > MAX_CLIPBOARD_IMAGE_BYTES {
+        return Err("Image exceeds 16 MiB".into());
+    }
+    if *format != ClipboardImageFormat::Bmp {
+        return Ok(());
+    }
+    let mut reader = image::ImageReader::with_format(
+        std::io::Cursor::new(bytes.as_slice()),
+        image::ImageFormat::Bmp,
+    );
+    // A compressed BMP must not request unbounded decoded pixel storage.
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits);
+    let png = reader
+        .decode()
+        .and_then(|decoded| {
+            let mut output = std::io::Cursor::new(Vec::new());
+            decoded.write_to(&mut output, image::ImageFormat::Png)?;
+            Ok(output.into_inner())
+        })
+        .map_err(|error| format!("Could not convert clipboard image to PNG: {error}"))?;
+    if png.len() > MAX_CLIPBOARD_IMAGE_BYTES {
+        return Err("Converted image exceeds 16 MiB".into());
+    }
+    *format = ClipboardImageFormat::Png;
+    *bytes = png;
+    Ok(())
+}
+
 /// The hover state after a pane reports `link`, or `None` when nothing changes. Every pane's
 /// mouse handler reports, so a `None` from a pane that does not own the current hover must
 /// not clear the pane that does.

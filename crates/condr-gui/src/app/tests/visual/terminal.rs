@@ -626,11 +626,11 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         click_count: 2,
     });
 
-    let selection = window.read(|app| view.read(app).terminal_selection.unwrap());
-    assert!(!selection.dragging);
-    assert_eq!(selection.range.start.column, column);
+    assert!(!window.read(|app| view.read(app).is_selecting(1, pane_id)));
+    let selection = window.read(|app| view.read(app).selection_for(1, pane_id).unwrap());
+    assert_eq!(selection.start.column, column);
     assert_eq!(
-        selection.range.end.column,
+        selection.end.column,
         column + u16::try_from(word_chars.len()).unwrap() - 1
     );
 
@@ -729,27 +729,50 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     }
 
     window.simulate_keystrokes("ctrl-u");
-    let image =
-        gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, b"clipboard image".to_vec());
-    window.write_to_clipboard(ClipboardItem::new_image(&image));
+    // Read the pasted path inside the Pane: screen cells include wide-character
+    // spacers, and shell echo/wrapping is not a lossless representation of input.
+    #[cfg(not(windows))]
+    let image_reader = r#"printf 'CONDR_IMAGE_%s\n' READY; IFS= read -r image; if [ "${image##*.}" = png ] && [ "$(od -An -tx1 -N8 "$image" | tr -d ' \n')" = 89504e470d0a1a0a ]; then printf '\nCONDR_IMAGE_%s\n' OK; fi"#;
+    #[cfg(windows)]
+    let image_reader = r#"Write-Host ('CONDR_IMAGE_' + 'READY'); $image = Read-Host; if ([IO.Path]::GetExtension($image) -eq '.png' -and [BitConverter]::ToString([IO.File]::ReadAllBytes($image), 0, 8) -eq '89-50-4E-47-0D-0A-1A-0A') { Write-Host ('CONDR_IMAGE_' + 'OK') }"#;
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(format!("{image_reader}\r")),
+            );
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_IMAGE_READY")
+    }));
+    window.write_to_clipboard(ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
+        gpui_kit::ImageFormat::Bmp,
+        vec![0],
+    )));
     window.simulate_keystrokes("alt-v");
     assert!(wait_until_event_driven(window, |window| {
-        terminal_contains(window, &view, 1, pane_id, "client-")
-            && terminal_contains(window, &view, 1, pane_id, ".png")
+        window.read(|app| {
+            let connection = view.read(app).connection(1).unwrap();
+            connection.status == ConnectionStatus::Connected
+                && connection
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.contains("Could not convert clipboard image"))
+        })
     }));
-    let path = window.read(|app| {
-        let text = view.read(app).connection(1).unwrap().terminals[&pane_id]
-            .view
-            .cells
-            .iter()
-            .map(|cell| cell.text.as_str())
-            .collect::<String>();
-        text.split_whitespace()
-            .find(|word| word.contains("client-") && word.ends_with(".png"))
-            .map(std::path::PathBuf::from)
-            .expect("Server path pasted into the Pane")
-    });
-    assert_eq!(std::fs::read(&path).unwrap(), image.bytes);
+    let mut bmp = Vec::new();
+    image::RgbImage::from_pixel(2, 1, image::Rgb([12, 34, 56]))
+        .write_to(&mut std::io::Cursor::new(&mut bmp), image::ImageFormat::Bmp)
+        .unwrap();
+    let image = gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Bmp, bmp);
+    window.write_to_clipboard(ClipboardItem::new_image(&image));
+    window.simulate_keystrokes("alt-v");
+    window.simulate_keystrokes("enter");
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_IMAGE_OK")
+    }));
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {

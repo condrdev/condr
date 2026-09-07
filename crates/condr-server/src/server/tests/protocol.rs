@@ -2073,7 +2073,7 @@ fn workspace_pane(
         .active_tab()
         .focused_pane()
         .id();
-    // Wide enough that a staged path never wraps across rows.
+    // Leave room for the shell's echoed input markers.
     send_terminal(
         stream,
         server_id,
@@ -2129,16 +2129,21 @@ fn a_pasted_image_is_staged_privately_pasted_as_a_path_and_removed_with_its_clie
     let png = b"\x89PNG\r\n\x1a\ncondr".to_vec();
     paste_image(&mut stream, server_id, session_id, pane_id, png.clone());
     // The shell echoes the pasted path; the file behind it holds the image.
-    let view = wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
+    wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
         let text = view_text(view);
         text.contains("client-") && text.contains(".png")
     });
-    let text = view_text(&view);
-    let path = text
-        .split_whitespace()
-        .find(|word| word.contains("client-") && word.ends_with(".png"))
-        .expect("staged path pasted into the Pane");
-    let path = std::path::PathBuf::from(path);
+    // The Server owns the path; shell echo loses whitespace and wide-cell fidelity.
+    let path = handle
+        .state
+        .lock()
+        .unwrap()
+        .staged_images
+        .values()
+        .flatten()
+        .next()
+        .cloned()
+        .expect("image staged for the Client");
     assert!(path.starts_with(clipboard_image::staging_directory().unwrap()));
     assert_eq!(std::fs::read(&path).unwrap(), png);
     {
@@ -2344,15 +2349,20 @@ fn a_large_image_crosses_the_noise_tcp_transport_and_dies_with_the_server() {
     let mut image = vec![0x42; 5 * 1024 * 1024];
     image[..4].copy_from_slice(b"BIG!");
     paste_image(&mut stream, server_id, session_id, pane_id, image.clone());
-    let view = wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
+    wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
         let text = view_text(view);
         text.contains("client-") && text.contains(".png")
     });
-    let path = view_text(&view)
-        .split_whitespace()
-        .find(|word| word.contains("client-") && word.ends_with(".png"))
-        .map(std::path::PathBuf::from)
-        .expect("staged path pasted into the Pane");
+    let path = handle
+        .state
+        .lock()
+        .unwrap()
+        .staged_images
+        .values()
+        .flatten()
+        .next()
+        .cloned()
+        .expect("image staged for the Client");
     assert_eq!(std::fs::read(&path).unwrap(), image);
 
     // Stopping the Server removes what its Clients staged.

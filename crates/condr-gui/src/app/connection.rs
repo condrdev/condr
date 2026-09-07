@@ -493,7 +493,19 @@ impl ClientIo {
         thread::Builder::new()
             .name("condr-client-writer".into())
             .spawn(move || {
-                while let Ok(message) = outgoing_rx.recv() {
+                while let Ok(mut message) = outgoing_rx.recv() {
+                    if let ClientMessage::PasteImage { format, bytes, .. } = &mut message
+                        && let Err(message) =
+                            super::terminal_input::prepare_clipboard_image(format, bytes)
+                    {
+                        if writer_events
+                            .send_blocking(Incoming::Message(ServerMessage::Error { message }))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                     if let Err(error) =
                         condr_core::protocol::write_client_message(&mut writer, &message)
                     {

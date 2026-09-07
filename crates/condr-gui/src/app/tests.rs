@@ -1,5 +1,6 @@
 use super::terminal_input::{
-    clipboard_image_format, is_image_paste_gesture, next_hovered_link, terminal_key_for,
+    clipboard_image_format, is_image_paste_gesture, next_hovered_link, prepare_clipboard_image,
+    terminal_key_for,
 };
 use crate::terminal_element::HoveredTerminalLink;
 use condr_core::TerminalKey;
@@ -1411,4 +1412,44 @@ fn alt_v_alone_is_the_image_paste_gesture_and_maps_only_supported_formats() {
     );
     assert_eq!(clipboard_image_format(gpui_kit::ImageFormat::Svg), None);
     assert_eq!(clipboard_image_format(gpui_kit::ImageFormat::Tiff), None);
+}
+
+#[test]
+fn clipboard_bmp_conversion_preserves_pixels_and_rejects_bad_input() {
+    use condr_core::protocol::{ClipboardImageFormat as Wire, MAX_CLIPBOARD_IMAGE_BYTES};
+    use std::io::Cursor;
+
+    let pixels = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 96]).unwrap();
+    let mut bytes = Vec::new();
+    pixels
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Bmp)
+        .unwrap();
+    let mut format = Wire::Bmp;
+    prepare_clipboard_image(&mut format, &mut bytes).unwrap();
+    assert_eq!(format, Wire::Png);
+    assert_eq!(
+        image::guess_format(&bytes).unwrap(),
+        image::ImageFormat::Png
+    );
+    assert_eq!(image::load_from_memory(&bytes).unwrap().to_rgba8(), pixels);
+
+    for mut format in [Wire::Png, Wire::Jpeg, Wire::Gif, Wire::Webp] {
+        let original_format = format;
+        let mut bytes = vec![1, 2, 3];
+        prepare_clipboard_image(&mut format, &mut bytes).unwrap();
+        assert_eq!(format, original_format);
+        assert_eq!(bytes, [1, 2, 3]);
+    }
+
+    let mut format = Wire::Bmp;
+    let mut bytes = vec![1, 2, 3];
+    assert!(prepare_clipboard_image(&mut format, &mut bytes).is_err());
+    assert_eq!(format, Wire::Bmp);
+    assert_eq!(bytes, [1, 2, 3]);
+    bytes.resize(MAX_CLIPBOARD_IMAGE_BYTES + 1, 0);
+    assert!(
+        prepare_clipboard_image(&mut format, &mut bytes)
+            .unwrap_err()
+            .contains("16 MiB")
+    );
 }
