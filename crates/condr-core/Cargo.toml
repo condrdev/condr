@@ -14,6 +14,7 @@ dirs.workspace = true
 portable-pty.workspace = true
 regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 smol_str.workspace = true
 sysinfo.workspace = true
 toml.workspace = true
@@ -21,6 +22,9 @@ toml.workspace = true
 [target.'cfg(unix)'.dependencies]
 filedescriptor.workspace = true
 nix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [lints]
 workspace = true

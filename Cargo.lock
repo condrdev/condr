@@ -1265,9 +1265,11 @@ dependencies = [
  "portable-pty",
  "regex",
  "serde",
+ "serde_json",
  "smol_str",
  "sysinfo 0.31.4",
  "toml 1.1.4+spec-1.1.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

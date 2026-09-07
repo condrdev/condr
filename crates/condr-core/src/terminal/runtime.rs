@@ -184,6 +184,7 @@ impl TerminalRuntime {
         let reader_revision = Arc::clone(&revision);
         let reader_updates = update_sender.clone();
         let reader_reported_cwd = Arc::clone(&reported_cwd);
+        let reader_notices = Arc::clone(&notices);
         let reader_input = input.clone();
         let reader_size = Arc::clone(&current_size);
         let reader_cursor_settle = Arc::clone(&cursor_settle);
@@ -198,6 +199,7 @@ impl TerminalRuntime {
                     revision: reader_revision,
                     updates: reader_updates,
                     reported_cwd: reader_reported_cwd,
+                    notices: reader_notices,
                     size: reader_size,
                     cursor_settle: reader_cursor_settle,
                 })
@@ -724,6 +726,7 @@ impl TerminalRuntime {
             #[cfg(unix)]
             master: Arc::downgrade(self.master.as_ref().expect("checked Terminal PTY master")),
             process: self.process,
+            notices: Arc::clone(&self.notices),
             revision: Arc::clone(&self.revision),
             detector: AgentDetector::new(),
             activity_revision: None,
@@ -1361,6 +1364,7 @@ pub struct TerminalAgentProbe {
     #[cfg(unix)]
     master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
     pub(super) process: ProcessProbe,
+    notices: SharedTerminalNotices,
     revision: Arc<AtomicU64>,
     detector: AgentDetector,
     /// The terminal revision the last tick saw; new output keeps process probing fast.
@@ -1378,21 +1382,36 @@ impl TerminalAgentProbe {
         self.detector.agent()
     }
 
-    /// One tick. `Some(None)` means the agent left; `Some(Some(_))` is a new agent to
-    /// publish.
+    /// One tick. `Some(None)` means the agent left; `Some(Some(_))` is the agent and state
+    /// to publish. Hook events queued since the last tick are applied after the process
+    /// table has named the agent; events arriving before that force the probe.
     pub fn poll(&mut self) -> Option<Option<AgentSnapshot>> {
         let now = Instant::now();
-        let foreground_changed = self.foreground_changed();
+        let events = std::mem::take(
+            &mut self
+                .notices
+                .lock()
+                .expect("terminal notices lock poisoned")
+                .agent_events,
+        );
+        let force = self.foreground_changed() || (!events.is_empty() && self.agent().is_none());
         let revision = self.revision.load(Ordering::Acquire);
         let output_changed = self.activity_revision != Some(revision);
         self.activity_revision = Some(revision);
-        if !self
+        let mut publish = AgentPublish::Nothing;
+        if self
             .detector
-            .wants_process_probe(now, foreground_changed, output_changed)
+            .wants_process_probe(now, force, output_changed)
         {
-            return None;
+            publish = self.detector.observe_process(self.probe_process(), now);
         }
-        match self.detector.observe_process(self.probe_process(), now) {
+        for event in &events {
+            match self.detector.observe_event(event) {
+                AgentPublish::Nothing => {}
+                next => publish = next,
+            }
+        }
+        match publish {
             AgentPublish::Nothing => None,
             AgentPublish::Snapshot(snapshot) => Some(Some(snapshot)),
             AgentPublish::Cleared => Some(None),

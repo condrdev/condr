@@ -39,7 +39,8 @@ use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::unistd::{Pid as UnixPid, getpgid, getsid};
 
 use crate::agent::{
-    AgentDetector, AgentPublish, ProcessInfo, ProcessProbeResult, identify_agent_process,
+    AGENT_EVENT_OSC_PREFIX, AgentDetector, AgentEvent, AgentPublish, ProcessInfo,
+    ProcessProbeResult, identify_agent_process,
 };
 use crate::{AgentKind, AgentSnapshot, PaneId};
 

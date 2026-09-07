@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::AgentEventKind;
 
 struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
 
@@ -332,6 +333,7 @@ fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
         revision: Arc::new(AtomicU64::new(0)),
         updates,
         reported_cwd: Arc::new(Mutex::new(ReportedCwd::default())),
+        notices: SharedTerminalNotices::default(),
         size: shared_size,
         cursor_settle: Arc::new(Mutex::new(Default::default())),
     })
@@ -974,21 +976,24 @@ fn terminal_cell_text_truncation_preserves_utf8_boundaries_and_base() {
 
 #[test]
 fn osc_cwd_parser_handles_fragmented_st_and_bel_sequences() {
-    let mut parser = OscCwdParser::default();
+    let mut parser = OscScanner::default();
     let mut reported = Vec::new();
 
     parser.advance(b"noise\x1b]9", |osc| {
-        let OscReport::Cwd(cwd) = osc;
-        reported.push(cwd)
+        if let OscReport::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
     });
     parser.advance(b";9;C:\\work space\x1b", |osc| {
-        let OscReport::Cwd(cwd) = osc;
-        reported.push(cwd)
+        if let OscReport::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
     });
     assert!(reported.is_empty());
     parser.advance(b"\\tail\x1b]9;9;\"D:\\quoted\"\x07", |osc| {
-        let OscReport::Cwd(cwd) = osc;
-        reported.push(cwd)
+        if let OscReport::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
     });
 
     assert_eq!(
@@ -998,13 +1003,108 @@ fn osc_cwd_parser_handles_fragmented_st_and_bel_sequences() {
 }
 
 #[test]
+fn agent_event_sequences_are_cut_out_before_the_vt_and_reported() {
+    let mut scanner = OscScanner::default();
+    let mut reported = Vec::new();
+    let event = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None);
+    let mut stream = b"before".to_vec();
+    stream.extend(event.encode());
+    stream.extend(b"after\x1b]0;title\x07\x1b[31mred");
+
+    // Everything around the event stays in order; only the event is gone.
+    let filtered = scanner.advance(&stream, |osc| reported.push(osc));
+    assert_eq!(
+        &*filtered,
+        b"beforeafter\x1b]0;title\x07\x1b[31mred" as &[u8]
+    );
+    assert_eq!(reported, [OscReport::Agent(event)]);
+
+    // Once released, a non-event OSC is still delivered intact.
+    let mut scanner = OscScanner::default();
+    let filtered = scanner.advance(b"x\x1b]0;title\x07y\x1b[31m", |_| unreachable!());
+    assert!(matches!(filtered, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(&*filtered, b"x\x1b]0;title\x07y\x1b[31m" as &[u8]);
+}
+
+#[test]
+fn an_agent_event_split_across_reads_is_held_back_then_dropped() {
+    let mut scanner = OscScanner::default();
+    let mut reported = Vec::new();
+    let event = AgentEvent::new(AgentKind::Claude, AgentEventKind::PermissionRequest, None);
+    let encoded = event.encode();
+    let mut vt = Vec::new();
+    // One byte at a time: the hardest fragmentation.
+    for chunk in encoded.chunks(1) {
+        vt.extend_from_slice(&scanner.advance(chunk, |osc| reported.push(osc)));
+    }
+    vt.extend_from_slice(&scanner.advance(b"tail", |osc| reported.push(osc)));
+    assert_eq!(vt, b"tail");
+    assert_eq!(reported, [OscReport::Agent(event)]);
+
+    // ST-terminated events and an ESC ESC ] start are handled too.
+    let mut scanner = OscScanner::default();
+    let mut reported = Vec::new();
+    let body = br#"777;notify;condr://agent;{"v":1,"agent":"codex","event":"prompt-submit"}"#;
+    let mut stream = b"\x1b\x1b]".to_vec();
+    stream.extend_from_slice(body);
+    stream.extend_from_slice(b"\x1b\\end");
+    let vt = scanner
+        .advance(&stream, |osc| reported.push(osc))
+        .into_owned();
+    assert_eq!(vt, b"\x1bend");
+    assert_eq!(
+        reported,
+        [OscReport::Agent(AgentEvent::new(
+            AgentKind::Codex,
+            AgentEventKind::PromptSubmit,
+            None
+        ))]
+    );
+}
+
+#[test]
+fn a_held_sequence_that_turns_out_not_to_be_an_event_reaches_the_vt_in_order() {
+    let mut scanner = OscScanner::default();
+    // Diverges from the sentinel only at "condr": bytes held across two reads are
+    // released in front of what follows.
+    let first = scanner
+        .advance(b"a\x1b]777;notify;", |_| unreachable!())
+        .into_owned();
+    assert_eq!(first, b"a");
+    let second = scanner
+        .advance(b"other;x\x07b", |_| unreachable!())
+        .into_owned();
+    assert_eq!(second, b"\x1b]777;notify;other;x\x07b");
+
+    // A sentinel with a malformed body is still ours and still dropped.
+    let mut scanner = OscScanner::default();
+    let vt = scanner
+        .advance(
+            b"\x1b]777;notify;condr://agent;not json\x07k",
+            |_| unreachable!(),
+        )
+        .into_owned();
+    assert_eq!(vt, b"k");
+
+    // An oversized payload is abandoned and released, whatever it began like.
+    let mut scanner = OscScanner::default();
+    let mut huge = b"\x1b]777;notify;condr://agent;".to_vec();
+    huge.extend(std::iter::repeat_n(b'{', MAX_OSC_CWD_BYTES));
+    let vt = scanner.advance(&huge, |_| unreachable!()).into_owned();
+    assert_eq!(vt, huge);
+    let vt = scanner.advance(b"}\x07after", |_| unreachable!());
+    assert_eq!(&*vt, b"}\x07after" as &[u8]);
+}
+
+#[test]
 fn osc_cwd_parser_recovers_after_malformed_prefixes() {
-    let mut parser = OscCwdParser::default();
+    let mut parser = OscScanner::default();
     let mut reported = Vec::new();
 
     parser.advance(b"\x1b]9;8;ignored\x07\x1b]9;9;/valid\x07", |osc| {
-        let OscReport::Cwd(cwd) = osc;
-        reported.push(cwd)
+        if let OscReport::Cwd(cwd) = osc {
+            reported.push(cwd)
+        }
     });
 
     assert_eq!(reported, [PathBuf::from("/valid")]);
@@ -1012,7 +1112,7 @@ fn osc_cwd_parser_recovers_after_malformed_prefixes() {
 
 #[test]
 fn osc_inside_a_control_string_is_payload_until_st() {
-    let mut parser = OscCwdParser::default();
+    let mut parser = OscScanner::default();
     let mut reported = Vec::new();
 
     // A DCS carrying a BEL and a fake OSC, split across reads, then a real OSC.
@@ -1026,7 +1126,7 @@ fn osc_inside_a_control_string_is_payload_until_st() {
 
 #[test]
 fn osc_seven_and_iterm_cwd_reports_are_decoded() {
-    let mut parser = OscCwdParser::default();
+    let mut parser = OscScanner::default();
     let mut reported = Vec::new();
 
     parser.advance(
@@ -1047,7 +1147,7 @@ fn osc_seven_and_iterm_cwd_reports_are_decoded() {
 #[test]
 fn osc_seven_accepts_this_host_and_escaped_paths_but_rejects_foreign_hosts() {
     let host = sysinfo::System::host_name().expect("test host has a name");
-    let mut parser = OscCwdParser::default();
+    let mut parser = OscScanner::default();
     let mut reported = Vec::new();
     for authority in [
         String::new(),
@@ -1089,15 +1189,17 @@ fn parsed_cwd_reports_advance_the_observation_generation() {
     std::fs::create_dir_all(&directory).unwrap();
     let sequence = format!("\x1b]9;9;{}\x07", directory.display());
     let reported = Mutex::new(ReportedCwd::default());
-    let mut parser = OscCwdParser::default();
+    let mut parser = OscScanner::default();
 
     parser.advance(sequence.as_bytes(), |osc| {
-        let OscReport::Cwd(cwd) = osc;
-        record_reported_cwd(&reported, cwd)
+        if let OscReport::Cwd(cwd) = osc {
+            record_reported_cwd(&reported, cwd)
+        }
     });
     parser.advance(sequence.as_bytes(), |osc| {
-        let OscReport::Cwd(cwd) = osc;
-        record_reported_cwd(&reported, cwd)
+        if let OscReport::Cwd(cwd) = osc {
+            record_reported_cwd(&reported, cwd)
+        }
     });
 
     assert_eq!(

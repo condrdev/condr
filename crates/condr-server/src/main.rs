@@ -43,6 +43,15 @@ enum Command {
     /// Agents detected in Panes and their prompt lifecycle
     #[command(subcommand)]
     Agent(cli::AgentCommand),
+    /// Installed into an agent CLI's hooks: reports one lifecycle event to the Pane's
+    /// Server (ADR 0014). Inert outside a Condr Pane; always exits 0.
+    #[command(hide = true)]
+    AgentHook {
+        #[arg(value_name = "AGENT")]
+        agent: String,
+        #[arg(value_name = "EVENT")]
+        event: String,
+    },
 }
 
 /// One Server per machine. It always answers on its private local socket; `--listen`
@@ -111,6 +120,10 @@ fn main() {
             Command::Tab(command) => cli::run_tab(command),
             Command::Pane(command) => cli::run_pane(command),
             Command::Agent(command) => cli::run_agent(command),
+            Command::AgentHook { agent, event } => {
+                condr_core::agent_hook::run(&agent, &event);
+                0
+            }
         },
     );
 }

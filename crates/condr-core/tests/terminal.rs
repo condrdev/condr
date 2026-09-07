@@ -2,9 +2,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "linux")]
 use condr_core::{
-    AgentKind, AgentSnapshot, AgentState, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
-    TerminalPosition, TerminalScroll, TerminalSide, TerminalUpdate,
+    AgentEvent, AgentEventKind, AgentKind, AgentSnapshot, AgentState, TerminalAgentProbe,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalScroll, TerminalSide,
+    TerminalUpdate,
 };
 use condr_core::{
     CommandBuilder, PaneEnvironment, PaneId, TerminalCommand, TerminalRuntime, TerminalSize,
@@ -710,6 +711,87 @@ fn foreground_agent_process_produces_an_unknown_snapshot() {
         },
         "agent process was not detected",
     );
+    runtime.shutdown().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_screen() {
+    let mut command = CommandBuilder::new("/bin/bash");
+    command.args(["--noprofile", "--norc", "-i"]);
+    command.env("CONDR_ENV", "1");
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(8, 80)).unwrap();
+    let mut probe = runtime.agent_probe().unwrap();
+    fn wait_for(probe: &mut TerminalAgentProbe, expected: Option<AgentSnapshot>, failure: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if probe.poll() == Some(expected) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{failure}");
+            std::thread::sleep(probe.poll_interval());
+        }
+    }
+    let snapshot = |state| {
+        Some(AgentSnapshot {
+            kind: AgentKind::Codex,
+            state,
+        })
+    };
+    let events = std::env::temp_dir().join(format!(
+        "condr-hook-events-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&events).unwrap();
+    let stop = events.join("stop");
+    std::fs::write(
+        &stop,
+        AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None).encode(),
+    )
+    .unwrap();
+    // An event naming another agent is not this Pane's.
+    let other = events.join("other");
+    std::fs::write(
+        &other,
+        AgentEvent::new(AgentKind::Claude, AgentEventKind::PromptSubmit, None).encode(),
+    )
+    .unwrap();
+    // The foreground job becomes the agent at once; a subshell in the same job reports
+    // for it two seconds later, the way a hook run by the agent would.
+    runtime
+        .write(
+            format!(
+                "bash -c '(sleep 2; cat \"{}\"; sleep 1; cat \"{}\") & exec -a codex sleep 6'\r",
+                stop.display(),
+                other.display()
+            )
+            .into_bytes(),
+        )
+        .unwrap();
+    wait_for(
+        &mut probe,
+        snapshot(AgentState::Unknown),
+        "agent process was not detected",
+    );
+    wait_for(
+        &mut probe,
+        snapshot(AgentState::Idle),
+        "stop event did not reach the agent state",
+    );
+    assert!(!runtime.visible_text().contains("condr://agent"));
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(
+        probe.poll(),
+        None,
+        "another agent's event changed this Pane"
+    );
+    wait_for(&mut probe, None, "exited agent was not cleared");
+    assert!(!runtime.visible_text().contains("condr://agent"));
+    let _ = std::fs::remove_dir_all(events);
     runtime.shutdown().unwrap();
 }
 

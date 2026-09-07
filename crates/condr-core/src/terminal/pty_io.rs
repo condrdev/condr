@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::*;
 use alacritty_terminal::vte::ansi::Rgb;
 
@@ -346,11 +348,23 @@ pub(super) struct TerminalNotices {
     pub(super) title_changed: bool,
     pub(super) bells: u64,
     pub(super) clipboard: Option<String>,
+    /// Hook events since the agent probe last drained them, oldest first.
+    pub(super) agent_events: Vec<AgentEvent>,
 }
 
 pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;
 
+/// More queued hook events than this means nobody is draining them; the oldest go.
+const MAX_QUEUED_AGENT_EVENTS: usize = 64;
+
 impl TerminalNotices {
+    fn record_agent_event(&mut self, event: AgentEvent) {
+        if self.agent_events.len() == MAX_QUEUED_AGENT_EVENTS {
+            self.agent_events.remove(0);
+        }
+        self.agent_events.push(event);
+    }
+
     fn record_title(&mut self, title: Option<String>) {
         if self.title != title {
             self.title = title;
@@ -722,6 +736,7 @@ pub(super) struct TerminalReadLoop {
     pub(super) revision: Arc<AtomicU64>,
     pub(super) updates: mpsc::Sender<TerminalUpdate>,
     pub(super) reported_cwd: Arc<Mutex<ReportedCwd>>,
+    pub(super) notices: SharedTerminalNotices,
     pub(super) size: Arc<Mutex<TerminalSize>>,
     pub(super) cursor_settle: Arc<Mutex<CursorSettle>>,
 }
@@ -735,21 +750,26 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
         revision,
         updates,
         reported_cwd,
+        notices,
         size,
         cursor_settle,
     } = io;
     let mut parser: Processor = Processor::new();
-    let mut cwd_parser = OscCwdParser::default();
+    let mut scanner = OscScanner::default();
     let mut bytes = [0; 16 * 1024];
     let result = loop {
         match reader.read(&mut bytes) {
             Ok(0) => break Ok(()),
             Ok(read) => {
-                cwd_parser.advance(&bytes[..read], |osc| match osc {
+                let filtered = scanner.advance(&bytes[..read], |osc| match osc {
                     OscReport::Cwd(cwd) => record_reported_cwd(&reported_cwd, cwd),
+                    OscReport::Agent(event) => notices
+                        .lock()
+                        .expect("terminal notices lock poisoned")
+                        .record_agent_event(event),
                 });
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
-                parser.advance(&mut *terminal_guard, &bytes[..read]);
+                parser.advance(&mut *terminal_guard, &filtered);
                 if CURSOR_POSITION_SETTLE_ENABLED {
                     // Observe after every read like herdr does, so a position that only
                     // lasts between two reads never counts as held, whatever the frame rate.
@@ -791,13 +811,15 @@ pub(super) fn record_reported_cwd(reported_cwd: &Mutex<ReportedCwd>, cwd: PathBu
 }
 
 #[derive(Default)]
-pub(super) struct OscCwdParser {
-    state: OscCwdState,
+pub(super) struct OscScanner {
+    state: OscState,
     payload: Vec<u8>,
+    /// Bytes of a possible agent event held back from the VT across reads.
+    held: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Default)]
-pub(super) enum OscCwdState {
+pub(super) enum OscState {
     #[default]
     Ground,
     Prefix(usize),
@@ -811,125 +833,245 @@ pub(super) enum OscCwdState {
 }
 
 /// The OSC payloads Condr reads itself because vte drops them: cwd reports as OSC 7
-/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`. This scanner
-/// runs over the raw bytes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`, and the OSC 777
+/// agent events `condr agent-hook` writes (ADR 0014). This scanner runs over the raw bytes.
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum OscReport {
     Cwd(PathBuf),
+    Agent(AgentEvent),
 }
 
-impl OscCwdParser {
+/// What the VT gets from one read: the bytes as they came, or a copy with the agent
+/// event sequences cut out. Everything from an `ESC` is held back until the scanner
+/// knows the sequence is not an agent event, which for anything else is settled within
+/// a few bytes, so ordinary output is borrowed, not copied.
+struct VtFilter<'a, 'h> {
+    bytes: &'a [u8],
+    carry: &'h mut Vec<u8>,
+    out: Option<Vec<u8>>,
+    /// How much of `bytes` is accounted for in `out` (passed or dropped).
+    emitted: usize,
+    hold_from: Option<usize>,
+}
+
+impl<'a, 'h> VtFilter<'a, 'h> {
+    fn new(bytes: &'a [u8], carry: &'h mut Vec<u8>) -> Self {
+        let hold_from = (!carry.is_empty()).then_some(0);
+        Self {
+            bytes,
+            carry,
+            out: None,
+            emitted: 0,
+            hold_from,
+        }
+    }
+
+    fn hold(&mut self, at: usize) {
+        self.hold_from = Some(at);
+    }
+
+    /// Makes `out` real and current up to `upto`.
+    fn materialize(&mut self, upto: usize) {
+        match &mut self.out {
+            Some(out) => out.extend_from_slice(&self.bytes[self.emitted..upto]),
+            None => self.out = Some(self.bytes[..upto].to_vec()),
+        }
+        self.emitted = upto;
+    }
+
+    /// The held bytes were not an agent event after all: the VT gets them, in order.
+    fn release(&mut self, end: usize) {
+        let Some(from) = self.hold_from.take() else {
+            return;
+        };
+        if self.out.is_none() && self.carry.is_empty() {
+            return;
+        }
+        self.materialize(from);
+        let out = self.out.as_mut().expect("materialized");
+        out.append(self.carry);
+        out.extend_from_slice(&self.bytes[from..end]);
+        self.emitted = end;
+    }
+
+    /// The held bytes were an agent event: the VT never sees them.
+    fn discard(&mut self, end: usize) {
+        let Some(from) = self.hold_from.take() else {
+            return;
+        };
+        self.materialize(from);
+        self.carry.clear();
+        self.emitted = end;
+    }
+
+    fn finish(mut self) -> Cow<'a, [u8]> {
+        if let Some(from) = self.hold_from.take() {
+            self.materialize(from);
+            self.carry.extend_from_slice(&self.bytes[from..]);
+            self.emitted = self.bytes.len();
+        }
+        match self.out {
+            Some(mut out) => {
+                out.extend_from_slice(&self.bytes[self.emitted..]);
+                Cow::Owned(out)
+            }
+            None => Cow::Borrowed(self.bytes),
+        }
+    }
+}
+
+impl OscScanner {
     const PREFIX: &'static [u8] = b"\x1b]";
 
-    pub(super) fn advance(&mut self, bytes: &[u8], mut report: impl FnMut(OscReport)) {
-        for &byte in bytes {
+    /// Scans one read, reporting what Condr consumes itself, and returns what the VT
+    /// should see.
+    pub(super) fn advance<'a>(
+        &mut self,
+        bytes: &'a [u8],
+        mut report: impl FnMut(OscReport),
+    ) -> Cow<'a, [u8]> {
+        let mut held = std::mem::take(&mut self.held);
+        let mut vt = VtFilter::new(bytes, &mut held);
+        for (index, &byte) in bytes.iter().enumerate() {
             match self.state {
-                OscCwdState::Ground => {
+                OscState::Ground => {
                     if byte == Self::PREFIX[0] {
-                        self.state = OscCwdState::Prefix(1);
+                        vt.hold(index);
+                        self.state = OscState::Prefix(1);
                     }
                 }
-                OscCwdState::Prefix(matched) => {
+                OscState::Prefix(matched) => {
                     if byte == Self::PREFIX[matched] {
                         let matched = matched + 1;
                         if matched == Self::PREFIX.len() {
                             self.payload.clear();
-                            self.state = OscCwdState::Payload;
+                            self.state = OscState::Payload;
                         } else {
-                            self.state = OscCwdState::Prefix(matched);
+                            self.state = OscState::Prefix(matched);
                         }
                     } else if byte == Self::PREFIX[0] {
-                        self.state = OscCwdState::Prefix(1);
+                        vt.release(index);
+                        vt.hold(index);
+                        self.state = OscState::Prefix(1);
                     } else if matched == 1 && matches!(byte, b'P' | b'X' | b'^' | b'_') {
                         // DCS/SOS/PM/APC: whatever looks like an OSC inside is payload.
-                        self.state = OscCwdState::ControlString;
+                        vt.release(index + 1);
+                        self.state = OscState::ControlString;
                     } else {
-                        self.state = OscCwdState::Ground;
+                        vt.release(index + 1);
+                        self.state = OscState::Ground;
                     }
                 }
-                OscCwdState::Payload => match byte {
-                    0x07 => self.finish(&mut report),
-                    0x1b => self.state = OscCwdState::PayloadEscape,
-                    _ => self.push_payload(byte),
+                OscState::Payload => match byte {
+                    0x07 => self.finish(index, &mut vt, &mut report),
+                    0x1b => self.state = OscState::PayloadEscape,
+                    _ => self.push_payload(byte, index, &mut vt),
                 },
-                OscCwdState::PayloadEscape => match byte {
-                    b'\\' => self.finish(&mut report),
+                OscState::PayloadEscape => match byte {
+                    b'\\' => self.finish(index, &mut vt, &mut report),
                     0x07 => {
-                        self.push_payload(0x1b);
-                        if matches!(self.state, OscCwdState::Payload) {
-                            self.finish(&mut report);
+                        self.push_payload(0x1b, index, &mut vt);
+                        if matches!(self.state, OscState::Payload) {
+                            self.finish(index, &mut vt, &mut report);
                         }
                     }
                     0x1b => {
-                        self.push_payload(0x1b);
-                        if matches!(self.state, OscCwdState::Payload) {
-                            self.state = OscCwdState::PayloadEscape;
+                        self.push_payload(0x1b, index, &mut vt);
+                        if matches!(self.state, OscState::Payload) {
+                            self.state = OscState::PayloadEscape;
                         }
                     }
                     _ => {
-                        self.push_payload(0x1b);
-                        if matches!(self.state, OscCwdState::Payload) {
-                            self.push_payload(byte);
+                        self.push_payload(0x1b, index, &mut vt);
+                        if matches!(self.state, OscState::Payload) {
+                            self.push_payload(byte, index, &mut vt);
                         }
                     }
                 },
-                OscCwdState::Discard => match byte {
+                OscState::Discard => match byte {
                     0x07 => self.reset(),
-                    0x1b => self.state = OscCwdState::DiscardEscape,
+                    0x1b => self.state = OscState::DiscardEscape,
                     _ => {}
                 },
-                OscCwdState::DiscardEscape => match byte {
+                OscState::DiscardEscape => match byte {
                     b'\\' => self.reset(),
                     0x1b => {}
-                    _ => self.state = OscCwdState::Discard,
+                    _ => self.state = OscState::Discard,
                 },
-                OscCwdState::ControlString => {
+                OscState::ControlString => {
                     if byte == 0x1b {
-                        self.state = OscCwdState::ControlStringEscape;
+                        self.state = OscState::ControlStringEscape;
                     }
                 }
-                OscCwdState::ControlStringEscape => match byte {
+                OscState::ControlStringEscape => match byte {
                     b'\\' => self.reset(),
                     0x1b => {}
-                    _ => self.state = OscCwdState::ControlString,
+                    _ => self.state = OscState::ControlString,
                 },
+            }
+        }
+        let filtered = vt.finish();
+        self.held = held;
+        filtered
+    }
+
+    /// Whether the payload so far can still turn out to be an agent event.
+    fn could_be_agent_event(&self) -> bool {
+        let prefix = AGENT_EVENT_OSC_PREFIX.as_bytes();
+        prefix.starts_with(&self.payload) || self.payload.starts_with(prefix)
+    }
+
+    fn push_payload(&mut self, byte: u8, index: usize, vt: &mut VtFilter<'_, '_>) {
+        if self.payload.len() == MAX_OSC_CWD_BYTES {
+            self.payload.clear();
+            self.state = OscState::Discard;
+            vt.release(index + 1);
+        } else {
+            self.payload.push(byte);
+            self.state = OscState::Payload;
+            if !self.could_be_agent_event() {
+                vt.release(index + 1);
             }
         }
     }
 
-    pub(super) fn push_payload(&mut self, byte: u8) {
-        if self.payload.len() == MAX_OSC_CWD_BYTES {
-            self.payload.clear();
-            self.state = OscCwdState::Discard;
+    fn finish(
+        &mut self,
+        index: usize,
+        vt: &mut VtFilter<'_, '_>,
+        report: &mut impl FnMut(OscReport),
+    ) {
+        if self.payload.starts_with(AGENT_EVENT_OSC_PREFIX.as_bytes()) {
+            // Ours, well-formed or not: the terminal has no use for it either way.
+            if let Some(event) = AgentEvent::decode(&self.payload) {
+                report(OscReport::Agent(event));
+            }
+            vt.discard(index + 1);
         } else {
-            self.payload.push(byte);
-            self.state = OscCwdState::Payload;
-        }
-    }
-
-    pub(super) fn finish(&mut self, report: &mut impl FnMut(OscReport)) {
-        if let Ok(payload) = std::str::from_utf8(&self.payload) {
-            if let Some(cwd) = payload.strip_prefix("9;9;") {
-                let cwd = cwd
-                    .strip_prefix('"')
-                    .and_then(|cwd| cwd.strip_suffix('"'))
-                    .unwrap_or(cwd);
-                report(OscReport::Cwd(PathBuf::from(cwd)));
-            } else if let Some(cwd) = payload.strip_prefix("7;").and_then(file_uri_cwd) {
-                report(OscReport::Cwd(cwd));
-            } else if let Some(cwd) = payload
-                .strip_prefix("1337;CurrentDir=")
-                .filter(|cwd| !cwd.is_empty())
-            {
-                report(OscReport::Cwd(PathBuf::from(cwd)));
+            vt.release(index + 1);
+            if let Ok(payload) = std::str::from_utf8(&self.payload) {
+                if let Some(cwd) = payload.strip_prefix("9;9;") {
+                    let cwd = cwd
+                        .strip_prefix('"')
+                        .and_then(|cwd| cwd.strip_suffix('"'))
+                        .unwrap_or(cwd);
+                    report(OscReport::Cwd(PathBuf::from(cwd)));
+                } else if let Some(cwd) = payload.strip_prefix("7;").and_then(file_uri_cwd) {
+                    report(OscReport::Cwd(cwd));
+                } else if let Some(cwd) = payload
+                    .strip_prefix("1337;CurrentDir=")
+                    .filter(|cwd| !cwd.is_empty())
+                {
+                    report(OscReport::Cwd(PathBuf::from(cwd)));
+                }
             }
         }
         self.reset();
     }
 
-    pub(super) fn reset(&mut self) {
+    fn reset(&mut self) {
         self.payload.clear();
-        self.state = OscCwdState::Ground;
+        self.state = OscState::Ground;
     }
 }
 

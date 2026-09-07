@@ -4,11 +4,14 @@
 //! Condr never classifies the screen. Until an agent reports, it is [`AgentState::Unknown`],
 //! and it stays that way rather than being guessed at.
 
+pub mod hook;
+
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Claude,
     Codex,
@@ -264,6 +267,119 @@ fn path_basename(path: &str) -> &str {
 }
 
 // ---------------------------------------------------------------------------
+// Hook events
+// ---------------------------------------------------------------------------
+
+/// The OSC 777 sentinel a hook writes: `ESC ] 777 ; notify ; condr://agent ; {json} BEL`.
+pub const AGENT_EVENT_OSC_PREFIX: &str = "777;notify;condr://agent;";
+const AGENT_EVENT_WIRE_VERSION: u32 = 1;
+
+/// What an agent's hook reported, in Condr's vocabulary. Each agent's installer maps its
+/// native hook names onto these.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentEventKind {
+    SessionStart,
+    PromptSubmit,
+    PermissionRequest,
+    QuestionAsked,
+    ToolStart,
+    ToolComplete,
+    Stop,
+    Interrupt,
+    StopFailure,
+}
+
+impl AgentEventKind {
+    pub const ALL: [Self; 9] = [
+        Self::SessionStart,
+        Self::PromptSubmit,
+        Self::PermissionRequest,
+        Self::QuestionAsked,
+        Self::ToolStart,
+        Self::ToolComplete,
+        Self::Stop,
+        Self::Interrupt,
+        Self::StopFailure,
+    ];
+
+    /// The wire spelling, which is also what `condr agent-hook` takes on its command line.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SessionStart => "session-start",
+            Self::PromptSubmit => "prompt-submit",
+            Self::PermissionRequest => "permission-request",
+            Self::QuestionAsked => "question-asked",
+            Self::ToolStart => "tool-start",
+            Self::ToolComplete => "tool-complete",
+            Self::Stop => "stop",
+            Self::Interrupt => "interrupt",
+            Self::StopFailure => "stop-failure",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentEvent {
+    #[serde(rename = "v")]
+    version: u32,
+    pub agent: AgentKind,
+    pub event: AgentEventKind,
+    /// Why a session started (`startup`, `resume`, `clear`, `compact`); only `compact`
+    /// matters, because it happens mid-turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+impl AgentEvent {
+    pub fn new(agent: AgentKind, event: AgentEventKind, source: Option<String>) -> Self {
+        Self {
+            version: AGENT_EVENT_WIRE_VERSION,
+            agent,
+            event,
+            source,
+        }
+    }
+
+    /// The complete OSC sequence a hook writes to its controlling terminal.
+    pub fn encode(&self) -> Vec<u8> {
+        let json = serde_json::to_string(self).expect("agent event serializes");
+        format!("\x1b]{AGENT_EVENT_OSC_PREFIX}{json}\x07").into_bytes()
+    }
+
+    /// Decodes an OSC payload (everything between `ESC ]` and the terminator).
+    pub fn decode(payload: &[u8]) -> Option<Self> {
+        let json = payload.strip_prefix(AGENT_EVENT_OSC_PREFIX.as_bytes())?;
+        let event: Self = serde_json::from_slice(json).ok()?;
+        (event.version == AGENT_EVENT_WIRE_VERSION).then_some(event)
+    }
+
+    /// The state after this event, from `state`. Turn boundaries map to Idle and
+    /// Working; a request for the user maps to Blocked; a tool starting or completing
+    /// maps to Working, which is what ends a Blocked once the user answered. A session
+    /// start caused by compaction happens mid-turn and changes nothing.
+    pub fn apply(&self, state: AgentState) -> AgentState {
+        match self.event {
+            AgentEventKind::SessionStart if self.source.as_deref() == Some("compact") => state,
+            AgentEventKind::SessionStart
+            | AgentEventKind::Stop
+            | AgentEventKind::Interrupt
+            | AgentEventKind::StopFailure => AgentState::Idle,
+            AgentEventKind::PromptSubmit
+            | AgentEventKind::ToolStart
+            | AgentEventKind::ToolComplete => AgentState::Working,
+            AgentEventKind::PermissionRequest | AgentEventKind::QuestionAsked => {
+                AgentState::Blocked
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Presence
 // ---------------------------------------------------------------------------
 
@@ -301,10 +417,12 @@ pub enum AgentPublish {
     Cleared,
 }
 
-/// Per-terminal presence: which agent the process table shows, and when to look again.
+/// Per-terminal agent tracking: which agent the process table shows, the state its hooks
+/// last reported, and when to look at the process table again.
 #[derive(Debug, Default)]
 pub struct AgentDetector {
     agent: Option<AgentKind>,
+    state: Option<AgentState>,
     consecutive_misses: u8,
     last_process_probe: Option<Instant>,
     last_activity: Option<Instant>,
@@ -370,6 +488,7 @@ impl AgentDetector {
                     return AgentPublish::Nothing;
                 }
                 self.agent = Some(agent);
+                self.state = Some(AgentState::Unknown);
                 AgentPublish::Snapshot(AgentSnapshot {
                     kind: agent,
                     state: AgentState::Unknown,
@@ -391,12 +510,34 @@ impl AgentDetector {
                     return AgentPublish::Nothing;
                 }
                 self.agent = None;
+                self.state = None;
                 self.consecutive_misses = 0;
                 // The shell is back in front: a replacement may start any moment.
                 self.acquisition_started = Some(now);
                 AgentPublish::Cleared
             }
         }
+    }
+
+    /// Feeds a hook event. An event naming a different agent than the process table
+    /// shows, or arriving before any agent is known, is dropped: it belongs to a nested
+    /// or forged reporter, not to this Pane's agent.
+    pub fn observe_event(&mut self, event: &AgentEvent) -> AgentPublish {
+        let (Some(agent), Some(state)) = (self.agent, self.state) else {
+            return AgentPublish::Nothing;
+        };
+        if agent != event.agent {
+            return AgentPublish::Nothing;
+        }
+        let next = event.apply(state);
+        if next == state {
+            return AgentPublish::Nothing;
+        }
+        self.state = Some(next);
+        AgentPublish::Snapshot(AgentSnapshot {
+            kind: agent,
+            state: next,
+        })
     }
 }
 
@@ -600,6 +741,126 @@ mod tests {
         assert_eq!(
             detector.observe_process(ProcessProbeResult::Unidentified, now),
             AgentPublish::Cleared
+        );
+    }
+
+    #[test]
+    fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
+        use AgentEventKind::*;
+        let event = |kind, source: Option<&str>| {
+            AgentEvent::new(AgentKind::Claude, kind, source.map(str::to_owned))
+        };
+        let apply = |state, kind, source| event(kind, source).apply(state);
+        assert_eq!(
+            apply(AgentState::Unknown, SessionStart, Some("startup")),
+            AgentState::Idle
+        );
+        assert_eq!(
+            apply(AgentState::Working, SessionStart, Some("compact")),
+            AgentState::Working
+        );
+        assert_eq!(
+            apply(AgentState::Idle, PromptSubmit, None),
+            AgentState::Working
+        );
+        assert_eq!(
+            apply(AgentState::Working, PermissionRequest, None),
+            AgentState::Blocked
+        );
+        assert_eq!(
+            apply(AgentState::Working, QuestionAsked, None),
+            AgentState::Blocked
+        );
+        assert_eq!(
+            apply(AgentState::Blocked, ToolStart, None),
+            AgentState::Working
+        );
+        assert_eq!(
+            apply(AgentState::Blocked, ToolComplete, None),
+            AgentState::Working
+        );
+        assert_eq!(apply(AgentState::Working, Stop, None), AgentState::Idle);
+        assert_eq!(
+            apply(AgentState::Working, Interrupt, None),
+            AgentState::Idle
+        );
+        assert_eq!(
+            apply(AgentState::Blocked, StopFailure, None),
+            AgentState::Idle
+        );
+
+        let encoded = event(SessionStart, Some("resume")).encode();
+        assert_eq!(
+            encoded,
+            b"\x1b]777;notify;condr://agent;{\"v\":1,\"agent\":\"claude\",\"event\":\"session-start\",\"source\":\"resume\"}\x07"
+                .to_vec()
+        );
+        let payload = &encoded[2..encoded.len() - 1];
+        assert_eq!(
+            AgentEvent::decode(payload),
+            Some(event(SessionStart, Some("resume")))
+        );
+        assert_eq!(
+            AgentEvent::decode(
+                br#"777;notify;condr://agent;{"v":1,"agent":"codex","event":"stop"}"#
+            ),
+            Some(AgentEvent::new(AgentKind::Codex, Stop, None))
+        );
+        assert_eq!(
+            AgentEvent::decode(
+                br#"777;notify;condr://agent;{"v":2,"agent":"codex","event":"stop"}"#
+            ),
+            None
+        );
+        assert_eq!(
+            AgentEvent::decode(
+                br#"777;notify;condr://agent;{"v":1,"agent":"codex","event":"nap"}"#
+            ),
+            None
+        );
+        assert_eq!(AgentEvent::decode(b"777;notify;other;{}"), None);
+        for kind in AgentEventKind::ALL {
+            assert_eq!(AgentEventKind::parse(kind.name()), Some(kind));
+        }
+    }
+
+    #[test]
+    fn events_only_count_for_the_agent_the_process_table_shows() {
+        let mut detector = AgentDetector::new();
+        let now = Instant::now();
+        let stop = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None);
+        // Before any agent is known, events are dropped rather than seeding one.
+        assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
+        detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), now);
+        assert_eq!(
+            detector.observe_event(&AgentEvent::new(
+                AgentKind::Claude,
+                AgentEventKind::Stop,
+                None
+            )),
+            AgentPublish::Nothing
+        );
+        assert_eq!(
+            detector.observe_event(&stop),
+            AgentPublish::Snapshot(AgentSnapshot {
+                kind: AgentKind::Codex,
+                state: AgentState::Idle,
+            })
+        );
+        assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
+        // A confirmed process probe does not reset the reported state.
+        assert_eq!(
+            detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), now),
+            AgentPublish::Nothing
+        );
+        // A restart is a new agent: back to Unknown, old state gone.
+        detector.observe_process(ProcessProbeResult::ShellOnly, now);
+        assert_eq!(
+            detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), now),
+            AgentPublish::Snapshot(AgentSnapshot {
+                kind: AgentKind::Codex,
+                state: AgentState::Unknown,
+            })
         );
     }
 }

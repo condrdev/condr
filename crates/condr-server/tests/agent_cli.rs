@@ -44,18 +44,19 @@ impl Server {
                 r#"#!/bin/sh
 printf 'started\n' >> "$CONDR_TEST_STARTS"
 printf '%s\n' "$@" > "$CONDR_TEST_ARGS"
+report() { printf '{"session_id":"fixture","source":"startup"}' | condr agent-hook codex "$1"; }
 case "$1" in
   --exit) exit 0 ;;
-  --blocked) printf '\033]0;Action Required\007' ;;
-  --working) printf '\033]0;\342\240\213 Working\007' ;;
-  *) printf '\033]0;Ready\007' ;;
+  --blocked) report session-start; report permission-request ;;
+  --working) report prompt-submit ;;
+  *) report session-start ;;
 esac
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$CONDR_TEST_PROMPTS"
   [ "$line" = quit ] && exit 0
-  printf '\033]0;\342\240\213 Working\007'
+  report prompt-submit
   sleep 1
-  printf '\033]0;Ready\007'
+  report stop
 done
 "#,
             )
@@ -190,9 +191,20 @@ fn windows_agent_fixture() {
             .unwrap();
         writeln!(file, "{text}").unwrap();
     };
-    let title = |text: &str| {
-        print!("\x1b]0;{text}\x07");
-        std::io::stdout().flush().unwrap();
+    let report = |event: &str| {
+        use std::process::{Command, Stdio};
+        let mut hook = Command::new("condr")
+            .args(["agent-hook", "codex", event])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        hook.stdin
+            .take()
+            .unwrap()
+            .write_all(br#"{"session_id":"fixture","source":"startup"}"#)
+            .unwrap();
+        hook.wait().unwrap();
     };
     let args = std::env::args()
         .skip_while(|arg| arg != "--")
@@ -206,9 +218,12 @@ fn windows_agent_fixture() {
     .unwrap();
     match args.first().map(String::as_str) {
         Some("--exit") => return,
-        Some("--blocked") => title("Action Required"),
-        Some("--working") => title("\u{280b} Working"),
-        _ => title("Ready"),
+        Some("--blocked") => {
+            report("session-start");
+            report("permission-request");
+        }
+        Some("--working") => report("prompt-submit"),
+        _ => report("session-start"),
     }
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
@@ -216,9 +231,9 @@ fn windows_agent_fixture() {
         if line == "quit" {
             return;
         }
-        title("\u{280b} Working");
+        report("prompt-submit");
         thread::sleep(Duration::from_secs(1));
-        title("Ready");
+        report("stop");
     }
 }
 
@@ -250,9 +265,6 @@ fn pane_cli_survives_a_child_shell_path_reset() {
     assert_eq!(current["pane"]["pane_id"], pane.parse::<u64>().unwrap());
 }
 
-// The fixture drives state through OSC titles, which no longer classify; #32 makes it
-// report through OSC 777 hook events instead.
-#[ignore = "agent state is hook-driven since ADR 0014; fixture is rewritten in #32"]
 #[test]
 fn discovers_on_server_starts_once_and_prompts_by_name() {
     let server = Server::start();
@@ -420,9 +432,6 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
     assert_eq!(server.ok(&launch)["agent"]["name"], "worker");
 }
 
-// The fixture drives state through OSC titles, which no longer classify; #32 makes it
-// report through OSC 777 hook events instead.
-#[ignore = "agent state is hook-driven since ADR 0014; fixture is rewritten in #32"]
 #[test]
 fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
     let server = Server::start();
