@@ -166,11 +166,14 @@ pub(super) fn avatar_initial(name: &str) -> SharedString {
 
 #[derive(Clone)]
 enum SidebarIconGraphic {
-    Glyph(SidebarGlyph, SidebarIconTone),
     /// A colored square with an initial.
-    Avatar {
-        initial: SharedString,
-        color: Hsla,
+    Avatar { initial: SharedString, color: Hsla },
+    /// An agent's mark with its status glyph tucked into the corner, so a row of
+    /// agents reads by agent first and by state second.
+    Agent {
+        mark: CondrIconName,
+        glyph: SidebarGlyph,
+        tone: SidebarIconTone,
     },
 }
 
@@ -194,13 +197,18 @@ impl CondrSidebarIcon {
         }
     }
 
-    pub(super) fn status(
+    pub(super) fn agent(
+        kind: AgentKind,
         visual: SidebarStatusVisual,
         selector: impl Into<SharedString>,
         tooltip: impl Into<SharedString>,
     ) -> Self {
         Self {
-            graphic: SidebarIconGraphic::Glyph(visual.glyph, visual.tone),
+            graphic: SidebarIconGraphic::Agent {
+                mark: CondrIconName::agent(kind),
+                glyph: visual.glyph,
+                tone: visual.tone,
+            },
             selector: selector.into(),
             tooltip: Some(tooltip.into()),
         }
@@ -208,11 +216,6 @@ impl CondrSidebarIcon {
 
     pub(super) fn render(self, cx: &mut App) -> AnyElement {
         let graphic = match self.graphic {
-            SidebarIconGraphic::Glyph(glyph, tone) => glyph
-                .icon()
-                .size_3()
-                .text_color(tone.color(cx))
-                .into_any_element(),
             SidebarIconGraphic::Avatar { initial, color } => div()
                 .size_4()
                 .rounded_sm()
@@ -224,6 +227,27 @@ impl CondrSidebarIcon {
                 .font_medium()
                 .text_color(gpui_kit::white())
                 .child(initial)
+                .into_any_element(),
+            SidebarIconGraphic::Agent { mark, glyph, tone } => div()
+                .relative()
+                .size_4()
+                .child(
+                    Icon::new(mark)
+                        .size_4()
+                        .text_color(cx.theme().sidebar_foreground),
+                )
+                .child(
+                    // The glyph sits past the mark's corner on a disc of the sidebar's
+                    // own color, so it stays legible over any mark.
+                    div()
+                        .absolute()
+                        .bottom(px(-3.))
+                        .right(px(-3.))
+                        .rounded_full()
+                        .bg(cx.theme().sidebar)
+                        .p(px(1.))
+                        .child(glyph.icon().size_2().text_color(tone.color(cx))),
+                )
                 .into_any_element(),
         };
         let id = self.selector.clone();
@@ -1101,15 +1125,24 @@ impl Condr {
                                         agent_sidebar_status(state)
                                     };
                                     let agent_label = agent.kind.label();
+                                    // The Pane's title is what the agent is doing; the
+                                    // mark already says which agent, so the name is only
+                                    // the fallback before a title arrives.
+                                    let row_label = connection
+                                        .terminal_titles
+                                        .get(&pane_id)
+                                        .cloned()
+                                        .unwrap_or_else(|| agent_label.to_owned());
                                     let agent_owner = owner.clone();
                                     Some(
                                         CondrSidebarTreeItem::new(
                                             format!("sidebar-agent-{key}-{}", pane_id.as_u64()),
                                             format!("agent-{key}-{}", pane_id.as_u64()),
                                             format!("agent-label-{key}-{}", pane_id.as_u64()),
-                                            agent_label,
+                                            row_label,
                                         )
-                                        .icon(CondrSidebarIcon::status(
+                                        .icon(CondrSidebarIcon::agent(
+                                            agent.kind,
                                             status,
                                             format!(
                                                 "agent-status-{key}-{}-{}",
