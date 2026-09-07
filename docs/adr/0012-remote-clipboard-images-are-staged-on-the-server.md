@@ -1,6 +1,6 @@
 # Remote Clipboard Images Are Staged on the Server
 
-Status: accepted 2026-09-05. Implemented for [GitHub #29](https://github.com/condrdev/condr/issues/29); Windows GUI to Linux Server manual acceptance remains pending.
+Status: accepted 2026-09-05. Implemented for [GitHub #29](https://github.com/condrdev/condr/issues/29); manual acceptance confirmed by the maintainer on 2026-09-07, including BMP-to-PNG conversion.
 
 An Agent running in a Terminal on a remote Server cannot read the native clipboard of the machine running the GUI. Forwarding `Alt+V` as terminal input therefore asks the remote Agent to read the remote host's clipboard, while the same shortcut works against a local Server. Condr will bridge that explicit image-paste gesture without adding an Agent-specific conversation or attachment API.
 
