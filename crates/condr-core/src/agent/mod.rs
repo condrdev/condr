@@ -242,12 +242,18 @@ fn agent_from_path_token(token: &str) -> Option<AgentKind> {
 }
 
 fn is_runtime_or_shell(name: &str) -> bool {
-    let name = normalized_lookup_name(path_basename(name));
-    name.starts_with("python")
-        || matches!(
-            name.as_str(),
-            "node" | "bun" | "sh" | "bash" | "zsh" | "fish" | "cmd" | "powershell" | "pwsh"
-        )
+    let normalized = normalized_lookup_name(path_basename(name));
+    normalized.starts_with("python")
+        || matches!(normalized.as_str(), "node" | "bun")
+        || is_shell(name)
+}
+
+/// A shell wrapping a command, as opposed to a runtime that *is* the agent's process.
+pub(super) fn is_shell(name: &str) -> bool {
+    matches!(
+        normalized_lookup_name(path_basename(name)).as_str(),
+        "sh" | "bash" | "zsh" | "fish" | "cmd" | "powershell" | "pwsh"
+    )
 }
 
 fn normalized_lookup_name(name: &str) -> String {
@@ -424,6 +430,10 @@ pub enum AgentPublish {
 pub struct AgentDetector {
     agent: Option<AgentKind>,
     state: Option<AgentState>,
+    /// The agent was named by its own events, not the process table: a launcher Condr
+    /// cannot see through is running it. Only a bare shell clears it then.
+    seeded: bool,
+    last_probe: Option<ProcessProbeResult>,
     consecutive_misses: u8,
     last_process_probe: Option<Instant>,
     last_activity: Option<Instant>,
@@ -482,13 +492,16 @@ impl AgentDetector {
     /// cleared. A different kind replacing the current one is a fresh agent.
     pub fn observe_process(&mut self, result: ProcessProbeResult, now: Instant) -> AgentPublish {
         self.last_process_probe = Some(now);
+        self.last_probe = Some(result);
         match result {
             ProcessProbeResult::Agent(agent) => {
                 self.consecutive_misses = 0;
                 if self.agent == Some(agent) {
+                    self.seeded = false;
                     return AgentPublish::Nothing;
                 }
                 self.agent = Some(agent);
+                self.seeded = false;
                 self.state = Some(AgentState::Unknown);
                 AgentPublish::Snapshot(AgentSnapshot {
                     kind: agent,
@@ -502,6 +515,8 @@ impl AgentDetector {
                 }
                 let exited = match result {
                     ProcessProbeResult::ShellOnly => true,
+                    // A seeded agent is expected to be invisible in the table.
+                    _ if self.seeded => false,
                     _ => {
                         self.consecutive_misses = self.consecutive_misses.saturating_add(1);
                         self.consecutive_misses >= AGENT_MISS_CONFIRMATION_ATTEMPTS
@@ -512,6 +527,7 @@ impl AgentDetector {
                 }
                 self.agent = None;
                 self.state = None;
+                self.seeded = false;
                 self.consecutive_misses = 0;
                 // The shell is back in front: a replacement may start any moment.
                 self.acquisition_started = Some(now);
@@ -521,9 +537,16 @@ impl AgentDetector {
     }
 
     /// Feeds a hook event. An event naming a different agent than the process table
-    /// shows, or arriving before any agent is known, is dropped: it belongs to a nested
-    /// or forged reporter, not to this Pane's agent.
+    /// shows is dropped: it belongs to a nested or forged reporter, not to this Pane's
+    /// agent. An event arriving while the table shows a foreground job Condr cannot
+    /// name (`mise exec -- claude`, a wrapper script) names the agent instead; a bare
+    /// shell (`ShellOnly`) has no agent to name, and the event is dropped.
     pub fn observe_event(&mut self, event: &AgentEvent) -> AgentPublish {
+        if self.agent.is_none() && self.last_probe == Some(ProcessProbeResult::Unidentified) {
+            self.agent = Some(event.agent);
+            self.seeded = true;
+            self.state = Some(AgentState::Unknown);
+        }
         let (Some(agent), Some(state)) = (self.agent, self.state) else {
             return AgentPublish::Nothing;
         };
@@ -830,7 +853,9 @@ mod tests {
         let mut detector = AgentDetector::new();
         let now = Instant::now();
         let stop = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None);
-        // Before any agent is known, events are dropped rather than seeding one.
+        // Before any probe, or over a bare shell, events do not seed an agent.
+        assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
+        detector.observe_process(ProcessProbeResult::ShellOnly, now);
         assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
         detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), now);
         assert_eq!(
@@ -863,5 +888,51 @@ mod tests {
                 state: AgentState::Unknown,
             })
         );
+    }
+
+    #[test]
+    fn an_agent_behind_an_opaque_launcher_is_named_by_its_own_events() {
+        let mut detector = AgentDetector::new();
+        let now = Instant::now();
+        // `mise exec -- claude`: something runs in front of the shell, nothing Condr can name.
+        detector.observe_process(ProcessProbeResult::Unidentified, now);
+        let start = AgentEvent::new(
+            AgentKind::Claude,
+            AgentEventKind::SessionStart,
+            Some("startup".into()),
+        );
+        assert_eq!(
+            detector.observe_event(&start),
+            AgentPublish::Snapshot(AgentSnapshot {
+                kind: AgentKind::Claude,
+                state: AgentState::Idle,
+            })
+        );
+        assert_eq!(detector.agent(), Some(AgentKind::Claude));
+        // The table keeps failing to name it; that is expected, not an exit.
+        for _ in 0..10 {
+            assert_eq!(
+                detector.observe_process(ProcessProbeResult::Unidentified, now),
+                AgentPublish::Nothing
+            );
+        }
+        // The table naming it later confirms rather than restarts it.
+        assert_eq!(
+            detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now),
+            AgentPublish::Nothing
+        );
+        // A bare shell still means it is gone.
+        assert_eq!(
+            detector.observe_process(ProcessProbeResult::ShellOnly, now),
+            AgentPublish::Cleared
+        );
+    }
+
+    #[test]
+    fn shells_are_told_apart_from_runtimes() {
+        assert!(is_shell("/bin/bash"));
+        assert!(is_shell("pwsh.exe"));
+        assert!(!is_shell("node"));
+        assert!(!is_shell("claude"));
     }
 }

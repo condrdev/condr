@@ -822,12 +822,14 @@ pub(super) struct OscScanner {
 pub(super) enum OscState {
     #[default]
     Ground,
-    Prefix(usize),
+    /// An `ESC` was seen and held; the next byte says what it starts.
+    Escape,
     Payload,
     PayloadEscape,
     Discard,
     DiscardEscape,
-    /// Inside DCS/SOS/PM/APC, which only ST ends; BEL is payload there.
+    /// Inside DCS/SOS/PM/APC, where BEL is payload and ST ends the string; a bare `ESC`
+    /// starting something else ends it too, as the VT reads it.
     ControlString,
     ControlStringEscape,
 }
@@ -870,6 +872,11 @@ impl<'a, 'h> VtFilter<'a, 'h> {
         self.hold_from = Some(at);
     }
 
+    /// Holds from `at` unless an earlier hold is still open.
+    fn hold_if_free(&mut self, at: usize) {
+        self.hold_from.get_or_insert(at);
+    }
+
     /// Makes `out` real and current up to `upto`.
     fn materialize(&mut self, upto: usize) {
         match &mut self.out {
@@ -904,6 +911,35 @@ impl<'a, 'h> VtFilter<'a, 'h> {
         self.emitted = end;
     }
 
+    /// Like `release`/`discard` up to `end`, except that the last held byte, the `ESC`
+    /// that ended the string, stays held: it starts whatever comes next.
+    fn settle_keeping_escape(&mut self, end: usize, keep: bool) {
+        let Some(from) = self.hold_from else {
+            return;
+        };
+        if end > from {
+            let escape = end - 1;
+            if keep {
+                self.release(escape);
+            } else {
+                self.discard(escape);
+            }
+            self.hold_from = Some(escape);
+        } else {
+            // The whole string, ESC included, arrived in earlier reads.
+            let escape = self.carry.pop();
+            if keep {
+                self.release(end);
+            } else {
+                self.discard(end);
+            }
+            if let Some(escape) = escape {
+                self.carry.push(escape);
+                self.hold_from = Some(end);
+            }
+        }
+    }
+
     fn finish(mut self) -> Cow<'a, [u8]> {
         if let Some(from) = self.hold_from.take() {
             self.materialize(from);
@@ -920,9 +956,17 @@ impl<'a, 'h> VtFilter<'a, 'h> {
     }
 }
 
-impl OscScanner {
-    const PREFIX: &'static [u8] = b"\x1b]";
+/// Where a string ended.
+#[derive(Clone, Copy)]
+enum Terminator {
+    /// BEL or ST: the terminator belongs to the string.
+    Proper,
+    /// A bare `ESC` followed by something else, as the VT reads it: the string ends, and
+    /// the `ESC` begins the next sequence.
+    Escape,
+}
 
+impl OscScanner {
     /// Scans one read, reporting what Condr consumes itself, and returns what the VT
     /// should see.
     pub(super) fn advance<'a>(
@@ -935,84 +979,81 @@ impl OscScanner {
         for (index, &byte) in bytes.iter().enumerate() {
             match self.state {
                 OscState::Ground => {
-                    if byte == Self::PREFIX[0] {
+                    if byte == 0x1b {
                         vt.hold(index);
-                        self.state = OscState::Prefix(1);
+                        self.state = OscState::Escape;
                     }
                 }
-                OscState::Prefix(matched) => {
-                    if byte == Self::PREFIX[matched] {
-                        let matched = matched + 1;
-                        if matched == Self::PREFIX.len() {
-                            self.payload.clear();
-                            self.state = OscState::Payload;
-                        } else {
-                            self.state = OscState::Prefix(matched);
-                        }
-                    } else if byte == Self::PREFIX[0] {
-                        vt.release(index);
-                        vt.hold(index);
-                        self.state = OscState::Prefix(1);
-                    } else if matched == 1 && matches!(byte, b'P' | b'X' | b'^' | b'_') {
-                        // DCS/SOS/PM/APC: whatever looks like an OSC inside is payload.
-                        vt.release(index + 1);
-                        self.state = OscState::ControlString;
-                    } else {
-                        vt.release(index + 1);
-                        self.state = OscState::Ground;
-                    }
-                }
+                OscState::Escape => self.after_escape(byte, index, &mut vt),
                 OscState::Payload => match byte {
-                    0x07 => self.finish(index, &mut vt, &mut report),
-                    0x1b => self.state = OscState::PayloadEscape,
+                    0x07 => self.finish(index, Terminator::Proper, &mut vt, &mut report),
+                    0x1b => {
+                        // Held even when the payload was released: this ESC may start
+                        // an agent event, as the VT would read it.
+                        vt.hold_if_free(index);
+                        self.state = OscState::PayloadEscape;
+                    }
                     _ => self.push_payload(byte, index, &mut vt),
                 },
                 OscState::PayloadEscape => match byte {
-                    b'\\' => self.finish(index, &mut vt, &mut report),
-                    0x07 => {
-                        self.push_payload(0x1b, index, &mut vt);
-                        if matches!(self.state, OscState::Payload) {
-                            self.finish(index, &mut vt, &mut report);
-                        }
-                    }
-                    0x1b => {
-                        self.push_payload(0x1b, index, &mut vt);
-                        if matches!(self.state, OscState::Payload) {
-                            self.state = OscState::PayloadEscape;
-                        }
-                    }
+                    b'\\' => self.finish(index, Terminator::Proper, &mut vt, &mut report),
                     _ => {
-                        self.push_payload(0x1b, index, &mut vt);
-                        if matches!(self.state, OscState::Payload) {
-                            self.push_payload(byte, index, &mut vt);
-                        }
+                        self.finish(index, Terminator::Escape, &mut vt, &mut report);
+                        self.after_escape(byte, index, &mut vt);
                     }
                 },
-                OscState::Discard => match byte {
-                    0x07 => self.reset(),
-                    0x1b => self.state = OscState::DiscardEscape,
+                OscState::Discard | OscState::ControlString => match byte {
+                    0x07 if matches!(self.state, OscState::Discard) => self.reset(),
+                    0x1b => {
+                        vt.hold(index);
+                        self.state = if matches!(self.state, OscState::Discard) {
+                            OscState::DiscardEscape
+                        } else {
+                            OscState::ControlStringEscape
+                        };
+                    }
                     _ => {}
                 },
-                OscState::DiscardEscape => match byte {
-                    b'\\' => self.reset(),
-                    0x1b => {}
-                    _ => self.state = OscState::Discard,
-                },
-                OscState::ControlString => {
-                    if byte == 0x1b {
-                        self.state = OscState::ControlStringEscape;
+                OscState::DiscardEscape | OscState::ControlStringEscape => match byte {
+                    b'\\' => {
+                        vt.release(index + 1);
+                        self.reset();
                     }
-                }
-                OscState::ControlStringEscape => match byte {
-                    b'\\' => self.reset(),
-                    0x1b => {}
-                    _ => self.state = OscState::ControlString,
+                    _ => {
+                        self.reset();
+                        self.after_escape(byte, index, &mut vt);
+                    }
                 },
             }
         }
         let filtered = vt.finish();
         self.held = held;
         filtered
+    }
+
+    /// The byte after a held `ESC` decides what it started.
+    fn after_escape(&mut self, byte: u8, index: usize, vt: &mut VtFilter<'_, '_>) {
+        match byte {
+            b']' => {
+                self.payload.clear();
+                self.state = OscState::Payload;
+            }
+            0x1b => {
+                // ESC ESC: the first one was nothing; this one may start something.
+                vt.release(index);
+                vt.hold(index);
+                self.state = OscState::Escape;
+            }
+            b'P' | b'X' | b'^' | b'_' => {
+                // DCS/SOS/PM/APC: whatever looks like an OSC inside is payload.
+                vt.release(index + 1);
+                self.state = OscState::ControlString;
+            }
+            _ => {
+                vt.release(index + 1);
+                self.state = OscState::Ground;
+            }
+        }
     }
 
     /// Whether the payload so far can still turn out to be an agent event.
@@ -1028,43 +1069,47 @@ impl OscScanner {
             vt.release(index + 1);
         } else {
             self.payload.push(byte);
-            self.state = OscState::Payload;
             if !self.could_be_agent_event() {
                 vt.release(index + 1);
             }
         }
     }
 
+    /// The OSC is complete. `index` is the byte that ended it: the BEL, the `\` of an ST,
+    /// or the byte after a bare `ESC`.
     fn finish(
         &mut self,
         index: usize,
+        terminator: Terminator,
         vt: &mut VtFilter<'_, '_>,
         report: &mut impl FnMut(OscReport),
     ) {
-        if self.payload.starts_with(AGENT_EVENT_OSC_PREFIX.as_bytes()) {
+        let ours = self.payload.starts_with(AGENT_EVENT_OSC_PREFIX.as_bytes());
+        if ours {
             // Ours, well-formed or not: the terminal has no use for it either way.
             if let Some(event) = AgentEvent::decode(&self.payload) {
                 report(OscReport::Agent(event));
             }
-            vt.discard(index + 1);
-        } else {
-            vt.release(index + 1);
-            if let Ok(payload) = std::str::from_utf8(&self.payload) {
-                if let Some(cwd) = payload.strip_prefix("9;9;") {
-                    let cwd = cwd
-                        .strip_prefix('"')
-                        .and_then(|cwd| cwd.strip_suffix('"'))
-                        .unwrap_or(cwd);
-                    report(OscReport::Cwd(PathBuf::from(cwd)));
-                } else if let Some(cwd) = payload.strip_prefix("7;").and_then(file_uri_cwd) {
-                    report(OscReport::Cwd(cwd));
-                } else if let Some(cwd) = payload
-                    .strip_prefix("1337;CurrentDir=")
-                    .filter(|cwd| !cwd.is_empty())
-                {
-                    report(OscReport::Cwd(PathBuf::from(cwd)));
-                }
+        } else if let Ok(payload) = std::str::from_utf8(&self.payload) {
+            if let Some(cwd) = payload.strip_prefix("9;9;") {
+                let cwd = cwd
+                    .strip_prefix('"')
+                    .and_then(|cwd| cwd.strip_suffix('"'))
+                    .unwrap_or(cwd);
+                report(OscReport::Cwd(PathBuf::from(cwd)));
+            } else if let Some(cwd) = payload.strip_prefix("7;").and_then(file_uri_cwd) {
+                report(OscReport::Cwd(cwd));
+            } else if let Some(cwd) = payload
+                .strip_prefix("1337;CurrentDir=")
+                .filter(|cwd| !cwd.is_empty())
+            {
+                report(OscReport::Cwd(PathBuf::from(cwd)));
             }
+        }
+        match (terminator, ours) {
+            (Terminator::Proper, true) => vt.discard(index + 1),
+            (Terminator::Proper, false) => vt.release(index + 1),
+            (Terminator::Escape, ours) => vt.settle_keeping_escape(index, !ours),
         }
         self.reset();
     }

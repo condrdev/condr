@@ -4,18 +4,25 @@
 //! Everything here fails quietly. A hook that blocks or errors would stall the agent it
 //! observes, so the worst outcome is a missed status update.
 
+use std::fs::File;
 use std::io::{IsTerminal as _, Read as _, Write as _};
 use std::time::Duration;
 
-use super::{AgentEvent, AgentEventKind, AgentKind};
+use super::{AgentEvent, AgentEventKind, AgentKind, ProcessInfo, identify_agent_process};
 
-const MAX_STDIN: u64 = 64 * 1024;
-/// A hook that cannot deliver in this long has nothing left to gain by trying.
-const DEADLINE: Duration = Duration::from_secs(2);
+/// How much of the agent's JSON is parsed; the rest is drained so the agent's write
+/// never fails with EPIPE, but a pasted file in a tool result is not worth reading.
+const MAX_PARSED_STDIN: usize = 64 * 1024;
+/// Finding a terminal to write to must not take longer than this. The write itself is
+/// never abandoned half way: a torn OSC would swallow the output that follows it.
+const OPEN_DEADLINE: Duration = Duration::from_secs(2);
+/// The `source` values Claude Code and Codex document; anything else is not a session
+/// start reason Condr knows, and an unbounded string would not fit the OSC anyway.
+const SESSION_SOURCES: [&str; 5] = ["startup", "resume", "clear", "compact", "fork"];
 
 /// Runs the hook. `agent` and `event` are the slugs the installer wrote into the agent's
-/// configuration; stdin carries the agent's JSON, of which only `source` is kept. Returns
-/// whether the event reached a terminal; callers exit 0 regardless.
+/// configuration; stdin carries the agent's JSON. Returns whether the event reached a
+/// terminal; callers exit 0 regardless.
 pub fn run(agent: &str, event: &str) -> bool {
     if std::env::var_os(crate::PaneEnvironment::ENV).is_none_or(|value| value != "1") {
         return false;
@@ -24,38 +31,119 @@ pub fn run(agent: &str, event: &str) -> bool {
     else {
         return false;
     };
-    let (done, wait) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let source = (event == AgentEventKind::SessionStart)
-            .then(read_stdin)
-            .flatten()
-            .and_then(|input| source_of(&input));
-        let delivered =
-            write_to_controlling_terminal(&AgentEvent::new(agent, event, source).encode());
-        let _ = done.send(delivered);
-    });
-    wait.recv_timeout(DEADLINE).unwrap_or(false)
-}
-
-fn read_stdin() -> Option<String> {
-    let stdin = std::io::stdin();
-    if stdin.is_terminal() {
-        return None;
+    let input = HookInput::read();
+    let event = match event {
+        // AskUserQuestion is an ordinary tool to Claude Code, so it only ever fires
+        // PreToolUse; to the user it is a question they have to answer.
+        AgentEventKind::ToolStart if input.tool_name.as_deref() == Some("AskUserQuestion") => {
+            AgentEventKind::QuestionAsked
+        }
+        other => other,
+    };
+    let source = (event == AgentEventKind::SessionStart)
+        .then_some(input.source)
+        .flatten();
+    // An agent an agent runs (Claude Code calling `claude -p` from its Bash tool) has
+    // the same hooks and the same terminal; its turns are not this Pane's.
+    if nested_inside_same_agent(agent) {
+        return false;
     }
-    let mut input = String::new();
-    stdin.take(MAX_STDIN).read_to_string(&mut input).ok()?;
-    Some(input)
+    let (opened, wait) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = opened.send(open_controlling_terminal());
+    });
+    let Ok(Some(mut terminal)) = wait.recv_timeout(OPEN_DEADLINE) else {
+        return false;
+    };
+    let bytes = AgentEvent::new(agent, event, source).encode();
+    terminal
+        .write_all(&bytes)
+        .and_then(|()| terminal.flush())
+        .is_ok()
 }
 
-fn source_of(input: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(input).ok()?;
-    value.get("source")?.as_str().map(str::to_owned)
+#[derive(Default)]
+struct HookInput {
+    source: Option<String>,
+    tool_name: Option<String>,
+}
+
+impl HookInput {
+    /// Reads stdin to the end, parsing only its head.
+    fn read() -> Self {
+        let mut stdin = std::io::stdin();
+        if stdin.is_terminal() {
+            return Self::default();
+        }
+        let mut head = Vec::new();
+        if (&mut stdin)
+            .take(MAX_PARSED_STDIN as u64)
+            .read_to_end(&mut head)
+            .is_err()
+        {
+            return Self::default();
+        }
+        let _ = std::io::copy(&mut stdin, &mut std::io::sink());
+        Self::parse(&head)
+    }
+
+    fn parse(json: &[u8]) -> Self {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(json) else {
+            return Self::default();
+        };
+        let field = |name: &str| value.get(name)?.as_str().map(str::to_owned);
+        Self {
+            source: field("source").filter(|source| SESSION_SOURCES.contains(&source.as_str())),
+            tool_name: field("tool_name"),
+        }
+    }
+}
+
+/// Whether more than one process of this agent's kind sits above the hook. Shells are
+/// looked through but not counted: `bash -c claude` is one agent, `claude` running
+/// `sh -c "claude -p …"` is two.
+fn nested_inside_same_agent(agent: AgentKind) -> bool {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut system = System::new();
+    let mut pid = Pid::from_u32(std::process::id());
+    let mut agents = 0;
+    for _ in 0..24 {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+        );
+        let Some(process) = system.process(pid) else {
+            break;
+        };
+        let name = process.name().to_string_lossy();
+        let argv: Vec<String> = process
+            .cmd()
+            .iter()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        let info = ProcessInfo {
+            name: &name,
+            argv: (!argv.is_empty()).then_some(argv.as_slice()),
+        };
+        let front = argv.first().map(String::as_str).unwrap_or(&name);
+        if identify_agent_process(info) == Some(agent) && !super::is_shell(front) {
+            agents += 1;
+            if agents > 1 {
+                return true;
+            }
+        }
+        let Some(parent) = process.parent() else {
+            break;
+        };
+        pid = parent;
+    }
+    false
 }
 
 #[cfg(unix)]
-fn write_to_controlling_terminal(bytes: &[u8]) -> bool {
-    if write_device("/dev/tty", bytes) {
-        return true;
+fn open_controlling_terminal() -> Option<File> {
+    if let Ok(tty) = File::options().write(true).open("/dev/tty") {
+        return Some(tty);
     }
     // Without a controlling terminal of our own, the nearest ancestor that has one is
     // the agent, or the shell it runs in.
@@ -64,12 +152,10 @@ fn write_to_controlling_terminal(bytes: &[u8]) -> bool {
         if pid <= 1 {
             break;
         }
-        let Ok(output) = std::process::Command::new("ps")
+        let output = std::process::Command::new("ps")
             .args(["-o", "tty=", "-o", "ppid=", "-p", &pid.to_string()])
             .output()
-        else {
-            break;
-        };
+            .ok()?;
         let line = String::from_utf8_lossy(&output.stdout);
         let mut fields = line.split_whitespace();
         let tty = fields.next().unwrap_or("");
@@ -78,29 +164,20 @@ fn write_to_controlling_terminal(bytes: &[u8]) -> bool {
             .and_then(|ppid| ppid.parse().ok())
             .unwrap_or(1);
         if !tty.is_empty() && tty != "?" && tty != "??" {
-            return write_device(&format!("/dev/{tty}"), bytes);
+            return File::options().write(true).open(format!("/dev/{tty}")).ok();
         }
         pid = parent;
     }
-    false
-}
-
-#[cfg(unix)]
-fn write_device(path: &str, bytes: &[u8]) -> bool {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .and_then(|mut tty| tty.write_all(bytes).and_then(|()| tty.flush()))
-        .is_ok()
+    None
 }
 
 #[cfg(windows)]
-fn write_to_controlling_terminal(bytes: &[u8]) -> bool {
+fn open_controlling_terminal() -> Option<File> {
     use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole};
 
     // The console we inherited is the ConPTY the agent runs in, when there is one.
-    if write_console_out(bytes) {
-        return true;
+    if let Some(out) = open_console_out() {
+        return Some(out);
     }
     // Otherwise borrow an ancestor's: the agent, or the shell it runs in.
     let mut system = sysinfo::System::new();
@@ -110,30 +187,46 @@ fn write_to_controlling_terminal(bytes: &[u8]) -> bool {
     );
     let mut pid = sysinfo::Pid::from_u32(std::process::id());
     for _ in 0..16 {
-        let Some(parent) = system.process(pid).and_then(sysinfo::Process::parent) else {
-            break;
-        };
+        let parent = system.process(pid).and_then(sysinfo::Process::parent)?;
         // SAFETY: plain Win32 console calls with no pointers involved.
         let attached = unsafe {
             FreeConsole();
             AttachConsole(parent.as_u32()) != 0
         };
-        if attached && write_console_out(bytes) {
-            return true;
+        if attached && let Some(out) = open_console_out() {
+            return Some(out);
         }
         pid = parent;
     }
-    false
+    None
 }
 
+/// `CONOUT$` with virtual terminal processing on, so conhost passes the OSC through to
+/// the ConPTY instead of printing it. The agent usually enables the mode on its own
+/// handle; this one is the hook's, and must not depend on that.
 #[cfg(windows)]
-fn write_console_out(bytes: &[u8]) -> bool {
-    std::fs::OpenOptions::new()
+fn open_console_out() -> Option<File> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::System::Console::{
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, SetConsoleMode,
+    };
+
+    let out = File::options()
         .read(true)
         .write(true)
         .open("CONOUT$")
-        .and_then(|mut out| out.write_all(bytes).and_then(|()| out.flush()))
-        .is_ok()
+        .ok()?;
+    let handle = out.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+    let mut mode = 0;
+    // SAFETY: `handle` is a live console handle owned by `out`; `mode` outlives the call.
+    unsafe {
+        if GetConsoleMode(handle, &mut mode) != 0
+            && SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) == 0
+        {
+            return None;
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -141,12 +234,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_session_source_is_kept_from_the_hook_input() {
-        assert_eq!(
-            source_of(r#"{"session_id":"abc","source":"compact","cwd":"/x"}"#),
-            Some("compact".to_owned())
+    fn only_a_known_session_source_and_the_tool_name_are_kept_from_the_hook_input() {
+        let input = HookInput::parse(
+            br#"{"session_id":"abc","source":"compact","cwd":"/x","tool_name":"Bash"}"#,
         );
-        assert_eq!(source_of(r#"{"session_id":"abc"}"#), None);
-        assert_eq!(source_of("not json"), None);
+        assert_eq!(input.source.as_deref(), Some("compact"));
+        assert_eq!(input.tool_name.as_deref(), Some("Bash"));
+        let long = format!(r#"{{"source":"{}"}}"#, "x".repeat(5000));
+        assert_eq!(HookInput::parse(long.as_bytes()).source, None);
+        assert_eq!(HookInput::parse(br#"{"session_id":"abc"}"#).source, None);
+        assert_eq!(HookInput::parse(b"not json").tool_name, None);
+    }
+
+    #[test]
+    fn a_hook_run_by_this_test_is_not_nested_in_an_agent() {
+        assert!(!nested_inside_same_agent(AgentKind::Claude));
     }
 }

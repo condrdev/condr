@@ -169,10 +169,10 @@ fn entries(agent: AgentKind) -> &'static [HookEntry] {
     }
 }
 
-/// The plugin OpenCode loads at startup. It follows the root session only: a task
-/// subagent runs in a child session whose events look the same, so children are
-/// remembered from `session.created` and skipped, or the pane would report the
-/// subagent's turns as its own. Inert outside a Condr Pane.
+/// The plugin OpenCode loads at startup. It follows the user's root sessions, including
+/// the ones `/new` starts later: a task subagent runs in a child session whose events
+/// look the same, so children are remembered from `session.created` and skipped, or the
+/// pane would report the subagent's turns as its own. Inert outside a Condr Pane.
 fn opencode_plugin(target: &HookTarget) -> String {
     let exe = serde_json::to_string(target.executable()).expect("string serializes");
     format!(
@@ -182,31 +182,37 @@ export const CondrAgentStatus = async ({{ $ }}) => {{
   if (process.env.CONDR_ENV !== "1") return {{}}
   const exe = {exe}
   const report = (event) => $`${{exe}} agent-hook opencode ${{event}}`.quiet().nothrow()
+  // Root sessions are the user's own; `/new` starts another. Children are subagents.
+  const roots = new Set()
   const children = new Set()
-  let root = ""
-  let announced = false
+  const announced = new Set()
   const own = (id) => {{
     if (!id || children.has(id)) return false
-    if (!root) root = id
-    return id === root
+    if (roots.size === 0) roots.add(id)
+    return roots.has(id)
   }}
-  const announce = async () => {{
-    if (announced) return
-    announced = true
+  const announce = async (id) => {{
+    if (announced.has(id)) return
+    announced.add(id)
     await report("session-start")
   }}
   return {{
     "tool.execute.before": async (input) => {{
-      if (!own(input?.sessionID)) return
-      await announce()
+      const id = input?.sessionID
+      if (!own(id)) return
+      await announce(id)
       await report("tool-start")
     }},
     event: async ({{ event }}) => {{
       const properties = event.properties ?? {{}}
       const info = properties.info
-      if (info?.id && info.parentID) children.add(info.id)
-      if (!own(properties.sessionID ?? info?.id)) return
-      await announce()
+      if (info?.id) {{
+        if (info.parentID) children.add(info.id)
+        else if (event.type === "session.created") roots.add(info.id)
+      }}
+      const id = properties.sessionID ?? info?.id
+      if (!own(id)) return
+      await announce(id)
       const key = event.type === "session.status" ? `session.status.${{properties.status?.type}}` : event.type
       switch (key) {{
         case "session.status.busy": return report("prompt-submit")
@@ -431,13 +437,24 @@ fn write_config(path: &Path, root: &Value) -> io::Result<()> {
     write_file(path, text.as_bytes())
 }
 
+/// Writes through a symlink (dotfile managers keep the real file elsewhere), replaces
+/// the target atomically, and leaves an already identical file untouched so a status
+/// check or a no-op uninstall never dirties the user's dotfiles.
 fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let path = match std::fs::canonicalize(path) {
+        Ok(real) => real,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(error) => return Err(error),
+    };
+    if std::fs::read(&path).is_ok_and(|current| current == bytes) {
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let temporary = path.with_extension("condr-tmp");
     std::fs::write(&temporary, bytes)?;
-    std::fs::rename(&temporary, path)
+    std::fs::rename(&temporary, &path)
 }
 
 fn invalid(path: &Path, detail: impl std::fmt::Display) -> io::Error {
@@ -510,6 +527,10 @@ mod tests {
         assert_eq!(read(&path), once, "a second install changes nothing");
 
         assert_eq!(once["model"], "opus");
+        // The user's key order survives; a no-op rewrite would show up as a dotfile diff.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.find("\"model\"").unwrap() < text.find("\"hooks\"").unwrap());
+        assert!(text.find("\"Stop\"").unwrap() < text.find("\"PreToolUse\"").unwrap());
         let stop = once["hooks"]["Stop"].as_array().unwrap();
         assert_eq!(stop.len(), 2);
         assert_eq!(stop[0]["hooks"][0]["command"], "notify-send done");
@@ -610,6 +631,9 @@ mod tests {
         assert!(plugin.contains(r#"const exe = "/opt/condr bin/condr""#));
         assert!(plugin.contains("agent-hook opencode ${event}"));
         assert!(plugin.contains(r#"process.env.CONDR_ENV !== "1""#));
+        assert!(
+            plugin.contains(r#"else if (event.type === "session.created") roots.add(info.id)"#)
+        );
         for event in [
             "session-start",
             "prompt-submit",
@@ -661,6 +685,39 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "export const Mine = async () => ({})\n"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_settings_file_is_written_through_and_an_unchanged_one_is_left_alone() {
+        let (target, root) = target();
+        let real = root.join("dotfiles/claude-settings.json");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, "{\n  \"model\": \"opus\"\n}\n").unwrap();
+        let link = target.path(AgentKind::Claude);
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        install(&target, AgentKind::Claude).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&link).unwrap().is_symlink(),
+            "link survives"
+        );
+        assert!(
+            read(&real)["hooks"]["Stop"].is_array(),
+            "the real file got the hooks"
+        );
+
+        let before = std::fs::metadata(&real).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        install(&target, AgentKind::Claude).unwrap();
+        uninstall(&target, AgentKind::Codex).unwrap_or_else(|_| target.path(AgentKind::Codex));
+        assert_eq!(
+            std::fs::metadata(&real).unwrap().modified().unwrap(),
+            before,
+            "an identical install does not rewrite"
         );
         std::fs::remove_dir_all(root).unwrap();
     }

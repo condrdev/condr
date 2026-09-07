@@ -47,7 +47,7 @@ printf '%s\n' "$@" > "$CONDR_TEST_ARGS"
 report() { printf '{"session_id":"fixture","source":"startup"}' | condr agent-hook codex "$1"; }
 case "$1" in
   --exit) exit 0 ;;
-  --blocked) report session-start; report permission-request ;;
+  --blocked) report permission-request ;;
   --working) report prompt-submit ;;
   *) report session-start ;;
 esac
@@ -218,10 +218,7 @@ fn windows_agent_fixture() {
     .unwrap();
     match args.first().map(String::as_str) {
         Some("--exit") => return,
-        Some("--blocked") => {
-            report("session-start");
-            report("permission-request");
-        }
+        Some("--blocked") => report("permission-request"),
         Some("--working") => report("prompt-submit"),
         _ => report("session-start"),
     }
