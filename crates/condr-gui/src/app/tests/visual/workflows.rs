@@ -365,16 +365,24 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         other_pane.is_some_and(|pane_id| pane_id != agent_pane)
     }));
 
+    let event = |kind| {
+        condr_core::AgentEvent::new(AgentKind::Codex, kind, None)
+            .encode()
+            .iter()
+            .map(|byte| format!("\\{byte:03o}"))
+            .collect::<String>()
+    };
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.terminal_command(
                 1,
                 agent_pane,
-                TerminalCommand::Text(
-                    // Working for longer than the detector's 3 s startup grace, then idle.
-                    "exec -a codex /bin/bash -c \"echo '◦ Working (1s - esc to interrupt)'; sleep 5; printf '\\033[2J\\033[H›\\n'; sleep 30 & wait\"\r"
-                        .into(),
-                ),
+                // ADR 0014: state comes from hooks, while the process supplies identity.
+                TerminalCommand::Text(format!(
+                    "exec -a codex /bin/bash -c \"printf '{}'; sleep 2; printf '{}'; sleep 30 & wait\"\r",
+                    event(condr_core::AgentEventKind::PromptSubmit),
+                    event(condr_core::AgentEventKind::Stop),
+                )),
             );
         });
     });

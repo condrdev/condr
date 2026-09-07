@@ -643,8 +643,8 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
     });
     window.simulate_keystrokes("ctrl-shift-c");
     assert!(
-        window.read(|app| view.read(app).terminal_selection.is_some()),
-        "a rejected Copy must preserve the local selection"
+        window.read(|app| view.read(app).selection_for(1, pane_id).is_some()),
+        "a rejected Copy must preserve the selection"
     );
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -654,7 +654,7 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         });
     });
     window.simulate_keystrokes("ctrl-shift-c");
-    assert!(window.read(|app| view.read(app).terminal_selection.is_some()));
+    assert!(window.read(|app| view.read(app).selection_for(1, pane_id).is_some()));
     assert!(wait_until_event_driven(window, |window| {
         window
             .read_from_clipboard()
@@ -728,6 +728,29 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         }));
     }
 
+    window.simulate_keystrokes("ctrl-u");
+    let image =
+        gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, b"clipboard image".to_vec());
+    window.write_to_clipboard(ClipboardItem::new_image(&image));
+    window.simulate_keystrokes("alt-v");
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "client-")
+            && terminal_contains(window, &view, 1, pane_id, ".png")
+    }));
+    let path = window.read(|app| {
+        let text = view.read(app).connection(1).unwrap().terminals[&pane_id]
+            .view
+            .cells
+            .iter()
+            .map(|cell| cell.text.as_str())
+            .collect::<String>();
+        text.split_whitespace()
+            .find(|word| word.contains("client-") && word.ends_with(".png"))
+            .map(std::path::PathBuf::from)
+            .expect("Server path pasted into the Pane")
+    });
+    assert_eq!(std::fs::read(&path).unwrap(), image.bytes);
+
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
             this.prompt_text(
@@ -752,6 +775,119 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     window.simulate_keystrokes("shift-insert");
     window.run_until_parked();
     assert!(!terminal_contains(window, &view, 1, pane_id, dialog_marker));
+}
+
+#[test]
+fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (server, remote) = start_tcp_server();
+    let (view, window, _server) = connected_condr_with(&mut cx, server, remote.clone());
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
+                root_directory: std::env::temp_dir(),
+            });
+        })
+    });
+    let mut target = None;
+    assert!(wait_until(window, |window| {
+        target = window.read(|app| view.read(app).target_pane);
+        let Some((key, pane_id)) = target else {
+            return false;
+        };
+        window.read(|app| {
+            view.read(app)
+                .connection(key)
+                .unwrap()
+                .terminals
+                .contains_key(&pane_id)
+        }) && window.debug_bounds(terminal_selector(pane_id)).is_some()
+            && window.update(|window, cx| {
+                view.read(cx)
+                    .panels
+                    .get(&(key, pane_id))
+                    .is_some_and(|panel| panel.read(cx).focus_handle.is_focused(window))
+            })
+    }));
+    let (key, pane_id) = target.unwrap();
+    let (outgoing, received) = std::sync::mpsc::channel();
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(key).unwrap().io = Some(ClientIo {
+                outgoing,
+                _incoming_task: Task::ready(()),
+            });
+        })
+    });
+    let image = gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, vec![1, 2, 3]);
+    for clipboard in [
+        ClipboardItem::new_string("text".into()),
+        ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
+            gpui_kit::ImageFormat::Svg,
+            vec![0],
+        )),
+        ClipboardItem::new_image(&image),
+    ] {
+        // The supported image case uses a Local endpoint, which must never intercept.
+        if clipboard.entries().iter().any(|entry| {
+            matches!(entry,
+            gpui_kit::ClipboardEntry::Image(image) if image.format == gpui_kit::ImageFormat::Png)
+        }) {
+            window.update(|_, cx| {
+                view.update(cx, |this, _| {
+                    this.connection_mut(key).unwrap().endpoint =
+                        Endpoint::local(std::env::temp_dir().join("image-test.sock"));
+                })
+            });
+        }
+        window.write_to_clipboard(clipboard);
+        window.simulate_keystrokes("alt-v");
+        assert!(received.try_iter().any(|message| matches!(message,
+            ClientMessage::Terminal { pane_id: target, command: TerminalCommand::Key { key: condr_core::TerminalKey::Character(text), modifiers }, .. }
+                if target == pane_id && text == "v" && modifiers.alt)));
+    }
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(key).unwrap().endpoint = remote;
+        })
+    });
+    window.simulate_keystrokes("alt-v");
+    window.update(|_, cx| view.update(cx, |this, _| this.target_pane = None));
+    let messages: Vec<_> = received.try_iter().collect();
+    assert!(matches!(messages.as_slice(), [ClientMessage::PasteImage {
+        server_id, session_id, pane_id: target, bytes, ..
+    }] if *target == pane_id && *bytes == image.bytes && window.read(|app| {
+        let connection = view.read(app).connection(key).unwrap();
+        Some(*server_id) == connection.server_id && Some(*session_id) == connection.session_id
+    })));
+
+    window.update(|_, cx| view.update(cx, |this, _| this.target_pane = Some((key, pane_id))));
+    let oversized = gpui_kit::Image::from_bytes(
+        gpui_kit::ImageFormat::Png,
+        vec![0; condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES + 1],
+    );
+    window.write_to_clipboard(ClipboardItem::new_image(&oversized));
+    window.simulate_keystrokes("alt-v");
+    assert!(!received.try_iter().any(|message| matches!(
+        message,
+        ClientMessage::PasteImage { .. }
+            | ClientMessage::Terminal {
+                command: TerminalCommand::Key { .. },
+                ..
+            }
+    )));
+    assert!(window.read(|app| {
+        view.read(app)
+            .connection(key)
+            .unwrap()
+            .error
+            .as_ref()
+            .is_some_and(|error| error.contains("16 MiB"))
+    }));
 }
 
 #[test]

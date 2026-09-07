@@ -439,6 +439,57 @@ impl Condr {
         }
     }
 
+    /// Returns whether a remote image-paste gesture was consumed (ADR 0012).
+    fn paste_clipboard_image(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(item) = cx.read_from_clipboard() else {
+            return false;
+        };
+        let Some((format, bytes)) = item.entries().iter().find_map(|entry| match entry {
+            gpui_kit::ClipboardEntry::Image(image) => {
+                clipboard_image_format(image.format).map(|format| (format, &image.bytes))
+            }
+            _ => None,
+        }) else {
+            return false;
+        };
+        let Some(connection) = self.connection_mut(key) else {
+            return false;
+        };
+        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        else {
+            return false;
+        };
+        if !connection.can_mutate()
+            || connection
+                .terminals
+                .get(&pane_id)
+                .is_none_or(|terminal| terminal.exited)
+        {
+            return false;
+        }
+        if bytes.len() > condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES {
+            connection.error = Some("Image exceeds 16 MiB".into());
+            cx.notify();
+            return true;
+        }
+        // The Pane is fixed here; a focus change while the upload is in flight must not
+        // retarget it, which the message's own pane_id guarantees.
+        connection.send(ClientMessage::PasteImage {
+            server_id,
+            session_id,
+            pane_id,
+            format,
+            bytes: bytes.clone(),
+        });
+        self.clear_selection(cx);
+        true
+    }
+
     pub(super) fn clear_selection(&mut self, cx: &mut Context<Self>) {
         if self.terminal_selection.take().is_some() {
             cx.notify();
@@ -540,6 +591,15 @@ impl Condr {
                 selection.selected_cell_range(columns)
             })
             .is_some();
+        if is_image_paste_gesture(stroke)
+            && self
+                .connection(key)
+                .is_some_and(|connection| matches!(connection.endpoint, Endpoint::Tcp(_)))
+            && self.paste_clipboard_image(key, pane_id, cx)
+        {
+            cx.stop_propagation();
+            return;
+        }
         if let Some(shortcut) = terminal_clipboard_shortcut(stroke, has_selection) {
             match shortcut {
                 TerminalClipboardShortcut::Copy => {
@@ -689,6 +749,32 @@ pub(super) fn terminal_clipboard_shortcut(
         "insert" if shift_only => Some(TerminalClipboardShortcut::Paste),
         _ => None,
     }
+}
+
+/// `Alt+V` alone: the image-paste gesture the common Agent CLIs use (ADR 0012).
+pub(super) fn is_image_paste_gesture(stroke: &Keystroke) -> bool {
+    let modifiers = stroke.modifiers;
+    stroke.key == "v"
+        && modifiers.alt
+        && !modifiers.control
+        && !modifiers.platform
+        && !modifiers.shift
+        && !modifiers.function
+}
+
+/// The wire format for a clipboard image, or `None` for one the Server does not stage.
+pub(super) fn clipboard_image_format(
+    format: gpui_kit::ImageFormat,
+) -> Option<condr_core::protocol::ClipboardImageFormat> {
+    use condr_core::protocol::ClipboardImageFormat as Wire;
+    Some(match format {
+        gpui_kit::ImageFormat::Png => Wire::Png,
+        gpui_kit::ImageFormat::Jpeg => Wire::Jpeg,
+        gpui_kit::ImageFormat::Gif => Wire::Gif,
+        gpui_kit::ImageFormat::Webp => Wire::Webp,
+        gpui_kit::ImageFormat::Bmp => Wire::Bmp,
+        _ => return None,
+    })
 }
 
 /// The hover state after a pane reports `link`, or `None` when nothing changes. Every pane's

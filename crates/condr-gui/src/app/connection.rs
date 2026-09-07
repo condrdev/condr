@@ -494,7 +494,9 @@ impl ClientIo {
             .name("condr-client-writer".into())
             .spawn(move || {
                 while let Ok(message) = outgoing_rx.recv() {
-                    if let Err(error) = condr_core::protocol::write_message(&mut writer, &message) {
+                    if let Err(error) =
+                        condr_core::protocol::write_client_message(&mut writer, &message)
+                    {
                         let _ = writer_events
                             .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
                         break;

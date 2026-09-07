@@ -33,6 +33,7 @@ use crate::persistence::{SnapshotLoad, SnapshotPersistence};
 mod agents;
 mod bootstrap;
 mod client;
+mod clipboard_image;
 mod layout;
 mod local;
 mod terminal_monitor;
@@ -799,6 +800,11 @@ impl BoundServer {
         let mut terminals = {
             let mut state = self.state.lock().expect("server state lock poisoned");
             state.stop_agent_waits();
+            clipboard_image::remove(
+                std::mem::take(&mut state.staged_images)
+                    .into_values()
+                    .flatten(),
+            );
             state.terminal_instances.clear();
             std::mem::take(&mut state.terminals)
         };
@@ -1018,6 +1024,8 @@ struct RuntimeState {
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
     /// Live TCP peers by client id, so a revocation can drop their connections.
     tcp_peers: std::collections::HashMap<u64, (crate::noise::PublicKey, EndpointStream)>,
+    /// Clipboard images staged for each Client (ADR 0012); removed with the Client.
+    staged_images: std::collections::HashMap<u64, Vec<PathBuf>>,
     settings_write: Arc<Mutex<()>>,
     persistence: Option<SnapshotPersistence>,
     settings: ServerSettings,
@@ -1206,6 +1214,7 @@ impl RuntimeState {
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             tcp_peers: std::collections::HashMap::new(),
+            staged_images: std::collections::HashMap::new(),
             settings_write: Arc::new(Mutex::new(())),
             persistence,
             settings,

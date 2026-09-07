@@ -1,4 +1,6 @@
-use super::terminal_input::{next_hovered_link, terminal_key_for};
+use super::terminal_input::{
+    clipboard_image_format, is_image_paste_gesture, next_hovered_link, terminal_key_for,
+};
 use crate::terminal_element::HoveredTerminalLink;
 use condr_core::TerminalKey;
 use condr_core::protocol::{
@@ -1328,4 +1330,31 @@ fn single_instance_lock_lives_in_the_platform_runtime_directory() {
         single_instance_lock_path(),
         condr_core::runtime_directory().map(|root| root.join("condr.lock"))
     );
+}
+
+#[test]
+fn alt_v_alone_is_the_image_paste_gesture_and_maps_only_supported_formats() {
+    assert!(is_image_paste_gesture(&Keystroke::parse("alt-v").unwrap()));
+    let mut function_chord = Keystroke::parse("alt-v").unwrap();
+    function_chord.modifiers.function = true;
+    assert!(!is_image_paste_gesture(&function_chord));
+    for keys in ["v", "ctrl-v", "alt-shift-v", "ctrl-alt-v", "cmd-v", "alt-c"] {
+        assert!(
+            !is_image_paste_gesture(&Keystroke::parse(keys).unwrap()),
+            "{keys}"
+        );
+    }
+    // Alt+V is not a text-paste shortcut either: on a local Server it reaches the PTY.
+    assert!(terminal_clipboard_shortcut(&Keystroke::parse("alt-v").unwrap(), false).is_none());
+    use condr_core::protocol::ClipboardImageFormat as Wire;
+    assert_eq!(
+        clipboard_image_format(gpui_kit::ImageFormat::Png),
+        Some(Wire::Png)
+    );
+    assert_eq!(
+        clipboard_image_format(gpui_kit::ImageFormat::Jpeg),
+        Some(Wire::Jpeg)
+    );
+    assert_eq!(clipboard_image_format(gpui_kit::ImageFormat::Svg), None);
+    assert_eq!(clipboard_image_format(gpui_kit::ImageFormat::Tiff), None);
 }

@@ -160,8 +160,24 @@ pub(super) fn handle_client(
 
     let mut stopping_server = false;
     loop {
-        let message = match condr_core::protocol::read_message(&mut stream) {
-            Ok(message) => message,
+        let message = match condr_core::protocol::read_message_with_limit::<_, ClientMessage>(
+            &mut stream,
+            condr_core::protocol::MAX_IMAGE_FRAME_SIZE,
+        ) {
+            // Only an image may use the large allowance; anything else that size is a fault.
+            Ok((message, size)) if size <= message.frame_limit() => message,
+            Ok((_, size)) => {
+                let _ = queue_message(
+                    &outbound,
+                    ServerMessage::Error {
+                        message: format!(
+                            "invalid client frame: {size} bytes exceeds the {} byte limit",
+                            condr_core::protocol::MAX_FRAME_SIZE
+                        ),
+                    },
+                );
+                break;
+            }
             Err(error @ (FramingError::Oversized { .. } | FramingError::Codec(_))) => {
                 let _ = queue_message(
                     &outbound,
@@ -826,6 +842,84 @@ pub(super) fn handle_client(
                     }
                 }
             }
+            ClientMessage::PasteImage {
+                server_id,
+                session_id,
+                pane_id,
+                format,
+                bytes,
+            } => {
+                let _operation = lifecycle.begin_operation();
+                // Validate, write the file with the lock released, validate again: a Pane
+                // can close while a 16 MiB image is being written, and the bytes must not
+                // end up in whatever took its place.
+                let target = |state: &RuntimeState| -> Result<(), &'static str> {
+                    if server_id != state.server_id {
+                        Err("unknown Server")
+                    } else if session_id != state.session_id {
+                        Err("unknown Session")
+                    } else if lifecycle.is_stopping() {
+                        Err("Server is stopping")
+                    } else if state.session.pane(pane_id).is_none()
+                        || !state.terminals.contains_key(&pane_id)
+                    {
+                        Err("unknown Pane")
+                    } else if state.exited_terminals.contains(&pane_id) {
+                        Err("terminal has exited")
+                    } else if state.closing_terminals.contains(&pane_id) {
+                        Err("terminal is closing")
+                    } else {
+                        Ok(())
+                    }
+                };
+                let checked = {
+                    let state = state.lock().expect("server state lock poisoned");
+                    target(&state)
+                        .map(|()| state.terminal_instances.get(&pane_id).copied())
+                        .map_err(str::to_owned)
+                };
+                let result = checked
+                    .and_then(|instance_id| {
+                        if bytes.len() > condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES {
+                            Err("image exceeds 16 MiB".to_owned())
+                        } else {
+                            Ok(instance_id)
+                        }
+                    })
+                    .and_then(|instance_id| {
+                        clipboard_image::stage(client_id, format, &bytes)
+                            .map(|path| (path, instance_id))
+                            .map_err(|error| format!("could not stage image: {error}"))
+                    })
+                    .and_then(|(path, instance_id)| {
+                        let mut state = state.lock().expect("server state lock poisoned");
+                        let pasted = target(&state).map_err(str::to_owned).and_then(|()| {
+                            if state.terminal_instances.get(&pane_id).copied() != instance_id {
+                                return Err("terminal changed during image upload".to_owned());
+                            }
+                            state.terminals[&pane_id]
+                                .execute(TerminalCommand::Paste(
+                                    path.to_string_lossy().into_owned(),
+                                ))
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                        });
+                        match pasted {
+                            Ok(()) => {
+                                state.staged_images.entry(client_id).or_default().push(path);
+                                Ok(())
+                            }
+                            Err(message) => {
+                                clipboard_image::remove([path]);
+                                Err(message)
+                            }
+                        }
+                    });
+                match result {
+                    Ok(()) => false,
+                    Err(message) => queue_message(&outbound, ServerMessage::Error { message }),
+                }
+            }
             ClientMessage::ReadPane {
                 server_id,
                 session_id,
@@ -979,6 +1073,9 @@ pub(super) fn handle_client(
     let mut state = state.lock().expect("server state lock poisoned");
     state.agent_control.waiters.remove(&client_id);
     state.subscribers.remove(&client_id);
+    if let Some(staged) = state.staged_images.remove(&client_id) {
+        clipboard_image::remove(staged);
+    }
     if state.active_controller == Some(client_id) {
         state.clear_controller_terminal_state();
         state.active_controller = None;

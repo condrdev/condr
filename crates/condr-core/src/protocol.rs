@@ -21,6 +21,11 @@ use crate::{
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_SIZE: usize = 2 * 1024 * 1024;
+/// The largest clipboard image a Client may paste into a remote Pane (ADR 0012).
+pub const MAX_CLIPBOARD_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+/// The inbound frame allowance for `ClientMessage::PasteImage` alone: the image plus the
+/// message's own fields. Every other message keeps `MAX_FRAME_SIZE`.
+pub const MAX_IMAGE_FRAME_SIZE: usize = MAX_CLIPBOARD_IMAGE_BYTES + 1024;
 pub const MAX_BOOTSTRAP_BATCHES: u32 = 65_536;
 pub const MAX_CHUNKED_RECORD_SIZE: usize = 32 * 1024 * 1024;
 pub const MAX_BOOTSTRAP_TOTAL_SIZE: usize = 64 * 1024 * 1024;
@@ -84,6 +89,17 @@ pub enum ClientMessage {
         session_id: SessionId,
         pane_id: PaneId,
         command: TerminalCommand,
+    },
+    /// A clipboard image from the Client's machine for an Agent in a remote Pane (ADR
+    /// 0012). The Server stages it in a private file and pastes that path into the Pane;
+    /// nothing of it enters Session state. Same authority as `Terminal` text: no Session
+    /// control needed. The only message allowed `MAX_IMAGE_FRAME_SIZE`.
+    PasteImage {
+        server_id: ServerId,
+        session_id: SessionId,
+        pane_id: PaneId,
+        format: ClipboardImageFormat,
+        bytes: Vec<u8>,
     },
     /// The last `lines` rows of a Pane as plain text, scrollback included: how the CLI
     /// and agents read a terminal. No Session control needed.
@@ -451,6 +467,39 @@ pub enum SessionEvent {
     ServerSettingsChanged {
         settings: ServerSettings,
     },
+}
+
+/// The image encodings a pasted clipboard image may arrive in. The Server names the
+/// staged file after the format; the Client never supplies a name.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ClipboardImageFormat {
+    Png,
+    Jpeg,
+    Gif,
+    Webp,
+    Bmp,
+}
+
+impl ClipboardImageFormat {
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::Gif => "gif",
+            Self::Webp => "webp",
+            Self::Bmp => "bmp",
+        }
+    }
+}
+
+impl ClientMessage {
+    /// How large this message's frame may be: images get their own allowance.
+    pub fn frame_limit(&self) -> usize {
+        match self {
+            Self::PasteImage { .. } => MAX_IMAGE_FRAME_SIZE,
+            _ => MAX_FRAME_SIZE,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -870,15 +919,35 @@ where
     W: Write,
     M: Serialize,
 {
+    write_message_with_limit(writer, message, MAX_FRAME_SIZE)
+}
+
+/// Writes a Client message under the allowance its kind is entitled to.
+pub fn write_client_message<W: Write>(
+    writer: &mut W,
+    message: &ClientMessage,
+) -> Result<(), FramingError> {
+    write_message_with_limit(writer, message, message.frame_limit())
+}
+
+pub fn write_message_with_limit<W, M>(
+    writer: &mut W,
+    message: &M,
+    limit: usize,
+) -> Result<(), FramingError>
+where
+    W: Write,
+    M: Serialize,
+{
     let payload = bincode::DefaultOptions::new()
         .with_fixint_encoding()
-        .with_limit(MAX_FRAME_SIZE as u64)
+        .with_limit(limit as u64)
         .serialize(message)
         .map_err(|error| FramingError::Codec(error.to_string()))?;
-    if payload.len() > MAX_FRAME_SIZE {
+    if payload.len() > limit {
         return Err(FramingError::Oversized {
             claimed: payload.len(),
-            max: MAX_FRAME_SIZE,
+            max: limit,
         });
     }
     let length = u32::try_from(payload.len()).map_err(|_| {
@@ -895,13 +964,26 @@ where
     R: Read,
     M: for<'de> Deserialize<'de>,
 {
+    read_message_with_limit(reader, MAX_FRAME_SIZE).map(|(message, _)| message)
+}
+
+/// Reads one frame of up to `limit` bytes, returning the message and the frame's payload
+/// size, so a reader that admits large frames can still hold most kinds to the normal one.
+pub fn read_message_with_limit<R, M>(
+    reader: &mut R,
+    limit: usize,
+) -> Result<(M, usize), FramingError>
+where
+    R: Read,
+    M: for<'de> Deserialize<'de>,
+{
     let mut prefix = [0; 4];
     read_exact_or_eof(reader, &mut prefix)?;
     let claimed = u32::from_le_bytes(prefix) as usize;
-    if claimed > MAX_FRAME_SIZE {
+    if claimed > limit {
         return Err(FramingError::Oversized {
             claimed,
-            max: MAX_FRAME_SIZE,
+            max: limit,
         });
     }
 
@@ -909,11 +991,11 @@ where
     read_exact_or_eof(reader, &mut payload)?;
     let message = bincode::DefaultOptions::new()
         .with_fixint_encoding()
-        .with_limit(MAX_FRAME_SIZE as u64)
+        .with_limit(limit as u64)
         .reject_trailing_bytes()
         .deserialize(&payload)
         .map_err(|error| FramingError::Codec(error.to_string()))?;
-    Ok(message)
+    Ok((message, claimed))
 }
 
 fn read_exact_or_eof<R: Read>(reader: &mut R, buffer: &mut [u8]) -> Result<(), FramingError> {
@@ -1473,5 +1555,40 @@ mod tests {
         )
         .unwrap();
         assert!(bytes.len() <= BOOTSTRAP_BATCH_FRAME_OVERHEAD);
+    }
+
+    #[test]
+    fn a_pasted_image_gets_its_own_frame_allowance_and_nothing_else_does() {
+        let image = ClientMessage::PasteImage {
+            server_id: ServerId(1),
+            session_id: SessionId(2),
+            pane_id: PaneId::from_u64(3),
+            format: ClipboardImageFormat::Png,
+            bytes: vec![7; 3 * 1024 * 1024],
+        };
+        let mut frame = Vec::new();
+        assert!(
+            write_message(&mut frame, &image).is_err(),
+            "over the normal limit"
+        );
+        write_client_message(&mut frame, &image).unwrap();
+        assert!(matches!(
+            read_message::<_, ClientMessage>(&mut frame.as_slice()),
+            Err(FramingError::Oversized { .. })
+        ));
+        let (decoded, size) = read_message_with_limit::<_, ClientMessage>(
+            &mut frame.as_slice(),
+            MAX_IMAGE_FRAME_SIZE,
+        )
+        .unwrap();
+        assert_eq!(decoded, image);
+        assert!(size > MAX_FRAME_SIZE);
+
+        let ping = ClientMessage::Ping {
+            server_id: ServerId(1),
+            nonce: 9,
+        };
+        assert_eq!(ping.frame_limit(), MAX_FRAME_SIZE);
+        assert_eq!(ClipboardImageFormat::Jpeg.extension(), "jpg");
     }
 }
