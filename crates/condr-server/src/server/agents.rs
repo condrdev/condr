@@ -202,7 +202,7 @@ impl RuntimeState {
                     outbound,
                     pane_id,
                     kind,
-                    vec![AgentState::Idle, AgentState::Blocked],
+                    ready_states(kind),
                     false,
                     true,
                     deadline,
@@ -228,7 +228,11 @@ impl RuntimeState {
                     ));
                 }
                 let info = self.resolve_agent(&target)?;
-                if info.launch_pending || info.agent.state != AgentState::Idle {
+                // An agent whose hooks are silent until its first turn is prompted blind
+                // once; from then on its state is reported.
+                let first_turn = info.agent.state == AgentState::Unknown
+                    && !info.agent.kind.reports_at_startup();
+                if info.launch_pending || (info.agent.state != AgentState::Idle && !first_turn) {
                     return Err(error(
                         "agent_not_ready",
                         "agent must be idle before accepting a prompt",
@@ -422,7 +426,7 @@ impl RuntimeState {
             && self
                 .agents
                 .get(&pane_id)
-                .is_some_and(|agent| matches!(agent.state, AgentState::Idle | AgentState::Blocked))
+                .is_some_and(|agent| ready_states(agent.kind).contains(&agent.state))
         {
             managed.pending = false;
             managed.deadline = None;
@@ -556,6 +560,16 @@ impl RuntimeState {
         self.agent_control.live.remove(&pane_id);
         self.agent_control.generations.remove(&pane_id);
     }
+}
+
+/// The states that end a launch: the agent reported a turn boundary or a request, or it
+/// is one whose hooks say nothing until prompted and its process has been identified.
+fn ready_states(kind: AgentKind) -> Vec<AgentState> {
+    let mut states = vec![AgentState::Idle, AgentState::Blocked];
+    if !kind.reports_at_startup() {
+        states.push(AgentState::Unknown);
+    }
+    states
 }
 
 fn valid_name(name: &str) -> bool {

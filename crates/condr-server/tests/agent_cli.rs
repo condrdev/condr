@@ -34,21 +34,30 @@ impl Server {
             format!("[server.terminal]\nshell = '{shell}'\n"),
         )
         .unwrap();
-        let executable = bin.join(if cfg!(windows) { "codex.exe" } else { "codex" });
-        #[cfg(windows)]
-        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
-        #[cfg(unix)]
-        {
-            std::fs::write(
-                &executable,
-                r#"#!/bin/sh
+        // Two fixtures from one script: the agent slug is the executable's own name. The
+        // Windows fixture is this test executable copied under each name.
+        for kind in ["claude", "codex"] {
+            let executable = bin.join(if cfg!(windows) {
+                format!("{kind}.exe")
+            } else {
+                kind.to_owned()
+            });
+            #[cfg(windows)]
+            std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+            #[cfg(unix)]
+            {
+                std::fs::write(
+                    &executable,
+                    r#"#!/bin/sh
 printf 'started\n' >> "$CONDR_TEST_STARTS"
 printf '%s\n' "$@" > "$CONDR_TEST_ARGS"
-report() { printf '{"session_id":"fixture","source":"startup"}' | condr agent-hook codex "$1"; }
+agent="$(basename "$0")"
+report() { printf '{"session_id":"fixture","source":"startup"}' | condr agent-hook "$agent" "$1"; }
 case "$1" in
   --exit) exit 0 ;;
   --blocked) report permission-request ;;
   --working) report prompt-submit ;;
+  --silent) ;;
   *) report session-start ;;
 esac
 while IFS= read -r line; do
@@ -59,9 +68,11 @@ while IFS= read -r line; do
   report stop
 done
 "#,
-            )
-            .unwrap();
-            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+                )
+                .unwrap();
+                std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+                    .unwrap();
+            }
         }
         #[cfg(windows)]
         let path = std::env::join_paths(
@@ -100,7 +111,7 @@ done
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        // The Windows fixture is this test executable renamed to codex.exe. Exact
+        // The Windows fixture is this test executable copied as <kind>.exe. Exact
         // test filters after `--` carry arbitrary native arguments to the helper.
         #[cfg(windows)]
         let args = if args.starts_with(&["agent", "start"]) {
@@ -180,9 +191,15 @@ impl Drop for Server {
 fn windows_agent_fixture() {
     use std::io::{BufRead as _, Write as _};
 
-    if std::env::current_exe().unwrap().file_name().unwrap() != "codex.exe" {
+    let exe = std::env::current_exe().unwrap();
+    let Some(slug) = exe
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| ["claude", "codex"].contains(stem))
+        .map(str::to_owned)
+    else {
         return;
-    }
+    };
     let append = |key: &str, text: &str| {
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -194,7 +211,7 @@ fn windows_agent_fixture() {
     let report = |event: &str| {
         use std::process::{Command, Stdio};
         let mut hook = Command::new("condr")
-            .args(["agent-hook", "codex", event])
+            .args(["agent-hook", &slug, event])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .spawn()
@@ -220,6 +237,7 @@ fn windows_agent_fixture() {
         Some("--exit") => return,
         Some("--blocked") => report("permission-request"),
         Some("--working") => report("prompt-submit"),
+        Some("--silent") => {}
         _ => report("session-start"),
     }
     for line in std::io::stdin().lock().lines() {
@@ -290,7 +308,7 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
         "trailing\\",
     ];
     let mut launch = vec![
-        "agent", "start", "worker", "--kind", "codex", "--pane", &pane, "--",
+        "agent", "start", "worker", "--kind", "claude", "--pane", &pane, "--",
     ];
     launch.extend(args);
     let pending = server
@@ -313,7 +331,7 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
         .connect()
         .agent(AgentCommand::Start {
             name: "competitor".into(),
-            kind: condr_core::AgentKind::Codex,
+            kind: condr_core::AgentKind::Claude,
             pane_id: condr_core::PaneId::from_u64(pane.parse().unwrap()),
             args: Vec::new(),
             timeout_ms: 30_000,
@@ -339,13 +357,13 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
     assert_eq!(server.ok(&["agent", "list"])["agents"][0]["name"], "worker");
     assert_eq!(
         server.err(&[
-            "agent", "start", "worker", "--kind", "codex", "--pane", &pane
+            "agent", "start", "worker", "--kind", "claude", "--pane", &pane
         ]),
         "agent_name_in_use"
     );
     assert_eq!(
         server.err(&[
-            "agent", "start", "second", "--kind", "codex", "--pane", &pane
+            "agent", "start", "second", "--kind", "claude", "--pane", &pane
         ]),
         "pane_busy"
     );
@@ -439,7 +457,7 @@ fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
             "start",
             "blocked",
             "--kind",
-            "codex",
+            "claude",
             "--pane",
             &pane,
             "--",
@@ -502,7 +520,7 @@ fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
             "start",
             "working",
             "--kind",
-            "codex",
+            "claude",
             "--pane",
             &working,
             "--timeout",
@@ -518,7 +536,7 @@ fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
         "start",
         "exiting",
         "--kind",
-        "codex",
+        "claude",
         "--pane",
         &exiting,
         "--timeout",
@@ -533,5 +551,51 @@ fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
             .unwrap()
             .iter()
             .all(|agent| agent["name"] != "exiting")
+    );
+}
+
+#[test]
+fn a_codex_that_says_nothing_at_startup_is_ready_once_identified_and_takes_a_first_prompt() {
+    let server = Server::start();
+    let pane = server.pane();
+    // Codex fires SessionStart with the first turn, not at startup (ADR 0014): a fresh one
+    // is Unknown, which `agent start` accepts for it once the process is identified.
+    let started = server.ok(&[
+        "agent", "start", "quiet", "--kind", "codex", "--pane", &pane, "--", "--silent",
+    ]);
+    assert_eq!(started["agent"]["agent_status"], "unknown");
+    assert_eq!(started["agent"]["launch_pending"], false);
+    // The first prompt goes in blind; the hooks report from then on.
+    let prompted = server.ok(&[
+        "agent",
+        "prompt",
+        "quiet",
+        "first",
+        "--wait",
+        "--timeout",
+        "8000",
+    ]);
+    assert_eq!(prompted["agent"]["agent_status"], "idle");
+    assert_eq!(
+        std::fs::read_to_string(server.root.join("prompts")).unwrap(),
+        "first\n"
+    );
+    // A Claude that has not reported is not ready: its hooks do speak at startup.
+    let other = server.pane();
+    assert_eq!(
+        server.err(&[
+            "agent",
+            "start",
+            "mute",
+            "--kind",
+            "claude",
+            "--pane",
+            &other,
+            "--timeout",
+            "4500",
+            "--",
+            "--silent",
+        ]),
+        "agent_timeout"
     );
 }

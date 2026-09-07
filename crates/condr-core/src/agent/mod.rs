@@ -40,6 +40,14 @@ impl AgentKind {
         }
     }
 
+    /// Whether the agent's hooks say anything before its first turn. Codex (0.146 and
+    /// 0.153) fires `SessionStart` together with the first `UserPromptSubmit`, so a fresh
+    /// Codex is `Unknown` until prompted; `agent start` and the first `agent prompt`
+    /// treat that `Unknown` as ready for it.
+    pub const fn reports_at_startup(self) -> bool {
+        !matches!(self, Self::Codex)
+    }
+
     /// Resolves a program name, alias or path to an agent.
     pub fn parse_label(value: &str) -> Option<Self> {
         match normalized_lookup_name(path_basename(value)).as_str() {

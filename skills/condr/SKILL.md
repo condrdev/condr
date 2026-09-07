@@ -43,4 +43,5 @@ All commands below start with `condr`.
 - Agent targets are names assigned by `start` or numeric Pane IDs. Names match `[a-z][a-z0-9_-]{0,31}`, are unique, and last until exit or Server restart.
 - Workspace/Tab/Pane/Agent commands return JSON, except `pane read` returns text. Their failures emit `.error.code` and `.error.message` JSON to stderr, exiting 1; usage errors exit 2. Server administration uses text.
 - `prompt --wait` and `wait` default to `idle` or `blocked`; `--until` selects states, `--timeout` is milliseconds. `blocked` needs input; `unknown` is not ready. Wait returns state; use `pane read` for output.
+- Codex reports nothing until its first turn: `agent start --kind codex` returns `unknown` once the process is identified, and the first `agent prompt` is accepted in that state; check `pane read` first if a trust or hooks-review dialog might be showing.
 - Blocked starts return `agent_not_ready` and retain the name. Timeouts leave processes running; startup timeouts release pending names. Inspect `agent list` and `pane read` before retrying; relay approvals or questions requiring the user's decision.

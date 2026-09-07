@@ -126,6 +126,8 @@ struct HookEntry {
     /// The native matcher, for events that would otherwise report things that do not
     /// block the user.
     matcher: Option<&'static str>,
+    /// Seconds the agent waits for the hook; it finishes in milliseconds.
+    timeout_secs: u64,
 }
 
 const fn entry(native: &'static str, event: AgentEventKind) -> HookEntry {
@@ -133,6 +135,7 @@ const fn entry(native: &'static str, event: AgentEventKind) -> HookEntry {
         native,
         event,
         matcher: None,
+        timeout_secs: HOOK_TIMEOUT_SECS,
     }
 }
 
@@ -146,6 +149,7 @@ const CLAUDE_HOOKS: &[HookEntry] = &[
         native: "Notification",
         event: AgentEventKind::PermissionRequest,
         matcher: Some("permission_prompt|elicitation_dialog"),
+        timeout_secs: HOOK_TIMEOUT_SECS,
     },
     entry("PreToolUse", AgentEventKind::ToolStart),
     entry("PostToolUse", AgentEventKind::ToolComplete),
@@ -162,10 +166,16 @@ const CODEX_HOOKS: &[HookEntry] = &[
     entry("PreToolUse", AgentEventKind::ToolStart),
     entry("PostToolUse", AgentEventKind::ToolComplete),
     entry("Stop", AgentEventKind::Stop),
-    entry("Interrupt", AgentEventKind::Interrupt),
+    // Codex clamps Interrupt hooks to 3 s and warns in the TUI about anything longer.
+    HookEntry {
+        native: "Interrupt",
+        event: AgentEventKind::Interrupt,
+        matcher: None,
+        timeout_secs: 3,
+    },
 ];
 
-/// Seconds Claude Code and Codex wait for the hook; it finishes in milliseconds.
+/// Seconds Claude Code and Codex wait for the hook by default; it finishes in milliseconds.
 const HOOK_TIMEOUT_SECS: u64 = 5;
 const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -260,7 +270,7 @@ fn expected_group(target: &HookTarget, agent: AgentKind, entry: &HookEntry) -> V
         "hooks": [{
             "type": "command",
             "command": target.hook_command(agent, entry.event),
-            "timeout": HOOK_TIMEOUT_SECS,
+            "timeout": entry.timeout_secs,
         }]
     });
     if let Some(matcher) = entry.matcher {
