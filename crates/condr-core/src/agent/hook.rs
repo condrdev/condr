@@ -24,13 +24,13 @@ const SESSION_SOURCES: [&str; 5] = ["startup", "resume", "clear", "compact", "fo
 /// configuration; stdin carries the agent's JSON. Returns whether the event reached a
 /// terminal; callers exit 0 regardless.
 pub fn run(agent: &str, event: &str) -> bool {
-    if std::env::var_os(crate::PaneEnvironment::ENV).is_none_or(|value| value != "1") {
-        return false;
-    }
     let (Some(agent), Some(event)) = (AgentKind::parse_label(agent), AgentEventKind::parse(event))
     else {
         return false;
     };
+    if std::env::var_os(crate::PaneEnvironment::ENV).is_none_or(|value| value != "1") {
+        return false;
+    }
     let input = HookInput::read();
     let event = match event {
         // AskUserQuestion is an ordinary tool to Claude Code, so it only ever fires
@@ -45,12 +45,14 @@ pub fn run(agent: &str, event: &str) -> bool {
         .flatten();
     // An agent an agent runs (Claude Code calling `claude -p` from its Bash tool) has
     // the same hooks and the same terminal; its turns are not this Pane's.
-    if nested_inside_same_agent(agent) {
+    let ancestors = Ancestors::of(agent);
+    if ancestors.nested {
         return false;
     }
+    let pane_process = ancestors.pane_process;
     let (opened, wait) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = opened.send(open_controlling_terminal());
+        let _ = opened.send(open_controlling_terminal(pane_process));
     });
     let Ok(Some(mut terminal)) = wait.recv_timeout(OPEN_DEADLINE) else {
         return false;
@@ -99,49 +101,76 @@ impl HookInput {
     }
 }
 
-/// Whether more than one process of this agent's kind sits above the hook. Shells are
-/// looked through but not counted: `bash -c claude` is one agent, `claude` running
-/// `sh -c "claude -p …"` is two.
-fn nested_inside_same_agent(agent: AgentKind) -> bool {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-    let mut system = System::new();
-    let mut pid = Pid::from_u32(std::process::id());
-    let mut agents = 0;
-    for _ in 0..24 {
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
-        );
-        let Some(process) = system.process(pid) else {
-            break;
+/// The process tree above the hook: whether a second instance of the hook's agent sits
+/// above the first, in which case the hook belongs to an agent the agent itself launched
+/// and its events are not the Pane's; and the Pane's own process, the child of the Server.
+struct Ancestors {
+    nested: bool,
+    pane_process: Option<u32>,
+}
+
+impl Ancestors {
+    /// Consecutive agent processes are one instance: `codex` is a Node wrapper spawning
+    /// the native binary, often behind a version manager's shim. An agent runs tools
+    /// through a shell, so a shell between two agent processes starts another instance:
+    /// `claude` running `sh -c "claude -p …"` is two.
+    fn of(agent: AgentKind) -> Self {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+        let mut system = System::new();
+        let mut pid = Pid::from_u32(std::process::id());
+        let mut found = Self {
+            nested: false,
+            pane_process: None,
         };
-        let name = process.name().to_string_lossy();
-        let argv: Vec<String> = process
-            .cmd()
-            .iter()
-            .map(|argument| argument.to_string_lossy().into_owned())
-            .collect();
-        let info = ProcessInfo {
-            name: &name,
-            argv: (!argv.is_empty()).then_some(argv.as_slice()),
-        };
-        let front = argv.first().map(String::as_str).unwrap_or(&name);
-        if identify_agent_process(info) == Some(agent) && !super::is_shell(front) {
-            agents += 1;
-            if agents > 1 {
-                return true;
+        let mut agent_seen = false;
+        let mut separated = true;
+        let mut child = None;
+        for _ in 0..24 {
+            system.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[pid]),
+                ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+            );
+            let Some(process) = system.process(pid) else {
+                break;
+            };
+            let name = process.name().to_string_lossy();
+            let argv: Vec<String> = process
+                .cmd()
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect();
+            let info = ProcessInfo {
+                name: &name,
+                argv: (!argv.is_empty()).then_some(argv.as_slice()),
+            };
+            let front = argv.first().map(String::as_str).unwrap_or(&name);
+            if super::is_shell(front) {
+                separated = true;
+            } else if identify_agent_process(info) == Some(agent) {
+                if separated && agent_seen {
+                    found.nested = true;
+                    break;
+                }
+                separated = false;
+                agent_seen = true;
+            } else if super::normalized_lookup_name(super::path_basename(front)) == "condr"
+                && argv.get(1).is_some_and(|argument| argument == "server")
+            {
+                found.pane_process = child;
+                break;
             }
+            child = Some(pid.as_u32());
+            let Some(parent) = process.parent() else {
+                break;
+            };
+            pid = parent;
         }
-        let Some(parent) = process.parent() else {
-            break;
-        };
-        pid = parent;
+        found
     }
-    false
 }
 
 #[cfg(unix)]
-fn open_controlling_terminal() -> Option<File> {
+fn open_controlling_terminal(_pane_process: Option<u32>) -> Option<File> {
     if let Ok(tty) = File::options().write(true).open("/dev/tty") {
         return Some(tty);
     }
@@ -172,14 +201,27 @@ fn open_controlling_terminal() -> Option<File> {
 }
 
 #[cfg(windows)]
-fn open_controlling_terminal() -> Option<File> {
+#[allow(unsafe_code)] // Win32 console attach; the only way to reach an ancestor's ConPTY.
+fn open_controlling_terminal(pane_process: Option<u32>) -> Option<File> {
     use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole};
 
-    // The console we inherited is the ConPTY the agent runs in, when there is one.
+    // The Pane's process sits on the ConPTY. The inherited console need not be: Claude
+    // Code spawns its shell with CREATE_NO_WINDOW, so the hook starts on a private,
+    // invisible conhost whose output goes nowhere.
+    if let Some(pid) = pane_process {
+        // SAFETY: plain Win32 console calls with no pointers involved.
+        let attached = unsafe {
+            FreeConsole();
+            AttachConsole(pid) != 0
+        };
+        if attached && let Some(out) = open_console_out() {
+            return Some(out);
+        }
+    }
     if let Some(out) = open_console_out() {
         return Some(out);
     }
-    // Otherwise borrow an ancestor's: the agent, or the shell it runs in.
+    // Otherwise borrow an ancestor's: the launcher, or the shell it runs in.
     let mut system = sysinfo::System::new();
     system.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
@@ -205,6 +247,7 @@ fn open_controlling_terminal() -> Option<File> {
 /// the ConPTY instead of printing it. The agent usually enables the mode on its own
 /// handle; this one is the hook's, and must not depend on that.
 #[cfg(windows)]
+#[allow(unsafe_code)] // GetConsoleMode/SetConsoleMode on the handle we just opened.
 fn open_console_out() -> Option<File> {
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::System::Console::{
@@ -248,6 +291,6 @@ mod tests {
 
     #[test]
     fn a_hook_run_by_this_test_is_not_nested_in_an_agent() {
-        assert!(!nested_inside_same_agent(AgentKind::Claude));
+        assert!(!Ancestors::of(AgentKind::Claude).nested);
     }
 }

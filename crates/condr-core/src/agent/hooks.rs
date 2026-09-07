@@ -66,8 +66,16 @@ impl HookTarget {
     }
 
     fn hook_command(&self, agent: AgentKind, event: AgentEventKind) -> String {
+        // Codex runs hooks through the session shell, PowerShell on Windows, where a quoted
+        // path is a string literal unless the call operator precedes it. Claude Code runs
+        // them through Git Bash, which would choke on the `&`.
+        let call = if cfg!(windows) && agent == AgentKind::Codex && self.command.starts_with('"') {
+            "& "
+        } else {
+            ""
+        };
         format!(
-            "{} agent-hook {} {}",
+            "{call}{} agent-hook {} {}",
             self.command,
             agent.id(),
             event.name()

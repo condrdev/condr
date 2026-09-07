@@ -478,7 +478,13 @@ fn agent_hooks(action: HooksAction, agent: &str) -> Result<Value, CliError> {
             if kind == AgentKind::Codex {
                 // Codex ignores hooks.json until its hooks feature is on; the user can
                 // also set `[features] hooks = true` in config.toml by hand.
-                let enabled = std::process::Command::new(kind.executable())
+                // Discovery also finds `codex.cmd`, which a bare `Command::new("codex")`
+                // cannot on Windows.
+                let codex = condr_core::agent_discovery::discover()
+                    .into_iter()
+                    .find(|found| found.kind == AgentKind::Codex)
+                    .map_or_else(|| kind.executable().into(), |found| found.executable);
+                let enabled = std::process::Command::new(codex)
                     .args(["features", "enable", "hooks"])
                     .stdin(std::process::Stdio::null())
                     .output();

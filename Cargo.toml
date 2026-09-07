@@ -60,4 +60,4 @@ taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
