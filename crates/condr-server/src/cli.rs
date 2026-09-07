@@ -237,6 +237,21 @@ pub(crate) enum AgentCommand {
         #[arg(long, default_value_t = DEFAULT_AGENT_WAIT_MS)]
         timeout: u64,
     },
+    /// Install, inspect or remove the hooks that report an agent's status to Condr; edits
+    /// that agent's own configuration on this machine
+    Hooks {
+        #[arg(value_enum)]
+        action: HooksAction,
+        /// claude, codex or opencode
+        agent: String,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum HooksAction {
+    Install,
+    Uninstall,
+    Status,
 }
 
 /// What stderr gets: `{"error":{"code":…,"message":…}}`.
@@ -423,7 +438,92 @@ pub(crate) fn run_pane(command: PaneCommand) -> i32 {
 }
 
 pub(crate) fn run_agent(command: AgentCommand) -> i32 {
+    if let AgentCommand::Hooks { action, agent } = command {
+        return match agent_hooks(action, &agent) {
+            Ok(value) => {
+                println!("{value}");
+                0
+            }
+            Err(error) => {
+                eprintln!("{}", json!({ "error": error }));
+                1
+            }
+        };
+    }
     run(|client| agent(client, command))
+}
+
+/// Local only: the hooks live in the agent's configuration on this machine, and the
+/// Server is not involved until an agent runs them.
+fn agent_hooks(action: HooksAction, agent: &str) -> Result<Value, CliError> {
+    use condr_core::agent_hooks as hooks;
+    let kind = AgentKind::parse_label(agent).ok_or_else(|| {
+        CliError::new("unknown_agent_kind", format!("unknown agent kind {agent}"))
+    })?;
+    let target = hooks::HookTarget::local()
+        .ok_or_else(|| CliError::new("no_home_directory", "cannot locate the home directory"))?;
+    let io = |error: io::Error| {
+        CliError::new(
+            match error.kind() {
+                io::ErrorKind::Unsupported => "hooks_unsupported",
+                io::ErrorKind::InvalidData => "hooks_config_invalid",
+                _ => "io",
+            },
+            error.to_string(),
+        )
+    };
+    let mut warning = None;
+    let path = match action {
+        HooksAction::Install => {
+            let path = hooks::install(&target, kind).map_err(io)?;
+            if kind == AgentKind::Codex {
+                // Codex ignores hooks.json until its hooks feature is on; the user can
+                // also set `[features] hooks = true` in config.toml by hand.
+                let enabled = std::process::Command::new(kind.executable())
+                    .args(["features", "enable", "hooks"])
+                    .stdin(std::process::Stdio::null())
+                    .output();
+                match enabled {
+                    Ok(output) if output.status.success() => {}
+                    Ok(output) => {
+                        warning = Some(format!(
+                            "codex features enable hooks failed ({}): {}; set [features] hooks = true in Codex's config.toml",
+                            output.status,
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        ));
+                    }
+                    Err(error) => {
+                        warning = Some(format!(
+                            "could not run codex to enable hooks: {error}; set [features] hooks = true in Codex's config.toml"
+                        ));
+                    }
+                }
+            }
+            path
+        }
+        HooksAction::Uninstall => hooks::uninstall(&target, kind).map_err(io)?,
+        HooksAction::Status => target.path(kind).ok_or_else(|| {
+            CliError::new(
+                "hooks_unsupported",
+                format!("Condr has no hooks for {}", kind.label()),
+            )
+        })?,
+    };
+    let state = hooks::state(&target, kind).map_err(io)?;
+    let mut value = json!({
+        "agent": kind.id(),
+        "path": path,
+        "state": state.name(),
+    });
+    if kind == AgentKind::Codex {
+        value["note"] = Value::String(
+            "Codex runs hooks only with the hooks feature enabled and, unless managed, after they are trusted from /hooks inside Codex".into(),
+        );
+    }
+    if let Some(warning) = warning {
+        value["warning"] = Value::String(warning);
+    }
+    Ok(value)
 }
 
 #[derive(Serialize)]
@@ -880,6 +980,7 @@ fn agent(client: &mut ClientConnection, command: AgentCommand) -> Result<Value, 
             until: parse_until(&until)?,
             timeout_ms: timeout,
         },
+        AgentCommand::Hooks { .. } => unreachable!("handled locally by run_agent"),
     };
     let retry_until = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let response = loop {

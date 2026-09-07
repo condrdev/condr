@@ -5,6 +5,7 @@
 //! and it stays that way rather than being guessed at.
 
 pub mod hook;
+pub mod hooks;
 
 use std::time::{Duration, Instant};
 

@@ -31,6 +31,7 @@ All commands below start with `condr`.
 | `agent start` | Start a named agent in an idle shell and await readiness. Requires `--kind` and `--pane`; native arguments follow `--`. |
 | `agent prompt` | Prompt an idle agent; `--wait` awaits its next settled state. |
 | `agent wait` | Await a state without sending input. |
+| `agent hooks` | `install`, `uninstall` or `status` the hooks that report an agent's state; states stay `unknown` until installed. |
 | `server start`, `server status`, `server run` | Start a background Server, check availability, or run it in the foreground. |
 | `server stop`, `server restart` | Stop all terminals; restart restores layout and cwd with fresh shells. Run restart from outside Condr. |
 | `server invite`, `server clients`, `server revoke` | Pair remote devices, list paired devices, or revoke access. |
