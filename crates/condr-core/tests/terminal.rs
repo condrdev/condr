@@ -673,25 +673,6 @@ fn view_scrollback_selection_and_final_update_follow_the_vt_state() {
     assert!(runtime.visible_text().contains("final"));
 }
 
-#[cfg(target_os = "linux")]
-#[test]
-fn detection_text_uses_the_live_bottom_while_the_viewport_is_scrolled() {
-    let mut command = CommandBuilder::new("/bin/sh");
-    command.args([
-        "-c",
-        "for i in $(seq 1 40); do printf 'line-%02d\\n' \"$i\"; done; sleep 1",
-    ]);
-    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
-    wait_for_text(&runtime, "line-40");
-    let bottom = runtime.bottom_text();
-    assert!(bottom.contains("line-40"));
-
-    runtime.scroll(TerminalScroll::Top);
-    assert!(!runtime.visible_text().contains("line-40"));
-    assert_eq!(runtime.bottom_text(), bottom);
-    runtime.shutdown().unwrap();
-}
-
 /// Polls the agent probe the way the Server does until it publishes `expected`. The
 /// detector announces the agent as `Unknown` first and holds screen reads for its
 /// three-second startup grace, so this takes a few seconds by design.
@@ -712,7 +693,7 @@ fn wait_for_agent(runtime: &TerminalRuntime, expected: AgentSnapshot, failure: &
 
 #[cfg(target_os = "linux")]
 #[test]
-fn foreground_agent_process_and_terminal_text_produce_a_snapshot() {
+fn foreground_agent_process_produces_an_unknown_snapshot() {
     let mut command = CommandBuilder::new("/bin/bash");
     command.args([
         "-c",
@@ -725,7 +706,7 @@ fn foreground_agent_process_and_terminal_text_produce_a_snapshot() {
         &runtime,
         AgentSnapshot {
             kind: AgentKind::Codex,
-            state: AgentState::Working,
+            state: AgentState::Unknown,
         },
         "agent process was not detected",
     );
@@ -751,7 +732,7 @@ fn foreground_agent_survives_its_process_group_leader_exiting() {
         &runtime,
         AgentSnapshot {
             kind: AgentKind::Codex,
-            state: AgentState::Working,
+            state: AgentState::Unknown,
         },
         "agent process was not detected after the pipeline leader exited",
     );

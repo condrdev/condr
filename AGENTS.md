@@ -38,7 +38,7 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 - **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
 - **终端渲染:自研 GPUI element**(项目最大自研件)— GPUI Kit 无终端组件。
 - **布局:GPUI Kit 的 Dock**(`gpui_kit::component::dock`) → 映射 workspace/tab/pane 模型。
-- **Agent 状态检测:** 移植 herdr 的实现:进程表识别 agent,底部屏幕文本 + OSC 标题/进度交给内嵌的 TOML manifest(`crates/condr-core/src/agent/manifests/`,与 herdr 上游逐字同步)按 priority/region 规则分类 idle/working/blocked,再经 herdr 同款迟滞(startup grace、Working→Idle 确认、6 次未命中)后发布;GUI 在此之上叠加 done。本地覆盖:`<config dir>/agent-detection/<id>.toml`。
+- **Agent 状态检测:** 只来自 agent CLI 自己的 hooks(ADR 0014)。进程表识别 agent 身份;`condr agent-hook` 把 hook 事件作为 OSC 777 写回控制终端,Server 在 VT 前截获并驱动 `AgentState`;未上报即 `Unknown`,不做屏幕文本分类。GUI 在此之上叠加 done。
 - **git worktree:shell out 调 `git`**,不引 git2。
 - **依赖:只声明 crates.io 的 `gpui-kit = "0.6"`**。GPUI 类型使用 `gpui_kit::*`,组件使用 `gpui_kit::component`,资源使用 `gpui_kit::assets`;通过 `gpui_kit::application()` 创建应用、`gpui_kit::init(cx)` 初始化。底层匹配的 `gpui-pre` 系列由 Kit 管理,所有实际版本由 `Cargo.lock` 锁定,无需直接声明 GPUI/平台/组件/资源 crates。GUI 测试通过 `gpui-kit/test-support` 启用。
 

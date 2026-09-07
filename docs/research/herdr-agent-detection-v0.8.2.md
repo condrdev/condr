@@ -1,3 +1,5 @@
+> 已被 ADR 0014 取代:Condr 不再移植 herdr 的屏幕检测,本文仅作历史参考。
+
 # herdr agent 检测与 Condr 现状对照
 
 > herdr commit：`5158adab10b6dcfea9370782043392f80fa0643c`（本地 checkout `../herdr`，2026-09-03 读取）

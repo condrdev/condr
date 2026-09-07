@@ -135,9 +135,8 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
 }
 
 /// Runs the agent, cwd, and Git probes for one Terminal off the frame path. The agent
-/// detector ticks on its own cadence (300 ms, 100 ms while it holds a transition) whether
-/// or not the terminal printed anything, since processes exit and titles change without
-/// output; nudges only feed the cwd and Git probes. A slow `git` or process enumeration
+/// probe ticks on its own cadence (300 ms) whether or not the terminal printed anything,
+/// since processes exit without output; nudges only feed the cwd and Git probes. A slow `git` or process enumeration
 /// delays the next probe, never a frame.
 fn probe_terminal(
     pane_id: PaneId,
@@ -180,7 +179,7 @@ fn probe_terminal(
                     state.record_terminal_cwds([(pane_id, cwd)]);
                 }
                 if let Some(next) = agent_update {
-                    state.agent_process_update(pane_id, agent_probe.running_agent());
+                    state.agent_process_update(pane_id, agent_probe.agent());
                     apply_agent_refresh(&mut state, pane_id, next);
                 }
             }

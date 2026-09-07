@@ -322,7 +322,7 @@ impl ProcessProbe {
             })
     }
 
-    /// Identifies the agent in the PTY's foreground job, the way herdr does: the group
+    /// Identifies the agent in the PTY's foreground job: the group
     /// leader first, then the best-scoring member. The shell's own process takes part
     /// (`exec agent` replaces it in place); only a job that contains the shell and no
     /// agent means whatever ran here has exited.

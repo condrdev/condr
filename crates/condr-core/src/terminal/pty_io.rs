@@ -346,9 +346,6 @@ pub(super) struct TerminalNotices {
     pub(super) title_changed: bool,
     pub(super) bells: u64,
     pub(super) clipboard: Option<String>,
-    /// The latest OSC 9;4 progress parameters (`"4;<state>;<percent>"`), as agent
-    /// manifests match them. Detection input only; not shown anywhere.
-    pub(super) progress: Option<String>,
 }
 
 pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;
@@ -725,7 +722,6 @@ pub(super) struct TerminalReadLoop {
     pub(super) revision: Arc<AtomicU64>,
     pub(super) updates: mpsc::Sender<TerminalUpdate>,
     pub(super) reported_cwd: Arc<Mutex<ReportedCwd>>,
-    pub(super) notices: SharedTerminalNotices,
     pub(super) size: Arc<Mutex<TerminalSize>>,
     pub(super) cursor_settle: Arc<Mutex<CursorSettle>>,
 }
@@ -739,7 +735,6 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
         revision,
         updates,
         reported_cwd,
-        notices,
         size,
         cursor_settle,
     } = io;
@@ -752,12 +747,6 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
             Ok(read) => {
                 cwd_parser.advance(&bytes[..read], |osc| match osc {
                     OscReport::Cwd(cwd) => record_reported_cwd(&reported_cwd, cwd),
-                    OscReport::Progress(progress) => {
-                        notices
-                            .lock()
-                            .expect("terminal notices lock poisoned")
-                            .progress = Some(progress);
-                    }
                 });
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal_guard, &bytes[..read]);
@@ -822,12 +811,11 @@ pub(super) enum OscCwdState {
 }
 
 /// The OSC payloads Condr reads itself because vte drops them: cwd reports as OSC 7
-/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`, plus ConEmu
-/// progress `9;4;<state>;<n>`. This scanner runs over the raw bytes.
+/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`. This scanner
+/// runs over the raw bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum OscReport {
     Cwd(PathBuf),
-    Progress(String),
 }
 
 impl OscCwdParser {
@@ -927,11 +915,6 @@ impl OscCwdParser {
                     .and_then(|cwd| cwd.strip_suffix('"'))
                     .unwrap_or(cwd);
                 report(OscReport::Cwd(PathBuf::from(cwd)));
-            } else if let Some(progress) = payload
-                .strip_prefix("9;")
-                .filter(|progress| progress.starts_with("4;") || *progress == "4")
-            {
-                report(OscReport::Progress(progress.to_owned()));
             } else if let Some(cwd) = payload.strip_prefix("7;").and_then(file_uri_cwd) {
                 report(OscReport::Cwd(cwd));
             } else if let Some(cwd) = payload

@@ -184,7 +184,6 @@ impl TerminalRuntime {
         let reader_revision = Arc::clone(&revision);
         let reader_updates = update_sender.clone();
         let reader_reported_cwd = Arc::clone(&reported_cwd);
-        let reader_notices = Arc::clone(&notices);
         let reader_input = input.clone();
         let reader_size = Arc::clone(&current_size);
         let reader_cursor_settle = Arc::clone(&cursor_settle);
@@ -199,7 +198,6 @@ impl TerminalRuntime {
                     revision: reader_revision,
                     updates: reader_updates,
                     reported_cwd: reader_reported_cwd,
-                    notices: reader_notices,
                     size: reader_size,
                     cursor_settle: reader_cursor_settle,
                 })
@@ -713,11 +711,6 @@ impl TerminalRuntime {
         lines.join("\n")
     }
 
-    pub fn bottom_text(&self) -> String {
-        let terminal = self.terminal.lock().expect("terminal state lock poisoned");
-        bottom_text(&terminal)
-    }
-
     /// The last `lines` rows of the active screen and its scrollback, oldest first,
     /// with trailing blank rows dropped. Ignores the viewport scroll position.
     pub fn recent_text(&self, lines: usize) -> String {
@@ -728,14 +721,11 @@ impl TerminalRuntime {
     pub fn agent_probe(&self) -> Option<TerminalAgentProbe> {
         self.master.as_ref()?;
         Some(TerminalAgentProbe {
-            terminal: Arc::clone(&self.terminal),
             #[cfg(unix)]
             master: Arc::downgrade(self.master.as_ref().expect("checked Terminal PTY master")),
             process: self.process,
-            notices: Arc::clone(&self.notices),
             revision: Arc::clone(&self.revision),
             detector: AgentDetector::new(),
-            screen_revision: None,
             activity_revision: None,
             #[cfg(unix)]
             last_foreground_group: None,
@@ -1364,19 +1354,15 @@ impl TerminalNoticeProbe {
     }
 }
 
-/// Drives agent detection for one Terminal: the process probe names the agent, the
-/// screen and OSC evidence classify it, and the [`AgentDetector`] decides what to
-/// publish. Poll it every [`TerminalAgentProbe::poll_interval`].
+/// Tracks which agent occupies one Terminal: the process probe names it, and its state is
+/// `Unknown` until its hooks report (ADR 0014). Poll it every
+/// [`TerminalAgentProbe::poll_interval`].
 pub struct TerminalAgentProbe {
-    pub(super) terminal: Arc<Mutex<Terminal>>,
     #[cfg(unix)]
     master: Weak<Mutex<Box<dyn MasterPty + Send>>>,
     pub(super) process: ProcessProbe,
-    notices: SharedTerminalNotices,
     revision: Arc<AtomicU64>,
     detector: AgentDetector,
-    /// The terminal revision the last screen read saw; unchanged means skip the read.
-    screen_revision: Option<u64>,
     /// The terminal revision the last tick saw; new output keeps process probing fast.
     activity_revision: Option<u64>,
     #[cfg(unix)]
@@ -1392,69 +1378,28 @@ impl TerminalAgentProbe {
         self.detector.agent()
     }
 
-    /// Unlike the display snapshot, this excludes the final Idle published on exit.
-    pub fn running_agent(&self) -> Option<AgentKind> {
-        self.detector.running_agent()
-    }
-
-    /// One detection tick. `Some(None)` means the agent left; `Some(Some(_))` is a new
-    /// snapshot to publish.
+    /// One tick. `Some(None)` means the agent left; `Some(Some(_))` is a new agent to
+    /// publish.
     pub fn poll(&mut self) -> Option<Option<AgentSnapshot>> {
         let now = Instant::now();
-        let (osc_title, osc_progress) = self.osc_evidence();
         let foreground_changed = self.foreground_changed();
         let revision = self.revision.load(Ordering::Acquire);
         let output_changed = self.activity_revision != Some(revision);
         self.activity_revision = Some(revision);
-        if self
+        if !self
             .detector
             .wants_process_probe(now, foreground_changed, output_changed)
         {
-            let result = self.probe_process();
-            match self
-                .detector
-                .observe_process(result, &osc_title, &osc_progress, now)
-            {
-                AgentPublish::Nothing => {}
-                AgentPublish::Snapshot(snapshot) => {
-                    self.screen_revision = None;
-                    return Some(Some(snapshot));
-                }
-                AgentPublish::Cleared => return Some(None),
-            }
-        }
-        let screen_changed = self.screen_revision != Some(revision);
-        if !self.detector.wants_screen(screen_changed, now) {
             return None;
         }
-        let screen = {
-            let terminal = self.terminal.lock().expect("terminal state lock poisoned");
-            bottom_text(&terminal)
-        };
-        self.screen_revision = Some(revision);
-        match self.detector.observe_screen(
-            DetectionInput {
-                screen: &screen,
-                osc_title: &osc_title,
-                osc_progress: &osc_progress,
-            },
-            now,
-        ) {
+        match self.detector.observe_process(self.probe_process(), now) {
             AgentPublish::Nothing => None,
             AgentPublish::Snapshot(snapshot) => Some(Some(snapshot)),
             AgentPublish::Cleared => Some(None),
         }
     }
 
-    fn osc_evidence(&self) -> (String, String) {
-        let notices = self.notices.lock().expect("terminal notices lock poisoned");
-        (
-            notices.title.clone().unwrap_or_default(),
-            notices.progress.clone().unwrap_or_default(),
-        )
-    }
-
-    /// A foreground group change (Unix) forces an early process probe, as herdr does.
+    /// A foreground group change (Unix) forces an early process probe.
     fn foreground_changed(&mut self) -> bool {
         #[cfg(unix)]
         {
@@ -1486,17 +1431,6 @@ impl TerminalAgentProbe {
             self.process.probe_agent()
         }
     }
-}
-
-/// The whole screen, trailing blank rows dropped; what agent detection classifies.
-fn bottom_text(terminal: &Terminal) -> String {
-    let mut lines: Vec<String> = (0..terminal.screen_lines() as i32)
-        .map(|row| row_text(terminal, Line(row)))
-        .collect();
-    while lines.last().is_some_and(String::is_empty) {
-        lines.pop();
-    }
-    lines.join("\n")
 }
 
 /// The last `lines` rows that end at the last row with any content, reaching into

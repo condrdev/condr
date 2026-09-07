@@ -250,6 +250,9 @@ fn pane_cli_survives_a_child_shell_path_reset() {
     assert_eq!(current["pane"]["pane_id"], pane.parse::<u64>().unwrap());
 }
 
+// The fixture drives state through OSC titles, which no longer classify; #32 makes it
+// report through OSC 777 hook events instead.
+#[ignore = "agent state is hook-driven since ADR 0014; fixture is rewritten in #32"]
 #[test]
 fn discovers_on_server_starts_once_and_prompts_by_name() {
     let server = Server::start();
@@ -417,6 +420,9 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
     assert_eq!(server.ok(&launch)["agent"]["name"], "worker");
 }
 
+// The fixture drives state through OSC titles, which no longer classify; #32 makes it
+// report through OSC 777 hook events instead.
+#[ignore = "agent state is hook-driven since ADR 0014; fixture is rewritten in #32"]
 #[test]
 fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
     let server = Server::start();

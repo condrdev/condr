@@ -1,8 +1,5 @@
 //! Agent CLIs available on this machine's PATH, independent of live Pane detection.
-//!
-//! Command names and file checks follow Herdr's `src/detect/mod.rs` and
-//! `src/integration/registry.rs` at 5158adab10b6dcfea9370782043392f80fa0643c
-//! (Apache-2.0; these files have no additional notices). No CLI is executed here.
+//! No CLI is executed here.
 
 use std::path::{Path, PathBuf};
 
@@ -18,14 +15,9 @@ pub struct AgentInstallation {
 }
 
 impl AgentKind {
-    /// The native interactive CLI command, which can differ from the manifest id.
+    /// The native interactive CLI command.
     pub const fn executable(self) -> &'static str {
-        match self {
-            Self::Cursor if cfg!(windows) => "cursor-agent.cmd",
-            Self::Cursor => "cursor-agent",
-            Self::Kiro => "kiro-cli",
-            _ => self.id(),
-        }
+        self.id()
     }
 }
 
@@ -103,8 +95,8 @@ mod tests {
         std::fs::create_dir_all(&second).unwrap();
         let codex = candidates(&first, "codex")[0].clone();
         let fallback = candidates(&second, "codex")[0].clone();
-        let cursor = candidates(&first, AgentKind::Cursor.executable())[0].clone();
-        for path in [&codex, &fallback, &cursor] {
+        let opencode = candidates(&first, AgentKind::OpenCode.executable())[0].clone();
+        for path in [&codex, &fallback, &opencode] {
             std::fs::write(path, "this must never be executed").unwrap();
             #[cfg(unix)]
             {
@@ -126,8 +118,8 @@ mod tests {
         assert_eq!(
             found[1],
             AgentInstallation {
-                kind: AgentKind::Cursor,
-                executable: cursor
+                kind: AgentKind::OpenCode,
+                executable: opencode
             }
         );
         #[cfg(unix)]
