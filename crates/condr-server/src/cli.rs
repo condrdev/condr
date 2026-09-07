@@ -465,7 +465,6 @@ fn agent_hooks(action: HooksAction, agent: &str) -> Result<Value, CliError> {
     let io = |error: io::Error| {
         CliError::new(
             match error.kind() {
-                io::ErrorKind::Unsupported => "hooks_unsupported",
                 io::ErrorKind::InvalidData => "hooks_config_invalid",
                 _ => "io",
             },
@@ -502,12 +501,7 @@ fn agent_hooks(action: HooksAction, agent: &str) -> Result<Value, CliError> {
             path
         }
         HooksAction::Uninstall => hooks::uninstall(&target, kind).map_err(io)?,
-        HooksAction::Status => target.path(kind).ok_or_else(|| {
-            CliError::new(
-                "hooks_unsupported",
-                format!("Condr has no hooks for {}", kind.label()),
-            )
-        })?,
+        HooksAction::Status => target.path(kind),
     };
     let state = hooks::state(&target, kind).map_err(io)?;
     let mut value = json!({
