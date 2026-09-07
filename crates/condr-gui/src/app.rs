@@ -167,7 +167,9 @@ const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
-const CONDR_ICON_PATHS: [&str; 7] = [
+/// Condr's own icons: status glyphs, then the marks of the agent CLIs (see
+/// assets/icons/NOTICE-AGENT-ICONS), kept for every agent Condr may come to name.
+const CONDR_ICON_PATHS: [&str; 17] = [
     "icons/circle.svg",
     "icons/circle-filled.svg",
     "icons/circle-alert.svg",
@@ -175,6 +177,16 @@ const CONDR_ICON_PATHS: [&str; 7] = [
     "icons/claude.svg",
     "icons/codex.svg",
     "icons/opencode.svg",
+    "icons/pi.svg",
+    "icons/omp.svg",
+    "icons/copilot.svg",
+    "icons/kimi.svg",
+    "icons/kilo.svg",
+    "icons/qoder.svg",
+    "icons/qwen.svg",
+    "icons/cursor.svg",
+    "icons/grok.svg",
+    "icons/antigravity.svg",
 ];
 
 /// The drag payload of the sidebar resize handle; the shell tracks its moves.
@@ -214,6 +226,36 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/opencode.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/opencode.svg"
+            )))),
+            "icons/pi.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/pi.svg"
+            )))),
+            "icons/omp.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/omp.svg"
+            )))),
+            "icons/copilot.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/copilot.svg"
+            )))),
+            "icons/kimi.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/kimi.svg"
+            )))),
+            "icons/kilo.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/kilo.svg"
+            )))),
+            "icons/qoder.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/qoder.svg"
+            )))),
+            "icons/qwen.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/qwen.svg"
+            )))),
+            "icons/cursor.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/cursor.svg"
+            )))),
+            "icons/grok.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/grok.svg"
+            )))),
+            "icons/antigravity.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/antigravity.svg"
             )))),
             _ => self.base.load(path),
         }

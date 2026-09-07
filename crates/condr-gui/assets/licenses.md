@@ -304,17 +304,43 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Agent marks from theSVG, https://thesvg.org.
+Agent marks:
 
-claude.svg, codex.svg and opencode.svg come from theSVG (https://thesvg.org,
-https://github.com/glincker/thesvg), fetched on 2026-09-07 as
-https://thesvg.org/icons/{claude,codex,opencode}/default.svg. The collection's
-code and tooling are MIT licensed (Copyright (c) 2025 thesvg.org); theSVG
-distributes the brand marks under nominative fair use and notes that each
-remains the property of its trademark holder. Condr shows them only to name the
-agent CLI running in a Pane, with the fixed brand fills replaced by
-`currentColor` so the theme colors them like every other icon. Claude is a
-trademark of Anthropic, PBC; Codex of OpenAI; OpenCode of its maintainers.
+The agent marks in this directory name the coding-agent CLI running in a Pane.
+Each is a trademark of its owner; Condr uses them nominatively, recolored to
+`currentColor` so the theme tints them like every other icon, and otherwise
+geometrically unchanged unless noted. Fetched on 2026-09-07.
+
+From theSVG (https://thesvg.org, https://github.com/glincker/thesvg; the
+collection's code and tooling are MIT, Copyright (c) 2025 thesvg.org; it
+distributes the marks under nominative fair use), as
+https://thesvg.org/icons/<slug>/default.svg:
+
+  claude.svg       claude              Claude is a trademark of Anthropic, PBC
+  codex.svg        codex               Codex, of OpenAI
+  opencode.svg     opencode            OpenCode, of its maintainers
+  pi.svg           pi                  Pi (pi.dev), of Mario Zechner
+  copilot.svg      github-copilot      GitHub Copilot, of GitHub, Inc.
+  kimi.svg         kimi                Kimi, of Moonshot AI; the rounded backdrop is
+                                       dropped and only the mark is kept
+  kilo.svg         kilo-code           Kilo Code, of Kilo Code
+  qwen.svg         qwen                Qwen, of Alibaba Cloud
+  cursor.svg       cursor              Cursor, of Anysphere, Inc.
+  grok.svg         grok                Grok, of xAI
+  antigravity.svg  google-antigravity  Antigravity, of Google LLC; the source is a
+                                       masked multi-colour composition, and only
+                                       its mask silhouette is kept
+
+From lobe-icons (https://github.com/lobehub/lobe-icons, MIT, Copyright (c) 2023
+LobeHub), packages/static-svg/icons/qoder.svg:
+
+  qoder.svg        Qoder, of Alibaba Cloud
+
+From Oh My Pi (https://github.com/can1357/oh-my-pi, MIT, Copyright (c) 2025
+Mario Zechner), assets/icon.svg:
+
+  omp.svg          Oh My Pi; the plug's two dark prongs and the two accent dots
+                   are dropped, which a single flat colour cannot show
 
 ## Rust crates
 

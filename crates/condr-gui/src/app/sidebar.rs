@@ -27,7 +27,7 @@ pub(super) enum CondrIconName {
     CircleAlert,
     /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
     ServerPlus,
-    /// The agent CLIs' marks, from theSVG (assets/icons/NOTICE-THESVG), recolored to
+    /// The agent CLIs' marks (assets/icons/NOTICE-AGENT-ICONS), recolored to
     /// `currentColor` so they follow the text like every other icon.
     Claude,
     Codex,
