@@ -94,6 +94,11 @@ impl RuntimeState {
     ) -> Result<Option<AgentResponse>, AgentError> {
         match command {
             AgentCommand::Available => Ok(Some(AgentResponse::Available(installations))),
+            // Answered by the connection before the Session lock is taken.
+            AgentCommand::Hooks { .. } => Err(error(
+                "invalid_agent_request",
+                "hooks are handled outside the Session",
+            )),
             AgentCommand::List => {
                 let mut panes = self
                     .agent_control

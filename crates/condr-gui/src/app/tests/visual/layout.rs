@@ -1604,6 +1604,22 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         px(TerminalFont::default().size)
     );
 
+    // Agents: opening Settings asked the Server for every agent's hooks state, and the
+    // Server tab renders those rows without reading the window entity re-entrantly.
+    assert!(
+        wait_until_event_driven(window, |window| {
+            window.read(|app| {
+                view.read(app).connection(1).is_some_and(|connection| {
+                    connection.hooks.len() == condr_core::AgentKind::ALL.len()
+                })
+            })
+        }),
+        "every agent's hooks state must arrive from the Server"
+    );
+    window.update(|_, cx| select_settings_tab(&settings_view, SettingsTab::Server, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    settings.run_until_parked();
+
     settings.update(|window, _| window.remove_window());
     window.run_until_parked();
 }

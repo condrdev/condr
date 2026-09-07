@@ -280,6 +280,29 @@ impl Condr {
         });
     }
 
+    /// Asks a Server for the state of every agent's hooks on its machine. The replies
+    /// arrive as `AgentResult`s and land on the connection, one row per agent.
+    pub(super) fn request_agent_hooks(&mut self, key: ConnectionKey) {
+        if let Some(connection) = self.connections.iter_mut().find(|c| c.key == key) {
+            for agent in AgentKind::ALL {
+                connection.send_agent_hooks(agent, HooksAction::Status);
+            }
+        }
+    }
+
+    /// Installs or removes one agent's hooks on a Server's machine; the reply replaces
+    /// that agent's row.
+    pub(super) fn set_agent_hooks(
+        &mut self,
+        key: ConnectionKey,
+        agent: AgentKind,
+        action: HooksAction,
+    ) {
+        if let Some(connection) = self.connections.iter_mut().find(|c| c.key == key) {
+            connection.send_agent_hooks(agent, action);
+        }
+    }
+
     /// Settings opens in its own window, as Zed does, so it can be moved aside while
     /// the real Panes behind it show every change live. A second open re-activates it.
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -468,6 +491,7 @@ impl SettingsWindow {
             .map(|owner| owner.read(cx).active_connection)
             .unwrap_or_default();
         let shell_draft = connection_shell(&owner, selected_server, cx);
+        let _ = owner.update(cx, |owner, _| owner.request_agent_hooks(selected_server));
         let (server_keys, server_labels) = server_choices(&owner, cx);
         let selected = server_keys
             .iter()
@@ -518,6 +542,9 @@ impl SettingsWindow {
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         self.selected_server = key;
         self.shell_draft = connection_shell(&self.owner, key, cx);
+        let _ = self
+            .owner
+            .update(cx, |owner, _| owner.request_agent_hooks(key));
         cx.notify();
     }
 
@@ -601,7 +628,8 @@ impl Render for SettingsWindow {
                 .page(licenses_page(&self.licenses)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(server_page(&settings)),
+                .page(server_page(&settings))
+                .page(agents_page(&settings, self.connection_hooks(cx))),
         };
         let tabs = TabBar::new("condr-settings-tabs")
             .underline()
@@ -741,6 +769,19 @@ pub(super) fn select_settings_server(
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| this.select_server(key, cx));
+}
+
+/// What clicking a tab in the tab bar does; tests call it without the widget.
+#[cfg(all(test, feature = "test-support"))]
+pub(super) fn select_settings_tab(
+    settings: &Entity<SettingsWindow>,
+    tab: SettingsTab,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        this.tab = tab;
+        cx.notify();
+    });
 }
 
 /// What the Shell field shows.
@@ -1038,6 +1079,158 @@ fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
                 .description("Empty uses the system default."),
             ),
         )
+}
+
+impl SettingsWindow {
+    /// The hooks rows for the selected Server, and why the last request failed if it
+    /// did. Read from `self`: this runs inside render, where the entity cannot be read
+    /// through its handle.
+    fn connection_hooks(&self, cx: &App) -> (Vec<HooksReport>, Option<String>) {
+        self.owner
+            .upgrade()
+            .and_then(|owner| {
+                owner
+                    .read(cx)
+                    .connections
+                    .iter()
+                    .find(|connection| connection.key == self.selected_server)
+                    .map(|connection| (connection.hooks.clone(), connection.hooks_error.clone()))
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// What one hooks action does: asks the selected Server and lets the reply repaint.
+pub(super) fn run_agent_hooks(
+    settings: &Entity<SettingsWindow>,
+    agent: AgentKind,
+    action: HooksAction,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        let key = this.selected_server;
+        let _ = this
+            .owner
+            .update(cx, |owner, _| owner.set_agent_hooks(key, agent, action));
+        cx.notify();
+    });
+}
+
+/// The status hooks of every supported agent on the selected Server's machine, with the
+/// actions their state allows; the Server writes the agent's own configuration (ADR 0014).
+/// Built on every render, so the rows follow the latest reports.
+fn agents_page(
+    settings: &Entity<SettingsWindow>,
+    (reports, error): (Vec<HooksReport>, Option<String>),
+) -> SettingPage {
+    let mut group = SettingGroup::new().title("Status hooks");
+    if let Some(error) = error {
+        group = group.item(
+            SettingItem::render(move |_, _, cx| {
+                div()
+                    .text_color(cx.theme().danger)
+                    .child(format!("Hooks request failed: {error}"))
+            })
+            .keywords(["hooks", "error"]),
+        );
+    }
+    for agent in AgentKind::ALL {
+        let report = reports.iter().find(|report| report.agent == agent).cloned();
+        let description = match &report {
+            Some(report) => report
+                .warning
+                .clone()
+                .unwrap_or_else(|| report.path.display().to_string()),
+            None => "Waiting for the Server to report.".to_owned(),
+        };
+        let settings = settings.clone();
+        // A custom row rather than `SettingItem::new`: the title carries the agent's
+        // mark, which the standard title slot cannot.
+        group = group.item(
+            SettingItem::render(move |_, _, cx| {
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_4()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        Icon::new(super::sidebar::CondrIconName::agent(agent))
+                                            .small(),
+                                    )
+                                    .child(agent.label()),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(description.clone()),
+                            ),
+                    )
+                    .child(agent_hooks_field(&settings, agent, report.as_ref(), cx))
+            })
+            .keywords([agent.label(), "hooks"]),
+        );
+    }
+    SettingPage::new("Agents").icon(IconName::Bot).group(group)
+}
+
+/// One row's field: the state as a word, then the one or two actions that change it.
+/// Installed hooks only offer Uninstall; an outdated set offers Update beside it. A
+/// missing report disables everything rather than guessing.
+fn agent_hooks_field(
+    settings: &Entity<SettingsWindow>,
+    agent: AgentKind,
+    report: Option<&HooksReport>,
+    cx: &App,
+) -> AnyElement {
+    let state = report.map(|report| report.state);
+    let (state_label, color) = match state {
+        Some(HooksState::Installed) => ("Installed", cx.theme().success),
+        Some(HooksState::Outdated) => ("Outdated", cx.theme().warning),
+        Some(HooksState::Missing) => ("Not installed", cx.theme().muted_foreground),
+        None => ("Checking…", cx.theme().muted_foreground),
+    };
+    let install_label = if state == Some(HooksState::Outdated) {
+        "Update"
+    } else {
+        "Install"
+    };
+    let action = |id: &'static str, label: &'static str, action: HooksAction| {
+        let settings = settings.clone();
+        Button::new(format!("agent-hooks-{}-{id}", agent.id()))
+            .label(label)
+            .small()
+            .outline()
+            .disabled(report.is_none())
+            .on_click(move |_, _, cx| run_agent_hooks(&settings, agent, action, cx))
+    };
+    h_flex()
+        .flex_none()
+        .gap_2()
+        .items_center()
+        .child(
+            div()
+                .debug_selector(move || format!("agent-hooks-{}-state", agent.id()))
+                .whitespace_nowrap()
+                .text_color(color)
+                .child(state_label),
+        )
+        .when(state != Some(HooksState::Installed), |this| {
+            this.child(action("install", install_label, HooksAction::Install))
+        })
+        .when(
+            matches!(state, Some(HooksState::Installed | HooksState::Outdated)),
+            |this| this.child(action("uninstall", "Uninstall", HooksAction::Uninstall)),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]

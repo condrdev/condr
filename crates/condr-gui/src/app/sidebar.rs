@@ -27,6 +27,21 @@ pub(super) enum CondrIconName {
     CircleAlert,
     /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
     ServerPlus,
+    /// The agent CLIs' marks, from theSVG (assets/icons/NOTICE-THESVG), recolored to
+    /// `currentColor` so they follow the text like every other icon.
+    Claude,
+    Codex,
+    OpenCode,
+}
+
+impl CondrIconName {
+    pub(super) fn agent(kind: AgentKind) -> Self {
+        match kind {
+            AgentKind::Claude => Self::Claude,
+            AgentKind::Codex => Self::Codex,
+            AgentKind::OpenCode => Self::OpenCode,
+        }
+    }
 }
 
 impl IconNamed for CondrIconName {
@@ -36,6 +51,9 @@ impl IconNamed for CondrIconName {
             Self::CircleFilled => "icons/circle-filled.svg",
             Self::CircleAlert => "icons/circle-alert.svg",
             Self::ServerPlus => "icons/server-plus.svg",
+            Self::Claude => "icons/claude.svg",
+            Self::Codex => "icons/codex.svg",
+            Self::OpenCode => "icons/opencode.svg",
         }
         .into()
     }

@@ -4,9 +4,10 @@ use super::terminal_input::{
 use crate::terminal_element::HoveredTerminalLink;
 use condr_core::TerminalKey;
 use condr_core::protocol::{
-    BootstrapBatch, BootstrapHeader, BootstrapRecord, PaneTerminalFrame, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId,
-    TerminalFrameBatch, TerminalFrameChunk, encode_bootstrap_record, encode_pane_terminal_frame,
+    AgentCommand, BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage,
+    PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage,
+    SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk,
+    encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor,
@@ -100,6 +101,46 @@ fn connection_with_io() -> ServerConnection {
         _incoming_task: Task::ready(()),
     });
     connection
+}
+
+#[test]
+fn hooks_actions_go_to_the_server_as_agent_commands() {
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
+    connection.status = ConnectionStatus::Connected;
+    connection.server_id = Some(ServerId(1));
+    connection.session_id = Some(SessionId(3));
+    let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+    connection.io = Some(ClientIo {
+        outgoing,
+        _incoming_task: Task::ready(()),
+    });
+
+    connection.send_agent_hooks(
+        condr_core::AgentKind::Codex,
+        condr_core::agent_hooks::HooksAction::Install,
+    );
+    assert_eq!(
+        outgoing_rx.recv().unwrap(),
+        ClientMessage::Agent {
+            server_id: ServerId(1),
+            session_id: SessionId(3),
+            command: AgentCommand::Hooks {
+                agent: condr_core::AgentKind::Codex,
+                action: condr_core::agent_hooks::HooksAction::Install,
+            },
+        }
+    );
+    // No Session yet: nothing to ask, and no disconnect either.
+    connection.session_id = None;
+    connection.send_agent_hooks(
+        condr_core::AgentKind::Claude,
+        condr_core::agent_hooks::HooksAction::Status,
+    );
+    assert!(matches!(
+        outgoing_rx.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
+    assert!(matches!(connection.status, ConnectionStatus::Connected));
 }
 
 #[test]
@@ -277,6 +318,9 @@ fn condr_assets_include_custom_and_kit_icons() {
         "icons/circle-filled.svg",
         "icons/circle-alert.svg",
         "icons/server-plus.svg",
+        "icons/claude.svg",
+        "icons/codex.svg",
+        "icons/opencode.svg",
         "icons/info.svg",
         "icons/settings.svg",
     ] {

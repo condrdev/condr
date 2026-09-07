@@ -40,6 +40,10 @@ trap 'rm -f "$TMP" "$ABOUT"' EXIT
     echo
     cat crates/condr-gui/assets/icons/LICENSE-LUCIDE
     echo
+    echo "Agent marks from theSVG, https://thesvg.org."
+    echo
+    cat crates/condr-gui/assets/icons/NOTICE-THESVG
+    echo
     echo "## Rust crates"
     echo
 } > "$TMP"

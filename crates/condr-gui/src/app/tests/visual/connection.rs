@@ -1122,3 +1122,59 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
     );
     drop(server);
 }
+
+#[test]
+fn hooks_reports_replace_their_agents_row_and_errors_clear_on_the_next_report() {
+    use condr_core::agent_hooks::{HooksReport, HooksState};
+    use condr_core::protocol::{AgentError, AgentResponse};
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            let mut deliver = |result| {
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::AgentResult { result }),
+                    cx,
+                );
+            };
+            let report = |state, warning: Option<&str>| HooksReport {
+                agent: AgentKind::Codex,
+                path: std::path::PathBuf::from("hooks.json"),
+                state,
+                note: None,
+                warning: warning.map(str::to_owned),
+            };
+            deliver(Err(AgentError {
+                code: "io".into(),
+                message: "disk full".into(),
+            }));
+            deliver(Ok(AgentResponse::Hooks(report(HooksState::Missing, None))));
+            deliver(Ok(AgentResponse::Hooks(HooksReport {
+                agent: AgentKind::Claude,
+                ..report(HooksState::Installed, None)
+            })));
+            deliver(Ok(AgentResponse::Hooks(report(
+                HooksState::Installed,
+                Some("enable hooks by hand"),
+            ))));
+            let connection = this.connection(1).unwrap();
+            assert_eq!(
+                connection.hooks_error, None,
+                "a report clears the last error"
+            );
+            assert_eq!(connection.hooks.len(), 2, "one row per agent");
+            let codex = connection
+                .hooks
+                .iter()
+                .find(|report| report.agent == AgentKind::Codex)
+                .unwrap();
+            assert_eq!(codex.state, HooksState::Installed);
+            assert_eq!(codex.warning.as_deref(), Some("enable hooks by hand"));
+        });
+    });
+}

@@ -955,6 +955,14 @@ pub(super) fn handle_client(
                 session_id,
                 command,
             } => {
+                // Hooks touch the agent's configuration files and may run `codex`: done
+                // here, outside the Session lock, like discovery.
+                let hooks = match command {
+                    condr_core::protocol::AgentCommand::Hooks { agent, action } => {
+                        Some(run_agent_hooks(agent, action))
+                    }
+                    _ => None,
+                };
                 let installations = if matches!(
                     command,
                     condr_core::protocol::AgentCommand::Available
@@ -978,6 +986,8 @@ pub(super) fn handle_client(
                             }),
                         },
                     );
+                } else if let Some(result) = hooks {
+                    queue_message(&outbound, ServerMessage::AgentResult { result });
                 } else {
                     state.handle_agent(client_id, &outbound, command, installations);
                 }
@@ -1087,6 +1097,28 @@ pub(super) fn handle_client(
     }
     drop(outbound);
     let _ = writer.join();
+}
+
+/// Installs, removes or inspects an agent's hooks on this machine, for a client that
+/// cannot reach the files itself.
+fn run_agent_hooks(
+    agent: condr_core::AgentKind,
+    action: condr_core::agent_hooks::HooksAction,
+) -> Result<condr_core::protocol::AgentResponse, condr_core::protocol::AgentError> {
+    use condr_core::protocol::{AgentError, AgentResponse};
+    let target = condr_core::agent_hooks::HookTarget::local().ok_or_else(|| AgentError {
+        code: "no_home_directory".into(),
+        message: "cannot locate the home directory".into(),
+    })?;
+    condr_core::agent_hooks::run(&target, agent, action)
+        .map(AgentResponse::Hooks)
+        .map_err(|error| AgentError {
+            code: match error.kind() {
+                std::io::ErrorKind::InvalidData => "hooks_config_invalid".into(),
+                _ => "io".into(),
+            },
+            message: error.to_string(),
+        })
 }
 
 fn set_server_shell(

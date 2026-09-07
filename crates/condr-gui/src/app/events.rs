@@ -1079,11 +1079,37 @@ impl Condr {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 IncomingEffect::default()
             }
-            // Only the CLI asks for Pane text, waits for agents, or administers devices.
+            // The GUI's only agent requests are hooks, so every result is one of theirs.
+            ServerMessage::AgentResult { result } => {
+                let connection = &mut self.connections[index];
+                match result {
+                    Ok(AgentResponse::Hooks(report)) => {
+                        connection.hooks_error = None;
+                        match connection
+                            .hooks
+                            .iter_mut()
+                            .find(|known| known.agent == report.agent)
+                        {
+                            Some(known) => *known = report,
+                            None => connection.hooks.push(report),
+                        }
+                    }
+                    Ok(_) => return IncomingEffect::default(),
+                    Err(error) => connection.hooks_error = Some(error.message),
+                }
+                // Settings is its own window; notifying this entity repaints only the main one.
+                if let Some(settings) = self.settings_view.as_ref().and_then(WeakEntity::upgrade) {
+                    settings.update(cx, |_, cx| cx.notify());
+                }
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            // Only the CLI asks for Pane text or administers devices.
             ServerMessage::Overview(_)
             | ServerMessage::OverviewTerminals { .. }
             | ServerMessage::PaneText { .. }
-            | ServerMessage::AgentResult { .. }
             | ServerMessage::DevicesRevoked { .. }
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {

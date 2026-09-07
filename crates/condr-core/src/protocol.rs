@@ -157,6 +157,12 @@ pub enum AgentCommand {
         until: Vec<crate::AgentState>,
         timeout_ms: u64,
     },
+    /// Installs, removes or inspects an agent's status hooks on the Server's machine,
+    /// where the agents run and their configuration lives.
+    Hooks {
+        agent: crate::AgentKind,
+        action: crate::agent_hooks::HooksAction,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -172,6 +178,7 @@ pub enum AgentResponse {
     Available(Vec<crate::agent_discovery::AgentInstallation>),
     List(Vec<AgentInfo>),
     Ready(AgentInfo),
+    Hooks(crate::agent_hooks::HooksReport),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

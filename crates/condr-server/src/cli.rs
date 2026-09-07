@@ -462,7 +462,12 @@ fn agent_hooks(action: HooksAction, agent: &str) -> Result<Value, CliError> {
     })?;
     let target = hooks::HookTarget::local()
         .ok_or_else(|| CliError::new("no_home_directory", "cannot locate the home directory"))?;
-    let io = |error: io::Error| {
+    let action = match action {
+        HooksAction::Install => hooks::HooksAction::Install,
+        HooksAction::Uninstall => hooks::HooksAction::Uninstall,
+        HooksAction::Status => hooks::HooksAction::Status,
+    };
+    let report = hooks::run(&target, kind, action).map_err(|error| {
         CliError::new(
             match error.kind() {
                 io::ErrorKind::InvalidData => "hooks_config_invalid",
@@ -470,60 +475,8 @@ fn agent_hooks(action: HooksAction, agent: &str) -> Result<Value, CliError> {
             },
             error.to_string(),
         )
-    };
-    let mut warning = None;
-    let path = match action {
-        HooksAction::Install => {
-            let path = hooks::install(&target, kind).map_err(io)?;
-            if kind == AgentKind::Codex {
-                // Codex ignores hooks.json until its hooks feature is on; the user can
-                // also set `[features] hooks = true` in config.toml by hand.
-                // Discovery also finds `codex.cmd`, which a bare `Command::new("codex")`
-                // cannot on Windows.
-                let codex = condr_core::agent_discovery::discover()
-                    .into_iter()
-                    .find(|found| found.kind == AgentKind::Codex)
-                    .map_or_else(|| kind.executable().into(), |found| found.executable);
-                let enabled = std::process::Command::new(codex)
-                    .args(["features", "enable", "hooks"])
-                    .stdin(std::process::Stdio::null())
-                    .output();
-                match enabled {
-                    Ok(output) if output.status.success() => {}
-                    Ok(output) => {
-                        warning = Some(format!(
-                            "codex features enable hooks failed ({}): {}; set [features] hooks = true in Codex's config.toml",
-                            output.status,
-                            String::from_utf8_lossy(&output.stderr).trim()
-                        ));
-                    }
-                    Err(error) => {
-                        warning = Some(format!(
-                            "could not run codex to enable hooks: {error}; set [features] hooks = true in Codex's config.toml"
-                        ));
-                    }
-                }
-            }
-            path
-        }
-        HooksAction::Uninstall => hooks::uninstall(&target, kind).map_err(io)?,
-        HooksAction::Status => target.path(kind),
-    };
-    let state = hooks::state(&target, kind).map_err(io)?;
-    let mut value = json!({
-        "agent": kind.id(),
-        "path": path,
-        "state": state.name(),
-    });
-    if kind == AgentKind::Codex {
-        value["note"] = Value::String(
-            "Codex runs hooks only with the hooks feature enabled and, unless managed, after they are trusted from /hooks inside Codex".into(),
-        );
-    }
-    if let Some(warning) = warning {
-        value["warning"] = Value::String(warning);
-    }
-    Ok(value)
+    })?;
+    serde_json::to_value(report).map_err(|error| CliError::new("io", error.to_string()))
 }
 
 #[derive(Serialize)]
@@ -1015,6 +968,10 @@ fn agent(client: &mut ClientConnection, command: AgentCommand) -> Result<Value, 
             "agents": agents.into_iter().map(agent_info).collect::<Vec<_>>()
         })),
         AgentResponse::Ready(agent) => Ok(json!({ "agent": agent_info(agent) })),
+        // The CLI never asks a Server for hooks; `agent hooks` runs them locally.
+        AgentResponse::Hooks(report) => {
+            serde_json::to_value(report).map_err(|error| CliError::new("io", error.to_string()))
+        }
     }
 }
 

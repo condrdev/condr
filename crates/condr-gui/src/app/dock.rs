@@ -277,6 +277,7 @@ impl Render for TerminalPanel {
             hovered_link,
             runtime_epoch,
             pane_title,
+            agent_kind,
             attention,
         ) = owner
             .as_ref()
@@ -309,6 +310,9 @@ impl Render for TerminalPanel {
                     app.hovered_link_for(self.connection_key, self.pane_id),
                     connection.and_then(|connection| connection.runtime_epoch),
                     pane_title,
+                    connection
+                        .and_then(|connection| connection.agents.get(&self.pane_id))
+                        .map(|agent| agent.kind),
                     connection.is_some_and(|connection| {
                         connection.controlling && connection.attention.contains(&self.pane_id)
                     }),
@@ -324,6 +328,7 @@ impl Render for TerminalPanel {
                 None,
                 None,
                 SharedString::from("Terminal"),
+                None,
                 false,
             ));
         let ime_terminal_revision = marked_text
@@ -500,6 +505,15 @@ impl Render for TerminalPanel {
                                                 .xsmall()
                                                 .text_color(cx.theme().warning),
                                         ),
+                                )
+                            })
+                            // The agent's mark sits before its Pane title, so a row of
+                            // Panes reads by agent before it reads by text.
+                            .when_some(agent_kind, |this, kind| {
+                                this.child(
+                                    Icon::new(super::sidebar::CondrIconName::agent(kind))
+                                        .xsmall()
+                                        .text_color(cx.theme().muted_foreground),
                                 )
                             })
                             .child(

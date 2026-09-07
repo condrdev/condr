@@ -10,6 +10,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{AgentEventKind, AgentKind};
@@ -100,7 +101,8 @@ fn command_name(exe: &Path) -> String {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HooksState {
     /// Exactly the hooks this `condr` would install.
     Installed,
@@ -116,6 +118,85 @@ impl HooksState {
             Self::Outdated => "outdated",
             Self::Missing => "missing",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HooksAction {
+    Install,
+    Uninstall,
+    Status,
+}
+
+/// What one action left behind: the file the hooks live in and its state afterwards.
+/// `note` is standing advice for the agent; `warning` is a step the install could not
+/// finish on the user's behalf.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+// No `skip_serializing_if`: bincode has no field names, so a skipped field is read
+// as the next one and the frame ends early.
+pub struct HooksReport {
+    pub agent: AgentKind,
+    pub path: PathBuf,
+    pub state: HooksState,
+    pub note: Option<String>,
+    pub warning: Option<String>,
+}
+
+const CODEX_NOTE: &str = "Codex runs hooks only with the hooks feature enabled and, unless managed, after they are trusted from /hooks inside Codex";
+
+/// Performs `action` for `agent` on this machine and reports the resulting state. The
+/// CLI runs it locally; the Server runs it for a GUI, whose hooks files live where the
+/// agents run.
+pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Result<HooksReport> {
+    let mut warning = None;
+    let path = match action {
+        HooksAction::Install => {
+            let path = install(target, agent)?;
+            if agent == AgentKind::Codex {
+                warning = enable_codex_hooks().err();
+            }
+            path
+        }
+        HooksAction::Uninstall => uninstall(target, agent)?,
+        HooksAction::Status => target.path(agent),
+    };
+    Ok(HooksReport {
+        agent,
+        path,
+        state: state(target, agent)?,
+        note: (agent == AgentKind::Codex).then(|| CODEX_NOTE.to_owned()),
+        warning,
+    })
+}
+
+/// Codex ignores hooks.json until its hooks feature is on; the user can also set
+/// `[features] hooks = true` in config.toml by hand, which the error text says.
+fn enable_codex_hooks() -> Result<(), String> {
+    // Discovery also finds `codex.cmd`, which a bare `Command::new("codex")` cannot on
+    // Windows.
+    let codex = crate::agent_discovery::discover()
+        .into_iter()
+        .find(|found| found.kind == AgentKind::Codex)
+        .map_or_else(
+            || AgentKind::Codex.executable().into(),
+            |found| found.executable,
+        );
+    let hint = "set [features] hooks = true in Codex's config.toml";
+    match std::process::Command::new(codex)
+        .args(["features", "enable", "hooks"])
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(format!(
+            "codex features enable hooks failed ({}): {}; {hint}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Err(format!(
+            "could not run codex to enable hooks: {error}; {hint}"
+        )),
     }
 }
 
@@ -506,6 +587,31 @@ mod tests {
 
     fn read(path: &Path) -> Value {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn run_reports_the_state_after_each_action_and_codex_carries_its_note() {
+        let (target, root) = target();
+        let status = |agent| run(&target, agent, HooksAction::Status).unwrap();
+        assert_eq!(status(AgentKind::Claude).state, HooksState::Missing);
+        assert_eq!(status(AgentKind::Claude).note, None);
+        assert!(status(AgentKind::Codex).note.is_some());
+        let installed = run(&target, AgentKind::Claude, HooksAction::Install).unwrap();
+        assert_eq!(installed.state, HooksState::Installed);
+        assert_eq!(installed.path, target.path(AgentKind::Claude));
+        assert_eq!(installed.warning, None);
+        assert_eq!(
+            run(&target, AgentKind::Claude, HooksAction::Uninstall)
+                .unwrap()
+                .state,
+            HooksState::Missing
+        );
+        // The wire shape the CLI prints and the GUI reads.
+        let json = serde_json::to_value(status(AgentKind::Claude)).unwrap();
+        assert_eq!(json["agent"], "claude");
+        assert_eq!(json["state"], "missing");
+        assert!(json["note"].is_null());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

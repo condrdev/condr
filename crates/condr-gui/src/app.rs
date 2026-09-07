@@ -8,15 +8,17 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
-    BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand, MAX_CHUNK_PAYLOAD_SIZE,
-    MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId,
-    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
-    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
+    AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
+    MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot,
+    RuntimeEpoch, ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
+    SessionId, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot,
+    decode_pane_terminal_frame,
 };
 use condr_core::{
-    AgentDisplayState, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId, PaneLayout,
-    Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand,
+    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId,
+    PaneLayout, Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand,
     TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSize,
     TerminalViewDelta, TerminalViewFrame, WorkspaceId,
@@ -72,10 +74,10 @@ use settings::{
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
-    color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
-    select_settings_server, select_terminal_font_family, select_terminal_font_size,
-    selected_appearance, server_shell, step_terminal_font_size, terminal_font_family,
-    terminal_font_size,
+    SettingsTab, color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
+    select_settings_server, select_settings_tab, select_terminal_font_family,
+    select_terminal_font_size, selected_appearance, server_shell, step_terminal_font_size,
+    terminal_font_family, terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;
@@ -165,11 +167,14 @@ const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
-const CONDR_ICON_PATHS: [&str; 4] = [
+const CONDR_ICON_PATHS: [&str; 7] = [
     "icons/circle.svg",
     "icons/circle-filled.svg",
     "icons/circle-alert.svg",
     "icons/server-plus.svg",
+    "icons/claude.svg",
+    "icons/codex.svg",
+    "icons/opencode.svg",
 ];
 
 /// The drag payload of the sidebar resize handle; the shell tracks its moves.
@@ -200,6 +205,15 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/server-plus.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/server-plus.svg"
+            )))),
+            "icons/claude.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/claude.svg"
+            )))),
+            "icons/codex.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/codex.svg"
+            )))),
+            "icons/opencode.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/opencode.svg"
             )))),
             _ => self.base.load(path),
         }
@@ -275,6 +289,11 @@ struct ServerConnection {
     zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
     settings: ServerSettings,
+    /// The state of each agent's status hooks on the Server's machine, as last
+    /// reported; requested when Settings shows this Server and after every action.
+    hooks: Vec<HooksReport>,
+    /// Why the last hooks request failed, until the next report.
+    hooks_error: Option<String>,
     io: Option<ClientIo>,
     connect_generation: u64,
     controlling: bool,
@@ -343,6 +362,8 @@ impl ServerConnection {
             workspace_git: HashMap::new(),
             zoomed_panes: HashSet::new(),
             settings: ServerSettings::default(),
+            hooks: Vec::new(),
+            hooks_error: None,
             io: None,
             connect_generation: 0,
             controlling: false,
@@ -458,6 +479,19 @@ impl ServerConnection {
             .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
             .map(PaneLayout::Pane)
             .or_else(|| Some(tab.layout().clone()))
+    }
+
+    /// Asks the Server to install, remove or report one agent's hooks on its machine.
+    /// The reply comes back as an `AgentResult` and replaces that agent's row.
+    fn send_agent_hooks(&mut self, agent: AgentKind, action: HooksAction) {
+        let (Some(server_id), Some(session_id)) = (self.server_id, self.session_id) else {
+            return;
+        };
+        self.send(ClientMessage::Agent {
+            server_id,
+            session_id,
+            command: AgentCommand::Hooks { agent, action },
+        });
     }
 
     fn send(&mut self, message: ClientMessage) {

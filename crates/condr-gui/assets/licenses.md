@@ -304,6 +304,18 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+Agent marks from theSVG, https://thesvg.org.
+
+claude.svg, codex.svg and opencode.svg come from theSVG (https://thesvg.org,
+https://github.com/glincker/thesvg), fetched on 2026-09-07 as
+https://thesvg.org/icons/{claude,codex,opencode}/default.svg. The collection's
+code and tooling are MIT licensed (Copyright (c) 2025 thesvg.org); theSVG
+distributes the brand marks under nominative fair use and notes that each
+remains the property of its trademark holder. Condr shows them only to name the
+agent CLI running in a Pane, with the fixed brand fills replaced by
+`currentColor` so the theme colors them like every other icon. Claude is a
+trademark of Anthropic, PBC; Codex of OpenAI; OpenCode of its maintainers.
+
 ## Rust crates
 
 ## Overview of licenses
