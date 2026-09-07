@@ -511,9 +511,8 @@ impl Render for TerminalPanel {
                             // Panes reads by agent before it reads by text.
                             .when_some(agent_kind, |this, kind| {
                                 this.child(
-                                    Icon::new(super::sidebar::CondrIconName::agent(kind))
-                                        .xsmall()
-                                        .text_color(cx.theme().muted_foreground),
+                                    super::sidebar::agent_mark(kind, cx.theme().muted_foreground)
+                                        .xsmall(),
                                 )
                             })
                             .child(

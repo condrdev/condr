@@ -1162,7 +1162,7 @@ fn agents_page(
                                     .gap_2()
                                     .items_center()
                                     .child(
-                                        Icon::new(super::sidebar::CondrIconName::agent(agent))
+                                        super::sidebar::agent_mark(agent, cx.theme().foreground)
                                             .small(),
                                     )
                                     .child(agent.label()),

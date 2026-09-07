@@ -44,6 +44,17 @@ impl CondrIconName {
     }
 }
 
+/// An agent's mark in its brand color where the brand has one; Codex and OpenCode
+/// publish monochrome marks, which take `fallback`, the surrounding text color.
+pub(super) fn agent_mark(kind: AgentKind, fallback: Hsla) -> Icon {
+    let color = match kind {
+        // Anthropic's terracotta, as the published mark carries it.
+        AgentKind::Claude => rgb(0xD97757).into(),
+        AgentKind::Codex | AgentKind::OpenCode => fallback,
+    };
+    Icon::new(CondrIconName::agent(kind)).text_color(color)
+}
+
 impl IconNamed for CondrIconName {
     fn path(self) -> SharedString {
         match self {
@@ -171,7 +182,7 @@ enum SidebarIconGraphic {
     /// An agent's mark with its status glyph tucked into the corner, so a row of
     /// agents reads by agent first and by state second.
     Agent {
-        mark: CondrIconName,
+        kind: AgentKind,
         glyph: SidebarGlyph,
         tone: SidebarIconTone,
     },
@@ -205,7 +216,7 @@ impl CondrSidebarIcon {
     ) -> Self {
         Self {
             graphic: SidebarIconGraphic::Agent {
-                mark: CondrIconName::agent(kind),
+                kind,
                 glyph: visual.glyph,
                 tone: visual.tone,
             },
@@ -228,27 +239,46 @@ impl CondrSidebarIcon {
                 .text_color(gpui_kit::white())
                 .child(initial)
                 .into_any_element(),
-            SidebarIconGraphic::Agent { mark, glyph, tone } => div()
-                .relative()
-                .size_4()
-                .child(
-                    Icon::new(mark)
-                        .size_4()
-                        .text_color(cx.theme().sidebar_foreground),
-                )
-                .child(
-                    // The glyph sits past the mark's corner on a disc of the sidebar's
-                    // own color, so it stays legible over any mark.
-                    div()
-                        .absolute()
-                        .bottom(px(-3.))
-                        .right(px(-3.))
-                        .rounded_full()
-                        .bg(cx.theme().sidebar)
-                        .p(px(1.))
-                        .child(glyph.icon().size_2().text_color(tone.color(cx))),
-                )
-                .into_any_element(),
+            SidebarIconGraphic::Agent { kind, glyph, tone } => {
+                // Past the mark's corner, on a disc of the sidebar's own color so it
+                // reads over any mark. At this size a glyph is a smudge, so the state
+                // is a plain dot in the tone's color; an unknown state shows nothing,
+                // and only the bell keeps its alert glyph, which a dot could not say.
+                let badge = match glyph {
+                    SidebarGlyph::Info => None,
+                    SidebarGlyph::CircleAlert => Some(
+                        glyph
+                            .icon()
+                            .size_2()
+                            .text_color(tone.color(cx))
+                            .into_any_element(),
+                    ),
+                    _ => Some(
+                        div()
+                            .size(px(6.))
+                            .rounded_full()
+                            .bg(tone.color(cx))
+                            .into_any_element(),
+                    ),
+                };
+                div()
+                    .relative()
+                    .size_4()
+                    .child(agent_mark(kind, cx.theme().sidebar_foreground).size_4())
+                    .when_some(badge, |this, badge| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .bottom(px(-2.))
+                                .right(px(-2.))
+                                .rounded_full()
+                                .bg(cx.theme().sidebar)
+                                .p(px(1.))
+                                .child(badge),
+                        )
+                    })
+                    .into_any_element()
+            }
         };
         let id = self.selector.clone();
         let debug_selector = self.selector;
