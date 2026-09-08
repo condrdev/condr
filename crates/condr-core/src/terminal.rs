@@ -16,11 +16,12 @@ use std::{
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 #[cfg(test)]
 use alacritty_terminal::term::cell::Hyperlink;
 use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::search::{RegexIter, RegexSearch};
 use alacritty_terminal::term::{Config, Osc52, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor};
 #[cfg(unix)]
@@ -98,21 +99,25 @@ use input::{encode_key, encode_key_in_mode, encode_paste, encode_text_in_mode};
 use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 use process::*;
 use pty_io::*;
+#[cfg(test)]
+use runtime::terminal_config;
 pub use runtime::{
     PaneEnvironment, TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch,
     TerminalNoticeProbe, TerminalRuntime, default_shell_program,
 };
-use view::{
-    SnapshotHyperlinks, TerminalDamageBaseline, publish_view, side, snapshot_terminal,
-    terminal_cell, terminal_cursor, viewport_point, viewport_selection,
-};
 pub use view::{
-    TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor,
-    TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
+    DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
+    DETECTED_LINK_FLAG, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
+    TerminalCursor, TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
     TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
     TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalScroll, TerminalSelection,
-    TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
-    TerminalViewSource,
+    TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate, TerminalView,
+    TerminalViewDelta, TerminalViewFrame, TerminalViewSource, default_indexed_color,
+};
+use view::{
+    SnapshotHyperlinks, TerminalDamageBaseline, detect_links, publish_view, side,
+    snapshot_terminal, snapshot_terminal_with_links, terminal_cell, terminal_cursor,
+    viewport_point, viewport_selection,
 };
 #[cfg(test)]
 use view::{blank_cell, terminal_cell_text};

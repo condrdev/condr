@@ -20,8 +20,8 @@ use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId,
     PaneLayout, Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand,
     TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSize,
-    TerminalViewDelta, TerminalViewFrame, WorkspaceId,
+    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
+    TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, Endpoint, ServerConfig, StaticKey, TcpEndpoint,

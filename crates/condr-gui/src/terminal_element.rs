@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use condr_core::protocol::RuntimeEpoch;
 use condr_core::{
-    PaneId, TerminalColor, TerminalCursorShape, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
-    TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
+    DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
+    DETECTED_LINK_FLAG, PaneId, TerminalColor, TerminalCursorShape, TerminalModifiers,
+    TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking,
+    TerminalMouseWheel, TerminalPosition, TerminalSelection, TerminalSide, TerminalSize,
+    TerminalView, default_indexed_color,
 };
 use gpui_kit::{
     App, BorderStyle, Bounds, ClipboardItem, ContentMask, CursorStyle, Element, ElementId,
@@ -27,7 +29,6 @@ const INVERSE: u16 = 1 << 0;
 const BOLD: u16 = 1 << 1;
 const ITALIC: u16 = 1 << 2;
 const UNDERLINE: u16 = 1 << 3;
-const WRAPLINE: u16 = 1 << 4;
 const WIDE_CHAR_SPACER: u16 = 1 << 6;
 const DIM: u16 = 1 << 7;
 const HIDDEN: u16 = 1 << 8;
@@ -61,33 +62,18 @@ impl Global for TerminalPalette {}
 
 impl Default for TerminalPalette {
     fn default() -> Self {
+        // The Server's OSC 4/10/11 replies quote the same palette, so a program that asks
+        // and a program that assumes agree.
+        let ansi = |index: usize| Hsla::from(rgb(DEFAULT_ANSI_COLORS[index]));
         Self {
-            background: rgb(0x0d1117).into(),
-            foreground: rgb(0xc9d1d9).into(),
-            cursor: rgb(0xf0f6fc).into(),
-            cursor_text: rgb(0x0d1117).into(),
+            background: rgb(DEFAULT_BACKGROUND_COLOR).into(),
+            foreground: rgb(DEFAULT_FOREGROUND_COLOR).into(),
+            cursor: rgb(DEFAULT_CURSOR_COLOR).into(),
+            cursor_text: rgb(DEFAULT_BACKGROUND_COLOR).into(),
             selection: rgb(0x264f78).into(),
             selection_text: None,
-            normal: [
-                rgb(0x484f58).into(),
-                rgb(0xff7b72).into(),
-                rgb(0x3fb950).into(),
-                rgb(0xd29922).into(),
-                rgb(0x58a6ff).into(),
-                rgb(0xbc8cff).into(),
-                rgb(0x39c5cf).into(),
-                rgb(0xb1bac4).into(),
-            ],
-            bright: [
-                rgb(0x6e7681).into(),
-                rgb(0xffa198).into(),
-                rgb(0x56d364).into(),
-                rgb(0xe3b341).into(),
-                rgb(0x79c0ff).into(),
-                rgb(0xd2a8ff).into(),
-                rgb(0x56d4dd).into(),
-                rgb(0xffffff).into(),
-            ],
+            normal: std::array::from_fn(ansi),
+            bright: std::array::from_fn(|index| ansi(index + 8)),
         }
     }
 }
@@ -486,7 +472,7 @@ impl Element for TerminalElement {
                 let cache_index = usize::from(row) * usize::from(self.props.terminal.size.columns)
                     + usize::from(column);
                 // OSC 8 links are always underlined; a hovered plain-text URL joins them.
-                let linked = cell.hyperlink.is_some()
+                let linked = (cell.hyperlink.is_some() && cell.flags & DETECTED_LINK_FLAG == 0)
                     || hovered_range
                         .as_ref()
                         .is_some_and(|range| range.contains(&(cache_index as u32)));
@@ -1419,137 +1405,30 @@ fn push_selection_quads(
     }
 }
 
-/// The link under a cell: an OSC 8 run sharing one URI, or a plain-text URL on its
-/// visible logical line.
+/// The link under a cell: the run of neighbours sharing its URI. The Server fills in
+/// `hyperlink` from OSC 8 and from plain-text URLs alike, so this is all the Client knows.
 pub(crate) fn link_at(view: &TerminalView, row: u16, column: u16) -> Option<HoveredTerminalLink> {
     let columns = u32::from(view.size.columns);
     let index = u32::from(row) * columns + u32::from(column);
-    let cell = view.cell(row, column)?;
-    if let Some(uri) = &cell.hyperlink {
-        let same = |index: u32| {
-            view.cells
-                .get(index as usize)
-                .is_some_and(|cell| cell.hyperlink.as_ref() == Some(uri))
-        };
-        let mut start = index;
-        while start > 0 && same(start - 1) {
-            start -= 1;
-        }
-        let mut end = index + 1;
-        while same(end) {
-            end += 1;
-        }
-        return Some(HoveredTerminalLink {
-            range: start..end,
-            uri: uri.clone(),
-            position: TerminalMousePosition { row, column },
-        });
+    let uri = view.cell(row, column)?.hyperlink.as_ref()?;
+    let same = |index: u32| {
+        view.cells
+            .get(index as usize)
+            .is_some_and(|cell| cell.hyperlink.as_ref() == Some(uri))
+    };
+    let mut start = index;
+    while start > 0 && same(start - 1) {
+        start -= 1;
     }
-
-    // One character per cell; wide-char spacers collapse into the cell they follow.
-    let mut first_row = row;
-    while first_row > 0
-        && view
-            .cell(first_row - 1, view.size.columns - 1)
-            .is_some_and(|cell| cell.flags & WRAPLINE != 0)
-    {
-        first_row -= 1;
+    let mut end = index + 1;
+    while same(end) {
+        end += 1;
     }
-    let mut last_row = row;
-    while last_row + 1 < view.size.rows
-        && view
-            .cell(last_row, view.size.columns - 1)
-            .is_some_and(|cell| cell.flags & WRAPLINE != 0)
-    {
-        last_row += 1;
-    }
-    let mut text = Vec::new();
-    let mut cell_of_char = Vec::new();
-    for logical_row in first_row..=last_row {
-        for logical_column in 0..view.size.columns {
-            let cell = view.cell(logical_row, logical_column)?;
-            if cell.flags & (WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0 {
-                continue;
-            }
-            text.push(cell.text.chars().next().unwrap_or(' '));
-            cell_of_char.push(u32::from(logical_row) * columns + u32::from(logical_column));
-        }
-    }
-    let at = cell_of_char.iter().position(|&cell| cell == index)?;
-    let (start, end) = url_span(&text, at)?;
     Some(HoveredTerminalLink {
-        range: cell_of_char[start]..cell_of_char[end - 1] + 1,
-        uri: text[start..end].iter().collect::<String>().into(),
+        range: start..end,
+        uri: uri.clone(),
         position: TerminalMousePosition { row, column },
     })
-}
-
-/// The `[start, end)` character span of the URL covering `at`, if any. URLs run from a
-/// known scheme to whitespace or a quote/bracket, minus trailing punctuation and any
-/// closing bracket without a matching opener.
-fn url_span(text: &[char], at: usize) -> Option<(usize, usize)> {
-    const SCHEMES: [&str; 14] = [
-        "https://",
-        "http://",
-        "file://",
-        "ftp://",
-        "ipfs:",
-        "ipns:",
-        "magnet:",
-        "mailto:",
-        "gemini://",
-        "gopher://",
-        "news:",
-        "ssh:",
-        "git://",
-        "zed://",
-    ];
-    let starts_with = |start: usize, scheme: &str| {
-        scheme.chars().enumerate().all(|(offset, expected)| {
-            text.get(start + offset)
-                .is_some_and(|actual| actual.eq_ignore_ascii_case(&expected))
-        })
-    };
-    let mut start = 0;
-    while start <= at {
-        if SCHEMES.iter().any(|scheme| starts_with(start, scheme)) {
-            let mut end = start;
-            while end < text.len()
-                && !text[end].is_whitespace()
-                && !matches!(text[end], '"' | '\'' | '<' | '>' | '`')
-            {
-                end += 1;
-            }
-            loop {
-                match text[start..end].last() {
-                    Some('.' | ',' | ';' | ':' | '!' | '?') => end -= 1,
-                    Some(&close @ (')' | ']' | '}')) => {
-                        let open = match close {
-                            ')' => '(',
-                            ']' => '[',
-                            _ => '{',
-                        };
-                        let span = &text[start..end];
-                        if span.iter().filter(|&&c| c == open).count()
-                            < span.iter().filter(|&&c| c == close).count()
-                        {
-                            end -= 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    _ => break,
-                }
-            }
-            if at < end {
-                return Some((start, end));
-            }
-            start = end.max(start + 1);
-        } else {
-            start += 1;
-        }
-    }
-    None
 }
 
 fn terminal_position(
@@ -1664,80 +1543,36 @@ fn terminal_color(color: TerminalColor, foreground: bool, palette: &TerminalPale
 }
 
 fn indexed_color(index: u8, palette: &TerminalPalette) -> Hsla {
-    if index < 16 {
-        return if index < 8 {
-            palette.normal[usize::from(index)]
-        } else {
-            palette.bright[usize::from(index - 8)]
-        };
+    match index {
+        0..=7 => palette.normal[usize::from(index)],
+        8..=15 => palette.bright[usize::from(index - 8)],
+        _ => rgb(default_indexed_color(index)).into(),
     }
-    let (red, green, blue) = if index < 232 {
-        let value = index - 16;
-        (
-            color_cube(value / 36),
-            color_cube((value / 6) % 6),
-            color_cube(value % 6),
-        )
-    } else {
-        let gray = 8 + (index - 232) * 10;
-        (gray, gray, gray)
-    };
-    rgb((u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)).into()
-}
-
-fn color_cube(value: u8) -> u8 {
-    if value == 0 { 0 } else { 55 + value * 40 }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn span(text: &str, at: usize) -> Option<String> {
-        let chars = text.chars().collect::<Vec<_>>();
-        url_span(&chars, at).map(|(start, end)| chars[start..end].iter().collect())
-    }
-
     #[test]
-    fn plain_text_urls_are_trimmed_of_trailing_punctuation_and_unbalanced_brackets() {
-        assert_eq!(
-            span("see https://example.com/a?b=1. now", 6).as_deref(),
-            Some("https://example.com/a?b=1")
-        );
-        assert_eq!(span("(https://x.y/z)", 3).as_deref(), Some("https://x.y/z"));
-        assert_eq!(
-            span("https://en.wikipedia.org/wiki/Foo_(bar)", 10).as_deref(),
-            Some("https://en.wikipedia.org/wiki/Foo_(bar)")
-        );
-        assert_eq!(span("see https://example.com now", 2), None);
-        assert_eq!(span("see https://example.com now", 24), None);
-        assert_eq!(span("http:/nope", 0), None);
-        assert_eq!(
-            span("SSH://host/path", 4).as_deref(),
-            Some("SSH://host/path")
-        );
-        assert_eq!(
-            span("mailto:user@example.com", 12).as_deref(),
-            Some("mailto:user@example.com")
-        );
-        assert_eq!(
-            span("gemini://example.com capsule", 4).as_deref(),
-            Some("gemini://example.com")
-        );
-    }
-
-    #[test]
-    fn osc8_runs_and_plain_urls_resolve_to_cell_ranges() {
-        let cell = |text: &str, hyperlink: Option<&str>| condr_core::TerminalCell {
+    fn hyperlink_runs_resolve_to_cell_ranges() {
+        let cell = |text: &str, hyperlink: Option<&str>, flags| condr_core::TerminalCell {
             text: text.into(),
             foreground: TerminalColor::Named(0),
             background: TerminalColor::Named(0),
-            flags: 0,
+            flags,
             hyperlink: hyperlink.map(SmolStr::new),
         };
-        let mut cells = vec![cell("a", Some("https://a")), cell("b", Some("https://a"))];
-        cells.push(cell(" ", None));
-        cells.extend("http://b".chars().map(|c| cell(&c.to_string(), None)));
+        let mut cells = vec![
+            cell("a", Some("https://a"), 0),
+            cell("b", Some("https://a"), 0),
+        ];
+        cells.push(cell(" ", None, 0));
+        cells.extend(
+            "http://b"
+                .chars()
+                .map(|c| cell(&c.to_string(), Some("http://b"), DETECTED_LINK_FLAG)),
+        );
         let view = TerminalView {
             selection: None,
             revision: 1,
@@ -1764,47 +1599,6 @@ mod tests {
                 position: TerminalMousePosition { row: 0, column: 5 },
             })
         );
-    }
-
-    #[test]
-    fn plain_text_urls_continue_across_soft_wrapped_rows_only() {
-        let cell = |text: char, flags| condr_core::TerminalCell {
-            text: text.to_string().into(),
-            foreground: TerminalColor::Named(0),
-            background: TerminalColor::Named(0),
-            flags,
-            hyperlink: None,
-        };
-        let mut cells = "https://"
-            .chars()
-            .map(|text| cell(text, 0))
-            .collect::<Vec<_>>();
-        cells[7].flags |= WRAPLINE;
-        cells.extend("example.".chars().map(|text| cell(text, 0)));
-        cells[15].flags |= WRAPLINE;
-        cells.extend("com/path".chars().map(|text| cell(text, 0)));
-        let view = TerminalView {
-            selection: None,
-            revision: 1,
-            size: TerminalSize::new(3, 8),
-            display_offset: 0,
-            mouse_tracking: TerminalMouseTracking::None,
-            cells,
-            cursor: None,
-        };
-
-        assert_eq!(
-            link_at(&view, 1, 2),
-            Some(HoveredTerminalLink {
-                range: 0..24,
-                uri: "https://example.com/path".into(),
-                position: TerminalMousePosition { row: 1, column: 2 },
-            })
-        );
-
-        let mut hard_break = view;
-        hard_break.cells[7].flags &= !WRAPLINE;
-        assert_eq!(link_at(&hard_break, 1, 2), None);
     }
 
     #[cfg(feature = "test-support")]

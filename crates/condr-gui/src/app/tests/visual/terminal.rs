@@ -2,6 +2,7 @@ use super::*;
 // Only the unix-only right-click test builds a reported motion by hand.
 #[cfg(unix)]
 use super::super::super::ReportedTerminalMouseMotion;
+use condr_core::DETECTED_LINK_FLAG;
 #[cfg(unix)]
 use condr_core::{TerminalMouseButton, TerminalMouseEvent};
 
@@ -627,12 +628,18 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
     });
 
     assert!(!window.read(|app| view.read(app).is_selecting(1, pane_id)));
-    let selection = window.read(|app| view.read(app).selection_for(1, pane_id).unwrap());
-    assert_eq!(selection.start.column, column);
-    assert_eq!(
-        selection.end.column,
-        column + u16::try_from(word_chars.len()).unwrap() - 1
-    );
+    // The Server expands the word and the next frame carries it back.
+    let word_end = column + u16::try_from(word_chars.len()).unwrap() - 1;
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .selection_for(1, pane_id)
+                .is_some_and(|selection| {
+                    (selection.start.row, selection.start.column) == (row, column)
+                        && (selection.end.row, selection.end.column) == (row, word_end)
+                })
+        })
+    }));
 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -977,10 +984,14 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                 cell.flags = 0;
                 cell.hyperlink = None;
             }
+            // As the Server publishes a plain-text URL: linked, but flagged as detected so
+            // it underlines only on hover.
             for (column, text) in uri.chars().enumerate() {
-                terminal_view.cells
-                    [usize::from(row) * usize::from(terminal_view.size.columns) + column]
-                    .text = text.to_string().into();
+                let cell = &mut terminal_view.cells
+                    [usize::from(row) * usize::from(terminal_view.size.columns) + column];
+                cell.text = text.to_string().into();
+                cell.hyperlink = Some(uri.into());
+                cell.flags = DETECTED_LINK_FLAG;
             }
             terminal_view.cursor = None;
             terminal_view.revision += 1;
@@ -1090,9 +1101,13 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                     connection.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
-            terminal_view.cells[usize::from(row) * usize::from(terminal_view.size.columns)
-                + usize::from(hover_column)]
-            .text = " ".into();
+            // The Server re-detects links per frame, so the blanked cell loses its link too.
+            let cell = &mut terminal_view.cells[usize::from(row)
+                * usize::from(terminal_view.size.columns)
+                + usize::from(hover_column)];
+            cell.text = " ".into();
+            cell.hyperlink = None;
+            cell.flags = 0;
             terminal_view.revision += 1;
             this.handle_incoming(
                 1,

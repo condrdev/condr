@@ -235,34 +235,39 @@ impl Condr {
             return;
         };
         let display_offset = terminal.view.display_offset;
-        let multi_click_range = match click_count {
-            2 => terminal
-                .view
-                .word_selection_at(position.row, position.column),
-            3.. => terminal.view.line_selection_at(position.row),
+        let server_selection = terminal.view.selection.is_some();
+        let unit = match click_count {
+            2 => Some(TerminalSelectionUnit::Word),
+            3.. => Some(TerminalSelectionUnit::Line),
             _ => None,
         };
         self.terminal_selection = Some(LocalTerminalSelection {
             connection_key: key,
             pane_id,
-            range: multi_click_range.unwrap_or(TerminalSelection {
+            range: TerminalSelection {
                 start: position,
                 end: position,
                 display_offset,
-            }),
+            },
             dragging: click_count == 1,
             committed: false,
         });
-        // A single click clears the Server-tracked selection (when there is one to clear);
-        // a word or line becomes it.
-        let server_selection = self
-            .terminal(key, pane_id)
-            .is_some_and(|terminal| terminal.view.selection.is_some());
-        if multi_click_range.is_some() || server_selection {
-            let sent =
-                self.terminal_command(key, pane_id, TerminalCommand::Select(multi_click_range));
+        // A single click clears the Server-tracked selection (when there is one to clear).
+        // A word or line is the Server's to expand: it follows soft wraps and brackets, and
+        // the next frame brings it back as the tracked selection.
+        let command = match unit {
+            Some(unit) => Some(TerminalCommand::SelectAt {
+                position,
+                display_offset,
+                unit,
+            }),
+            None if server_selection => Some(TerminalCommand::Select(None)),
+            None => None,
+        };
+        if let Some(command) = command {
+            let sent = self.terminal_command(key, pane_id, command);
             if sent && let Some(selection) = &mut self.terminal_selection {
-                selection.committed = multi_click_range.is_some();
+                selection.committed = unit.is_some();
             }
         }
         cx.notify();

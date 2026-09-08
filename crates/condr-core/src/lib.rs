@@ -25,13 +25,16 @@ pub use session::{
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
 pub use terminal::{
-    CURSOR_POSITION_SETTLE, CommandBuilder, PaneEnvironment, TerminalAgentProbe, TerminalCell,
-    TerminalCellRun, TerminalColor, TerminalCommand, TerminalCursor, TerminalCursorShape,
-    TerminalCwdProbe, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers,
-    TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking,
-    TerminalMouseWheel, TerminalNoticeBatch, TerminalNoticeProbe, TerminalPosition,
-    TerminalRuntime, TerminalScroll, TerminalSelection, TerminalSide, TerminalSize, TerminalUpdate,
-    TerminalView, TerminalViewDelta, TerminalViewFrame, TerminalViewSource, default_shell_program,
+    CURSOR_POSITION_SETTLE, CommandBuilder, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
+    DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneEnvironment,
+    TerminalAgentProbe, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
+    TerminalCursor, TerminalCursorShape, TerminalCwdProbe, TerminalFrameError,
+    TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
+    TerminalNoticeBatch, TerminalNoticeProbe, TerminalPosition, TerminalRuntime, TerminalScroll,
+    TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate,
+    TerminalView, TerminalViewDelta, TerminalViewFrame, TerminalViewSource, default_indexed_color,
+    default_shell_program,
 };
 
 pub const APP_NAME: &str = "Condr";

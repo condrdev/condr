@@ -498,67 +498,18 @@ pub(super) fn flush_terminal_replies(
 }
 
 fn default_terminal_color(index: usize) -> Option<Rgb> {
-    const NORMAL: [Rgb; 8] = [
-        rgb(0x48_4f_58),
-        rgb(0xff_7b_72),
-        rgb(0x3f_b9_50),
-        rgb(0xd2_99_22),
-        rgb(0x58_a6_ff),
-        rgb(0xbc_8c_ff),
-        rgb(0x39_c5_cf),
-        rgb(0xb1_ba_c4),
-    ];
-    const BRIGHT: [Rgb; 8] = [
-        rgb(0x6e_76_81),
-        rgb(0xff_a1_98),
-        rgb(0x56d364),
-        rgb(0xe3_b3_41),
-        rgb(0x79_c0_ff),
-        rgb(0xd2_a8_ff),
-        rgb(0x56_d4_dd),
-        rgb(0xff_ff_ff),
-    ];
-
-    match index {
-        0..=7 => Some(NORMAL[index]),
-        8..=15 => Some(BRIGHT[index - 8]),
-        16..=231 => {
-            let value = index - 16;
-            Some(Rgb {
-                r: color_cube(value / 36),
-                g: color_cube((value / 6) % 6),
-                b: color_cube(value % 6),
-            })
-        }
-        232..=255 => {
-            let gray = 8 + (index - 232) * 10;
-            Some(Rgb {
-                r: gray as u8,
-                g: gray as u8,
-                b: gray as u8,
-            })
-        }
-        index if index == NamedColor::Foreground as usize => Some(rgb(0xc9_d1_d9)),
-        index if index == NamedColor::Background as usize => Some(rgb(0x0d_11_17)),
-        index if index == NamedColor::Cursor as usize => Some(rgb(0xf0_f6_fc)),
-        _ => None,
-    }
-}
-
-const fn rgb(value: u32) -> Rgb {
-    Rgb {
+    let value = match u8::try_from(index) {
+        Ok(index) => default_indexed_color(index),
+        Err(_) if index == NamedColor::Foreground as usize => DEFAULT_FOREGROUND_COLOR,
+        Err(_) if index == NamedColor::Background as usize => DEFAULT_BACKGROUND_COLOR,
+        Err(_) if index == NamedColor::Cursor as usize => DEFAULT_CURSOR_COLOR,
+        Err(_) => return None,
+    };
+    Some(Rgb {
         r: (value >> 16) as u8,
         g: (value >> 8) as u8,
         b: value as u8,
-    }
-}
-
-fn color_cube(value: usize) -> u8 {
-    if value == 0 {
-        0
-    } else {
-        (55 + value * 40) as u8
-    }
+    })
 }
 
 pub(super) type Terminal = Term<TerminalEventProxy>;

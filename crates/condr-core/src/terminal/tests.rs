@@ -418,7 +418,7 @@ fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
     cell.set_hyperlink(Some(Hyperlink::new(Some("first"), "abc".into())));
 
     assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks)
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None)
             .hyperlink
             .as_deref(),
         Some("abc")
@@ -426,7 +426,7 @@ fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
 
     cell.set_hyperlink(Some(Hyperlink::new(Some("new-id"), "abc".into())));
     assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks)
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None)
             .hyperlink
             .as_deref(),
         Some("abc")
@@ -434,7 +434,7 @@ fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
 
     cell.set_hyperlink(Some(Hyperlink::new(Some("second"), "d".into())));
     assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks).hyperlink,
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None).hyperlink,
         None
     );
 
@@ -443,7 +443,7 @@ fn terminal_hyperlinks_stay_within_the_frame_byte_budget() {
         "x".repeat(MAX_TERMINAL_HYPERLINK_URI_BYTES + 1),
     )));
     assert_eq!(
-        terminal_cell(&cell, terminal.colors(), &mut hyperlinks).hyperlink,
+        terminal_cell(&cell, terminal.colors(), &mut hyperlinks, None).hyperlink,
         None
     );
 }
@@ -1752,51 +1752,164 @@ fn terminal_selection_matches_simple_cell_boundary_semantics() {
     assert!(reversed.contains_cell(1, 1, 10));
 }
 
-#[test]
-fn terminal_view_selects_words_by_display_column() {
-    let text = "run https://example.com/a?q=1, next";
-    let size = TerminalSize::new(1, 40);
-    let mut cells = vec![blank_cell(); usize::from(size.columns)];
-    for (column, ch) in text.chars().enumerate() {
-        cells[column].text = ch.to_string().into();
+fn terminal_showing(size: TerminalSize, bytes: &[u8]) -> Terminal {
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
+    let mut terminal = Term::new(terminal_config(), &size, event_proxy);
+    {
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut terminal, bytes);
     }
-    let view = TerminalView {
-        selection: None,
-        revision: 1,
-        size,
-        display_offset: 3,
-        mouse_tracking: TerminalMouseTracking::None,
-        cells,
-        cursor: None,
+    terminal
+}
+
+fn selected_at(
+    terminal: &mut Terminal,
+    size: TerminalSize,
+    (row, column): (u16, u16),
+    unit: TerminalSelectionUnit,
+) -> ((u16, u16), (u16, u16)) {
+    let position = TerminalPosition {
+        row,
+        column,
+        side: TerminalSide::Left,
     };
-
-    let selection = view.word_selection_at(0, 12).unwrap();
-    assert_eq!(selection.start.column, 4);
-    assert_eq!(selection.end.column, 28);
-    assert_eq!(selection.display_offset, 3);
-    assert!(view.word_selection_at(0, 3).is_none());
-    assert!(view.word_selection_at(0, 29).is_none());
-
-    let mut punctuation = view.clone();
-    punctuation.cells[0].text = ".".into();
-    punctuation.cells[1].text = " ".into();
-    assert!(punctuation.word_selection_at(0, 0).is_none());
+    let ty = match unit {
+        TerminalSelectionUnit::Word => SelectionType::Semantic,
+        TerminalSelectionUnit::Line => SelectionType::Lines,
+    };
+    let point = viewport_point(terminal, position, 0);
+    terminal.selection = Some(Selection::new(ty, point, side(position.side)));
+    let selection = viewport_selection(terminal, size).unwrap();
+    (
+        (selection.start.row, selection.start.column),
+        (selection.end.row, selection.end.column),
+    )
 }
 
 #[test]
-fn terminal_view_selects_a_complete_line() {
-    let view = TerminalView {
-        selection: None,
-        revision: 1,
-        size: TerminalSize::new(3, 10),
-        display_offset: 2,
-        mouse_tracking: TerminalMouseTracking::None,
-        cells: vec![blank_cell(); 30],
-        cursor: None,
-    };
+fn word_and_line_selections_follow_soft_wraps_and_keep_urls_whole() {
+    let size = TerminalSize::new(2, 20);
+    let mut terminal = terminal_showing(size, b"run https://example.com/a?q=1, next");
 
-    let selection = view.line_selection_at(1).unwrap();
-    assert_eq!((selection.start.row, selection.start.column), (1, 0));
-    assert_eq!((selection.end.row, selection.end.column), (1, 9));
-    assert_eq!(selection.display_offset, 2);
+    // `:` is not a separator, so the URL is one word; the trailing comma is not part of it.
+    assert_eq!(
+        selected_at(&mut terminal, size, (0, 12), TerminalSelectionUnit::Word),
+        ((0, 4), (1, 8))
+    );
+    assert_eq!(
+        selected_at(&mut terminal, size, (0, 1), TerminalSelectionUnit::Word),
+        ((0, 0), (0, 2))
+    );
+    assert_eq!(
+        selected_at(&mut terminal, size, (0, 5), TerminalSelectionUnit::Line),
+        ((0, 0), (1, 19))
+    );
+}
+
+#[test]
+fn plain_text_urls_are_detected_trimmed_and_flagged() {
+    let size = TerminalSize::new(1, 40);
+    let terminal = terminal_showing(size, b"see https://example.com/a?b=1. now");
+    let view = snapshot_terminal(&terminal, size, 1);
+    let link = |column| view.cell(0, column).unwrap().hyperlink.clone();
+    assert_eq!(link(4).as_deref(), Some("https://example.com/a?b=1"));
+    assert_eq!(link(28).as_deref(), Some("https://example.com/a?b=1"));
+    assert_eq!(link(29), None, "trailing punctuation belongs to the prose");
+    assert_eq!(link(3), None);
+    assert_ne!(view.cell(0, 4).unwrap().flags & DETECTED_LINK_FLAG, 0);
+
+    let cases: [(&[u8], &str); 4] = [
+        (b"(https://x.y/z)", "https://x.y/z"),
+        (
+            b"https://en.wikipedia.org/wiki/Foo_(bar)",
+            "https://en.wikipedia.org/wiki/Foo_(bar)",
+        ),
+        (b"SSH://host/path", "SSH://host/path"),
+        (b"mailto:user@example.com", "mailto:user@example.com"),
+    ];
+    for (bytes, expected) in cases {
+        let terminal = terminal_showing(size, bytes);
+        let view = snapshot_terminal(&terminal, size, 1);
+        let linked = view
+            .cells
+            .iter()
+            .filter_map(|cell| cell.hyperlink.as_deref())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            linked,
+            [expected].into(),
+            "{}",
+            String::from_utf8_lossy(bytes)
+        );
+    }
+    let terminal = terminal_showing(size, b"http:/nope");
+    assert!(
+        snapshot_terminal(&terminal, size, 1)
+            .cells
+            .iter()
+            .all(|cell| cell.hyperlink.is_none())
+    );
+}
+
+#[test]
+fn detected_urls_continue_across_soft_wraps_only_and_yield_to_osc8() {
+    let size = TerminalSize::new(3, 8);
+    let terminal = terminal_showing(size, b"https://example.com/path");
+    let view = snapshot_terminal(&terminal, size, 1);
+    assert!(
+        view.cells
+            .iter()
+            .all(|cell| cell.hyperlink.as_deref() == Some("https://example.com/path"))
+    );
+
+    let terminal = terminal_showing(size, b"https://\r\nexample.com");
+    let view = snapshot_terminal(&terminal, size, 1);
+    assert!(view.cells.iter().all(|cell| cell.hyperlink.is_none()));
+
+    let terminal = terminal_showing(
+        size,
+        b"\x1b]8;;https://other\x1b\\https://\x1b]8;;\x1b\\x.y/z",
+    );
+    let view = snapshot_terminal(&terminal, size, 1);
+    let cell = view.cell(0, 0).unwrap();
+    assert_eq!(cell.hyperlink.as_deref(), Some("https://other"));
+    assert_eq!(cell.flags & DETECTED_LINK_FLAG, 0);
+}
+
+#[test]
+fn link_changes_reach_delta_frames_without_text_damage() {
+    let size = TerminalSize::new(4, 12);
+    let terminal = Arc::new(Mutex::new(terminal_showing(size, b"https://examp")));
+    let revision = Arc::new(AtomicU64::new(1));
+    let source = TerminalViewSource {
+        terminal: Arc::clone(&terminal),
+        size: Arc::new(Mutex::new(size)),
+        revision: Arc::clone(&revision),
+        damage_baseline: Arc::new(Mutex::new(None)),
+        cursor_settle: Arc::new(Mutex::new(CursorSettle::default())),
+    };
+    let Some(TerminalViewFrame::Full(view)) = source.take_frame() else {
+        panic!("the first frame is full");
+    };
+    assert_eq!(
+        view.cell(0, 0).unwrap().hyperlink.as_deref(),
+        Some("https://examp")
+    );
+
+    // Blank the wrapped tail: alacritty damages row 1 only, yet row 0's URL shrank.
+    {
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut *terminal.lock().unwrap(), b"\x1b[2;1H ");
+    }
+    revision.fetch_add(1, Ordering::AcqRel);
+    let Some(TerminalViewFrame::Delta(delta)) = source.take_frame() else {
+        panic!("a small change is a delta");
+    };
+    let row0 = delta
+        .runs
+        .iter()
+        .find(|run| run.start == 0)
+        .expect("row 0 is resent for its link change");
+    assert_eq!(row0.cells[0].hyperlink.as_deref(), Some("https://exam"));
 }

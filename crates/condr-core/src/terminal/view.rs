@@ -1,5 +1,6 @@
 use super::*;
 use serde::{Deserializer, Serializer, de::Error as _};
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 const MAX_TERMINAL_HYPERLINKS: usize = u16::MAX as usize + 1;
@@ -26,6 +27,41 @@ pub enum TerminalColor {
     Named(u16),
     Indexed(u8),
     Rgb { red: u8, green: u8, blue: u8 },
+}
+
+/// The palette used when nothing else decides a color: OSC 4/10/11 replies to programs that
+/// ask, and clients without a color scheme of their own. Entries 0–15 are GitHub Dark; the
+/// 6×6×6 cube and the grayscale ramp above are the fixed xterm values.
+pub const DEFAULT_ANSI_COLORS: [u32; 16] = [
+    0x484f58, 0xff7b72, 0x3fb950, 0xd29922, 0x58a6ff, 0xbc8cff, 0x39c5cf, 0xb1bac4, 0x6e7681,
+    0xffa198, 0x56d364, 0xe3b341, 0x79c0ff, 0xd2a8ff, 0x56d4dd, 0xffffff,
+];
+pub const DEFAULT_FOREGROUND_COLOR: u32 = 0xc9d1d9;
+pub const DEFAULT_BACKGROUND_COLOR: u32 = 0x0d1117;
+pub const DEFAULT_CURSOR_COLOR: u32 = 0xf0f6fc;
+
+/// The xterm-256 color at `index` as `0xRRGGBB`, with [`DEFAULT_ANSI_COLORS`] for 0–15.
+pub const fn default_indexed_color(index: u8) -> u32 {
+    let (red, green, blue) = match index {
+        0..=15 => return DEFAULT_ANSI_COLORS[index as usize],
+        16..=231 => {
+            let value = index - 16;
+            (
+                color_cube(value / 36),
+                color_cube((value / 6) % 6),
+                color_cube(value % 6),
+            )
+        }
+        232..=255 => {
+            let gray = 8 + (index - 232) * 10;
+            (gray, gray, gray)
+        }
+    };
+    ((red as u32) << 16) | ((green as u32) << 8) | blue as u32
+}
+
+const fn color_cube(value: u8) -> u8 {
+    if value == 0 { 0 } else { 55 + value * 40 }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -574,13 +610,16 @@ pub struct TerminalViewSource {
     pub(super) cursor_settle: Arc<Mutex<super::cursor_settle::CursorSettle>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct TerminalDamageBaseline {
     pub(super) revision: u64,
     pub(super) size: TerminalSize,
     pub(super) display_offset: u32,
     /// The cursor as published, after settling; a settle alone must still emit a frame.
     pub(super) cursor: Option<TerminalCursor>,
+    /// The plain-text URLs as published; a cell whose link changed is damage alacritty
+    /// cannot know about, since the text it sits in may be untouched.
+    pub(super) links: DetectedLinks,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -913,117 +952,12 @@ impl TerminalSelection {
     }
 }
 
-impl TerminalView {
-    pub fn word_selection_at(&self, row: u16, column: u16) -> Option<TerminalSelection> {
-        if row >= self.size.rows || column >= self.size.columns {
-            return None;
-        }
-        let clicked = self.semantic_character(row, column)?;
-        if is_word_separator(clicked) {
-            return None;
-        }
-
-        let mut start = column;
-        while start > 0
-            && self
-                .semantic_character(row, start - 1)
-                .is_some_and(|ch| !is_word_separator(ch))
-        {
-            start -= 1;
-        }
-
-        let mut end = column;
-        while end + 1 < self.size.columns
-            && self
-                .semantic_character(row, end + 1)
-                .is_some_and(|ch| !is_word_separator(ch))
-        {
-            end += 1;
-        }
-
-        while start <= end
-            && self
-                .semantic_character(row, start)
-                .is_some_and(is_leading_token_wrapper)
-        {
-            start += 1;
-        }
-        while start <= end
-            && self
-                .semantic_character(row, end)
-                .is_some_and(is_trailing_token_wrapper)
-        {
-            if end == 0 {
-                return None;
-            }
-            end -= 1;
-        }
-        if !(start..=end).contains(&column) {
-            return None;
-        }
-
-        Some(TerminalSelection {
-            start: TerminalPosition {
-                row,
-                column: start,
-                side: TerminalSide::Left,
-            },
-            end: TerminalPosition {
-                row,
-                column: end,
-                side: TerminalSide::Right,
-            },
-            display_offset: self.display_offset,
-        })
-    }
-
-    pub fn line_selection_at(&self, row: u16) -> Option<TerminalSelection> {
-        let end = self.size.columns.checked_sub(1)?;
-        (row < self.size.rows).then_some(TerminalSelection {
-            start: TerminalPosition {
-                row,
-                column: 0,
-                side: TerminalSide::Left,
-            },
-            end: TerminalPosition {
-                row,
-                column: end,
-                side: TerminalSide::Right,
-            },
-            display_offset: self.display_offset,
-        })
-    }
-
-    fn semantic_character(&self, row: u16, column: u16) -> Option<char> {
-        let cell = self.cell(row, column)?;
-        let flags = Flags::from_bits_retain(cell.flags);
-        if flags.contains(Flags::WIDE_CHAR_SPACER) {
-            return column
-                .checked_sub(1)
-                .and_then(|column| self.cell(row, column))
-                .and_then(|cell| cell.text.chars().next());
-        }
-        cell.text.chars().next()
-    }
-}
-
-fn is_word_separator(ch: char) -> bool {
-    ch.is_whitespace()
-        || matches!(
-            ch,
-            '|' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '!'
-        )
-}
-
-fn is_leading_token_wrapper(ch: char) -> bool {
-    matches!(ch, '(' | '[' | '{' | '<' | '"' | '\'' | '`')
-}
-
-fn is_trailing_token_wrapper(ch: char) -> bool {
-    matches!(
-        ch,
-        ')' | ']' | '}' | '>' | '"' | '\'' | '`' | '.' | ',' | ';' | ':' | '!' | '?'
-    )
+/// What a multi-click selects around its anchor. The Server expands it with alacritty's
+/// semantic search, which follows soft-wrapped lines and matching brackets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalSelectionUnit {
+    Word,
+    Line,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1040,6 +974,12 @@ pub enum TerminalCommand {
     Scroll(TerminalScroll),
     /// Replaces the Server-tracked selection; `None` clears it.
     Select(Option<TerminalSelection>),
+    /// Replaces the Server-tracked selection with the word or line around a viewport cell.
+    SelectAt {
+        position: TerminalPosition,
+        display_offset: u32,
+        unit: TerminalSelectionUnit,
+    },
     /// Copies the Server-tracked selection, or an explicit viewport range.
     Copy {
         selection: Option<TerminalSelection>,
@@ -1124,10 +1064,121 @@ pub(super) fn publish_view(revision: &AtomicU64, updates: &mpsc::Sender<Terminal
     let _ = updates.send(TerminalUpdate::View(revision));
 }
 
+/// Set alongside `hyperlink` on cells whose link the Server found in plain text rather than
+/// received via OSC 8, so clients can underline those only on hover. The one flag bit
+/// alacritty leaves free.
+pub const DETECTED_LINK_FLAG: u16 = 1 << 15;
+
+/// Lowercase throughout, which makes alacritty's search case-insensitive. A URL runs from a
+/// known scheme to whitespace or a quote/bracket; [`trimmed_url_len`] drops what prose adds.
+const URL_PATTERN: &str = r#"(https?://|file://|ftp://|git://|gemini://|gopher://|zed://|ipfs:|ipns:|magnet:|mailto:|news:|ssh:)[^\s"'<>`]+"#;
+
+thread_local! {
+    static URL_SEARCH: RefCell<RegexSearch> =
+        RefCell::new(RegexSearch::new(URL_PATTERN).expect("the URL pattern compiles"));
+}
+
+/// Plain-text URLs in the viewport, keyed by viewport cell index.
+pub(super) type DetectedLinks = HashMap<u32, SmolStr>;
+
+/// Finds plain-text URLs with alacritty's grid search, which follows soft-wrapped lines and
+/// steps over wide characters, then trims trailing punctuation and unbalanced brackets.
+pub(super) fn detect_links(terminal: &Terminal, size: TerminalSize) -> DetectedLinks {
+    let mut links = DetectedLinks::new();
+    let (Some(last_row), Some(last_column)) =
+        (size.rows.checked_sub(1), size.columns.checked_sub(1))
+    else {
+        return links;
+    };
+    let display_offset = i32::try_from(terminal.grid().display_offset()).unwrap_or(i32::MAX);
+    let start = Point::new(Line(-display_offset), Column(0));
+    let end = Point::new(
+        Line(i32::from(last_row) - display_offset),
+        Column(usize::from(last_column)),
+    );
+    let columns = u32::from(size.columns);
+    let spacer = Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER;
+    URL_SEARCH.with_borrow_mut(|regex| {
+        for found in RegexIter::new(start, end, Direction::Right, terminal, regex) {
+            // Every cell of the match in order. Spacers carry no character but stay linked so
+            // the run has no holes.
+            let mut cells = Vec::new();
+            let mut point = *found.start();
+            loop {
+                let cell = &terminal.grid()[point];
+                let row = u32::try_from(point.line.0 + display_offset).unwrap_or(u32::MAX);
+                let character = (!cell.flags.intersects(spacer)).then_some(cell.c);
+                cells.push((row * columns + point.column.0 as u32, character));
+                if point == *found.end() {
+                    break;
+                }
+                point = point.add(terminal, Boundary::None, 1);
+            }
+            let chars = cells
+                .iter()
+                .filter_map(|(_, character)| *character)
+                .collect::<Vec<_>>();
+            let keep = trimmed_url_len(&chars);
+            if keep == 0 {
+                continue;
+            }
+            let uri = SmolStr::from(chars[..keep].iter().collect::<String>());
+            let mut kept = 0;
+            for (index, character) in cells {
+                if character.is_some() {
+                    if kept == keep {
+                        break;
+                    }
+                    kept += 1;
+                }
+                links.insert(index, uri.clone());
+            }
+        }
+    });
+    links
+}
+
+/// The URL's length without trailing punctuation and closing brackets that have no opener:
+/// prose puts those after a URL far more often than a URL ends with them.
+fn trimmed_url_len(chars: &[char]) -> usize {
+    let mut end = chars.len();
+    loop {
+        match chars[..end].last() {
+            Some('.' | ',' | ';' | ':' | '!' | '?') => end -= 1,
+            Some(&close @ (')' | ']' | '}')) => {
+                let open = match close {
+                    ')' => '(',
+                    ']' => '[',
+                    _ => '{',
+                };
+                let span = &chars[..end];
+                let count = |wanted| span.iter().filter(|&&c| c == wanted).count();
+                if count(open) < count(close) {
+                    end -= 1;
+                } else {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    end
+}
+
 pub(super) fn snapshot_terminal(
     terminal: &Terminal,
     size: TerminalSize,
     revision: u64,
+) -> TerminalView {
+    let links = detect_links(terminal, size);
+    snapshot_terminal_with_links(terminal, size, revision, &links)
+}
+
+pub(super) fn snapshot_terminal_with_links(
+    terminal: &Terminal,
+    size: TerminalSize,
+    revision: u64,
+    links: &DetectedLinks,
 ) -> TerminalView {
     let content = terminal.renderable_content();
     let display_offset = content.display_offset;
@@ -1152,8 +1203,13 @@ pub(super) fn snapshot_terminal(
         if row >= size.rows || column >= size.columns {
             continue;
         }
-        cells[usize::from(row) * usize::from(size.columns) + usize::from(column)] =
-            terminal_cell(cell.cell, content.colors, &mut hyperlinks);
+        let index = usize::from(row) * usize::from(size.columns) + usize::from(column);
+        cells[index] = terminal_cell(
+            cell.cell,
+            content.colors,
+            &mut hyperlinks,
+            links.get(&(index as u32)),
+        );
     }
 
     TerminalView {
@@ -1264,16 +1320,28 @@ pub(super) fn terminal_cell(
     cell: &Cell,
     colors: &alacritty_terminal::term::color::Colors,
     hyperlinks: &mut SnapshotHyperlinks,
+    detected_link: Option<&SmolStr>,
 ) -> TerminalCell {
     let text = terminal_cell_text(cell);
+    let mut flags = cell.flags.bits();
+    // An OSC 8 link is the program's word; a detected one only fills in where it said nothing.
+    let hyperlink = match (cell.hyperlink(), detected_link) {
+        (Some(link), _) => hyperlinks.intern(link.uri()),
+        (None, Some(uri)) => {
+            let uri = hyperlinks.intern(uri);
+            if uri.is_some() {
+                flags |= DETECTED_LINK_FLAG;
+            }
+            uri
+        }
+        (None, None) => None,
+    };
     TerminalCell {
         text,
         foreground: terminal_color(cell.fg, colors),
         background: terminal_color(cell.bg, colors),
-        flags: cell.flags.bits(),
-        hyperlink: cell
-            .hyperlink()
-            .and_then(|link| hyperlinks.intern(link.uri())),
+        flags,
+        hyperlink,
     }
 }
 

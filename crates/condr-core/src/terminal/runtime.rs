@@ -117,13 +117,7 @@ impl TerminalRuntime {
         let current_size = Arc::new(Mutex::new(size));
         let (event_proxy, pending_replies, notices) =
             TerminalEventProxy::new(Arc::clone(&current_size));
-        let terminal_config = Config {
-            // Copy only: a program may fill the user's clipboard (like tmux `set-clipboard on`),
-            // never read it. See ADR 0007.
-            osc52: Osc52::OnlyCopy,
-            ..Config::default()
-        };
-        let terminal = Arc::new(Mutex::new(Term::new(terminal_config, &size, event_proxy)));
+        let terminal = Arc::new(Mutex::new(Term::new(terminal_config(), &size, event_proxy)));
         let revision = Arc::new(AtomicU64::new(0));
         let damage_baseline = Arc::new(Mutex::new(None));
         let cursor_settle = Arc::new(Mutex::new(CursorSettle::default()));
@@ -404,6 +398,14 @@ impl TerminalRuntime {
             }
             TerminalCommand::Select(selection) => {
                 self.select(selection);
+                Ok(None)
+            }
+            TerminalCommand::SelectAt {
+                position,
+                display_offset,
+                unit,
+            } => {
+                self.select_at(position, display_offset, unit);
                 Ok(None)
             }
             TerminalCommand::Copy { selection } => Ok(self.copy_range(selection)),
@@ -774,6 +776,25 @@ impl TerminalRuntime {
         publish_view(&self.revision, &self.update_sender);
     }
 
+    /// A word or line selection anchored at one cell. alacritty expands it, to the semantic
+    /// escape characters in [`terminal_config`] or the matching bracket, across soft wraps.
+    fn select_at(
+        &self,
+        position: TerminalPosition,
+        display_offset: u32,
+        unit: TerminalSelectionUnit,
+    ) {
+        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let point = viewport_point(&terminal, position, display_offset);
+        let ty = match unit {
+            TerminalSelectionUnit::Word => SelectionType::Semantic,
+            TerminalSelectionUnit::Line => SelectionType::Lines,
+        };
+        terminal.selection = Some(Selection::new(ty, point, side(position.side)));
+        drop(terminal);
+        publish_view(&self.revision, &self.update_sender);
+    }
+
     fn scroll_to_bottom(&self) {
         let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
         if terminal.grid().display_offset() != 0 {
@@ -879,6 +900,17 @@ impl TerminalRuntime {
         let writer_and_resize =
             combine_cleanup_results(writer_result, resize_result, "stop terminal resizer");
         combine_cleanup_results(writer_and_resize, reader_result, "stop terminal reader")
+    }
+}
+
+pub(super) fn terminal_config() -> Config {
+    Config {
+        // Copy only: a program may fill the user's clipboard (like tmux `set-clipboard on`),
+        // never read it. See ADR 0007.
+        osc52: Osc52::OnlyCopy,
+        // alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
+        semantic_escape_chars: ",│`|\"' ()[]{}<>\t".into(),
+        ..Config::default()
     }
 }
 
@@ -1200,52 +1232,80 @@ impl TerminalViewSource {
         );
         let cursor = self.settled_cursor(cursor);
         if baseline
+            .as_ref()
             .is_some_and(|baseline| revision <= baseline.revision && baseline.cursor != cursor)
         {
             // Nothing new arrived from the PTY, but the settled cursor moved: give the
             // cursor-only frame its own revision so clients accept it.
             revision = self.revision.fetch_add(1, Ordering::AcqRel) + 1;
         }
+        let links = detect_links(&terminal, size);
         let full = || {
-            let mut view = snapshot_terminal(&terminal, size, revision);
+            let mut view = snapshot_terminal_with_links(&terminal, size, revision, &links);
             view.cursor = cursor;
             TerminalViewFrame::Full(view)
         };
-        let requires_full = baseline.is_none_or(|baseline| {
+        let requires_full = baseline.as_ref().is_none_or(|baseline| {
             baseline.size != size || baseline.display_offset != display_offset
         }) || damage.is_none();
 
-        let frame = if baseline.is_some_and(|baseline| revision <= baseline.revision) {
+        let frame = if baseline
+            .as_ref()
+            .is_some_and(|baseline| revision <= baseline.revision)
+        {
             None
         } else if requires_full {
             Some(full())
         } else {
-            let previous = baseline.expect("partial damage has a baseline");
+            let previous = baseline.as_ref().expect("partial damage has a baseline");
             let columns = usize::from(size.columns);
-            let mut runs = Vec::new();
-            let mut changed_cells = 0usize;
-            let mut hyperlinks = SnapshotHyperlinks::default();
+            // Damaged column spans per viewport row: alacritty's, widened by every cell whose
+            // detected link changed, which happens when text elsewhere on its line did.
+            let mut damaged_rows = std::collections::BTreeMap::new();
             for bounds in damage.expect("full damage was handled") {
                 if bounds.line >= usize::from(size.rows) || bounds.left >= columns {
                     continue;
                 }
                 let right = bounds.right.min(columns - 1);
-                if bounds.left > right {
-                    continue;
+                if bounds.left <= right {
+                    damaged_rows.insert(bounds.line, (bounds.left, right));
                 }
-                let mut cells = Vec::with_capacity(right - bounds.left + 1);
-                let line = i32::try_from(bounds.line).unwrap_or(i32::MAX)
+            }
+            let link_changed = |index: &u32| previous.links.get(index) != links.get(index);
+            for index in previous
+                .links
+                .keys()
+                .chain(links.keys())
+                .filter(|i| link_changed(i))
+            {
+                let (row, column) = (*index as usize / columns, *index as usize % columns);
+                damaged_rows
+                    .entry(row)
+                    .and_modify(|(left, right)| {
+                        *left = (*left).min(column);
+                        *right = (*right).max(column);
+                    })
+                    .or_insert((column, column));
+            }
+            let mut runs = Vec::new();
+            let mut changed_cells = 0usize;
+            let mut hyperlinks = SnapshotHyperlinks::default();
+            for (row, (left, right)) in damaged_rows {
+                let mut cells = Vec::with_capacity(right - left + 1);
+                let line = i32::try_from(row).unwrap_or(i32::MAX)
                     - i32::try_from(content.display_offset).unwrap_or(i32::MAX);
-                for column in bounds.left..=right {
+                for column in left..=right {
+                    let index = row * columns + column;
                     cells.push(terminal_cell(
                         &terminal.grid()[Point::new(Line(line), Column(column))],
                         content.colors,
                         &mut hyperlinks,
+                        links.get(&(index as u32)),
                     ));
                 }
                 changed_cells += cells.len();
                 runs.push(TerminalCellRun {
-                    start: u32::try_from(bounds.line * columns + bounds.left)
+                    start: u32::try_from(row * columns + left)
                         .expect("terminal cell count fits u32"),
                     cells,
                 });
@@ -1270,6 +1330,7 @@ impl TerminalViewSource {
             size,
             display_offset,
             cursor,
+            links,
         });
         drop(baseline);
         terminal.reset_damage();
