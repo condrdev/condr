@@ -206,7 +206,8 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     }));
 
     let rebuilds = window.read(|app| view.read(app).dock_rebuild_count);
-    let sequence = window.read(|app| view.read(app).connection(1).unwrap().sequence);
+    let next_request_id =
+        window.read(|app| view.read(app).connection(1).unwrap().next_layout_request_id);
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
             this.select_workspace(1, second_workspace, window, cx);
@@ -215,8 +216,8 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
     window.run_until_parked();
     assert!(window.read(|app| { view.read(app).pending_workspace_selection_for(1).is_none() }));
     assert_eq!(
-        window.read(|app| view.read(app).connection(1).unwrap().sequence),
-        sequence,
+        window.read(|app| view.read(app).connection(1).unwrap().next_layout_request_id),
+        next_request_id,
         "reselecting the visible Workspace must not send a Layout command"
     );
     assert_eq!(

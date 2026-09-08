@@ -166,10 +166,10 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
 
-    let (sequence, rebuilds) = window.read(|app| {
+    let (next_request_id, rebuilds) = window.read(|app| {
         let condr = view.read(app);
         (
-            condr.connection(1).unwrap().sequence,
+            condr.connection(1).unwrap().next_layout_request_id,
             condr.dock_rebuild_count,
         )
     });
@@ -192,6 +192,9 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
 
+    // Agent metadata can advance the reliable cursor during a purely local resize.
+    agent_changed(window, &view, pane_id, None);
+
     let (authoritative_layout, panes) = window.read(|app| {
         let condr = view.read(app);
         let session = condr.active_session().unwrap();
@@ -202,8 +205,8 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
         )
     });
     assert_eq!(
-        window.read(|app| view.read(app).connection(1).unwrap().sequence),
-        sequence,
+        window.read(|app| view.read(app).connection(1).unwrap().next_layout_request_id),
+        next_request_id,
         "a read-only Dock resize must not send a Layout command"
     );
     assert_eq!(

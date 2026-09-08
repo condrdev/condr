@@ -1,8 +1,8 @@
 # Condr Roadmap
 
-> 状态：执行中（2026-08-31）
+> 状态：M1 自举已完成（2026-09-08）
 >
-> MVP Phase 7 已完成，验收记录见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；当前进入 M0 Rolling Developer Preview，随后用 M1 完成自举。
+> MVP Phase 7 验收见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；M0 滚动开发版已建立，M1 自举验收记录见下文。下一阶段评估 R0 与 M2。
 
 本文档描述 MVP 通过 Phase 7 发布门之后的方向。它不修改 [MVP 验收计划](mvp-plan.md) 中已经约定的 Server、Session、Terminal、Agent 和 Git 边界。
 
@@ -24,7 +24,7 @@ Agent 仍然是 Terminal 中的可选进程，Condr 负责编排、呈现和生�
 
 Phase 7 release gate 已在 [GitHub #16](https://github.com/condrdev/condr/issues/16) 完成，Condr 已进入 post-MVP。后续每个发布候选仍需在同一 commit 上通过适用的自动化与人工验证。
 
-当前项目由单个开发者维护，近期没有对外发布计划。现阶段先建立一个可下载、可更新的滚动开发版，再使用 Condr 开发 Condr 本身；完成自举后才重新决定对外发布范围，不提前承担 Private Alpha 的安装、兼容和支持成本。
+当前项目由单个开发者维护，近期没有对外发布计划。可下载、可更新的滚动开发版已建立，维护者已实际使用 Condr 开发 Condr 本身；下一阶段重新决定对外发布范围，不提前承担 Private Alpha 的安装、兼容和支持成本。
 
 ## 排序原则
 
@@ -67,7 +67,7 @@ M3 + 稳定语义 API -> M6 Web 只读 -> Mobile Companion -> 受控交互
 开发文档从 M0 开始按需维护；面向用户的品牌、社区治理和正式推广在 R0 再启动，不需要等待完整 Mobile。
 ```
 
-M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完成后再决定进入 R0 还是继续 M2；M3 需要 M2 的 Server 发布和协议/客户端边界，M2 才建立独立的 `condr-cli` 只读骨架，M4 再扩展 Agent workflow，Skill 最后依赖 CLI。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
+M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完成后再决定进入 R0 还是继续 M2；M3 需要 M2 的 Server 发布和协议/客户端边界。M1 已在 `condr` 中落地自举所需的 CLI 编排与 Skill；M2 再建立独立的 `condr-cli` 和可复用客户端边界，M4 按需扩展 Agent workflow。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
 
 ## 里程碑
 
@@ -95,6 +95,13 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - Condr 可以用该滚动开发版开始开发 Condr 自身。
 
 ### M1：Solo Daily Driver / Desktop Daily Driver
+
+**完成记录（2026-09-08）**
+
+- 维护者确认已实际使用 Condr 开发 Condr，此前未单独记录；本次补记自举验收。SSH 连接与 Server 重启后的 Agent 会话恢复均已手工测试通过。
+- 本次代码核对基线为 `ad538e2b2d7c47a1559a9ca1b84dd39f616dc6d7`。既有跨 Pane 编排验收见 [#27](https://github.com/condrdev/condr/issues/27)，Windows hooks 验收见 [#30](https://github.com/condrdev/condr/issues/30)，远程图片粘贴验收见 [#29](https://github.com/condrdev/condr/issues/29)。手工结果由维护者确认，本阶段未单独采集上手计时或 FPS 数据。
+- 自动化收尾修正两处把 Session event cursor 当作布局命令计数的测试断言，并覆盖元数据事件推进 cursor 的情况。Linux arm64 上 `cargo test --workspace --features condr-gui/test-support --locked` 通过 423 项（含 121 项 GUI 测试），1 项辅助测试忽略；`cargo clippy --workspace --all-targets --features condr-gui/test-support --locked -- -D warnings` 与格式检查通过。
+- 已知限制继续独立跟踪：[颜色查询 #23](https://github.com/condrdev/condr/issues/23) 已延期、[Kitty keyboard #28](https://github.com/condrdev/condr/issues/28) 与 [OpenCode 真机验证 #36](https://github.com/condrdev/condr/issues/36) 后续按需求推进。命令注册表、通知、搜索和 context action 仍按实际摩擦决定，不阻塞 M1 关闭。
 
 **核心交付**
 
@@ -278,10 +285,8 @@ M0/M1 不建设遥测，只记录自举中直接观察到的摩擦与性能问�
 - 为了平台数量而同时维护完整的 Web、iOS、Android 和桌面功能 parity。
 - 在真实工作流验证之前实现完整插件 SDK、插件市场或大量终端边缘协议。
 
-## 当前第一批工作
+## 当前下一步
 
-1. 从一个明确 commit 手工构建 Windows bundle 和 Linux arm64 Server artifact，验证原生打包内容。
-2. 从解压目录验证 Windows 本地 Server、Windows GUI 到 Linux Server 的 SSH 连接，以及断开和重连。
-3. 将已验证的构建和上传步骤做成最小 GitHub Actions 自动化，同时生成 Linux x64 artifact；只有主动移动并推送滚动 `dev` tag 才触发更新，不按普通 commit 触发。
-4. 用滚动开发版进入 M1，使用 Condr 开发 Condr；只为真实出现的高频摩擦创建和排序任务。
-5. 自举完成后重新评估 R0 与 M2，不在当前阶段展开 Private Alpha、公开协议或远程产品化工作。
+1. 持续使用 Condr 开发 Condr，记录并处理真实出现的摩擦；不再扩充 M1 范围。
+2. 重新评估 R0 与 M2。没有对外发布计划时，R0 继续延期。
+3. 保持主动更新 `dev` tag 的滚动开发版流程；普通 commit 不自动发布。

@@ -49,7 +49,7 @@ cwd 上报只对已知 shell 注入：Linux 上的 bash（wrapper rcfile）和 W
 
 三个平台一致。Windows 上 `condr-gui.exe` 是 GUI 子系统程序，双击不出现控制台；`condr.exe` 是普通控制台程序。安装器和快捷方式负责把 GUI 以 Condr 的名字露给用户。
 
-在 Condr 外部终端执行 `condr server restart`，先停止当前 Server，等待 PTY 关闭、快照写回和 endpoint 释放，再启动后台 Server；尚未运行时直接启动。支持 `start` 同款 `--listen`、`--snapshot`，未指定时读取配置和环境；此前通过命令行指定的自定义快照路径需再次提供，或设置 `CONDR_SNAPSHOT_PATH`。关闭超过 30 秒时报错，不启动替代进程。重启恢复布局和 cwd，agent 进程不会恢复。在 Condr Pane 内执行会提前拒绝，因为关闭 Server 会终止发起重启的 CLI。
+在 Condr 外部终端执行 `condr server restart`，先停止当前 Server，等待 PTY 关闭、快照写回和 endpoint 释放，再启动后台 Server；尚未运行时直接启动。支持 `start` 同款 `--listen`、`--snapshot`，未指定时读取配置和环境；此前通过命令行指定的自定义快照路径需再次提供，或设置 `CONDR_SNAPSHOT_PATH`。关闭超过 30 秒时报错，不启动替代进程。重启恢复布局和 cwd，启动新 shell，再用 hooks 已保存的原生会话 ID 重新打开 Agent 会话；不恢复旧进程或终端历史，详见 [ADR 0005](adr/0005-session-snapshots-restore-structure-only.md)。维护者于 2026-09-08 确认会话恢复已手工测试通过。在 Condr Pane 内执行会提前拒绝，因为关闭 Server 会终止发起重启的 CLI。
 
 CLI 查询结构时不会请求全部终端画面；`pane read --lines N` 只读取目标 Pane 的文本。创建 Workspace、Tab 或拆分 Pane 时，Server 在同一次操作中应用名称与 `--focus`，并返回实际创建的 ID；不带 `--focus` 时保留当前选择。`pane send-keys` 支持 F1–F20，整组键在发送前校验，F21–F24 会直接拒绝。
 
@@ -159,7 +159,7 @@ Client 执行 `ssh -T … 'condr server bridge'`（指定 `bin` 时替换程序�
 
 SSH/Welcome 阶段允许 15 秒无数据；Welcome 后 Bootstrap 的超时按 4 秒无数据计算，持续传输不会因总耗时过长中断。Disconnect 可取消连接中的握手和堵塞的发送。
 
-首版面向 Windows/Linux Client 连接 Linux/macOS Server（远端使用 POSIX shell）；Windows OpenSSH/GUI 仍需原生手工验收。远端 Server 自动启动将在后续 install 安装流程中一起实现。
+首版面向 Windows/Linux Client 连接 Linux/macOS Server（远端使用 POSIX shell）；维护者于 2026-09-08 确认 SSH 连接已手工测试通过，见 [M1 完成记录](roadmap.md#m1solo-daily-driver--desktop-daily-driver)。远端 Server 自动启动将在后续 install 安装流程中一起实现。
 
 ### TCP 连接
 
