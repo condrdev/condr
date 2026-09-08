@@ -200,7 +200,28 @@ impl Condr {
                         // completion behind another window still shows as done.
                         let visible = self.focused_terminal == Some((key, pane_id));
                         if let Some(agent) = agent {
-                            self.connections[index].agents.insert(pane_id, agent);
+                            let previous = self.connections[index].agents.insert(pane_id, agent);
+                            let started = previous
+                                .is_none_or(|previous| previous.kind != agent.kind)
+                                || agent.state == AgentState::Unknown;
+                            if started
+                                && let Some(workspace_id) =
+                                    Session::restore(self.connections[index].snapshot.clone())
+                                        .ok()
+                                        .and_then(|session| {
+                                            session
+                                                .workspace_for_pane(pane_id)
+                                                .map(|workspace| workspace.id())
+                                        })
+                            {
+                                self.sidebar_workspace_open
+                                    .entry((key, workspace_id))
+                                    .or_insert_with(|| cx.new(|_| true))
+                                    .update(cx, |open, cx| {
+                                        *open = true;
+                                        cx.notify();
+                                    });
+                            }
                             self.connections[index]
                                 .agent_trackers
                                 .entry(pane_id)

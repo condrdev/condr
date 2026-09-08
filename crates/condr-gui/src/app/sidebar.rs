@@ -45,17 +45,47 @@ impl Condr {
         }
     }
 
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = cx.weak_entity();
+        let sessions = self
+            .connections
+            .iter()
+            .filter_map(|connection| {
+                Session::restore(connection.snapshot.clone())
+                    .ok()
+                    .map(|session| (connection.key, session))
+            })
+            .collect::<HashMap<_, _>>();
+        // Retain disclosure state in the view so both clicks and AgentChanged can
+        // update it, including for Server groups the Sidebar has not rendered yet.
+        self.sidebar_workspace_open
+            .retain(|(key, workspace_id), _| {
+                sessions
+                    .get(key)
+                    .is_some_and(|session| session.workspace(*workspace_id).is_some())
+            });
+        for (&key, session) in &sessions {
+            let active_workspace = self.presented_workspace_id(key, session);
+            for workspace in session.workspaces() {
+                self.sidebar_workspace_open
+                    .entry((key, workspace.id()))
+                    .or_insert_with(|| {
+                        cx.new(|_| {
+                            key == self.active_connection
+                                && active_workspace == Some(workspace.id())
+                        })
+                    });
+            }
+        }
         let items = self.connections.iter().map(|connection| {
             let key = connection.key;
             let server_target = DropTarget::Server { key, after: false };
             let active_server = key == self.active_connection;
             let connected = connection.can_mutate();
-            let workspaces = Session::restore(connection.snapshot.clone())
-                .ok()
+            let workspaces = sessions
+                .get(&key)
                 .map(|session| {
-                    let active_workspace = self.presented_workspace_id(key, &session);
+                    let active_workspace = self.presented_workspace_id(key, session);
                     // Drop handlers need the source index of the dragged Workspace.
                     let workspace_ids = Rc::new(
                         session
@@ -160,11 +190,10 @@ impl Condr {
                                     && active_workspace == Some(workspace_id)
                                     && !agent_selected,
                             )
-                            .tree_parent(format!(
-                                "workspace-toggle-{key}-{}",
-                                workspace_id.as_u64()
-                            ))
-                            .default_open(active_server && active_workspace == Some(workspace_id))
+                            .tree_parent(
+                                format!("workspace-toggle-{key}-{}", workspace_id.as_u64()),
+                                self.sidebar_workspace_open[&(key, workspace_id)].clone(),
+                            )
                             .children(agents)
                             .disable(!connected)
                             .when(connected, |item| {

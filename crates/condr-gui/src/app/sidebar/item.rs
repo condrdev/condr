@@ -21,7 +21,7 @@ pub(in crate::app) struct CondrSidebarTreeItem {
     pub(super) icon: Option<CondrSidebarIcon>,
     pub(super) handler: SidebarClickHandler,
     pub(super) active: bool,
-    pub(super) default_open: bool,
+    pub(super) open_state: Option<Entity<bool>>,
     pub(super) reserve_toggle_space: bool,
     pub(super) children: Vec<Self>,
     pub(super) suffix: Option<SidebarSuffixBuilder>,
@@ -54,7 +54,7 @@ impl CondrSidebarTreeItem {
             icon: None,
             handler: Rc::new(|_, _, _| {}),
             active: false,
-            default_open: false,
+            open_state: None,
             reserve_toggle_space: false,
             children: Vec::new(),
             suffix: None,
@@ -105,14 +105,14 @@ impl CondrSidebarTreeItem {
         self.active || self.children.iter().any(Self::subtree_active)
     }
 
-    pub(in crate::app) fn tree_parent(mut self, toggle_selector: impl Into<SharedString>) -> Self {
+    pub(in crate::app) fn tree_parent(
+        mut self,
+        toggle_selector: impl Into<SharedString>,
+        open_state: Entity<bool>,
+    ) -> Self {
         self.toggle_selector = Some(toggle_selector.into());
+        self.open_state = Some(open_state);
         self.reserve_toggle_space = true;
-        self
-    }
-
-    pub(in crate::app) fn default_open(mut self, open: bool) -> Self {
-        self.default_open = open;
         self
     }
 
@@ -163,7 +163,7 @@ impl CondrSidebarTreeItem {
             icon,
             handler,
             active,
-            default_open,
+            open_state,
             reserve_toggle_space,
             children,
             suffix,
@@ -175,13 +175,6 @@ impl CondrSidebarTreeItem {
             on_drop_move,
         } = self;
         let is_submenu = !children.is_empty();
-        let open_state = reserve_toggle_space.then(|| {
-            window.use_keyed_state(
-                SharedString::from(format!("condr-sidebar-open-{id}")),
-                cx,
-                |_, _| default_open,
-            )
-        });
         let is_open = open_state.as_ref().is_some_and(|state| *state.read(cx));
         let show_children = is_open && is_submenu;
         let rendered_children = if show_children {

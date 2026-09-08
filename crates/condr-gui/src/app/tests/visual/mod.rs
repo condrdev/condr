@@ -22,10 +22,9 @@ use condr_core::protocol::{
     ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
 };
 use condr_core::{
-    AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneId, PaneLayout, Session, TabId,
-    TerminalCell, TerminalColor, TerminalCommand, TerminalMousePosition, TerminalMouseTracking,
-    TerminalPosition, TerminalSelection, TerminalSide, TerminalSize, TerminalView,
-    TerminalViewFrame, WorkspaceId,
+    AgentKind, AgentSnapshot, AgentState, PaneId, PaneLayout, Session, TabId, TerminalCell,
+    TerminalColor, TerminalCommand, TerminalMousePosition, TerminalMouseTracking, TerminalPosition,
+    TerminalSelection, TerminalSide, TerminalSize, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
 use gpui_kit::component::dialog::Confirm;

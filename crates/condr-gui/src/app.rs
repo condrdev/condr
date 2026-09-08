@@ -232,6 +232,7 @@ pub(crate) struct Condr {
     /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
     /// only dragging the handle does.
     sidebar_width: Pixels,
+    sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
     settings_window: Option<WindowHandle<Root>>,
@@ -349,6 +350,7 @@ impl Condr {
             appearance,
             fps_monitor,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
+            sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,
             settings_window: None,

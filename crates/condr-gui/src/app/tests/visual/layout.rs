@@ -1,5 +1,29 @@
 use super::*;
 
+fn agent_changed(
+    window: &mut VisualTestContext,
+    view: &Entity<Condr>,
+    pane_id: PaneId,
+    agent: Option<AgentSnapshot>,
+) {
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.connect_generation;
+            let message = ServerMessage::Event {
+                server_id: connection.server_id.unwrap(),
+                session_id: connection.session_id.unwrap(),
+                sequence: connection.sequence + 1,
+                event: SessionEvent::AgentChanged { pane_id, agent },
+            };
+            this.handle_incoming(1, generation, Incoming::Message(message), cx);
+            cx.notify();
+        });
+    });
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+}
+
 #[test]
 fn default_window_options_create_1280_by_720_window() {
     let _serial_guard = acquire_visual_test_lock();
@@ -278,32 +302,29 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
 
-    window.update(|_, cx| {
-        view.update(cx, |this, cx| {
-            let connection = this.connection_mut(1).unwrap();
-            connection.agents.insert(
-                pane_id,
-                AgentSnapshot {
-                    kind: AgentKind::Codex,
-                    state: AgentState::Idle,
-                },
-            );
-            connection
-                .agent_trackers
-                .insert(pane_id, AgentTracker::new(AgentState::Idle));
-            cx.notify();
-        });
+    window.update(|window, cx| {
+        let focus = view.read(cx).panels[&(1, pane_id)]
+            .read(cx)
+            .focus_handle
+            .clone();
+        focus.focus(window, cx);
     });
-    window.update(|window, cx| _ = window.draw(cx));
+    let focus_before = window.update(|window, cx| window.focused(cx));
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        Some(AgentSnapshot {
+            kind: AgentKind::Codex,
+            state: AgentState::Idle,
+        }),
+    );
+    assert_eq!(window.update(|window, cx| window.focused(cx)), focus_before);
     let agent_selector = leaked_selector(format!("agent-1-{}", pane_id.as_u64()));
     assert!(
-        window.debug_bounds(agent_selector).is_none(),
-        "a Workspace collapsed while empty should stay collapsed when its first Agent appears"
+        window.debug_bounds(agent_selector).is_some(),
+        "a newly detected Agent should expand its collapsed Workspace"
     );
-    let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
-    window.simulate_click(workspace_toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
 
     let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
     let workspace_icon = window.debug_bounds(workspace_icon_selector).unwrap();
@@ -355,10 +376,50 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         "the Workspace disclosure button must not change selection"
     );
 
-    let workspace_toggle = window.debug_bounds(workspace_toggle_selector).unwrap();
-    window.simulate_click(workspace_toggle.center(), Modifiers::default());
+    for state in [AgentState::Working, AgentState::Idle] {
+        agent_changed(
+            window,
+            &view,
+            pane_id,
+            Some(AgentSnapshot {
+                kind: AgentKind::Codex,
+                state,
+            }),
+        );
+        assert!(
+            window.debug_bounds(agent_selector).is_none(),
+            "status changes must respect a manual collapse"
+        );
+    }
+    // A replacement process may be detected without a separate removal event.
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        Some(AgentSnapshot {
+            kind: AgentKind::Codex,
+            state: AgentState::Unknown,
+        }),
+    );
+    assert!(window.debug_bounds(agent_selector).is_some());
+    let toggle_center = window
+        .debug_bounds(workspace_toggle_selector)
+        .unwrap()
+        .center();
+    window.simulate_click(toggle_center, Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds(agent_selector).is_none());
+    agent_changed(window, &view, pane_id, None);
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        Some(AgentSnapshot {
+            kind: AgentKind::Codex,
+            state: AgentState::Unknown,
+        }),
+    );
     assert!(window.debug_bounds(agent_selector).is_some());
 }
 
