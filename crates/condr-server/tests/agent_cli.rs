@@ -635,15 +635,31 @@ fn hooks_persist_the_conversation_and_a_cold_restart_resumes_it_once() {
                 .session_id,
             "fixture"
         );
+        // Only the restored shell's profile can find the CLI; the Server's PATH cannot.
+        let profile = server.root.join("resume-shell.rc");
+        std::fs::write(
+            &profile,
+            format!(
+                "PATH='{}':\"$PATH\"\nexport PATH\n",
+                server.root.join("bin directory").display()
+            ),
+        )
+        .unwrap();
+        server
+            .command
+            .env("PATH", "/usr/bin:/bin")
+            .env("ENV", profile);
         server.child = server.command.spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             if let Ok(mut connection) =
                 ClientConnection::connect_overview(&server.endpoint, "resume-test")
                 && let Ok(Ok(AgentResponse::List(agents))) = connection.agent(AgentCommand::List)
-                && agents
-                    .iter()
-                    .any(|a| a.agent.session_id.as_deref() == Some("fixture"))
+                && agents.iter().any(|a| {
+                    a.agent.session_id.as_deref() == Some("fixture")
+                        // The saved ID is seeded before Claude's first ready hook arrives.
+                        && (kind == "codex" || a.agent.state == condr_core::AgentState::Idle)
+                })
             {
                 break;
             }
@@ -653,6 +669,12 @@ fn hooks_persist_the_conversation_and_a_cold_restart_resumes_it_once() {
         assert_eq!(
             std::fs::read_to_string(server.root.join("args")).unwrap(),
             format!("{flag}\nfixture\n")
+        );
+        let text = server.connect().read_pane(pane_id, 20).unwrap();
+        assert!(
+            text.lines()
+                .any(|line| line.ends_with(&format!("{kind} {flag} fixture"))),
+            "resume command was not displayed plainly: {text:?}"
         );
         assert_eq!(
             std::fs::read_to_string(server.root.join("starts"))

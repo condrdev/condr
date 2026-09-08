@@ -19,7 +19,6 @@ pub(super) struct AgentControl {
 #[derive(Clone)]
 struct RestoringAgent {
     resume: condr_core::AgentResume,
-    installation: condr_core::agent_discovery::AgentInstallation,
     deadline: Instant,
     submitted: bool,
 }
@@ -94,10 +93,15 @@ pub(super) fn resume_agent(
             io::ErrorKind::TimedOut,
             "agent resume timed out",
         ))
-    } else if resume.submitted {
+    } else if resume.submitted || !probe.is_idle() {
         return true;
     } else {
-        probe.command(&resume.installation, &resume.resume.args())
+        // Session validation bounds the ID to a plain token; the shell resolves the CLI.
+        Ok(format!(
+            "{} {}",
+            resume.resume.kind.executable(),
+            resume.resume.args().join(" "),
+        ))
     };
     let mut state = state.lock().expect("server state lock poisoned");
     if !state.terminal_is_current(pane_id, instance_id)
@@ -136,7 +140,6 @@ pub(super) fn resume_agent(
 
 impl RuntimeState {
     pub(super) fn queue_agent_resumes(&mut self) {
-        let installations = condr_core::agent_discovery::discover();
         for &pane_id in self.terminals.keys() {
             let Some(resume) = self
                 .session
@@ -145,15 +148,10 @@ impl RuntimeState {
             else {
                 continue;
             };
-            let Some(installation) = installations.iter().find(|i| i.kind == resume.kind) else {
-                self.report_resume_failure(pane_id, "CLI is not on the Server's PATH");
-                continue;
-            };
             self.agent_control.resumes.insert(
                 pane_id,
                 RestoringAgent {
                     resume: resume.clone(),
-                    installation: installation.clone(),
                     deadline: Instant::now() + Duration::from_secs(30),
                     submitted: false,
                 },

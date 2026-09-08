@@ -31,6 +31,11 @@ impl TerminalRuntime {
 }
 
 impl TerminalLaunchProbe {
+    /// Whether the Pane has an idle supported shell ready for a command.
+    pub fn is_idle(&self) -> bool {
+        self.idle_shell().is_some()
+    }
+
     /// OS inspection runs outside the Server lock. The caller validates the Terminal
     /// instance and launch reservation again before submitting the returned command.
     pub fn command(
