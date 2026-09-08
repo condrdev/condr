@@ -23,7 +23,9 @@ use condr_core::{
     TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSize,
     TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
-use condr_server::{ClientConnection, Endpoint, ServerConfig, StaticKey, TcpEndpoint};
+use condr_server::{
+    ClientConnection, ConnectionCancellation, Endpoint, ServerConfig, StaticKey, TcpEndpoint,
+};
 use gpui_kit::assets::Assets;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
@@ -343,6 +345,7 @@ struct ServerConnection {
     /// Why the last hooks request failed, until the next report.
     hooks_error: Option<String>,
     io: Option<ClientIo>,
+    cancellation: ConnectionCancellation,
     connect_generation: u64,
     controlling: bool,
     subscribed: bool,
@@ -389,6 +392,12 @@ impl PendingWorkspaceSelection {
     }
 }
 
+impl Drop for ServerConnection {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
+}
+
 impl ServerConnection {
     fn new(key: ConnectionKey, label: String, endpoint: Endpoint) -> Self {
         Self {
@@ -413,6 +422,7 @@ impl ServerConnection {
             hooks: Vec::new(),
             hooks_error: None,
             io: None,
+            cancellation: ConnectionCancellation::default(),
             connect_generation: 0,
             controlling: false,
             subscribed: false,
@@ -632,6 +642,8 @@ pub(crate) struct Condr {
     /// it could not be loaded or created; TCP Servers are then unavailable rather than
     /// reached with a key an attacker could predict.
     device_key: Option<StaticKey>,
+    /// A failed load must never turn the missing saved list into an empty writeback.
+    servers_error: Option<String>,
     connections: Vec<ServerConnection>,
     active_connection: ConnectionKey,
     next_connection_key: ConnectionKey,
@@ -713,6 +725,7 @@ impl Condr {
             path: client_config_path,
             device_key,
             servers: saved_servers,
+            servers_error,
             error: config_error,
             appearance,
             fps_monitor,
@@ -757,6 +770,7 @@ impl Condr {
             client_config_path,
             config_save: None,
             device_key,
+            servers_error,
             connections,
             active_connection: 1,
             next_connection_key,

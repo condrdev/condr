@@ -133,31 +133,62 @@ archive=$(find "$PWD/condr-download" -name "condr-linux-${arch}-*.tar.gz" -print
 tar -C condr-download -xzf "$archive"
 ```
 
-后台启动远端 Server 并让它额外监听一个 TCP 地址。一台机器只有一个 Server，它始终在本地 socket 上服务本机 GUI 与 CLI；`--listen` 把地址写进 Server 的 `config.toml`，之后不带参数的 `start` 也会按它监听，其他子命令都不需要再指定。每个 TCP 连接都经过 WireGuard 式的双向密钥认证与加密，因此地址可以是 loopback 配合 SSH tunnel，也可以直接是局域网地址。首次启动会在配置目录生成 `server-key`；默认 snapshot 和 log 会写入 XDG state 目录：
+远端需预装与 Client 同一构建的 `condr`，并提前启动 Server：
 
 ```bash
-./condr-download/condr/condr server start --listen 127.0.0.1:4242
+condr server start
 ```
 
-调试或交给外部服务管理器时，使用 `server run` 在前台运行，它同样读取 `config.toml` 里的监听地址。
+### SSH 连接
 
-在 Windows 建立 SSH tunnel（直接监听局域网地址时可省略）：
+先在 Client 机器的终端完成一次 `ssh <host>` 登录，确认主机密钥和密钥认证可用；GUI 使用系统 OpenSSH 与 ssh-agent，不弹出密码或主机信任提示。端口、IdentityFile、ProxyJump 等可以放在 SSH config 的 Host 条目里。Condr 会禁用该条目继承的端口转发，并覆盖 RemoteCommand、SessionType、StdinNull、ForkAfterAuthentication，保证 bridge 在前台使用协议 stdin/stdout。
 
-```powershell
-ssh -N -L 4242:127.0.0.1:4242 <linux-host>
+在 Add Server 的 Address 中填写：
+
+```text
+ssh://user@host
+ssh://build-box
+ssh://user@host:2222?bin=/opt/example/condr
 ```
 
-在 Linux 上为这台 Windows 设备生成一次性 invite，它 10 分钟内有效，只能使用一次：
+未指定 `bin` 时，远端非交互 shell 的 PATH 必须能找到 `condr`。`bin` 是绝对可执行文件路径；空格等字符可使用 URI 百分号编码，例如 `?bin=/opt/Condr%20Dev/condr`，`+` 保留为加号。只支持 `bin` 这一个 query 参数，路径中的 `&`、`#`、`%` 应分别编码为 `%26`、`%23`、`%25`。Server 必须用同一远端用户启动；非默认 socket 可由远端 `CONDR_SOCKET_PATH` 指定。
+
+Client 执行 `ssh -T … 'condr server bridge'`（指定 `bin` 时替换程序路径）。bridge 仅双向转接远端私有 `.sock`，不需要 TCP listener、invite 或 Noise 配对；它不创建 Server、不安装或更新程序。SSH Client 的权限等同于远端登录用户，TCP 的 `server clients|revoke` 不管理 SSH 密钥。GUI 断开后远端 Server、Session 和终端继续运行，重连获取当前 Bootstrap。
+
+SSH/Welcome 阶段允许 15 秒无数据；Welcome 后 Bootstrap 的超时按 4 秒无数据计算，持续传输不会因总耗时过长中断。Disconnect 可取消连接中的握手和堵塞的发送。
+
+首版面向 Windows/Linux Client 连接 Linux/macOS Server（远端使用 POSIX shell）；Windows OpenSSH/GUI 仍需原生手工验收。远端 Server 自动启动将在后续 install 安装流程中一起实现。
+
+### TCP 连接
+
+远端额外监听 TCP 时，使用：
 
 ```bash
-./condr-download/condr/condr server invite
+condr server start --listen 0.0.0.0:4242
+condr server invite
 ```
 
-把它打印的 `<server key>.<invite>@<host>:4242` 中的 `<host>` 换成 `127.0.0.1`，粘贴到 Condr 的 Add Server 对话框。第一次连接成功后，设备的公钥就记录在 Server 的 `authorized-clients` 里，之后重连不再需要 invite。`condr server clients` 列出已配对设备，`condr server revoke <key 前缀>` 撤销一台设备：先改写名单文件，再连上运行中的 Server 断开该设备的存活连接。停止 Server 时，在 Linux 的另一个 shell 运行：
+已启动的 Server 需要 `condr server restart` 才会应用新的 listen 地址。将 invite 打印的 `tcp://<server key>.<invite>@<host>:4242` 中 `<host>` 换成远端可达地址，粘贴到 Add Server。TCP 每次连接仍使用 Noise 双向认证与加密；首次 invite 配对成功后，重连只使用设备密钥。`condr server clients` 列出配对设备，`condr server revoke <key 前缀>` 撤销并断开设备。
 
-```bash
-./condr-download/condr/condr server stop
+### 保存的 Server
+
+Client 将远端连接保存到 `config.toml`，地址的 scheme 区分类型：
+
+```toml
+[[client.servers]]
+name = "Build"
+address = "ssh://user@host?bin=/opt/example/condr"
+
+[[client.servers]]
+name = "TCP Server"
+address = "tcp://<server-public-key>@host:4242"
 ```
+
+TCP 地址只保存公钥，不保存 invite。开发版不迁移旧的 `address = "host:port"` + `server_key` 配置；将其改成上面的单个 `tcp://<server-public-key>@host:port` 地址即可。
+
+Server 列表加载失败时会保留原文件，并禁止添加、编辑、删除或写回列表；先修正错误再重启 GUI。其他外观和终端偏好仍可保存。
+
+停止远端 Server 是显式操作，在远端终端执行 `condr server stop`。
 
 ## 更新检查
 

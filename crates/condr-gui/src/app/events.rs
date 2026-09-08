@@ -9,6 +9,7 @@ impl Condr {
     ) -> Result<BootstrapApplication, String> {
         let client = result?;
         let bootstrap = client.bootstrap().unwrap().clone();
+        connection.cancellation = client.cancellation();
         let io = ClientIo::start(
             client,
             connection.key,
@@ -422,6 +423,7 @@ impl Condr {
         if connection.status == ConnectionStatus::Connecting {
             return needs_active_rebuild;
         }
+        connection.cancellation.cancel();
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
         }
@@ -431,10 +433,12 @@ impl Condr {
         connection.reset_sync_state();
         connection.error = None;
         let endpoint = connection.endpoint.clone();
+        let cancellation = ConnectionCancellation::default();
+        connection.cancellation = cancellation.clone();
         let sender = self.connect_results_tx.clone();
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         thread::spawn(move || {
-            let (connected_endpoint, result) = connect_to_server(endpoint);
+            let (connected_endpoint, result) = connect_to_server(endpoint, cancellation);
             let _ = sender.send_blocking(ConnectionResult {
                 key,
                 generation,
@@ -451,6 +455,7 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return active_projection_cleared;
         };
+        connection.cancellation.cancel();
         if let Some(io) = connection.io.take() {
             let _ = io.outgoing.send(ClientMessage::Detach);
         }
@@ -469,6 +474,9 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.server_list_writable(cx) {
+            return;
+        }
         let released_presentation = self.disconnect_server(key);
         let Some(index) = self
             .connections
@@ -1155,6 +1163,7 @@ impl Condr {
         connection.status = ConnectionStatus::Disconnected;
         connection.reset_sync_state();
         connection.error = Some(message);
+        connection.cancellation.cancel();
         connection.io = None;
         let active_projection_cleared = self.clear_pending_projections_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);

@@ -128,6 +128,7 @@ impl Condr {
         });
         let owner = cx.weak_entity();
         let apply = Rc::new(apply);
+        let error = cx.new(|_| None::<String>);
         window.defer(cx, move |window, cx| {
             let input_for_content = input.clone();
             let input_for_ok = input.clone();
@@ -139,16 +140,23 @@ impl Condr {
                 let owner = owner.clone();
                 let apply = apply.clone();
                 let field_label = field_label.clone();
+                let content_error = error.clone();
+                let submit_error = error.clone();
                 dialog
                     .title(title.clone())
-                    .content(move |content, _, _| {
+                    .content(move |content, _, cx| {
                         content.child(
                             v_flex()
                                 .gap_1()
                                 .when_some(field_label.clone(), |field, label| {
                                     field.child(div().text_sm().child(label))
                                 })
-                                .child(Input::new(&input_for_content).w_full()),
+                                .child(Input::new(&input_for_content).w_full())
+                                .when_some(content_error.read(cx).clone(), |field, error| {
+                                    field.child(
+                                        div().text_sm().text_color(cx.theme().danger).child(error),
+                                    )
+                                }),
                         )
                     })
                     .footer(
@@ -184,6 +192,10 @@ impl Condr {
                         owner
                             .update(cx, |this, cx| {
                                 let accepted = apply(this, value, window, cx);
+                                submit_error.update(cx, |error, cx| {
+                                    *error = (!accepted).then(|| this.app_error.clone()).flatten();
+                                    cx.notify();
+                                });
                                 cx.notify();
                                 accepted
                             })
@@ -198,25 +210,22 @@ impl Condr {
     }
 
     pub(super) fn prompt_add_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // `<server key>[.<invite>]@host:port`, as `condr server invite` prints it. The
-        // invite is only carried in memory until the first connection pairs this device.
-        self.prompt_text(
-            "Add Server (server-key[.invite]@host:port)",
+        if !self.server_list_writable(cx) {
+            return;
+        }
+        self.prompt_text_input(
+            "Add Server".into(),
             "Add",
             String::new(),
-            |this, value, _, cx| match this
-                .device_key
-                .clone()
-                .ok_or_else(|| {
-                    std::io::Error::other("this device has no key; see the startup error")
-                })
-                .and_then(|device_key| TcpEndpoint::parse(&value, device_key))
-            {
-                Ok(tcp) => {
+            Some("Address".into()),
+            Some("tcp://server-key[.invite]@host:port or ssh://user@host".into()),
+            true,
+            |this, value, _, cx| match Endpoint::parse(&value, this.device_key.as_ref()) {
+                Ok(endpoint) => {
                     if this
                         .connections
                         .iter()
-                        .any(|c| c.endpoint.tcp_host_port() == Some((tcp.host.as_str(), tcp.port)))
+                        .any(|c| c.endpoint.to_string() == endpoint.to_string())
                     {
                         this.app_error = Some("Server already added".into());
                         return false;
@@ -224,9 +233,13 @@ impl Condr {
                     this.app_error = None;
                     let key = this.next_connection_key;
                     this.next_connection_key += 1;
-                    let label = tcp.authority();
+                    let label = match &endpoint {
+                        Endpoint::Tcp(tcp) => tcp.authority(),
+                        Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
+                        Endpoint::Local(_) => unreachable!("remote address parser"),
+                    };
                     this.connections
-                        .push(ServerConnection::new(key, label, Endpoint::tcp(tcp)));
+                        .push(ServerConnection::new(key, label, endpoint));
                     this.save_servers(cx);
                     this.pending_presentation_request = None;
                     this.active_connection = key;
@@ -244,7 +257,7 @@ impl Condr {
         );
     }
 
-    /// Edits a TCP Server's name, host and port. The Server key is its identity and is
+    /// Edits a remote Server's name, host and port. A TCP Server key is its identity and is
     /// shown but not editable: a different key is a different Server, added with an
     /// invite. The Local Server has nothing to edit and never gets this dialog.
     pub(super) fn prompt_edit_server_on(
@@ -253,40 +266,57 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((label, tcp)) =
-            self.connection(key)
-                .and_then(|connection| match &connection.endpoint {
-                    Endpoint::Tcp(tcp) => Some((connection.label.clone(), tcp.clone())),
-                    Endpoint::Local(_) => None,
-                })
-        else {
+        let Some((label, endpoint)) = self.connection(key).and_then(|connection| match &connection
+            .endpoint
+        {
+            Endpoint::Local(_) => None,
+            endpoint => Some((connection.label.clone(), endpoint.clone())),
+        }) else {
             return;
         };
+        let (host_value, port_value, server_key) = match endpoint {
+            Endpoint::Tcp(tcp) => (
+                tcp.host,
+                tcp.port.to_string(),
+                Some(tcp.server_key.to_hex()),
+            ),
+            Endpoint::Ssh(ssh) => (ssh.to_string(), String::new(), None),
+            Endpoint::Local(_) => unreachable!(),
+        };
+        let ssh = server_key.is_none();
         // Typing is limited to what the field can hold: a host name or address, a port
         // number. Whether the result is complete is checked on Save.
         let name = cx.new(|cx| InputState::new(window, cx).default_value(label));
         let host = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value(tcp.host.clone())
-                .placeholder("host or IP")
-                .validate(|text, _| host_text_is_plausible(text))
+                .default_value(host_value)
+                .placeholder(if ssh {
+                    "ssh://user@host?bin=/opt/condr"
+                } else {
+                    "host or IP"
+                })
+                .validate(move |text, _| ssh || host_text_is_plausible(text))
         });
         let port = cx.new(|cx| {
             InputState::new(window, cx)
-                .default_value(tcp.port.to_string())
-                .placeholder("port")
+                .default_value(port_value)
+                .placeholder(if ssh { "SSH config" } else { "port" })
                 .validate(|text, _| port_text_is_plausible(text))
         });
         let fields = [
             (SharedString::from("Name"), name),
-            (SharedString::from("Host"), host),
+            (
+                SharedString::from(if ssh { "Address" } else { "Host" }),
+                host,
+            ),
             (SharedString::from("Port"), port),
         ];
         // The fingerprint is shown in a read-only field: one line that scrolls sideways
         // and can be selected to compare against `condr server status`.
         let fingerprint =
-            cx.new(|cx| InputState::new(window, cx).default_value(tcp.server_key.to_hex()));
+            server_key.map(|key| cx.new(|cx| InputState::new(window, cx).default_value(key)));
         let owner = cx.weak_entity();
+        let error = cx.new(|_| None::<String>);
         window.defer(cx, move |window, cx| {
             let inputs_for_content = fields.clone();
             let inputs_for_ok = fields.clone();
@@ -296,9 +326,11 @@ impl Condr {
                 let inputs_for_ok = inputs_for_ok.clone();
                 let fingerprint = fingerprint.clone();
                 let owner = owner.clone();
+                let content_error = error.clone();
+                let submit_error = error.clone();
                 dialog
                     .title("Edit Server")
-                    .content(move |content, _, _| {
+                    .content(move |content, _, cx| {
                         let field = |(label, input): &(SharedString, Entity<InputState>)| {
                             v_flex()
                                 .gap_1()
@@ -311,19 +343,31 @@ impl Condr {
                                 .gap_2()
                                 .child(field(name))
                                 // Host and port belong together, as `host:port` reads.
-                                .child(
-                                    h_flex()
-                                        .gap_2()
-                                        .items_end()
-                                        .child(field(host).flex_1())
-                                        .child(field(port).w_24().flex_none()),
-                                )
-                                .child(
-                                    v_flex()
-                                        .gap_1()
-                                        .child(div().text_sm().child("Fingerprint"))
-                                        .child(Input::new(&fingerprint).readonly(true).w_full()),
-                                ),
+                                .when(ssh, |form| form.child(field(host)))
+                                .when(!ssh, |form| {
+                                    form.child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_end()
+                                            .child(field(host).flex_1())
+                                            .child(field(port).w_24().flex_none()),
+                                    )
+                                })
+                                .when_some(fingerprint.clone(), |form, fingerprint| {
+                                    form.child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(div().text_sm().child("Fingerprint"))
+                                            .child(
+                                                Input::new(&fingerprint).readonly(true).w_full(),
+                                            ),
+                                    )
+                                })
+                                .when_some(content_error.read(cx).clone(), |form, error| {
+                                    form.child(
+                                        div().text_sm().text_color(cx.theme().danger).child(error),
+                                    )
+                                }),
                         )
                     })
                     .footer(
@@ -358,6 +402,10 @@ impl Condr {
                             .update(cx, |this, cx| {
                                 let accepted =
                                     this.apply_server_edit(key, &name, &host, &port, window, cx);
+                                submit_error.update(cx, |error, cx| {
+                                    *error = (!accepted).then(|| this.app_error.clone()).flatten();
+                                    cx.notify();
+                                });
                                 cx.notify();
                                 accepted
                             })
@@ -382,8 +430,27 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let (host, port) = match TcpEndpoint::split_authority(&format!("{host}:{port}")) {
-            Ok(authority) => authority,
+        if !self.server_list_writable(cx) {
+            return false;
+        }
+        let Some(connection) = self.connection(key) else {
+            return true;
+        };
+        let endpoint = match &connection.endpoint {
+            Endpoint::Local(_) => return true,
+            Endpoint::Tcp(tcp) => {
+                TcpEndpoint::split_authority(&format!("{host}:{port}")).map(|(host, port)| {
+                    Endpoint::Tcp(TcpEndpoint {
+                        host,
+                        port,
+                        ..tcp.clone()
+                    })
+                })
+            }
+            Endpoint::Ssh(_) => condr_server::SshEndpoint::parse(host).map(Endpoint::Ssh),
+        };
+        let endpoint = match endpoint {
+            Ok(endpoint) => endpoint,
             Err(error) => {
                 self.app_error = Some(format!("Invalid server address: {error}"));
                 return false;
@@ -394,8 +461,7 @@ impl Condr {
             return false;
         }
         if self.connections.iter().any(|connection| {
-            connection.key != key
-                && connection.endpoint.tcp_host_port() == Some((host.as_str(), port))
+            connection.key != key && connection.endpoint.to_string() == endpoint.to_string()
         }) {
             self.app_error = Some("Another Server already uses this address".into());
             return false;
@@ -403,13 +469,9 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return true;
         };
-        let Endpoint::Tcp(tcp) = &mut connection.endpoint else {
-            return true;
-        };
         connection.label = name.to_owned();
-        let moved = (tcp.host.as_str(), tcp.port) != (host.as_str(), port);
-        tcp.host = host;
-        tcp.port = port;
+        let moved = connection.endpoint != endpoint;
+        connection.endpoint = endpoint;
         let was_up = connection.status != ConnectionStatus::Disconnected;
         self.app_error = None;
         self.save_servers(cx);

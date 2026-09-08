@@ -58,6 +58,12 @@ enum Command {
 /// adds a TCP address for other devices and remembers it in `config.toml`.
 #[derive(Subcommand)]
 enum ServerCommand {
+    /// Forward stdin/stdout to the running Server's private local socket (for SSH)
+    Bridge {
+        /// Local socket or named pipe path; defaults to the platform path
+        #[arg(long, value_name = "PATH")]
+        endpoint: Option<PathBuf>,
+    },
     /// Start the Server detached unless it is already running
     Start {
         /// Also listen on this TCP address from now on (saved to config.toml)
@@ -169,6 +175,10 @@ fn failure(headline: impl Into<String>, details: impl IntoIterator<Item = String
 fn run_server_command(command: ServerCommand) -> io::Result<i32> {
     let restart = matches!(command, ServerCommand::Restart { .. });
     match command {
+        ServerCommand::Bridge { endpoint } => {
+            condr_server::ssh::bridge(&endpoint.unwrap_or_else(condr_server::default_socket_path))?;
+            Ok(0)
+        }
         ServerCommand::Start { listen, snapshot } | ServerCommand::Restart { listen, snapshot } => {
             // Shutdown terminates every Pane's process tree, including a restart CLI
             // running inside it, before that CLI could launch the replacement Server.
@@ -290,7 +300,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 noise::INVITE_TTL.as_secs() / 60
             );
             println!(
-                "  {}.{}@<host>:{port}",
+                "  tcp://{}.{}@<host>:{port}",
                 identity.public_key(),
                 invite.secret.to_hex()
             );

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{AppContext as _, Context, SharedString};
 use serde::Deserialize;
 
-use condr_server::{PublicKey, StaticKey, TcpEndpoint};
+use condr_server::StaticKey;
 
 use super::{Appearance, Condr, Endpoint, TerminalFont};
 
@@ -24,21 +24,13 @@ const COLOR_SCHEME_KEY: &str = "color_scheme";
 #[derive(Deserialize)]
 pub(super) struct SavedServer {
     pub name: String,
-    /// `host:port`; the host may be a name.
+    /// `tcp://<server key>@host:port` or `ssh://[user@]host[:port]`; never an invite.
     pub address: String,
-    pub server_key: String,
 }
 
 impl SavedServer {
-    pub(super) fn endpoint(&self, device_key: &StaticKey) -> io::Result<Endpoint> {
-        let (host, port) = TcpEndpoint::split_authority(&self.address)?;
-        Ok(Endpoint::tcp(TcpEndpoint {
-            host,
-            port,
-            server_key: PublicKey::parse(&self.server_key)?,
-            client_key: device_key.clone(),
-            invite: None,
-        }))
+    pub(super) fn endpoint(&self, device_key: Option<&StaticKey>) -> io::Result<Endpoint> {
+        Endpoint::parse(&self.address, device_key)
     }
 }
 
@@ -50,6 +42,7 @@ pub(super) struct LoadedConfig {
     pub path: Option<PathBuf>,
     pub device_key: Option<StaticKey>,
     pub servers: Vec<(String, Endpoint)>,
+    pub servers_error: Option<String>,
     pub error: Option<String>,
     pub appearance: Appearance,
     pub fps_monitor: bool,
@@ -73,18 +66,18 @@ impl LoadedConfig {
                 )),
             ),
         };
-        let (servers, error) = path
+        let (servers, servers_error) = path
             .as_deref()
             .map_or_else(|| Ok(Vec::new()), load_servers)
             .and_then(|servers| {
-                let Some(device_key) = &device_key else {
-                    return Ok(Vec::new());
-                };
                 servers
                     .into_iter()
+                    .filter(|server| {
+                        device_key.is_some() || !server.address.trim().starts_with("tcp://")
+                    })
                     .map(|server| {
                         server
-                            .endpoint(device_key)
+                            .endpoint(device_key.as_ref())
                             .map(|endpoint| (server.name, endpoint))
                     })
                     .collect::<Result<Vec<_>, _>>()
@@ -94,7 +87,7 @@ impl LoadedConfig {
                     (
                         Vec::new(),
                         Some(format!(
-                            "Failed to load {}: {error}",
+                            "Failed to load {}: {error}. Server list changes are disabled; fix the file and restart Condr.",
                             path.as_deref().map_or_else(
                                 || "config.toml".to_owned(),
                                 |path| path.display().to_string()
@@ -102,7 +95,7 @@ impl LoadedConfig {
                         )),
                     )
                 },
-                |servers| (servers, key_error),
+                |servers| (servers, None),
             );
         Self {
             appearance: path
@@ -124,7 +117,8 @@ impl LoadedConfig {
             path,
             device_key,
             servers,
-            error,
+            error: servers_error.clone().or(key_error),
+            servers_error,
         }
     }
 }
@@ -199,27 +193,47 @@ fn decode_servers(value: toml::Value) -> io::Result<Vec<SavedServer>> {
 }
 
 impl Condr {
+    pub(super) fn server_list_writable(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(error) = &self.servers_error {
+            self.app_error = Some(error.clone());
+            cx.notify();
+            return false;
+        }
+        true
+    }
+
     pub(super) fn save_servers(&mut self, cx: &mut Context<Self>) {
-        // Without a device key no saved TCP Server was loaded; rewriting the list now
-        // would erase them.
-        if self.device_key.is_none() {
+        if !self.server_list_writable(cx) {
             return;
         }
-        let servers = self
+        let preserve_tcp = self.device_key.is_none();
+        let mut servers = self
             .connections
             .iter()
             .filter_map(|connection| {
-                let Endpoint::Tcp(tcp) = &connection.endpoint else {
-                    return None;
+                let address = match &connection.endpoint {
+                    Endpoint::Local(_) => return None,
+                    Endpoint::Tcp(tcp) => format!("tcp://{}@{}", tcp.server_key, tcp.authority()),
+                    Endpoint::Ssh(ssh) => ssh.to_string(),
                 };
                 Some(SavedServer {
                     name: connection.label.clone(),
-                    address: tcp.authority(),
-                    server_key: tcp.server_key.to_hex(),
+                    address,
                 })
             })
             .collect::<Vec<_>>();
-        self.save_config(cx, move |path| write_servers(path, servers));
+        self.save_config(cx, move |path| {
+            // A failed device-key load hides TCP entries, but SSH still works. Preserve
+            // the entries we could not load when saving SSH changes.
+            if preserve_tcp {
+                servers.extend(
+                    load_servers(path)?
+                        .into_iter()
+                        .filter(|server| server.address.trim().starts_with("tcp://")),
+                );
+            }
+            write_servers(path, servers)
+        });
     }
 
     pub(super) fn save_appearance(&mut self, cx: &mut Context<Self>) {
@@ -299,7 +313,6 @@ fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) ->
         let mut table = toml_edit::Table::new();
         table["name"] = toml_edit::value(server.name);
         table["address"] = toml_edit::value(server.address);
-        table["server_key"] = toml_edit::value(server.server_key);
         saved.push(table);
     }
     write_client_value(path, SERVERS_KEY, toml_edit::Item::ArrayOfTables(saved))
@@ -357,6 +370,28 @@ mod tests {
     }
 
     #[test]
+    fn ssh_config_keeps_the_binary_path_and_needs_no_device_key() {
+        let server: SavedServer = toml::from_str(
+            "name = 'Build'\naddress = 'ssh://alice@build:2222?bin=/opt/a%20b/condr'\n",
+        )
+        .unwrap();
+        let Endpoint::Ssh(ssh) = server.endpoint(None).unwrap() else {
+            panic!("expected SSH");
+        };
+        assert_eq!(ssh.binary(), "/opt/a b/condr");
+        let path = std::env::temp_dir().join(format!(
+            "condr-ssh-config-{}-{:?}.toml",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        write_servers(&path, [server]).unwrap();
+        let loaded = load_servers(&path).unwrap();
+        assert_eq!(loaded[0].endpoint(None).unwrap(), Endpoint::Ssh(ssh));
+        fs::remove_file(&path).unwrap();
+        let _ = fs::remove_file(path.with_extension("toml.lock"));
+    }
+
+    #[test]
     fn saving_client_servers_preserves_server_config() {
         let directory =
             std::env::temp_dir().join(format!("condr-client-config-{}", std::process::id()));
@@ -368,8 +403,7 @@ mod tests {
             &path,
             [SavedServer {
                 name: "Linux".into(),
-                address: "127.0.0.1:4242".parse().unwrap(),
-                server_key: "0".repeat(64),
+                address: format!("tcp://{}@127.0.0.1:4242", "0".repeat(64)),
             }],
         )
         .unwrap();
@@ -379,7 +413,10 @@ mod tests {
         let servers = load_servers(&path).unwrap();
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].name, "Linux");
-        assert_eq!(servers[0].address, "127.0.0.1:4242");
+        assert_eq!(
+            servers[0].address,
+            format!("tcp://{}@127.0.0.1:4242", "0".repeat(64))
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -397,8 +434,7 @@ mod tests {
             &path,
             [SavedServer {
                 name: "Linux".into(),
-                address: "127.0.0.1:4242".parse().unwrap(),
-                server_key: "0".repeat(64),
+                address: format!("tcp://{}@127.0.0.1:4242", "0".repeat(64)),
             }],
         )
         .unwrap();
@@ -518,8 +554,7 @@ appearance = 'light'   # was system
 # The Linux box in the corner.
 [[client.servers]]
 name = 'Linux'
-address = '127.0.0.1:4242'
-server_key = '0000000000000000000000000000000000000000000000000000000000000000'
+address = 'tcp://0000000000000000000000000000000000000000000000000000000000000000@127.0.0.1:4242'
 ";
         fs::write(&path, original).unwrap();
 
@@ -559,8 +594,7 @@ server_key = '0000000000000000000000000000000000000000000000000000000000000000'
             &path,
             [SavedServer {
                 name: "Linux".into(),
-                address: "127.0.0.1:4242".parse().unwrap(),
-                server_key: "0".repeat(64),
+                address: format!("tcp://{}@127.0.0.1:4242", "0".repeat(64)),
             }],
         )
         .unwrap();

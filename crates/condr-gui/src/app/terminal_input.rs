@@ -594,7 +594,7 @@ impl Condr {
         if is_image_paste_gesture(stroke)
             && self
                 .connection(key)
-                .is_some_and(|connection| matches!(connection.endpoint, Endpoint::Tcp(_)))
+                .is_some_and(|connection| connection.endpoint.as_local_path().is_none())
             && self.paste_clipboard_image(key, pane_id, cx)
         {
             cx.stop_propagation();

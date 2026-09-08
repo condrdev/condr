@@ -140,10 +140,15 @@ pub(super) fn connect_to_server_with<T>(
 /// `condr server clients`.
 pub(super) fn connect_to_server(
     endpoint: Endpoint,
+    cancellation: ConnectionCancellation,
 ) -> (Endpoint, Result<ClientConnection, String>) {
     connect_to_server_with(endpoint, condr_server::ensure_local_server, |endpoint| {
-        ClientConnection::connect(endpoint, condr_server::noise::device_name())
-            .map_err(|error| endpoint.describe_connect_error(&error))
+        ClientConnection::connect_cancellable(
+            endpoint,
+            condr_server::noise::device_name(),
+            cancellation,
+        )
+        .map_err(|error| endpoint.describe_connect_error(&error))
     })
 }
 
@@ -194,7 +199,10 @@ pub(crate) fn run() {
             return;
         }
     };
-    let (endpoint, initial) = connect_to_server(ServerConfig::default().local_endpoint());
+    let (endpoint, initial) = connect_to_server(
+        ServerConfig::default().local_endpoint(),
+        ConnectionCancellation::default(),
+    );
     let config = config::LoadedConfig::read(config::default_path());
     let app = gpui_kit::application().with_assets(CondrAssets::new());
 

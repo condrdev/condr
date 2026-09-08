@@ -5,13 +5,13 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 ## Language
 
 **Server**:
-A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server has a persistent static key and accepts only paired Devices, as ADR 0011 describes.
+A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015).
 
 **Device**:
-A Client installation on another machine, identified by its own persistent static key stored beside its `config.toml`. A Device is paired once through an Invite and listed in the Server's `authorized-clients` until revoked; Clients on the Server's own machine use the local socket and need no pairing.
+A Client installation on another machine, identified by its own persistent static key stored beside its `config.toml`. A Device is paired once through an Invite and listed in the Server's `authorized-clients` until revoked; local and SSH Clients need no TCP pairing.
 
 **Invite**:
-A one-time secret that `condr server invite` creates for ten minutes. Pasted into Add Server as `<server key>.<invite>@host:port`, it lets one unknown Device complete the handshake and become authorized; it is never stored by the Client.
+A one-time secret that `condr server invite` creates for ten minutes. Pasted into Add Server as `tcp://<server key>.<invite>@host:port`, it lets one unknown Device complete the handshake and become authorized; it is never stored by the Client.
 _Avoid_: Local backend, GUI runtime
 
 **Client**:
@@ -43,7 +43,7 @@ A project- or task-level container with a stable identity and Root Directory. It
 _Avoid_: Project, space
 
 **Root Directory**:
-An absolute directory on the owning Server, selected when a Workspace is created or opened. It is the fallback cwd for new terminals and remains stable when a shell changes directory. A local Client can choose it with the native directory picker; a Client connected through TCP or an SSH tunnel enters the path in the Server's filesystem namespace.
+An absolute directory on the owning Server, selected when a Workspace is created or opened. It is the fallback cwd for new terminals and remains stable when a shell changes directory. A local Client can choose it with the native directory picker; a Client connected through TCP or SSH enters the path in the Server's filesystem namespace.
 _Avoid_: Current directory, identity cwd
 
 **Tab**:

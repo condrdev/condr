@@ -514,6 +514,7 @@ impl ClientIo {
                         break;
                     }
                 }
+                let _ = writer.shutdown();
             })?;
         let reader_visual_slot = Arc::clone(&visual_slot);
         thread::Builder::new()
@@ -682,6 +683,7 @@ impl ClientIo {
                         }
                     }
                 }
+                let _ = reader.shutdown();
             })?;
 
         let incoming_task = cx.spawn_in(window, async move |owner, cx| {

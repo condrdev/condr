@@ -34,7 +34,7 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 - **VT 终端模拟:`alacritty_terminal`**— 纯 Rust、免 Zig/FFI、有 Zed 的 GPUI 渲染先例;herdr 用 libghostty-vt 是 TUI 场景的选择。
 - **PTY:`portable-pty`**(对齐 herdr;Unix pty / Windows ConPTY)。
 - **异步:server/core 用 tokio**(对齐 herdr);**GUI 用 GPUI 自带 executor**,两者通过协议连接。
-- **传输:版本化二进制协议 over transport adapters**。协议使用 `bincode + serde` 长度前缀帧与严格版本握手;本地优先使用 `interprocess` 的 Unix domain socket / Windows named pipe,远程通过 TCP endpoint 接入同一协议,每个 TCP 连接都用 WireGuard 式的 `Noise_IKpsk2`(`snow`)做双向静态密钥认证与加密,新设备靠一次性 invite 配对(见 ADR 0011);capability 授权后置。Server 默认只暴露本地私有 endpoint,不监听公网。
+- **传输:版本化二进制协议 over transport adapters**。协议使用 `bincode + serde` 长度前缀帧与严格版本握手;本地优先使用 `interprocess` 的 Unix domain socket / Windows named pipe,远程通过 TCP endpoint 接入同一协议,每个 TCP 连接都用 WireGuard 式的 `Noise_IKpsk2`(`snow`)做双向静态密钥认证与加密,新设备靠一次性 invite 配对(见 ADR 0011);capability 授权后置。SSH 连接由 Client 调系统 `ssh -T` 执行远端 `condr server bridge`,转接远端私有 socket,认证与加密交给 SSH(见 ADR 0015)。Server 默认只暴露本地私有 endpoint,不监听公网。
 - **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
 - **终端渲染:自研 GPUI element**(项目最大自研件)— GPUI Kit 无终端组件。
 - **布局:GPUI Kit 的 Dock**(`gpui_kit::component::dock`) → 映射 workspace/tab/pane 模型。

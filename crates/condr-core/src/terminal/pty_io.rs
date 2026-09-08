@@ -1,3 +1,4 @@
+use crate::uri::percent_decode;
 use std::borrow::Cow;
 
 use super::*;
@@ -1151,23 +1152,6 @@ fn file_uri_cwd(uri: &str) -> Option<PathBuf> {
         if drive { &path[1..] } else { path.as_str() }.replace('/', "\\")
     };
     (!path.is_empty() && !path.contains('\0')).then(|| PathBuf::from(path))
-}
-
-fn percent_decode(input: &str) -> Option<String> {
-    let bytes = input.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
-            decoded.push(u8::from_str_radix(hex, 16).ok()?);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(decoded).ok()
 }
 
 pub(super) fn io_loop(io: TerminalIoLoop) -> io::Result<()> {

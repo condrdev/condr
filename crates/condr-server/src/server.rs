@@ -25,7 +25,8 @@ use condr_core::{
 
 use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};
 use crate::endpoint::{
-    Endpoint, EndpointListener, EndpointStream, TcpEndpoint, default_socket_path,
+    ConnectionCancellation, Endpoint, EndpointListener, EndpointStream, TcpEndpoint,
+    default_socket_path,
 };
 use crate::noise::{ServerIdentity, StaticKey};
 use crate::persistence::{SnapshotLoad, SnapshotPersistence};
@@ -278,6 +279,7 @@ pub struct ServerHandle {
 
 pub struct ClientConnection {
     stream: EndpointStream,
+    cancellation: ConnectionCancellation,
     bootstrap: Option<SessionBootstrap>,
     overview: SessionOverview,
     next_request_id: u64,
@@ -285,7 +287,20 @@ pub struct ClientConnection {
 
 impl ClientConnection {
     pub fn connect(endpoint: &Endpoint, client_name: impl Into<String>) -> io::Result<Self> {
-        Self::connect_with_state(endpoint, client_name.into(), true)
+        Self::connect_cancellable(endpoint, client_name, ConnectionCancellation::default())
+    }
+
+    /// The caller owns cancellation from before SSH spawn through connected I/O.
+    pub fn connect_cancellable(
+        endpoint: &Endpoint,
+        client_name: impl Into<String>,
+        cancellation: ConnectionCancellation,
+    ) -> io::Result<Self> {
+        Self::connect_with_state(endpoint, client_name.into(), true, cancellation)
+    }
+
+    pub fn cancellation(&self) -> ConnectionCancellation {
+        self.cancellation.clone()
     }
 
     /// Connects for CLI inspection and mutations, without requesting terminal views.
@@ -293,15 +308,34 @@ impl ClientConnection {
         endpoint: &Endpoint,
         client_name: impl Into<String>,
     ) -> io::Result<Self> {
-        Self::connect_with_state(endpoint, client_name.into(), false)
+        Self::connect_with_state(
+            endpoint,
+            client_name.into(),
+            false,
+            ConnectionCancellation::default(),
+        )
     }
 
     fn connect_with_state(
         endpoint: &Endpoint,
         client_name: String,
         terminal_views: bool,
+        cancellation: ConnectionCancellation,
     ) -> io::Result<Self> {
-        match Self::handshake(endpoint.connect()?, client_name.clone(), terminal_views) {
+        let attempt = |endpoint: &Endpoint| {
+            let stream = cancellation.connect(endpoint)?;
+            let result = Self::handshake(
+                stream,
+                client_name.clone(),
+                terminal_views,
+                cancellation.clone(),
+            );
+            if result.is_err() {
+                cancellation.clear();
+            }
+            result
+        };
+        match attempt(endpoint) {
             // The Server may already have recorded this device from an earlier attempt
             // that broke before the Client completed its initial query; it expects the zero
             // pre-shared key, so a refused invite is retried as a paired device.
@@ -313,7 +347,7 @@ impl ClientConnection {
                     unreachable!()
                 };
                 let paired = Endpoint::tcp(tcp.clone().without_invite());
-                Self::handshake(paired.connect()?, client_name, terminal_views).map_err(|_| error)
+                attempt(&paired).map_err(|_| error)
             }
             result => result,
         }
@@ -323,8 +357,12 @@ impl ClientConnection {
         stream: EndpointStream,
         client_name: impl Into<String>,
         terminal_views: bool,
+        cancellation: ConnectionCancellation,
     ) -> io::Result<Self> {
         let (mut stream, _, session_id) = Self::welcome(stream, client_name)?;
+        // Authentication is complete. Bootstrap may be large: bound inactivity,
+        // not total transfer time, just as socket read timeouts do.
+        stream.set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))?;
         let request = if terminal_views {
             ClientMessage::SnapshotRequest { session_id }
         } else {
@@ -367,6 +405,7 @@ impl ClientConnection {
         stream.set_handshake_timeout(None)?;
         Ok(Self {
             stream,
+            cancellation,
             bootstrap,
             overview,
             next_request_id: 1,
@@ -539,7 +578,13 @@ impl ClientConnection {
             FramingError::Io(error) => error,
             other => io::Error::other(other.to_string()),
         };
-        stream.set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))?;
+        // SSH also establishes its encrypted session before the first protocol byte.
+        let timeout = if matches!(stream, EndpointStream::Ssh(_)) {
+            Duration::from_secs(15)
+        } else {
+            HANDSHAKE_TIMEOUT
+        };
+        stream.set_handshake_timeout(Some(timeout))?;
         condr_core::protocol::write_message(
             &mut stream,
             &ClientMessage::Hello(Hello {

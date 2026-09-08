@@ -35,3 +35,5 @@ pub use terminal::{
 };
 
 pub const APP_NAME: &str = "Condr";
+
+pub mod uri;

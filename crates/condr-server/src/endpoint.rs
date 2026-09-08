@@ -3,9 +3,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 #[cfg(windows)]
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[cfg(windows)]
@@ -13,6 +13,7 @@ use atomicwrites::{AtomicFile, DisallowOverwrite};
 use interprocess::local_socket::traits::Listener as _;
 
 use crate::noise::{NoiseStream, PublicKey, Secret, ServerIdentity, StaticKey};
+use crate::ssh::{SshEndpoint, SshStream};
 
 pub type LocalListener = interprocess::local_socket::Listener;
 pub type LocalStream = interprocess::local_socket::Stream;
@@ -21,6 +22,7 @@ pub type LocalStream = interprocess::local_socket::Stream;
 pub enum Endpoint {
     Local(PathBuf),
     Tcp(TcpEndpoint),
+    Ssh(SshEndpoint),
 }
 
 /// Everything a Client needs to reach one TCP Server: where it listens, whose static key
@@ -63,16 +65,76 @@ enum LocalEndpointOwnership {
 pub enum EndpointStream {
     Local(LocalStream),
     Tcp(NoiseStream),
+    Ssh(SshStream),
+}
+
+/// Cancels a pending or established remote connection without waiting for its
+/// reader/writer queue. Local connections still use protocol Detach.
+#[derive(Clone, Default)]
+pub struct ConnectionCancellation {
+    state: Arc<Mutex<CancellationState>>,
+}
+
+#[derive(Default)]
+struct CancellationState {
+    cancelled: bool,
+    stream: Option<EndpointStream>,
+}
+
+impl ConnectionCancellation {
+    pub fn cancel(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.cancelled = true;
+        if let Some(stream) = state.stream.take() {
+            let _ = stream.shutdown();
+        }
+    }
+
+    pub(crate) fn connect(&self, endpoint: &Endpoint) -> io::Result<EndpointStream> {
+        if self.state.lock().unwrap().cancelled {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "connection cancelled",
+            ));
+        }
+        let stream = endpoint.connect()?;
+        self.attach(&stream)?;
+        Ok(stream)
+    }
+
+    pub(crate) fn attach(&self, stream: &EndpointStream) -> io::Result<()> {
+        let mut state = self.state.lock().unwrap();
+        if state.cancelled {
+            let _ = stream.shutdown();
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "connection cancelled",
+            ));
+        }
+        state.stream = match stream {
+            EndpointStream::Local(_) => None,
+            _ => Some(stream.try_clone()?),
+        };
+        Ok(())
+    }
+
+    pub(crate) fn clear(&self) {
+        if let Some(stream) = self.state.lock().unwrap().stream.take() {
+            let _ = stream.shutdown();
+        }
+    }
 }
 
 impl TcpEndpoint {
-    /// Parses `<server key>[.<invite>]@host:port`, the text an invite hands to a person.
+    /// Parses `tcp://<server key>[.<invite>]@host:port`, as printed by an invite.
     pub fn parse(text: &str, client_key: StaticKey) -> io::Result<Self> {
         let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
         let (credentials, authority) = text
             .trim()
+            .strip_prefix("tcp://")
+            .ok_or_else(|| invalid("expected tcp://<server key>[.<invite>]@host:port"))?
             .rsplit_once('@')
-            .ok_or_else(|| invalid("expected <server key>[.<invite>]@host:port"))?;
+            .ok_or_else(|| invalid("expected tcp://<server key>[.<invite>]@host:port"))?;
         let (host, port) = Self::split_authority(authority)?;
         let (server_key, invite) = match credentials.split_once('.') {
             Some((key, invite)) => (key, Some(Secret::parse(invite)?)),
@@ -134,6 +196,24 @@ impl TcpEndpoint {
 }
 
 impl Endpoint {
+    /// Parse a remote address without requiring a TCP device key for SSH.
+    pub fn parse(text: &str, client_key: Option<&StaticKey>) -> io::Result<Self> {
+        let text = text.trim();
+        if text.starts_with("ssh://") {
+            return SshEndpoint::parse(text).map(Self::Ssh);
+        }
+        if text.starts_with("tcp://") {
+            let key = client_key.ok_or_else(|| {
+                io::Error::other("this device has no TCP key; see the startup error")
+            })?;
+            return TcpEndpoint::parse(text, key.clone()).map(Self::Tcp);
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "use a tcp:// or ssh:// address",
+        ))
+    }
+
     pub fn local(path: impl Into<PathBuf>) -> Self {
         Self::Local(path.into())
     }
@@ -152,6 +232,7 @@ impl Endpoint {
                 tcp.invite.as_ref(),
             )
             .map(EndpointStream::Tcp),
+            Self::Ssh(ssh) => ssh.connect().map(EndpointStream::Ssh),
         }
     }
 
@@ -170,6 +251,9 @@ impl Endpoint {
     /// A failed connect in words. A missing socket file and a refused TCP connect both
     /// mean nobody is listening; the raw OS text says neither that nor which endpoint.
     pub fn describe_connect_error(&self, error: &io::Error) -> String {
+        if matches!(self, Self::Ssh(_)) {
+            return format!("could not connect to {self}: {error}");
+        }
         match error.kind() {
             io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
                 format!("no Server is listening at {self}")
@@ -190,25 +274,26 @@ impl Endpoint {
     pub fn as_local_path(&self) -> Option<&Path> {
         match self {
             Self::Local(path) => Some(path),
-            Self::Tcp(_) => None,
+            Self::Tcp(_) | Self::Ssh(_) => None,
         }
     }
 
     /// The host and port of a TCP endpoint, which identify a saved Server in the GUI.
     pub fn tcp_host_port(&self) -> Option<(&str, u16)> {
         match self {
-            Self::Local(_) => None,
+            Self::Local(_) | Self::Ssh(_) => None,
             Self::Tcp(tcp) => Some((tcp.host.as_str(), tcp.port)),
         }
     }
 }
 
-/// The endpoint without any key material: a path, or `tcp://host:port`.
+/// The endpoint without key material: a local path, `tcp://host:port`, or an SSH URI.
 impl fmt::Display for Endpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Local(path) => write!(f, "{}", path.display()),
             Self::Tcp(tcp) => write!(f, "tcp://{}", tcp.authority()),
+            Self::Ssh(ssh) => ssh.fmt(f),
         }
     }
 }
@@ -289,6 +374,7 @@ impl std::io::Read for EndpointStream {
         match self {
             Self::Local(stream) => stream.read(buffer),
             Self::Tcp(stream) => stream.read(buffer),
+            Self::Ssh(stream) => stream.read(buffer),
         }
     }
 }
@@ -298,6 +384,7 @@ impl std::io::Write for EndpointStream {
         match self {
             Self::Local(stream) => stream.write(buffer),
             Self::Tcp(stream) => stream.write(buffer),
+            Self::Ssh(stream) => stream.write(buffer),
         }
     }
 
@@ -305,6 +392,7 @@ impl std::io::Write for EndpointStream {
         match self {
             Self::Local(stream) => stream.flush(),
             Self::Tcp(stream) => stream.flush(),
+            Self::Ssh(stream) => stream.flush(),
         }
     }
 }
@@ -317,6 +405,7 @@ impl EndpointStream {
                 stream.try_clone().map(Self::Local)
             }
             Self::Tcp(stream) => stream.try_clone().map(Self::Tcp),
+            Self::Ssh(stream) => stream.try_clone().map(Self::Ssh),
         }
     }
 
@@ -324,7 +413,7 @@ impl EndpointStream {
     /// for local and already-paired peers. Call after its first message was read.
     pub fn complete_pairing(&self, client_name: &str) -> io::Result<()> {
         match self {
-            Self::Local(_) => Ok(()),
+            Self::Local(_) | Self::Ssh(_) => Ok(()),
             Self::Tcp(stream) => stream.complete_pairing(client_name),
         }
     }
@@ -332,7 +421,7 @@ impl EndpointStream {
     /// The static key of a TCP peer; `None` for local connections.
     pub fn peer_key(&self) -> Option<PublicKey> {
         match self {
-            Self::Local(_) => None,
+            Self::Local(_) | Self::Ssh(_) => None,
             Self::Tcp(stream) => stream.remote_public_key(),
         }
     }
@@ -341,7 +430,7 @@ impl EndpointStream {
     /// again after the handshake so a device revoked meanwhile never gets served.
     pub fn peer_authorized(&self) -> io::Result<bool> {
         match self {
-            Self::Local(_) => Ok(true),
+            Self::Local(_) | Self::Ssh(_) => Ok(true),
             Self::Tcp(stream) => stream.peer_authorized(),
         }
     }
@@ -349,7 +438,7 @@ impl EndpointStream {
     /// Records that a TCP peer connected now, for `condr server clients`.
     pub fn record_peer_seen(&self) -> io::Result<()> {
         match self {
-            Self::Local(_) => Ok(()),
+            Self::Local(_) | Self::Ssh(_) => Ok(()),
             Self::Tcp(stream) => stream.record_seen(),
         }
     }
@@ -360,11 +449,12 @@ impl EndpointStream {
         matches!(self, Self::Local(_))
     }
 
-    /// Closes a TCP connection for all of its clones; local streams close on drop.
+    /// Closes TCP/SSH for all clones; local streams close on drop.
     pub fn shutdown(&self) -> io::Result<()> {
         match self {
             Self::Local(_) => Ok(()),
             Self::Tcp(stream) => stream.shutdown(),
+            Self::Ssh(stream) => stream.shutdown(),
         }
     }
 
@@ -379,6 +469,7 @@ impl EndpointStream {
                 }
             }
             Self::Tcp(stream) => stream.socket().set_read_timeout(timeout),
+            Self::Ssh(stream) => stream.set_handshake_timeout(timeout),
         }
     }
 }

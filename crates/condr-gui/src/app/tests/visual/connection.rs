@@ -678,6 +678,91 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
 }
 
 #[test]
+fn invalid_saved_server_protects_the_list_but_allows_preferences() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("invalid-client-config");
+    let config_path = directory.0.join("config.toml");
+    let original = "# keep these entries\n[[client.servers]]\nname = 'Old TCP'\naddress = '127.0.0.1:4242'\nserver_key = 'legacy'\n[[client.servers]]\nname = 'Valid SSH'\naddress = 'ssh://build-box'\n";
+    std::fs::write(&config_path, original).unwrap();
+    let config = config::LoadedConfig::read(Some(config_path.clone()));
+    assert!(config.servers_error.is_some());
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let view_holder = Rc::new(RefCell::new(None));
+    let holder = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            Condr::new(
+                Endpoint::local(directory.0.join("unused.sock")),
+                Err("offline for config test".into()),
+                config,
+                window,
+                cx,
+            )
+        });
+        holder.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            assert!(this.servers_error.is_some());
+            this.prompt_add_server(window, cx);
+            assert!(!window.has_active_dialog(cx));
+            assert!(
+                this.app_error
+                    .as_ref()
+                    .unwrap()
+                    .contains("fix the file and restart")
+            );
+            // Even direct writeback and mutations must respect the failed load.
+            this.connections.push(ServerConnection::new(
+                2,
+                "Unsaved".into(),
+                Endpoint::parse("ssh://new-box", None).unwrap(),
+            ));
+            assert!(!this.apply_server_edit(2, "Edited", "ssh://edited", "", window, cx));
+            this.remove_server(2, window, cx);
+            assert_eq!(this.connection(2).unwrap().label, "Unsaved");
+            this.save_servers(cx);
+            assert!(this.config_save.is_none());
+        });
+    });
+    window.run_until_parked();
+    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), original);
+    window.update(|_, cx| view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx)));
+    window.run_until_parked();
+    let saved = std::fs::read_to_string(&config_path).unwrap();
+    assert!(saved.contains("appearance = \"dark\""));
+    assert!(saved.contains("# keep these entries"));
+    assert!(saved.contains("address = '127.0.0.1:4242'"));
+    assert!(saved.contains("address = 'ssh://build-box'"));
+    assert!(!saved.contains("new-box"));
+    window.quit();
+}
+
+#[test]
+fn disconnect_and_drop_cancel_pending_connection_attempts() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| view.update(cx, |this, _| {
+        let connection = this.connection_mut(1).unwrap();
+        let endpoint = connection.endpoint.clone();
+        let cancellation = connection.cancellation.clone();
+        connection.status = ConnectionStatus::Connecting;
+        this.disconnect_server(1);
+        assert!(matches!(ClientConnection::connect_cancellable(&endpoint, "cancelled", cancellation), Err(error) if error.kind() == std::io::ErrorKind::Interrupted));
+        let connection = ServerConnection::new(2, "Dropped".into(), endpoint.clone());
+        let cancellation = connection.cancellation.clone();
+        drop(connection);
+        assert!(matches!(ClientConnection::connect_cancellable(&endpoint, "dropped", cancellation), Err(error) if error.kind() == std::io::ErrorKind::Interrupted));
+    }));
+    window.quit();
+}
+
+#[test]
 fn added_server_survives_gui_restart() {
     let _serial_guard = acquire_visual_test_lock();
     let directory = TestDirectory::new("client-config");
@@ -712,7 +797,7 @@ fn added_server_survives_gui_restart() {
         submit_text_dialog(
             window,
             &format!(
-                "{}@127.0.0.1:4242",
+                "tcp://{}@127.0.0.1:4242",
                 StaticKey::from_private([7; 32]).public()
             ),
         );
@@ -858,6 +943,63 @@ fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
     assert!(window.update(|window, cx| window.has_focused_input(cx)));
+}
+
+#[test]
+fn ssh_addresses_add_edit_and_use_remote_paths() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.prompt_add_server(window, cx));
+    });
+    submit_text_dialog(window, "ssh://user@127.0.0.1:1?bin=/opt/a%20b/condr");
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let key = this.active_connection;
+            let Endpoint::Ssh(ssh) = &this.connection(key).unwrap().endpoint else {
+                panic!("expected SSH");
+            };
+            assert_eq!(ssh.binary(), "/opt/a b/condr");
+            this.disconnect_server(key);
+            assert!(this.apply_server_edit(
+                key,
+                "Build",
+                "ssh://builder@127.0.0.1:1?bin=/opt/condr",
+                "",
+                window,
+                cx
+            ));
+            assert_eq!(
+                this.connection(key).unwrap().endpoint.to_string(),
+                "ssh://builder@127.0.0.1:1?bin=/opt/condr"
+            );
+            this.prompt_edit_server_on(key, window, cx);
+        });
+    });
+    window.run_until_parked();
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    assert!(window.update(|window, cx| window.has_focused_input(cx)));
+    window.simulate_keystrokes("escape");
+    window.run_until_parked();
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.prompt_directory_on(
+                this.active_connection,
+                "New Workspace".into(),
+                "Create",
+                |_, _, _, _| {},
+                window,
+                cx,
+            )
+        });
+    });
+    window.run_until_parked();
+    assert!(!window.did_prompt_for_paths());
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    window.quit();
 }
 
 #[test]
