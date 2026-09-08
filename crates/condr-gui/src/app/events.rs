@@ -42,6 +42,7 @@ impl Condr {
                 } else {
                     self.prune_dock_cache(key);
                 }
+                self.sync_sidebar_workspace_open(cx);
                 if application.reacquire_control {
                     // Layout responses may have been lost to writer lag; this Bootstrap is
                     // the authoritative layout, so nothing stays pending against it.
@@ -184,6 +185,7 @@ impl Condr {
                                 .retain(|pane_id, _| live.contains(pane_id));
                         }
                         self.prune_dock_cache(key);
+                        self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, index, sequence, layout_changed);
                     }
                     SessionEvent::TerminalExited { pane_id } => {
@@ -201,6 +203,8 @@ impl Condr {
                         let visible = self.focused_terminal == Some((key, pane_id));
                         if let Some(agent) = agent {
                             let previous = self.connections[index].agents.insert(pane_id, agent);
+                            // The Server only publishes changed snapshots, so Unknown here is
+                            // a new process, not a repeat that would reopen a manual collapse.
                             let started = previous
                                 .is_none_or(|previous| previous.kind != agent.kind)
                                 || agent.state == AgentState::Unknown;

@@ -365,6 +365,7 @@ impl Condr {
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
         };
+        this.sync_sidebar_workspace_open(cx);
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);
 

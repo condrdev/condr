@@ -119,11 +119,10 @@ pub(super) fn cell_font(mut font: Font, flags: u16) -> Font {
     font
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "test-support")]
     #[test]
     fn render_cache_reuses_unchanged_cells_across_terminal_frames() {
         let mut cache = TerminalRenderCache::default();

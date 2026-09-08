@@ -245,8 +245,6 @@ impl Condr {
     }
 
     pub(super) fn clear_connection_gui_state(&mut self, key: ConnectionKey) {
-        self.sidebar_workspace_open
-            .retain(|(connection_key, _), _| *connection_key != key);
         self.dock_surfaces
             .retain(|surface, _| surface.connection_key != key);
         if self

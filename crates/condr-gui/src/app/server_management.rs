@@ -197,6 +197,7 @@ impl Condr {
         self.connections.remove(index);
         self.save_servers(cx);
         self.clear_connection_gui_state(key);
+        self.sync_sidebar_workspace_open(cx);
         self.clear_pending_workspace_selection_for(key);
         if was_active {
             self.active_connection = self
@@ -266,6 +267,7 @@ impl Condr {
             } else {
                 self.prune_dock_cache(key);
             }
+            self.sync_sidebar_workspace_open(cx);
             if application.reacquire_control {
                 self.clear_pending_workspace_selection_for(key);
             }

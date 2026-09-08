@@ -45,19 +45,11 @@ impl Condr {
         }
     }
 
-    pub(super) fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = cx.weak_entity();
-        let sessions = self
-            .connections
-            .iter()
-            .filter_map(|connection| {
-                Session::restore(connection.snapshot.clone())
-                    .ok()
-                    .map(|session| (connection.key, session))
-            })
-            .collect::<HashMap<_, _>>();
-        // Retain disclosure state in the view so both clicks and AgentChanged can
-        // update it, including for Server groups the Sidebar has not rendered yet.
+    /// Disclosure state lives in the view so both chevron clicks and AgentChanged can
+    /// update it, including for Server groups the Sidebar has not rendered yet. Call
+    /// after every snapshot change; Workspaces keep their state across reconnects.
+    pub(super) fn sync_sidebar_workspace_open(&mut self, cx: &mut Context<Self>) {
+        let sessions = self.restored_sessions();
         self.sidebar_workspace_open
             .retain(|(key, workspace_id), _| {
                 sessions
@@ -77,6 +69,22 @@ impl Condr {
                     });
             }
         }
+    }
+
+    fn restored_sessions(&self) -> HashMap<ConnectionKey, Session> {
+        self.connections
+            .iter()
+            .filter_map(|connection| {
+                Session::restore(connection.snapshot.clone())
+                    .ok()
+                    .map(|session| (connection.key, session))
+            })
+            .collect()
+    }
+
+    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let owner = cx.weak_entity();
+        let sessions = self.restored_sessions();
         let items = self.connections.iter().map(|connection| {
             let key = connection.key;
             let server_target = DropTarget::Server { key, after: false };
