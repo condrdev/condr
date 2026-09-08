@@ -6,6 +6,7 @@ pub mod protocol;
 mod session;
 mod snapshot;
 mod terminal;
+pub mod uri;
 
 pub use agent::{
     AgentDetector, AgentDisplayState, AgentEvent, AgentEventKind, AgentKind, AgentPublish,
@@ -38,5 +39,3 @@ pub use terminal::{
 };
 
 pub const APP_NAME: &str = "Condr";
-
-pub mod uri;

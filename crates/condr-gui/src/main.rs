@@ -5,6 +5,7 @@
 
 mod apca;
 mod app;
+mod assets;
 mod color_scheme;
 mod terminal_element;
 

@@ -138,97 +138,6 @@ pub(super) fn send_message(stream: &mut EndpointStream, message: &ServerMessage)
         .map_err(|error| io::Error::other(error.to_string()))
 }
 
-pub(super) fn flush_terminal_render(state: &Arc<Mutex<RuntimeState>>, client_id: u64) {
-    loop {
-        let Some(snapshot) = state
-            .lock()
-            .expect("server state lock poisoned")
-            .terminal_render_snapshot(client_id)
-        else {
-            return;
-        };
-        let mut prepared = prepare_terminal_render(snapshot);
-        let frames = if prepared.frames.is_empty() {
-            None
-        } else {
-            match frame_terminal_batches(
-                prepared.server_id,
-                prepared.session_id,
-                std::mem::take(&mut prepared.frames),
-            ) {
-                Ok(frames) => Some(frames),
-                Err(_) => return,
-            }
-        };
-        let outcome = state
-            .lock()
-            .expect("server state lock poisoned")
-            .commit_terminal_render(prepared, frames);
-        if matches!(outcome, TerminalRenderCommit::Done) {
-            return;
-        }
-    }
-}
-
-pub(super) fn prepare_terminal_render(snapshot: TerminalRenderSnapshot) -> PreparedTerminalRender {
-    let mut pending = Vec::with_capacity(snapshot.panes.len());
-    let mut baselines = Vec::with_capacity(snapshot.panes.len());
-    let mut frames = Vec::with_capacity(snapshot.panes.len());
-    for pane in snapshot.panes {
-        pending.push(pane.pane_id);
-        if pane
-            .baseline
-            .as_ref()
-            .is_some_and(|baseline| pane.current.revision <= baseline.revision)
-        {
-            continue;
-        }
-        let frame = match (&pane.baseline, &pane.producer_frame) {
-            (Some(baseline), Some(TerminalViewFrame::Delta(delta)))
-                if baseline.revision == delta.base_revision =>
-            {
-                pane.producer_frame
-            }
-            (baseline, _) => TerminalView::frame_from(baseline.as_deref(), &pane.current),
-        };
-        let Some(mut frame) = frame else {
-            continue;
-        };
-        let projected = frame.normalize_hyperlinks_for_wire();
-        let baseline = if projected {
-            match &frame {
-                TerminalViewFrame::Full(view) => Arc::new(view.clone()),
-                TerminalViewFrame::Delta(_) => {
-                    let mut view = pane
-                        .baseline
-                        .expect("a prepared terminal delta has a client baseline")
-                        .as_ref()
-                        .clone();
-                    view.apply_frame(frame.clone())
-                        .expect("a prepared terminal delta matches its client baseline");
-                    Arc::new(view)
-                }
-            }
-        } else {
-            pane.current
-        };
-        frames.push(PaneTerminalFrame {
-            pane_id: pane.pane_id,
-            frame,
-        });
-        baselines.push((pane.pane_id, baseline));
-    }
-    PreparedTerminalRender {
-        client_id: snapshot.client_id,
-        generation: snapshot.generation,
-        server_id: snapshot.server_id,
-        session_id: snapshot.session_id,
-        pending,
-        baselines,
-        frames,
-    }
-}
-
 pub(super) fn frame_message(message: &ServerMessage) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
     condr_core::protocol::write_message(&mut data, message)
@@ -370,107 +279,60 @@ pub(super) fn split_bootstrap_records(
     Ok((batches, baselines))
 }
 
-pub(super) fn frame_terminal_batches(
-    server_id: ServerId,
-    session_id: SessionId,
-    panes: Vec<PaneTerminalFrame>,
-) -> io::Result<Vec<Vec<u8>>> {
-    let mut frames = Vec::new();
-    let mut batch = Vec::new();
-    let empty = ServerMessage::TerminalFrame(TerminalFrameBatch {
-        server_id,
-        session_id,
-        panes: Vec::new(),
-    });
-    let overhead = usize::try_from(
-        bincode::serialized_size(&empty).map_err(|error| io::Error::other(error.to_string()))?,
-    )
-    .map_err(|_| io::Error::other("terminal frame size does not fit usize"))?;
-    let mut batch_size = overhead;
-    for pane in panes {
-        let pane_size = usize::try_from(
-            bincode::serialized_size(&pane).map_err(|error| io::Error::other(error.to_string()))?,
-        )
-        .map_err(|_| io::Error::other("terminal Pane frame size does not fit usize"))?;
-        if overhead.saturating_add(pane_size) > MAX_FRAME_SIZE {
-            append_terminal_frame_batch(
-                &mut frames,
-                server_id,
-                session_id,
-                std::mem::take(&mut batch),
-            )?;
-            batch_size = overhead;
-
-            let revision = terminal_frame_revision(&pane.frame);
-            let pane_id = pane.pane_id;
-            let payload = encode_pane_terminal_frame(&pane).map_err(io::Error::other)?;
-            let chunk_count = u32::try_from(payload.len().div_ceil(MAX_CHUNK_PAYLOAD_SIZE))
-                .map_err(|_| io::Error::other("too many terminal frame chunks"))?;
-            if chunk_count == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "terminal Pane frame encoded to an empty payload",
-                ));
-            }
-            for (chunk_index, payload) in payload.chunks(MAX_CHUNK_PAYLOAD_SIZE).enumerate() {
-                let chunk_index = u32::try_from(chunk_index)
-                    .map_err(|_| io::Error::other("too many terminal frame chunks"))?;
-                frames.push(frame_message(&ServerMessage::TerminalFrameChunk(
-                    TerminalFrameChunk {
-                        server_id,
-                        session_id,
-                        pane_id,
-                        revision,
-                        chunk_index,
-                        chunk_count,
-                        payload: payload.to_vec(),
-                    },
-                ))?);
-            }
-            continue;
-        }
-        if !batch.is_empty() && batch_size.saturating_add(pane_size) > MAX_FRAME_SIZE {
-            append_terminal_frame_batch(
-                &mut frames,
-                server_id,
-                session_id,
-                std::mem::take(&mut batch),
-            )?;
-            batch_size = overhead;
-        }
-        batch_size += pane_size;
-        batch.push(pane);
-    }
-    append_terminal_frame_batch(&mut frames, server_id, session_id, batch)?;
-    Ok(frames)
-}
-
-pub(super) fn append_terminal_frame_batch(
-    frames: &mut Vec<Vec<u8>>,
-    server_id: ServerId,
-    session_id: SessionId,
-    panes: Vec<PaneTerminalFrame>,
-) -> io::Result<()> {
-    if !panes.is_empty() {
-        frames.push(frame_message(&ServerMessage::TerminalFrame(
-            TerminalFrameBatch {
-                server_id,
-                session_id,
-                panes,
-            },
-        ))?);
-    }
-    Ok(())
-}
-
-pub(super) fn terminal_frame_revision(frame: &TerminalViewFrame) -> u64 {
-    match frame {
-        TerminalViewFrame::Full(view) => view.revision,
-        TerminalViewFrame::Delta(delta) => delta.revision,
-    }
-}
-
 pub(super) fn send_framed(stream: &mut EndpointStream, data: &[u8]) -> io::Result<()> {
     stream.write_all(data)?;
     stream.flush()
+}
+
+impl RuntimeState {
+    pub(super) fn capture_bootstrap(&self) -> BootstrapCapture {
+        #[cfg(test)]
+        self.bootstrap_captures.fetch_add(1, Ordering::Relaxed);
+        let mut terminals = Vec::new();
+        for workspace in self.session.workspaces() {
+            for tab in workspace.tabs() {
+                for pane in tab.panes() {
+                    if (self.terminals.contains_key(&pane.id())
+                        || self.closing_terminals.contains(&pane.id()))
+                        && let Some(latest) = self.terminal_views.get(&pane.id())
+                    {
+                        terminals.push(BootstrapTerminalCapture {
+                            pane_id: pane.id(),
+                            view: Arc::clone(&latest.view),
+                            exited: self.exited_terminals.contains(&pane.id()),
+                            title: self.terminal_titles.get(&pane.id()).cloned(),
+                            attention: self.pending_terminal_bells.contains(&pane.id()),
+                        });
+                    }
+                }
+            }
+        }
+        BootstrapCapture {
+            settings: self.settings.clone(),
+            server_id: self.server_id,
+            runtime_epoch: self.runtime_epoch,
+            session_id: self.session_id,
+            sequence: self.sequence,
+            snapshot: self.session.snapshot(),
+            terminals,
+            agents: self
+                .agents
+                .iter()
+                .filter(|(pane_id, _)| !self.closing_terminals.contains(pane_id))
+                .filter(|(pane_id, _)| !self.exited_terminals.contains(pane_id))
+                .map(|(&pane_id, &agent)| PaneAgentSnapshot { pane_id, agent })
+                .collect(),
+            workspace_git: self
+                .workspace_git
+                .iter()
+                .map(|(&workspace_id, repository)| workspace_git_snapshot(workspace_id, repository))
+                .collect(),
+            zoomed_panes: self.zoomed_panes(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn bootstrap(&self) -> SessionBootstrap {
+        self.capture_bootstrap().materialize()
+    }
 }

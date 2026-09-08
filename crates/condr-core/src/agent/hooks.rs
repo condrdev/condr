@@ -7,13 +7,11 @@
 //! takes a plugin instead: a file Condr owns outright in its plugin directory, bridging
 //! OpenCode's event stream onto the same command.
 
-use std::io;
-use std::path::{Path, PathBuf};
-
+use super::{AgentEventKind, AgentKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-
-use super::{AgentEventKind, AgentKind};
+use std::io;
+use std::path::{Path, PathBuf};
 
 /// Where and how hooks are installed on one machine.
 #[derive(Clone, Debug)]
@@ -590,31 +588,6 @@ mod tests {
     }
 
     #[test]
-    fn run_reports_the_state_after_each_action_and_codex_carries_its_note() {
-        let (target, root) = target();
-        let status = |agent| run(&target, agent, HooksAction::Status).unwrap();
-        assert_eq!(status(AgentKind::Claude).state, HooksState::Missing);
-        assert_eq!(status(AgentKind::Claude).note, None);
-        assert!(status(AgentKind::Codex).note.is_some());
-        let installed = run(&target, AgentKind::Claude, HooksAction::Install).unwrap();
-        assert_eq!(installed.state, HooksState::Installed);
-        assert_eq!(installed.path, target.path(AgentKind::Claude));
-        assert_eq!(installed.warning, None);
-        assert_eq!(
-            run(&target, AgentKind::Claude, HooksAction::Uninstall)
-                .unwrap()
-                .state,
-            HooksState::Missing
-        );
-        // The wire shape the CLI prints and the GUI reads.
-        let json = serde_json::to_value(status(AgentKind::Claude)).unwrap();
-        assert_eq!(json["agent"], "claude");
-        assert_eq!(json["state"], "missing");
-        assert!(json["note"].is_null());
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
     fn install_is_idempotent_preserves_user_hooks_and_uninstall_leaves_only_theirs() {
         let (target, root) = target();
         let path = target.path(AgentKind::Claude);
@@ -704,145 +677,6 @@ mod tests {
         assert!(read(&codex)["hooks"]["Interrupt"].is_array());
         uninstall(&target, AgentKind::Codex).unwrap();
         assert_eq!(read(&codex), json!({}));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn a_broken_or_oversized_settings_file_is_never_overwritten() {
-        let (target, root) = target();
-        let path = target.path(AgentKind::Claude);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "{ not json").unwrap();
-        assert!(install(&target, AgentKind::Claude).is_err());
-        assert!(state(&target, AgentKind::Claude).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
-
-        std::fs::write(&path, "[]").unwrap();
-        assert!(install(&target, AgentKind::Claude).is_err());
-        std::fs::write(&path, r#"{"hooks": "nope"}"#).unwrap();
-        assert!(install(&target, AgentKind::Claude).is_err());
-
-        // Whitespace-only counts as absent; an install creates the directory too.
-        let fresh = root.join("fresh/.claude/settings.json");
-        let target = HookTarget {
-            claude_dir: fresh.parent().unwrap().to_path_buf(),
-            ..target
-        };
-        install(&target, AgentKind::Claude).unwrap();
-        assert_eq!(
-            state(&target, AgentKind::Claude).unwrap(),
-            HooksState::Installed
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn the_opencode_plugin_is_an_owned_file_that_never_replaces_a_foreign_one() {
-        let (target, root) = target();
-        let path = target.path(AgentKind::OpenCode);
-        assert!(path.ends_with(".config/opencode/plugins/condr.js"));
-        assert_eq!(
-            state(&target, AgentKind::OpenCode).unwrap(),
-            HooksState::Missing
-        );
-
-        install(&target, AgentKind::OpenCode).unwrap();
-        assert_eq!(
-            state(&target, AgentKind::OpenCode).unwrap(),
-            HooksState::Installed
-        );
-        let plugin = std::fs::read_to_string(&path).unwrap();
-        assert!(plugin.contains(r#"const exe = "/opt/condr bin/condr""#));
-        assert!(plugin.contains("agent-hook opencode ${event}"));
-        assert!(plugin.contains(r#"process.env.CONDR_ENV !== "1""#));
-        assert!(
-            plugin.contains(r#"else if (event.type === "session.created") roots.add(info.id)"#)
-        );
-        for event in [
-            "session-start",
-            "prompt-submit",
-            "stop",
-            "stop-failure",
-            "permission-request",
-            "question-asked",
-            "tool-complete",
-            "tool-start",
-        ] {
-            assert!(
-                plugin.contains(&format!("\"{event}\"")),
-                "{event} is reported"
-            );
-            assert!(
-                AgentEventKind::parse(event).is_some(),
-                "{event} is a wire event"
-            );
-        }
-
-        // A plugin from another condr is ours, but outdated; installing replaces it.
-        std::fs::write(
-            &path,
-            "// condr agent-hook opencode — generated by condr\nold",
-        )
-        .unwrap();
-        assert_eq!(
-            state(&target, AgentKind::OpenCode).unwrap(),
-            HooksState::Outdated
-        );
-        install(&target, AgentKind::OpenCode).unwrap();
-        assert_eq!(
-            state(&target, AgentKind::OpenCode).unwrap(),
-            HooksState::Installed
-        );
-
-        uninstall(&target, AgentKind::OpenCode).unwrap();
-        assert!(!path.exists());
-        uninstall(&target, AgentKind::OpenCode).unwrap();
-
-        // Somebody else's condr.js is left alone by install and uninstall alike.
-        std::fs::write(&path, "export const Mine = async () => ({})\n").unwrap();
-        assert_eq!(
-            state(&target, AgentKind::OpenCode).unwrap(),
-            HooksState::Missing
-        );
-        assert!(install(&target, AgentKind::OpenCode).is_err());
-        assert!(uninstall(&target, AgentKind::OpenCode).is_err());
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "export const Mine = async () => ({})\n"
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlinked_settings_file_is_written_through_and_an_unchanged_one_is_left_alone() {
-        let (target, root) = target();
-        let real = root.join("dotfiles/claude-settings.json");
-        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
-        std::fs::write(&real, "{\n  \"model\": \"opus\"\n}\n").unwrap();
-        let link = target.path(AgentKind::Claude);
-        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-
-        install(&target, AgentKind::Claude).unwrap();
-        assert!(
-            std::fs::symlink_metadata(&link).unwrap().is_symlink(),
-            "link survives"
-        );
-        assert!(
-            read(&real)["hooks"]["Stop"].is_array(),
-            "the real file got the hooks"
-        );
-
-        let before = std::fs::metadata(&real).unwrap().modified().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        install(&target, AgentKind::Claude).unwrap();
-        uninstall(&target, AgentKind::Codex).unwrap_or_else(|_| target.path(AgentKind::Codex));
-        assert_eq!(
-            std::fs::metadata(&real).unwrap().modified().unwrap(),
-            before,
-            "an identical install does not rewrite"
-        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

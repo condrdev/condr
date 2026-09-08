@@ -1,11 +1,21 @@
-use std::cell::RefCell;
-use std::ops::Deref;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+mod connection;
+mod dock;
+mod layout;
+mod settings;
+mod terminal;
+mod workflows;
 
+use super::super::{
+    Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
+    DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
+    PendingWorkspaceSelection, ServerConnection, SettingsTab, TerminalFont, TerminalPalette,
+    color_scheme_is_dirty, default_window_options, reset_color_scheme, select_appearance,
+    select_server_shell, select_settings_server, select_settings_tab, select_terminal_font_family,
+    select_terminal_font_size, selected_appearance, server_shell, step_terminal_font_size,
+    terminal_font_family, terminal_font_size,
+};
+use crate::app::config;
+use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 use condr_core::SplitDirection;
 use condr_core::protocol::{
     ClientMessage, LayoutCommand, PaneAgentSnapshot, PaneTerminalFrame, RuntimeEpoch, ServerId,
@@ -18,24 +28,19 @@ use condr_core::{
     TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
+use gpui_kit::component::dialog::Confirm;
+use gpui_kit::component::{ActiveTheme as _, Root, WindowExt as _};
 use gpui_kit::{
     AppContext as _, Background, ClipboardItem, Entity, Modifiers, MouseButton, MouseDownEvent,
     MouseUpEvent, Task, TestAppContext, VisualTestContext, point, px, size,
 };
-
-use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
-use gpui_kit::component::dialog::Confirm;
-use gpui_kit::component::{ActiveTheme as _, Root, WindowExt as _};
-
-use super::super::{
-    Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
-    DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
-    PendingWorkspaceSelection, ServerConnection, SettingsTab, TerminalFont, TerminalPalette,
-    color_scheme_is_dirty, default_window_options, reset_color_scheme, select_appearance,
-    select_server_shell, select_settings_server, select_settings_tab, select_terminal_font_family,
-    select_terminal_font_size, selected_appearance, server_shell, step_terminal_font_size,
-    terminal_font_family, terminal_font_size,
-};
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 /// A ceiling, not an expected wait: the loops return as soon as the condition holds.
 /// Five seconds was not enough on Linux when the whole workspace runs in parallel.
@@ -366,9 +371,3 @@ fn wait_until_event_driven(
     }
     false
 }
-
-mod connection;
-mod layout;
-mod terminal;
-mod workflows;
-use crate::app::config;

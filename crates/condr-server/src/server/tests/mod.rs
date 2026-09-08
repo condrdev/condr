@@ -1,3 +1,13 @@
+#[cfg(target_os = "linux")]
+mod clipboard_image;
+mod control;
+mod layout;
+mod persistence;
+mod protocol;
+mod shutdown;
+mod subscriptions;
+mod unit;
+
 use super::*;
 
 fn test_endpoint() -> Endpoint {
@@ -248,8 +258,3 @@ fn marker_value(text: &str, marker: &str) -> String {
         .expect("terminal marker has a value")
         .to_owned()
 }
-
-mod layout;
-mod persistence;
-mod protocol;
-mod unit;

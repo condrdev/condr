@@ -1,21 +1,22 @@
 //! The standalone Condr runtime and its local client endpoint.
 
+mod client;
 mod client_writer;
 mod endpoint;
 pub mod noise;
 pub(crate) mod persistence;
-pub use persistence::{read_config_text, update_config_values};
 mod server;
 pub mod ssh;
 
+pub use client::ClientConnection;
 pub use endpoint::{
     ConnectionCancellation, Endpoint, EndpointStream, TcpEndpoint, default_socket_path,
 };
 pub use noise::{PublicKey, Secret, ServerIdentity, StaticKey};
+pub use persistence::{read_config_text, update_config_values};
 pub use server::{
-    BoundServer, ClientConnection, ServerConfig, ServerHandle, connected_devices,
-    ensure_local_server, ensure_server, load_listen, probe_server, restart_server, revoke_devices,
-    save_listen, stop_server,
+    BoundServer, ServerConfig, ServerHandle, connected_devices, ensure_local_server, ensure_server,
+    load_listen, probe_server, restart_server, revoke_devices, save_listen, stop_server,
 };
 pub use ssh::SshEndpoint;
 

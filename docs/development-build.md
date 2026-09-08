@@ -2,6 +2,8 @@
 
 Condr 在私有 GitHub 仓库中维护一个滚动的 `Development Build` Pre-release。它只供当前开发者自举使用，不是版本化发布。
 
+开发时的模块入口、测试归档约定与检查命令见 [代码组织与测试归档](code-organization.md)。
+
 ## 发布模型
 
 - `dev` 是可变 tag，指向当前选定的 `main` commit。
