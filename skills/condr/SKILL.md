@@ -27,19 +27,20 @@ All commands below start with `condr`.
 | `pane read` | Read recent terminal rows, including scrollback. |
 | `pane send-text`, `pane send-keys`, `pane run` | Type without Enter, send keys, or submit a shell command. |
 | `agent available` | Find supported agents on the Server's PATH. |
-| `agent list` | List running agents and pending launches, with names and Pane IDs. |
+| `agent list` | List running agents and pending launches, with names, Pane IDs, and hook-reported native `session_id`. |
 | `agent start` | Start a named agent in an idle shell and await readiness. Requires `--kind` and `--pane`; native arguments follow `--`. |
 | `agent prompt` | Prompt an idle agent; `--wait` awaits its next settled state. |
 | `agent wait` | Await a state without sending input. |
 | `agent hooks` | `install`, `uninstall` or `status` the hooks that report an agent's state; states stay `unknown` until installed. |
 | `server start`, `server status`, `server run` | Start a background Server, check availability, or run it in the foreground. |
-| `server stop`, `server restart` | Stop all terminals; restart restores layout and cwd with fresh shells. Run restart from outside Condr. |
+| `server stop`, `server restart` | Stop all terminals; restart restores layout/cwd and resumes saved native conversations in fresh shells. Run restart from outside Condr. |
 | `server invite`, `server clients`, `server revoke` | Pair remote devices, list paired devices, or revoke access. |
 
 ## Targets and Results
 
 - Inside Condr (`CONDR_ENV=1`), `CONDR_SOCKET_PATH` selects the Server; `CONDR_PANE_ID` identifies the caller. The command sandbox must permit access to this socket. Omitted optional Pane targets mean the caller; use explicit IDs for other Panes.
 - Read IDs from responses: creation returns `.workspace`, `.tab`, and/or `.root_pane`; splitting returns `.pane.pane_id`. Create/split preserve GUI focus unless `--focus` is requested.
+- Resume requires installed hooks and the native transcript on the Server. Hook reports save resume IDs; any observed process exit clears its ID. Server shutdown saves the existing IDs without an extra process check. Resume reopens the conversation without sending a prompt. Resume submits once; read any failure in the Pane and retry with the native resume command. OpenCode uses a TUI plugin installed with `agent hooks install opencode`; remove an old development `plugins/condr.js` before installing it.
 - Agent targets are names assigned by `start` or numeric Pane IDs. Names match `[a-z][a-z0-9_-]{0,31}`, are unique, and last until exit or Server restart.
 - Workspace/Tab/Pane/Agent commands return JSON, except `pane read` returns text. Their failures emit `.error.code` and `.error.message` JSON to stderr, exiting 1; usage errors exit 2. Server administration uses text.
 - `prompt --wait` and `wait` default to `idle` or `blocked`; `--until` selects states, `--timeout` is milliseconds. `blocked` needs input; `unknown` is not ready. Wait returns state; use `pane read` for output.

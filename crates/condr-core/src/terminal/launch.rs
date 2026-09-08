@@ -1,13 +1,43 @@
 use super::*;
 
+#[derive(Clone)]
+pub struct TerminalLaunchProbe {
+    #[cfg(unix)]
+    master: Option<Weak<Mutex<Box<dyn MasterPty + Send>>>>,
+    process: ProcessProbe,
+}
+
 impl TerminalRuntime {
-    /// Starts a discovered CLI in the existing shell, retaining its cwd and environment.
-    /// The caller must serialize launches for this Terminal until detection settles.
-    pub fn start_agent(
+    pub fn launch_probe(&self) -> TerminalLaunchProbe {
+        TerminalLaunchProbe {
+            #[cfg(unix)]
+            master: self.master.as_ref().map(Arc::downgrade),
+            process: self.process,
+        }
+    }
+
+    /// A fresh process check for orchestration; display detection may intentionally lag.
+    pub fn running_agent(&self) -> Option<AgentKind> {
+        process_snapshot().refreshed_at = None;
+        #[cfg(unix)]
+        let result = self.process.probe_agent(self.master.as_ref()?);
+        #[cfg(windows)]
+        let result = self.process.probe_agent();
+        match result {
+            ProcessProbeResult::Agent(kind) => Some(kind),
+            _ => None,
+        }
+    }
+}
+
+impl TerminalLaunchProbe {
+    /// OS inspection runs outside the Server lock. The caller validates the Terminal
+    /// instance and launch reservation again before submitting the returned command.
+    pub fn command(
         &self,
         installation: &crate::agent_discovery::AgentInstallation,
         args: &[String],
-    ) -> io::Result<()> {
+    ) -> io::Result<String> {
         let shell = self.idle_shell().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::WouldBlock,
@@ -29,20 +59,7 @@ impl TerminalRuntime {
                 "encoded agent command exceeds 4094 bytes",
             ));
         }
-        self.submit(&command)
-    }
-
-    /// A fresh process check for orchestration; display detection may intentionally lag.
-    pub fn running_agent(&self) -> Option<AgentKind> {
-        process_snapshot().refreshed_at = None;
-        #[cfg(unix)]
-        let result = self.process.probe_agent(self.master.as_ref()?);
-        #[cfg(windows)]
-        let result = self.process.probe_agent();
-        match result {
-            ProcessProbeResult::Agent(kind) => Some(kind),
-            _ => None,
-        }
+        Ok(command)
     }
 
     fn idle_shell(&self) -> Option<String> {
@@ -55,7 +72,13 @@ impl TerminalRuntime {
         }
         #[cfg(unix)]
         {
-            let group = self.master.as_ref()?.lock().ok()?.process_group_leader()?;
+            let group = self
+                .master
+                .as_ref()?
+                .upgrade()?
+                .lock()
+                .ok()?
+                .process_group_leader()?;
             if u32::try_from(group).ok() != Some(shell_pid.as_u32())
                 || system.processes().keys().any(|pid| {
                     *pid != shell_pid

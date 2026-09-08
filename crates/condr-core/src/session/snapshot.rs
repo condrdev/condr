@@ -24,6 +24,7 @@ impl Session {
                                 .map(|pane| PaneSnapshot {
                                     id: pane.id,
                                     cwd: pane.cwd.clone(),
+                                    agent_resume: pane.agent_resume.clone(),
                                 })
                                 .collect(),
                             focused_pane: tab.focused_pane,
@@ -57,6 +58,7 @@ impl Session {
                         .map(|pane| Pane {
                             id: pane.id,
                             cwd: pane.cwd,
+                            agent_resume: pane.agent_resume,
                         })
                         .collect(),
                     focused_pane: tab.focused_pane,
@@ -138,6 +140,13 @@ impl Session {
                 let mut tab_pane_ids = HashSet::new();
                 for pane in &tab.panes {
                     validate_id(pane.id.0, &mut max_id)?;
+                    if pane
+                        .agent_resume
+                        .as_ref()
+                        .is_some_and(|resume| !crate::agent::valid_session_id(&resume.session_id))
+                    {
+                        return Err(SnapshotError::Invalid("invalid Agent resume ID"));
+                    }
                     if !pane_ids.insert(pane.id) || !tab_pane_ids.insert(pane.id) {
                         return Err(SnapshotError::Invalid("duplicate Pane ID"));
                     }

@@ -112,6 +112,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                             state.record_terminal_cwds([(pane_id, cwd)]);
                         }
                         state.exited_terminals.insert(pane_id);
+                        state.record_agent_resume(pane_id, None);
                         state.forget_agent_control(pane_id);
                         state.publish_background(SessionEvent::TerminalExited { pane_id });
                         state.clear_terminal_title(pane_id);
@@ -147,6 +148,7 @@ fn probe_terminal(
     state: Arc<Mutex<RuntimeState>>,
 ) {
     thread::spawn(move || {
+        let mut resume_pending = true;
         let mut cwd_scan_due: Option<Instant> = None;
         let mut git_scan_pending: Option<Instant> = None;
         loop {
@@ -160,8 +162,12 @@ fn probe_terminal(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
+            if resume_pending {
+                resume_pending = agents::resume_agent(&state, pane_id, instance_id);
+            }
             let now = Instant::now();
             let agent_update = agent_probe.poll();
+            let agent_resume = agent_probe.resume();
             // Debounced behind output: a burst must not turn into a process cwd read per
             // chunk, and the shutdown path records the final cwd on its own.
             let cwd = if cwd_scan_due.is_some_and(|due| now >= due) {
@@ -170,13 +176,16 @@ fn probe_terminal(
             } else {
                 None
             };
-            if agent_update.is_some() || cwd.is_some() {
+            if agent_update.is_some() || cwd.is_some() || agent_resume.is_some() {
                 let mut state = state.lock().expect("server state lock poisoned");
                 if !state.terminal_is_current(pane_id, instance_id) {
                     break;
                 }
                 if let Some(cwd) = cwd {
                     state.record_terminal_cwds([(pane_id, cwd)]);
+                }
+                if let Some(resume) = agent_resume {
+                    state.record_agent_resume(pane_id, resume);
                 }
                 if let Some(next) = agent_update {
                     state.agent_process_update(pane_id, agent_probe.agent());
@@ -307,14 +316,14 @@ pub(super) fn apply_agent_refresh(
     pane_id: PaneId,
     next: Option<AgentSnapshot>,
 ) {
-    let previous = state.agents.get(&pane_id).copied();
-    if previous == next {
+    let previous = state.agents.get(&pane_id);
+    if previous == next.as_ref() {
         state.complete_agent_waits();
         return;
     }
-    match next {
+    match &next {
         Some(agent) => {
-            state.agents.insert(pane_id, agent);
+            state.agents.insert(pane_id, agent.clone());
         }
         None => {
             state.agents.remove(&pane_id);

@@ -392,6 +392,7 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
                 event: SessionEvent::AgentChanged {
                     pane_id: event_pane,
                     agent: Some(AgentSnapshot {
+                        session_id: None,
                         kind: condr_core::AgentKind::Codex,
                         state: condr_core::AgentState::Unknown,
                     }),

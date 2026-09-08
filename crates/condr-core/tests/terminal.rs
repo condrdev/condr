@@ -684,7 +684,7 @@ fn wait_for_agent(runtime: &TerminalRuntime, expected: AgentSnapshot, failure: &
         .expect("live terminal has an agent probe");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if probe.poll() == Some(Some(expected)) {
+        if probe.poll() == Some(Some(expected.clone())) {
             return;
         }
         assert!(Instant::now() < deadline, "{failure}");
@@ -706,6 +706,7 @@ fn foreground_agent_process_produces_an_unknown_snapshot() {
     wait_for_agent(
         &runtime,
         AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
         },
@@ -725,7 +726,7 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
     fn wait_for(probe: &mut TerminalAgentProbe, expected: Option<AgentSnapshot>, failure: &str) {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            if probe.poll() == Some(expected) {
+            if probe.poll() == Some(expected.clone()) {
                 return;
             }
             assert!(Instant::now() < deadline, "{failure}");
@@ -734,6 +735,7 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
     }
     let snapshot = |state| {
         Some(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state,
         })
@@ -750,14 +752,14 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
     let stop = events.join("stop");
     std::fs::write(
         &stop,
-        AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None).encode(),
+        AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None, None).encode(),
     )
     .unwrap();
     // An event naming another agent is not this Pane's.
     let other = events.join("other");
     std::fs::write(
         &other,
-        AgentEvent::new(AgentKind::Claude, AgentEventKind::PromptSubmit, None).encode(),
+        AgentEvent::new(AgentKind::Claude, AgentEventKind::PromptSubmit, None, None).encode(),
     )
     .unwrap();
     // The foreground job becomes the agent at once; a subshell in the same job reports
@@ -797,6 +799,117 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
 
 #[cfg(target_os = "linux")]
 #[test]
+fn shutdown_keeps_hook_ids_while_observed_process_exits_clear_them() {
+    use std::os::unix::fs::PermissionsExt as _;
+    for exited in [false, true] {
+        let root =
+            std::env::temp_dir().join(format!("condr-resume-tail-{}-{exited}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for id in ["first", "second", "tail"] {
+            std::fs::write(
+                root.join(id),
+                AgentEvent::new(
+                    AgentKind::Codex,
+                    AgentEventKind::Stop,
+                    None,
+                    Some(id.into()),
+                )
+                .encode(),
+            )
+            .unwrap();
+        }
+        let script = root.join("codex");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+cat "$CONDR_TEST_EVENTS_DIR/first"
+while IFS= read -r line; do
+  case "$line" in switch | exit | tail) ;; *) continue ;; esac
+  if [ "$line" = tail ]; then
+    cat "$CONDR_TEST_EVENTS_DIR/tail"
+    printf 'tail-hook\n'
+  else
+    cat "$CONDR_TEST_EVENTS_DIR/second"
+    printf 'switched-hook\n'
+  fi
+  [ "$line" = exit ] && exit 1
+done
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = CommandBuilder::new("/bin/bash");
+        command.args(["--noprofile", "--norc", "-i"]);
+        command.env("CONDR_ENV", "1");
+        command.env("CONDR_TEST_EVENTS_DIR", &root);
+        let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(8, 120)).unwrap();
+        runtime
+            .write(
+                b"trap '' HUP TERM; \"$CONDR_TEST_EVENTS_DIR/codex\"; printf 'job-finished\\n'\r"
+                    .to_vec(),
+            )
+            .unwrap();
+        wait_for_agent(
+            &runtime,
+            AgentSnapshot {
+                kind: AgentKind::Codex,
+                state: AgentState::Idle,
+                session_id: Some("first".into()),
+            },
+            "first hook was not detected",
+        );
+        runtime
+            .write(if exited {
+                b"exit\r".to_vec()
+            } else {
+                b"switch\r".to_vec()
+            })
+            .unwrap();
+        wait_for_text(&runtime, "switched-hook");
+        if exited {
+            // The echo contains the command, so wait for the marker on its own line.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !runtime
+                .visible_text()
+                .lines()
+                .any(|line| line.trim() == "job-finished")
+            {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let mut probe = runtime.agent_probe().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while probe.poll() != Some(None) {
+                assert!(Instant::now() < deadline, "process exit was not observed");
+                std::thread::sleep(probe.poll_interval());
+            }
+        }
+        // An active agent's new hook deliberately has no monitor poll/commit yet.
+        runtime.prepare_agent_shutdown();
+        let resume = runtime.agent_resume().flatten();
+        assert_eq!(
+            resume.as_ref().map(|resume| resume.session_id.as_str()),
+            if exited { None } else { Some("second") }
+        );
+        if !exited {
+            // A hook received after tracking stops still belongs to the final flush.
+            runtime.write(b"tail\r".to_vec()).unwrap();
+            wait_for_text(&runtime, "tail-hook");
+        }
+        runtime.close().unwrap();
+        let resume = runtime.agent_resume().flatten();
+        assert_eq!(
+            resume.as_ref().map(|resume| resume.session_id.as_str()),
+            if exited { None } else { Some("tail") },
+            "terminal output: {:?}",
+            runtime.visible_text()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn foreground_agent_survives_its_process_group_leader_exiting() {
     let mut command = CommandBuilder::new("/bin/bash");
     command.args(["--noprofile", "--norc", "-i"]);
@@ -813,6 +926,7 @@ fn foreground_agent_survives_its_process_group_leader_exiting() {
     wait_for_agent(
         &runtime,
         AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
         },

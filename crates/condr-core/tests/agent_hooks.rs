@@ -15,7 +15,7 @@ fn target() -> (HookTarget, PathBuf) {
     let target = HookTarget {
         claude_dir: root.join(".claude"),
         codex_dir: root.join(".codex"),
-        opencode_plugins_dir: root.join(".config/opencode/plugins"),
+        opencode_dir: root.join(".config/opencode"),
         command: "\"/opt/condr bin/condr\"".to_owned(),
     };
     (target, root)
@@ -83,11 +83,18 @@ fn a_broken_or_oversized_settings_file_is_never_overwritten() {
 fn the_opencode_plugin_is_an_owned_file_that_never_replaces_a_foreign_one() {
     let (target, root) = target();
     let path = target.path(AgentKind::OpenCode);
-    assert!(path.ends_with(".config/opencode/plugins/condr.js"));
+    assert!(path.ends_with(".config/opencode/condr-tui.js"));
     assert_eq!(
         state(&target, AgentKind::OpenCode).unwrap(),
         HooksState::Missing
     );
+
+    std::fs::create_dir_all(&target.opencode_dir).unwrap();
+    let config = target.opencode_dir.join("tui.json");
+    let jsonc = target.opencode_dir.join("tui.jsonc");
+    let original_jsonc = "{ // user's settings\n  \"theme\": \"custom\"\n}\n";
+    std::fs::write(&config, r#"{"plugin":["another-plugin"],"scroll_speed":4}"#).unwrap();
+    std::fs::write(&jsonc, original_jsonc).unwrap();
 
     install(&target, AgentKind::OpenCode).unwrap();
     assert_eq!(
@@ -96,18 +103,21 @@ fn the_opencode_plugin_is_an_owned_file_that_never_replaces_a_foreign_one() {
     );
     let plugin = std::fs::read_to_string(&path).unwrap();
     assert!(plugin.contains(r#"const exe = "/opt/condr bin/condr""#));
-    assert!(plugin.contains("agent-hook opencode ${event}"));
+    assert!(plugin.contains("[\"agent-hook\", \"opencode\", event]"));
     assert!(plugin.contains(r#"process.env.CONDR_ENV !== "1""#));
-    assert!(plugin.contains(r#"else if (event.type === "session.created") roots.add(info.id)"#));
+    assert!(plugin.contains("api.route.current"));
+    assert_eq!(
+        read(&config)["plugin"],
+        serde_json::json!(["another-plugin", "./condr-tui.js"])
+    );
+    assert_eq!(read(&config)["scroll_speed"], 4);
+    assert_eq!(std::fs::read_to_string(&jsonc).unwrap(), original_jsonc);
     for event in [
         "session-start",
         "prompt-submit",
         "stop",
-        "stop-failure",
         "permission-request",
         "question-asked",
-        "tool-complete",
-        "tool-start",
     ] {
         assert!(
             plugin.contains(&format!("\"{event}\"")),
@@ -137,9 +147,13 @@ fn the_opencode_plugin_is_an_owned_file_that_never_replaces_a_foreign_one() {
 
     uninstall(&target, AgentKind::OpenCode).unwrap();
     assert!(!path.exists());
+    assert_eq!(
+        read(&config)["plugin"],
+        serde_json::json!(["another-plugin"])
+    );
     uninstall(&target, AgentKind::OpenCode).unwrap();
 
-    // Somebody else's condr.js is left alone by install and uninstall alike.
+    // Somebody else's plugin file is left alone by install and uninstall alike.
     std::fs::write(&path, "export const Mine = async () => ({})\n").unwrap();
     assert_eq!(
         state(&target, AgentKind::OpenCode).unwrap(),

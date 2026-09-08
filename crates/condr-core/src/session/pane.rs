@@ -1,6 +1,29 @@
 use super::*;
 
 impl Session {
+    /// Replaces the native conversation to resume; reports whether it changed.
+    pub fn set_pane_agent_resume(
+        &mut self,
+        pane_id: PaneId,
+        resume: Option<crate::AgentResume>,
+    ) -> bool {
+        if resume
+            .as_ref()
+            .is_some_and(|resume| !crate::agent::valid_session_id(&resume.session_id))
+        {
+            return false;
+        }
+        let Some((workspace, tab, pane)) = self.find_pane(pane_id) else {
+            return false;
+        };
+        let pane = &mut self.workspaces[workspace].tabs[tab].panes[pane];
+        if pane.agent_resume == resume {
+            return false;
+        }
+        pane.agent_resume = resume;
+        true
+    }
+
     pub fn split_pane(
         &mut self,
         pane_id: PaneId,
@@ -47,6 +70,7 @@ impl Session {
         tab.panes.push(Pane {
             id: new_pane_id,
             cwd: Some(cwd),
+            agent_resume: None,
         });
         workspace.active_tab = tab_id;
         self.active_workspace = Some(workspace_id);

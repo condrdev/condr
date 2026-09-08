@@ -298,10 +298,14 @@ impl BoundServer {
                     .flatten(),
             );
             state.terminal_instances.clear();
+            for runtime in state.terminals.values() {
+                runtime.prepare_agent_shutdown();
+            }
             std::mem::take(&mut state.terminals)
         };
         let mut terminal_result = Ok(());
         let mut final_cwds = Vec::new();
+        let mut final_resumes = Vec::new();
         for (&pane_id, runtime) in &mut terminals {
             let cwd_probe = runtime.cwd_probe();
             let before_close = cwd_probe.observe();
@@ -320,10 +324,16 @@ impl BoundServer {
             if let Some(cwd) = shutdown_cwd(before_close, cwd_probe.observe()) {
                 final_cwds.push((pane_id, cwd));
             }
+            if let Some(resume) = runtime.agent_resume() {
+                final_resumes.push((pane_id, resume));
+            }
         }
         let mut persistence = {
             let mut state = self.state.lock().expect("server state lock poisoned");
             state.record_terminal_cwds(final_cwds);
+            for (pane_id, resume) in final_resumes {
+                state.record_agent_resume(pane_id, resume);
+            }
             state.persistence.take()
         };
         let persistence_result = persistence

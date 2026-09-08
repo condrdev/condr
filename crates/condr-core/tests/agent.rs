@@ -105,6 +105,7 @@ fn a_new_agent_is_unknown_until_it_reports_and_a_restart_is_a_new_agent() {
     assert_eq!(
         detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), now),
         AgentPublish::Snapshot(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
         })
@@ -126,6 +127,7 @@ fn a_new_agent_is_unknown_until_it_reports_and_a_restart_is_a_new_agent() {
     assert_eq!(
         detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now),
         AgentPublish::Snapshot(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Claude,
             state: AgentState::Unknown,
         })
@@ -153,7 +155,7 @@ fn unidentified_probes_need_six_misses_but_a_bare_shell_needs_one() {
 fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
     use AgentEventKind::*;
     let event = |kind, source: Option<&str>| {
-        AgentEvent::new(AgentKind::Claude, kind, source.map(str::to_owned))
+        AgentEvent::new(AgentKind::Claude, kind, source.map(str::to_owned), None)
     };
     let apply = |state, kind, source| event(kind, source).apply(state);
     assert_eq!(
@@ -197,7 +199,7 @@ fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
     let encoded = event(SessionStart, Some("resume")).encode();
     assert_eq!(
         encoded,
-        b"\x1b]777;notify;condr://agent;{\"v\":1,\"agent\":\"claude\",\"event\":\"session-start\",\"source\":\"resume\"}\x07"
+        b"\x1b]777;notify;condr://agent;{\"v\":1,\"agent\":\"claude\",\"event\":\"session-start\",\"source\":\"resume\",\"session_id\":null}\x07"
             .to_vec()
     );
     let payload = &encoded[2..encoded.len() - 1];
@@ -207,7 +209,7 @@ fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
     );
     assert_eq!(
         AgentEvent::decode(br#"777;notify;condr://agent;{"v":1,"agent":"codex","event":"stop"}"#),
-        Some(AgentEvent::new(AgentKind::Codex, Stop, None))
+        Some(AgentEvent::new(AgentKind::Codex, Stop, None, None))
     );
     assert_eq!(
         AgentEvent::decode(br#"777;notify;condr://agent;{"v":2,"agent":"codex","event":"stop"}"#),
@@ -227,7 +229,7 @@ fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
 fn events_only_count_for_the_agent_the_process_table_shows() {
     let mut detector = AgentDetector::new();
     let now = Instant::now();
-    let stop = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None);
+    let stop = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None, None);
     // Before any probe, or over a bare shell, events do not seed an agent.
     assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
     detector.observe_process(ProcessProbeResult::ShellOnly, now);
@@ -237,6 +239,7 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
         detector.observe_event(&AgentEvent::new(
             AgentKind::Claude,
             AgentEventKind::Stop,
+            None,
             None
         )),
         AgentPublish::Nothing
@@ -244,6 +247,7 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
     assert_eq!(
         detector.observe_event(&stop),
         AgentPublish::Snapshot(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Idle,
         })
@@ -259,6 +263,7 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
     assert_eq!(
         detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), now),
         AgentPublish::Snapshot(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
         })
@@ -275,10 +280,12 @@ fn an_agent_behind_an_opaque_launcher_is_named_by_its_own_events() {
         AgentKind::Claude,
         AgentEventKind::SessionStart,
         Some("startup".into()),
+        None,
     );
     assert_eq!(
         detector.observe_event(&start),
         AgentPublish::Snapshot(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Claude,
             state: AgentState::Idle,
         })
@@ -300,5 +307,157 @@ fn an_agent_behind_an_opaque_launcher_is_named_by_its_own_events() {
     assert_eq!(
         detector.observe_process(ProcessProbeResult::ShellOnly, now),
         AgentPublish::Cleared
+    );
+}
+
+#[test]
+fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
+    let mut detector = AgentDetector::new();
+    let now = Instant::now();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now);
+    let event = |id: &str, source: &str| {
+        AgentEvent::new(
+            AgentKind::Claude,
+            AgentEventKind::SessionStart,
+            Some(source.into()),
+            Some(id.into()),
+        )
+    };
+    for (id, source) in [
+        ("first", "startup"),
+        ("second", "clear"),
+        ("third", "resume"),
+    ] {
+        let event = event(id, source);
+        let bytes = event.encode();
+        assert_eq!(
+            AgentEvent::decode(&bytes[2..bytes.len() - 1]),
+            Some(event.clone())
+        );
+        assert_eq!(
+            detector.observe_event(&event),
+            AgentPublish::Snapshot(AgentSnapshot {
+                kind: AgentKind::Claude,
+                state: AgentState::Idle,
+                session_id: Some(id.into()),
+            })
+        );
+    }
+    // A late hook without an ID retains the current one; a forged sibling cannot replace it.
+    assert_eq!(
+        detector.observe_event(&AgentEvent::new(
+            AgentKind::Codex,
+            AgentEventKind::Stop,
+            None,
+            Some("wrong".into())
+        )),
+        AgentPublish::Nothing
+    );
+    assert_eq!(
+        detector.observe_event(&AgentEvent::new(
+            AgentKind::Claude,
+            AgentEventKind::PromptSubmit,
+            None,
+            None
+        )),
+        AgentPublish::Snapshot(AgentSnapshot {
+            kind: AgentKind::Claude,
+            state: AgentState::Working,
+            session_id: Some("third".into()),
+        })
+    );
+    assert_eq!(
+        detector.observe_process(ProcessProbeResult::ShellOnly, now),
+        AgentPublish::Cleared
+    );
+    assert_eq!(
+        detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now),
+        AgentPublish::Snapshot(AgentSnapshot {
+            kind: AgentKind::Claude,
+            state: AgentState::Unknown,
+            session_id: None
+        })
+    );
+    for id in ["--last", "../conversation", "a;exit"] {
+        let bytes = event(id, "resume").encode();
+        assert_eq!(AgentEvent::decode(&bytes[2..bytes.len() - 1]), None);
+    }
+}
+
+#[test]
+fn a_conversation_reference_round_trips_without_copying_it_to_new_panes() {
+    use condr_core::{AgentResume, Session, SessionSnapshot, SplitDirection};
+    for (kind, flag) in [
+        (AgentKind::Claude, "--resume"),
+        (AgentKind::Codex, "resume"),
+        (AgentKind::OpenCode, "--session"),
+    ] {
+        let mut session = Session::new();
+        session.create_workspace(std::env::temp_dir()).unwrap();
+        let pane = session
+            .active_workspace()
+            .unwrap()
+            .active_tab()
+            .focused_pane()
+            .id();
+        let resume = AgentResume {
+            kind,
+            session_id: "ses_123-abc".into(),
+        };
+        assert_eq!(resume.args(), [flag, "ses_123-abc"]);
+        assert!(session.set_pane_agent_resume(pane, Some(resume.clone())));
+        let other = session
+            .split_pane(pane, SplitDirection::Horizontal, 0.5)
+            .unwrap();
+        let restored = Session::restore(
+            SessionSnapshot::from_bytes(&session.snapshot().to_bytes().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored.pane(pane).unwrap().agent_resume(), Some(&resume));
+        assert_eq!(restored.pane(other).unwrap().agent_resume(), None);
+        assert!(!session.set_pane_agent_resume(
+            pane,
+            Some(AgentResume {
+                kind,
+                session_id: "--last".into()
+            })
+        ));
+        assert_eq!(session.pane(pane).unwrap().agent_resume(), Some(&resume));
+    }
+}
+
+#[test]
+fn resume_seeding_never_overrides_a_new_session_and_any_process_exit_clears_it() {
+    use condr_core::AgentResume;
+    let mut detector = AgentDetector::new();
+    let saved = AgentResume {
+        kind: AgentKind::Codex,
+        session_id: "saved".into(),
+    };
+    detector.restore(saved.clone());
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Codex), Instant::now());
+    assert_eq!(detector.resume(), Some(Some(saved)));
+    detector.observe_event(&AgentEvent::new(
+        AgentKind::Codex,
+        AgentEventKind::SessionStart,
+        Some("startup".into()),
+        None,
+    ));
+    assert_eq!(
+        detector.resume(),
+        Some(None),
+        "a new session must not recover the old ID"
+    );
+    detector.observe_event(&AgentEvent::new(
+        AgentKind::Codex,
+        AgentEventKind::Stop,
+        None,
+        Some("new".into()),
+    ));
+    detector.observe_process(ProcessProbeResult::ShellOnly, Instant::now());
+    assert_eq!(
+        detector.resume(),
+        Some(None),
+        "every observed exit cancels recovery"
     );
 }

@@ -62,10 +62,14 @@ The interactive command-line environment presented by a Pane. A Terminal remains
 A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`) comes only from hooks Condr installed into that CLI, delivered in-band as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed.
 _Avoid_: Pane
 
+**Agent Conversation**:
+A conversation owned and stored by a native Agent CLI, identified by that CLI’s session ID. A Pane retains a reference to its running Agent Conversation so a replacement Server can reopen it.
+_Avoid_: Session, process snapshot
+
 **Managed Worktree**:
 A linked Git worktree created by Condr and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact.
 _Avoid_: Git Workspace, any detected worktree
 
 **Session Snapshot**:
-A durable description of Session structure, including an empty Session, used to rebuild the arrangement after a Server restart. It does not represent terminal history, live processes, or agent conversations; reconnecting a Client to a running Server instead receives the live Session layout and Pane views, including Agents that are still running.
+A durable description of Session structure and references to Agent Conversations, including an empty Session, used to rebuild the arrangement after a Server restart. It contains neither terminal history nor live processes nor conversation contents; those contents remain owned by the native CLI.
 _Avoid_: Backup, process snapshot

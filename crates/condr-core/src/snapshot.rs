@@ -55,6 +55,7 @@ pub(crate) struct TabSnapshot {
 pub(crate) struct PaneSnapshot {
     pub(crate) id: PaneId,
     pub(crate) cwd: Option<PathBuf>,
+    pub(crate) agent_resume: Option<crate::AgentResume>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

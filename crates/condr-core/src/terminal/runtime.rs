@@ -485,6 +485,19 @@ impl TerminalRuntime {
         recent_text(&terminal, lines)
     }
 
+    /// A Server launch failure is visible in the same Pane as native CLI failures.
+    pub fn print_notice(&self, message: &str) {
+        let message: String = message.chars().filter(|ch| !ch.is_control()).collect();
+        let mut terminal = self.terminal.lock().expect("terminal state lock poisoned");
+        let mut processor: Processor = Processor::new();
+        processor.advance(
+            &mut *terminal,
+            format!("\r\n[Condr] {message}\r\n").as_bytes(),
+        );
+        drop(terminal);
+        publish_view(&self.revision, &self.update_sender);
+    }
+
     pub fn agent_probe(&self) -> Option<TerminalAgentProbe> {
         self.master.as_ref()?;
         Some(TerminalAgentProbe {
@@ -493,11 +506,39 @@ impl TerminalRuntime {
             process: self.process,
             notices: Arc::clone(&self.notices),
             revision: Arc::clone(&self.revision),
-            detector: AgentDetector::new(),
             activity_revision: None,
             #[cfg(unix)]
             last_foreground_group: None,
         })
+    }
+
+    pub fn restore_agent(&self, resume: crate::AgentResume) {
+        self.notices
+            .lock()
+            .expect("terminal notices lock poisoned")
+            .agent
+            .restore(resume);
+    }
+
+    /// Freeze process tracking before shutdown so stopping our own processes cannot
+    /// turn the last live conversation into an ordinary agent exit.
+    pub fn prepare_agent_shutdown(&self) {
+        self.notices
+            .lock()
+            .expect("terminal notices lock poisoned")
+            .agent_stopping = true;
+    }
+
+    /// Returns the last hook decision even if its monitor has not committed it yet.
+    /// After closing, merges tail hooks using the identity frozen before signalling.
+    pub fn agent_resume(&self) -> Option<Option<crate::AgentResume>> {
+        let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+        if notices.agent_stopping {
+            for event in std::mem::take(&mut notices.agent_events) {
+                notices.agent.observe_event(&event);
+            }
+        }
+        notices.agent.resume()
     }
 
     pub fn scroll(&self, scroll: TerminalScroll) {

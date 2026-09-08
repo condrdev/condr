@@ -225,7 +225,7 @@ fn bootstrap_for_session(connection: &ServerConnection, session: &Session) -> Se
             .iter()
             .map(|(&pane_id, agent)| PaneAgentSnapshot {
                 pane_id,
-                agent: *agent,
+                agent: agent.clone(),
             })
             .collect(),
         workspace_git: connection.workspace_git.values().cloned().collect(),

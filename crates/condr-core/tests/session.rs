@@ -1010,7 +1010,11 @@ fn encoded_tab(id: u64, pane_ids: Vec<u64>, layout: EncodedLayout) -> EncodedTab
         focused_pane: pane_ids[0],
         panes: pane_ids
             .into_iter()
-            .map(|id| EncodedPane { id, cwd: None })
+            .map(|id| EncodedPane {
+                id,
+                cwd: None,
+                agent_resume: None,
+            })
             .collect(),
         focus_history: Vec::new(),
         layout,
@@ -1077,6 +1081,7 @@ struct EncodedTab {
 struct EncodedPane {
     id: u64,
     cwd: Option<PathBuf>,
+    agent_resume: Option<condr_core::AgentResume>,
 }
 
 #[derive(serde::Serialize)]

@@ -78,7 +78,7 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
             vec![(
                 tab_id,
                 String::new(),
-                vec![(pane_id, Some(root))],
+                vec![(pane_id, Some(root), Option::<condr_core::AgentResume>::None)],
                 pane_id,
                 Vec::<PaneId>::new(),
                 (u32::MAX, vec![(0u32, pane_id)]),

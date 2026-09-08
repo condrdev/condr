@@ -10,8 +10,8 @@ pub mod uri;
 
 pub use agent::{
     AgentDetector, AgentDisplayState, AgentEvent, AgentEventKind, AgentKind, AgentPublish,
-    AgentSnapshot, AgentState, AgentTracker, ProcessInfo, ProcessProbeResult, hook as agent_hook,
-    hooks as agent_hooks, identify_agent_among, identify_agent_process,
+    AgentResume, AgentSnapshot, AgentState, AgentTracker, ProcessInfo, ProcessProbeResult,
+    hook as agent_hook, hooks as agent_hooks, identify_agent_among, identify_agent_process,
 };
 pub use git::{
     GitError, GitHeadFingerprint, GitRepository, create_worktree, default_worktree_root,
@@ -30,12 +30,12 @@ pub use terminal::{
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneEnvironment,
     TerminalAgentProbe, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
     TerminalCursor, TerminalCursorShape, TerminalCwdProbe, TerminalFrameError,
-    TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel,
-    TerminalNoticeBatch, TerminalNoticeProbe, TerminalPosition, TerminalRuntime, TerminalScroll,
-    TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize, TerminalUpdate,
-    TerminalView, TerminalViewDelta, TerminalViewFrame, TerminalViewSource, default_indexed_color,
-    default_shell_program,
+    TerminalHyperlinkBudget, TerminalKey, TerminalLaunchProbe, TerminalModifiers,
+    TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking,
+    TerminalMouseWheel, TerminalNoticeBatch, TerminalNoticeProbe, TerminalPosition,
+    TerminalRuntime, TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide,
+    TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    TerminalViewSource, default_indexed_color, default_shell_program,
 };
 
 pub const APP_NAME: &str = "Condr";

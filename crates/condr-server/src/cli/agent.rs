@@ -187,6 +187,7 @@ pub(super) fn agent_info(info: condr_core::protocol::AgentInfo) -> Value {
         "name": info.name,
         "agent": info.agent.kind.id(),
         "agent_status": agent_state_name(info.agent.state),
+        "session_id": info.agent.session_id,
         "launch_pending": info.launch_pending,
     })
 }

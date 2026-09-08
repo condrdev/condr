@@ -19,6 +19,8 @@ pub(super) struct TerminalNotices {
     pub(super) clipboard: Option<String>,
     /// Hook events since the agent probe last drained them, oldest first.
     pub(super) agent_events: Vec<AgentEvent>,
+    pub(super) agent: AgentDetector,
+    pub(super) agent_stopping: bool,
 }
 
 pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;

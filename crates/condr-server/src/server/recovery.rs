@@ -153,6 +153,7 @@ impl RuntimeState {
             .into_iter()
             .map(|(pane_id, runtime, updates)| state.install_terminal(pane_id, runtime, updates))
             .collect();
+        state.queue_agent_resumes();
         if restored && (!failed_panes.is_empty() || repaired_worktrees != 0 || repaired_cwds != 0) {
             state.schedule_snapshot(state.session.snapshot());
         }

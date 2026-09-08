@@ -185,7 +185,7 @@ pub(super) fn pane_info(
         .agents
         .iter()
         .find(|agent| agent.pane_id == pane_id)
-        .map(|agent| agent.agent);
+        .map(|agent| &agent.agent);
     PaneInfo {
         pane_id: pane_id.as_u64(),
         tab_id: tab.id().as_u64(),

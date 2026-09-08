@@ -32,7 +32,7 @@ pub enum ProcessProbeResult {
 }
 
 /// What the detector wants published after a tick.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentPublish {
     Nothing,
     Snapshot(AgentSnapshot),
@@ -46,6 +46,11 @@ pub enum AgentPublish {
 pub struct AgentDetector {
     agent: Option<AgentKind>,
     state: Option<AgentState>,
+    session_id: Option<String>,
+    /// No observation yet / cleared / the current native conversation. Kept alongside
+    /// the live state so shutdown can read a hook before its monitor commits it.
+    resume: Option<Option<AgentResume>>,
+    restoring: Option<AgentResume>,
     /// The agent was named by its own events, not the process table: a launcher Condr
     /// cannot see through is running it. Only a bare shell clears it then.
     seeded: bool,
@@ -63,6 +68,16 @@ impl AgentDetector {
 
     pub fn agent(&self) -> Option<AgentKind> {
         self.agent
+    }
+
+    pub fn resume(&self) -> Option<Option<AgentResume>> {
+        self.resume.clone()
+    }
+
+    /// Seed only the process we are about to resume; hooks remain authoritative.
+    pub fn restore(&mut self, resume: AgentResume) {
+        self.resume = Some(Some(resume.clone()));
+        self.restoring = Some(resume);
     }
 
     /// How long the caller should wait before the next tick.
@@ -117,9 +132,19 @@ impl AgentDetector {
                     return AgentPublish::Nothing;
                 }
                 self.agent = Some(agent);
+                self.session_id = self
+                    .restoring
+                    .take()
+                    .filter(|resume| resume.kind == agent)
+                    .map(|resume| resume.session_id);
+                self.resume = Some(self.session_id.as_ref().map(|id| AgentResume {
+                    kind: agent,
+                    session_id: id.clone(),
+                }));
                 self.seeded = false;
                 self.state = Some(AgentState::Unknown);
                 AgentPublish::Snapshot(AgentSnapshot {
+                    session_id: self.session_id.clone(),
                     kind: agent,
                     state: AgentState::Unknown,
                 })
@@ -142,6 +167,9 @@ impl AgentDetector {
                     return AgentPublish::Nothing;
                 }
                 self.agent = None;
+                self.session_id = None;
+                self.resume = Some(None);
+                self.restoring = None;
                 self.state = None;
                 self.seeded = false;
                 self.consecutive_misses = 0;
@@ -170,11 +198,29 @@ impl AgentDetector {
             return AgentPublish::Nothing;
         }
         let next = event.apply(state);
-        if next == state {
+        let session_id = event.session_id.clone().or_else(|| {
+            (event.event != AgentEventKind::SessionStart
+                || event.source.as_deref() == Some("compact"))
+            .then(|| self.session_id.clone())
+            .flatten()
+        });
+        if event.session_id.is_some()
+            || (event.event == AgentEventKind::SessionStart
+                && event.source.as_deref() != Some("compact"))
+        {
+            self.restoring = None;
+            self.resume = Some(session_id.as_ref().map(|id| AgentResume {
+                kind: agent,
+                session_id: id.clone(),
+            }));
+        }
+        if next == state && session_id == self.session_id {
             return AgentPublish::Nothing;
         }
         self.state = Some(next);
+        self.session_id = session_id;
         AgentPublish::Snapshot(AgentSnapshot {
+            session_id: self.session_id.clone(),
             kind: agent,
             state: next,
         })

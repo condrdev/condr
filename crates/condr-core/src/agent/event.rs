@@ -64,15 +64,22 @@ pub struct AgentEvent {
     /// matters, because it happens mid-turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    pub session_id: Option<String>,
 }
 
 impl AgentEvent {
-    pub fn new(agent: AgentKind, event: AgentEventKind, source: Option<String>) -> Self {
+    pub fn new(
+        agent: AgentKind,
+        event: AgentEventKind,
+        source: Option<String>,
+        session_id: Option<String>,
+    ) -> Self {
         Self {
             version: AGENT_EVENT_WIRE_VERSION,
             agent,
             event,
             source,
+            session_id,
         }
     }
 
@@ -86,7 +93,12 @@ impl AgentEvent {
     pub fn decode(payload: &[u8]) -> Option<Self> {
         let json = payload.strip_prefix(AGENT_EVENT_OSC_PREFIX.as_bytes())?;
         let event: Self = serde_json::from_slice(json).ok()?;
-        (event.version == AGENT_EVENT_WIRE_VERSION).then_some(event)
+        (event.version == AGENT_EVENT_WIRE_VERSION
+            && event
+                .session_id
+                .as_deref()
+                .is_none_or(super::valid_session_id))
+        .then_some(event)
     }
 
     /// The state after this event, from `state`. Turn boundaries map to Idle and

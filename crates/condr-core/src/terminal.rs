@@ -86,6 +86,7 @@ pub use input::{
     TerminalCommand, TerminalKey, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
     TerminalMousePosition, TerminalMouseWheel, TerminalScroll,
 };
+pub use launch::TerminalLaunchProbe;
 pub use portable_pty::CommandBuilder;
 pub use probes::{TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe};
 pub use runtime::TerminalRuntime;

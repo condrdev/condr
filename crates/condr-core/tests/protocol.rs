@@ -209,6 +209,7 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
         BootstrapRecord::Agent(PaneAgentSnapshot {
             pane_id,
             agent: AgentSnapshot {
+                session_id: None,
                 kind: condr_core::AgentKind::Codex,
                 state: condr_core::AgentState::Working,
             },
@@ -380,6 +381,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
         BootstrapRecord::Agent(PaneAgentSnapshot {
             pane_id,
             agent: AgentSnapshot {
+                session_id: None,
                 kind: condr_core::AgentKind::Claude,
                 state: condr_core::AgentState::Idle,
             },

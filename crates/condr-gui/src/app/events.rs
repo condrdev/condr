@@ -202,7 +202,9 @@ impl Condr {
                         // completion behind another window still shows as done.
                         let visible = self.focused_terminal == Some((key, pane_id));
                         if let Some(agent) = agent {
-                            let previous = self.connections[index].agents.insert(pane_id, agent);
+                            let previous = self.connections[index]
+                                .agents
+                                .insert(pane_id, agent.clone());
                             // The Server only publishes changed snapshots, so Unknown here is
                             // a new process, not a repeat that would reopen a manual collapse.
                             let started = previous

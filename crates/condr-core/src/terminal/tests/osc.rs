@@ -32,7 +32,7 @@ fn osc_cwd_parser_handles_fragmented_st_and_bel_sequences() {
 fn agent_event_sequences_are_cut_out_before_the_vt_and_reported() {
     let mut scanner = OscScanner::default();
     let mut reported = Vec::new();
-    let event = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None);
+    let event = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None, None);
     let mut stream = b"before".to_vec();
     stream.extend(event.encode());
     stream.extend(b"after\x1b]0;title\x07\x1b[31mred");
@@ -56,7 +56,12 @@ fn agent_event_sequences_are_cut_out_before_the_vt_and_reported() {
 fn an_agent_event_split_across_reads_is_held_back_then_dropped() {
     let mut scanner = OscScanner::default();
     let mut reported = Vec::new();
-    let event = AgentEvent::new(AgentKind::Claude, AgentEventKind::PermissionRequest, None);
+    let event = AgentEvent::new(
+        AgentKind::Claude,
+        AgentEventKind::PermissionRequest,
+        None,
+        None,
+    );
     let encoded = event.encode();
     let mut vt = Vec::new();
     // One byte at a time: the hardest fragmentation.
@@ -83,6 +88,7 @@ fn an_agent_event_split_across_reads_is_held_back_then_dropped() {
         [OscReport::Agent(AgentEvent::new(
             AgentKind::Codex,
             AgentEventKind::PromptSubmit,
+            None,
             None
         ))]
     );
@@ -124,7 +130,7 @@ fn a_held_sequence_that_turns_out_not_to_be_an_event_reaches_the_vt_in_order() {
 
 #[test]
 fn a_bare_escape_ends_a_string_the_way_the_vt_reads_it() {
-    let event = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None);
+    let event = AgentEvent::new(AgentKind::Codex, AgentEventKind::Stop, None, None);
     let encoded = event.encode();
 
     // A Sixel/kitty image cut off by ^C: the VT recovers at the next ESC, and so must the
@@ -188,7 +194,8 @@ fn the_scanner_produces_the_same_bytes_and_reports_however_a_stream_is_chunked()
         seed ^= seed << 17;
         seed
     };
-    let event = AgentEvent::new(AgentKind::Claude, AgentEventKind::PromptSubmit, None).encode();
+    let event =
+        AgentEvent::new(AgentKind::Claude, AgentEventKind::PromptSubmit, None, None).encode();
     let tokens: [&[u8]; 13] = [
         b"text ",
         &event,

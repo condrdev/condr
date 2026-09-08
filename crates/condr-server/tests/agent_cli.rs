@@ -13,6 +13,8 @@ use serde_json::Value;
 
 struct Server {
     child: Child,
+    #[cfg_attr(not(unix), allow(dead_code))]
+    command: Command,
     root: PathBuf,
     endpoint: Endpoint,
 }
@@ -57,7 +59,7 @@ case "$1" in
   --exit) exit 0 ;;
   --blocked) report permission-request ;;
   --working) report prompt-submit ;;
-  --silent) ;;
+  --silent | resume) ;;
   *) report session-start ;;
 esac
 while IFS= read -r line; do
@@ -83,7 +85,8 @@ done
         let path =
             std::env::join_paths([bin, PathBuf::from("/usr/bin"), PathBuf::from("/bin")]).unwrap();
         let endpoint = Endpoint::local(root.join("server.sock"));
-        let child = Command::new(env!("CARGO_BIN_EXE_condr"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_condr"));
+        command
             .args(["server", "run", "--endpoint"])
             .arg(endpoint.as_local_path().unwrap())
             .arg("--snapshot")
@@ -94,11 +97,11 @@ done
             .env("CONDR_TEST_ARGS", root.join("args"))
             .env("CONDR_TEST_PROMPTS", root.join("prompts"))
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::inherit());
+        let child = command.spawn().unwrap();
         let server = Self {
             child,
+            command,
             root,
             endpoint,
         };
@@ -598,4 +601,86 @@ fn a_codex_that_says_nothing_at_startup_is_ready_once_identified_and_takes_a_fir
         ]),
         "agent_timeout"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn hooks_persist_the_conversation_and_a_cold_restart_resumes_it_once() {
+    use condr_core::{PaneId, Session, SessionSnapshot};
+    for (kind, flag) in [("claude", "--resume"), ("codex", "resume")] {
+        let mut server = Server::start();
+        let pane = server.pane();
+        server.ok(&["agent", "start", "worker", "--kind", kind, "--pane", &pane]);
+        // Codex start can finish before its first hook, even in this fixture.
+        let ready = server.ok(&["agent", "wait", &pane, "--until", "idle"]);
+        assert_eq!(ready["agent"]["session_id"], "fixture");
+        condr_server::stop_server(&server.endpoint).unwrap();
+        assert!(server.child.wait().unwrap().success());
+        let read_snapshot = || {
+            Session::restore(
+                SessionSnapshot::from_bytes(
+                    &std::fs::read(server.root.join("session.bin")).unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let pane_id = PaneId::from_u64(pane.parse().unwrap());
+        assert_eq!(
+            read_snapshot()
+                .pane(pane_id)
+                .unwrap()
+                .agent_resume()
+                .unwrap()
+                .session_id,
+            "fixture"
+        );
+        server.child = server.command.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if let Ok(mut connection) =
+                ClientConnection::connect_overview(&server.endpoint, "resume-test")
+                && let Ok(Ok(AgentResponse::List(agents))) = connection.agent(AgentCommand::List)
+                && agents
+                    .iter()
+                    .any(|a| a.agent.session_id.as_deref() == Some("fixture"))
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "{kind} was not resumed");
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(
+            std::fs::read_to_string(server.root.join("args")).unwrap(),
+            format!("{flag}\nfixture\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(server.root.join("starts"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        // Restored Agents can accept work; the name was runtime-only, so target the Pane.
+        server.ok(&["agent", "prompt", &pane, "continue", "--wait"]);
+        server.ok(&["pane", "run", &pane, "quit"]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let result = server.ok(&["agent", "list"]);
+            if result["agents"].as_array().unwrap().is_empty() {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(50));
+        }
+        condr_server::stop_server(&server.endpoint).unwrap();
+        assert!(server.child.wait().unwrap().success());
+        assert!(
+            read_snapshot()
+                .pane(pane_id)
+                .unwrap()
+                .agent_resume()
+                .is_none()
+        );
+    }
 }

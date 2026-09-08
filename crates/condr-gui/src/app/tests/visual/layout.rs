@@ -315,6 +315,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         &view,
         pane_id,
         Some(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Idle,
         }),
@@ -382,6 +383,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             &view,
             pane_id,
             Some(AgentSnapshot {
+                session_id: None,
                 kind: AgentKind::Codex,
                 state,
             }),
@@ -397,6 +399,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         &view,
         pane_id,
         Some(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
         }),
@@ -416,6 +419,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         &view,
         pane_id,
         Some(AgentSnapshot {
+            session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
         }),

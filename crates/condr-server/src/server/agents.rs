@@ -9,10 +9,19 @@ const MAX_AGENT_TIMEOUT_MS: u64 = 300_000;
 
 #[derive(Default)]
 pub(super) struct AgentControl {
+    resumes: HashMap<PaneId, RestoringAgent>,
     names: HashMap<PaneId, ManagedAgent>,
     live: HashMap<PaneId, AgentKind>,
     generations: HashMap<PaneId, u64>,
     pub(super) waiters: HashMap<u64, AgentWaiter>,
+}
+
+#[derive(Clone)]
+struct RestoringAgent {
+    resume: condr_core::AgentResume,
+    installation: condr_core::agent_discovery::AgentInstallation,
+    deadline: Instant,
+    submitted: bool,
 }
 
 struct ManagedAgent {
@@ -60,13 +69,152 @@ fn reply(outbound: &ClientWriter, result: Result<AgentResponse, AgentError>) {
     }
 }
 
+/// Prepares a native resume outside the Session lock, then verifies the same Terminal
+/// still owns the reservation before enqueueing it once.
+pub(super) fn resume_agent(
+    state: &Arc<Mutex<RuntimeState>>,
+    pane_id: PaneId,
+    instance_id: u64,
+) -> bool {
+    let (resume, probe) = {
+        let state = state.lock().expect("server state lock poisoned");
+        if !state.terminal_is_current(pane_id, instance_id)
+            || state.closing_terminals.contains(&pane_id)
+            || state.agent_control.live.contains_key(&pane_id)
+        {
+            return false;
+        }
+        let Some(resume) = state.agent_control.resumes.get(&pane_id) else {
+            return false;
+        };
+        (resume.clone(), state.terminals[&pane_id].launch_probe())
+    };
+    let result = if Instant::now() >= resume.deadline {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "agent resume timed out",
+        ))
+    } else if resume.submitted {
+        return true;
+    } else {
+        probe.command(&resume.installation, &resume.resume.args())
+    };
+    let mut state = state.lock().expect("server state lock poisoned");
+    if !state.terminal_is_current(pane_id, instance_id)
+        || state.closing_terminals.contains(&pane_id)
+        || state.agent_control.live.contains_key(&pane_id)
+        || !state.agent_control.resumes.contains_key(&pane_id)
+    {
+        return false;
+    }
+    let result = result.and_then(|command| {
+        state.terminals[&pane_id].restore_agent(resume.resume);
+        state.terminals[&pane_id].submit(&command)
+    });
+    match result {
+        Ok(()) => {
+            state
+                .agent_control
+                .resumes
+                .get_mut(&pane_id)
+                .expect("reserved resume")
+                .submitted = true;
+            true
+        }
+        Err(error)
+            if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < resume.deadline =>
+        {
+            true
+        }
+        Err(error) => {
+            state.report_resume_failure(pane_id, &error.to_string());
+            state.agent_control.resumes.remove(&pane_id);
+            false
+        }
+    }
+}
+
 impl RuntimeState {
+    pub(super) fn queue_agent_resumes(&mut self) {
+        let installations = condr_core::agent_discovery::discover();
+        for &pane_id in self.terminals.keys() {
+            let Some(resume) = self
+                .session
+                .pane(pane_id)
+                .and_then(|pane| pane.agent_resume())
+            else {
+                continue;
+            };
+            let Some(installation) = installations.iter().find(|i| i.kind == resume.kind) else {
+                self.report_resume_failure(pane_id, "CLI is not on the Server's PATH");
+                continue;
+            };
+            self.agent_control.resumes.insert(
+                pane_id,
+                RestoringAgent {
+                    resume: resume.clone(),
+                    installation: installation.clone(),
+                    deadline: Instant::now() + Duration::from_secs(30),
+                    submitted: false,
+                },
+            );
+        }
+    }
+
+    fn report_resume_failure(&self, pane_id: PaneId, reason: &str) {
+        let Some(resume) = self
+            .session
+            .pane(pane_id)
+            .and_then(|pane| pane.agent_resume())
+        else {
+            return;
+        };
+        let message = format!(
+            "Could not resume {}: {reason}. Retry with: {} {}",
+            resume.kind.label(),
+            resume.kind.executable(),
+            resume.args().join(" "),
+        );
+        eprintln!("condr-server: Pane {}: {message}", pane_id.as_u64());
+        if let Some(terminal) = self.terminals.get(&pane_id) {
+            terminal.print_notice(&message);
+        }
+    }
+
+    pub(super) fn record_agent_resume(
+        &mut self,
+        pane_id: PaneId,
+        resume: Option<condr_core::AgentResume>,
+    ) {
+        // A final hook drain cannot revive a Terminal whose EOF was already handled.
+        let resume = resume.filter(|_| !self.exited_terminals.contains(&pane_id));
+        let previous = self
+            .session
+            .pane(pane_id)
+            .and_then(|pane| pane.agent_resume())
+            .cloned();
+        if self.session.set_pane_agent_resume(pane_id, resume) {
+            let snapshot = self.session.snapshot();
+            match validate_persistable_snapshot(&snapshot) {
+                Ok(()) => self.schedule_snapshot(snapshot),
+                Err(error) => {
+                    self.session.set_pane_agent_resume(pane_id, previous);
+                    eprintln!(
+                        "condr-server: cannot persist agent resume for Pane {}: {error}",
+                        pane_id.as_u64()
+                    );
+                }
+            }
+        }
+    }
+
     pub(super) fn handle_agent(
         &mut self,
         client_id: u64,
         outbound: &ClientWriter,
         command: AgentCommand,
         installations: Vec<condr_core::agent_discovery::AgentInstallation>,
+        launch: Option<(u64, io::Result<String>)>,
     ) {
         if self.agent_control.waiters.contains_key(&client_id) {
             reply(
@@ -78,7 +226,7 @@ impl RuntimeState {
             );
             return;
         }
-        match self.agent_request(client_id, outbound, command, installations) {
+        match self.agent_request(client_id, outbound, command, installations, launch) {
             Ok(Some(response)) => reply(outbound, Ok(response)),
             Ok(None) => self.complete_agent_waits(),
             Err(error) => reply(outbound, Err(error)),
@@ -91,6 +239,7 @@ impl RuntimeState {
         outbound: &ClientWriter,
         command: AgentCommand,
         installations: Vec<condr_core::agent_discovery::AgentInstallation>,
+        launch: Option<(u64, io::Result<String>)>,
     ) -> Result<Option<AgentResponse>, AgentError> {
         match command {
             AgentCommand::Available => Ok(Some(AgentResponse::Available(installations))),
@@ -159,26 +308,30 @@ impl RuntimeState {
                 let instance = self.agent_terminal_instance(pane_id)?;
                 if self.agent_control.names.contains_key(&pane_id)
                     || self.agent_control.live.contains_key(&pane_id)
+                    || self.agent_control.resumes.contains_key(&pane_id)
                 {
                     return Err(error(
                         "pane_busy",
                         "Pane already contains an agent or a pending launch",
                     ));
                 }
-                let installation = installations
-                    .into_iter()
-                    .find(|installation| installation.kind == kind)
-                    .ok_or_else(|| {
-                        error(
-                            "agent_unavailable",
-                            format!(
-                                "{} is not executable on the Server's PATH",
-                                kind.executable()
-                            ),
-                        )
-                    })?;
-                self.terminals[&pane_id]
-                    .start_agent(&installation, &args)
+                let (launch_instance, prepared) = launch.ok_or_else(|| {
+                    error(
+                        "agent_unavailable",
+                        format!(
+                            "{} is not executable on the Server's PATH",
+                            kind.executable()
+                        ),
+                    )
+                })?;
+                if launch_instance != instance {
+                    return Err(error(
+                        "pane_not_running",
+                        "Terminal changed during launch preparation",
+                    ));
+                }
+                prepared
+                    .and_then(|command| self.terminals[&pane_id].submit(&command))
                     .map_err(|err| {
                         error(
                             if err.kind() == io::ErrorKind::WouldBlock {
@@ -321,9 +474,10 @@ impl RuntimeState {
         let agent = self
             .agents
             .get(&pane_id)
-            .copied()
+            .cloned()
             .filter(|agent| agent.kind == kind)
             .unwrap_or(AgentSnapshot {
+                session_id: None,
                 kind,
                 state: AgentState::Unknown,
             });
@@ -395,6 +549,9 @@ impl RuntimeState {
     /// remains available to the GUI but cannot satisfy an orchestration wait.
     pub(super) fn agent_process_update(&mut self, pane_id: PaneId, next: Option<AgentKind>) {
         let previous = self.agent_control.live.get(&pane_id).copied();
+        if next.is_some() {
+            self.agent_control.resumes.remove(&pane_id);
+        }
         match next {
             Some(kind) => {
                 self.agent_control.live.insert(pane_id, kind);
@@ -561,6 +718,7 @@ impl RuntimeState {
     }
 
     pub(super) fn forget_agent_control(&mut self, pane_id: PaneId) {
+        self.agent_control.resumes.remove(&pane_id);
         self.agent_control.names.remove(&pane_id);
         self.agent_control.live.remove(&pane_id);
         self.agent_control.generations.remove(&pane_id);

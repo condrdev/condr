@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn an_observed_terminal_exit_cannot_be_undone_by_its_final_hook_drain() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    state
+        .session
+        .create_workspace(std::env::temp_dir())
+        .unwrap();
+    let pane_id = state
+        .session
+        .active_workspace()
+        .unwrap()
+        .active_tab()
+        .focused_pane()
+        .id();
+    let resume = condr_core::AgentResume {
+        kind: condr_core::AgentKind::Codex,
+        session_id: "saved".into(),
+    };
+    state.record_agent_resume(pane_id, Some(resume.clone()));
+    assert_eq!(
+        state.session.pane(pane_id).unwrap().agent_resume(),
+        Some(&resume)
+    );
+    state.exited_terminals.insert(pane_id);
+    state.record_agent_resume(pane_id, None);
+    state.record_agent_resume(pane_id, Some(resume));
+    assert_eq!(state.session.pane(pane_id).unwrap().agent_resume(), None);
+}
+
+#[test]
 fn snapshot_paths_use_platform_state_and_endpoint_identity() {
     let socket = snapshot_path_for_endpoint(std::path::Path::new("condr.sock")).unwrap();
     let pipe = snapshot_path_for_endpoint(std::path::Path::new("condr.pipe")).unwrap();

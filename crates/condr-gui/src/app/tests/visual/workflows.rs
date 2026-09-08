@@ -491,7 +491,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
     }));
 
     let event = |kind| {
-        condr_core::AgentEvent::new(AgentKind::Codex, kind, None)
+        condr_core::AgentEvent::new(AgentKind::Codex, kind, None, None)
             .encode()
             .iter()
             .map(|byte| format!("\\{byte:03o}"))

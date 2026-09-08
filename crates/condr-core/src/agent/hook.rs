@@ -57,7 +57,7 @@ pub fn run(agent: &str, event: &str) -> bool {
     let Ok(Some(mut terminal)) = wait.recv_timeout(OPEN_DEADLINE) else {
         return false;
     };
-    let bytes = AgentEvent::new(agent, event, source).encode();
+    let bytes = AgentEvent::new(agent, event, source, input.session_id).encode();
     terminal
         .write_all(&bytes)
         .and_then(|()| terminal.flush())
@@ -67,6 +67,7 @@ pub fn run(agent: &str, event: &str) -> bool {
 #[derive(Default)]
 struct HookInput {
     source: Option<String>,
+    session_id: Option<String>,
     tool_name: Option<String>,
 }
 
@@ -97,6 +98,7 @@ impl HookInput {
         Self {
             source: field("source").filter(|source| SESSION_SOURCES.contains(&source.as_str())),
             tool_name: field("tool_name"),
+            session_id: field("session_id").filter(|id| super::valid_session_id(id)),
         }
     }
 }
@@ -277,16 +279,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_known_session_source_and_the_tool_name_are_kept_from_the_hook_input() {
+    fn hook_input_keeps_the_native_session_id_and_bounded_status_fields() {
         let input = HookInput::parse(
             br#"{"session_id":"abc","source":"compact","cwd":"/x","tool_name":"Bash"}"#,
         );
+        assert_eq!(input.session_id.as_deref(), Some("abc"));
         assert_eq!(input.source.as_deref(), Some("compact"));
         assert_eq!(input.tool_name.as_deref(), Some("Bash"));
         let long = format!(r#"{{"source":"{}"}}"#, "x".repeat(5000));
         assert_eq!(HookInput::parse(long.as_bytes()).source, None);
         assert_eq!(HookInput::parse(br#"{"session_id":"abc"}"#).source, None);
         assert_eq!(HookInput::parse(b"not json").tool_name, None);
+        for id in [
+            "",
+            "--last",
+            "a\nb",
+            "../session",
+            "a;b",
+            "a b",
+            &"x".repeat(257),
+        ] {
+            let json = serde_json::json!({"session_id": id}).to_string();
+            assert_eq!(HookInput::parse(json.as_bytes()).session_id, None, "{id:?}");
+        }
     }
 
     #[test]

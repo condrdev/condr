@@ -20,6 +20,7 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
                 panes: vec![EncodedPane {
                     id: MAX_STABLE_ID,
                     cwd: Some(PathBuf::from("projects/boundary")),
+                    agent_resume: None,
                 }],
                 focused_pane: MAX_STABLE_ID,
                 focus_history: Vec::new(),
@@ -87,6 +88,7 @@ struct EncodedTab {
 struct EncodedPane {
     id: u64,
     cwd: Option<PathBuf>,
+    agent_resume: Option<condr_core::AgentResume>,
 }
 
 #[derive(Serialize)]

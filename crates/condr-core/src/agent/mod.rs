@@ -89,8 +89,10 @@ pub enum AgentState {
     Blocked,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentSnapshot {
+    /// The native CLI conversation identifier, reported by a hook or retained for resume.
+    pub session_id: Option<String>,
     pub kind: AgentKind,
     pub state: AgentState,
 }
@@ -156,4 +158,32 @@ impl AgentTracker {
             (AgentState::Blocked, _) => AgentDisplayState::Blocked,
         }
     }
+}
+
+/// A native conversation to reopen in a fresh shell after a Server restart.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentResume {
+    pub kind: AgentKind,
+    pub session_id: String,
+}
+
+impl AgentResume {
+    pub fn args(&self) -> Vec<String> {
+        let flag = match self.kind {
+            AgentKind::Claude => "--resume",
+            AgentKind::Codex => "resume",
+            AgentKind::OpenCode => "--session",
+        };
+        vec![flag.into(), self.session_id.clone()]
+    }
+}
+
+/// Native IDs are opaque tokens, never paths, shell syntax, or CLI options.
+pub(crate) fn valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 256
+        && id.as_bytes()[0].is_ascii_alphanumeric()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
 }

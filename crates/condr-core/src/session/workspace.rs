@@ -67,6 +67,7 @@ impl Session {
                 panes: vec![Pane {
                     id: pane_id,
                     cwd: Some(root_directory),
+                    agent_resume: None,
                 }],
                 focused_pane: pane_id,
                 focus_history: Vec::new(),
@@ -105,6 +106,7 @@ impl Session {
             panes: vec![Pane {
                 id: pane_id,
                 cwd: Some(cwd),
+                agent_resume: None,
             }],
             focused_pane: pane_id,
             focus_history: Vec::new(),

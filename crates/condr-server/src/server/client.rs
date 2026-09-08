@@ -224,7 +224,7 @@ pub(super) fn handle_client(
                                 })
                                 .map(|(pane_id, agent)| PaneAgentSnapshot {
                                     pane_id: *pane_id,
-                                    agent: *agent,
+                                    agent: agent.clone(),
                                 })
                                 .collect(),
                             zoomed_panes: state.zoomed_panes(),
@@ -972,6 +972,31 @@ pub(super) fn handle_client(
                 } else {
                     Vec::new()
                 };
+                let launch = if let condr_core::protocol::AgentCommand::Start {
+                    pane_id,
+                    kind,
+                    ref args,
+                    ..
+                } = command
+                {
+                    let probe = {
+                        let state = state.lock().expect("server state lock poisoned");
+                        state.terminal_instances.get(&pane_id).copied().zip(
+                            state
+                                .terminals
+                                .get(&pane_id)
+                                .map(TerminalRuntime::launch_probe),
+                        )
+                    };
+                    probe.and_then(|(instance, probe)| {
+                        installations
+                            .iter()
+                            .find(|installation| installation.kind == kind)
+                            .map(|installation| (instance, probe.command(installation, args)))
+                    })
+                } else {
+                    None
+                };
                 let mut state = state.lock().expect("server state lock poisoned");
                 if server_id != state.server_id
                     || session_id != state.session_id
@@ -989,7 +1014,7 @@ pub(super) fn handle_client(
                 } else if let Some(result) = hooks {
                     queue_message(&outbound, ServerMessage::AgentResult { result });
                 } else {
-                    state.handle_agent(client_id, &outbound, command, installations);
+                    state.handle_agent(client_id, &outbound, command, installations, launch);
                 }
                 false
             }

@@ -89,7 +89,6 @@ pub struct TerminalAgentProbe {
     pub(super) process: ProcessProbe,
     pub(super) notices: SharedTerminalNotices,
     pub(super) revision: Arc<AtomicU64>,
-    pub(super) detector: AgentDetector,
     /// The terminal revision the last tick saw; new output keeps process probing fast.
     pub(super) activity_revision: Option<u64>,
     #[cfg(unix)]
@@ -98,11 +97,27 @@ pub struct TerminalAgentProbe {
 
 impl TerminalAgentProbe {
     pub fn poll_interval(&self) -> Duration {
-        self.detector.poll_interval()
+        self.notices
+            .lock()
+            .expect("terminal notices lock poisoned")
+            .agent
+            .poll_interval()
     }
 
     pub fn agent(&self) -> Option<AgentKind> {
-        self.detector.agent()
+        self.notices
+            .lock()
+            .expect("terminal notices lock poisoned")
+            .agent
+            .agent()
+    }
+
+    pub fn resume(&self) -> Option<Option<crate::AgentResume>> {
+        self.notices
+            .lock()
+            .expect("terminal notices lock poisoned")
+            .agent
+            .resume()
     }
 
     /// One tick. `Some(None)` means the agent left; `Some(Some(_))` is the agent and state
@@ -110,26 +125,50 @@ impl TerminalAgentProbe {
     /// table has named the agent; events arriving before that force the probe.
     pub fn poll(&mut self) -> Option<Option<AgentSnapshot>> {
         let now = Instant::now();
-        let events = std::mem::take(
-            &mut self
-                .notices
-                .lock()
-                .expect("terminal notices lock poisoned")
-                .agent_events,
-        );
-        let force = self.foreground_changed() || (!events.is_empty() && self.agent().is_none());
+        let foreground_changed = self.foreground_changed();
         let revision = self.revision.load(Ordering::Acquire);
         let output_changed = self.activity_revision != Some(revision);
         self.activity_revision = Some(revision);
-        let mut publish = AgentPublish::Nothing;
-        if self
-            .detector
-            .wants_process_probe(now, force, output_changed)
-        {
-            publish = self.detector.observe_process(self.probe_process(), now);
+        let (probe, event_count) = {
+            let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+            if notices.agent_stopping {
+                return None;
+            }
+            let force = foreground_changed
+                || (!notices.agent_events.is_empty() && notices.agent.agent().is_none());
+            (
+                notices
+                    .agent
+                    .wants_process_probe(now, force, output_changed),
+                notices.agent_events.len(),
+            )
+        };
+        // OS work never holds the notice lock, so shutdown can freeze immediately.
+        let process = probe.then(|| self.probe_process());
+        let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
+        if notices.agent_stopping {
+            return None;
         }
-        for event in &events {
-            match self.detector.observe_event(event) {
+        let mut publish = AgentPublish::Nothing;
+        if let Some(process) = process.filter(|p| *p != ProcessProbeResult::ShellOnly) {
+            publish = notices.agent.observe_process(process, now);
+        }
+        // Hooks arriving during the OS probe belong to the next observation: the
+        // foreground job may have changed after we sampled it.
+        let count = event_count.min(notices.agent_events.len());
+        let events = notices.agent_events.drain(..count).collect::<Vec<_>>();
+        for event in events {
+            match notices.agent.observe_event(&event) {
+                AgentPublish::Nothing => {}
+                next => publish = next,
+            }
+        }
+        // An exit-tail hook belongs to the job that just left, not to the bare shell.
+        if process == Some(ProcessProbeResult::ShellOnly) {
+            match notices
+                .agent
+                .observe_process(ProcessProbeResult::ShellOnly, now)
+            {
                 AgentPublish::Nothing => {}
                 next => publish = next,
             }

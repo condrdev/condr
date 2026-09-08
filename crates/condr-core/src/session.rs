@@ -128,6 +128,7 @@ pub struct Tab {
 pub struct Pane {
     id: PaneId,
     cwd: Option<PathBuf>,
+    agent_resume: Option<crate::AgentResume>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,6 +323,10 @@ impl Tab {
 }
 
 impl Pane {
+    pub fn agent_resume(&self) -> Option<&crate::AgentResume> {
+        self.agent_resume.as_ref()
+    }
+
     pub fn id(&self) -> PaneId {
         self.id
     }

@@ -320,7 +320,10 @@ impl RuntimeState {
                 .iter()
                 .filter(|(pane_id, _)| !self.closing_terminals.contains(pane_id))
                 .filter(|(pane_id, _)| !self.exited_terminals.contains(pane_id))
-                .map(|(&pane_id, &agent)| PaneAgentSnapshot { pane_id, agent })
+                .map(|(&pane_id, agent)| PaneAgentSnapshot {
+                    pane_id,
+                    agent: agent.clone(),
+                })
                 .collect(),
             workspace_git: self
                 .workspace_git
