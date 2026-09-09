@@ -30,6 +30,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+      - name: Install Linux GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libvulkan1 patchelf desktop-file-utils
       - name: Install Rust
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal
@@ -188,7 +192,7 @@ jobs:
           test -f "dist/condr-macos-arm64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
           test -f dist/install-condr.sh
           test -f dist/install-condr.ps1
-          sha256sum dist/* > dist/SHA256SUMS
+          (cd dist && sha256sum * > SHA256SUMS)
       - name: Publish Development Build
         env:
           GH_TOKEN: ${{ github.token }}

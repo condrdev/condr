@@ -30,4 +30,5 @@ $iscc = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 is required' }
 & $iscc "/DAppVersion=$Version" "/DOutputBaseFilename=condr-windows-x86_64-$Version-$shortSha-setup" packaging\condr.iss
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 Copy-Item script\install-condr.ps1 (Join-Path $Dist install-condr.ps1) -Force

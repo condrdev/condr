@@ -7,6 +7,7 @@
 #endif
 
 [Setup]
+SourceDir=..
 AppId={{9B6E4C3B-502D-4CBF-A2E3-39B5E9E0A1A8}
 AppName=Condr
 AppVersion={#AppVersion}

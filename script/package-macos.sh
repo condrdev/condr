@@ -17,7 +17,7 @@ mkdir -p "$cli"
 install -m 755 target/release/condr "$cli/condr"
 install -m 644 LICENSE "$cli/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
-tar -C "$stage" -czf "$DIST_DIR/condr-macos-${CONDR_ARCH}-${asset_id}-cli.tar.gz" condr-cli
+tar -C "$stage" -czf "$DIST_DIR/condr-macos-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}-cli.tar.gz" condr-cli
 
 app="$stage/payload/Applications/Condr.app"
 mkdir -p "$app/Contents/MacOS" "$stage/payload/.local/bin"
@@ -40,4 +40,4 @@ sed "s/@VERSION@/$CONDR_VERSION/g" packaging/macos/Distribution.xml >"$stage/Dis
 pkgbuild --root "$stage/payload" --identifier dev.condr.condr --version "$CONDR_VERSION" \
   --install-location / "$stage/condr-component.pkg"
 productbuild --distribution "$stage/Distribution.xml" --package-path "$stage" \
-  "$DIST_DIR/condr-macos-${CONDR_ARCH}-${asset_id}.pkg"
+  "$DIST_DIR/condr-macos-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}.pkg"

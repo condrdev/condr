@@ -6,6 +6,7 @@ set -eu
 : "${CONDR_ARCH:=$(uname -m)}"
 : "${DIST_DIR:=dist}"
 : "${APPIMAGE_TOOL:=appimagetool}"
+: "${LINUXDEPLOY_TOOL:=linuxdeploy}"
 asset_id=$(printf '%s' "$CONDR_COMMIT" | cut -c 1-12)
 : "${APPIMAGE_OUTPUT:=$DIST_DIR/condr-linux-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}.AppImage}"
 
@@ -24,13 +25,13 @@ appdir="$stage/condr.AppDir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications"
 install -m 755 target/release/condr target/release/condr-gui "$appdir/usr/bin/"
 install -m 644 script/condr.desktop "$appdir/usr/share/applications/condr.desktop"
+install -m 644 LICENSE "$appdir/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$appdir/BUILD-COMMIT"
-if [ -n "${LINUXDEPLOY_TOOL:-}" ]; then
-    "$LINUXDEPLOY_TOOL" --appdir "$appdir" \
-        --executable target/release/condr \
-        --executable target/release/condr-gui \
-        --desktop-file script/condr.desktop
-fi
+"$LINUXDEPLOY_TOOL" --appdir "$appdir" \
+    --executable target/release/condr \
+    --executable target/release/condr-gui \
+    --desktop-file script/condr.desktop \
+    --icon-file packaging/linux/condr.svg
 cat >"$appdir/AppRun" <<'EOF'
 #!/bin/sh
 set -eu
@@ -39,7 +40,8 @@ if [ -n "${APPIMAGE:-}" ] && [ -n "${HOME:-}" ]; then
     root=${CONDR_INSTALL_DIR:-"$HOME/.local/opt/condr"}
     bin_dir="$HOME/.local/bin"
     mkdir -p "$root" "$bin_dir"
-    install -m 755 "$appdir/usr/bin/condr" "$root/condr"
+    install -m 755 "$appdir/usr/bin/condr" "$root/condr.new"
+    mv "$root/condr.new" "$root/condr"
     ln -sfn "$root/condr" "$bin_dir/condr"
     marker='# condr user bin'
     profile=${CONDR_PROFILE:-"$HOME/.profile"}

@@ -2,5 +2,6 @@
 Type=Application
 Name=Condr
 Exec=condr-gui
+Icon=condr
 Terminal=false
 Categories=Development;Utility;
