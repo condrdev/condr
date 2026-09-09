@@ -202,7 +202,7 @@ jobs:
 
           while IFS= read -r asset; do
             case "$asset" in
-            SHA256SUMS|install-condr.sh|install-condr.ps1) ;;
+              SHA256SUMS|install-condr.sh|install-condr.ps1) ;;
               *-"$short_sha"-*.*|*-"$short_sha".*) ;;
               *) gh release delete-asset dev "$asset" --yes ;;
             esac
