@@ -44,6 +44,7 @@ impl Condr {
                 .items_center()
                 .justify_center()
                 .gap_3()
+                .child(img(APP_LOGO).size_12())
                 .when_some(error, |view, error| {
                     view.child(div().text_sm().text_color(cx.theme().danger).child(error))
                 })
@@ -315,7 +316,7 @@ impl Render for Condr {
                     h_flex()
                         .gap_2()
                         .items_center()
-                        .child(Icon::new(IconName::SquareTerminal).small())
+                        .child(img(APP_LOGO).size_4().flex_shrink_0())
                         .child(condr_core::APP_NAME),
                 ),
             )

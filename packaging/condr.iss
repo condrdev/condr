@@ -20,7 +20,8 @@ PrivilegesRequired=lowest
 ChangesEnvironment=yes
 OutputDir=dist
 OutputBaseFilename={#OutputBaseFilename}
-UninstallDisplayIcon={app}\condr-gui.exe
+SetupIconFile=packaging\icons\condr.ico
+UninstallDisplayIcon={app}\condr.exe
 
 [Types]
 Name: "full"; Description: "GUI + CLI"
@@ -37,8 +38,8 @@ Source: "{#BundleDir}\LICENSE"; DestDir: "{app}"
 Source: "{#BundleDir}\BUILD-COMMIT"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\Condr"; Filename: "{app}\condr-gui.exe"; Components: full
-Name: "{userdesktop}\Condr"; Filename: "{app}\condr-gui.exe"; Components: full; Tasks: desktopicon
+Name: "{group}\Condr"; Filename: "{app}\condr-gui.exe"; AppUserModelID: "dev.condr.gui"; Components: full
+Name: "{userdesktop}\Condr"; Filename: "{app}\condr-gui.exe"; AppUserModelID: "dev.condr.gui"; Components: full; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked

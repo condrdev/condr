@@ -82,7 +82,7 @@ impl Condr {
                 display_id,
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(min_size),
-                ..TitleBar::window_options()
+                ..crate::assets::window_options()
             };
             let view_owner = owner.clone();
             let opened = cx.open_window(options, |window, cx| {
@@ -414,7 +414,14 @@ impl Render for SettingsWindow {
                     window.remove_window();
                 }
             })
-            .child(TitleBar::new().child(SETTINGS_WINDOW_TITLE))
+            .child(
+                TitleBar::new().child(
+                    h_flex()
+                        .gap_2()
+                        .child(img(APP_LOGO).size_4().flex_shrink_0())
+                        .child(SETTINGS_WINDOW_TITLE),
+                ),
+            )
             .child(tabs)
             .child(div().flex_1().min_h_0().child(content))
     }

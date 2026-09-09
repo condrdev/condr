@@ -1,9 +1,13 @@
-//! Embeds every vendored Alacritty color scheme as `(name, toml)` pairs.
+//! Embeds Windows branding and vendored Alacritty color schemes.
+
+#[path = "../../packaging/windows.rs"]
+mod windows;
 
 use std::path::Path;
 use std::{env, fs};
 
 fn main() {
+    windows::embed_icon("condr-gui");
     // Read at run time, not `env!` at compile time: a compiled-in path goes stale when the
     // checkout moves, and cargo has no reason to rebuild the script for that.
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set");

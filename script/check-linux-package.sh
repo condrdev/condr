@@ -16,6 +16,9 @@ readelf -h "$appdir/usr/bin/condr-gui" > /dev/null
 "$appdir/usr/bin/condr" server --help > /dev/null
 test -f "$appdir/condr.desktop"
 test -f "$appdir/condr.svg"
+cmp "$repo/packaging/icons/condr.svg" "$appdir/condr.svg"
+grep -Fxq 'Icon=condr' "$appdir/condr.desktop"
+grep -Fxq 'StartupWMClass=condr' "$appdir/condr.desktop"
 test -s "$appdir/LICENSE"
 test "$(cat "$appdir/BUILD-COMMIT")" = "$commit"
 

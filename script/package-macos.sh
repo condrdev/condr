@@ -27,7 +27,8 @@ printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
 tar -C "$stage" -czf "$DIST_DIR/condr-cli-${package_version}-macos-${arch}.tar.gz" condr-cli
 
 app="$stage/payload/Applications/Condr.app"
-mkdir -p "$app/Contents/MacOS" "$stage/payload/.local/bin"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$stage/payload/.local/bin"
+iconutil --convert icns --output "$app/Contents/Resources/condr.icns" packaging/icons/condr.iconset
 install -m 755 target/release/condr target/release/condr-gui "$app/Contents/MacOS/"
 install -m 644 LICENSE "$app/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$app/BUILD-COMMIT"
@@ -38,6 +39,7 @@ cat >"$app/Contents/Info.plist" <<EOF
 <key>CFBundleExecutable</key><string>condr-gui</string>
 <key>CFBundleIdentifier</key><string>dev.condr.gui</string>
 <key>CFBundleName</key><string>Condr</string>
+<key>CFBundleIconFile</key><string>condr.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>$CONDR_VERSION</string>
 </dict></plist>

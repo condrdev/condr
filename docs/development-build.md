@@ -241,4 +241,8 @@ Server 列表加载失败时会保留原文件，并禁止添加、编辑、删�
 
 ## 更新检查
 
+应用图标统一来自 `packaging/icons/condr.svg`。修改后运行
+`cargo run --locked -p condr-gui --example generate_icons` 并提交生成资源；
+各平台打包方式见 [应用图标说明](../packaging/icons/README.md)。
+
 解压后核对三个位置中的 commit SHA：release notes、artifact 文件名和包内 `BUILD-COMMIT`。更新滚动 release 后同时替换 Windows bundle 与 Linux Server，不要混用两个 SHA。

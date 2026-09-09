@@ -24,6 +24,25 @@ try {
   $commit = (Get-Content (Join-Path $bundle 'BUILD-COMMIT') -Raw).Trim()
   if ($env:GITHUB_SHA -and $commit -ne $env:GITHUB_SHA) { throw 'GUI ZIP has the wrong commit' }
 
+  # Exercise the shell's icon extraction, including the installer executable.
+  Add-Type -AssemblyName System.Drawing
+  $expectedIcon = [Drawing.Icon]::new((Join-Path $PSScriptRoot '../packaging/icons/condr.ico'), 32, 32)
+  $expectedBitmap = $expectedIcon.ToBitmap()
+  try {
+    foreach ($executable in (Join-Path $bundle 'condr.exe'), (Join-Path $bundle 'condr-gui.exe'), $installer[0].FullName) {
+      $icon = [Drawing.Icon]::ExtractAssociatedIcon($executable)
+      $bitmap = $icon.ToBitmap()
+      try {
+        if ($bitmap.Size -ne $expectedBitmap.Size) { throw "wrong icon size in $executable" }
+        for ($y = 0; $y -lt $bitmap.Height; $y++) {
+          for ($x = 0; $x -lt $bitmap.Width; $x++) {
+            if ($bitmap.GetPixel($x, $y) -ne $expectedBitmap.GetPixel($x, $y)) { throw "wrong application icon in $executable" }
+          }
+        }
+      } finally { $bitmap.Dispose(); $icon.Dispose() }
+    }
+  } finally { $expectedBitmap.Dispose(); $expectedIcon.Dispose() }
+
   # Install GUI + CLI, without creating shortcuts on the test runner.
   $process = Start-Process -FilePath $installer[0].FullName -Wait -PassThru -ArgumentList @(
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS', '/TYPE=full',

@@ -2,6 +2,23 @@ use gpui_kit::assets::Assets;
 use gpui_kit::{AssetSource, Result, SharedString};
 use std::borrow::Cow;
 
+pub(crate) const APP_LOGO: &str = "brand/condr.png";
+
+/// Shared by the main and Settings windows. Wayland looks up condr.desktop;
+/// X11 also accepts pixels directly. Windows uses the executable's icon resource.
+pub(crate) fn window_options() -> gpui_kit::WindowOptions {
+    gpui_kit::WindowOptions {
+        app_id: Some("condr".into()),
+        #[cfg(target_os = "linux")]
+        icon: Some(std::sync::Arc::new(
+            image::load_from_memory(include_bytes!("../../../packaging/icons/condr.png"))
+                .expect("bundled application icon is a valid PNG")
+                .into_rgba8(),
+        )),
+        ..gpui_kit::component::TitleBar::window_options()
+    }
+}
+
 /// Condr's own icons: status glyphs, then the marks of the agent CLIs (see
 /// assets/icons/NOTICE-AGENT-ICONS), kept for every agent Condr may come to name.
 const CONDR_ICON_PATHS: [&str; 17] = [
@@ -37,6 +54,9 @@ impl CondrAssets {
 impl AssetSource for CondrAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         match path {
+            APP_LOGO => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../../packaging/icons/condr.png"
+            )))),
             "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle.svg"
             )))),
@@ -94,6 +114,9 @@ impl AssetSource for CondrAssets {
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut assets = self.base.list(path)?;
+        if APP_LOGO.starts_with(path) {
+            assets.push(APP_LOGO.into());
+        }
         assets.extend(
             CONDR_ICON_PATHS
                 .into_iter()

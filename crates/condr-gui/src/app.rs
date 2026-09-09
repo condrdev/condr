@@ -16,7 +16,7 @@ mod terminal_input;
 mod terminal_panel;
 mod workspace;
 
-use crate::assets::CondrAssets;
+use crate::assets::{APP_LOGO, CondrAssets};
 use crate::terminal_element::{
     HoveredTerminalLink, TerminalElement, TerminalElementProps, TerminalPalette,
     TerminalRenderCache, link_at,
@@ -188,7 +188,7 @@ fn default_window_options(cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::centered(DEFAULT_WINDOW_SIZE, cx)),
         // The window draws its own title bar and owns dragging.
-        ..TitleBar::window_options()
+        ..crate::assets::window_options()
     }
 }
 

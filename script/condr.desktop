@@ -3,5 +3,6 @@ Type=Application
 Name=Condr
 Exec=condr-gui
 Icon=condr
+StartupWMClass=condr
 Terminal=false
 Categories=Development;Utility;

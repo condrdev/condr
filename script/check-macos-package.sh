@@ -74,6 +74,11 @@ if [ "$#" -gt 0 ]; then
     for attempt in 1 2; do
         /usr/sbin/installer -pkg "$package" -target CurrentUserHomeDirectory
         test "$(cat "$HOME/Applications/Condr.app/BUILD-COMMIT")" = "$commit"
+        contents="$HOME/Applications/Condr.app/Contents"
+        test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$contents/Info.plist")" = condr.icns
+        test -s "$contents/Resources/condr.icns"
+        iconutil --convert iconset --output "$stage/installed-$attempt.iconset" "$contents/Resources/condr.icns"
+        test -s "$stage/installed-$attempt.iconset/icon_512x512@2x.png"
         after=$(snapshot_profiles "$HOME")
         if [ "$attempt" = 2 ]; then test "$before" = "$after"; fi
         before=$after

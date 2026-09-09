@@ -208,6 +208,7 @@ pub(crate) fn run() {
 
     app.run(move |cx| {
         gpui_kit::init(cx);
+        cx.set_app_identity("dev.condr.gui", "Condr");
         bind_keys(cx);
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
