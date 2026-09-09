@@ -2,12 +2,28 @@
 set -eu
 
 : "${CONDR_VERSION:=0.1.0}"
-: "${MACOS_PKG_OUTPUT:=dist/condr-macos.pkg}"
-stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-pkg.XXXXXX")
+: "${CONDR_COMMIT:=$CONDR_VERSION}"
+: "${CONDR_ASSET_ID:=$CONDR_COMMIT}"
+: "${CONDR_ARCH:=$(uname -m)}"
+: "${DIST_DIR:=dist}"
+asset_id=$(printf '%s' "$CONDR_ASSET_ID" | cut -c 1-12)
+mkdir -p "$DIST_DIR"
+
+stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-macos.XXXXXX")
 trap 'rm -rf "$stage"' EXIT INT TERM
+
+cli="$stage/condr-cli"
+mkdir -p "$cli"
+install -m 755 target/release/condr "$cli/condr"
+install -m 644 LICENSE "$cli/LICENSE"
+printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
+tar -C "$stage" -czf "$DIST_DIR/condr-macos-${CONDR_ARCH}-${asset_id}-cli.tar.gz" condr-cli
+
 app="$stage/payload/Applications/Condr.app"
 mkdir -p "$app/Contents/MacOS" "$stage/payload/.local/bin"
 install -m 755 target/release/condr target/release/condr-gui "$app/Contents/MacOS/"
+install -m 644 LICENSE "$app/LICENSE"
+printf '%s\n' "$CONDR_COMMIT" >"$app/BUILD-COMMIT"
 cat >"$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -20,7 +36,8 @@ cat >"$app/Contents/Info.plist" <<EOF
 </dict></plist>
 EOF
 ln -s ../../Applications/Condr.app/Contents/MacOS/condr "$stage/payload/.local/bin/condr"
+sed "s/@VERSION@/$CONDR_VERSION/g" packaging/macos/Distribution.xml >"$stage/Distribution.xml"
 pkgbuild --root "$stage/payload" --identifier dev.condr.condr --version "$CONDR_VERSION" \
   --install-location / "$stage/condr-component.pkg"
-mkdir -p "$(dirname "$MACOS_PKG_OUTPUT")"
-productbuild --distribution packaging/macos/Distribution.xml --package-path "$stage" "$MACOS_PKG_OUTPUT"
+productbuild --distribution "$stage/Distribution.xml" --package-path "$stage" \
+  "$DIST_DIR/condr-macos-${CONDR_ARCH}-${asset_id}.pkg"

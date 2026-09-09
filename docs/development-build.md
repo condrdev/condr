@@ -145,7 +145,7 @@ Linux artifacts are built on Ubuntu 22.04 and require glibc 2.35 or newer.
 GUI + CLI 的 Linux 包使用 AppImage。构建机需要 `appimagetool`：
 
 ```bash
-CONDR_VERSION=<commit> script/build-appimage.sh
+CONDR_VERSION=<commit> script/package-linux.sh
 ```
 
 AppImage 需要先赋予执行权限；它只是桌面分发包，CLI-only 环境仍使用上面的安装脚本。AppImage 运行时使用临时挂载目录，因此 PATH 入口必须指向安装后的稳定用户目录。
@@ -153,7 +153,7 @@ AppImage 需要先赋予执行权限；它只是桌面分发包，CLI-only 环�
 macOS GUI + CLI 使用用户域 `.pkg`（可放进 DMG），构建机需要 Xcode Command Line Tools：
 
 ```bash
-CONDR_VERSION=<version> script/build-macos-pkg.sh
+CONDR_VERSION=<version> script/package-macos.sh
 ```
 
 根据机器架构下载一个 Server artifact：

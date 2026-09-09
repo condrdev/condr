@@ -9,5 +9,5 @@
   <choice id="condr" title="Condr" description="Condr GUI and CLI">
     <pkg-ref id="dev.condr.condr" />
   </choice>
-  <pkg-ref id="dev.condr.condr" version="0.1.0" onConclusion="none">condr-component.pkg</pkg-ref>
+  <pkg-ref id="dev.condr.condr" version="@VERSION@" onConclusion="none">condr-component.pkg</pkg-ref>
 </installer-gui-script>
