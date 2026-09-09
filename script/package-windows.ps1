@@ -19,7 +19,10 @@ Copy-Item target\release\condr.exe, LICENSE $cliStage
 Set-Content -Encoding ascii -Path (Join-Path $cliStage BUILD-COMMIT) -Value $Commit
 Compress-Archive -Path $cliStage -DestinationPath (Join-Path $Dist "condr-windows-x86_64-$Version-$shortSha-cli.zip") -Force
 
-$iscc = Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'
-if (-not (Test-Path $iscc)) { throw 'Inno Setup 6 is required' }
+$iscc = @(
+  (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+  (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $iscc) { throw 'Inno Setup 6 is required' }
 & $iscc "/DAppVersion=$Version" "/DOutputBaseFilename=condr-windows-x86_64-$Version-$shortSha-setup" packaging\condr.iss
 Copy-Item script\install-condr.ps1 (Join-Path $Dist install-condr.ps1) -Force
