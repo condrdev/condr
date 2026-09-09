@@ -17,8 +17,8 @@ Name: "full"; Description: "GUI + CLI"
 Name: "cli"; Description: "CLI only"
 
 [Components]
-Name: "full"; Types: full
-Name: "cli"; Types: full cli
+Name: "full"; Description: "GUI + CLI"; Types: full
+Name: "cli"; Description: "CLI only"; Types: full cli
 
 [Files]
 Source: "target\release\condr.exe"; DestDir: "{app}"; Components: full or cli
