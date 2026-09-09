@@ -32,6 +32,10 @@ printf '%s\n' "$CONDR_COMMIT" >"$appdir/BUILD-COMMIT"
     --executable target/release/condr-gui \
     --desktop-file script/condr.desktop \
     --icon-file packaging/linux/condr.svg
+# linuxdeploy creates AppRun as a symlink to the GUI. Replace the link, not its target.
+if [ -L "$appdir/AppRun" ]; then
+    unlink "$appdir/AppRun"
+fi
 cat >"$appdir/AppRun" <<'EOF'
 #!/bin/sh
 set -eu

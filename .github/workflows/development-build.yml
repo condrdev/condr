@@ -63,6 +63,8 @@ jobs:
           LINUXDEPLOY_TOOL: ${{ github.workspace }}/linuxdeploy
           APPIMAGE_EXTRACT_AND_RUN: '1'
         run: script/package-linux.sh
+      - name: Check Linux packages
+        run: sh script/check-linux-package.sh
       - uses: actions/upload-artifact@v7
         with:
           name: condr-linux-${{ matrix.arch }}
