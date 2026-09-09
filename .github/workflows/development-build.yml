@@ -130,9 +130,10 @@ jobs:
       - name: Package macOS artifacts
         env:
           CONDR_COMMIT: ${{ github.sha }}
-          CONDR_ASSET_ID: ${{ github.sha }}
           CONDR_ARCH: ${{ matrix.arch }}
         run: script/package-macos.sh
+      - name: Check macOS packages and PATH registration
+        run: python3 script/check-macos-package.py dist/*.pkg
       - uses: actions/upload-artifact@v7
         with:
           name: condr-macos-${{ matrix.arch }}
@@ -179,28 +180,16 @@ jobs:
           test -n "$version"
           echo "CONDR_VERSION=$version" >> "$GITHUB_ENV"
       - name: Verify release assets
+        env:
+          CONDR_COMMIT: ${{ github.sha }}
         run: |
-          short_sha="${GITHUB_SHA::12}"
-          test -f "dist/condr-windows-x86_64-${CONDR_VERSION}-${short_sha}.zip"
-          test -f "dist/condr-linux-x86_64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
-          test -f "dist/condr-linux-aarch64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
-          test -f "dist/condr-linux-x86_64-${CONDR_VERSION}-${short_sha}.AppImage"
-          test -f "dist/condr-linux-aarch64-${CONDR_VERSION}-${short_sha}.AppImage"
-          test -f "dist/condr-windows-x86_64-${CONDR_VERSION}-${short_sha}-setup.exe"
-          test -f "dist/condr-windows-x86_64-${CONDR_VERSION}-${short_sha}-cli.zip"
-          test -f "dist/condr-macos-x86_64-${CONDR_VERSION}-${short_sha}.pkg"
-          test -f "dist/condr-macos-arm64-${CONDR_VERSION}-${short_sha}.pkg"
-          test -f "dist/condr-macos-x86_64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
-          test -f "dist/condr-macos-arm64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
-          test -f dist/install-condr.sh
-          test -f dist/install-condr.ps1
+          sh script/check-release-assets.sh
           (cd dist && sha256sum * > SHA256SUMS)
       - name: Publish Development Build
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          short_sha="${GITHUB_SHA::12}"
           notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; all platform installers are rebuilt together."
 
           if gh release view dev >/dev/null 2>&1; then
@@ -211,9 +200,7 @@ jobs:
           fi
 
           while IFS= read -r asset; do
-            case "$asset" in
-              SHA256SUMS|install-condr.sh|install-condr.ps1) ;;
-              *-"$short_sha"-*.*|*-"$short_sha".*) ;;
-              *) gh release delete-asset dev "$asset" --yes ;;
-            esac
+            if [ ! -f "dist/$asset" ]; then
+              gh release delete-asset dev "$asset" --yes
+            fi
           done < <(gh release view dev --json assets --jq '.assets[].name')

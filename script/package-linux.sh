@@ -7,8 +7,16 @@ set -eu
 : "${DIST_DIR:=dist}"
 : "${APPIMAGE_TOOL:=appimagetool}"
 : "${LINUXDEPLOY_TOOL:=linuxdeploy}"
-asset_id=$(printf '%s' "$CONDR_COMMIT" | cut -c 1-12)
-: "${APPIMAGE_OUTPUT:=$DIST_DIR/condr-linux-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}.AppImage}"
+case "$CONDR_ARCH" in
+    x86_64|amd64) arch=x86_64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "unsupported architecture: $CONDR_ARCH" >&2; exit 1 ;;
+esac
+package_version=$CONDR_VERSION
+if [ "${CONDR_RELEASE:-0}" != 1 ]; then
+    package_version="$package_version-$(printf '%s' "$CONDR_COMMIT" | cut -c 1-12)"
+fi
+: "${APPIMAGE_OUTPUT:=$DIST_DIR/condr-${package_version}-linux-${arch}.AppImage}"
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-linux.XXXXXX")
 trap 'rm -rf "$stage"' EXIT INT TERM
@@ -19,7 +27,7 @@ install -m 755 target/release/condr "$cli/condr"
 install -m 644 LICENSE "$cli/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
 mkdir -p "$DIST_DIR"
-tar -C "$stage" -czf "$DIST_DIR/condr-linux-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}-cli.tar.gz" condr
+tar -C "$stage" -czf "$DIST_DIR/condr-cli-${package_version}-linux-${arch}.tar.gz" condr
 
 appdir="$stage/condr.AppDir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications"

@@ -13,10 +13,9 @@ try {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'pass -From ARCHIVE or install GitHub CLI (gh)' }
     $repo = $env:CONDR_REPO
     if (-not $repo) { $repo = 'condrdev/condr' }
-    $pattern = if ($CliOnly) { 'condr-windows-x86_64-*-cli.zip' } else { 'condr-windows-x86_64-*.zip' }
+    $pattern = if ($CliOnly) { 'condr-cli-*-windows-x86_64.zip' } else { 'condr-[0-9]*-windows-x86_64.zip' }
     gh release download $Version --repo $repo --dir $stage --pattern $pattern --pattern SHA256SUMS --clobber
     $archives = Get-ChildItem $stage -Filter '*.zip'
-    if (-not $CliOnly) { $archives = $archives | Where-Object { $_.Name -notlike '*-cli.zip' } }
     $selected = $archives | Select-Object -First 1
     if (-not $selected) { throw "no matching Windows archive for $(if ($CliOnly) { 'CLI-only' } else { 'GUI + CLI' })" }
     $From = $selected.FullName

@@ -17,7 +17,7 @@ test -f "$appdir/condr.svg"
 test -s "$appdir/LICENSE"
 test -s "$appdir/BUILD-COMMIT"
 
-set -- "$dist"/*-cli.tar.gz
+set -- "$dist"/condr-cli-*-linux-*.tar.gz
 [ "$#" -eq 1 ]
 CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
     HOME="$stage/home" sh script/install-condr.sh --from "$1"

@@ -3,7 +3,7 @@
 #define AppVersion "0.0.0"
 #endif
 #ifndef OutputBaseFilename
-#define OutputBaseFilename "condr-windows-x86_64-setup"
+#define OutputBaseFilename "condr-" + AppVersion + "-windows-x86_64"
 #endif
 
 [Setup]

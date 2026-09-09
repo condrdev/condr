@@ -3,10 +3,17 @@ set -eu
 
 : "${CONDR_VERSION:=$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"name":"condr-server","version":"\([^"]*\)".*/\1/p' | head -n 1)}"
 : "${CONDR_COMMIT:?CONDR_COMMIT is required}"
-: "${CONDR_ASSET_ID:=$CONDR_COMMIT}"
 : "${CONDR_ARCH:=$(uname -m)}"
 : "${DIST_DIR:=dist}"
-asset_id=$(printf '%s' "$CONDR_ASSET_ID" | cut -c 1-12)
+case "$CONDR_ARCH" in
+    x86_64|amd64) arch=x86_64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "unsupported architecture: $CONDR_ARCH" >&2; exit 1 ;;
+esac
+package_version=$CONDR_VERSION
+if [ "${CONDR_RELEASE:-0}" != 1 ]; then
+    package_version="$package_version-$(printf '%s' "$CONDR_COMMIT" | cut -c 1-12)"
+fi
 mkdir -p "$DIST_DIR"
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-macos.XXXXXX")
@@ -17,7 +24,7 @@ mkdir -p "$cli"
 install -m 755 target/release/condr "$cli/condr"
 install -m 644 LICENSE "$cli/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
-tar -C "$stage" -czf "$DIST_DIR/condr-macos-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}-cli.tar.gz" condr-cli
+tar -C "$stage" -czf "$DIST_DIR/condr-cli-${package_version}-macos-${arch}.tar.gz" condr-cli
 
 app="$stage/payload/Applications/Condr.app"
 mkdir -p "$app/Contents/MacOS" "$stage/payload/.local/bin"
@@ -38,6 +45,6 @@ EOF
 ln -s ../../Applications/Condr.app/Contents/MacOS/condr "$stage/payload/.local/bin/condr"
 sed "s/@VERSION@/$CONDR_VERSION/g" packaging/macos/Distribution.xml >"$stage/Distribution.xml"
 pkgbuild --root "$stage/payload" --identifier dev.condr.condr --version "$CONDR_VERSION" \
-  --install-location / "$stage/condr-component.pkg"
+  --scripts packaging/macos/scripts --install-location / "$stage/condr-component.pkg"
 productbuild --distribution "$stage/Distribution.xml" --package-path "$stage" \
-  "$DIST_DIR/condr-macos-${CONDR_ARCH}-${CONDR_VERSION}-${asset_id}.pkg"
+  "$DIST_DIR/condr-${package_version}-macos-${arch}.pkg"
