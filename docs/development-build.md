@@ -31,7 +31,7 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 Unix 使用仓库内的安装脚本。它把 CLI 放到用户目录并只追加自己的 PATH 标记；不会修改 Condr 数据目录：
 
 ```bash
-sh script/install-condr.sh --cli-only --from ./condr-linux-x86_64-<commit>.tar.gz
+sh script/install-condr.sh --cli-only --from ./condr-linux-x86_64-<commit>-cli.tar.gz
 ```
 
 安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `dev` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
