@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
   <title>Condr</title>
-  <options customize="never" hostArchitectures="x86_64,arm64" />
+  <options customize="never" hostArchitectures="@ARCH@" />
   <domains enable_anywhere="false" enable_currentUserHome="true" enable_localSystem="false" />
   <choices-outline>
     <line choice="condr" />

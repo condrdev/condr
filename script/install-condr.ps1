@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = $env:CONDR_INSTALL_DIR
 if (-not $root) { $root = Join-Path $env:LOCALAPPDATA 'Programs\Condr' }
-$root = [IO.Path]::GetFullPath($root)
+$root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($root)
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("condr-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force $stage | Out-Null
 $pending = $null

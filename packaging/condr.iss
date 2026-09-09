@@ -5,6 +5,9 @@
 #ifndef OutputBaseFilename
 #define OutputBaseFilename "condr-" + AppVersion + "-windows-x86_64"
 #endif
+#ifndef BundleDir
+#error "Build with script/package-windows.ps1 to supply BundleDir"
+#endif
 
 [Setup]
 SourceDir=..
@@ -28,8 +31,10 @@ Name: "full"; Description: "GUI + CLI"; Types: full
 Name: "cli"; Description: "CLI only"; Types: full cli
 
 [Files]
-Source: "target\release\condr.exe"; DestDir: "{app}"; Components: full or cli
-Source: "target\release\condr-gui.exe"; DestDir: "{app}"; Components: full
+Source: "{#BundleDir}\condr.exe"; DestDir: "{app}"; Components: full or cli
+Source: "{#BundleDir}\condr-gui.exe"; DestDir: "{app}"; Components: full
+Source: "{#BundleDir}\LICENSE"; DestDir: "{app}"
+Source: "{#BundleDir}\BUILD-COMMIT"; DestDir: "{app}"
 
 [Icons]
 Name: "{group}\Condr"; Filename: "{app}\condr-gui.exe"; Components: full

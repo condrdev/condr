@@ -33,6 +33,8 @@ try {
     Get-Content (Join-Path $stage 'installer.log')
     throw "GUI installer failed: $($process.ExitCode)"
   }
+  if ((Get-Content (Join-Path $gui 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'GUI installer has the wrong commit' }
+  if (-not (Test-Path (Join-Path $gui 'LICENSE') -PathType Leaf)) { throw 'GUI installer is missing LICENSE' }
   $guiHash = (Get-FileHash (Join-Path $gui 'condr-gui.exe')).Hash
   & (Join-Path $gui 'condr.exe') server --help
   if ($LASTEXITCODE -ne 0) { throw 'installed GUI bundle CLI failed' }
@@ -47,17 +49,28 @@ try {
   'yes' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName
   if ($LASTEXITCODE -ne 0 -or (Get-FileHash (Join-Path $gui 'condr.exe')).Hash -eq $previousHash) { throw 'confirmed installation did not update the CLI' }
 
-  # The CLI script must install by itself and update a shared GUI directory.
-  foreach ($destination in (Join-Path $stage 'cli'), $gui) {
-    $env:CONDR_INSTALL_DIR = $destination
-    & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName -Yes
-    & (Join-Path $destination 'condr.exe') server --help
-    if ($LASTEXITCODE -ne 0) { throw 'installed CLI failed' }
-    if ((Get-Content (Join-Path $destination 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'CLI ZIP has the wrong commit' }
-    $pathEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $destination })
-    if ($pathEntries.Count -ne 1) { throw 'CLI installer must register PATH exactly once' }
+  # Resolve a relative CLI directory against PowerShell's location, even when
+  # it differs from the process directory; also update an absolute GUI path.
+  $currentDirectory = Join-Path $stage 'current'
+  New-Item -ItemType Directory -Path $currentDirectory | Out-Null
+  $originalProcessDirectory = [Environment]::CurrentDirectory
+  Push-Location $currentDirectory
+  try {
+    [Environment]::CurrentDirectory = $stage
+    foreach ($destination in (Join-Path $currentDirectory 'cli'), $gui) {
+      $env:CONDR_INSTALL_DIR = if ($destination -eq $gui) { $gui } else { 'cli' }
+      & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName -Yes
+      & (Join-Path $destination 'condr.exe') server --help
+      if ($LASTEXITCODE -ne 0) { throw 'installed CLI failed' }
+      if ((Get-Content (Join-Path $destination 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'CLI ZIP has the wrong commit' }
+      $pathEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $destination })
+      if ($pathEntries.Count -ne 1) { throw 'CLI installer must register PATH exactly once' }
+    }
+  } finally {
+    Pop-Location
+    [Environment]::CurrentDirectory = $originalProcessDirectory
   }
-  if (Test-Path (Join-Path $stage 'cli\condr-gui.exe')) { throw 'CLI script installed a GUI' }
+  if (Test-Path (Join-Path $currentDirectory 'cli\condr-gui.exe')) { throw 'CLI script installed a GUI' }
   if ((Get-FileHash (Join-Path $gui 'condr-gui.exe')).Hash -ne $guiHash) { throw 'CLI update changed the GUI' }
 
   $rejected = $false

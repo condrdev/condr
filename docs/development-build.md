@@ -140,9 +140,9 @@ CLI-only 安装可直接运行仓库内脚本（PowerShell 会写入当前用户
 powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-cli-<version>-<short_sha>-windows-x86_64.zip
 ```
 
-GUI + CLI 的安装器工程在 `packaging/condr.iss`；使用 Inno Setup 构建时，默认安装两个相邻的 EXE，CLI-only 类型只安装 `condr.exe`。
+GUI + CLI 的安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器与 GUI ZIP 共用打包输入目录，默认安装两个相邻的 EXE，CLI-only 类型只安装 `condr.exe`；两种类型均附带 `LICENSE` 和 `BUILD-COMMIT`。
 
-`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 GUI ZIP、CLI ZIP 和 `.exe`，实际安装 GUI 包，并验证 CLI 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
+`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 GUI ZIP、CLI ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，并验证 CLI 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
 
 更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
@@ -166,7 +166,9 @@ CONDR_COMMIT=<commit> script/package-macos.sh
 
 `.pkg` 将 GUI 和 CLI 安装到 `~/Applications/Condr.app`，并建立 `~/.local/bin/condr` 链接。安装后脚本把 `~/.local/bin` 加入 zsh 的 `~/.zprofile`，以及 bash 首个存在的登录配置（依次为 `~/.bash_profile`、`~/.bash_login`、`~/.profile`，都不存在时创建 `~/.profile`）。保留原有内容，重复安装不会重复追加。使用标准启动配置的 zsh/bash 重新打开终端后即可运行 `condr --help`；已打开的终端需重新启动 shell。
 
-`sh script/check-macos-package.sh` 可在 Linux/macOS 检查 PATH 注册、配置保留与重复安装，无需 Python。macOS Actions 另传入生成的 `.pkg`，在 runner 当前用户下实际安装两次，并验证全新 zsh/bash 登录 shell 能直接执行 `condr server --help`。
+`sh script/check-macos-package.sh` 可在 Linux/macOS 检查 PATH 注册、配置保留与重复安装，无需 Python。macOS Actions 另传入生成的 `.pkg` 和 CLI tar.gz，核对安装包声明的架构，在 runner 当前用户下实际安装两次，并验证提交号及全新 zsh/bash 登录 shell 能直接执行 `condr server --help`。每个 `.pkg` 按构建架构声明 `hostArchitectures`。
+
+Linux/macOS 原生检查共用 `script/check-cli-package.sh`：归档必须只包含对应顶层目录、可执行 `condr`、`LICENSE` 和 `BUILD-COMMIT`；随后实际运行 CLI，验证安装、覆盖确认和已有 GUI 文件保留。提交号默认比对 `GITHUB_SHA`（本地为当前 HEAD），检查旧产物时用 `CONDR_COMMIT` 显式指定期望 SHA。
 
 根据机器架构下载一个 Server artifact：
 

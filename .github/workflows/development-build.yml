@@ -135,7 +135,7 @@ jobs:
           CONDR_ARCH: ${{ matrix.arch }}
         run: script/package-macos.sh
       - name: Check macOS packages and PATH registration
-        run: sh script/check-macos-package.sh dist/*.pkg
+        run: sh script/check-macos-package.sh dist/*.pkg dist/condr-cli-*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: condr-macos-${{ matrix.arch }}

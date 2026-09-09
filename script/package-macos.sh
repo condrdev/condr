@@ -43,7 +43,8 @@ cat >"$app/Contents/Info.plist" <<EOF
 </dict></plist>
 EOF
 ln -s ../../Applications/Condr.app/Contents/MacOS/condr "$stage/payload/.local/bin/condr"
-sed "s/@VERSION@/$CONDR_VERSION/g" packaging/macos/Distribution.xml >"$stage/Distribution.xml"
+sed -e "s/@VERSION@/$CONDR_VERSION/g" -e "s/@ARCH@/$arch/g" \
+  packaging/macos/Distribution.xml >"$stage/Distribution.xml"
 pkgbuild --root "$stage/payload" --identifier dev.condr.condr --version "$CONDR_VERSION" \
   --scripts packaging/macos/scripts --install-location / "$stage/condr-component.pkg"
 productbuild --distribution "$stage/Distribution.xml" --package-path "$stage" \

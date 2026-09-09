@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+repo=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+commit=${CONDR_COMMIT:-${GITHUB_SHA:-$(git -C "$repo" rev-parse HEAD)}}
 dist=${1:-dist}
 dist=$(cd "$dist" && pwd)
 stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-package-check.XXXXXX")
@@ -15,24 +17,9 @@ readelf -h "$appdir/usr/bin/condr-gui" > /dev/null
 test -f "$appdir/condr.desktop"
 test -f "$appdir/condr.svg"
 test -s "$appdir/LICENSE"
-test -s "$appdir/BUILD-COMMIT"
+test "$(cat "$appdir/BUILD-COMMIT")" = "$commit"
 
 set -- "$dist"/condr-cli-*-linux-*.tar.gz
 [ "$#" -eq 1 ]
-CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh script/install-condr.sh --from "$1"
-"$stage/home/.local/bin/condr" server --help > /dev/null
-printf '#!/bin/sh\necho previous-cli\n' >"$stage/install/condr"
-printf 'keep GUI\n' >"$stage/install/condr-gui"
-printf 'n\n' | CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh script/install-condr.sh --from "$1"
-test "$("$stage/install/condr")" = previous-cli
-printf 'Yes\n' | CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh script/install-condr.sh --from "$1"
-"$stage/home/.local/bin/condr" server --help > /dev/null
-CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh script/install-condr.sh --from "$1" --yes
-"$stage/home/.local/bin/condr" server --help > /dev/null
-test "$(cat "$stage/install/condr-gui")" = 'keep GUI'
-test "$(grep -Fxc '# condr user bin' "$stage/profile")" = 1
+CONDR_COMMIT="$commit" sh "$repo/script/check-cli-package.sh" "$1" condr
 echo 'Linux package content and CLI installation checks passed.'

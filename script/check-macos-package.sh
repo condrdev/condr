@@ -1,6 +1,6 @@
 #!/bin/sh
-# With no argument, check postinstall in temporary homes. Pass a .pkg on macOS
-# to also install it into the current user's home (intended for a test runner).
+# With no argument, check postinstall in temporary homes. Pass a .pkg and CLI
+# archive on macOS to also check native installation (intended for a test runner).
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
@@ -64,10 +64,16 @@ test -z "$(ls -A "$stage/installer-home")"
 echo 'macOS PATH registration checks passed.'
 
 if [ "$#" -gt 0 ]; then
-    test "$#" -eq 1 && test "$(uname -s)" = Darwin
+    test "$#" -eq 2
+    test "$(uname -s)" = Darwin
+    commit=${CONDR_COMMIT:-${GITHUB_SHA:-$(git -C "$repo" rev-parse HEAD)}}
+    CONDR_COMMIT="$commit" sh "$repo/script/check-cli-package.sh" "$2" condr-cli
     package=$(CDPATH= cd -- "$(dirname "$1")" && pwd)/$(basename "$1")
+    pkgutil --expand "$package" "$stage/package"
+    grep -Fq "hostArchitectures=\"$(uname -m)\"" "$stage/package/Distribution"
     for attempt in 1 2; do
         /usr/sbin/installer -pkg "$package" -target CurrentUserHomeDirectory
+        test "$(cat "$HOME/Applications/Condr.app/BUILD-COMMIT")" = "$commit"
         after=$(snapshot_profiles "$HOME")
         if [ "$attempt" = 2 ]; then test "$before" = "$after"; fi
         before=$after

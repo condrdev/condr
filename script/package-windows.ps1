@@ -32,5 +32,6 @@ $iscc = @(
   (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 is required' }
-& $iscc "/DAppVersion=$Version" "/DOutputBaseFilename=condr-$packageVersion-windows-x86_64" packaging\condr.iss
+$bundleDir = (Resolve-Path -LiteralPath $fullStage).Path
+& $iscc "/DBundleDir=$bundleDir" "/DAppVersion=$Version" "/DOutputBaseFilename=condr-$packageVersion-windows-x86_64" packaging\condr.iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
