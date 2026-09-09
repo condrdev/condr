@@ -38,3 +38,21 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Flags: preservestringtype
+
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  UserPath: string;
+  InstallPath: string;
+begin
+  if CurUninstallStep <> usUninstall then
+    exit;
+  InstallPath := ExpandConstant('{app}');
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', UserPath) then
+    exit;
+  StringChangeEx(UserPath, ';' + InstallPath, '', True);
+  StringChangeEx(UserPath, InstallPath + ';', '', True);
+  if CompareText(UserPath, InstallPath) = 0 then
+    UserPath := '';
+  RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', UserPath);
+end;
