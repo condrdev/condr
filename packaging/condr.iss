@@ -1,6 +1,9 @@
 #ifndef AppVersion
 #define AppVersion "0.1.0"
 #endif
+#ifndef OutputBaseFilename
+#define OutputBaseFilename "condr-windows-x86_64-setup"
+#endif
 
 [Setup]
 AppId={{9B6E4C3B-502D-4CBF-A2E3-39B5E9E0A1A8}
@@ -10,6 +13,8 @@ DefaultDirName={localappdata}\Programs\Condr
 DefaultGroupName=Condr
 PrivilegesRequired=lowest
 ChangesEnvironment=yes
+OutputDir=dist
+OutputBaseFilename={#OutputBaseFilename}
 UninstallDisplayIcon={app}\condr-gui.exe
 
 [Types]

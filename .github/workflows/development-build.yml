@@ -18,7 +18,7 @@ env:
 
 jobs:
   linux:
-    name: Linux server and CLI (${{ matrix.arch }})
+    name: Linux GUI, server and CLI (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -36,8 +36,8 @@ jobs:
           rustup default "$RUST_VERSION"
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-      - name: Build condr
-        run: cargo build --release --locked -p condr-server
+      - name: Build GUI and condr
+        run: cargo build --release --locked -p condr-gui -p condr-server
       - name: Smoke test condr
         run: target/release/condr server --help
       - name: Package condr
@@ -49,10 +49,20 @@ jobs:
           install -m 644 LICENSE dist/condr/LICENSE
           printf '%s\n' "$GITHUB_SHA" > dist/condr/BUILD-COMMIT
           tar -C dist -czf "dist/${package}.tar.gz" condr
+          tool_arch="${{ matrix.arch }}"
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${tool_arch}.AppImage" \
+            --output appimagetool
+          chmod +x appimagetool
+          APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE_TOOL="$PWD/appimagetool" \
+            APPIMAGE_OUTPUT="dist/condr-linux-${{ matrix.arch }}-${short_sha}.AppImage" \
+            CONDR_VERSION="$GITHUB_SHA" script/build-appimage.sh
       - uses: actions/upload-artifact@v7
         with:
           name: condr-linux-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.AppImage
           if-no-files-found: error
           retention-days: 1
 
@@ -84,11 +94,85 @@ jobs:
           Copy-Item "LICENSE" $stage
           Set-Content -Encoding ascii -Path (Join-Path $stage "BUILD-COMMIT") -Value $env:GITHUB_SHA
           Compress-Archive -Path $stage -DestinationPath "dist\$package.zip"
+          $cliStage = Join-Path "dist" "condr-cli"
+          New-Item -ItemType Directory -Force -Path $cliStage | Out-Null
+          Copy-Item "target\release\condr.exe" $cliStage
+          Copy-Item "LICENSE" $cliStage
+          Set-Content -Encoding ascii -Path (Join-Path $cliStage "BUILD-COMMIT") -Value $env:GITHUB_SHA
+          Compress-Archive -Path $cliStage -DestinationPath "dist\condr-windows-x86_64-$shortSha-cli.zip"
+      - name: Build GUI installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress --yes
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          $iscc = Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=0.1.0" "/DOutputBaseFilename=condr-windows-x86_64-$shortSha-setup" "packaging\condr.iss"
+      - name: Copy installer script
+        shell: pwsh
+        run: Copy-Item script\install-condr.ps1 dist\install-condr.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: condr-windows-x86_64
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/install-condr.ps1
           if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: macOS GUI, server and CLI (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+      - name: Build GUI and condr
+        run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Package GUI and CLI
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          mkdir -p dist/condr-cli
+          install -m 755 target/release/condr dist/condr-cli/condr
+          install -m 644 LICENSE dist/condr-cli/LICENSE
+          printf '%s\n' "$GITHUB_SHA" > dist/condr-cli/BUILD-COMMIT
+          tar -C dist -czf "dist/condr-macos-${{ matrix.arch }}-${short_sha}-cli.tar.gz" condr-cli
+          CONDR_VERSION=0.1.0 MACOS_PKG_OUTPUT="dist/condr-macos-${{ matrix.arch }}-${short_sha}.pkg" \
+            script/build-macos-pkg.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-macos-${{ matrix.arch }}
+          path: |
+            dist/*.pkg
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  install-scripts:
+    name: Installer scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Stage installer scripts
+        run: |
+          mkdir -p dist
+          cp script/install-condr.sh script/install-condr.ps1 dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-install-scripts
+          path: dist/install-condr.*
           retention-days: 1
 
   publish:
@@ -96,6 +180,8 @@ jobs:
     needs:
       - linux
       - windows-bundle
+      - macos
+      - install-scripts
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -110,6 +196,16 @@ jobs:
           test -f "dist/condr-windows-x86_64-${short_sha}.zip"
           test -f "dist/condr-linux-x86_64-${short_sha}.tar.gz"
           test -f "dist/condr-linux-aarch64-${short_sha}.tar.gz"
+          test -f "dist/condr-linux-x86_64-${short_sha}.AppImage"
+          test -f "dist/condr-linux-aarch64-${short_sha}.AppImage"
+          test -f "dist/condr-windows-x86_64-${short_sha}-setup.exe"
+          test -f "dist/condr-windows-x86_64-${short_sha}-cli.zip"
+          test -f "dist/condr-macos-x86_64-${short_sha}.pkg"
+          test -f "dist/condr-macos-arm64-${short_sha}.pkg"
+          test -f "dist/condr-macos-x86_64-${short_sha}-cli.tar.gz"
+          test -f "dist/condr-macos-arm64-${short_sha}-cli.tar.gz"
+          test -f dist/install-condr.sh
+          test -f dist/install-condr.ps1
           sha256sum dist/* > dist/SHA256SUMS
       - name: Publish Development Build
         env:
@@ -128,7 +224,7 @@ jobs:
 
           while IFS= read -r asset; do
             case "$asset" in
-              SHA256SUMS) ;;
+            SHA256SUMS|install-condr.sh|install-condr.ps1) ;;
               *-"$short_sha".*) ;;
               *) gh release delete-asset dev "$asset" --yes ;;
             esac
