@@ -26,6 +26,16 @@ Condr 按数据用途遵循 XDG 和各平台目录规范：
 
 Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下的 `runtime/`。`CONDR_SOCKET_PATH` 和 `CONDR_SNAPSHOT_PATH` 仍可覆盖 Server 的默认路径。Development Build 是普通归档，不会修改 PATH；全局命令注册需要单独的显式安装步骤。
 
+### 安装 CLI
+
+Unix 使用仓库内的安装脚本。它把 CLI 放到用户目录并只追加自己的 PATH 标记；不会修改 Condr 数据目录：
+
+```bash
+sh script/install-condr.sh --cli-only --from ./condr-linux-x86_64-<commit>.tar.gz
+```
+
+安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `dev` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
+
 ### `config.toml` 可以手工编辑
 
 `config.toml` 由 Client 和 Server 共享，允许手工编辑。GUI 写回时只改动它自己那个键，文件其余部分——注释、键顺序、空行和引号风格——原样保留，包括被改键上方和行尾的注释。
@@ -118,11 +128,33 @@ Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Forc
 
 运行 `condr-dev\condr\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr\condr.exe server start|restart|status|stop|run`。
 
+CLI-only 安装可直接运行仓库内脚本（PowerShell 会写入当前用户 PATH）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File script\\install-condr.ps1 -From .\\condr-windows-x86_64-<commit>.zip -CliOnly
+```
+
+GUI + CLI 的安装器工程在 `packaging/condr.iss`；使用 Inno Setup 构建时，默认安装两个相邻的 EXE，CLI-only 类型只安装 `condr.exe`。
+
 更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
 ## Linux Server
 
 Linux artifacts are built on Ubuntu 22.04 and require glibc 2.35 or newer.
+
+GUI + CLI 的 Linux 包使用 AppImage。构建机需要 `appimagetool`：
+
+```bash
+CONDR_VERSION=<commit> script/build-appimage.sh
+```
+
+AppImage 需要先赋予执行权限；它只是桌面分发包，CLI-only 环境仍使用上面的安装脚本。AppImage 运行时使用临时挂载目录，因此 PATH 入口必须指向安装后的稳定用户目录。
+
+macOS GUI + CLI 使用用户域 `.pkg`（可放进 DMG），构建机需要 Xcode Command Line Tools：
+
+```bash
+CONDR_VERSION=<version> script/build-macos-pkg.sh
+```
 
 根据机器架构下载一个 Server artifact：
 

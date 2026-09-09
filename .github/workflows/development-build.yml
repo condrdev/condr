@@ -110,6 +110,7 @@ jobs:
           test -f "dist/condr-windows-x86_64-${short_sha}.zip"
           test -f "dist/condr-linux-x86_64-${short_sha}.tar.gz"
           test -f "dist/condr-linux-aarch64-${short_sha}.tar.gz"
+          sha256sum dist/* > dist/SHA256SUMS
       - name: Publish Development Build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,6 +128,7 @@ jobs:
 
           while IFS= read -r asset; do
             case "$asset" in
+              SHA256SUMS) ;;
               *-"$short_sha".*) ;;
               *) gh release delete-asset dev "$asset" --yes ;;
             esac
