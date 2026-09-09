@@ -8,8 +8,8 @@ Condr 在私有 GitHub 仓库中维护一个滚动的 `Development Build` Pre-re
 
 - `dev` 是可变 tag，指向当前选定的 `main` commit。
 - 普通 commit 和 push 不发布；只有移动并推送 `dev` tag 才触发 GitHub Actions。
-- 每次发布同时生成 Windows x86_64 bundle（`condr-gui` + `condr`）、Linux x86_64 和 Linux aarch64 的 `condr`（Server + CLI）。
-- 三个 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
+- 每次发布生成所有平台的 GUI + CLI 安装包、CLI-only 归档和安装脚本：Linux x86_64/aarch64 AppImage 与 tar.gz，Windows x86_64 安装器与 ZIP，macOS x86_64/arm64 `.pkg` 与 tar.gz。
+- 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨开发版本兼容承诺，必须一起更新。
 
 ## 数据位置
