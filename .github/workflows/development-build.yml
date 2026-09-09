@@ -213,7 +213,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           short_sha="${GITHUB_SHA::12}"
-          notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; update the Windows bundle and the Linux build together."
+          notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; all platform installers are rebuilt together."
 
           if gh release view dev >/dev/null 2>&1; then
             gh release upload dev dist/* --clobber
@@ -225,7 +225,7 @@ jobs:
           while IFS= read -r asset; do
             case "$asset" in
             SHA256SUMS|install-condr.sh|install-condr.ps1) ;;
-              *-"$short_sha".*) ;;
+              *-"$short_sha"-*.*|*-"$short_sha".*) ;;
               *) gh release delete-asset dev "$asset" --yes ;;
             esac
           done < <(gh release view dev --json assets --jq '.assets[].name')

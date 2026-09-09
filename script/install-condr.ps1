@@ -13,10 +13,24 @@ try {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'pass -From ARCHIVE or install GitHub CLI (gh)' }
     $repo = $env:CONDR_REPO
     if (-not $repo) { $repo = 'condrdev/condr' }
-    gh release download $Version --repo $repo --dir $stage --pattern 'condr-windows-x86_64-*.zip' --clobber
-    $From = (Get-ChildItem $stage -Filter '*.zip' | Select-Object -First 1).FullName
+    $pattern = if ($CliOnly) { 'condr-windows-x86_64-*-cli.zip' } else { 'condr-windows-x86_64-*.zip' }
+    gh release download $Version --repo $repo --dir $stage --pattern $pattern --pattern SHA256SUMS --clobber
+    $archives = Get-ChildItem $stage -Filter '*.zip'
+    if (-not $CliOnly) { $archives = $archives | Where-Object { $_.Name -notlike '*-cli.zip' } }
+    $selected = $archives | Select-Object -First 1
+    if (-not $selected) { throw "no matching Windows archive for $(if ($CliOnly) { 'CLI-only' } else { 'GUI + CLI' })" }
+    $From = $selected.FullName
   }
   if (-not (Test-Path -LiteralPath $From -PathType Leaf)) { throw "archive not found: $From" }
+  $checksums = Join-Path (Split-Path -Parent $From) 'SHA256SUMS'
+  if (Test-Path $checksums) {
+    $name = [IO.Path]::GetFileName($From)
+    $line = Get-Content $checksums | Where-Object { $_ -match ("\s" + [regex]::Escape($name) + "$") } | Select-Object -First 1
+    if (-not $line) { throw "no checksum for $name" }
+    $expected = ($line -split '\s+')[0].ToUpperInvariant()
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $From).Hash.ToUpperInvariant()
+    if ($actual -ne $expected) { throw "checksum mismatch: $name" }
+  }
   Expand-Archive -LiteralPath $From -DestinationPath $stage -Force
   $payload = Get-ChildItem $stage -Recurse -File | Where-Object { $_.Name -eq 'condr.exe' } | Select-Object -First 1
   if (-not $payload) { throw 'archive does not contain condr.exe' }
