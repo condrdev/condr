@@ -25,14 +25,23 @@ downloaded=no
 if [ -z "$source" ]; then
     command -v gh >/dev/null 2>&1 || { echo "install gh or pass --from ARCHIVE" >&2; exit 1; }
     arch=$(uname -m)
-    case "$arch" in
-        x86_64|amd64) arch=x86_64 ;;
-        aarch64|arm64) arch=aarch64 ;;
-        *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
-    esac
     case "$(uname -s)" in
-        Linux) pattern="condr-linux-${arch}-*.tar.gz" ;;
-        Darwin) pattern="condr-macos-${arch}-*.tar.gz" ;;
+        Linux)
+            case "$arch" in
+                x86_64|amd64) arch=x86_64 ;;
+                aarch64|arm64) arch=aarch64 ;;
+                *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
+            esac
+            pattern="condr-linux-${arch}-*.tar.gz"
+            ;;
+        Darwin)
+            case "$arch" in
+                x86_64|amd64) arch=x86_64 ;;
+                arm64|aarch64) arch=arm64 ;;
+                *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
+            esac
+            pattern="condr-macos-${arch}-*.tar.gz"
+            ;;
         *) echo "unsupported platform: $(uname -s)" >&2; exit 1 ;;
     esac
     gh release download "${CONDR_VERSION:-dev}" --repo "${CONDR_REPO:-condrdev/condr}" \
