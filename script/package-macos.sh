@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-: "${CONDR_VERSION:=0.1.0}"
-: "${CONDR_COMMIT:=$CONDR_VERSION}"
+: "${CONDR_VERSION:=$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"name":"condr-server","version":"\([^"]*\)".*/\1/p' | head -n 1)}"
+: "${CONDR_COMMIT:?CONDR_COMMIT is required}"
 : "${CONDR_ASSET_ID:=$CONDR_COMMIT}"
 : "${CONDR_ARCH:=$(uname -m)}"
 : "${DIST_DIR:=dist}"

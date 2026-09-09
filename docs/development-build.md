@@ -131,7 +131,7 @@ Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Forc
 CLI-only 安装可直接运行仓库内脚本（PowerShell 会写入当前用户 PATH）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File script\\install-condr.ps1 -From .\\condr-windows-x86_64-0.1.0-<commit>-cli.zip -CliOnly
+powershell -ExecutionPolicy Bypass -File script\\install-condr.ps1 -From .\\condr-windows-x86_64-<version>-<commit>-cli.zip -CliOnly
 ```
 
 GUI + CLI 的安装器工程在 `packaging/condr.iss`；使用 Inno Setup 构建时，默认安装两个相邻的 EXE，CLI-only 类型只安装 `condr.exe`。
@@ -145,7 +145,7 @@ Linux artifacts are built on Ubuntu 22.04 and require glibc 2.35 or newer.
 GUI + CLI 的 Linux 包使用 AppImage。构建机需要 `linuxdeploy` 和 `appimagetool`：
 
 ```bash
-CONDR_VERSION=<commit> script/package-linux.sh
+CONDR_COMMIT=<commit> script/package-linux.sh
 ```
 
 AppImage 需要先赋予执行权限；它只是桌面分发包，CLI-only 环境仍使用上面的安装脚本。AppImage 运行时使用临时挂载目录，因此 PATH 入口必须指向安装后的稳定用户目录。

@@ -1,9 +1,14 @@
 param(
-  [string] $Version = '0.1.0',
+  [string] $Version,
   [string] $Commit = $env:GITHUB_SHA,
   [string] $Dist = 'dist'
 )
 $ErrorActionPreference = 'Stop'
+if (-not $Version) {
+  $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+  $Version = ($metadata.packages | Where-Object { $_.name -eq 'condr-server' } | Select-Object -First 1).version
+}
+if (-not $Version) { throw 'could not determine Condr version' }
 $shortSha = $Commit.Substring(0, 12)
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 

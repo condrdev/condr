@@ -1,5 +1,6 @@
 #ifndef AppVersion
-#define AppVersion "0.1.0"
+; Release builds pass /DAppVersion from the workspace package version.
+#define AppVersion "0.0.0"
 #endif
 #ifndef OutputBaseFilename
 #define OutputBaseFilename "condr-windows-x86_64-setup"

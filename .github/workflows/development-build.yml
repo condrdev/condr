@@ -53,7 +53,6 @@ jobs:
           chmod +x linuxdeploy
       - name: Package Linux artifacts
         env:
-          CONDR_VERSION: ${{ github.sha }}
           CONDR_COMMIT: ${{ github.sha }}
           CONDR_ARCH: ${{ matrix.arch }}
           APPIMAGE_TOOL: ${{ github.workspace }}/appimagetool
@@ -124,7 +123,6 @@ jobs:
         run: cargo build --release --locked -p condr-gui -p condr-server
       - name: Package macOS artifacts
         env:
-          CONDR_VERSION: 0.1.0
           CONDR_COMMIT: ${{ github.sha }}
           CONDR_ASSET_ID: ${{ github.sha }}
           CONDR_ARCH: ${{ matrix.arch }}
@@ -164,24 +162,30 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+      - name: Determine package version
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          test -n "$version"
+          echo "CONDR_VERSION=$version" >> "$GITHUB_ENV"
       - name: Verify release assets
         run: |
           short_sha="${GITHUB_SHA::12}"
-          test -f "dist/condr-windows-x86_64-0.1.0-${short_sha}.zip"
-          test -f "dist/condr-linux-x86_64-${short_sha}-cli.tar.gz"
-          test -f "dist/condr-linux-aarch64-${short_sha}-cli.tar.gz"
-          test -f "dist/condr-linux-x86_64-${short_sha}.AppImage"
-          test -f "dist/condr-linux-aarch64-${short_sha}.AppImage"
-          test -f "dist/condr-windows-x86_64-0.1.0-${short_sha}-setup.exe"
-          test -f "dist/condr-windows-x86_64-0.1.0-${short_sha}-cli.zip"
-          test -f "dist/condr-macos-x86_64-${short_sha}.pkg"
-          test -f "dist/condr-macos-arm64-${short_sha}.pkg"
-          test -f "dist/condr-macos-x86_64-${short_sha}-cli.tar.gz"
-          test -f "dist/condr-macos-arm64-${short_sha}-cli.tar.gz"
+          test -f "dist/condr-windows-x86_64-${CONDR_VERSION}-${short_sha}.zip"
+          test -f "dist/condr-linux-x86_64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
+          test -f "dist/condr-linux-aarch64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
+          test -f "dist/condr-linux-x86_64-${CONDR_VERSION}-${short_sha}.AppImage"
+          test -f "dist/condr-linux-aarch64-${CONDR_VERSION}-${short_sha}.AppImage"
+          test -f "dist/condr-windows-x86_64-${CONDR_VERSION}-${short_sha}-setup.exe"
+          test -f "dist/condr-windows-x86_64-${CONDR_VERSION}-${short_sha}-cli.zip"
+          test -f "dist/condr-macos-x86_64-${CONDR_VERSION}-${short_sha}.pkg"
+          test -f "dist/condr-macos-arm64-${CONDR_VERSION}-${short_sha}.pkg"
+          test -f "dist/condr-macos-x86_64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
+          test -f "dist/condr-macos-arm64-${CONDR_VERSION}-${short_sha}-cli.tar.gz"
           test -f dist/install-condr.sh
           test -f dist/install-condr.ps1
           sha256sum dist/* > dist/SHA256SUMS
