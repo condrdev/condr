@@ -96,13 +96,15 @@ jobs:
           choco install innosetup --no-progress --yes
           $env:CONDR_COMMIT = $env:GITHUB_SHA
           & powershell -File script\package-windows.ps1
+      - name: Check Windows packages and CLI installation
+        shell: pwsh
+        run: .\script\check-windows-package.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: condr-windows-x86_64
           path: |
             dist/*.zip
             dist/*.exe
-            dist/install-condr.ps1
           if-no-files-found: error
           retention-days: 1
 
@@ -133,7 +135,7 @@ jobs:
           CONDR_ARCH: ${{ matrix.arch }}
         run: script/package-macos.sh
       - name: Check macOS packages and PATH registration
-        run: python3 script/check-macos-package.py dist/*.pkg
+        run: sh script/check-macos-package.sh dist/*.pkg
       - uses: actions/upload-artifact@v7
         with:
           name: condr-macos-${{ matrix.arch }}
@@ -143,28 +145,12 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  install-scripts:
-    name: Installer scripts
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Stage installer scripts
-        run: |
-          mkdir -p dist
-          cp script/install-condr.sh script/install-condr.ps1 dist/
-      - uses: actions/upload-artifact@v7
-        with:
-          name: condr-install-scripts
-          path: dist/install-condr.*
-          retention-days: 1
-
   publish:
     name: Update rolling prerelease
     needs:
       - linux
       - windows-bundle
       - macos
-      - install-scripts
     runs-on: ubuntu-24.04
     permissions:
       contents: write

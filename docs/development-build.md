@@ -8,13 +8,13 @@ Condr 在私有 GitHub 仓库中维护一个滚动的 `Development Build` Pre-re
 
 - `dev` 是可变 tag，指向当前选定的 `main` commit。
 - 普通 commit 和 push 不发布；只有移动并推送 `dev` tag 才触发 GitHub Actions。
-- 每次发布生成所有平台的 GUI + CLI 安装包、CLI-only 归档和安装脚本：Linux x86_64/arm64 AppImage 与 tar.gz，Windows x86_64 安装器与 ZIP，macOS x86_64/arm64 `.pkg` 与 tar.gz。
+- 每次发布生成所有平台的 GUI + CLI 安装包与 CLI-only 归档：Linux x86_64/arm64 AppImage 与 tar.gz，Windows x86_64 安装器与 ZIP，macOS x86_64/arm64 `.pkg` 与 tar.gz。
 - 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨开发版本兼容承诺，必须一起更新。
 
 产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`（GUI + CLI）和 `condr-cli-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`（CLI-only）。`platform` 为 `linux`、`macos` 或 `windows`；`arch` 为 `x86_64` 或 `arm64`（Linux 的 `aarch64` 也输出为 `arm64`）。开发版包含 12 位短 SHA，例如 `condr-0.1.0-d7912d3f186e-macos-arm64.pkg`、`condr-cli-0.1.0-d7912d3f186e-linux-x86_64.tar.gz`。Windows 安装器使用 `.exe`，便携包使用 `.zip`，不再附加 `setup`。
 
-正式版文件名省略 SHA：Unix 打包脚本设置 `CONDR_RELEASE=1`，Windows 打包脚本传入 `-Release`；完整 commit 仍必须传入并写入包内 `BUILD-COMMIT`。当前 Actions 只发布带 SHA 的开发版。安装脚本名称保持 `install-condr.sh` / `install-condr.ps1`，校验文件为 `SHA256SUMS`。
+正式版文件名省略 SHA：Unix 打包脚本设置 `CONDR_RELEASE=1`，Windows 打包脚本传入 `-Release`；完整 commit 仍必须传入并写入包内 `BUILD-COMMIT`。当前 Actions 只发布带 SHA 的开发版。Release 附带 `SHA256SUMS`；安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`，不作为 Release 附件发布。
 
 ## 数据位置
 
@@ -32,13 +32,15 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 ### 安装 CLI
 
-Unix 使用仓库内的安装脚本。它把 CLI 放到用户目录并只追加自己的 PATH 标记；不会修改 Condr 数据目录：
+仓库内的安装脚本只用于安装 headless CLI/server（同一个 `condr` 二进制）；GUI + CLI 使用对应平台的安装包。Unix 脚本把 CLI 放到用户目录并只追加自己的 PATH 标记；不会修改 Condr 数据目录：
 
 ```bash
-sh script/install-condr.sh --cli-only --from ./condr-cli-<version>-<short_sha>-linux-x86_64.tar.gz
+sh script/install-condr.sh --from ./condr-cli-<version>-<short_sha>-linux-x86_64.tar.gz
 ```
 
 安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `dev` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
+
+检测到已有 `condr` 时，脚本提示确认覆盖，默认取消；确认后只更新 CLI，保留已有 GUI 文件。自动化环境通过 Unix 的 `--yes` 或 PowerShell 的 `-Yes` 显式确认。两个脚本都支持 `CONDR_INSTALL_DIR` 覆盖安装目录；默认 Unix 使用 `~/.local/opt/condr`，Windows 与 GUI 共用 `%LOCALAPPDATA%\Programs\Condr`。安装不会自动启动 Server，需要时执行 `condr server start`。
 
 ### `config.toml` 可以手工编辑
 
@@ -135,10 +137,12 @@ Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Forc
 CLI-only 安装可直接运行仓库内脚本（PowerShell 会写入当前用户 PATH）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File script\\install-condr.ps1 -From .\\condr-cli-<version>-<short_sha>-windows-x86_64.zip -CliOnly
+powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-cli-<version>-<short_sha>-windows-x86_64.zip
 ```
 
 GUI + CLI 的安装器工程在 `packaging/condr.iss`；使用 Inno Setup 构建时，默认安装两个相邻的 EXE，CLI-only 类型只安装 `condr.exe`。
+
+`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 GUI ZIP、CLI ZIP 和 `.exe`，实际安装 GUI 包，并验证 CLI 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
 
 更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
@@ -162,7 +166,7 @@ CONDR_COMMIT=<commit> script/package-macos.sh
 
 `.pkg` 将 GUI 和 CLI 安装到 `~/Applications/Condr.app`，并建立 `~/.local/bin/condr` 链接。安装后脚本把 `~/.local/bin` 加入 zsh 的 `~/.zprofile`，以及 bash 首个存在的登录配置（依次为 `~/.bash_profile`、`~/.bash_login`、`~/.profile`，都不存在时创建 `~/.profile`）。保留原有内容，重复安装不会重复追加。使用标准启动配置的 zsh/bash 重新打开终端后即可运行 `condr --help`；已打开的终端需重新启动 shell。
 
-`python3 script/check-macos-package.py` 可在 Linux/macOS 检查 PATH 注册、配置保留与重复安装。macOS Actions 另传入生成的 `.pkg`，在 runner 当前用户下实际安装两次，并验证全新 zsh/bash 登录 shell 能直接执行 `condr server --help`。
+`sh script/check-macos-package.sh` 可在 Linux/macOS 检查 PATH 注册、配置保留与重复安装，无需 Python。macOS Actions 另传入生成的 `.pkg`，在 runner 当前用户下实际安装两次，并验证全新 zsh/bash 登录 shell 能直接执行 `condr server --help`。
 
 根据机器架构下载一个 Server artifact：
 

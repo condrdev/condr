@@ -22,4 +22,17 @@ set -- "$dist"/condr-cli-*-linux-*.tar.gz
 CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
     HOME="$stage/home" sh script/install-condr.sh --from "$1"
 "$stage/home/.local/bin/condr" server --help > /dev/null
+printf '#!/bin/sh\necho previous-cli\n' >"$stage/install/condr"
+printf 'keep GUI\n' >"$stage/install/condr-gui"
+printf 'n\n' | CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
+    HOME="$stage/home" sh script/install-condr.sh --from "$1"
+test "$("$stage/install/condr")" = previous-cli
+printf 'Yes\n' | CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
+    HOME="$stage/home" sh script/install-condr.sh --from "$1"
+"$stage/home/.local/bin/condr" server --help > /dev/null
+CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
+    HOME="$stage/home" sh script/install-condr.sh --from "$1" --yes
+"$stage/home/.local/bin/condr" server --help > /dev/null
+test "$(cat "$stage/install/condr-gui")" = 'keep GUI'
+test "$(grep -Fxc '# condr user bin' "$stage/profile")" = 1
 echo 'Linux package content and CLI installation checks passed.'

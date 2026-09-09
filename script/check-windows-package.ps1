@@ -1,0 +1,80 @@
+# Run on a disposable Windows user/CI runner: exercises the per-user installer.
+param([string] $Dist = 'dist')
+$ErrorActionPreference = 'Stop'
+if ($env:OS -ne 'Windows_NT') { throw 'Native package checks require Windows' }
+$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{9B6E4C3B-502D-4CBF-A2E3-39B5E9E0A1A8}_is1'
+if (Test-Path -LiteralPath $uninstallKey) { throw 'Run this check under a test user without an installed Condr GUI' }
+$Dist = (Resolve-Path $Dist).Path
+$stage = Join-Path ([IO.Path]::GetTempPath()) ('condr-package-check-' + [guid]::NewGuid())
+$originalPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$originalInstallDir = $env:CONDR_INSTALL_DIR
+$gui = Join-Path $stage 'gui'
+New-Item -ItemType Directory -Path $stage | Out-Null
+
+try {
+  $guiZip = @(Get-ChildItem $Dist -Filter 'condr-*-windows-x86_64.zip' | Where-Object Name -NotLike 'condr-cli-*')
+  $cliZip = @(Get-ChildItem $Dist -Filter 'condr-cli-*-windows-x86_64.zip')
+  $installer = @(Get-ChildItem $Dist -Filter 'condr-*-windows-x86_64.exe')
+  if ($guiZip.Count -ne 1 -or $cliZip.Count -ne 1 -or $installer.Count -ne 1) { throw 'expected one GUI ZIP, CLI ZIP and installer' }
+  Expand-Archive $guiZip[0].FullName (Join-Path $stage 'bundle')
+  $bundle = Join-Path $stage 'bundle\condr'
+  foreach ($name in 'condr.exe', 'condr-gui.exe', 'LICENSE', 'BUILD-COMMIT') {
+    if (-not (Test-Path (Join-Path $bundle $name))) { throw "GUI ZIP is missing $name" }
+  }
+  $commit = (Get-Content (Join-Path $bundle 'BUILD-COMMIT') -Raw).Trim()
+  if ($env:GITHUB_SHA -and $commit -ne $env:GITHUB_SHA) { throw 'GUI ZIP has the wrong commit' }
+
+  # Install GUI + CLI, without creating shortcuts on the test runner.
+  $process = Start-Process -FilePath $installer[0].FullName -Wait -PassThru -ArgumentList @(
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS', '/TYPE=full',
+    "/DIR=`"$gui`"", "/LOG=`"$(Join-Path $stage 'installer.log')`""
+  )
+  if ($process.ExitCode -ne 0) {
+    Get-Content (Join-Path $stage 'installer.log')
+    throw "GUI installer failed: $($process.ExitCode)"
+  }
+  $guiHash = (Get-FileHash (Join-Path $gui 'condr-gui.exe')).Hash
+  & (Join-Path $gui 'condr.exe') server --help
+  if ($LASTEXITCODE -ne 0) { throw 'installed GUI bundle CLI failed' }
+  if ($gui -notin ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';')) { throw 'GUI installer did not register PATH' }
+
+  # Empty input must cancel an update, even when a GUI shares this directory.
+  $env:CONDR_INSTALL_DIR = $gui
+  Set-Content (Join-Path $gui 'condr.exe') 'previous-cli'
+  $previousHash = (Get-FileHash (Join-Path $gui 'condr.exe')).Hash
+  '' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName
+  if ($LASTEXITCODE -ne 0 -or (Get-FileHash (Join-Path $gui 'condr.exe')).Hash -ne $previousHash) { throw 'cancelled installation changed the CLI' }
+  'yes' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName
+  if ($LASTEXITCODE -ne 0 -or (Get-FileHash (Join-Path $gui 'condr.exe')).Hash -eq $previousHash) { throw 'confirmed installation did not update the CLI' }
+
+  # The CLI script must install by itself and update a shared GUI directory.
+  foreach ($destination in (Join-Path $stage 'cli'), $gui) {
+    $env:CONDR_INSTALL_DIR = $destination
+    & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName -Yes
+    & (Join-Path $destination 'condr.exe') server --help
+    if ($LASTEXITCODE -ne 0) { throw 'installed CLI failed' }
+    if ((Get-Content (Join-Path $destination 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'CLI ZIP has the wrong commit' }
+    $pathEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $destination })
+    if ($pathEntries.Count -ne 1) { throw 'CLI installer must register PATH exactly once' }
+  }
+  if (Test-Path (Join-Path $stage 'cli\condr-gui.exe')) { throw 'CLI script installed a GUI' }
+  if ((Get-FileHash (Join-Path $gui 'condr-gui.exe')).Hash -ne $guiHash) { throw 'CLI update changed the GUI' }
+
+  $rejected = $false
+  try { & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $guiZip[0].FullName -Yes }
+  catch { $rejected = $true }
+  if (-not $rejected) { throw 'CLI script accepted a GUI ZIP' }
+  Write-Output 'Windows package content, native installation and CLI update checks passed.'
+} finally {
+  try {
+    $uninstaller = Join-Path $gui 'unins000.exe'
+    if (Test-Path $uninstaller) {
+      $process = Start-Process $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+      if ($process.ExitCode -ne 0) { throw "test uninstall failed: $($process.ExitCode)" }
+    }
+  } finally {
+    [Environment]::SetEnvironmentVariable('Path', $originalPath, 'User')
+    $env:CONDR_INSTALL_DIR = $originalInstallDir
+    Remove-Item $stage -Recurse -Force
+  }
+}
