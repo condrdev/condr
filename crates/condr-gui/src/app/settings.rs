@@ -127,6 +127,9 @@ pub(super) struct SettingsWindow {
     pub(super) shell_draft: SharedString,
     /// The Listen address as typed; see `set_server_listen`.
     pub(super) listen_draft: SharedString,
+    /// The Listen address field. Typing only moves the draft; leaving the field or
+    /// pressing Enter saves it, so a half-typed address never reaches the Server.
+    pub(super) listen_input: Entity<InputState>,
     /// Which tab is showing: this Client's settings or one Server's.
     pub(super) tab: SettingsTab,
     /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
@@ -229,6 +232,24 @@ impl SettingsWindow {
             .unwrap_or_default();
         let shell_draft = connection_shell(&owner, selected_server, cx);
         let listen_draft = connection_listen(&owner, selected_server, cx);
+        let listen_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(listen_draft.clone()));
+        cx.subscribe(
+            &listen_input,
+            |this, input, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
+                    this.listen_draft = input.read(cx).value();
+                    cx.notify();
+                }
+                InputEvent::Blur | InputEvent::PressEnter { .. } => this.commit_listen(cx),
+                InputEvent::Focus => {}
+            },
+        )
+        .detach();
+        // Connection status and admin replies live on `Condr`; the Server pages show them.
+        if let Some(owner) = owner.upgrade() {
+            cx.observe(&owner, |_, _, cx| cx.notify()).detach();
+        }
         let _ = owner.update(cx, |owner, _| {
             owner.request_agent_hooks(selected_server);
             owner.request_server_admin(selected_server);
@@ -272,6 +293,7 @@ impl SettingsWindow {
             selected_server,
             shell_draft,
             listen_draft,
+            listen_input,
             tab: SettingsTab::default(),
             server_select,
             server_keys,
@@ -358,6 +380,9 @@ fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_server_choices(window, cx);
+        // Root does not draw dialogs itself; without this the Restart and Revoke
+        // confirmations open invisibly.
+        let dialog_layer = Root::render_dialog_layer(window, cx);
         let settings = cx.entity();
         let tab = self.tab;
         let content = match tab {
@@ -403,28 +428,32 @@ impl Render for SettingsWindow {
                         .child(Select::new(&self.server_select).small()),
                 )
             });
-        v_flex()
-            .id("condr-settings-window")
-            .debug_selector(|| "settings-content".into())
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .on_key_down(|event, window, _| {
-                if event.keystroke.key == "escape" {
-                    window.remove_window();
-                }
-            })
-            .child(
-                TitleBar::new().child(
-                    h_flex()
-                        .gap_2()
-                        .child(img(APP_LOGO).size_4().flex_shrink_0())
-                        .child(SETTINGS_WINDOW_TITLE),
-                ),
-            )
-            .child(tabs)
-            .child(div().flex_1().min_h_0().child(content))
+        // The dialog layer sits beside the page, not inside it, so Escape in a dialog
+        // closes the dialog and not the window.
+        div().size_full().relative().children(dialog_layer).child(
+            v_flex()
+                .id("condr-settings-window")
+                .debug_selector(|| "settings-content".into())
+                .track_focus(&self.focus_handle)
+                .size_full()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .on_key_down(|event, window, _| {
+                    if event.keystroke.key == "escape" {
+                        window.remove_window();
+                    }
+                })
+                .child(
+                    TitleBar::new().child(
+                        h_flex()
+                            .gap_2()
+                            .child(img(APP_LOGO).size_4().flex_shrink_0())
+                            .child(SETTINGS_WINDOW_TITLE),
+                    ),
+                )
+                .child(tabs)
+                .child(div().flex_1().min_h_0().child(content)),
+        )
     }
 }
 

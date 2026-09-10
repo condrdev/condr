@@ -630,3 +630,65 @@ fn the_daemon_page_keeps_half_typed_addresses_local_and_invites_follow_the_liste
         "no invite is shown after the listener changed"
     );
 }
+
+#[test]
+fn the_settings_window_draws_its_confirm_dialogs() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let main_window = window.update(|window, _| window.window_handle());
+    let settings_button = window.debug_bounds("open-settings").unwrap();
+    window.simulate_click(settings_button.center(), Modifiers::default());
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    settings.update(|_, cx| select_settings_tab(&settings_view, SettingsTab::Server, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+
+    // The same confirm the Restart and Revoke buttons open; Root does not draw dialogs
+    // on its own, so the window must mount the layer or the click looks ignored.
+    settings.update(|window, cx| {
+        window.open_alert_dialog(cx, |alert, _, _| alert.confirm().title("Restart Server?"));
+    });
+    settings.run_until_parked();
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.update(|window, cx| window.has_active_dialog(cx)));
+    // Escape reaches the dialog only if it is drawn and focused; otherwise the window's
+    // own Escape handler closes Settings instead. (Confirming for real would restart the
+    // in-process test Server through the test binary.)
+    settings.simulate_keystrokes("escape");
+    settings.run_until_parked();
+    assert_eq!(
+        window.windows().len(),
+        2,
+        "Escape closed the dialog, not Settings"
+    );
+    assert!(!settings.update(|window, cx| window.has_active_dialog(cx)));
+
+    // Once asked, the page says so until the Server is back.
+    settings.update(|_, cx| {
+        view.update(cx, |this, cx| this.restart_server(1, cx));
+    });
+    assert!(settings.read(|app| {
+        view.read(app)
+            .connection(1)
+            .unwrap()
+            .restart_deadline
+            .is_some()
+    }));
+}

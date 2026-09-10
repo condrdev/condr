@@ -1094,10 +1094,19 @@ pub(super) fn handle_client(
                     }
                 } else if restart {
                     match std::env::current_exe().and_then(|exe| {
-                        std::process::Command::new(exe)
+                        let mut command = std::process::Command::new(exe);
+                        command
                             .args(["server", "restart"])
-                            .spawn()
-                            .map(|_| ())
+                            .stdin(std::process::Stdio::null());
+                        // The Server runs without a console; a console child would
+                        // otherwise pop up a terminal window on the user's desktop.
+                        #[cfg(windows)]
+                        {
+                            use std::os::windows::process::CommandExt as _;
+                            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                            command.creation_flags(CREATE_NO_WINDOW);
+                        }
+                        command.spawn().map(|_| ())
                     }) {
                         Ok(()) => {
                             lifecycle.begin_stop();

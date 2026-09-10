@@ -528,7 +528,9 @@ impl Condr {
                 }
             }
             ServerMessage::Error { message } => {
+                // A refused or failed admin command; a pending restart is not happening.
                 self.connections[index].error = Some(message);
+                self.connections[index].restart_deadline = None;
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -618,7 +620,9 @@ impl Condr {
             | ServerMessage::DevicesRevoked { .. }
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
-                self.mark_disconnected(key, index, "Server stopped".into())
+                let effect = self.mark_disconnected(key, index, "Server stopped".into());
+                self.schedule_restart_reconnect(key, cx);
+                effect
             }
             ServerMessage::Subscribed {
                 server_id,

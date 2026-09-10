@@ -49,7 +49,7 @@ use gpui_kit::component::dock::{
     BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
     PanelState, TabGroupRenderer, TilesRenderer,
 };
-use gpui_kit::component::input::{Editor, EditorState, Input, InputState};
+use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::setting::{
@@ -91,7 +91,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use terminal_input::{
     LocalTerminalSelection, ReportedTerminalMouse, ReportedTerminalMouseMotion, TerminalGeometry,
 };
@@ -172,6 +172,10 @@ const CONTROL_RETRY_DELAY: Duration = Duration::from_millis(50);
 /// Retries double up to this while another client holds control; they never give up
 /// while the connection stays up, so a controller that leaves seconds later is noticed.
 const MAX_CONTROL_RETRY_DELAY: Duration = Duration::from_secs(2);
+/// How often the GUI retries the Server after asking it to restart, and for how long;
+/// `condr server restart` itself waits up to 30 s for the old process to let go.
+const RESTART_RECONNECT_DELAY: Duration = Duration::from_millis(500);
+const RESTART_RECONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);

@@ -106,7 +106,11 @@ pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingP
 /// Whether this Client may change the selected Server: only a local or SSH connection
 /// can, and the Server refuses everything else (ADR 0015).
 fn server_admin_allowed(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
-    selected_connection(settings, cx, |c| {
+    admin_allowed(settings.read(cx), cx)
+}
+
+fn admin_allowed(this: &SettingsWindow, cx: &App) -> bool {
+    this.selected_connection(cx, |c| {
         c.status == ConnectionStatus::Connected
             && matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_))
     })
@@ -118,14 +122,48 @@ fn selected_connection<T>(
     cx: &App,
     read: impl FnOnce(&ServerConnection) -> T,
 ) -> Option<T> {
-    let this = settings.read(cx);
-    let owner = this.owner.upgrade()?;
-    owner
-        .read(cx)
-        .connections
-        .iter()
-        .find(|c| c.key == this.selected_server)
-        .map(read)
+    settings.read(cx).selected_connection(cx, read)
+}
+
+impl SettingsWindow {
+    fn selected_connection<T>(
+        &self,
+        cx: &App,
+        read: impl FnOnce(&ServerConnection) -> T,
+    ) -> Option<T> {
+        let owner = self.owner.upgrade()?;
+        owner
+            .read(cx)
+            .connections
+            .iter()
+            .find(|c| c.key == self.selected_server)
+            .map(read)
+    }
+
+    /// Saves the Listen address draft if it is a complete `host:port` and the listener is
+    /// on; anything else stays in the field. Runs when the field is left or Enter pressed.
+    pub(in crate::app) fn commit_listen(&mut self, cx: &mut Context<Self>) {
+        let listening = self
+            .selected_connection(cx, |c| c.listen.is_some())
+            .unwrap_or(false);
+        if !listening {
+            return;
+        }
+        if let Ok(address) = self.listen_draft.trim().parse::<std::net::SocketAddr>() {
+            self.send_listen(Some(address.to_string()), cx);
+        }
+    }
+
+    fn send_listen(&mut self, address: Option<String>, cx: &mut Context<Self>) {
+        if !admin_allowed(self, cx) {
+            return;
+        }
+        let key = self.selected_server;
+        let command = ServerAdminCommand::SaveListen { address };
+        let _ = self
+            .owner
+            .update(cx, |owner, _| owner.server_admin(key, command));
+    }
 }
 
 /// The Client's view of the selected Server: the connection type, colored by whether it
@@ -159,7 +197,6 @@ fn server_status_row(settings: &Entity<SettingsWindow>) -> SettingItem {
 
 fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     let value = settings.clone();
-    let set = settings.clone();
     let restart = settings.clone();
     let group = SettingGroup::new().description(
         "Changes take effect when the Server restarts. Only a local or SSH connection can \
@@ -184,32 +221,57 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
         .item(
             SettingItem::new(
                 "Listen address",
-                SettingField::input(
-                    move |cx| server_listen(&value, cx),
-                    move |address: SharedString, cx| set_server_listen(&set, address, cx),
-                )
-                .default_value(DEFAULT_LISTEN),
+                // Not `SettingField::input`: that saves on every keystroke, and this field
+                // saves when it is left. ponytail: no reset-to-default arrow as a result.
+                SettingField::render(move |_, window, cx| {
+                    let input = value.read(cx).listen_input.clone();
+                    // Picking another Server replaces the draft under the field.
+                    let draft = server_listen(&value, cx);
+                    if input.read(cx).value() != draft {
+                        input.update(cx, |input, cx| input.set_value(draft, window, cx));
+                    }
+                    Input::new(&input).w_64()
+                }),
             )
-            .description("host:port, saved once it is a complete address."),
+            .description("host:port, saved when you leave the field."),
         )
         .item(SettingItem::render(move |_, _, cx| {
             let settings = restart.clone();
             let allowed = server_admin_allowed(&settings, cx);
-            h_flex().gap_2().items_center().child(
-                Button::new("server-restart")
-                    .label("Restart Server")
-                    .small()
-                    .outline()
-                    .disabled(!allowed)
-                    .on_click(move |_, window, cx| {
-                        let (owner, key) = {
-                            let this = settings.read(cx);
-                            (this.owner.clone(), this.selected_server)
-                        };
-                        window.defer(cx, move |window, cx| {
-                            window.open_alert_dialog(cx, move |alert, _, _| {
-                                let owner = owner.clone();
-                                alert
+            let (restarting, error) = selected_connection(&settings, cx, |c| {
+                (c.restart_deadline.is_some(), c.error.clone())
+            })
+            .unwrap_or_default();
+            let feedback = if restarting {
+                Some((
+                    "Waiting for the Server to come back…".into(),
+                    cx.theme().muted_foreground,
+                ))
+            } else {
+                error.map(|error| (error, cx.theme().danger))
+            };
+            h_flex()
+                .gap_3()
+                .items_center()
+                .child(
+                    Button::new("server-restart")
+                        .label(if restarting {
+                            "Restarting…"
+                        } else {
+                            "Restart Server"
+                        })
+                        .small()
+                        .outline()
+                        .disabled(!allowed || restarting)
+                        .on_click(move |_, window, cx| {
+                            let (owner, key) = {
+                                let this = settings.read(cx);
+                                (this.owner.clone(), this.selected_server)
+                            };
+                            window.defer(cx, move |window, cx| {
+                                window.open_alert_dialog(cx, move |alert, _, _| {
+                                    let owner = owner.clone();
+                                    alert
                                     .confirm()
                                     .title("Restart Server?")
                                     .description(
@@ -222,15 +284,17 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                                             .ok_variant(ButtonVariant::Danger),
                                     )
                                     .on_ok(move |_, _, cx| {
-                                        let _ = owner.update(cx, |owner, _| {
-                                            owner.server_admin(key, ServerAdminCommand::Restart)
-                                        });
+                                        let _ = owner
+                                            .update(cx, |owner, cx| owner.restart_server(key, cx));
                                         true
                                     })
+                                });
                             });
-                        });
-                    }),
-            )
+                        }),
+                )
+                .when_some(feedback, |row, (text, color)| {
+                    row.child(div().text_sm().text_color(color).child(text))
+                })
         }))
 }
 
@@ -479,14 +543,7 @@ pub(in crate::app) fn server_listen(settings: &Entity<SettingsWindow>, cx: &App)
 }
 
 fn server_listen_enabled(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
-    settings.read(cx).owner.upgrade().is_some_and(|owner| {
-        owner
-            .read(cx)
-            .connections
-            .iter()
-            .find(|c| c.key == settings.read(cx).selected_server)
-            .is_some_and(|c| c.listen.is_some())
-    })
+    selected_connection(settings, cx, |c| c.listen.is_some()).unwrap_or(false)
 }
 
 fn set_server_listen_enabled(settings: &Entity<SettingsWindow>, enabled: bool, cx: &mut App) {
@@ -503,25 +560,19 @@ fn set_server_listen_enabled(settings: &Entity<SettingsWindow>, enabled: bool, c
     set_server_listen_value(settings, address.map(|address| address.to_string()), cx);
 }
 
-/// Every change updates the draft; only a complete `host:port` while the listener is on
-/// reaches the Server, so a half-typed address never becomes a Server error.
+/// What leaving the Listen address field does; tests call it without the widget. See
+/// `SettingsWindow::commit_listen`.
+#[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn set_server_listen(
     settings: &Entity<SettingsWindow>,
     address: SharedString,
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| {
-        this.listen_draft = address.clone();
+        this.listen_draft = address;
+        this.commit_listen(cx);
         cx.notify();
     });
-    if !server_listen_enabled(settings, cx) {
-        return;
-    }
-    // ponytail: saves on every complete intermediate address (":26", ":263"); debounce
-    // like the shell if config writes ever show up as a cost.
-    if let Ok(address) = address.trim().parse::<std::net::SocketAddr>() {
-        set_server_listen_value(settings, Some(address.to_string()), cx);
-    }
 }
 
 fn set_server_listen_value(
@@ -529,13 +580,7 @@ fn set_server_listen_value(
     address: Option<String>,
     cx: &mut App,
 ) {
-    if !server_admin_allowed(settings, cx) {
-        return;
-    }
-    let key = settings.read(cx).selected_server;
-    let command = ServerAdminCommand::SaveListen { address };
-    let owner = settings.read(cx).owner.clone();
-    let _ = owner.update(cx, |owner, _| owner.server_admin(key, command));
+    settings.update(cx, |this, cx| this.send_listen(address, cx));
 }
 
 /// What one hooks action does: asks the selected Server and lets the reply repaint.

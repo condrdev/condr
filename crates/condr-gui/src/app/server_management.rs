@@ -18,6 +18,63 @@ impl Condr {
         self.server_admin(key, ServerAdminCommand::Clients);
     }
 
+    /// Asks the Server to restart and reconnects once it has stopped. The Server replies
+    /// with `ServerStopping` or an `Error`; either way the Daemon page shows the outcome.
+    pub(in crate::app) fn restart_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        connection.restart_deadline = Some(Instant::now() + RESTART_RECONNECT_TIMEOUT);
+        connection.error = None;
+        self.server_admin(key, ServerAdminCommand::Restart);
+        cx.notify();
+    }
+
+    pub(super) fn clear_restart(&mut self, key: ConnectionKey) {
+        if let Some(connection) = self.connection_mut(key) {
+            connection.restart_deadline = None;
+        }
+    }
+
+    /// After a restart the Server is gone for a moment; retry until it is back or the
+    /// deadline passes, then leave the last error showing.
+    pub(super) fn schedule_restart_reconnect(
+        &mut self,
+        key: ConnectionKey,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(deadline) = self
+            .connection(key)
+            .and_then(|connection| connection.restart_deadline)
+        else {
+            return;
+        };
+        if Instant::now() >= deadline {
+            self.clear_restart(key);
+            return;
+        }
+        let window = self.window_handle;
+        cx.spawn(async move |owner, cx| {
+            cx.background_executor()
+                .timer(RESTART_RECONNECT_DELAY)
+                .await;
+            let _ = cx.update_window(window, |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    let reconnect = this.connection(key).is_some_and(|connection| {
+                        connection.restart_deadline.is_some()
+                            && connection.status == ConnectionStatus::Disconnected
+                    });
+                    if reconnect && this.start_connect(key) {
+                        this.refresh_target_pane(key);
+                        this.rebuild_dock(window, cx);
+                    }
+                    cx.notify();
+                });
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn install_connection(
         connection: &mut ServerConnection,
         result: Result<ClientConnection, String>,
@@ -272,6 +329,11 @@ impl Condr {
         };
         if paired {
             self.save_servers(cx);
+        }
+        if application.is_some() {
+            self.clear_restart(key);
+        } else {
+            self.schedule_restart_reconnect(key, cx);
         }
         if let Some(application) = application {
             let presentation_before = self.pending_presentation_request;
