@@ -31,6 +31,8 @@ pub(super) struct ServerConnection {
     pub(super) agent_trackers: HashMap<PaneId, AgentTracker>,
     /// Panes that rang BEL while not focused; cleared when the Terminal gains focus.
     pub(super) attention: HashSet<PaneId>,
+    /// Panes with a clipboard image still on its way to the Server; the header says so.
+    pub(super) pasting_images: HashSet<PaneId>,
     pub(super) workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
     pub(super) zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
@@ -99,6 +101,7 @@ impl ServerConnection {
             agents: HashMap::new(),
             agent_trackers: HashMap::new(),
             attention: HashSet::new(),
+            pasting_images: HashSet::new(),
             workspace_git: HashMap::new(),
             zoomed_panes: HashSet::new(),
             settings: ServerSettings::default(),
@@ -132,6 +135,7 @@ impl ServerConnection {
     pub(super) fn reset_sync_state(&mut self) {
         self.controlling = false;
         self.attention.clear();
+        self.pasting_images.clear();
         self.subscribed = false;
         self.subscription_pending = false;
         self.control_retry_attempts = 0;

@@ -886,6 +886,24 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         })
     });
     window.simulate_keystrokes("alt-v");
+    // The header says the image is on its way until the writer reports it sent.
+    let pasting = leaked_selector(format!("terminal-pane-pasting-{}", pane_id.as_u64()));
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds(pasting).is_some(),
+        "a remote image paste shows a pasting indicator"
+    );
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(key).unwrap().connect_generation;
+            this.handle_incoming(key, generation, Incoming::ImageSent(pane_id), cx);
+        })
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds(pasting).is_none(),
+        "the indicator comes down once the image left the writer"
+    );
     window.update(|_, cx| view.update(cx, |this, _| this.target_pane = None));
     let messages: Vec<_> = received.try_iter().collect();
     assert!(matches!(messages.as_slice(), [ClientMessage::PasteImage {

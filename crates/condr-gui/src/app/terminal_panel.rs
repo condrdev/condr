@@ -116,6 +116,7 @@ impl Render for TerminalPanel {
             agent_kind,
             attention,
             zoomed,
+            pasting,
         ) = owner
             .as_ref()
             .map(|owner| {
@@ -159,6 +160,9 @@ impl Render for TerminalPanel {
                         connection.controlling && connection.attention.contains(&self.pane_id)
                     }),
                     zoomed,
+                    connection.is_some_and(|connection| {
+                        connection.pasting_images.contains(&self.pane_id)
+                    }),
                 )
             })
             .unwrap_or((
@@ -172,6 +176,7 @@ impl Render for TerminalPanel {
                 None,
                 SharedString::from("Terminal"),
                 None,
+                false,
                 false,
                 false,
             ));
@@ -393,7 +398,34 @@ impl Render for TerminalPanel {
                                     .child(pane_title),
                             ),
                     )
-                    .child(h_flex().flex_shrink_0().child(pane_zoom).child(pane_menu)),
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .items_center()
+                            .gap_1()
+                            // A remote image can take a while to cross the wire; without
+                            // this the paste looks ignored until the path shows up.
+                            .when(pasting, |this| {
+                                this.child(
+                                    h_flex()
+                                        .id(format!(
+                                            "terminal-pane-pasting-{key}-{}",
+                                            pane_id.as_u64()
+                                        ))
+                                        .debug_selector(move || {
+                                            format!("terminal-pane-pasting-{}", pane_id.as_u64())
+                                        })
+                                        .items_center()
+                                        .gap_1()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(Spinner::new().xsmall())
+                                        .child("Pasting image…"),
+                                )
+                            })
+                            .child(pane_zoom)
+                            .child(pane_menu),
+                    ),
             )
             .child(body)
     }

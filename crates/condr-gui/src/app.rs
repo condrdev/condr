@@ -56,6 +56,7 @@ use gpui_kit::component::setting::{
     SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
 use gpui_kit::component::sidebar::{Sidebar, SidebarCollapsible, SidebarItem};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{

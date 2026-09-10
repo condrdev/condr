@@ -9,6 +9,9 @@ pub(super) enum Incoming {
     Message(ServerMessage),
     VisualReady(u64),
     TerminalResync,
+    /// A `PasteImage` for this Pane has left the writer, or failed before it could: the
+    /// "Pasting image…" indicator comes down. Client-local, not a Server reply.
+    ImageSent(PaneId),
     Disconnected(String),
 }
 
@@ -71,23 +74,47 @@ impl ClientIo {
             .name("condr-client-writer".into())
             .spawn(move || {
                 while let Ok(mut message) = outgoing_rx.recv() {
-                    if let ClientMessage::PasteImage { format, bytes, .. } = &mut message
-                        && let Err(message) =
-                            super::terminal_input::prepare_clipboard_image(format, bytes)
-                    {
-                        if writer_events
-                            .send_blocking(Incoming::Message(ServerMessage::Error { message }))
-                            .is_err()
-                        {
-                            break;
+                    let image_pane = match &mut message {
+                        ClientMessage::PasteImage {
+                            pane_id,
+                            format,
+                            bytes,
+                            ..
+                        } => {
+                            if let Err(message) =
+                                super::terminal_input::prepare_clipboard_image(format, bytes)
+                            {
+                                if writer_events
+                                    .send_blocking(Incoming::Message(ServerMessage::Error {
+                                        message,
+                                    }))
+                                    .is_err()
+                                    || writer_events
+                                        .send_blocking(Incoming::ImageSent(*pane_id))
+                                        .is_err()
+                                {
+                                    break;
+                                }
+                                continue;
+                            }
+                            Some(*pane_id)
                         }
-                        continue;
-                    }
+                        _ => None,
+                    };
                     if let Err(error) =
                         condr_core::protocol::write_client_message(&mut writer, &message)
                     {
                         let _ = writer_events
                             .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
+                        break;
+                    }
+                    // ponytail: "sent" is the socket accepting the last byte, not the Server
+                    // pasting the path; add a Server ack if staging ever gets slow.
+                    if let Some(pane_id) = image_pane
+                        && writer_events
+                            .send_blocking(Incoming::ImageSent(pane_id))
+                            .is_err()
+                    {
                         break;
                     }
                 }

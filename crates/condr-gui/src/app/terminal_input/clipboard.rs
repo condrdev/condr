@@ -77,6 +77,7 @@ impl Condr {
         }
         // The Pane is fixed here; a focus change while the upload is in flight must not
         // retarget it, which the message's own pane_id guarantees.
+        connection.pasting_images.insert(pane_id);
         connection.send(ClientMessage::PasteImage {
             server_id,
             session_id,
@@ -85,6 +86,8 @@ impl Condr {
             bytes: bytes.clone(),
         });
         self.clear_selection(cx);
+        // The header's "Pasting image…" must show now, not on the next terminal frame.
+        cx.notify();
         true
     }
 }

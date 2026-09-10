@@ -94,6 +94,12 @@ impl Condr {
                 };
             }
             Incoming::VisualReady(_) => return IncomingEffect::default(),
+            Incoming::ImageSent(pane_id) => {
+                return IncomingEffect {
+                    notify: self.connections[index].pasting_images.remove(&pane_id),
+                    ..IncomingEffect::default()
+                };
+            }
             Incoming::Disconnected(error) => {
                 return self.mark_disconnected(
                     key,
