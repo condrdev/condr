@@ -155,7 +155,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
             let allowed = server_admin_allowed(&settings, cx);
             h_flex().gap_2().items_center().child(
                 Button::new("server-restart")
-                    .label("Restart Server…")
+                    .label("Restart Server")
                     .small()
                     .outline()
                     .disabled(!allowed)
@@ -358,7 +358,7 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                             .when(allowed, |this| {
                                 this.child(
                                     Button::new(format!("revoke-{key}"))
-                                        .label("Revoke…")
+                                        .label("Revoke")
                                         .small()
                                         .outline()
                                         .on_click(move |_, window, cx| {
