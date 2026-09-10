@@ -115,17 +115,23 @@ impl Render for TerminalPanel {
             pane_title,
             agent_kind,
             attention,
+            zoomed,
         ) = owner
             .as_ref()
             .map(|owner| {
                 let app = owner.read(cx);
                 let active = app.target_pane == Some((self.connection_key, self.pane_id));
-                let solo = app.dock_surfaces.iter().any(|(surface_key, surface)| {
-                    surface_key.connection_key == self.connection_key
-                        && surface.pane_ids.len() == 1
-                        && surface.pane_ids.contains(&self.pane_id)
-                });
                 let connection = app.connection(self.connection_key);
+                let zoomed = connection
+                    .is_some_and(|connection| connection.zoomed_panes.contains(&self.pane_id));
+                // A zoomed Pane is alone on its surface too, but it is not the Tab's only
+                // Pane: keeping the active border is what says "zoomed".
+                let solo = !zoomed
+                    && app.dock_surfaces.iter().any(|(surface_key, surface)| {
+                        surface_key.connection_key == self.connection_key
+                            && surface.pane_ids.len() == 1
+                            && surface.pane_ids.contains(&self.pane_id)
+                    });
                 let terminal = app.terminal(self.connection_key, self.pane_id).cloned();
                 let pane_title = connection
                     .and_then(|connection| connection.terminal_titles.get(&self.pane_id).cloned())
@@ -152,6 +158,7 @@ impl Render for TerminalPanel {
                     connection.is_some_and(|connection| {
                         connection.controlling && connection.attention.contains(&self.pane_id)
                     }),
+                    zoomed,
                 )
             })
             .unwrap_or((
@@ -165,6 +172,7 @@ impl Render for TerminalPanel {
                 None,
                 SharedString::from("Terminal"),
                 None,
+                false,
                 false,
             ));
         let ime_terminal_revision = marked_text
@@ -289,6 +297,28 @@ impl Render for TerminalPanel {
                     .menu_with_enable("Close Pane", Box::new(ClosePane), controlling)
             })
             .anchor(Anchor::TopRight);
+        // The zoom state is otherwise invisible: a zoomed Pane looks like a one-Pane Tab.
+        let zoom_owner = self.owner.clone();
+        let zoom_label = if zoomed { "Zoom Out" } else { "Zoom In" };
+        let pane_zoom = Button::new(format!("terminal-pane-zoom-{key}-{}", pane_id.as_u64()))
+            .icon(Icon::new(if zoomed {
+                super::sidebar::CondrIconName::Minimize2
+            } else {
+                super::sidebar::CondrIconName::Maximize2
+            }))
+            .xsmall()
+            .ghost()
+            .tab_stop(false)
+            .tooltip(zoom_label)
+            .accessibility_label(zoom_label)
+            .debug_selector(move || format!("terminal-pane-zoom-{}", pane_id.as_u64()))
+            .disabled(!controlling)
+            .on_click(move |_, _, cx| {
+                let _ = zoom_owner.update(cx, |app, cx| {
+                    app.set_target_pane(key, pane_id, cx);
+                    app.toggle_zoom();
+                });
+            });
         let title_tooltip = pane_title.clone();
 
         v_flex()
@@ -363,7 +393,7 @@ impl Render for TerminalPanel {
                                     .child(pane_title),
                             ),
                     )
-                    .child(pane_menu),
+                    .child(h_flex().flex_shrink_0().child(pane_zoom).child(pane_menu)),
             )
             .child(body)
     }

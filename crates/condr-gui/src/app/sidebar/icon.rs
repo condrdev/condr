@@ -27,6 +27,9 @@ pub(in crate::app) enum CondrIconName {
     CircleAlert,
     /// Lucide's `server` with a plus in the corner; Lucide itself has no server-plus.
     ServerPlus,
+    /// Lucide `maximize-2` / `minimize-2`: a Pane's zoom toggle.
+    Maximize2,
+    Minimize2,
     /// The agent CLIs' marks (assets/icons/NOTICE-AGENT-ICONS), recolored to
     /// `currentColor` so they follow the text like every other icon.
     Claude,
@@ -62,6 +65,8 @@ impl IconNamed for CondrIconName {
             Self::CircleFilled => "icons/circle-filled.svg",
             Self::CircleAlert => "icons/circle-alert.svg",
             Self::ServerPlus => "icons/server-plus.svg",
+            Self::Maximize2 => "icons/maximize-2.svg",
+            Self::Minimize2 => "icons/minimize-2.svg",
             Self::Claude => "icons/claude.svg",
             Self::Codex => "icons/codex.svg",
             Self::OpenCode => "icons/opencode.svg",
