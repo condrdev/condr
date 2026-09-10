@@ -237,7 +237,7 @@ impl Condr {
         let measured_size = {
             let size = size(
                 self.workspace_size.width.max(px(0.)),
-                (self.workspace_size.height - WORKSPACE_TAB_BAR_HEIGHT).max(px(0.)),
+                self.workspace_size.height.max(px(0.)),
             );
             (size.width > px(0.) && size.height > px(0.)).then_some(size)
         };
@@ -249,7 +249,7 @@ impl Condr {
         .unwrap_or_else(|| {
             size(
                 (window.viewport_size().width - self.sidebar_width).max(px(1.)),
-                (window.viewport_size().height - WORKSPACE_TAB_BAR_HEIGHT).max(px(1.)),
+                (window.viewport_size().height - TITLE_BAR_HEIGHT).max(px(1.)),
             )
         });
 

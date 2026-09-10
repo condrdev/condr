@@ -20,9 +20,15 @@ pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
 }
 
 impl Condr {
-    pub(super) fn render_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The active Workspace as two pieces: its Tab strip, which the title bar hosts so
+    /// the Panes get the full body height, and the body under it. No strip without a
+    /// Workspace; the empty state carries the error itself.
+    pub(super) fn render_workspace(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> (Option<AnyElement>, AnyElement) {
         let Some(connection) = self.active_connection() else {
-            return div().size_full().into_any_element();
+            return (None, div().size_full().into_any_element());
         };
         let error = self.app_error.clone().or_else(|| connection.error.clone());
         let can_mutate = connection.can_mutate()
@@ -31,15 +37,18 @@ impl Condr {
                 .is_none()
             && !self.has_pending_projection_for(connection.key);
         let Ok(session) = Session::restore(connection.snapshot.clone()) else {
-            return div()
-                .size_full()
-                .child("Invalid Session state")
-                .into_any_element();
+            return (
+                None,
+                div()
+                    .size_full()
+                    .child("Invalid Session state")
+                    .into_any_element(),
+            );
         };
         let key = connection.key;
         let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
             let new_owner = cx.weak_entity();
-            return v_flex()
+            let empty = v_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
@@ -62,6 +71,7 @@ impl Condr {
                         }),
                 )
                 .into_any_element();
+            return (None, empty);
         };
         let workspace = session
             .workspace(workspace_id)
@@ -101,6 +111,9 @@ impl Condr {
             let tab_row = h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
                 .flex_shrink_0()
+                // Inside the title bar a press would otherwise start a window move;
+                // the Tab's own drag needs it.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .when(can_mutate, |this| {
                     let drop_owner = cx.weak_entity();
                     let tab_ids = tab_ids.clone();
@@ -200,51 +213,46 @@ impl Condr {
         });
         let new_tab_owner = cx.weak_entity();
 
-        v_flex()
-            .size_full()
+        let strip = h_flex()
+            .id("workspace-tabs")
+            .debug_selector(|| "workspace-tabs".into())
+            .h_full()
+            .w_full()
+            .min_w_0()
+            .gap_1()
+            .px_2()
+            .items_center()
+            .children(tab_buttons)
             .child(
-                h_flex()
-                    .h(WORKSPACE_TAB_BAR_HEIGHT)
-                    .flex_shrink_0()
-                    .gap_1()
-                    .px_2()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .children(tab_buttons)
-                    .child(
-                        Button::new("new-tab")
-                            .debug_selector(|| "new-tab".into())
-                            .ghost()
-                            .small()
-                            .icon(IconName::Plus)
-                            .tooltip("New Tab")
-                            .disabled(!can_mutate)
-                            .on_click(move |_, window, cx| {
-                                let _ = new_tab_owner.update(cx, |this, cx| {
-                                    this.new_tab_on(key, workspace_id, window, cx)
-                                });
-                            }),
-                    )
-                    .when_some(error, |row, error| {
-                        row.child(
-                            div()
-                                .ml_auto()
-                                .min_w_0()
-                                .truncate()
-                                .text_xs()
-                                .text_color(cx.theme().danger)
-                                .child(error),
-                        )
+                Button::new("new-tab")
+                    .debug_selector(|| "new-tab".into())
+                    .ghost()
+                    .small()
+                    .icon(IconName::Plus)
+                    .tooltip("New Tab")
+                    .disabled(!can_mutate)
+                    .on_click(move |_, window, cx| {
+                        let _ = new_tab_owner.update(cx, |this, cx| {
+                            this.new_tab_on(key, workspace_id, window, cx)
+                        });
                     }),
             )
-            .child(
-                div()
-                    .min_h_0()
-                    .flex_1()
-                    .when_some(dock_area, |view, dock_area| view.child(dock_area)),
-            )
-            .into_any_element()
+            .when_some(error, |row, error| {
+                row.child(
+                    div()
+                        .ml_auto()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(error),
+                )
+            });
+        let body = div()
+            .size_full()
+            .when_some(dock_area, |view, dock_area| view.child(dock_area))
+            .into_any_element();
+        (Some(strip.into_any_element()), body)
     }
 }
 
@@ -266,10 +274,62 @@ pub(super) fn title_bar(title: &'static str, cx: &App) -> TitleBar {
     )
 }
 
+/// The Kit's own inset before the title bar's content: room for macOS traffic lights,
+/// a small margin elsewhere. Private to the Kit, so mirrored here to line the sidebar
+/// segment up with the sidebar below it.
+#[cfg(target_os = "macos")]
+const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
+#[cfg(not(target_os = "macos"))]
+const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
+
+/// The main window's title bar continues the sidebar and the Workspace: its left segment
+/// is the sidebar's width and color, its right segment hosts the Tab strip, so the two
+/// columns read as one surface each and the Panes get the height a separate strip took.
+/// The Kit still draws the window controls and moves the window from empty space.
+fn workspace_title_bar(sidebar_width: Pixels, tab_strip: Option<AnyElement>, cx: &App) -> TitleBar {
+    let theme = cx.theme();
+    TitleBar::new()
+        // The sidebar's color reaches the window edge, traffic-light inset included.
+        .bg(theme.sidebar)
+        // The strip draws its own bottom edge; the sidebar segment has none, like the
+        // sidebar below it.
+        .border_b_0()
+        .child(
+            h_flex()
+                .h_full()
+                .w_full()
+                .min_w_0()
+                .child(
+                    h_flex()
+                        .debug_selector(|| "title-sidebar".into())
+                        .w(sidebar_width - TITLE_BAR_LEFT_PADDING)
+                        .flex_none()
+                        .h_full()
+                        .gap_2()
+                        .items_center()
+                        .border_r_1()
+                        .border_color(theme.sidebar_border)
+                        .child(img(APP_LOGO).size_4().flex_shrink_0())
+                        .child(condr_core::APP_NAME),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .bg(theme.background)
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .children(tab_strip),
+                ),
+        )
+}
+
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let workspace_owner = cx.weak_entity();
+        let (tab_strip, body) = self.render_workspace(cx);
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {
@@ -277,7 +337,7 @@ impl Render for Condr {
                     this.workspace_size = bounds.size;
                 });
             })
-            .child(self.render_workspace(cx))
+            .child(body)
             .into_any_element();
         div()
             .key_context("Condr")
@@ -321,7 +381,7 @@ impl Render for Condr {
             .text_color(cx.theme().foreground)
             // Client-side title bar on every platform, as Zed does; the OS title for the
             // taskbar is set separately when the window opens.
-            .child(title_bar(condr_core::APP_NAME, cx))
+            .child(workspace_title_bar(self.sidebar_width, tab_strip, cx))
             .child(
                 // The sidebar keeps an absolute width, the way Zed sizes its docks: a
                 // resizable group would rescale it with the window on every resize.

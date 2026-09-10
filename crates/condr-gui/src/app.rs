@@ -61,8 +61,8 @@ use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     ActiveTheme as _, Collapsible, Disableable as _, ElementExt as _, Icon, IconName, IconNamed,
-    IndexPath, Root, Selectable as _, Sizable as _, StyledExt as _, TitleBar, WindowExt as _,
-    h_flex, v_flex,
+    IndexPath, Root, Selectable as _, Sizable as _, StyledExt as _, TITLE_BAR_HEIGHT, TitleBar,
+    WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -183,7 +183,6 @@ const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
-const WORKSPACE_TAB_BAR_HEIGHT: Pixels = px(36.);
 
 /// The drag payload of the sidebar resize handle; the shell tracks its moves.
 #[derive(Clone)]
@@ -338,7 +337,7 @@ impl Condr {
             pending_presentation_request: None,
             workspace_size: size(
                 (window.viewport_size().width - INITIAL_SIDEBAR_WIDTH).max(px(0.)),
-                window.viewport_size().height,
+                (window.viewport_size().height - TITLE_BAR_HEIGHT).max(px(0.)),
             ),
             focus_handle: cx.focus_handle(),
             terminal_selection: None,
