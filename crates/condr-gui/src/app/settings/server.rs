@@ -62,21 +62,18 @@ pub(in crate::app) fn select_server_shell(
     });
 }
 
-/// Preferences a Server owns, edited for one connection at a time. Only the shell so
-/// far; the Server picker sits in the tab bar.
 const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
 
-pub(super) fn server_page(
-    settings: &Entity<SettingsWindow>,
-    hooks: (Vec<HooksReport>, Option<String>),
-) -> SettingPage {
+/// Preferences a Server owns, edited for one connection at a time; the Server picker sits
+/// in the tab bar. Each page mirrors one `condr server` concern.
+pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> SettingPage {
     let shell_get = settings.clone();
     let shell_set = settings.clone();
-    SettingPage::new("Server")
-        .icon(IconName::Cpu)
+    SettingPage::new("Terminal")
+        .icon(IconName::SquareTerminal)
         .default_open(true)
         .group(
-            SettingGroup::new().title("Terminal").item(
+            SettingGroup::new().item(
                 SettingItem::new(
                     "Shell",
                     SettingField::input(
@@ -88,9 +85,20 @@ pub(super) fn server_page(
                 .description("Empty uses the system default."),
             ),
         )
+}
+
+pub(super) fn server_network_page(settings: &Entity<SettingsWindow>) -> SettingPage {
+    SettingPage::new("Daemon")
+        .icon(IconName::Cpu)
+        .default_open(true)
         .group(server_network_group(settings))
+}
+
+pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingPage {
+    SettingPage::new("Clients")
+        .icon(IconName::Network)
+        .default_open(true)
         .group(server_clients_group(settings))
-        .group(agents_group(settings, hooks))
 }
 
 fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
@@ -98,7 +106,6 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     let set = settings.clone();
     let restart = settings.clone();
     SettingGroup::new()
-        .title("Daemon")
         .item(SettingItem::render({
             let settings = restart.clone();
             move |_, _, cx| {
@@ -211,7 +218,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
 
 fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     let invite_settings = settings.clone();
-    SettingGroup::new().title("Clients").item(
+    SettingGroup::new().item(
         SettingItem::render(move |_, _, cx| {
             let settings = invite_settings.clone();
             let (allowed, invite, clients, connected) = settings
@@ -263,19 +270,40 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                         .child("No paired clients."),
                 );
             } else {
+                // The same columns as `condr server clients`.
+                let column = |name: &'static str, seen: &'static str, key: &'static str| {
+                    h_flex()
+                        .gap_4()
+                        .items_center()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(div().w(rems(10.)).child(name))
+                        .child(div().w(rems(8.)).child(seen))
+                        .child(div().flex_1().child(key))
+                };
+                row = row.child(column("NAME", "LAST SEEN", "FINGERPRINT"));
                 for client in clients {
-                    let connected = connected.contains(&client.fingerprint);
+                    let seen = if connected.contains(&client.fingerprint) {
+                        "connected".to_owned()
+                    } else {
+                        relative_age(client.last_seen)
+                    };
                     let key = client.fingerprint.clone();
                     let settings = settings.clone();
                     let row_view = h_flex()
-                        .gap_2()
+                        .gap_4()
                         .items_center()
-                        .child(div().flex_1().child(format!(
-                            "{}  {}  {}",
-                            client.name,
-                            client.last_seen,
-                            if connected { "connected" } else { "" }
-                        )))
+                        .text_sm()
+                        .child(div().w(rems(10.)).truncate().child(client.name))
+                        .child(div().w(rems(8.)).whitespace_nowrap().child(seen))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family("monospace")
+                                .child(client.fingerprint),
+                        )
                         .when(allowed, |this| {
                             this.child(
                                 Button::new(format!("revoke-{key}"))
@@ -395,10 +423,10 @@ pub(in crate::app) fn run_agent_hooks(
 /// The status hooks of every supported agent on the selected Server's machine, with the
 /// actions their state allows; the Server writes the agent's own configuration (ADR 0014).
 /// Built on every render, so the rows follow the latest reports.
-fn agents_group(
+pub(super) fn agents_page(
     settings: &Entity<SettingsWindow>,
     (reports, error): (Vec<HooksReport>, Option<String>),
-) -> SettingGroup {
+) -> SettingPage {
     let mut group = SettingGroup::new().title("Status hooks");
     if let Some(error) = error {
         group = group.item(
@@ -455,7 +483,7 @@ fn agents_group(
             .keywords([agent.label(), "hooks"]),
         );
     }
-    group
+    SettingPage::new("Agents").icon(IconName::Bot).group(group)
 }
 
 /// One row's field: the state as a word, then the one or two actions that change it.

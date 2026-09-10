@@ -355,11 +355,8 @@ impl Render for SettingsWindow {
         self.refresh_server_choices(window, cx);
         let settings = cx.entity();
         let tab = self.tab;
-        // One `Settings` per tab, each with its own id so their page selection and
-        // search do not bleed into each other.
         let content = match tab {
             SettingsTab::Application => Settings::new("condr-settings-application")
-                // Matches the main window's sidebar.
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(appearance_page(&self.owner, &settings, &self.color_scheme))
                 .page(shortcuts_page())
@@ -367,14 +364,14 @@ impl Render for SettingsWindow {
                 .page(licenses_page(&self.licenses)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(server_page(&settings, self.connection_hooks(cx))),
+                .page(server_terminal_page(&settings))
+                .page(server_network_page(&settings))
+                .page(server_clients_page(&settings))
+                .page(agents_page(&settings, self.connection_hooks(cx))),
         };
         let tabs = TabBar::new("condr-settings-tabs")
             .underline()
-            .selected_index(match tab {
-                SettingsTab::Application => 0,
-                SettingsTab::Server => 1,
-            })
+            .selected_index(if tab == SettingsTab::Server { 1 } else { 0 })
             .on_click(move |index, _, cx| {
                 let tab = if *index == 1 {
                     SettingsTab::Server
@@ -388,18 +385,14 @@ impl Render for SettingsWindow {
                     }
                 });
             })
-            // The tabs start flush left otherwise; match the page sidebar's inset.
             .prefix(div().w_3())
             .children([Tab::new().label("Application"), Tab::new().label("Server")])
-            // The picker sits beside the tabs, so the whole Server tab reads as "this
-            // Server's settings". The Select fills its container, so the wrapper sets
-            // the width.
             .when(tab == SettingsTab::Server, |this| {
                 this.suffix(
                     div()
                         .debug_selector(|| "settings-server".into())
                         .flex_none()
-                        .w(rems(11.))
+                        .w(rems(14.))
                         .pr_3()
                         .py_1()
                         .child(Select::new(&self.server_select).small()),

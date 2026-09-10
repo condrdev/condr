@@ -27,7 +27,7 @@ use condr_core::protocol::{
     MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot,
     RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
     ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
-    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
+    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame, relative_age,
 };
 use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId,

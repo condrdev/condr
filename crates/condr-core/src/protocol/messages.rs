@@ -118,6 +118,45 @@ pub struct ServerClientInfo {
     pub last_seen: u64,
 }
 
+/// How long ago a unix timestamp was, as the CLI and GUI both print it.
+pub fn relative_age(unix_seconds: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let elapsed = now.saturating_sub(unix_seconds);
+    let (amount, unit) = match elapsed {
+        0..60 => return "just now".into(),
+        60..3_600 => (elapsed / 60, "minute"),
+        3_600..86_400 => (elapsed / 3_600, "hour"),
+        _ => (elapsed / 86_400, "day"),
+    };
+    format!("{amount} {unit}{} ago", if amount == 1 { "" } else { "s" })
+}
+
+#[cfg(test)]
+mod relative_age_tests {
+    use super::relative_age;
+
+    #[test]
+    fn reads_as_a_coarse_relative_time() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(relative_age(now), "just now");
+        assert_eq!(relative_age(now - 60), "1 minute ago");
+        assert_eq!(relative_age(now - 5 * 60), "5 minutes ago");
+        assert_eq!(relative_age(now - 3 * 3_600), "3 hours ago");
+        assert_eq!(relative_age(now - 86_400), "1 day ago");
+        assert_eq!(relative_age(now - 40 * 86_400), "40 days ago");
+        assert_eq!(
+            relative_age(now + 100),
+            "just now",
+            "a clock skew is not the future"
+        );
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AgentCommand {
     Available,

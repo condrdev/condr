@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use condr_core::protocol::relative_age;
 use condr_server::ServerConfig;
 use condr_server::noise::{self, ServerIdentity};
 
@@ -335,7 +336,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 let seen = if connected.contains(&client.key.to_hex()) {
                     "connected".to_owned()
                 } else {
-                    ago(client.last_seen)
+                    relative_age(client.last_seen)
                 };
                 println!("{:<name_width$}  {seen:<14}  {}", client.name, client.key);
             }
@@ -399,20 +400,6 @@ fn load_identity(directory: &std::path::Path) -> io::Result<ServerIdentity> {
 }
 
 /// "3 hours ago" for a Unix timestamp; coarse on purpose, a device list is not a log.
-fn ago(unix_seconds: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    let elapsed = now.saturating_sub(unix_seconds);
-    let (amount, unit) = match elapsed {
-        0..60 => return "just now".into(),
-        60..3_600 => (elapsed / 60, "minute"),
-        3_600..86_400 => (elapsed / 3_600, "hour"),
-        _ => (elapsed / 86_400, "day"),
-    };
-    format!("{amount} {unit}{} ago", if amount == 1 { "" } else { "s" })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,21 +469,6 @@ mod tests {
             parse(&["revoke", "abcd"]),
             Ok(ServerCommand::Revoke { key }) if key == "abcd"
         ));
-    }
-
-    #[test]
-    fn pairing_age_reads_as_a_coarse_relative_time() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        assert_eq!(ago(now), "just now");
-        assert_eq!(ago(now - 60), "1 minute ago");
-        assert_eq!(ago(now - 5 * 60), "5 minutes ago");
-        assert_eq!(ago(now - 3 * 3_600), "3 hours ago");
-        assert_eq!(ago(now - 86_400), "1 day ago");
-        assert_eq!(ago(now - 40 * 86_400), "40 days ago");
-        assert_eq!(ago(now + 100), "just now", "a clock skew is not the future");
     }
 
     #[test]
