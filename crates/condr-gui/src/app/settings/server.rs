@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::component::clipboard::Clipboard;
+use gpui_kit::component::tag::Tag;
 
 /// The shell a Server currently stores, as its Bootstrap or last event reported it.
 pub(super) fn connection_shell(
@@ -105,15 +106,56 @@ pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingP
 /// Whether this Client may change the selected Server: only a local or SSH connection
 /// can, and the Server refuses everything else (ADR 0015).
 fn server_admin_allowed(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
-    let this = settings.read(cx);
-    this.owner.upgrade().is_some_and(|owner| {
-        owner
-            .read(cx)
-            .connections
-            .iter()
-            .find(|c| c.key == this.selected_server)
-            .is_some_and(|c| matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_)))
+    selected_connection(settings, cx, |c| {
+        c.status == ConnectionStatus::Connected
+            && matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_))
     })
+    .unwrap_or(false)
+}
+
+fn selected_connection<T>(
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+    read: impl FnOnce(&ServerConnection) -> T,
+) -> Option<T> {
+    let this = settings.read(cx);
+    let owner = this.owner.upgrade()?;
+    owner
+        .read(cx)
+        .connections
+        .iter()
+        .find(|c| c.key == this.selected_server)
+        .map(read)
+}
+
+/// The Client's view of the selected Server: whether it is connected and where. A
+/// Server can run while this GUI is disconnected, so this never claims "running".
+fn server_status_row(settings: &Entity<SettingsWindow>) -> SettingItem {
+    let settings = settings.clone();
+    SettingItem::render(move |_, _, cx| {
+        let (status, endpoint) =
+            selected_connection(&settings, cx, |c| (c.status, c.endpoint.to_string()))
+                .unwrap_or((ConnectionStatus::Disconnected, String::new()));
+        let tag = match status {
+            ConnectionStatus::Connected => Tag::success().child("Connected"),
+            ConnectionStatus::Connecting => Tag::warning().child("Connecting"),
+            ConnectionStatus::Disconnected => Tag::secondary().child("Disconnected"),
+        };
+        h_flex()
+            .justify_between()
+            .items_center()
+            .gap_2()
+            .child("Status")
+            .child(
+                h_flex().gap_2().items_center().child(tag.small()).child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(endpoint),
+                ),
+            )
+    })
+    .keywords(["status", "connected", "endpoint"])
 }
 
 fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
@@ -125,6 +167,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
          change them; over TCP this page is read-only.",
     );
     group
+        .item(server_status_row(settings))
         .item(SettingItem::new(
             "TCP listener",
             SettingField::switch(
