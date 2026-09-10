@@ -548,3 +548,85 @@ fn hooks_reports_replace_their_agents_row_and_errors_clear_on_the_next_report() 
         });
     });
 }
+
+#[test]
+fn the_daemon_page_keeps_half_typed_addresses_local_and_invites_follow_the_listener() {
+    use condr_core::protocol::{ServerAdminResponse, ServerMessage};
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let main_window = window.update(|window, _| window.window_handle());
+    let settings_button = window.debug_bounds("open-settings").unwrap();
+    window.simulate_click(settings_button.center(), Modifiers::default());
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    settings.update(|window, cx| _ = window.draw(cx));
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+
+    // A partial address stays in the field and never reaches the Server.
+    let before = settings.read(|app| view.read(app).connection(1).unwrap().listen.clone());
+    settings.update(|_, cx| set_server_listen(&settings_view, "127.0.0.1:".into(), cx));
+    assert_eq!(
+        settings.read(|app| server_listen(&settings_view, app)),
+        "127.0.0.1:"
+    );
+    settings.update(|_, cx| set_server_listen(&settings_view, "not an address".into(), cx));
+    settings.run_until_parked();
+    assert_eq!(
+        settings.read(|app| view.read(app).connection(1).unwrap().listen.clone()),
+        before,
+        "an incomplete address is not saved"
+    );
+
+    settings.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::Invite {
+                    address: "tcp://key.secret@<host>:2637".into(),
+                    expires_in_secs: 600,
+                })),
+                cx,
+            );
+            assert_eq!(
+                this.connection(1).unwrap().invite,
+                Some(("tcp://key.secret@<host>:2637".to_owned(), 600))
+            );
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::ServerAdmin(
+                    ServerAdminResponse::ListenSaved {
+                        listen: Some("127.0.0.1:2638".into()),
+                    },
+                )),
+                cx,
+            );
+            let connection = this.connection(1).unwrap();
+            assert_eq!(connection.listen.as_deref(), Some("127.0.0.1:2638"));
+            assert_eq!(connection.invite, None, "a new port voids the old invite");
+        });
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        settings.debug_bounds("server-invite-address").is_none(),
+        "no invite is shown after the listener changed"
+    );
+}

@@ -125,6 +125,8 @@ pub(super) struct SettingsWindow {
     /// The Shell field as typed. The Server stores the trimmed value and echoes it
     /// through its settings; the field is not rewritten under the user meanwhile.
     pub(super) shell_draft: SharedString,
+    /// The Listen address as typed; see `set_server_listen`.
+    pub(super) listen_draft: SharedString,
     /// Which tab is showing: this Client's settings or one Server's.
     pub(super) tab: SettingsTab,
     /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
@@ -226,6 +228,7 @@ impl SettingsWindow {
             .map(|owner| owner.read(cx).active_connection)
             .unwrap_or_default();
         let shell_draft = connection_shell(&owner, selected_server, cx);
+        let listen_draft = connection_listen(&owner, selected_server, cx);
         let _ = owner.update(cx, |owner, _| {
             owner.request_agent_hooks(selected_server);
             owner.request_server_admin(selected_server);
@@ -268,6 +271,7 @@ impl SettingsWindow {
             font_draft,
             selected_server,
             shell_draft,
+            listen_draft,
             tab: SettingsTab::default(),
             server_select,
             server_keys,
@@ -280,6 +284,7 @@ impl SettingsWindow {
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         self.selected_server = key;
         self.shell_draft = connection_shell(&self.owner, key, cx);
+        self.listen_draft = connection_listen(&self.owner, key, cx);
         let _ = self.owner.update(cx, |owner, _| {
             owner.request_agent_hooks(key);
             owner.request_server_admin(key);

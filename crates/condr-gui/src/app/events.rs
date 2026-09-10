@@ -542,14 +542,22 @@ impl Condr {
                         connection.listen = listen;
                         connection.connected_devices = connected;
                     }
-                    ServerAdminResponse::ListenSaved { listen } => connection.listen = listen,
                     ServerAdminResponse::Clients { clients, connected } => {
                         connection.clients = clients;
                         connection.connected_devices = connected;
                     }
-                    ServerAdminResponse::Invite { address, .. } => {
+                    ServerAdminResponse::Invite {
+                        address,
+                        expires_in_secs,
+                    } => {
                         cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
-                        connection.invite = Some(address)
+                        connection.invite = Some((address, expires_in_secs));
+                    }
+                    // The stored listen address changed: a pending invite still points at
+                    // the old port, and none can be issued without a listener.
+                    ServerAdminResponse::ListenSaved { listen } => {
+                        connection.listen = listen;
+                        connection.invite = None;
                     }
                     ServerAdminResponse::Revoked { .. } => {
                         connection.send(ClientMessage::ServerAdmin {

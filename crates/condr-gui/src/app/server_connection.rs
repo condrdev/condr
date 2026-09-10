@@ -44,7 +44,9 @@ pub(super) struct ServerConnection {
     pub(super) clients: Vec<ServerClientInfo>,
     pub(super) connected_devices: Vec<String>,
     pub(super) admin_error: Option<String>,
-    pub(super) invite: Option<String>,
+    /// The last invite this Server issued and how long it said it was valid, for the
+    /// Clients page to show and copy.
+    pub(super) invite: Option<(String, u64)>,
     pub(super) io: Option<ClientIo>,
     pub(super) cancellation: ConnectionCancellation,
     pub(super) connect_generation: u64,
