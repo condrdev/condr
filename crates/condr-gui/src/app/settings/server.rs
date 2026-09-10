@@ -128,34 +128,33 @@ fn selected_connection<T>(
         .map(read)
 }
 
-/// The Client's view of the selected Server: whether it is connected and where. A
-/// Server can run while this GUI is disconnected, so this never claims "running".
+/// The Client's view of the selected Server: the connection type, colored by whether it
+/// is up. A Server can run while this GUI is disconnected, so this never claims "running".
 fn server_status_row(settings: &Entity<SettingsWindow>) -> SettingItem {
     let settings = settings.clone();
     SettingItem::render(move |_, _, cx| {
-        let (status, endpoint) =
-            selected_connection(&settings, cx, |c| (c.status, c.endpoint.to_string()))
-                .unwrap_or((ConnectionStatus::Disconnected, String::new()));
+        let (status, kind) = selected_connection(&settings, cx, |c| {
+            let kind = match c.endpoint {
+                Endpoint::Local(_) => "Local",
+                Endpoint::Ssh(_) => "SSH",
+                Endpoint::Tcp(_) => "TCP",
+            };
+            (c.status, kind)
+        })
+        .unwrap_or((ConnectionStatus::Disconnected, "Local"));
         let tag = match status {
-            ConnectionStatus::Connected => Tag::success().child("Connected"),
-            ConnectionStatus::Connecting => Tag::warning().child("Connecting"),
-            ConnectionStatus::Disconnected => Tag::secondary().child("Disconnected"),
+            ConnectionStatus::Connected => Tag::success(),
+            ConnectionStatus::Connecting => Tag::warning(),
+            ConnectionStatus::Disconnected => Tag::secondary(),
         };
         h_flex()
             .justify_between()
             .items_center()
             .gap_2()
             .child("Status")
-            .child(
-                h_flex().gap_2().items_center().child(tag.small()).child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(endpoint),
-                ),
-            )
+            .child(tag.outline().small().child(kind))
     })
-    .keywords(["status", "connected", "endpoint"])
+    .keywords(["status", "connected", "local", "ssh", "tcp"])
 }
 
 fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
