@@ -1,8 +1,8 @@
 # Condr Roadmap
 
-> 状态：M1 自举已完成（2026-09-08）
+> 状态：M1 自举已完成（2026-09-08），post-M1 持续 dogfood 中（最近核对 2026-09-10）
 >
-> MVP Phase 7 验收见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；M0 滚动开发版已建立，M1 自举验收记录见下文。下一阶段评估 R0 与 M2。
+> MVP Phase 7 验收见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；M0 滚动开发版已建立，M1 自举验收记录见下文。M1 关闭后两天里落地了全平台安装包、Server 管理设置页和一批 GUI 打磨，其中安装包与校验和原属 R0/M2 的交付，已提前完成；见各里程碑下的「M1 之后」记录。下一阶段评估 R0 与 M2 的决定尚未做出。
 
 本文档描述 MVP 通过 Phase 7 发布门之后的方向。它不修改 [MVP 验收计划](mvp-plan.md) 中已经约定的 Server、Session、Terminal、Agent 和 Git 边界。
 
@@ -94,6 +94,16 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - 所有目标构建成功后才更新 release assets；成功更新后 `dev` tag、release notes 和所有 artifacts 指向同一 commit。
 - Condr 可以用该滚动开发版开始开发 Condr 自身。
 
+**M1 之后的扩展（2026-09-08～09）**
+
+M0 原本不做安装器、checksums 和 macOS 构建，M1 关闭后这些已经落地，滚动开发版的形态因此超出上面的非目标：
+
+- 每次发布从同一 commit 生成 Linux x86_64/arm64 AppImage 与 tar.gz、Windows x86_64 Inno Setup 安装器与 ZIP、macOS x86_64/arm64 `.pkg` 与 tar.gz，另有各平台 CLI-only 归档；Release 附带 `SHA256SUMS`，包内 `BUILD-COMMIT` 记录 SHA。
+- 仓库提供 `script/install-condr.sh` 与 `script/install-condr.ps1` 安装 headless CLI/Server，处理 PATH 注册与覆盖确认；卸载时清理 PATH。
+- 应用图标与品牌资源已统一到各平台。
+
+仍未做的仍是 M0 非目标：代码签名、自动升级、系统服务、遥测、协议兼容层。细节见 [Development Build](development-build.md)。
+
 ### M1：Solo Daily Driver / Desktop Daily Driver
 
 **完成记录（2026-09-08）**
@@ -102,6 +112,16 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - 本次代码核对基线为 `ad538e2b2d7c47a1559a9ca1b84dd39f616dc6d7`。既有跨 Pane 编排验收见 [#27](https://github.com/condrdev/condr/issues/27)，Windows hooks 验收见 [#30](https://github.com/condrdev/condr/issues/30)，远程图片粘贴验收见 [#29](https://github.com/condrdev/condr/issues/29)。手工结果由维护者确认，本阶段未单独采集上手计时或 FPS 数据。
 - 自动化收尾修正两处把 Session event cursor 当作布局命令计数的测试断言，并覆盖元数据事件推进 cursor 的情况。Linux arm64 上 `cargo test --workspace --features condr-gui/test-support --locked` 通过 423 项（含 121 项 GUI 测试），1 项辅助测试忽略；`cargo clippy --workspace --all-targets --features condr-gui/test-support --locked -- -D warnings` 与格式检查通过。
 - 已知限制继续独立跟踪：[颜色查询 #23](https://github.com/condrdev/condr/issues/23) 已延期、[Kitty keyboard #28](https://github.com/condrdev/condr/issues/28) 与 [OpenCode 真机验证 #36](https://github.com/condrdev/condr/issues/36) 后续按需求推进。命令注册表、通知、搜索和 context action 仍按实际摩擦决定，不阻塞 M1 关闭。
+
+**M1 之后的 dogfood 改动（2026-09-09～10）**
+
+这些改动来自日常使用中的直接摩擦，不扩充 M1 范围：
+
+- Settings 的 Server 标签拆成 Terminal、Daemon、Clients、Agents 四个顶层页。Daemon 页显示当前 Client 的连接状态与连接类型（Local/SSH/TCP），可编辑 TCP 监听地址（失焦或回车保存，改动重启后生效），可签发带复制按钮和有效期的 invite，可确认后重启 Server，GUI 在 Server 报告停止后自动重连。Clients 页与 `condr server clients` 共用同一份 NAME / LAST SEEN / FINGERPRINT 列，可撤销设备。
+- Pane header 新增缩放切换按钮，缩放中的 Pane 保留活动边框，不再与单 Pane Tab 混淆；远程粘贴图片期间 header 显示「Pasting image…」直到整帧送出。
+- Workspace 的 Tab 条移入标题栏，标题栏左段与侧栏同宽同色，Pane 拿回 Tab 条原来占用的高度。标题栏内的可点元素必须在按下时截获事件，否则 Windows 会把按下当作拖动窗口而丢掉点击。
+
+M1 可选项中的桌面通知、终端内搜索、命令注册表和 Reveal / 在 IDE 中打开等 context action 至今没有出现足以触发实现的摩擦记录，仍保持未实现。
 
 **核心交付**
 
@@ -132,6 +152,10 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 
 - M1 已完成自举，并且已经明确决定邀请外部用户、目标平台和发布范围。
 
+**已提前完成的部分**
+
+三大桌面平台的安装包、CLI 归档、`SHA256SUMS` 和安装脚本已随滚动开发版落地（见 M0 的「M1 之后的扩展」），安装与数据目录说明在 [Development Build](development-build.md)。R0 剩下的是可复现的候选版本流程、诊断能力、协议语义冻结、支持矩阵和外部 dogfood；代码中尚无结构化日志、health/status 或终端 burst 基准。
+
 **核心交付**
 
 - 以已完成的 Phase 7 验收证据和后续 dogfood 为基线，维护一个可复现的 Private Alpha 候选版本。
@@ -147,6 +171,8 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 - 已知限制和安全边界可被用户理解；诊断默认不采集终端内容，额外数据采用 opt-in。
 
 ### M2：Headless Server 与稳定 Client API
+
+Server 的 Linux x86_64/arm64、Windows 和 macOS 构建产物与 checksums 已由滚动开发版覆盖，`condr server restart|clients|revoke|invite` 与 Settings 的 Daemon/Clients 页提供了基本的运维入口。以下仍全部未开始：协议/客户端 crate 拆分、`condr-cli`、health/status、系统服务、签名、升级与回滚。
 
 **核心交付**
 
@@ -168,7 +194,7 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 
 ### M3：Secure Direct Remote
 
-这是对外宣传 remote 的硬门槛。M1 已按 WireGuard 模型落地了传输层认证与加密（[ADR 0011](adr/0011-tcp-endpoints-authenticate-like-wireguard.md)）：Server 与设备各持久 X25519 静态密钥，`Noise_IKpsk2` 握手，`condr server invite` 生成 10 分钟有效的一次性 invite 配对新设备，`condr server clients|revoke` 管理设备。以下为仍未完成的部分。
+这是对外宣传 remote 的硬门槛。M1 已按 WireGuard 模型落地了传输层认证与加密（[ADR 0011](adr/0011-tcp-endpoints-authenticate-like-wireguard.md)）：Server 与设备各持久 X25519 静态密钥，`Noise_IKpsk2` 握手，`condr server invite` 生成 10 分钟有效的一次性 invite 配对新设备，`condr server clients|revoke` 管理设备；Settings 的 Daemon/Clients 页已能签发 invite、查看设备指纹和撤销设备。以下为仍未完成的部分；其中 capability 授权在代码中尚无任何雏形，认证通过即拥有全部权限。
 
 **核心交付**
 
@@ -287,6 +313,7 @@ M0/M1 不建设遥测，只记录自举中直接观察到的摩擦与性能问�
 
 ## 当前下一步
 
-1. 持续使用 Condr 开发 Condr，记录并处理真实出现的摩擦；不再扩充 M1 范围。
-2. 重新评估 R0 与 M2。没有对外发布计划时，R0 继续延期。
-3. 保持主动更新 `dev` tag 的滚动开发版流程；普通 commit 不自动发布。
+1. 持续使用 Condr 开发 Condr，记录并处理真实出现的摩擦；不再扩充 M1 范围。M1 可选项（通知、搜索、命令注册表、context action）只在摩擦记录出现后实现。
+2. 决定下一阶段是 R0 还是 M2。安装包与 checksums 已经做完，R0 剩余部分取决于是否邀请外部用户；M2 的协议/客户端拆分是 M3 授权模型和 M4 `condr-cli` 的共同前置。没有对外发布计划时，R0 继续延期。
+3. 保持主动更新 `dev` tag 的滚动开发版流程；普通 commit 不自动发布。每次日常使用依赖的修复合入 main 后应及时移动 `dev` tag，避免安装版长期落后于 main（2026-09-10 核对时 `dev` 停在 `dff225f`，落后 main 十余个提交）。
+4. 待处理 Issue 中只有 [#28](https://github.com/condrdev/condr/issues/28) 处于 ready-for-agent；[#26](https://github.com/condrdev/condr/issues/26) 是 OSC 支持对照文档；#23 与 #36 延期。
