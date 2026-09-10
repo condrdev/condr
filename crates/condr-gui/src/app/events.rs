@@ -534,6 +534,38 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
+            ServerMessage::ServerAdmin(response) => {
+                let connection = &mut self.connections[index];
+                connection.admin_error = None;
+                match response {
+                    ServerAdminResponse::Status { listen, connected } => {
+                        connection.listen = listen;
+                        connection.connected_devices = connected;
+                    }
+                    ServerAdminResponse::ListenSaved { listen } => connection.listen = listen,
+                    ServerAdminResponse::Clients { clients, connected } => {
+                        connection.clients = clients;
+                        connection.connected_devices = connected;
+                    }
+                    ServerAdminResponse::Invite { address, .. } => {
+                        cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
+                        connection.invite = Some(address)
+                    }
+                    ServerAdminResponse::Revoked { .. } => {
+                        connection.send(ClientMessage::ServerAdmin {
+                            server_id: connection.server_id.unwrap_or(ServerId(0)),
+                            command: ServerAdminCommand::Clients,
+                        });
+                    }
+                }
+                if let Some(settings) = self.settings_view.as_ref().and_then(WeakEntity::upgrade) {
+                    settings.update(cx, |_, cx| cx.notify());
+                }
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
             ServerMessage::TerminalCopied { text, .. } => {
                 if let Some(text) = text {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));

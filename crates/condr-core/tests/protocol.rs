@@ -573,3 +573,19 @@ fn a_pasted_image_gets_its_own_frame_allowance_and_nothing_else_does() {
     assert_eq!(ping.frame_limit(), MAX_FRAME_SIZE);
     assert_eq!(ClipboardImageFormat::Jpeg.extension(), "jpg");
 }
+
+#[test]
+fn server_admin_commands_round_trip() {
+    let message = ClientMessage::ServerAdmin {
+        server_id: ServerId(7),
+        command: ServerAdminCommand::SaveListen {
+            address: Some("127.0.0.1:4242".into()),
+        },
+    };
+    let mut frame = Vec::new();
+    write_client_message(&mut frame, &message).unwrap();
+    assert_eq!(
+        read_message::<_, ClientMessage>(&mut frame.as_slice()).unwrap(),
+        message
+    );
+}

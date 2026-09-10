@@ -25,9 +25,9 @@ use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
     AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
-    SessionId, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot,
-    decode_pane_terminal_frame,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
+    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+    TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
 };
 use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId,

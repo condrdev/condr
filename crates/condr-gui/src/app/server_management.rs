@@ -3,6 +3,21 @@ mod dialogs;
 use super::*;
 
 impl Condr {
+    pub(in crate::app) fn server_admin(&mut self, key: ConnectionKey, command: ServerAdminCommand) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        let Some(server_id) = connection.server_id else {
+            return;
+        };
+        connection.send(ClientMessage::ServerAdmin { server_id, command });
+    }
+
+    pub(in crate::app) fn request_server_admin(&mut self, key: ConnectionKey) {
+        self.server_admin(key, ServerAdminCommand::Status);
+        self.server_admin(key, ServerAdminCommand::Clients);
+    }
+
     pub(super) fn install_connection(
         connection: &mut ServerConnection,
         result: Result<ClientConnection, String>,

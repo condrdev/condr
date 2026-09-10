@@ -1081,6 +1081,43 @@ pub(super) fn handle_client(
                 };
                 queue_message(&outbound, response)
             }
+            ClientMessage::ServerAdmin { server_id, command } => {
+                let restart = matches!(command, ServerAdminCommand::Restart);
+                let readonly_status = matches!(command, ServerAdminCommand::Status);
+                let response = if !stream.may_administer() && !readonly_status {
+                    ServerMessage::Error {
+                        message: "only a local or SSH connection may administer the Server".into(),
+                    }
+                } else if state.lock().expect("server state lock poisoned").server_id != server_id {
+                    ServerMessage::Error {
+                        message: "unknown Server".into(),
+                    }
+                } else if restart {
+                    match std::env::current_exe().and_then(|exe| {
+                        std::process::Command::new(exe)
+                            .args(["server", "restart"])
+                            .spawn()
+                            .map(|_| ())
+                    }) {
+                        Ok(()) => {
+                            lifecycle.begin_stop();
+                            stopping_server = true;
+                            ServerMessage::ServerStopping
+                        }
+                        Err(error) => ServerMessage::Error {
+                            message: format!("failed to start Server restart: {error}"),
+                        },
+                    }
+                } else {
+                    match server_admin(&state, command) {
+                        Ok(response) => ServerMessage::ServerAdmin(response),
+                        Err(error) => ServerMessage::Error {
+                            message: error.to_string(),
+                        },
+                    }
+                };
+                queue_message(&outbound, response)
+            }
             ClientMessage::Detach => true,
             ClientMessage::Hello(Hello { .. }) => false,
         };
@@ -1122,6 +1159,106 @@ pub(super) fn handle_client(
     }
     drop(outbound);
     let _ = writer.join();
+}
+
+fn server_admin(
+    state: &Arc<Mutex<RuntimeState>>,
+    command: condr_core::protocol::ServerAdminCommand,
+) -> io::Result<condr_core::protocol::ServerAdminResponse> {
+    use condr_core::protocol::{ServerAdminCommand, ServerAdminResponse, ServerClientInfo};
+    let config_path = state
+        .lock()
+        .expect("server state lock poisoned")
+        .config_path
+        .clone()
+        .or_else(|| condr_core::config_directory().map(|root| root.join("config.toml")));
+    let connected = || {
+        let state = state.lock().expect("server state lock poisoned");
+        let mut keys = state
+            .tcp_peers
+            .values()
+            .map(|(key, _)| key.to_hex())
+            .collect::<Vec<_>>();
+        keys.sort();
+        keys.dedup();
+        keys
+    };
+    match command {
+        ServerAdminCommand::Status => Ok(ServerAdminResponse::Status {
+            listen: ServerConfig::default()
+                .listen
+                .map(|address| address.to_string()),
+            connected: connected(),
+        }),
+        ServerAdminCommand::SaveListen { address } => {
+            let listen = address
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid listen address")
+                })?;
+            let path = config_path.ok_or_else(|| io::Error::other("no Server config path"))?;
+            crate::server::save_listen(&path, listen)?;
+            Ok(ServerAdminResponse::ListenSaved {
+                listen: listen.map(|address| address.to_string()),
+            })
+        }
+        ServerAdminCommand::Restart => {
+            Err(io::Error::other("restart is handled by the Server runtime"))
+        }
+        ServerAdminCommand::Clients => {
+            let directory = crate::noise::identity_directory()?;
+            let clients = crate::noise::read_authorized(&directory)?
+                .into_iter()
+                .map(|client| ServerClientInfo {
+                    name: client.name,
+                    fingerprint: client.key.to_hex(),
+                    last_seen: client.last_seen,
+                })
+                .collect();
+            Ok(ServerAdminResponse::Clients {
+                clients,
+                connected: connected(),
+            })
+        }
+        ServerAdminCommand::Invite => {
+            let directory = crate::noise::identity_directory()?;
+            let identity = crate::noise::ServerIdentity::load_or_create(&directory)?;
+            let invite = crate::noise::create_invite(&directory)?;
+            let port = ServerConfig::default()
+                .listen
+                .map(|address| address.port().to_string())
+                .unwrap_or_else(|| "<port>".into());
+            Ok(ServerAdminResponse::Invite {
+                address: format!(
+                    "tcp://{}.{}@<host>:{}",
+                    identity.public_key(),
+                    invite.secret.to_hex(),
+                    port
+                ),
+                expires_in_secs: crate::noise::INVITE_TTL.as_secs(),
+            })
+        }
+        ServerAdminCommand::Revoke { key } => {
+            let directory = crate::noise::identity_directory()?;
+            let Some(key) = crate::noise::revoke(&directory, &key)? else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no paired device matches that fingerprint",
+                ));
+            };
+            let state = state.lock().expect("server state lock poisoned");
+            let mut disconnected = 0;
+            for (peer_key, peer) in state.tcp_peers.values() {
+                if *peer_key == key {
+                    let _ = peer.shutdown();
+                    disconnected += 1;
+                }
+            }
+            Ok(ServerAdminResponse::Revoked { disconnected })
+        }
+    }
 }
 
 /// Installs, removes or inspects an agent's hooks on this machine, for a client that

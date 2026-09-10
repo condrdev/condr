@@ -93,7 +93,29 @@ pub enum ClientMessage {
     },
     /// Asks which paired devices hold a live TCP connection right now. Server host only.
     ConnectedDevices,
+    /// Server management commands. Only local/SSH connections may administer.
+    ServerAdmin {
+        server_id: ServerId,
+        command: ServerAdminCommand,
+    },
     Detach,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ServerAdminCommand {
+    Status,
+    SaveListen { address: Option<String> },
+    Restart,
+    Clients,
+    Invite,
+    Revoke { key: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ServerClientInfo {
+    pub name: String,
+    pub fingerprint: String,
+    pub last_seen: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -569,7 +591,30 @@ pub enum ServerMessage {
     ConnectedDevices {
         keys: Vec<String>,
     },
+    ServerAdmin(ServerAdminResponse),
     Error {
         message: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ServerAdminResponse {
+    Status {
+        listen: Option<String>,
+        connected: Vec<String>,
+    },
+    ListenSaved {
+        listen: Option<String>,
+    },
+    Clients {
+        clients: Vec<ServerClientInfo>,
+        connected: Vec<String>,
+    },
+    Invite {
+        address: String,
+        expires_in_secs: u64,
+    },
+    Revoked {
+        disconnected: u32,
     },
 }

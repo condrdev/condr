@@ -226,7 +226,10 @@ impl SettingsWindow {
             .map(|owner| owner.read(cx).active_connection)
             .unwrap_or_default();
         let shell_draft = connection_shell(&owner, selected_server, cx);
-        let _ = owner.update(cx, |owner, _| owner.request_agent_hooks(selected_server));
+        let _ = owner.update(cx, |owner, _| {
+            owner.request_agent_hooks(selected_server);
+            owner.request_server_admin(selected_server);
+        });
         let (server_keys, server_labels) = server_choices(&owner, cx);
         let selected = server_keys
             .iter()
@@ -277,9 +280,10 @@ impl SettingsWindow {
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         self.selected_server = key;
         self.shell_draft = connection_shell(&self.owner, key, cx);
-        let _ = self
-            .owner
-            .update(cx, |owner, _| owner.request_agent_hooks(key));
+        let _ = self.owner.update(cx, |owner, _| {
+            owner.request_agent_hooks(key);
+            owner.request_server_admin(key);
+        });
         cx.notify();
     }
 

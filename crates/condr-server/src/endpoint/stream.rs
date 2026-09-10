@@ -139,10 +139,10 @@ impl EndpointStream {
         }
     }
 
-    /// Whether the peer may administer the Server: only a local connection, which means a
-    /// process on the Server host itself.
+    /// Whether the peer may administer the Server. Local and SSH bridge connections execute
+    /// on the Server host; TCP clients are deliberately read-only.
     pub fn may_administer(&self) -> bool {
-        matches!(self, Self::Local(_))
+        matches!(self, Self::Local(_) | Self::Ssh(_))
     }
 
     /// Closes TCP/SSH for all clones; local streams close on drop.

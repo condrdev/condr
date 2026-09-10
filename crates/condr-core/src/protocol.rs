@@ -31,8 +31,9 @@ pub use messages::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
     BootstrapRecord, ClientMessage, ClipboardImageFormat, Hello, LayoutCommand, LayoutResult,
     PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch,
-    ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
-    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot,
+    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerMessage,
+    ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
+    TerminalFrameChunk, WorkspaceGitSnapshot,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;

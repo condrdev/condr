@@ -27,10 +27,10 @@ use condr_core::protocol::{
     BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage, FramingError, Hello,
     LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage,
-    ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
-    TerminalFrameChunk, VersionCheck, WorkspaceGitSnapshot, check_version, encode_bootstrap_record,
-    encode_pane_terminal_frame,
+    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerId,
+    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview,
+    TerminalFrameBatch, TerminalFrameChunk, VersionCheck, WorkspaceGitSnapshot, check_version,
+    encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentSnapshot, GitHeadFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
