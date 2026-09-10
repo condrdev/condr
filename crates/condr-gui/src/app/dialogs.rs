@@ -91,14 +91,43 @@ impl Condr {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some(title.into()),
+            prompt: Some(title.clone().into()),
         });
         let owner = cx.weak_entity();
         window
             .spawn(cx, async move |cx| {
-                let path = paths.await.ok()?.ok()??.into_iter().next()?;
+                // `Ok(None)` is the user cancelling; an error means the native picker
+                // never opened (on Linux: no xdg-desktop-portal), which the platform
+                // explains in its message.
+                let picked = match paths.await {
+                    Ok(Ok(picked)) => Ok(picked),
+                    Ok(Err(error)) => Err(error.to_string()),
+                    Err(_) => Err("The folder picker closed without a result".to_string()),
+                };
                 owner
-                    .update_in(cx, |this, window, cx| apply(this, path, window, cx))
+                    .update_in(cx, |this, window, cx| match picked {
+                        Ok(Some(paths)) => {
+                            if let Some(path) = paths.into_iter().next() {
+                                apply(this, path, window, cx);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            // Say why, and take the path as text so work can go on.
+                            this.app_error = Some(error);
+                            cx.notify();
+                            this.prompt_server_path(
+                                title,
+                                ok_text,
+                                move |this, path, window, cx| {
+                                    apply(this, PathBuf::from(path), window, cx);
+                                    true
+                                },
+                                window,
+                                cx,
+                            );
+                        }
+                    })
                     .ok()?;
                 Some(())
             })
