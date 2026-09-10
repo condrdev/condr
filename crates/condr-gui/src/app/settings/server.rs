@@ -64,7 +64,12 @@ pub(in crate::app) fn select_server_shell(
 
 /// Preferences a Server owns, edited for one connection at a time. Only the shell so
 /// far; the Server picker sits in the tab bar.
-pub(super) fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
+const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
+
+pub(super) fn server_page(
+    settings: &Entity<SettingsWindow>,
+    hooks: (Vec<HooksReport>, Option<String>),
+) -> SettingPage {
     let shell_get = settings.clone();
     let shell_set = settings.clone();
     SettingPage::new("Server")
@@ -85,6 +90,7 @@ pub(super) fn server_page(settings: &Entity<SettingsWindow>) -> SettingPage {
         )
         .group(server_network_group(settings))
         .group(server_clients_group(settings))
+        .group(agents_group(settings, hooks))
 }
 
 fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
@@ -92,7 +98,65 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     let set = settings.clone();
     let restart = settings.clone();
     SettingGroup::new()
-        .title("TCP listener")
+        .title("Daemon")
+        .item(SettingItem::render({
+            let settings = restart.clone();
+            move |_, _, cx| {
+                let (allowed, listen, error) = settings
+                    .read(cx)
+                    .owner
+                    .upgrade()
+                    .and_then(|owner| {
+                        let owner = owner.read(cx);
+                        owner
+                            .connections
+                            .iter()
+                            .find(|c| c.key == settings.read(cx).selected_server)
+                            .map(|c| {
+                                (
+                                    matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_)),
+                                    c.listen.clone(),
+                                    c.error.clone(),
+                                )
+                            })
+                    })
+                    .unwrap_or((false, None, None));
+                let status = error.unwrap_or_else(|| match listen {
+                    Some(address) => format!("TCP listener active at {address}"),
+                    None => format!("TCP listener disabled; default is {DEFAULT_LISTEN}"),
+                });
+                h_flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    )
+                    .when(!allowed, |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().warning)
+                                .child("TCP remote connections are read-only."),
+                        )
+                    })
+            }
+        }))
+        .item(SettingItem::new(
+            "Enable TCP listener",
+            SettingField::switch(
+                {
+                    let settings = settings.clone();
+                    move |cx| server_listen_enabled(&settings, cx)
+                },
+                {
+                    let settings = settings.clone();
+                    move |enabled, cx| set_server_listen_enabled(&settings, enabled, cx)
+                },
+            )
+            .default_value(false),
+        ))
         .item(
             SettingItem::new(
                 "Listen address",
@@ -100,74 +164,48 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                     move |cx| server_listen(&value, cx),
                     move |address: SharedString, cx| set_server_listen(&set, address, cx),
                 )
-                .default_value(""),
+                .default_value(DEFAULT_LISTEN),
             )
-            .description("Empty disables TCP. Restart the Server to apply the saved address."),
+            .description("Default: localhost:2637. Restart the Server to apply changes."),
         )
         .item(SettingItem::render(move |_, _, cx| {
             let settings = restart.clone();
-            let (allowed, error) = settings
-                .read(cx)
-                .owner
-                .upgrade()
-                .and_then(|owner| {
-                    let owner = owner.read(cx);
-                    owner
-                        .connections
-                        .iter()
-                        .find(|c| c.key == settings.read(cx).selected_server)
-                        .map(|c| {
-                            (
-                                matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_)),
-                                c.error.clone(),
-                            )
-                        })
-                })
-                .unwrap_or((false, None));
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(error.unwrap_or_else(|| {
-                            if allowed {
-                                "Configuration follows the CLI."
-                            } else {
-                                "Read-only for TCP connections."
-                            }
-                            .into()
-                        })),
-                )
-                .child(
-                    Button::new("server-restart")
-                        .label("Restart Server")
-                        .small()
-                        .outline()
-                        .disabled(!allowed)
-                        .on_click(move |_, window, cx| {
-                            let (owner, key) = {
-                                let this = settings.read(cx);
-                                (this.owner.clone(), this.selected_server)
-                            };
-                            window.defer(cx, move |window, cx| {
-                                window.open_alert_dialog(cx, move |alert, _, _| {
-                                    let owner = owner.clone();
-                                    alert
-                                        .confirm()
-                                        .title("Restart Server?")
-                                        .description("All panes and agent processes will stop.")
-                                        .on_ok(move |_, _, cx| {
-                                            let _ = owner.update(cx, |owner, _| {
-                                                owner.server_admin(key, ServerAdminCommand::Restart)
-                                            });
-                                            true
-                                        })
-                                });
+            let allowed = settings.read(cx).owner.upgrade().is_some_and(|owner| {
+                owner
+                    .read(cx)
+                    .connections
+                    .iter()
+                    .find(|c| c.key == settings.read(cx).selected_server)
+                    .is_some_and(|c| matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_)))
+            });
+            h_flex().gap_2().items_center().child(
+                Button::new("server-restart")
+                    .label("Restart Server")
+                    .small()
+                    .outline()
+                    .disabled(!allowed)
+                    .on_click(move |_, window, cx| {
+                        let (owner, key) = {
+                            let this = settings.read(cx);
+                            (this.owner.clone(), this.selected_server)
+                        };
+                        window.defer(cx, move |window, cx| {
+                            window.open_alert_dialog(cx, move |alert, _, _| {
+                                let owner = owner.clone();
+                                alert
+                                    .confirm()
+                                    .title("Restart Server?")
+                                    .description("All panes and agent processes will stop.")
+                                    .on_ok(move |_, _, cx| {
+                                        let _ = owner.update(cx, |owner, _| {
+                                            owner.server_admin(key, ServerAdminCommand::Restart)
+                                        });
+                                        true
+                                    })
                             });
-                        }),
-                )
+                        });
+                    }),
+            )
         }))
 }
 
@@ -279,32 +317,61 @@ fn server_listen(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
                 .find(|c| c.key == settings.read(cx).selected_server)
                 .and_then(|c| c.listen.clone())
         })
-        .unwrap_or_default()
+        .unwrap_or_else(|| DEFAULT_LISTEN.to_owned())
         .into()
 }
 
+fn server_listen_enabled(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
+    settings.read(cx).owner.upgrade().is_some_and(|owner| {
+        owner
+            .read(cx)
+            .connections
+            .iter()
+            .find(|c| c.key == settings.read(cx).selected_server)
+            .is_some_and(|c| c.listen.is_some())
+    })
+}
+
+fn set_server_listen_enabled(settings: &Entity<SettingsWindow>, enabled: bool, cx: &mut App) {
+    let address = if enabled {
+        Some(server_listen(settings, cx).to_string())
+    } else {
+        None
+    };
+    set_server_listen_value(settings, address, cx);
+}
+
 fn set_server_listen(settings: &Entity<SettingsWindow>, address: SharedString, cx: &mut App) {
-    let (key, allowed) = {
+    let allowed = {
         let this = settings.read(cx);
-        let key = this.selected_server;
-        let allowed = this.owner.upgrade().is_some_and(|owner| {
+        this.owner.upgrade().is_some_and(|owner| {
             owner
                 .read(cx)
                 .connections
                 .iter()
-                .find(|connection| connection.key == key)
+                .find(|connection| connection.key == this.selected_server)
                 .is_some_and(|connection| {
                     matches!(connection.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_))
                 })
-        });
-        (key, allowed)
+        })
     };
     if !allowed {
         return;
     }
-    let command = ServerAdminCommand::SaveListen {
-        address: (!address.trim().is_empty()).then(|| address.to_string()),
-    };
+    set_server_listen_value(
+        settings,
+        (!address.trim().is_empty()).then(|| address.to_string()),
+        cx,
+    );
+}
+
+fn set_server_listen_value(
+    settings: &Entity<SettingsWindow>,
+    address: Option<String>,
+    cx: &mut App,
+) {
+    let key = settings.read(cx).selected_server;
+    let command = ServerAdminCommand::SaveListen { address };
     let owner = settings.read(cx).owner.clone();
     let _ = owner.update(cx, |owner, _| owner.server_admin(key, command));
 }
@@ -328,10 +395,10 @@ pub(in crate::app) fn run_agent_hooks(
 /// The status hooks of every supported agent on the selected Server's machine, with the
 /// actions their state allows; the Server writes the agent's own configuration (ADR 0014).
 /// Built on every render, so the rows follow the latest reports.
-pub(super) fn agents_page(
+fn agents_group(
     settings: &Entity<SettingsWindow>,
     (reports, error): (Vec<HooksReport>, Option<String>),
-) -> SettingPage {
+) -> SettingGroup {
     let mut group = SettingGroup::new().title("Status hooks");
     if let Some(error) = error {
         group = group.item(
@@ -388,7 +455,7 @@ pub(super) fn agents_page(
             .keywords([agent.label(), "hooks"]),
         );
     }
-    SettingPage::new("Agents").icon(IconName::Bot).group(group)
+    group
 }
 
 /// One row's field: the state as a word, then the one or two actions that change it.

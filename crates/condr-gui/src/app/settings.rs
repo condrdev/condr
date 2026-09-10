@@ -367,8 +367,7 @@ impl Render for SettingsWindow {
                 .page(licenses_page(&self.licenses)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(server_page(&settings))
-                .page(agents_page(&settings, self.connection_hooks(cx))),
+                .page(server_page(&settings, self.connection_hooks(cx))),
         };
         let tabs = TabBar::new("condr-settings-tabs")
             .underline()
