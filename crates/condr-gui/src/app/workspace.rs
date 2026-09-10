@@ -254,7 +254,17 @@ impl Focusable for Condr {
     }
 }
 
-impl Condr {}
+/// The drawn title bar every Condr window uses: logo, title, and the theme's flat
+/// title-bar color rather than the Kit's default gradient.
+pub(super) fn title_bar(title: &'static str, cx: &App) -> TitleBar {
+    TitleBar::new().bg(cx.theme().title_bar).child(
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(img(APP_LOGO).size_4().flex_shrink_0())
+            .child(title),
+    )
+}
 
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -311,15 +321,7 @@ impl Render for Condr {
             .text_color(cx.theme().foreground)
             // Client-side title bar on every platform, as Zed does; the OS title for the
             // taskbar is set separately when the window opens.
-            .child(
-                TitleBar::new().child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(img(APP_LOGO).size_4().flex_shrink_0())
-                        .child(condr_core::APP_NAME),
-                ),
-            )
+            .child(title_bar(condr_core::APP_NAME, cx))
             .child(
                 // The sidebar keeps an absolute width, the way Zed sizes its docks: a
                 // resizable group would rescale it with the window on every resize.

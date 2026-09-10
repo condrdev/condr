@@ -443,14 +443,7 @@ impl Render for SettingsWindow {
                         window.remove_window();
                     }
                 })
-                .child(
-                    TitleBar::new().child(
-                        h_flex()
-                            .gap_2()
-                            .child(img(APP_LOGO).size_4().flex_shrink_0())
-                            .child(SETTINGS_WINDOW_TITLE),
-                    ),
-                )
+                .child(title_bar(SETTINGS_WINDOW_TITLE, cx))
                 .child(tabs)
                 .child(div().flex_1().min_h_0().child(content)),
         )

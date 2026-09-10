@@ -100,7 +100,7 @@ use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
 };
 use terminal_panel::TerminalPanel;
-use workspace::default_worktree_branch;
+use workspace::{default_worktree_branch, title_bar};
 
 pub(crate) use startup::run;
 
