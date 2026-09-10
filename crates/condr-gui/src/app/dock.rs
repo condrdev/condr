@@ -249,7 +249,7 @@ impl Condr {
         .unwrap_or_else(|| {
             size(
                 (window.viewport_size().width - self.sidebar_width).max(px(1.)),
-                (window.viewport_size().height - TITLE_BAR_HEIGHT).max(px(1.)),
+                (window.viewport_size().height - WORKSPACE_TITLE_BAR_HEIGHT).max(px(1.)),
             )
         });
 

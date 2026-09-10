@@ -231,6 +231,9 @@ impl Condr {
                     .icon(IconName::Plus)
                     .tooltip("New Tab")
                     .disabled(!can_mutate)
+                    // Like the Tab rows: inside the title bar an unclaimed press starts a
+                    // window move on Windows, and the move swallows the click.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(move |_, window, cx| {
                         let _ = new_tab_owner.update(cx, |this, cx| {
                             this.new_tab_on(key, workspace_id, window, cx)
@@ -289,11 +292,11 @@ const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
 fn workspace_title_bar(sidebar_width: Pixels, tab_strip: Option<AnyElement>, cx: &App) -> TitleBar {
     let theme = cx.theme();
     TitleBar::new()
+        .h(WORKSPACE_TITLE_BAR_HEIGHT)
         // The sidebar's color reaches the window edge, traffic-light inset included.
         .bg(theme.sidebar)
-        // The strip draws its own bottom edge; the sidebar segment has none, like the
-        // sidebar below it.
-        .border_b_0()
+        // The Kit draws the bottom edge, so it runs under its window controls too.
+        .border_color(theme.border)
         .child(
             h_flex()
                 .h_full()
@@ -318,8 +321,6 @@ fn workspace_title_bar(sidebar_width: Pixels, tab_strip: Option<AnyElement>, cx:
                         .min_w_0()
                         .h_full()
                         .bg(theme.background)
-                        .border_b_1()
-                        .border_color(theme.border)
                         .children(tab_strip),
                 ),
         )
