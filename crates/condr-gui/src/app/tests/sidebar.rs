@@ -126,3 +126,27 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
         assert_eq!((visual.glyph, visual.tone, visual.key), (glyph, tone, key));
     }
 }
+
+#[test]
+fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
+    use AgentDisplayState::*;
+    let statuses = [Working, Done, Unknown, Idle, Done, Blocked]
+        .into_iter()
+        .map(agent_sidebar_status)
+        .chain([BELL_SIDEBAR_STATUS]);
+    let summary = agent_status_summary(statuses)
+        .into_iter()
+        .map(|(status, count)| (status.key, count))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        summary,
+        [("bell", 1), ("blocked", 1), ("done", 2), ("working", 1)]
+    );
+    assert!(agent_status_summary([agent_sidebar_status(Idle)]).is_empty());
+
+    let label = |ahead, behind| upstream_label(condr_core::GitUpstream { ahead, behind });
+    assert_eq!(label(0, 0), None);
+    assert_eq!(label(3, 0).as_deref(), Some("↑3"));
+    assert_eq!(label(0, 1).as_deref(), Some("↓1"));
+    assert_eq!(label(3, 1).as_deref(), Some("↑3 ↓1"));
+}

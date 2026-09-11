@@ -18,6 +18,8 @@ pub(in crate::app) struct CondrSidebarTreeItem {
     pub(super) label_selector: SharedString,
     pub(super) toggle_selector: Option<SharedString>,
     pub(super) label: SharedString,
+    /// A muted second line under the label; the row grows to hold it.
+    pub(super) detail: Option<SharedString>,
     pub(super) icon: Option<CondrSidebarIcon>,
     pub(super) handler: SidebarClickHandler,
     pub(super) active: bool,
@@ -36,6 +38,10 @@ pub(in crate::app) struct CondrSidebarTreeItem {
 
 pub(in crate::app) type SidebarDropMoveHandler = Rc<dyn Fn(Option<bool>, &mut App)>;
 
+/// Heights of the label and detail lines of a two-line row. A suffix that wants to sit
+/// beside both lines stacks two boxes of these heights.
+pub(in crate::app) const DETAIL_LINE_HEIGHTS: (Pixels, Pixels) = (px(20.), px(16.));
+
 impl FluentBuilder for CondrSidebarTreeItem {}
 
 impl CondrSidebarTreeItem {
@@ -51,6 +57,7 @@ impl CondrSidebarTreeItem {
             label_selector: label_selector.into(),
             toggle_selector: None,
             label: label.into(),
+            detail: None,
             icon: None,
             handler: Rc::new(|_, _, _| {}),
             active: false,
@@ -93,6 +100,11 @@ impl CondrSidebarTreeItem {
 
     pub(in crate::app) fn icon(mut self, icon: CondrSidebarIcon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    pub(in crate::app) fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
         self
     }
 
@@ -160,6 +172,7 @@ impl CondrSidebarTreeItem {
             label_selector,
             toggle_selector,
             label,
+            detail,
             icon,
             handler,
             active,
@@ -191,7 +204,8 @@ impl CondrSidebarTreeItem {
             .id(id.clone())
             .debug_selector(move || row_debug_selector.to_string())
             .w_full()
-            .h_8()
+            .when(detail.is_none(), |this| this.h_8())
+            .when(detail.is_some(), |this| this.h_11())
             .min_w_0()
             .overflow_x_hidden()
             .flex_shrink_0()
@@ -276,13 +290,38 @@ impl CondrSidebarTreeItem {
             .when_some(icon.filter(|_| !reserve_toggle_space), |this, icon| {
                 this.child(icon.render(cx))
             })
+            // With a detail line the two text lines take fixed heights so a two-line
+            // suffix can line up with them: `DETAIL_LINE_HEIGHTS`.
             .child(
-                div()
-                    .debug_selector(move || label_debug_selector.to_string())
+                v_flex()
                     .min_w_0()
                     .flex_1()
-                    .truncate()
-                    .child(label),
+                    .justify_center()
+                    .child(
+                        div()
+                            .debug_selector(move || label_debug_selector.to_string())
+                            .when(detail.is_some(), |this| {
+                                this.h(DETAIL_LINE_HEIGHTS.0)
+                                    .line_height(DETAIL_LINE_HEIGHTS.0)
+                            })
+                            .min_w_0()
+                            .w_full()
+                            .truncate()
+                            .child(label),
+                    )
+                    .when_some(detail, |this, detail| {
+                        this.child(
+                            div()
+                                .h(DETAIL_LINE_HEIGHTS.1)
+                                .line_height(DETAIL_LINE_HEIGHTS.1)
+                                .min_w_0()
+                                .w_full()
+                                .truncate()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(detail),
+                        )
+                    }),
             )
             .when(suffix.is_some() || context_menu.is_some(), |this| {
                 let menu = context_menu.clone().map(|context_menu| {

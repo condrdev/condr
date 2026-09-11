@@ -110,6 +110,64 @@ pub(in crate::app) const BELL_SIDEBAR_STATUS: SidebarStatusVisual = SidebarStatu
     label: "Bell",
 };
 
+/// A state at badge size: a glyph is a smudge here, so it is a plain dot in the tone's
+/// color. Only the bell keeps its alert glyph, which a dot could not say, and an unknown
+/// state shows nothing.
+pub(in crate::app) fn status_badge(
+    glyph: SidebarGlyph,
+    tone: SidebarIconTone,
+    cx: &App,
+) -> Option<AnyElement> {
+    match glyph {
+        SidebarGlyph::Info => None,
+        SidebarGlyph::CircleAlert => Some(
+            glyph
+                .icon()
+                .size_2()
+                .text_color(tone.color(cx))
+                .into_any_element(),
+        ),
+        _ => Some(
+            div()
+                .size(px(6.))
+                .rounded_full()
+                .bg(tone.color(cx))
+                .into_any_element(),
+        ),
+    }
+}
+
+/// A Workspace's agents rolled up by state, ordered by how urgently each wants a person.
+/// States with nothing to report (unknown, idle) are left out, so a quiet Workspace shows
+/// nothing.
+pub(in crate::app) fn agent_status_summary(
+    statuses: impl IntoIterator<Item = SidebarStatusVisual>,
+) -> Vec<(SidebarStatusVisual, usize)> {
+    const ORDER: [&str; 4] = ["bell", "blocked", "done", "working"];
+    let rank = |status: &SidebarStatusVisual| ORDER.iter().position(|key| *key == status.key);
+    let mut summary: Vec<(SidebarStatusVisual, usize)> = Vec::new();
+    for status in statuses.into_iter().filter(|status| rank(status).is_some()) {
+        match summary.iter_mut().find(|(seen, _)| seen.key == status.key) {
+            Some((_, count)) => *count += 1,
+            None => summary.push((status, 1)),
+        }
+    }
+    summary.sort_by_key(|(status, _)| rank(status));
+    summary
+}
+
+/// `↑2 ↓1` against the upstream; nothing while in sync, so a quiet row stays quiet.
+pub(in crate::app) fn upstream_label(upstream: condr_core::GitUpstream) -> Option<String> {
+    let mut parts = Vec::new();
+    if upstream.ahead > 0 {
+        parts.push(format!("↑{}", upstream.ahead));
+    }
+    if upstream.behind > 0 {
+        parts.push(format!("↓{}", upstream.behind));
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 pub(in crate::app) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarStatusVisual {
     match state {
         AgentDisplayState::Unknown => SidebarStatusVisual {
@@ -246,31 +304,12 @@ impl CondrSidebarIcon {
                 .into_any_element(),
             SidebarIconGraphic::Agent { kind, glyph, tone } => {
                 // Past the mark's corner, on a disc of the sidebar's own color so it
-                // reads over any mark. At this size a glyph is a smudge, so the state
-                // is a plain dot in the tone's color; an unknown state shows nothing,
-                // and only the bell keeps its alert glyph, which a dot could not say.
-                let badge = match glyph {
-                    SidebarGlyph::Info => None,
-                    SidebarGlyph::CircleAlert => Some(
-                        glyph
-                            .icon()
-                            .size_2()
-                            .text_color(tone.color(cx))
-                            .into_any_element(),
-                    ),
-                    _ => Some(
-                        div()
-                            .size(px(6.))
-                            .rounded_full()
-                            .bg(tone.color(cx))
-                            .into_any_element(),
-                    ),
-                };
+                // reads over any mark.
                 div()
                     .relative()
                     .size_4()
                     .child(agent_mark(kind, cx.theme().sidebar_foreground).size_4())
-                    .when_some(badge, |this, badge| {
+                    .when_some(status_badge(glyph, tone, cx), |this, badge| {
                         this.child(
                             div()
                                 .absolute()

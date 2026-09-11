@@ -8,6 +8,45 @@ use item::*;
 pub(super) use drag_drop::*;
 pub(super) use icon::*;
 
+/// The Workspace row's trailing column: its agents' states beside the name and, on a
+/// repository row, `↑ ↓` beside the branch. The two boxes take `DETAIL_LINE_HEIGHTS` so
+/// they sit level with the row's own two lines.
+fn workspace_suffix(
+    summary: &[(SidebarStatusVisual, usize)],
+    upstream: Option<&str>,
+    two_lines: bool,
+    cx: &App,
+) -> AnyElement {
+    let states = h_flex()
+        .items_center()
+        .gap_x_1p5()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .children(summary.iter().map(|(status, count)| {
+            h_flex()
+                .items_center()
+                .gap_x_0p5()
+                .children(status_badge(status.glyph, status.tone, cx))
+                .child(count.to_string())
+        }));
+    if !two_lines {
+        return states.into_any_element();
+    }
+    v_flex()
+        .items_end()
+        .justify_center()
+        .child(states.h(DETAIL_LINE_HEIGHTS.0))
+        .child(
+            div()
+                .h(DETAIL_LINE_HEIGHTS.1)
+                .line_height(DETAIL_LINE_HEIGHTS.1)
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .children(upstream.map(str::to_owned)),
+        )
+        .into_any_element()
+}
+
 /// Moves the dragged connection before or after the target connection. Returns
 /// whether the order changed.
 pub(super) fn reorder_connection(
@@ -110,7 +149,14 @@ impl Condr {
                             let workspace_id = workspace.id();
                             let workspace_name = workspace.name().to_owned();
                             let git = connection.workspace_git.get(&workspace_id);
-                            let branch = git.and_then(|git| git.branch.clone());
+                            // A repository always gets its second line, `detached` included,
+                            // so Workspaces of one Server keep one row height.
+                            let detail = git.map(|git| {
+                                git.branch.clone().unwrap_or_else(|| "detached".to_owned())
+                            });
+                            let upstream =
+                                git.and_then(|git| git.upstream).and_then(upstream_label);
+                            let mut statuses = Vec::new();
                             let supports_worktrees = git.is_some_and(|git| !git.linked_worktree)
                                 && workspace.worktree().is_none();
                             let managed_worktree = workspace
@@ -137,6 +183,7 @@ impl Condr {
                                     } else {
                                         agent_sidebar_status(state)
                                     };
+                                    statuses.push(status);
                                     let agent_label = agent.kind.label();
                                     // The Pane's title is what the agent is doing; the
                                     // mark already says which agent, so the name is only
@@ -179,6 +226,7 @@ impl Condr {
                                     )
                                 })
                                 .collect::<Vec<_>>();
+                            let summary = agent_status_summary(statuses);
                             let owner = owner.clone();
                             let menu_owner = owner.clone();
                             let agent_selected = agents.iter().any(|agent| agent.active);
@@ -350,14 +398,11 @@ impl Condr {
                                         }),
                                 )
                             })
-                            .when_some(branch, |item, branch| {
+                            .when_some(detail.clone(), |item, detail| item.detail(detail))
+                            .when(!summary.is_empty() || upstream.is_some(), |item| {
+                                let two_lines = detail.is_some();
                                 item.suffix(move |_, cx| {
-                                    div()
-                                        .max_w(px(84.0))
-                                        .truncate()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(branch.clone())
+                                    workspace_suffix(&summary, upstream.as_deref(), two_lines, cx)
                                 })
                             })
                             .on_click(move |_, window, cx| {

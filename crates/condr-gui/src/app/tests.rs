@@ -12,14 +12,15 @@ use super::terminal_input::{
     terminal_key_for,
 };
 use super::{
-    ActivateTab, ClientIo, ClosePane, CondrAssets, ConnectionStatus, FocusLeft, NewTab, NextTab,
-    OpenSettings, PreviousTab, ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown,
-    SplitRight, TerminalClipboardShortcut, TerminalVisualSlot, ToggleZoom, accepted_text_input,
-    agent_sidebar_status, apply_terminal_frame_batch, assemble_terminal_frame_chunk,
-    clear_pending_sizes_for_bootstrap, connect_to_server_with,
-    enforce_terminal_chunk_reliable_fence, fixed_shortcut, lock_exclusively, merge_terminal_deltas,
-    read_bootstrap_batches, reorder_connection, should_defer_to_character_input,
-    single_instance_lock_path, terminal_chunk_identity_matches, terminal_clipboard_shortcut,
+    ActivateTab, BELL_SIDEBAR_STATUS, ClientIo, ClosePane, CondrAssets, ConnectionStatus,
+    FocusLeft, NewTab, NextTab, OpenSettings, PreviousTab, ServerConnection, SidebarGlyph,
+    SidebarIconTone, SplitDown, SplitRight, TerminalClipboardShortcut, TerminalVisualSlot,
+    ToggleZoom, accepted_text_input, agent_sidebar_status, agent_status_summary,
+    apply_terminal_frame_batch, assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap,
+    connect_to_server_with, enforce_terminal_chunk_reliable_fence, fixed_shortcut,
+    lock_exclusively, merge_terminal_deltas, read_bootstrap_batches, reorder_connection,
+    should_defer_to_character_input, single_instance_lock_path, terminal_chunk_identity_matches,
+    terminal_clipboard_shortcut, upstream_label,
 };
 use crate::terminal_element::HoveredTerminalLink;
 use condr_core::TerminalKey;
