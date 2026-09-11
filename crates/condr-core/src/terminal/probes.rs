@@ -134,17 +134,27 @@ impl TerminalAgentProbe {
             if notices.agent_stopping {
                 return None;
             }
-            let force = foreground_changed
-                || (!notices.agent_events.is_empty() && notices.agent.agent().is_none());
+            let unnamed_reporter =
+                !notices.agent_events.is_empty() && notices.agent.agent().is_none();
+            let force = foreground_changed || unnamed_reporter;
             (
                 notices
                     .agent
-                    .wants_process_probe(now, force, output_changed),
+                    .wants_process_probe(now, force, output_changed)
+                    .then_some(unnamed_reporter),
                 notices.agent_events.len(),
             )
         };
         // OS work never holds the notice lock, so shutdown can freeze immediately.
-        let process = probe.then(|| self.probe_process());
+        let process = probe.map(|unnamed_reporter| {
+            // A hook from a process the table does not show yet means the shared snapshot
+            // is stale: read it again, or `ShellOnly` would have the event dropped and the
+            // agent's first report lost.
+            if unnamed_reporter {
+                process_snapshot().refreshed_at = None;
+            }
+            self.probe_process()
+        });
         let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
         if notices.agent_stopping {
             return None;

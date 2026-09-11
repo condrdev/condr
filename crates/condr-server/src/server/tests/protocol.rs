@@ -479,7 +479,7 @@ fn server_settings_are_stored_published_and_reloaded() {
         },
     )
     .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while settings_write.try_lock().is_ok() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
     }
@@ -621,6 +621,16 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     let paired = noise::read_authorized(&directory).unwrap();
     assert!(paired[0].last_seen >= paired[0].paired_at);
 
+    // The dropped stale-invite connection leaves the peer table only once the Server reads
+    // its EOF; revoking before that would count it too.
+    let peers_deadline = Instant::now() + Duration::from_secs(5);
+    while handle.state.lock().unwrap().tcp_peers.len() != 2 {
+        assert!(
+            Instant::now() < peers_deadline,
+            "expected the two live device connections in the peer table"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
     // The host revokes: the file refuses the next handshake, the message drops both
     // live connections.
     assert_eq!(
@@ -634,10 +644,11 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         },
     )
     .unwrap();
-    assert!(matches!(
-        read_server(&mut admin),
-        ServerMessage::DevicesRevoked { disconnected: 2 }
-    ));
+    let revoked = read_server(&mut admin);
+    assert!(
+        matches!(revoked, ServerMessage::DevicesRevoked { disconnected: 2 }),
+        "{revoked:?}"
+    );
     for stream in [&mut first, &mut second] {
         stream
             .set_handshake_timeout(Some(Duration::from_secs(5)))

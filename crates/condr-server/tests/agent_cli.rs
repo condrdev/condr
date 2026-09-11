@@ -17,6 +17,7 @@ struct Server {
     command: Command,
     root: PathBuf,
     endpoint: Endpoint,
+    last_pane: std::cell::Cell<Option<u64>>,
 }
 
 impl Server {
@@ -104,6 +105,7 @@ done
             command,
             root,
             endpoint,
+            last_pane: std::cell::Cell::new(None),
         };
         let deadline = Instant::now() + Duration::from_secs(5);
         while server.endpoint.connect().is_err() {
@@ -148,19 +150,43 @@ done
         self.command(args).output().unwrap()
     }
 
+    /// What the last Pane shows and whether the fixture ever started: the context a timeout
+    /// needs to tell a lost launch from a lost hook report.
+    fn diagnostics(&self) -> String {
+        let screen = self.last_pane.get().map(|pane| {
+            String::from_utf8_lossy(&self.run(&["pane", "read", &pane.to_string()]).stdout)
+                .into_owned()
+        });
+        format!(
+            "fixture starts: {:?}; args: {:?}; last pane screen:
+{}",
+            std::fs::read_to_string(self.root.join("starts")).ok(),
+            std::fs::read_to_string(self.root.join("args")).ok(),
+            screen.unwrap_or_default()
+        )
+    }
+
     fn ok(&self, args: &[&str]) -> Value {
         let output = self.run(args);
         assert!(
             output.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "{args:?}: {}
+{}",
+            String::from_utf8_lossy(&output.stderr),
+            self.diagnostics()
         );
         serde_json::from_slice(&output.stdout).unwrap()
     }
 
     fn err(&self, args: &[&str]) -> String {
         let output = self.run(args);
-        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{args:?}: {output:?}
+{}",
+            self.diagnostics()
+        );
         serde_json::from_slice::<Value>(&output.stderr).unwrap()["error"]["code"]
             .as_str()
             .unwrap()
@@ -168,7 +194,12 @@ done
     }
 
     fn pane(&self) -> String {
-        self.ok(&["workspace", "create", "--cwd", self.root.to_str().unwrap()])["root_pane"]["pane_id"].as_u64().unwrap().to_string()
+        let pane = self.ok(&["workspace", "create", "--cwd", self.root.to_str().unwrap()])
+            ["root_pane"]["pane_id"]
+            .as_u64()
+            .unwrap();
+        self.last_pane.set(Some(pane));
+        pane.to_string()
     }
 
     fn connect(&self) -> ClientConnection {
@@ -345,8 +376,10 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
     let output = pending.wait_with_output().unwrap();
     assert!(
         output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        "{}
+{}",
+        String::from_utf8_lossy(&output.stderr),
+        server.diagnostics()
     );
     let started: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(started["agent"]["name"], "worker");
@@ -466,7 +499,9 @@ fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
             "--",
             "--blocked"
         ]),
-        "agent_not_ready"
+        "agent_not_ready",
+        "{}",
+        server.diagnostics()
     );
     assert_eq!(
         server.ok(&["agent", "list"])["agents"][0]["name"],
