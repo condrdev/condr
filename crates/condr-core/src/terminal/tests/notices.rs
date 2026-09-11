@@ -57,8 +57,10 @@ fn title_and_bell_notices_are_recorded_once_per_change_and_counted() {
     assert_eq!(probe.take().clipboard.as_deref(), Some(""));
 }
 
+/// The writer stops before the reader on close, so a query landing in that window ends the
+/// reader cleanly rather than as a failed close.
 #[test]
-fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
+fn terminal_reply_to_a_stopped_writer_ends_the_reader_cleanly_and_keeps_tail_notices() {
     let size = TerminalSize::new(4, 12);
     let shared_size = Arc::new(Mutex::new(size));
     let (event_proxy, pending_replies, notices) = TerminalEventProxy::new(Arc::clone(&shared_size));
@@ -68,7 +70,7 @@ fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
     drop(input_receiver);
     let (updates, update_receiver) = mpsc::channel();
 
-    let error = read_loop(TerminalReadLoop {
+    read_loop(TerminalReadLoop {
         reader: Box::new(io::Cursor::new(
             b"\x1b]2;tail title\x07\x07\x1b]52;c;dGFpbCBjb3B5\x07\x1b[5n".to_vec(),
         )),
@@ -82,9 +84,8 @@ fn terminal_reply_failure_still_publishes_exit_and_keeps_tail_notices() {
         size: shared_size,
         cursor_settle: Arc::new(Mutex::new(Default::default())),
     })
-    .unwrap_err();
+    .unwrap();
 
-    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
     assert_eq!(update_receiver.recv().unwrap(), TerminalUpdate::Exited);
     assert!(update_receiver.try_recv().is_err());
     assert_eq!(

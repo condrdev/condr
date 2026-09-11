@@ -70,7 +70,13 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
                 }
                 drop(terminal_guard);
                 if let Err(error) = flush_terminal_replies(&terminal, &input, &pending_replies) {
-                    break Err(error);
+                    // Closing stops the writer before the reader; a query the shell sent in
+                    // that window has no one left to answer it, which is not a failure.
+                    break if error.kind() == io::ErrorKind::BrokenPipe {
+                        Ok(())
+                    } else {
+                        Err(error)
+                    };
                 }
                 publish_view(&revision, &updates);
             }
