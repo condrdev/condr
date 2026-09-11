@@ -9,8 +9,11 @@ use condr_server::noise::{self, ServerIdentity};
 
 mod cli;
 
-/// Condr: the Server and its command line. The Server owns sessions, terminals and
-/// agents; the GUI and the CLI subcommands are its clients.
+/// The Condr Server and its command line.
+///
+/// `condr server` starts, stops and installs this machine's Server, which owns the
+/// Workspaces, Tabs, Panes and agents. The other commands act on that Server; run
+/// inside a Condr Pane they default to the Pane's own Workspace, Tab and Pane.
 #[derive(Parser)]
 #[command(
     name = "condr",
