@@ -322,3 +322,12 @@ Copilot 1.0.83 的真实 TUI + localhost 401 provider 补测发现：`userPrompt
 凭证按用户授权读取本机 Codex provider 配置，优先使用配置中明确设置的 bearer token；没有把凭证、私有端点地址或认证文件写进仓库。Pi/OMP 自定义 provider 添加 `authHeader:true`，Pi 用 `$CONDR_TEST_API_KEY`，OMP 用 `CONDR_TEST_API_KEY`。Copilot 的 provider wire API 能力以实际 binary help 为准，不能仅据较旧网页认定只支持 Chat Completions。
 
 已通过：`cargo test -p condr-core -p condr-server --lib --tests`、新增的真实进程祖先边界回归、`node crates/condr-core/tests/pi_extension.mjs`、`cargo clippy --workspace --all-targets -- -D warnings`（含 GUI 编译检查）。覆盖 native payload 字段、Grok 旧回合过滤、父进程边界、配置保留/重复安装/卸载/外部文件保护、Pi 最终 settled、OMP continuation、多项等待及会话切换。Windows ConPTY 和真实 GUI 尚需 Windows 笔记本验收；Linux 编译检查不能替代它们。
+
+### Windows 验收（2026-09-11）
+
+Windows 11 笔记本、ConPTY、PowerShell Pane，隔离 Server（`CONDR_SOCKET_PATH=condr-verify-pipe`、独立 `CONDR_CONFIG_DIR`、`PI_CODING_AGENT_DIR`，未改用户配置）：
+
+- `cargo test -p condr-core -p condr-server --lib --tests`：275 通过，0 失败；`node crates/condr-core/tests/pi_extension.mjs` 通过。
+- Pi 0.85.1（npm 隔离 prefix，`pi.cmd` → node）+ Ollama `qwen3.8:27b`（openai-completions）：`agent hooks install pi` 写入 `extensions/condr-pi.ts`；`agent start` 后 session_start 立即上报 Idle 并带原生 session ID；`agent prompt --wait` Working → Idle；扩展 `ctx.ui.confirm` 触发 Blocked，Escape 后 Idle；`server restart` 用 `pi --session <id>` 恢复同一会话并再次上报 Idle。hook 子进程为 `condr.exe` 绝对路径，经 ConPTY 的 OSC 777 路径全链路通过。
+- GUI Agents 页：全部 10 个 agent 行、图标与状态渲染正常；Kimi 显示 Unavailable 且无按钮；Pi 行 Uninstall/Install 按钮实时刷新状态。
+- 注意：resume 由 Pane 的 shell 解析 `pi`，与 `agent available` 解析的可执行文件可能不同（本机 PATH 顺序下恢复到了全局 0.80.6）。OMP、Grok、Cursor、Copilot、Antigravity 未在 Windows 安装，未验证。

@@ -606,7 +606,7 @@ pub(super) fn agents_page(
     settings: &Entity<SettingsWindow>,
     (reports, error): (Vec<HooksReport>, Option<String>),
 ) -> SettingPage {
-    let mut group = SettingGroup::new().title("Status hooks");
+    let mut group = SettingGroup::new().title("Agent integration");
     if let Some(error) = error {
         group = group.item(
             SettingItem::render(move |_, _, cx| {
@@ -619,14 +619,6 @@ pub(super) fn agents_page(
     }
     for agent in AgentKind::ALL {
         let report = reports.iter().find(|report| report.agent == agent).cloned();
-        let description = match &report {
-            Some(report) => report
-                .warning
-                .clone()
-                .or_else(|| report.note.clone())
-                .unwrap_or_else(|| report.path.display().to_string()),
-            None => "Waiting for the Server to report.".to_owned(),
-        };
         let settings = settings.clone();
         // A custom row rather than `SettingItem::new`: the title carries the agent's
         // mark, which the standard title slot cannot.
@@ -637,26 +629,13 @@ pub(super) fn agents_page(
                     .items_center()
                     .gap_4()
                     .child(
-                        v_flex()
+                        h_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap_1()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(
-                                        super::sidebar::agent_mark(agent, cx.theme().foreground)
-                                            .small(),
-                                    )
-                                    .child(agent.label()),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(description.clone()),
-                            ),
+                            .gap_2()
+                            .items_center()
+                            .child(super::sidebar::agent_mark(agent, cx.theme().foreground).small())
+                            .child(agent.label()),
                     )
                     .child(agent_hooks_field(&settings, agent, report.as_ref(), cx))
             })
