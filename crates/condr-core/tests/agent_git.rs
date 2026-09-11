@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use condr_core::{Session, create_worktree, discover_repository, open_worktree, remove_worktree};
+use condr_core::{
+    GitUpstream, Session, create_worktree, discover_repository, open_worktree, remove_worktree,
+};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 
@@ -58,8 +60,24 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     assert_eq!(existing.branch(), Some("existing"));
     assert!(existing.is_linked_worktree());
     assert_eq!(open_worktree(&parent, existing.root()).unwrap(), existing);
+    // gix wrote the worktree; git must read it back as its own: listed, clean, on the branch.
+    let listed = git_stdout(&repository, ["worktree", "list", "--porcelain"]);
+    assert!(
+        listed.contains("branch refs/heads/existing"),
+        "git should list the worktree: {listed}"
+    );
+    assert!(git_stdout(existing.root(), ["status", "--porcelain"]).is_empty());
+    assert!(existing.root().join("README.md").is_file());
+    let duplicate = create_worktree(&parent, "existing", temp.path().join("elsewhere"));
+    assert!(
+        duplicate
+            .unwrap_err()
+            .to_string()
+            .contains("already checked out")
+    );
     remove_worktree(&parent, &existing).unwrap();
     assert!(!existing.root().exists());
+    assert!(!git_stdout(&repository, ["worktree", "list", "--porcelain"]).contains("existing"));
     assert!(git_status(
         &repository,
         ["show-ref", "--verify", "refs/heads/existing"]
@@ -122,11 +140,14 @@ fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
     git(&repository, ["commit", "-m", "initial"]);
 
     let on_main = discover_repository(&repository).unwrap().unwrap();
-    let before = on_main.head_fingerprint().unwrap();
-    // Committing on the same branch does not rewrite HEAD.
+    let initial = on_main.fingerprint().unwrap();
+    assert_eq!(on_main.fingerprint().unwrap(), initial);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    // Committing on the same branch does not rewrite HEAD, but it moves the head.
     fs::write(repository.join("README.md"), "again\n").unwrap();
     git(&repository, ["commit", "-am", "second"]);
-    assert_eq!(on_main.head_fingerprint().unwrap(), before);
+    let before = on_main.fingerprint().unwrap();
+    assert_ne!(before, initial);
 
     std::thread::sleep(std::time::Duration::from_millis(20));
     git(&repository, ["checkout", "-b", "feature/nested"]);
@@ -137,11 +158,89 @@ fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
     git(&repository, ["checkout", "--detach"]);
     let detached = discover_repository(&repository).unwrap().unwrap();
     assert_eq!(detached.branch(), None);
-    assert_ne!(detached.head_fingerprint().unwrap(), before);
+    assert_ne!(detached.fingerprint().unwrap(), before);
     assert!(
         discover_repository(repository.join(".git"))
             .unwrap()
             .is_none()
+    );
+}
+
+#[test]
+fn discovery_counts_divergence_from_the_local_upstream_ref() {
+    let temp = TempDirectory::new("git-upstream");
+    let remote = temp.path().join("remote.git");
+    let repository = temp.path().join("repository");
+    fs::create_dir_all(&remote).unwrap();
+    fs::create_dir_all(&repository).unwrap();
+    git(&remote, ["init", "--bare", "-b", "main"]);
+    git(&repository, ["init", "-b", "main"]);
+    git(&repository, ["config", "user.name", "Condr Tests"]);
+    git(
+        &repository,
+        ["config", "user.email", "condr@example.invalid"],
+    );
+    fs::write(repository.join("README.md"), "condr\n").unwrap();
+    git(&repository, ["add", "README.md"]);
+    git(&repository, ["commit", "-m", "initial"]);
+    // No upstream yet: the branch exists but has nothing to diverge from.
+    assert_eq!(
+        discover_repository(&repository)
+            .unwrap()
+            .unwrap()
+            .upstream(),
+        None
+    );
+
+    let remote_url = remote.to_string_lossy().replace('\\', "/");
+    git(&repository, ["remote", "add", "origin", &remote_url]);
+    git(&repository, ["push", "-u", "origin", "main"]);
+    let in_sync = discover_repository(&repository).unwrap().unwrap();
+    assert_eq!(
+        in_sync.upstream(),
+        Some(GitUpstream {
+            ahead: 0,
+            behind: 0
+        })
+    );
+    let synced = in_sync.fingerprint().unwrap();
+
+    // Two local commits, one of them also pushed elsewhere and fetched back as remote work.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(repository.join("README.md"), "ahead\n").unwrap();
+    git(&repository, ["commit", "-am", "ahead"]);
+    assert_eq!(
+        discover_repository(&repository)
+            .unwrap()
+            .unwrap()
+            .upstream(),
+        Some(GitUpstream {
+            ahead: 1,
+            behind: 0
+        })
+    );
+
+    let other = temp.path().join("other");
+    git(temp.path(), ["clone", "-q", &remote_url, "other"]);
+    git(&other, ["config", "user.name", "Condr Tests"]);
+    git(&other, ["config", "user.email", "condr@example.invalid"]);
+    fs::write(other.join("OTHER.md"), "behind\n").unwrap();
+    git(&other, ["add", "OTHER.md"]);
+    git(&other, ["commit", "-m", "behind"]);
+    git(&other, ["push", "-q", "origin", "main"]);
+    // Fetching rewrites the remote-tracking ref, so the fingerprint moves without a checkout.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    git(&repository, ["fetch", "-q", "origin"]);
+    assert_ne!(in_sync.fingerprint().unwrap(), synced);
+    assert_eq!(
+        discover_repository(&repository)
+            .unwrap()
+            .unwrap()
+            .upstream(),
+        Some(GitUpstream {
+            ahead: 1,
+            behind: 1
+        })
     );
 }
 
@@ -157,6 +256,21 @@ fn git<const N: usize>(cwd: &Path, args: [&str; N]) {
         "Git failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn git_stdout<const N: usize>(cwd: &Path, args: [&str; N]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "Git failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 fn git_status<const N: usize>(cwd: &Path, args: [&str; N]) -> bool {

@@ -429,6 +429,7 @@ pub struct WorkspaceGitSnapshot {
     pub workspace_id: WorkspaceId,
     pub branch: Option<String>,
     pub linked_worktree: bool,
+    pub upstream: Option<crate::GitUpstream>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -165,28 +165,31 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         &repository,
         &["config", "user.email", "condr@example.invalid"],
     );
-    std::fs::write(repository.join("README.md"), "condr\n").unwrap();
-    run_git(&repository, &["add", "README.md"]);
-    run_git(&repository, &["commit", "-m", "initial"]);
-
+    // gix runs no hooks, but it does run the smudge filter of a checked-out file: that is
+    // the point where the worktree creation can be held in flight.
     let shell_path = |path: &std::path::Path| path.to_string_lossy().replace('\\', "/");
-    let hook = repository.join(".git").join("hooks").join("post-checkout");
+    let smudge = temp.join("slow-smudge.sh");
     std::fs::write(
-        &hook,
+        &smudge,
         format!(
-            "#!/bin/sh\nprintf started > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            "#!/bin/sh\nprintf started > '{}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\ncat\n",
             shell_path(&marker),
             shell_path(&release)
         ),
     )
     .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        let mut permissions = std::fs::metadata(&hook).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&hook, permissions).unwrap();
-    }
+    std::fs::write(repository.join(".gitattributes"), "README.md filter=slow\n").unwrap();
+    std::fs::write(repository.join("README.md"), "condr\n").unwrap();
+    run_git(&repository, &["add", ".gitattributes", "README.md"]);
+    run_git(&repository, &["commit", "-m", "initial"]);
+    run_git(
+        &repository,
+        &[
+            "config",
+            "filter.slow.smudge",
+            &format!("sh '{}'", shell_path(&smudge)),
+        ],
+    );
 
     let (handle, endpoint, thread) = start();
     handle.state.lock().unwrap().worktree_root = Some(temp.join("worktrees"));
@@ -254,7 +257,7 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         }
         thread::sleep(Duration::from_millis(10));
     };
-    assert!(checkout_started, "Git checkout hook did not start");
+    assert!(checkout_started, "the smudge filter did not start");
 
     let mut stopper = connect_and_bootstrap(&endpoint);
     condr_core::protocol::write_message(&mut stopper, &ClientMessage::StopServer { server_id })

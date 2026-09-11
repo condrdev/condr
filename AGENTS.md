@@ -39,7 +39,7 @@ herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio�
 - **终端渲染:自研 GPUI element**(项目最大自研件)— GPUI Kit 无终端组件。
 - **布局:GPUI Kit 的 Dock**(`gpui_kit::component::dock`) → 映射 workspace/tab/pane 模型。
 - **Agent 状态检测:** 只来自 agent CLI 自己的 hooks(ADR 0014)。进程表识别 agent 身份;`condr agent-hook` 把 hook 事件作为 OSC 777 写回控制终端,Server 在 VT 前截获并驱动 `AgentState`;未上报即 `Unknown`,不做屏幕文本分类。GUI 在此之上叠加 done。
-- **git worktree:shell out 调 `git`**,不引 git2。
+- **Git:`gix`(gitoxide,纯 Rust)**,只读查询和 worktree add/remove 全走 gix API,不 shell out `git`,不引 git2(libgit2 C 依赖)。gix 没有 `worktree add/remove` porcelain,`condr-core/src/git.rs` 用它的原语(ref 事务、`index_from_tree`、`gix::worktree::state::checkout`)按 git 自己的 `worktrees/<id>` 布局实现。
 - **依赖:只声明 crates.io 的 `gpui-kit = "0.6"`**。GPUI 类型使用 `gpui_kit::*`,组件使用 `gpui_kit::component`,资源使用 `gpui_kit::assets`;通过 `gpui_kit::application()` 创建应用、`gpui_kit::init(cx)` 初始化。底层匹配的 `gpui-pre` 系列由 Kit 管理,所有实际版本由 `Cargo.lock` 锁定,无需直接声明 GPUI/平台/组件/资源 crates。GUI 测试通过 `gpui-kit/test-support` 启用。
 
 ### 架构与工程结构

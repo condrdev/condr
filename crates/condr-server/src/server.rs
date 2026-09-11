@@ -33,7 +33,7 @@ use condr_core::protocol::{
     encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
-    AgentSnapshot, GitHeadFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
+    AgentSnapshot, GitFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
     TerminalAgentProbe, TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget,
     TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate,
     TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree,
@@ -446,7 +446,7 @@ struct RuntimeState {
     workspace_git: std::collections::HashMap<WorkspaceId, GitRepository>,
     workspace_git_scanned_at: std::collections::HashMap<WorkspaceId, Instant>,
     /// HEAD fingerprints at the last rediscovery, shared by every Pane of the Workspace.
-    workspace_git_heads: std::collections::HashMap<WorkspaceId, GitHeadFingerprint>,
+    workspace_git_heads: std::collections::HashMap<WorkspaceId, GitFingerprint>,
     worktree_root: Option<PathBuf>,
     active_controller: Option<u64>,
     focused_terminal: Option<PaneId>,

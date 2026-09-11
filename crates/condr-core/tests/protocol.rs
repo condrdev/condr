@@ -218,6 +218,10 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
             workspace_id,
             branch: Some("feature/wire-chunks".into()),
             linked_worktree: true,
+            upstream: Some(condr_core::GitUpstream {
+                ahead: 2,
+                behind: 1,
+            }),
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];
@@ -390,6 +394,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
             workspace_id,
             branch: None,
             linked_worktree: false,
+            upstream: None,
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];

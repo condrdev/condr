@@ -206,7 +206,7 @@ fn probe_terminal(
                     WorkspaceGitScan::Ready { workspace_id, root } => {
                         git_scan_pending = None;
                         // Terminal output alone does not change the branch; only rediscover
-                        // when the HEAD files moved since the Workspace was last discovered.
+                        // when the ref files moved since the Workspace was last discovered.
                         let known = {
                             let state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
@@ -214,7 +214,7 @@ fn probe_terminal(
                             }
                             state.workspace_git.get(&workspace_id).cloned()
                         };
-                        let fingerprint = known.as_ref().and_then(GitRepository::head_fingerprint);
+                        let fingerprint = known.as_ref().and_then(GitRepository::fingerprint);
                         {
                             let mut state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
@@ -435,5 +435,6 @@ pub(super) fn workspace_git_snapshot(
         workspace_id,
         branch: repository.branch().map(str::to_owned),
         linked_worktree: repository.is_linked_worktree(),
+        upstream: repository.upstream(),
     }
 }

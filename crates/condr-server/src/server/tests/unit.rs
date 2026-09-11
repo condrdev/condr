@@ -1075,6 +1075,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
             workspace_id: session.active_workspace_id().unwrap(),
             branch: Some("b".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024)),
             linked_worktree: false,
+            upstream: None,
         }],
         zoomed_panes: vec![first_pane],
     };

@@ -14,7 +14,7 @@ pub use agent::{
     hook as agent_hook, hooks as agent_hooks, identify_agent_among, identify_agent_process,
 };
 pub use git::{
-    GitError, GitHeadFingerprint, GitRepository, create_worktree, default_worktree_root,
+    GitError, GitFingerprint, GitRepository, GitUpstream, create_worktree, default_worktree_root,
     discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
 };
 pub use paths::{
