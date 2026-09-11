@@ -65,6 +65,10 @@ pub struct AgentEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub session_id: Option<String>,
+    /// Native turn identifier, used when a CLI dispatches completion hooks after the
+    /// next prompt has already started (Grok).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_id: Option<String>,
 }
 
 impl AgentEvent {
@@ -80,6 +84,7 @@ impl AgentEvent {
             event,
             source,
             session_id,
+            prompt_id: None,
         }
     }
 
@@ -97,7 +102,8 @@ impl AgentEvent {
             && event
                 .session_id
                 .as_deref()
-                .is_none_or(super::valid_session_id))
+                .is_none_or(super::valid_session_id)
+            && event.prompt_id.as_deref().is_none_or(valid_prompt_id))
         .then_some(event)
     }
 
@@ -120,4 +126,8 @@ impl AgentEvent {
             }
         }
     }
+}
+
+pub(super) fn valid_prompt_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control)
 }

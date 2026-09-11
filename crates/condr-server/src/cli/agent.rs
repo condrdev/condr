@@ -44,7 +44,7 @@ pub(crate) enum AgentCommand {
     Hooks {
         #[arg(value_enum)]
         action: HooksAction,
-        /// claude, codex or opencode
+        /// Agent kind (see `condr agent available`)
         agent: String,
     },
 }

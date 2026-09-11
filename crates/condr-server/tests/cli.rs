@@ -62,6 +62,44 @@ fn skill_prints_the_bundled_document_without_a_server() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn omp_hook_status_uses_the_native_config_root_and_agent_override() {
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    let name = format!(".condr-omp-path-test-{}", uuid::Uuid::new_v4());
+    let mut command = Command::new(env!("CARGO_BIN_EXE_condr"));
+    command.args(["agent", "hooks", "status", "omp"]);
+    let status_path = |command: &mut Command| {
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        std::path::PathBuf::from(report["path"].as_str().unwrap())
+    };
+    // Native OMP joins the config root name to home, including a leading '/'.
+    // Status only reads; neither these directories nor the user's config are written.
+    for config_name in [name.clone(), format!("/{name}")] {
+        command
+            .env("PI_CONFIG_DIR", config_name)
+            .env_remove("PI_CODING_AGENT_DIR");
+        assert_eq!(
+            status_path(&mut command),
+            home.join(&name).join("agent/extensions/condr-omp.ts")
+        );
+        command.env("PI_CODING_AGENT_DIR", "");
+        assert_eq!(
+            status_path(&mut command),
+            home.join(&name).join("agent/extensions/condr-omp.ts")
+        );
+        let agent_dir = std::env::temp_dir().join(&name).join("agent override");
+        command.env("PI_CODING_AGENT_DIR", &agent_dir);
+        assert_eq!(
+            status_path(&mut command),
+            agent_dir.join("extensions/condr-omp.ts")
+        );
+    }
+    assert!(!home.join(name).exists());
+}
+
 #[test]
 fn workspace_and_tab_commands_drive_a_live_server() {
     let suffix = SystemTime::now()

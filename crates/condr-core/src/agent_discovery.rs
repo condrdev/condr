@@ -17,7 +17,11 @@ pub struct AgentInstallation {
 impl AgentKind {
     /// The native interactive CLI command.
     pub const fn executable(self) -> &'static str {
-        self.id()
+        match self {
+            Self::Antigravity => "agy",
+            Self::Cursor => "cursor-agent",
+            _ => self.id(),
+        }
     }
 }
 

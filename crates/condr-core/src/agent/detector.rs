@@ -47,6 +47,7 @@ pub struct AgentDetector {
     agent: Option<AgentKind>,
     state: Option<AgentState>,
     session_id: Option<String>,
+    prompt_id: Option<String>,
     /// No observation yet / cleared / the current native conversation. Kept alongside
     /// the live state so shutdown can read a hook before its monitor commits it.
     resume: Option<Option<AgentResume>>,
@@ -132,6 +133,7 @@ impl AgentDetector {
                     return AgentPublish::Nothing;
                 }
                 self.agent = Some(agent);
+                self.prompt_id = None;
                 self.session_id = self
                     .restoring
                     .take()
@@ -168,6 +170,7 @@ impl AgentDetector {
                 }
                 self.agent = None;
                 self.session_id = None;
+                self.prompt_id = None;
                 self.resume = Some(None);
                 self.restoring = None;
                 self.state = None;
@@ -196,6 +199,23 @@ impl AgentDetector {
         };
         if agent != event.agent {
             return AgentPublish::Nothing;
+        }
+        if agent == AgentKind::Grok {
+            match event.event {
+                AgentEventKind::SessionStart => self.prompt_id = None,
+                AgentEventKind::PromptSubmit => self.prompt_id = event.prompt_id.clone(),
+                _ if event.prompt_id.is_some()
+                    && self.prompt_id.is_some()
+                    && (event.prompt_id != self.prompt_id
+                        || event
+                            .session_id
+                            .as_ref()
+                            .is_some_and(|id| Some(id) != self.session_id.as_ref())) =>
+                {
+                    return AgentPublish::Nothing;
+                }
+                _ => {}
+            }
         }
         let next = event.apply(state);
         let session_id = event.session_id.clone().or_else(|| {

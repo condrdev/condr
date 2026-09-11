@@ -84,10 +84,12 @@ fn agent_from_path_token(token: &str) -> Option<AgentKind> {
         return Some(agent);
     }
     let lower = path.replace('\\', "/").to_ascii_lowercase();
-    if let Some(agent) = AgentKind::ALL
-        .into_iter()
-        .find(|agent| lower.contains(&format!("/node_modules/{}/", agent.package_path())))
-    {
+    if let Some(agent) = AgentKind::ALL.into_iter().find(|agent| {
+        agent
+            .package_paths()
+            .iter()
+            .any(|package| lower.contains(&format!("/node_modules/{package}/")))
+    }) {
         return Some(agent);
     }
     // A launcher (a symlink in `~/.local/bin`, say) may resolve to the real agent.

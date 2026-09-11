@@ -18,7 +18,9 @@ const MAX_PARSED_STDIN: usize = 64 * 1024;
 const OPEN_DEADLINE: Duration = Duration::from_secs(2);
 /// The `source` values Claude Code and Codex document; anything else is not a session
 /// start reason Condr knows, and an unbounded string would not fit the OSC anyway.
-const SESSION_SOURCES: [&str; 5] = ["startup", "resume", "clear", "compact", "fork"];
+const SESSION_SOURCES: [&str; 8] = [
+    "startup", "resume", "clear", "compact", "fork", "new", "reload", "load",
+];
 
 /// Runs the hook. `agent` and `event` are the slugs the installer wrote into the agent's
 /// configuration; stdin carries the agent's JSON. Returns whether the event reached a
@@ -28,17 +30,17 @@ pub fn run(agent: &str, event: &str) -> bool {
     else {
         return false;
     };
+    if agent == AgentKind::Antigravity {
+        // Antigravity expects a JSON response even from a passive hook. The empty
+        // object changes no permissions; the status still travels only over OSC.
+        let _ = writeln!(std::io::stdout().lock(), "{{}}");
+    }
     if std::env::var_os(crate::PaneEnvironment::ENV).is_none_or(|value| value != "1") {
         return false;
     }
     let input = HookInput::read();
-    let event = match event {
-        // AskUserQuestion is an ordinary tool to Claude Code, so it only ever fires
-        // PreToolUse; to the user it is a question they have to answer.
-        AgentEventKind::ToolStart if input.tool_name.as_deref() == Some("AskUserQuestion") => {
-            AgentEventKind::QuestionAsked
-        }
-        other => other,
+    let Some(event) = input.event(agent, event) else {
+        return false;
     };
     let source = (event == AgentEventKind::SessionStart)
         .then_some(input.source)
@@ -57,7 +59,9 @@ pub fn run(agent: &str, event: &str) -> bool {
     let Ok(Some(mut terminal)) = wait.recv_timeout(OPEN_DEADLINE) else {
         return false;
     };
-    let bytes = AgentEvent::new(agent, event, source, input.session_id).encode();
+    let mut report = AgentEvent::new(agent, event, source, input.session_id);
+    report.prompt_id = input.prompt_id;
+    let bytes = report.encode();
     terminal
         .write_all(&bytes)
         .and_then(|()| terminal.flush())
@@ -69,9 +73,39 @@ struct HookInput {
     source: Option<String>,
     session_id: Option<String>,
     tool_name: Option<String>,
+    subagent: bool,
+    initial_prompt: bool,
+    prompt_id: Option<String>,
+    fully_idle: Option<bool>,
 }
 
 impl HookInput {
+    fn event(&self, agent: AgentKind, event: AgentEventKind) -> Option<AgentEventKind> {
+        if self.subagent
+            || (agent == AgentKind::Antigravity
+                && event == AgentEventKind::Stop
+                && self.fully_idle != Some(true))
+        {
+            return None;
+        }
+        Some(match event {
+            // Copilot may report sessionStart after its first prompt was submitted.
+            AgentEventKind::SessionStart if agent == AgentKind::Copilot && self.initial_prompt => {
+                AgentEventKind::PromptSubmit
+            }
+            AgentEventKind::ToolStart
+                if matches!(
+                    (agent, self.tool_name.as_deref()),
+                    (AgentKind::Claude, Some("AskUserQuestion"))
+                        | (AgentKind::Antigravity, Some("ask_question"))
+                ) =>
+            {
+                AgentEventKind::QuestionAsked
+            }
+            other => other,
+        })
+    }
+
     /// Reads stdin to the end, parsing only its head.
     fn read() -> Self {
         let mut stdin = std::io::stdin();
@@ -97,8 +131,24 @@ impl HookInput {
         let field = |name: &str| value.get(name)?.as_str().map(str::to_owned);
         Self {
             source: field("source").filter(|source| SESSION_SOURCES.contains(&source.as_str())),
-            tool_name: field("tool_name"),
-            session_id: field("session_id").filter(|id| super::valid_session_id(id)),
+            tool_name: field("tool_name")
+                .or_else(|| field("toolName"))
+                .or_else(|| {
+                    value
+                        .get("toolCall")?
+                        .get("name")?
+                        .as_str()
+                        .map(str::to_owned)
+                }),
+            session_id: field("session_id")
+                .or_else(|| field("sessionId"))
+                .or_else(|| field("conversation_id"))
+                .or_else(|| field("conversationId"))
+                .filter(|id| super::valid_session_id(id)),
+            subagent: field("subagentType").is_some_and(|kind| !kind.is_empty()),
+            initial_prompt: field("initialPrompt").is_some_and(|prompt| !prompt.is_empty()),
+            prompt_id: field("promptId").filter(|id| super::event::valid_prompt_id(id)),
+            fully_idle: value.get("fullyIdle").and_then(serde_json::Value::as_bool),
         }
     }
 }
@@ -148,8 +198,10 @@ impl Ancestors {
             let front = argv.first().map(String::as_str).unwrap_or(&name);
             if super::is_shell(front) {
                 separated = true;
-            } else if identify_agent_process(info) == Some(agent) {
-                if separated && agent_seen {
+            } else if let Some(actual) = identify_agent_process(info) {
+                // Some CLIs import Claude/Cursor hook files. A hook registered for
+                // another CLI must not claim this Pane before process discovery.
+                if actual != agent || (separated && agent_seen) {
                     found.nested = true;
                     break;
                 }
@@ -279,6 +331,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_hook_shapes_keep_identity_and_only_report_real_boundaries() {
+        use AgentEventKind::*;
+        let copilot =
+            HookInput::parse(br#"{"sessionId":"root","initialPrompt":"hello","toolName":"shell"}"#);
+        assert_eq!(copilot.session_id.as_deref(), Some("root"));
+        assert_eq!(
+            copilot.event(AgentKind::Copilot, SessionStart),
+            Some(PromptSubmit)
+        );
+        let cursor = HookInput::parse(br#"{"conversation_id":"cursor-root"}"#);
+        assert_eq!(cursor.session_id.as_deref(), Some("cursor-root"));
+        let grok = HookInput::parse(
+            br#"{"sessionId":"root","promptId":"turn-1","subagentType":"explore"}"#,
+        );
+        assert_eq!(grok.prompt_id.as_deref(), Some("turn-1"));
+        assert_eq!(grok.event(AgentKind::Grok, Stop), None);
+        let agy = HookInput::parse(br#"{"conversationId":"agy-root","toolCall":{"name":"ask_question"},"fullyIdle":false}"#);
+        assert_eq!(agy.session_id.as_deref(), Some("agy-root"));
+        assert_eq!(
+            agy.event(AgentKind::Antigravity, ToolStart),
+            Some(QuestionAsked)
+        );
+        assert_eq!(agy.event(AgentKind::Antigravity, Stop), None);
+        assert_eq!(
+            HookInput::default().event(AgentKind::Antigravity, Stop),
+            None
+        );
+        assert_eq!(
+            HookInput::parse(br#"{"fullyIdle":true}"#).event(AgentKind::Antigravity, Stop),
+            Some(Stop)
+        );
+    }
+
+    #[test]
     fn hook_input_keeps_the_native_session_id_and_bounded_status_fields() {
         let input = HookInput::parse(
             br#"{"session_id":"abc","source":"compact","cwd":"/x","tool_name":"Bash"}"#,
@@ -304,8 +390,49 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
-    fn a_hook_run_by_this_test_is_not_nested_in_an_agent() {
-        assert!(!Ancestors::of(AgentKind::Claude).nested);
+    #[ignore = "invoked by the process-boundary regression below"]
+    fn ancestor_fixture() {
+        let kind = AgentKind::parse_label(&std::env::var("CONDR_HOOK_TEST_KIND").unwrap()).unwrap();
+        let ancestors = Ancestors::of(kind);
+        assert_eq!(ancestors.nested, kind != AgentKind::Grok);
+        if kind == AgentKind::Grok {
+            assert!(
+                ancestors.pane_process.is_some(),
+                "stop at the owning Server"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_imported_hook_cannot_claim_another_cli_and_the_server_bounds_the_walk() {
+        use std::os::unix::process::CommandExt as _;
+        let root =
+            std::env::temp_dir().join(format!("condr-hook-ancestors-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("server"), r#"
+bash -c 'exec -a grok "$CONDR_HOOK_TEST_EXE" --exact agent::hook::tests::ancestor_fixture --ignored --nocapture'
+status=$?
+exit "$status"
+"#).unwrap();
+        for kind in ["grok", "claude"] {
+            let output = std::process::Command::new("/bin/bash")
+                .arg0("condr")
+                .arg("server")
+                .current_dir(&root)
+                .env("CONDR_HOOK_TEST_EXE", std::env::current_exe().unwrap())
+                .env("CONDR_HOOK_TEST_KIND", kind)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

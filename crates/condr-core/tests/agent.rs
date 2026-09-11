@@ -13,6 +13,71 @@ fn args(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn new_agents_are_identified_through_native_commands_and_npm_launchers() {
+    for kind in AgentKind::ALL {
+        assert_eq!(AgentKind::parse_label(kind.id()), Some(kind));
+        let executable = format!("C:\\tools\\{}.exe", kind.executable());
+        assert_eq!(
+            identify_agent_process(info("runtime", &args(&[&executable]))),
+            Some(kind)
+        );
+    }
+    for (kind, package) in [
+        (AgentKind::Pi, "@earendil-works/pi-coding-agent"),
+        (AgentKind::Pi, "@mariozechner/pi-coding-agent"),
+        (AgentKind::Omp, "@oh-my-pi/pi-coding-agent"),
+        (AgentKind::Copilot, "@github/copilot"),
+    ] {
+        let script = format!("/usr/lib/node_modules/{package}/dist/cli.js");
+        assert_eq!(
+            identify_agent_process(info("node", &args(&["node", &script]))),
+            Some(kind)
+        );
+    }
+    assert_eq!(
+        AgentKind::parse_label("agent"),
+        None,
+        "generic command names cannot identify Cursor"
+    );
+    assert_eq!(
+        AgentResume {
+            kind: AgentKind::Copilot,
+            session_id: "conversation".into()
+        }
+        .args(),
+        ["--resume=conversation"]
+    );
+    assert!(!AgentKind::Copilot.reports_at_startup());
+    assert!(!AgentKind::Cursor.reports_at_startup());
+}
+
+#[test]
+fn a_delayed_grok_completion_cannot_finish_a_newer_prompt() {
+    let mut detector = AgentDetector::new();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Grok), Instant::now());
+    let event = |kind, prompt: &str| {
+        let mut event = AgentEvent::new(AgentKind::Grok, kind, None, Some("root".into()));
+        event.prompt_id = Some(prompt.into());
+        let bytes = event.encode();
+        AgentEvent::decode(&bytes[2..bytes.len() - 1]).unwrap()
+    };
+    detector.observe_event(&event(AgentEventKind::PromptSubmit, "first"));
+    detector.observe_event(&event(AgentEventKind::PromptSubmit, "second"));
+    assert_eq!(
+        detector.observe_event(&event(AgentEventKind::Interrupt, "first")),
+        AgentPublish::Nothing
+    );
+    assert_eq!(
+        detector.observe_event(&event(AgentEventKind::Stop, "second")),
+        AgentPublish::Snapshot(AgentSnapshot {
+            kind: AgentKind::Grok,
+            session_id: Some("root".into()),
+            state: AgentState::Idle,
+        })
+    );
+}
+
+#[test]
 fn identifies_agents_directly_and_through_wrappers() {
     assert_eq!(
         identify_agent_process(info("claude", &args(&["claude"]))),
@@ -391,6 +456,12 @@ fn a_conversation_reference_round_trips_without_copying_it_to_new_panes() {
         (AgentKind::Claude, "--resume"),
         (AgentKind::Codex, "resume"),
         (AgentKind::OpenCode, "--session"),
+        (AgentKind::Pi, "--session"),
+        (AgentKind::Omp, "--session"),
+        (AgentKind::Antigravity, "--conversation"),
+        (AgentKind::Grok, "--resume"),
+        (AgentKind::Cursor, "--resume"),
+        (AgentKind::Kimi, "--session"),
     ] {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();

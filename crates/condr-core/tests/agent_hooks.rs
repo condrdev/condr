@@ -12,17 +12,83 @@ fn target() -> (HookTarget, PathBuf) {
             .unwrap()
             .as_nanos()
     ));
-    let target = HookTarget {
-        claude_dir: root.join(".claude"),
-        codex_dir: root.join(".codex"),
-        opencode_dir: root.join(".config/opencode"),
-        command: "\"/opt/condr bin/condr\"".to_owned(),
-    };
+    let target = HookTarget::in_home(&root, "\"/opt/condr bin/condr\"".to_owned());
     (target, root)
 }
 
 fn read(path: &Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn new_hook_files_install_refresh_and_remove_without_losing_user_entries() {
+    let (target, root) = target();
+    for agent in [AgentKind::Grok, AgentKind::Cursor, AgentKind::Copilot] {
+        let path = target.path(agent);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let user =
+            serde_json::json!({"hooks":{"custom":[{"command":"user-hook"}]},"userSetting":true});
+        std::fs::write(&path, user.to_string()).unwrap();
+        install(&target, agent).unwrap();
+        assert_eq!(state(&target, agent).unwrap(), HooksState::Installed);
+        let installed = read(&path);
+        install(&target, agent).unwrap();
+        assert_eq!(read(&path), installed);
+        assert_eq!(installed["hooks"]["custom"], user["hooks"]["custom"]);
+        if agent == AgentKind::Copilot {
+            assert_eq!(
+                installed["hooks"]["agentStop"][0]["exec"],
+                "/opt/condr bin/condr"
+            );
+            assert_eq!(
+                installed["hooks"]["agentStop"][0]["args"],
+                serde_json::json!(["agent-hook", "copilot", "stop"])
+            );
+            assert!(installed["hooks"].get("permissionRequest").is_none());
+        }
+        if agent == AgentKind::Cursor {
+            assert_eq!(
+                installed["hooks"]["stop"][0]["command"],
+                "\"/opt/condr bin/condr\" agent-hook cursor stop"
+            );
+            assert!(installed["hooks"].get("beforeShellExecution").is_none());
+        }
+        let moved = HookTarget {
+            command: "condr".into(),
+            ..target.clone()
+        };
+        assert_eq!(state(&moved, agent).unwrap(), HooksState::Outdated);
+        install(&moved, agent).unwrap();
+        assert_eq!(state(&moved, agent).unwrap(), HooksState::Installed);
+        uninstall(&moved, agent).unwrap();
+        assert_eq!(state(&moved, agent).unwrap(), HooksState::Missing);
+        assert_eq!(read(&path)["hooks"], user["hooks"]);
+        assert_eq!(read(&path)["userSetting"], true);
+    }
+    for agent in [AgentKind::Pi, AgentKind::Omp, AgentKind::Antigravity] {
+        let path = target.path(agent);
+        install(&target, agent).unwrap();
+        assert_eq!(state(&target, agent).unwrap(), HooksState::Installed);
+        let original = std::fs::read(&path).unwrap();
+        install(&target, agent).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        uninstall(&target, agent).unwrap();
+        assert!(!path.exists());
+        uninstall(&target, agent).unwrap();
+        std::fs::write(&path, "{\"user\":true}").unwrap();
+        assert!(install(&target, agent).is_err());
+        assert!(uninstall(&target, agent).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"user\":true}");
+    }
+    let kimi = run(&target, AgentKind::Kimi, HooksAction::Status).unwrap();
+    assert_eq!(kimi.state, HooksState::Unsupported);
+    assert!(kimi.note.unwrap().contains("subagent"));
+    assert_eq!(
+        install(&target, AgentKind::Kimi).unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
+    assert!(!target.path(AgentKind::Kimi).exists());
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

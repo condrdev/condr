@@ -35,6 +35,13 @@ pub(in crate::app) enum CondrIconName {
     Claude,
     Codex,
     OpenCode,
+    Pi,
+    Omp,
+    Antigravity,
+    Grok,
+    Cursor,
+    Copilot,
+    Kimi,
 }
 
 impl CondrIconName {
@@ -43,17 +50,23 @@ impl CondrIconName {
             AgentKind::Claude => Self::Claude,
             AgentKind::Codex => Self::Codex,
             AgentKind::OpenCode => Self::OpenCode,
+            AgentKind::Pi => Self::Pi,
+            AgentKind::Omp => Self::Omp,
+            AgentKind::Antigravity => Self::Antigravity,
+            AgentKind::Grok => Self::Grok,
+            AgentKind::Cursor => Self::Cursor,
+            AgentKind::Copilot => Self::Copilot,
+            AgentKind::Kimi => Self::Kimi,
         }
     }
 }
 
-/// An agent's mark in its brand color where the brand has one; Codex and OpenCode
-/// publish monochrome marks, which take `fallback`, the surrounding text color.
+/// Claude's published brand color; other marks take the surrounding text color.
 pub(in crate::app) fn agent_mark(kind: AgentKind, fallback: Hsla) -> Icon {
     let color = match kind {
         // Anthropic's terracotta, as the published mark carries it.
         AgentKind::Claude => rgb(0xD97757).into(),
-        AgentKind::Codex | AgentKind::OpenCode => fallback,
+        _ => fallback,
     };
     Icon::new(CondrIconName::agent(kind)).text_color(color)
 }
@@ -70,6 +83,13 @@ impl IconNamed for CondrIconName {
             Self::Claude => "icons/claude.svg",
             Self::Codex => "icons/codex.svg",
             Self::OpenCode => "icons/opencode.svg",
+            Self::Pi => "icons/pi.svg",
+            Self::Omp => "icons/omp.svg",
+            Self::Antigravity => "icons/antigravity.svg",
+            Self::Grok => "icons/grok.svg",
+            Self::Cursor => "icons/cursor.svg",
+            Self::Copilot => "icons/copilot.svg",
+            Self::Kimi => "icons/kimi.svg",
         }
         .into()
     }

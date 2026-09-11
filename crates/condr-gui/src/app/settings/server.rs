@@ -623,6 +623,7 @@ pub(super) fn agents_page(
             Some(report) => report
                 .warning
                 .clone()
+                .or_else(|| report.note.clone())
                 .unwrap_or_else(|| report.path.display().to_string()),
             None => "Waiting for the Server to report.".to_owned(),
         };
@@ -679,6 +680,7 @@ pub(super) fn agent_hooks_field(
         Some(HooksState::Installed) => ("Installed", cx.theme().success),
         Some(HooksState::Outdated) => ("Outdated", cx.theme().warning),
         Some(HooksState::Missing) => ("Not installed", cx.theme().muted_foreground),
+        Some(HooksState::Unsupported) => ("Unavailable", cx.theme().muted_foreground),
         None => ("Checking…", cx.theme().muted_foreground),
     };
     let install_label = if state == Some(HooksState::Outdated) {
@@ -706,9 +708,10 @@ pub(super) fn agent_hooks_field(
                 .text_color(color)
                 .child(state_label),
         )
-        .when(state != Some(HooksState::Installed), |this| {
-            this.child(action("install", install_label, HooksAction::Install))
-        })
+        .when(
+            !matches!(state, Some(HooksState::Installed | HooksState::Unsupported)),
+            |this| this.child(action("install", install_label, HooksAction::Install)),
+        )
         .when(
             matches!(state, Some(HooksState::Installed | HooksState::Outdated)),
             |this| this.child(action("uninstall", "Uninstall", HooksAction::Uninstall)),

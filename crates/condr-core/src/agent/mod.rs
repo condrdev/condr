@@ -25,17 +25,42 @@ pub enum AgentKind {
     Claude,
     Codex,
     OpenCode,
+    Pi,
+    Omp,
+    Antigravity,
+    Grok,
+    Cursor,
+    Copilot,
+    Kimi,
 }
 
 impl AgentKind {
-    pub const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::OpenCode];
+    pub const ALL: [Self; 10] = [
+        Self::Claude,
+        Self::Codex,
+        Self::OpenCode,
+        Self::Pi,
+        Self::Omp,
+        Self::Antigravity,
+        Self::Grok,
+        Self::Cursor,
+        Self::Copilot,
+        Self::Kimi,
+    ];
 
-    /// The canonical id: the CLI `--kind` value, the hook slug and the executable name.
+    /// The canonical id: the CLI `--kind` value and the hook slug.
     pub const fn id(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::Pi => "pi",
+            Self::Omp => "omp",
+            Self::Antigravity => "antigravity",
+            Self::Grok => "grok",
+            Self::Cursor => "cursor",
+            Self::Copilot => "copilot",
+            Self::Kimi => "kimi",
         }
     }
 
@@ -45,15 +70,24 @@ impl AgentKind {
             Self::Claude => "Claude",
             Self::Codex => "Codex",
             Self::OpenCode => "OpenCode",
+            Self::Pi => "Pi",
+            Self::Omp => "Oh My Pi",
+            Self::Antigravity => "Antigravity CLI",
+            Self::Grok => "Grok Build",
+            Self::Cursor => "Cursor CLI",
+            Self::Copilot => "GitHub Copilot",
+            Self::Kimi => "Kimi Code",
         }
     }
 
-    /// Whether the agent's hooks say anything before its first turn. Codex (0.146 and
-    /// 0.153) fires `SessionStart` together with the first `UserPromptSubmit`, so a fresh
-    /// Codex is `Unknown` until prompted; `agent start` and the first `agent prompt`
-    /// treat that `Unknown` as ready for it.
+    /// Whether native hooks report before the first turn. Codex and Copilot defer
+    /// SessionStart until prompted; Cursor omits it on resume; Antigravity has none
+    /// in its documented contract. Kimi has no reliable status adapter yet.
     pub const fn reports_at_startup(self) -> bool {
-        !matches!(self, Self::Codex)
+        !matches!(
+            self,
+            Self::Codex | Self::Copilot | Self::Cursor | Self::Antigravity | Self::Kimi
+        )
     }
 
     /// Resolves a program name, alias or path to an agent.
@@ -62,17 +96,31 @@ impl AgentKind {
             "claude" | "claude-code" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
             "opencode" => Some(Self::OpenCode),
+            "pi" => Some(Self::Pi),
+            "omp" | "oh-my-pi" => Some(Self::Omp),
+            "agy" | "antigravity" => Some(Self::Antigravity),
+            "grok" | "grok-build" => Some(Self::Grok),
+            "cursor" | "cursor-agent" => Some(Self::Cursor),
+            "copilot" | "github-copilot" => Some(Self::Copilot),
+            "kimi" | "kimi-code" => Some(Self::Kimi),
             _ => None,
         }
     }
 
     /// The npm package the agent's node entry point lives under, for launchers that
     /// run `node .../node_modules/<package>/...` without the agent's name in argv.
-    const fn package_path(self) -> &'static str {
+    const fn package_paths(self) -> &'static [&'static str] {
         match self {
-            Self::Claude => "@anthropic-ai/claude-code",
-            Self::Codex => "@openai/codex",
-            Self::OpenCode => "opencode-ai",
+            Self::Claude => &["@anthropic-ai/claude-code"],
+            Self::Codex => &["@openai/codex"],
+            Self::OpenCode => &["opencode-ai"],
+            Self::Pi => &[
+                "@earendil-works/pi-coding-agent",
+                "@mariozechner/pi-coding-agent",
+            ],
+            Self::Omp => &["@oh-my-pi/pi-coding-agent"],
+            Self::Copilot => &["@github/copilot"],
+            Self::Antigravity | Self::Grok | Self::Cursor | Self::Kimi => &[],
         }
     }
 }
@@ -169,10 +217,17 @@ pub struct AgentResume {
 
 impl AgentResume {
     pub fn args(&self) -> Vec<String> {
+        if self.kind == AgentKind::Copilot {
+            return vec![format!("--resume={}", self.session_id)];
+        }
         let flag = match self.kind {
             AgentKind::Claude => "--resume",
             AgentKind::Codex => "resume",
             AgentKind::OpenCode => "--session",
+            AgentKind::Pi | AgentKind::Omp | AgentKind::Kimi => "--session",
+            AgentKind::Antigravity => "--conversation",
+            AgentKind::Grok | AgentKind::Cursor => "--resume",
+            AgentKind::Copilot => unreachable!("handled above"),
         };
         vec![flag.into(), self.session_id.clone()]
     }

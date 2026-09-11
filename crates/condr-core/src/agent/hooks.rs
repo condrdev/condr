@@ -23,16 +23,44 @@ pub struct HookTarget {
     /// OpenCode's global configuration directory (`$XDG_CONFIG_HOME/opencode` or
     /// `~/.config/opencode`, on every platform).
     pub opencode_dir: PathBuf,
+    pub pi_dir: PathBuf,
+    pub omp_dir: PathBuf,
+    pub antigravity_dir: PathBuf,
+    pub grok_dir: PathBuf,
+    pub cursor_dir: PathBuf,
+    pub copilot_dir: PathBuf,
+    pub kimi_dir: PathBuf,
     /// How a hook command names this `condr`: a bare name when PATH resolves it, otherwise
     /// the quoted absolute path.
     pub command: String,
 }
 
 impl HookTarget {
+    /// Default locations under a home directory, also used for isolated installations.
+    pub fn in_home(home: &Path, command: String) -> Self {
+        Self {
+            claude_dir: home.join(".claude"),
+            codex_dir: home.join(".codex"),
+            opencode_dir: home.join(".config/opencode"),
+            pi_dir: home.join(".pi/agent"),
+            omp_dir: home.join(".omp/agent"),
+            antigravity_dir: home.join(".gemini/antigravity-cli"),
+            grok_dir: home.join(".grok"),
+            cursor_dir: home.join(".cursor"),
+            copilot_dir: home.join(".copilot"),
+            kimi_dir: home.join(".kimi"),
+            command,
+        }
+    }
+
     /// This machine and this executable.
     pub fn local() -> Option<Self> {
         let home = dirs::home_dir()?;
         let exe = std::env::current_exe().ok()?;
+        // OMP joins PI_CONFIG_DIR to home, even when it starts with a separator.
+        let mut omp_root = home.as_os_str().to_os_string();
+        omp_root.push(std::path::MAIN_SEPARATOR_STR);
+        omp_root.push(env_dir("PI_CONFIG_DIR", PathBuf::from(".omp")));
         Some(Self {
             claude_dir: std::env::var_os("CLAUDE_CONFIG_DIR")
                 .map(PathBuf::from)
@@ -45,7 +73,19 @@ impl HookTarget {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join(".config"))
                 .join("opencode"),
-            command: command_name(&exe),
+            pi_dir: env_dir("PI_CODING_AGENT_DIR", home.join(".pi/agent")),
+            omp_dir: env_dir("PI_CODING_AGENT_DIR", PathBuf::from(omp_root).join("agent")),
+            grok_dir: env_dir("GROK_HOME", home.join(".grok")),
+            cursor_dir: env_dir(
+                "CURSOR_CONFIG_DIR",
+                std::env::var_os("XDG_CONFIG_HOME")
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+                    .map_or_else(|| home.join(".cursor"), |dir| dir.join("cursor")),
+            ),
+            copilot_dir: env_dir("COPILOT_HOME", home.join(".copilot")),
+            kimi_dir: env_dir("KIMI_SHARE_DIR", home.join(".kimi")),
+            ..Self::in_home(&home, command_name(&exe))
         })
     }
 
@@ -55,6 +95,13 @@ impl HookTarget {
             AgentKind::Claude => self.claude_dir.join("settings.json"),
             AgentKind::Codex => self.codex_dir.join("hooks.json"),
             AgentKind::OpenCode => self.opencode_dir.join("condr-tui.js"),
+            AgentKind::Pi => self.pi_dir.join("extensions/condr-pi.ts"),
+            AgentKind::Omp => self.omp_dir.join("extensions/condr-omp.ts"),
+            AgentKind::Antigravity => self.antigravity_dir.join("plugins/condr/hooks.json"),
+            AgentKind::Grok => self.grok_dir.join("hooks/condr.json"),
+            AgentKind::Cursor => self.cursor_dir.join("hooks.json"),
+            AgentKind::Copilot => self.copilot_dir.join("hooks/condr.json"),
+            AgentKind::Kimi => self.kimi_dir.join("config.toml"),
         }
     }
 
@@ -64,10 +111,33 @@ impl HookTarget {
     }
 
     fn hook_command(&self, agent: AgentKind, event: AgentEventKind) -> String {
-        // Codex runs hooks through the session shell, PowerShell on Windows, where a quoted
-        // path is a string literal unless the call operator precedes it. Claude Code runs
-        // them through Git Bash, which would choke on the `&`.
-        let call = if cfg!(windows) && agent == AgentKind::Codex && self.command.starts_with('"') {
+        self.hook_command_for_shell(
+            agent,
+            event,
+            cfg!(windows),
+            std::env::var("GROK_SHELL").ok().as_deref(),
+        )
+    }
+
+    fn hook_command_for_shell(
+        &self,
+        agent: AgentKind,
+        event: AgentEventKind,
+        windows: bool,
+        grok_shell: Option<&str>,
+    ) -> String {
+        // PowerShell needs the call operator before a quoted path. Grok defaults
+        // to PowerShell on Windows, but also lets users select Git Bash or cmd.
+        // Claude's Git Bash and Antigravity's cmd must keep the plain form.
+        let powershell = agent == AgentKind::Codex
+            || (agent == AgentKind::Grok
+                && !matches!(
+                    grok_shell
+                        .map(|shell| shell.trim().to_ascii_lowercase())
+                        .as_deref(),
+                    Some("bash" | "gitbash" | "git-bash" | "cmd" | "cmd.exe")
+                ));
+        let call = if windows && powershell && self.command.starts_with('"') {
             "& "
         } else {
             ""
@@ -79,6 +149,13 @@ impl HookTarget {
             event.name()
         )
     }
+}
+
+fn env_dir(name: &str, fallback: PathBuf) -> PathBuf {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or(fallback)
 }
 
 /// `condr` if that is what PATH resolves `exe` to, so the hook survives a moved install
@@ -106,6 +183,8 @@ pub enum HooksState {
     /// Condr hooks are present, but not the ones this `condr` would install.
     Outdated,
     Missing,
+    /// The native CLI cannot yet report a reliable main-agent state.
+    Unsupported,
 }
 
 impl HooksState {
@@ -114,6 +193,7 @@ impl HooksState {
             Self::Installed => "installed",
             Self::Outdated => "outdated",
             Self::Missing => "missing",
+            Self::Unsupported => "unsupported",
         }
     }
 }
@@ -141,6 +221,7 @@ pub struct HooksReport {
 }
 
 const CODEX_NOTE: &str = "Codex runs hooks only with the hooks feature enabled and, unless managed, after they are trusted from /hooks inside Codex";
+const KIMI_NOTE: &str = "Kimi 1.50 hooks cannot distinguish a subagent's Stop from the main agent's Stop; status integration is unavailable until native hooks identify their agent";
 
 /// Performs `action` for `agent` on this machine and reports the resulting state. The
 /// CLI runs it locally; the Server runs it for a GUI, whose hooks files live where the
@@ -162,7 +243,17 @@ pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Re
         agent,
         path,
         state: state(target, agent)?,
-        note: (agent == AgentKind::Codex).then(|| CODEX_NOTE.to_owned()),
+        note: match agent {
+            AgentKind::Codex => Some(CODEX_NOTE),
+            AgentKind::Pi => Some("Requires Pi 0.85.1 or newer for settled and UI prompt events"),
+            AgentKind::Omp => Some("Requires Oh My Pi 18.1.17 or newer; install into each profile's agent directory when using named profiles"),
+            AgentKind::Kimi => Some(KIMI_NOTE),
+            AgentKind::Cursor => Some("Cursor hooks report activity and completion, but expose no event for a permission prompt"),
+            AgentKind::Antigravity => Some("Enable the condr plugin in Antigravity CLI; hooks expose no permission-wait event, and startup stays Unknown until the first invocation"),
+            AgentKind::Grok => Some("Grok Stop hooks can request continuation; completion may appear early when other Stop hooks block. Native idle notifications repair missed completion reports"),
+            AgentKind::Copilot => Some("Copilot can omit its completion hook after an API error; status may stay Working until the next completion or process exit"),
+            _ => None,
+        }.map(str::to_owned),
         warning,
     })
 }
@@ -253,6 +344,53 @@ const CODEX_HOOKS: &[HookEntry] = &[
     },
 ];
 
+const GROK_HOOKS: &[HookEntry] = &[
+    entry("SessionStart", AgentEventKind::SessionStart),
+    entry("UserPromptSubmit", AgentEventKind::PromptSubmit),
+    entry("PreToolUse", AgentEventKind::ToolStart),
+    entry("PostToolUse", AgentEventKind::ToolComplete),
+    entry("PostToolUseFailure", AgentEventKind::ToolComplete),
+    HookEntry {
+        native: "Notification",
+        event: AgentEventKind::PermissionRequest,
+        matcher: Some("permission_prompt"),
+        timeout_secs: HOOK_TIMEOUT_SECS,
+    },
+    HookEntry {
+        native: "Notification",
+        event: AgentEventKind::Stop,
+        matcher: Some("idle_prompt"),
+        timeout_secs: HOOK_TIMEOUT_SECS,
+    },
+    entry("Stop", AgentEventKind::Stop),
+    entry("StopFailure", AgentEventKind::StopFailure),
+    entry("StopCancelled", AgentEventKind::Interrupt),
+];
+
+const CURSOR_HOOKS: &[HookEntry] = &[
+    entry("sessionStart", AgentEventKind::SessionStart),
+    entry("beforeSubmitPrompt", AgentEventKind::PromptSubmit),
+    entry("preToolUse", AgentEventKind::ToolStart),
+    entry("postToolUse", AgentEventKind::ToolComplete),
+    entry("postToolUseFailure", AgentEventKind::ToolComplete),
+    entry("stop", AgentEventKind::Stop),
+];
+
+const COPILOT_HOOKS: &[HookEntry] = &[
+    entry("sessionStart", AgentEventKind::SessionStart),
+    entry("userPromptSubmitted", AgentEventKind::PromptSubmit),
+    entry("preToolUse", AgentEventKind::ToolStart),
+    entry("postToolUse", AgentEventKind::ToolComplete),
+    entry("postToolUseFailure", AgentEventKind::ToolComplete),
+    HookEntry {
+        native: "notification",
+        event: AgentEventKind::PermissionRequest,
+        matcher: Some("permission_prompt|elicitation_dialog"),
+        timeout_secs: HOOK_TIMEOUT_SECS,
+    },
+    entry("agentStop", AgentEventKind::Stop),
+];
+
 /// Seconds Claude Code and Codex wait for the hook by default; it finishes in milliseconds.
 const HOOK_TIMEOUT_SECS: u64 = 5;
 const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
@@ -261,7 +399,10 @@ fn entries(agent: AgentKind) -> &'static [HookEntry] {
     match agent {
         AgentKind::Claude => CLAUDE_HOOKS,
         AgentKind::Codex => CODEX_HOOKS,
-        AgentKind::OpenCode => unreachable!("OpenCode takes a plugin, not a hook map"),
+        AgentKind::Grok => GROK_HOOKS,
+        AgentKind::Cursor => CURSOR_HOOKS,
+        AgentKind::Copilot => COPILOT_HOOKS,
+        _ => unreachable!("agent does not take a hook map"),
     }
 }
 
@@ -272,6 +413,60 @@ fn opencode_plugin(target: &HookTarget) -> String {
         "__CONDR_EXECUTABLE__",
         &serde_json::to_string(target.executable()).expect("string serializes"),
     )
+}
+
+fn extension(target: &HookTarget, agent: AgentKind) -> String {
+    include_str!("pi-extension.js")
+        .replace(
+            "__CONDR_EXECUTABLE__",
+            &serde_json::to_string(target.executable()).expect("string serializes"),
+        )
+        .replace(
+            "__CONDR_AGENT__",
+            &serde_json::to_string(agent.id()).expect("string serializes"),
+        )
+        .replace("__CONDR_AGENT_MARKER__", agent.id())
+}
+
+fn owned_state(path: &Path, expected: &str, marker: &str) -> io::Result<HooksState> {
+    Ok(match std::fs::read_to_string(path) {
+        Ok(contents) if contents == expected => HooksState::Installed,
+        Ok(contents) if contents.contains(marker) => HooksState::Outdated,
+        Ok(_) => HooksState::Missing,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => HooksState::Missing,
+        Err(error) => return Err(error),
+    })
+}
+
+fn check_owned(path: &Path, marker: &str) -> io::Result<()> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) if !contents.contains(marker) => {
+            Err(invalid(path, "exists and was not written by condr"))
+        }
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+fn antigravity_hooks(target: &HookTarget) -> Value {
+    let command = |event| json!({"type": "command", "command": target.hook_command(AgentKind::Antigravity, event), "timeout": HOOK_TIMEOUT_SECS});
+    json!({"condr": {
+        "PreInvocation": [command(AgentEventKind::PromptSubmit)],
+        "PreToolUse": [{"matcher": "*", "hooks": [command(AgentEventKind::ToolStart)]}],
+        "PostToolUse": [{"matcher": "*", "hooks": [command(AgentEventKind::ToolComplete)]}],
+        "Stop": [command(AgentEventKind::Stop)],
+    }})
+}
+
+fn antigravity_manifest() -> Value {
+    json!({"name": "condr", "description": "Condr agent status hooks (generated by condr)"})
+}
+
+fn check_manifest(path: &Path) -> io::Result<()> {
+    if read_config(path)?.is_some_and(|value| value != antigravity_manifest()) {
+        return Err(invalid(path, "exists and was not written by condr"));
+    }
+    Ok(())
 }
 
 const OPENCODE_PLUGIN: &str = "./condr-tui.js";
@@ -298,14 +493,29 @@ fn marker(agent: AgentKind) -> String {
     format!(" agent-hook {} ", agent.id())
 }
 
-fn is_ours(hook: &Value, marker: &str) -> bool {
+fn is_ours(hook: &Value, agent: AgentKind) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| command.contains(marker))
+        .is_some_and(|command| command.contains(&marker(agent)))
+        || hook.get("args").and_then(Value::as_array).is_some_and(|args| {
+            matches!(args.as_slice(), [first, second, ..] if first == "agent-hook" && second == agent.id())
+        })
 }
 
 /// The matcher group Condr installs for one entry.
 fn expected_group(target: &HookTarget, agent: AgentKind, entry: &HookEntry) -> Value {
+    if matches!(agent, AgentKind::Cursor | AgentKind::Copilot) {
+        let mut hook = if agent == AgentKind::Copilot {
+            json!({"type": "command", "exec": target.executable(),
+                "args": ["agent-hook", agent.id(), entry.event.name()], "timeoutSec": entry.timeout_secs})
+        } else {
+            json!({"command": target.hook_command(agent, entry.event), "timeout": entry.timeout_secs})
+        };
+        if let Some(matcher) = entry.matcher {
+            hook["matcher"] = json!(matcher);
+        }
+        return hook;
+    }
     let mut group = json!({
         "hooks": [{
             "type": "command",
@@ -321,6 +531,27 @@ fn expected_group(target: &HookTarget, agent: AgentKind, entry: &HookEntry) -> V
 
 pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
     let path = target.path(agent);
+    if agent == AgentKind::Kimi {
+        return Ok(HooksState::Unsupported);
+    }
+    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
+        return owned_state(&path, &extension(target, agent), &marker(agent));
+    }
+    if agent == AgentKind::Antigravity {
+        let Some(config) = read_config(&path)? else {
+            return Ok(HooksState::Missing);
+        };
+        let manifest = read_config(&path.with_file_name("plugin.json"))?;
+        return Ok(
+            if config == antigravity_hooks(target) && manifest == Some(antigravity_manifest()) {
+                HooksState::Installed
+            } else if config.to_string().contains(&marker(agent)) {
+                HooksState::Outdated
+            } else {
+                HooksState::Missing
+            },
+        );
+    }
     if agent == AgentKind::OpenCode {
         let (_, config) = opencode_config(target)?;
         let registered = config["plugin"]
@@ -340,13 +571,14 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
     let Some(root) = read_config(&path)? else {
         return Ok(HooksState::Missing);
     };
-    let marker = marker(agent);
     let mut found = Vec::new();
     if let Some(events) = root.get("hooks").and_then(Value::as_object) {
         for (native, groups) in events {
             for group in groups.as_array().into_iter().flatten() {
                 let hooks = group.get("hooks").and_then(Value::as_array);
-                if hooks.is_some_and(|hooks| hooks.iter().any(|hook| is_ours(hook, &marker))) {
+                if is_ours(group, agent)
+                    || hooks.is_some_and(|hooks| hooks.iter().any(|hook| is_ours(hook, agent)))
+                {
                     found.push((native.clone(), group.clone()));
                 }
             }
@@ -366,7 +598,9 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
         .collect();
     expected.sort_by(|a, b| a.0.cmp(&b.0));
     found.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(if found == expected {
+    let version_ok =
+        !matches!(agent, AgentKind::Cursor | AgentKind::Copilot) || root["version"] == 1;
+    Ok(if found == expected && version_ok {
         HooksState::Installed
     } else {
         HooksState::Outdated
@@ -377,6 +611,22 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
 /// user's alone. Returns the file written.
 pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
     let path = target.path(agent);
+    if agent == AgentKind::Kimi {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, KIMI_NOTE));
+    }
+    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
+        check_owned(&path, &marker(agent))?;
+        write_file(&path, extension(target, agent).as_bytes())?;
+        return Ok(path);
+    }
+    if agent == AgentKind::Antigravity {
+        let manifest = path.with_file_name("plugin.json");
+        check_owned(&path, &marker(agent))?;
+        check_manifest(&manifest)?;
+        write_config(&manifest, &antigravity_manifest())?;
+        write_config(&path, &antigravity_hooks(target))?;
+        return Ok(path);
+    }
     if agent == AgentKind::OpenCode {
         match std::fs::read_to_string(&path) {
             // Someone else's file at our name is theirs to keep.
@@ -399,9 +649,14 @@ pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
         return Ok(path);
     }
     let mut root = read_config(&path)?.unwrap_or_else(|| json!({}));
-    let marker = marker(agent);
+    if matches!(agent, AgentKind::Cursor | AgentKind::Copilot) {
+        if root.get("version").is_some_and(|version| version != 1) {
+            return Err(invalid(&path, "unsupported hooks configuration version"));
+        }
+        root["version"] = json!(1);
+    }
     let hooks = hooks_map(&mut root)?;
-    strip_ours(hooks, &marker);
+    strip_ours(hooks, agent);
     for entry in entries(agent) {
         let groups = hooks
             .entry(entry.native)
@@ -421,6 +676,28 @@ pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
 /// Removes every Condr entry, leaving the rest of the file as it was.
 pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
     let path = target.path(agent);
+    if agent == AgentKind::Kimi {
+        return Ok(path);
+    }
+    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
+        check_owned(&path, &marker(agent))?;
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        return Ok(path);
+    }
+    if agent == AgentKind::Antigravity {
+        let manifest = path.with_file_name("plugin.json");
+        check_owned(&path, &marker(agent))?;
+        check_manifest(&manifest)?;
+        for file in [&path, &manifest] {
+            if file.exists() {
+                std::fs::remove_file(file)?;
+            }
+        }
+        // A disabled/enabled preference still belongs to the user, as do other files.
+        return Ok(path);
+    }
     if agent == AgentKind::OpenCode {
         let (config_path, mut config) = opencode_config(target)?;
         match std::fs::read_to_string(&path) {
@@ -441,9 +718,8 @@ pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
     let Some(mut root) = read_config(&path)? else {
         return Ok(path);
     };
-    let marker = marker(agent);
     if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        strip_ours(hooks, &marker);
+        strip_ours(hooks, agent);
         hooks.retain(|_, groups| groups.as_array().is_none_or(|groups| !groups.is_empty()));
     }
     if root
@@ -471,21 +747,22 @@ fn hooks_map(root: &mut Value) -> io::Result<&mut serde_json::Map<String, Value>
 }
 
 /// Drops Condr's hooks from every group of every event, and the groups that emptied.
-fn strip_ours(hooks: &mut serde_json::Map<String, Value>, marker: &str) {
+fn strip_ours(hooks: &mut serde_json::Map<String, Value>, agent: AgentKind) {
     for groups in hooks.values_mut() {
         let Some(groups) = groups.as_array_mut() else {
             continue;
         };
         for group in groups.iter_mut() {
             if let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) {
-                entries.retain(|hook| !is_ours(hook, marker));
+                entries.retain(|hook| !is_ours(hook, agent));
             }
         }
         groups.retain(|group| {
-            group
-                .get("hooks")
-                .and_then(Value::as_array)
-                .is_none_or(|entries| !entries.is_empty())
+            !is_ours(group, agent)
+                && group
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .is_none_or(|entries| !entries.is_empty())
         });
     }
 }
@@ -558,17 +835,55 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let target = HookTarget {
-            claude_dir: root.join(".claude"),
-            codex_dir: root.join(".codex"),
-            opencode_dir: root.join(".config/opencode"),
-            command: "\"/opt/condr bin/condr\"".to_owned(),
-        };
+        let target = HookTarget::in_home(&root, "\"/opt/condr bin/condr\"".to_owned());
         (target, root)
     }
 
     fn read(path: &Path) -> Value {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn quoted_hook_paths_follow_the_cli_shell() {
+        let (target, _) = target();
+        let command = |agent, windows, shell| {
+            target.hook_command_for_shell(agent, AgentEventKind::Stop, windows, shell)
+        };
+        for shell in [None, Some("pwsh"), Some("PowerShell"), Some("unknown")] {
+            assert_eq!(
+                command(AgentKind::Grok, true, shell),
+                "& \"/opt/condr bin/condr\" agent-hook grok stop"
+            );
+            assert_eq!(
+                command(AgentKind::Grok, false, shell),
+                "\"/opt/condr bin/condr\" agent-hook grok stop"
+            );
+        }
+        for shell in ["bash", "gitbash", "git-bash", "cmd", " CMD.EXE "] {
+            assert_eq!(
+                command(AgentKind::Grok, true, Some(shell)),
+                "\"/opt/condr bin/condr\" agent-hook grok stop"
+            );
+        }
+        assert_eq!(
+            command(AgentKind::Codex, true, Some("bash")),
+            "& \"/opt/condr bin/condr\" agent-hook codex stop",
+            "GROK_SHELL does not select Codex's shell"
+        );
+        for agent in [AgentKind::Claude, AgentKind::Cursor, AgentKind::Antigravity] {
+            assert_eq!(
+                command(agent, true, None),
+                format!("\"/opt/condr bin/condr\" agent-hook {} stop", agent.id())
+            );
+        }
+        let target = HookTarget {
+            command: "condr".into(),
+            ..target
+        };
+        assert_eq!(
+            target.hook_command_for_shell(AgentKind::Grok, AgentEventKind::Stop, true, None),
+            "condr agent-hook grok stop"
+        );
     }
 
     #[test]
