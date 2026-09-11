@@ -61,7 +61,13 @@ pub fn ensure_local_server() -> io::Result<Endpoint> {
 /// Stops the host's Server and waits for its listener ownership to be released before
 /// starting a replacement. An absent Server is started normally.
 pub fn restart_server(config: ServerConfig) -> io::Result<Endpoint> {
-    resolve_server_executable()?;
+    let executable = resolve_server_executable()?;
+    restart_server_from(config, &executable)
+}
+
+/// [`restart_server`], but the replacement is `executable` rather than whatever the
+/// lookup rules would pick; `condr server install` runs from a temporary copy.
+pub fn restart_server_from(config: ServerConfig, executable: &Path) -> io::Result<Endpoint> {
     let endpoint = config.local_endpoint();
     match stop_server(&endpoint) {
         Ok(()) => {}
@@ -71,18 +77,24 @@ pub fn restart_server(config: ServerConfig) -> io::Result<Endpoint> {
                 io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
             ) =>
         {
-            return ensure_server(config);
+            return ensure_server_from(config, executable);
         }
         Err(error) => return Err(error),
     }
+    wait_for_shutdown(&config.socket_path)?;
+    ensure_server_from(config, executable)
+}
+
+/// Waits until a stopped Server has released its listener, for up to 30 seconds.
+pub fn wait_for_shutdown(socket_path: &Path) -> io::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         // The bind lock outlives PTY shutdown and the final Snapshot flush. Polling
         // it also avoids filling a socket backlog after the accept loop has stopped.
-        match crate::endpoint::acquire_local_bind_lock(&config.socket_path) {
+        match crate::endpoint::acquire_local_bind_lock(socket_path) {
             Ok(lock) => {
                 drop(lock);
-                return ensure_server(config);
+                return Ok(());
             }
             Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
             Err(error) => return Err(error),
@@ -100,16 +112,36 @@ pub fn restart_server(config: ServerConfig) -> io::Result<Endpoint> {
 /// Connects to the host's Server, starting it detached first if nothing answers on its
 /// socket. Returns the local endpoint to talk to it on.
 pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
+    if let Some(endpoint) = running_endpoint(&config)? {
+        return Ok(endpoint);
+    }
+    let executable = resolve_server_executable()?;
+    spawn_server(config, &executable)
+}
+
+/// [`ensure_server`] with an explicit Server binary instead of the lookup rules.
+pub fn ensure_server_from(config: ServerConfig, executable: &Path) -> io::Result<Endpoint> {
+    if let Some(endpoint) = running_endpoint(&config)? {
+        return Ok(endpoint);
+    }
+    spawn_server(config, executable)
+}
+
+/// The local endpoint when a compatible Server already answers there.
+fn running_endpoint(config: &ServerConfig) -> io::Result<Option<Endpoint>> {
     let endpoint = config.local_endpoint();
     if let Ok(stream) = endpoint.connect() {
         match probe_protocol(stream) {
-            Ok(()) => return Ok(endpoint),
+            Ok(()) => return Ok(Some(endpoint)),
             Err(error) if error.kind() == io::ErrorKind::InvalidData => return Err(error),
             Err(_) => {}
         }
     }
+    Ok(None)
+}
 
-    let server_executable = resolve_server_executable()?;
+fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<Endpoint> {
+    let endpoint = config.local_endpoint();
     let log_path = server_log_path(&config.socket_path)?;
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
@@ -131,7 +163,7 @@ pub fn ensure_server(config: ServerConfig) -> io::Result<Endpoint> {
         )
     })?;
     let stderr = log.try_clone()?;
-    let mut command = Command::new(&server_executable);
+    let mut command = Command::new(server_executable);
     command.args(["server", "run"]);
     command.arg("--endpoint").arg(&config.socket_path);
     if let Some(address) = config.listen {

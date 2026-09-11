@@ -3,6 +3,7 @@
 mod client;
 mod client_writer;
 mod endpoint;
+pub mod install;
 pub mod noise;
 pub(crate) mod persistence;
 mod server;
@@ -16,7 +17,8 @@ pub use noise::{PublicKey, Secret, ServerIdentity, StaticKey};
 pub use persistence::{read_config_text, update_config_values};
 pub use server::{
     BoundServer, ServerConfig, ServerHandle, connected_devices, ensure_local_server, ensure_server,
-    load_listen, probe_server, restart_server, revoke_devices, save_listen, stop_server,
+    ensure_server_from, load_listen, probe_server, restart_server, restart_server_from,
+    revoke_devices, save_listen, stop_server, wait_for_shutdown,
 };
 pub use ssh::SshEndpoint;
 

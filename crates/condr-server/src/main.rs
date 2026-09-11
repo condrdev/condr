@@ -85,6 +85,30 @@ enum ServerCommand {
     },
     /// Report whether the Server is running
     Status,
+    /// Copy this executable into the user's Condr directory and put it on PATH
+    Install {
+        /// Start the Server from the installed copy if none is running
+        #[arg(long, conflicts_with = "restart")]
+        start: bool,
+        /// Stop the running Server and start it from the installed copy
+        #[arg(long)]
+        restart: bool,
+        /// Confirm the restart without a terminal
+        #[arg(long)]
+        yes: bool,
+        /// Print one JSON object instead of step lines
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop the Server, remove the installed `condr` and its PATH entry; keep your data
+    Uninstall {
+        /// Confirm stopping the Server without a terminal
+        #[arg(long)]
+        yes: bool,
+        /// Print one JSON object instead of step lines
+        #[arg(long)]
+        json: bool,
+    },
     /// Ask the Server to shut down
     Stop,
     /// Run the Server in the foreground
@@ -250,6 +274,20 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     Ok(1)
                 }
             }
+        }
+        ServerCommand::Install {
+            start,
+            restart,
+            yes,
+            json,
+        } => condr_server::install::install(condr_server::install::InstallOptions {
+            start,
+            restart,
+            yes,
+            json,
+        }),
+        ServerCommand::Uninstall { yes, json } => {
+            condr_server::install::uninstall(condr_server::install::UninstallOptions { yes, json })
         }
         ServerCommand::Stop => {
             let endpoint = ServerConfig::default().local_endpoint();
@@ -462,6 +500,31 @@ mod tests {
         assert!(detached);
 
         assert!(matches!(parse(&["status"]), Ok(ServerCommand::Status)));
+        assert!(matches!(
+            parse(&["install", "--restart", "--yes", "--json"]),
+            Ok(ServerCommand::Install {
+                start: false,
+                restart: true,
+                yes: true,
+                json: true
+            })
+        ));
+        assert!(matches!(
+            parse(&["install", "--start"]),
+            Ok(ServerCommand::Install {
+                start: true,
+                restart: false,
+                yes: false,
+                json: false
+            })
+        ));
+        assert!(matches!(
+            parse(&["uninstall", "--yes", "--json"]),
+            Ok(ServerCommand::Uninstall {
+                yes: true,
+                json: true
+            })
+        ));
         assert!(matches!(parse(&["stop"]), Ok(ServerCommand::Stop)));
         assert!(matches!(parse(&["invite"]), Ok(ServerCommand::Invite)));
         assert!(matches!(parse(&["clients"]), Ok(ServerCommand::Clients)));
@@ -486,6 +549,8 @@ mod tests {
         assert!(parse(&["start", "--detached"]).is_err());
         assert!(parse(&["start", "--listen", "not-an-address"]).is_err());
         assert!(parse(&["revoke"]).is_err());
+        assert!(parse(&["install", "--start", "--restart"]).is_err());
+        assert!(parse(&["uninstall", "--start"]).is_err());
         assert!(Cli::try_parse_from(["condr", "--skill", "server", "stop"]).is_err());
         assert!(Cli::try_parse_from(["condr", "server", "stop", "--skill"]).is_err());
     }

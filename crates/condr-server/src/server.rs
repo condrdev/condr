@@ -62,8 +62,8 @@ use terminal_stream::{
 
 pub use config::{ServerConfig, load_listen, save_listen};
 pub use local::{
-    connected_devices, ensure_local_server, ensure_server, probe_server, restart_server,
-    revoke_devices, stop_server,
+    connected_devices, ensure_local_server, ensure_server, ensure_server_from, probe_server,
+    restart_server, restart_server_from, revoke_devices, stop_server, wait_for_shutdown,
 };
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
