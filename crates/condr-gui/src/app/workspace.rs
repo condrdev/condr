@@ -317,9 +317,13 @@ impl Condr {
                             }),
                     )
                     .child(
-                        welcome_row("clone-repository", IconName::Github, "Clone Repository")
-                            .disabled(true)
-                            .tooltip("Not available yet"),
+                        welcome_row(
+                            "clone-repository",
+                            CondrIconName::GitBranch,
+                            "Clone Repository",
+                        )
+                        .disabled(true)
+                        .tooltip("Not available yet"),
                     )
                     .child(
                         welcome_row(

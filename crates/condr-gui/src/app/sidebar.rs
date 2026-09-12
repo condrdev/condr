@@ -432,7 +432,7 @@ impl Condr {
                         .debug_selector(move || format!("new-workspace-server-{key}"))
                         .ghost()
                         .xsmall()
-                        .icon(IconName::Plus)
+                        .icon(Icon::new(CondrIconName::FolderPlus))
                         .tooltip(tooltip)
                         .disabled(!connected)
                         .on_click(move |_, window, cx| {
