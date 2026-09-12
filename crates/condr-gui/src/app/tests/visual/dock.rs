@@ -927,3 +927,111 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
         })
     }));
 }
+
+#[test]
+fn authoritative_layout_event_releases_workspace_selection_without_ack() {
+    let _serial_guard = acquire_visual_test_lock();
+    let first_root = TestDirectory::new("selection-ack-first");
+    let second_root = TestDirectory::new("selection-ack-second");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
+                root_directory: first_root.0.clone(),
+            });
+        });
+    });
+    let first_workspace = {
+        let mut id = None;
+        assert!(wait_until(window, |window| {
+            id = window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .and_then(|session| session.active_workspace_id())
+            });
+            id.is_some()
+        }));
+        id.unwrap()
+    };
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                focus: true,
+                root_directory: second_root.0.clone(),
+            });
+        });
+    });
+    let second_workspace = {
+        let mut id = None;
+        assert!(wait_until(window, |window| {
+            id = window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .and_then(|session| session.active_workspace_id())
+                    .filter(|workspace_id| *workspace_id != first_workspace)
+            });
+            id.is_some()
+        }));
+        id.unwrap()
+    };
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let (connect_generation, server_id, runtime_epoch, session_id, snapshot) = {
+                let connection = this.connection(1).unwrap();
+                (
+                    connection.connect_generation,
+                    connection.server_id.unwrap(),
+                    connection.runtime_epoch.unwrap(),
+                    connection.session_id.unwrap(),
+                    connection.snapshot.clone(),
+                )
+            };
+            let pending = PendingWorkspaceSelection {
+                connection_key: 1,
+                workspace_id: first_workspace,
+                pane_id: None,
+                connect_generation,
+                server_id,
+                runtime_epoch,
+                session_id,
+                request_id: u64::MAX,
+                applied_sequence: None,
+            };
+            this.pending_workspace_selections.insert(1, pending);
+            this.pending_presentation_request = Some((1, pending.request_id));
+
+            let mut authoritative = Session::restore(snapshot).unwrap();
+            assert_eq!(authoritative.active_workspace_id(), Some(second_workspace));
+            assert!(authoritative.activate_workspace(first_workspace));
+            let bootstrap = SessionBootstrap {
+                settings: Default::default(),
+                server_id,
+                runtime_epoch,
+                session_id,
+                sequence: 0,
+                snapshot: authoritative.snapshot(),
+                terminals: Vec::new(),
+                agents: Vec::new(),
+                workspace_git: Vec::new(),
+                zoomed_panes: Vec::new(),
+            };
+            let effect = this.handle_incoming(
+                1,
+                pending.connect_generation,
+                Incoming::Bootstrap(bootstrap),
+                cx,
+            );
+            assert!(effect.rebuild);
+            assert!(this.pending_workspace_selection_for(1).is_none());
+            assert!(this.pending_presentation_request.is_none());
+            this.rebuild_dock(window, cx);
+        });
+    });
+}

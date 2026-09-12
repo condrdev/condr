@@ -181,16 +181,16 @@ impl Condr {
         else {
             return (false, false);
         };
+        // The layout event/bootstrap is itself the authoritative result.  The direct
+        // LayoutApplied acknowledgement can be lost when the reliable writer falls behind;
+        // waiting for it here would leave the selection pending forever and disable every
+        // subsequent layout action until the GUI reconnects.  Only defer when an acknowledgement
+        // explicitly points at a newer sequence than the snapshot being considered.
         if pending
             .applied_sequence
-            .is_none_or(|applied| applied > sequence)
+            .is_some_and(|applied| applied > sequence)
         {
             return (false, false);
-        }
-        self.pending_workspace_selections.remove(&key);
-        let should_present = self.pending_presentation_request == Some((key, pending.request_id));
-        if should_present {
-            self.pending_presentation_request = None;
         }
         let target_is_active = session.active_workspace_id() == Some(pending.workspace_id)
             && pending.pane_id.is_none_or(|pane_id| {
@@ -198,6 +198,17 @@ impl Condr {
                     .active_workspace()
                     .is_some_and(|workspace| workspace.active_tab().focused_pane().id() == pane_id)
             });
+        // Without an acknowledgement, keep waiting while the authoritative structure still
+        // points elsewhere.  This preserves an in-flight, supersedable click while allowing a
+        // matching event/bootstrap to settle it when the direct reply was lost.
+        if pending.applied_sequence.is_none() && !target_is_active {
+            return (false, false);
+        }
+        self.pending_workspace_selections.remove(&key);
+        let should_present = self.pending_presentation_request == Some((key, pending.request_id));
+        if should_present {
+            self.pending_presentation_request = None;
+        }
         if target_is_active {
             if should_present {
                 self.active_connection = key;
