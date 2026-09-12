@@ -2,6 +2,28 @@ use super::super::*;
 use crate::app::dialogs::{host_text_is_plausible, port_text_is_plausible};
 
 impl Condr {
+    pub(in crate::app) fn add_server_menu(
+        mut menu: PopupMenu,
+        owner: WeakEntity<Condr>,
+    ) -> PopupMenu {
+        let ssh_owner = owner.clone();
+        let tcp_owner = owner;
+        menu = menu.item(
+            PopupMenuItem::new("SSH address")
+                .icon(IconName::SquareTerminal)
+                .on_click(move |_, window, cx| {
+                    let _ = ssh_owner.update(cx, |this, cx| this.prompt_add_server_ssh(window, cx));
+                }),
+        );
+        menu.item(
+            PopupMenuItem::new("TCP pairing link")
+                .icon(IconName::Network)
+                .on_click(move |_, window, cx| {
+                    let _ = tcp_owner.update(cx, |this, cx| this.prompt_add_server_tcp(window, cx));
+                }),
+        )
+    }
+
     pub(in crate::app) fn prompt_add_server_ssh(
         &mut self,
         window: &mut Window,

@@ -552,26 +552,7 @@ impl Condr {
                             .tooltip("Connect Remote Device")
                             .accessibility_label("Connect Remote Device")
                             .dropdown_menu(move |menu, _, _| {
-                                let ssh_owner = add_owner.clone();
-                                let tcp_owner = add_owner.clone();
-                                menu.item(
-                                    PopupMenuItem::new("SSH address")
-                                        .icon(IconName::SquareTerminal)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = ssh_owner.update(cx, |this, cx| {
-                                                this.prompt_add_server_ssh(window, cx)
-                                            });
-                                        }),
-                                )
-                                .item(
-                                    PopupMenuItem::new("TCP pairing link")
-                                        .icon(IconName::Network)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = tcp_owner.update(cx, |this, cx| {
-                                                this.prompt_add_server_tcp(window, cx)
-                                            });
-                                        }),
-                                )
+                                Condr::add_server_menu(menu, add_owner.clone())
                             })
                             .anchor(Anchor::BottomLeft),
                     )

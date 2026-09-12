@@ -452,6 +452,21 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
     window.run_until_parked();
     assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
 
+    let welcome_connect = window
+        .debug_bounds("connect-remote-device")
+        .expect("the welcome page should expose Connect Remote Device");
+    window.simulate_click(welcome_connect.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    window.simulate_keystrokes("down enter");
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("dialog-primary-action").is_some());
+    window.update(|window, cx| window.close_dialog(cx));
+    window.run_until_parked();
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+
     let new_workspace = window
         .debug_bounds("new-workspace-server-1")
         .expect("Local server should expose New Workspace");

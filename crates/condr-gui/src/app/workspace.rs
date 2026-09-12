@@ -331,9 +331,8 @@ impl Condr {
                             CondrIconName::ServerPlus,
                             "Connect Remote Device",
                         )
-                        .on_click(move |_, window, cx| {
-                            let _ = connect_owner
-                                .update(cx, |this, cx| this.prompt_add_server(window, cx));
+                        .dropdown_menu(move |menu, _, _| {
+                            Condr::add_server_menu(menu, connect_owner.clone())
                         }),
                     )
                     .when_some(error, |column, error| {
