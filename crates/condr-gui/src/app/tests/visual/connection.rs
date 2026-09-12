@@ -863,7 +863,7 @@ fn corrupt_snapshot_connects_to_an_operable_start_page() {
     }));
     window.update(|window, cx| _ = window.draw(cx));
     let new_workspace = window
-        .debug_bounds("new-terminal-workspace")
+        .debug_bounds("open-project")
         .expect("Start Page should offer New Workspace after a corrupt snapshot");
     window.simulate_click(new_workspace.center(), Modifiers::default());
     assert!(window.did_prompt_for_paths());

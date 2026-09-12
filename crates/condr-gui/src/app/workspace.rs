@@ -1,4 +1,4 @@
-use super::sidebar::{DragPreview, DropTarget, attach_drop_target, drop_index};
+use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target, drop_index};
 use super::*;
 use gpui_fps::fps_monitor;
 
@@ -47,31 +47,7 @@ impl Condr {
         };
         let key = connection.key;
         let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
-            let new_owner = cx.weak_entity();
-            let empty = v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_3()
-                .child(img(APP_LOGO).size_12())
-                .when_some(error, |view, error| {
-                    view.child(div().text_sm().text_color(cx.theme().danger).child(error))
-                })
-                .child(
-                    Button::new("new-terminal-workspace")
-                        .debug_selector(|| "new-terminal-workspace".into())
-                        .primary()
-                        .icon(IconName::SquareTerminal)
-                        .label("New Workspace")
-                        .disabled(!can_mutate)
-                        .on_click(move |_, window, cx| {
-                            let _ = new_owner.update(cx, |this, cx| {
-                                this.choose_workspace_directory_on(key, window, cx)
-                            });
-                        }),
-                )
-                .into_any_element();
-            return (None, empty);
+            return (None, self.render_welcome(key, can_mutate, error, cx));
         };
         let workspace = session
             .workspace(workspace_id)
@@ -256,6 +232,117 @@ impl Condr {
             .when_some(dock_area, |view, dock_area| view.child(dock_area))
             .into_any_element();
         (Some(strip.into_any_element()), body)
+    }
+}
+
+/// The width of the welcome page's action column: wide enough for the longest row,
+/// narrow enough that the labels stay one short reading column in a maximized window.
+const WELCOME_COLUMN_WIDTH: Pixels = px(400.);
+
+/// One welcome row. A Button centers its content, so the trailing spacer takes the
+/// leftover width and leaves the icons and labels on one left spine.
+fn welcome_row(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> Button {
+    Button::new(id)
+        .debug_selector(move || id.into())
+        .ghost()
+        .w_full()
+        .icon(icon)
+        .label(label)
+        .child(div().flex_1())
+}
+
+impl Condr {
+    /// What a Server with no Workspace shows: the brand, then the ways in. The
+    /// connection's error belongs here too, since this page replaces the Tab strip
+    /// that would otherwise carry it.
+    fn render_welcome(
+        &self,
+        key: ConnectionKey,
+        can_mutate: bool,
+        error: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open_owner = cx.weak_entity();
+        let connect_owner = cx.weak_entity();
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_8()
+            .child(
+                h_flex()
+                    .gap_4()
+                    .items_center()
+                    .child(img(APP_LOGO).size_12())
+                    .child(
+                        v_flex()
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .child(format!("Welcome to {}", condr_core::APP_NAME)),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .italic()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Keep your agents running"),
+                            ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .w(WELCOME_COLUMN_WIDTH)
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .pb_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("GET STARTED"),
+                            )
+                            .child(Separator::horizontal().flex_1()),
+                    )
+                    .child(
+                        welcome_row("open-project", IconName::FolderOpen, "Open Project")
+                            .disabled(!can_mutate)
+                            .on_click(move |_, window, cx| {
+                                let _ = open_owner.update(cx, |this, cx| {
+                                    this.choose_workspace_directory_on(key, window, cx)
+                                });
+                            }),
+                    )
+                    .child(
+                        welcome_row("clone-repository", IconName::Github, "Clone Repository")
+                            .disabled(true)
+                            .tooltip("Not available yet"),
+                    )
+                    .child(
+                        welcome_row(
+                            "connect-remote-device",
+                            CondrIconName::ServerPlus,
+                            "Connect Remote Device",
+                        )
+                        .on_click(move |_, window, cx| {
+                            let _ = connect_owner
+                                .update(cx, |this, cx| this.prompt_add_server(window, cx));
+                        }),
+                    )
+                    .when_some(error, |column, error| {
+                        column.child(
+                            div()
+                                .pt_2()
+                                .text_sm()
+                                .text_color(cx.theme().danger)
+                                .child(error),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 }
 

@@ -614,7 +614,7 @@ fn tcp_paths_use_server_side_text_dialogs() {
     let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint);
     window.update(|window, cx| _ = window.draw(cx));
     let new_workspace = window
-        .debug_bounds("new-terminal-workspace")
+        .debug_bounds("open-project")
         .expect("TCP Start Page should offer New Workspace");
     window.simulate_click(new_workspace.center(), Modifiers::default());
     window.run_until_parked();
@@ -834,7 +834,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     cx.update(gpui_kit::init);
     let (view, window, server) = connected_condr(&mut cx);
     let button = window
-        .debug_bounds("new-terminal-workspace")
+        .debug_bounds("open-project")
         .expect("new workspace button should be rendered");
     window.simulate_click(button.center(), Modifiers::default());
     assert!(window.did_prompt_for_paths());

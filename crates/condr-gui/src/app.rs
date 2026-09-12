@@ -52,6 +52,7 @@ use gpui_kit::component::dock::{
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::setting::{
     SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
