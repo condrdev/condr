@@ -121,7 +121,10 @@ impl Condr {
             .collect()
     }
 
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.sidebar_collapsed {
+            return self.render_collapsed_sidebar(cx);
+        }
         let owner = cx.weak_entity();
         let sessions = self.restored_sessions();
         let items = self.connections.iter().map(|connection| {
@@ -570,5 +573,72 @@ impl Condr {
                             }),
                     ),
             )
+            .into_any_element()
+    }
+
+    fn render_collapsed_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let owner = cx.weak_entity();
+        let sessions = self.restored_sessions();
+        let mut avatars = Vec::new();
+        for connection in &self.connections {
+            let connection_key = connection.key;
+            let Some(session) = sessions.get(&connection.key) else {
+                continue;
+            };
+            let active_workspace = self.presented_workspace_id(connection.key, session);
+            for workspace in session.workspaces() {
+                let workspace_id = workspace.id();
+                let active = connection.key == self.active_connection
+                    && active_workspace == Some(workspace_id);
+                let workspace_name = workspace.name().to_owned();
+                let icon = CondrSidebarIcon::avatar(
+                    &workspace_name,
+                    &workspace.root_directory().to_string_lossy(),
+                    format!(
+                        "collapsed-workspace-icon-{}-{}",
+                        connection_key,
+                        workspace_id.as_u64()
+                    ),
+                );
+                let item_owner = owner.clone();
+                let button = Button::new(format!(
+                    "collapsed-workspace-{}-{}",
+                    connection_key,
+                    workspace_id.as_u64()
+                ))
+                .debug_selector(move || {
+                    format!(
+                        "collapsed-workspace-{}-{}",
+                        connection_key,
+                        workspace_id.as_u64()
+                    )
+                })
+                .ghost()
+                .small()
+                .tooltip(workspace_name.clone())
+                .when(active, |this| {
+                    this.bg(cx.theme().sidebar_accent)
+                        .text_color(cx.theme().sidebar_accent_foreground)
+                })
+                .on_click(move |_, window, cx| {
+                    let _ = item_owner.update(cx, |this, cx| {
+                        this.select_workspace(connection_key, workspace_id, window, cx)
+                    });
+                })
+                .child(icon.render(cx));
+                avatars.push(button.into_any_element());
+            }
+        }
+        v_flex()
+            .size_full()
+            .items_center()
+            .gap_1()
+            .pt_2()
+            .bg(cx.theme().tokens.sidebar)
+            .text_color(cx.theme().sidebar_foreground)
+            .border_r_1()
+            .border_color(cx.theme().sidebar_border)
+            .children(avatars)
+            .into_any_element()
     }
 }

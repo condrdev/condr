@@ -183,6 +183,7 @@ const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
 const MAX_SIDEBAR_WIDTH: Pixels = px(360.);
+const COLLAPSED_SIDEBAR_WIDTH: Pixels = px(48.);
 const SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(6.);
 /// The main window's title bar hosts the Tab strip, so it takes the strip's old height
 /// rather than the Kit's default; the Tabs keep the same room above and below.
@@ -240,6 +241,7 @@ pub(crate) struct Condr {
     /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
     /// only dragging the handle does.
     sidebar_width: Pixels,
+    sidebar_collapsed: bool,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -358,6 +360,7 @@ impl Condr {
             appearance,
             fps_monitor,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
+            sidebar_collapsed: false,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

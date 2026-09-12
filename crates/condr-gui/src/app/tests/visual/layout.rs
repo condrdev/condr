@@ -538,6 +538,27 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
     let sidebar = window.debug_bounds("condr-sidebar").unwrap();
     assert_eq!(sidebar.size.width, initial);
 
+    let toggle = window
+        .debug_bounds("toggle-sidebar")
+        .expect("the title bar should expose the sidebar toggle");
+    window.simulate_click(toggle.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.debug_bounds("condr-sidebar").unwrap().size.width,
+        px(48.),
+        "collapsing keeps the workspace avatar rail"
+    );
+    let toggle = window.debug_bounds("toggle-sidebar").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.debug_bounds("condr-sidebar").unwrap().size.width,
+        initial,
+        "expanding restores the previous sidebar width"
+    );
+
     // Drag the handle 80px to the right.
     let handle = window
         .debug_bounds("condr-sidebar-resize")

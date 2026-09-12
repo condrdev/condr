@@ -379,8 +379,30 @@ const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
 /// is the sidebar's width and color, its right segment hosts the Tab strip, so the two
 /// columns read as one surface each and the Panes get the height a separate strip took.
 /// The Kit still draws the window controls and moves the window from empty space.
-fn workspace_title_bar(sidebar_width: Pixels, tab_strip: Option<AnyElement>, cx: &App) -> TitleBar {
+fn workspace_title_bar(
+    sidebar_width: Pixels,
+    sidebar_collapsed: bool,
+    tab_strip: Option<AnyElement>,
+    owner: WeakEntity<Condr>,
+    cx: &App,
+) -> TitleBar {
     let theme = cx.theme();
+    let title_sidebar_width = if sidebar_collapsed {
+        COLLAPSED_SIDEBAR_WIDTH
+    } else {
+        sidebar_width
+    };
+    let toggle_label = if sidebar_collapsed {
+        "Expand Sidebar"
+    } else {
+        "Collapse Sidebar"
+    };
+    let toggle_icon = if sidebar_collapsed {
+        IconName::PanelLeftOpen
+    } else {
+        IconName::PanelLeftClose
+    };
+    let toggle_owner = owner.clone();
     TitleBar::new()
         .h(WORKSPACE_TITLE_BAR_HEIGHT)
         // The sidebar's color reaches the window edge, traffic-light inset included.
@@ -395,15 +417,42 @@ fn workspace_title_bar(sidebar_width: Pixels, tab_strip: Option<AnyElement>, cx:
                 .child(
                     h_flex()
                         .debug_selector(|| "title-sidebar".into())
-                        .w(sidebar_width - TITLE_BAR_LEFT_PADDING)
+                        .w(title_sidebar_width - TITLE_BAR_LEFT_PADDING)
                         .flex_none()
                         .h_full()
                         .gap_2()
                         .items_center()
+                        .justify_between()
                         .border_r_1()
                         .border_color(theme.sidebar_border)
-                        .child(img(APP_LOGO).size_4().flex_shrink_0())
-                        .child(condr_core::APP_NAME),
+                        .when(!sidebar_collapsed, |this| {
+                            this.child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .flex_shrink_0()
+                                    .child(img(APP_LOGO).size_4().flex_shrink_0())
+                                    .child(condr_core::APP_NAME),
+                            )
+                        })
+                        .child(
+                            Button::new("toggle-sidebar")
+                                .debug_selector(|| "toggle-sidebar".into())
+                                .ghost()
+                                .small()
+                                .icon(Icon::new(toggle_icon))
+                                .tooltip(toggle_label)
+                                .accessibility_label(toggle_label)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation();
+                                })
+                                .on_click(move |_, _, cx| {
+                                    let _ = toggle_owner.update(cx, |this, cx| {
+                                        this.sidebar_collapsed = !this.sidebar_collapsed;
+                                        cx.notify();
+                                    });
+                                }),
+                        ),
                 )
                 .child(
                     div()
@@ -416,10 +465,21 @@ fn workspace_title_bar(sidebar_width: Pixels, tab_strip: Option<AnyElement>, cx:
         )
 }
 
+impl Condr {
+    pub(super) fn sidebar_layout_width(&self) -> Pixels {
+        if self.sidebar_collapsed {
+            COLLAPSED_SIDEBAR_WIDTH
+        } else {
+            self.sidebar_width
+        }
+    }
+}
+
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let workspace_owner = cx.weak_entity();
+        let sidebar_toggle_owner = cx.weak_entity();
         let (tab_strip, body) = self.render_workspace(cx);
         let workspace = div()
             .size_full()
@@ -472,7 +532,13 @@ impl Render for Condr {
             .text_color(cx.theme().foreground)
             // Client-side title bar on every platform, as Zed does; the OS title for the
             // taskbar is set separately when the window opens.
-            .child(workspace_title_bar(self.sidebar_width, tab_strip, cx))
+            .child(workspace_title_bar(
+                self.sidebar_width,
+                self.sidebar_collapsed,
+                tab_strip,
+                sidebar_toggle_owner,
+                cx,
+            ))
             .child(
                 // The sidebar keeps an absolute width, the way Zed sizes its docks: a
                 // resizable group would rescale it with the window on every resize.
@@ -493,7 +559,7 @@ impl Render for Condr {
                         div()
                             .debug_selector(|| "condr-sidebar".into())
                             .relative()
-                            .w(self.sidebar_width)
+                            .w(self.sidebar_layout_width())
                             .flex_none()
                             .h_full()
                             .child(self.render_sidebar(cx))
@@ -501,22 +567,26 @@ impl Render for Condr {
                             // half its width, occluding so the terminal underneath never
                             // sees the press, and swallowing the press so the pane does
                             // not start a selection.
-                            .child(deferred(
-                                div()
-                                    .id("condr-sidebar-resize")
-                                    .debug_selector(|| "condr-sidebar-resize".into())
-                                    .absolute()
-                                    .top_0()
-                                    .bottom_0()
-                                    .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
-                                    .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
-                                    .occlude()
-                                    .cursor_col_resize()
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation()
-                                    })
-                                    .on_drag(DraggedSidebar, |_, _, _, cx| cx.new(|_| EmptyView)),
-                            )),
+                            .when(!self.sidebar_collapsed, |this| {
+                                this.child(deferred(
+                                    div()
+                                        .id("condr-sidebar-resize")
+                                        .debug_selector(|| "condr-sidebar-resize".into())
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .right(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
+                                        .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                        .occlude()
+                                        .cursor_col_resize()
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_drag(DraggedSidebar, |_, _, _, cx| {
+                                            cx.new(|_| EmptyView)
+                                        }),
+                                ))
+                            }),
                     )
                     .child(workspace),
             )
