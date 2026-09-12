@@ -28,8 +28,8 @@ Condr 是一个轻量的原生 GUI，你可以在一个窗口中同时运行 Cla
 - **始终运行** —— `condr` Server 会持续运行。关闭窗口或断开连接后，agent 仍会继续工作。
 - **远程访问** —— 在一个窗口管理本地和远程设备。通过 SSH 连接，或使用密钥通过 TCP 配对远程设备。
 - **Agent 感知** —— 在侧边栏查看每个 agent 的状态。完成工作时，Condr 会通知你。
-- **Agent 驱动** —— Agent 也可以使用 Condr：通过 CLI 创建 Pane、读取输出、分配任务，并与其他 Agent 沟通。
-- **原生终端** —— Condr 使用 `alacritty` 内核，为每个 agent 提供真实终端。任何 CLI agent 或终端程序都能运行。
+- **Agent 驱动** —— Agent 也可以使用 Condr：创建 Pane、读取输出、分配任务，还能与其他 Agent 沟通。
+- **原生终端** —— Condr 使用 `alacritty` 内核，为每个窗格提供真实终端。任何 CLI agent 或终端程序都能运行。
 - **Fast** —— 全程使用 Rust 构建。没有 Electron。小巧、响应快，即使 agent 忙碌时也能保持流畅。
 
 ## 安装
