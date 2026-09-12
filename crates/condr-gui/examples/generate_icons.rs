@@ -6,23 +6,64 @@ use image::codecs::ico::{IcoEncoder, IcoFrame};
 use resvg::{tiny_skia, usvg};
 use std::{collections::BTreeMap, error::Error, fs, path::Path};
 
+const LOGO_VIEWBOX: &str = "0 0 128 128";
+const PLATFORM_CORNER_RADIUS: &str = "16";
+
+fn rounded_platform_svg(source: &str) -> String {
+    let body_start = source
+        .find('>')
+        .expect("condr.svg must have an opening svg element")
+        + 1;
+    let body_end = source
+        .rfind("</svg>")
+        .expect("condr.svg must have a closing svg element");
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{LOGO_VIEWBOX}">
+<defs><clipPath id="platform-corners"><rect width="128" height="128" rx="{PLATFORM_CORNER_RADIUS}"/></clipPath></defs>
+<g clip-path="url(#platform-corners)">{}</g>
+</svg>"#,
+        &source[body_start..body_end]
+    )
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/icons");
-    let tree = usvg::Tree::from_data(&fs::read(root.join("condr.svg"))?, &Default::default())?;
+    let source = fs::read_to_string(root.join("condr.svg"))?;
+    let source_tree = usvg::Tree::from_str(&source, &Default::default())?;
+    // The checked-in SVG is the platform-neutral source. Desktop application icon formats
+    // conventionally mask their corners, so rasterize a clipped wrapper for macOS while leaving
+    // the source SVG itself untouched for Linux packaging. PNG and ICO are also used by the GUI
+    // title bar, X11 and Windows Shell, where the unmasked source is the appropriate
+    // representation.
+    let platform_tree = usvg::Tree::from_str(&rounded_platform_svg(&source), &Default::default())?;
     let mut images = BTreeMap::new();
     for size in [16, 32, 48, 64, 128, 256, 512, 1024] {
         let mut pixmap = tiny_skia::Pixmap::new(size, size).ok_or("allocate icon pixels")?;
         resvg::render(
-            &tree,
+            &source_tree,
             tiny_skia::Transform::from_scale(
-                size as f32 / tree.size().width(),
-                size as f32 / tree.size().height(),
+                size as f32 / source_tree.size().width(),
+                size as f32 / source_tree.size().height(),
             ),
             &mut pixmap.as_mut(),
         );
         images.insert(size, pixmap.encode_png()?);
     }
     fs::write(root.join("condr.png"), &images[&256])?;
+
+    let mut platform_images = BTreeMap::new();
+    for size in [16, 32, 48, 64, 128, 256, 512, 1024] {
+        let mut pixmap = tiny_skia::Pixmap::new(size, size).ok_or("allocate icon pixels")?;
+        resvg::render(
+            &platform_tree,
+            tiny_skia::Transform::from_scale(
+                size as f32 / platform_tree.size().width(),
+                size as f32 / platform_tree.size().height(),
+            ),
+            &mut pixmap.as_mut(),
+        );
+        platform_images.insert(size, pixmap.encode_png()?);
+    }
 
     let frames = [16, 32, 48, 64, 128, 256]
         .into_iter()
@@ -43,11 +84,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     for size in [16, 32, 128, 256, 512] {
         fs::write(
             iconset.join(format!("icon_{size}x{size}.png")),
-            &images[&size],
+            &platform_images[&size],
         )?;
         fs::write(
             iconset.join(format!("icon_{size}x{size}@2x.png")),
-            &images[&(size * 2)],
+            &platform_images[&(size * 2)],
         )?;
     }
     println!("Generated PNG, ICO and macOS iconset in {}", root.display());

@@ -1,7 +1,10 @@
 # Application icons
 
-`condr.svg` is the source for Condr's application logo. Keep its original colors;
-it is branding, not a theme-tinted action glyph.
+`condr.svg` is the platform-neutral source for Condr's application logo. Keep its
+original colors; it is branding, not a theme-tinted action glyph. The SVG keeps
+the full square canvas. The icon generator keeps PNG square for the GUI title bar
+and X11, and applies the desktop platform's rounded corner mask to ICO and macOS
+iconset assets; Linux packaging uses the source SVG directly.
 
 After editing the SVG, regenerate and commit its derived assets:
 
