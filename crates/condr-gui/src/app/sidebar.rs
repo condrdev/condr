@@ -514,15 +514,14 @@ impl Condr {
                 if is_local {
                     menu
                 } else {
-                    menu.separator()
-                        .item(
-                            PopupMenuItem::new("Delete Server").on_click(move |_, window, cx| {
-                                let name = delete_name.clone();
-                                let _ = delete_owner.update(cx, |this, cx| {
-                                    this.confirm_delete_server_on(key, name, window, cx)
-                                });
-                            }),
-                        )
+                    menu.separator().item(PopupMenuItem::new("Delete").on_click(
+                        move |_, window, cx| {
+                            let name = delete_name.clone();
+                            let _ = delete_owner.update(cx, |this, cx| {
+                                this.confirm_delete_server_on(key, name, window, cx)
+                            });
+                        },
+                    ))
                 }
             })
             .on_click(move |_, window, cx| {
@@ -537,7 +536,7 @@ impl Condr {
             .w_full()
             .children(items)
             // The app name lives in the title bar; the actions sit at the bottom right,
-            // Add Server left of Settings. Reconnect is the `ReconnectServer`
+            // Connect Remote Device left of Settings. Reconnect is the `ReconnectServer`
             // action; it has no button here.
             .footer(
                 h_flex()
@@ -550,8 +549,8 @@ impl Condr {
                             .ghost()
                             .small()
                             .icon(Icon::new(CondrIconName::ServerPlus))
-                            .tooltip("Add Server")
-                            .accessibility_label("Add Server")
+                            .tooltip("Connect Remote Device")
+                            .accessibility_label("Connect Remote Device")
                             .on_click(move |_, window, cx| {
                                 let _ = add_owner
                                     .update(cx, |this, cx| this.prompt_add_server(window, cx));

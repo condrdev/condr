@@ -5,13 +5,13 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 ## Language
 
 **Server**:
-A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015).
+A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015). Server is an engineering term: the interface never shows it, and presents a Server together with the machine it runs on as one Device.
 
 **Device**:
-A Client installation on another machine, identified by its own persistent static key stored beside its `config.toml`. A Device is paired once through an Invite and listed in the Server's `authorized-clients` until revoked; local and SSH Clients need no TCP pairing.
+A machine running Condr, identified by its own persistent static key stored beside its `config.toml`. Device is the interface's name for a whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. A Device reaching a Server over TCP is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no TCP pairing.
 
 **Invite**:
-A one-time secret that `condr server invite` creates for ten minutes. Pasted into Add Server as `tcp://<server key>.<invite>@host:port`, it lets one unknown Device complete the handshake and become authorized; it is never stored by the Client.
+A one-time secret that `condr server invite` creates for ten minutes. Pasted into Connect Remote Device as `tcp://<server key>.<invite>@host:port`, it lets one unknown Device complete the handshake and become authorized; it is never stored by the Client.
 _Avoid_: Local backend, GUI runtime
 
 **Client**:

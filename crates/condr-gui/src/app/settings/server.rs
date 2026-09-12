@@ -97,7 +97,7 @@ pub(super) fn server_network_page(settings: &Entity<SettingsWindow>) -> SettingP
 }
 
 pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingPage {
-    SettingPage::new("Clients")
+    SettingPage::new("Paired devices")
         .icon(IconName::Network)
         .default_open(true)
         .group(server_clients_group(settings))
@@ -199,8 +199,8 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     let value = settings.clone();
     let restart = settings.clone();
     let group = SettingGroup::new().description(
-        "Changes take effect when the Server restarts. Only a local or SSH connection can \
-         change them; over TCP this page is read-only.",
+        "Changes take effect when Condr restarts on this device. Only a local or SSH \
+         connection can change them; over TCP this page is read-only.",
     );
     group
         .item(server_status_row(settings))
@@ -244,7 +244,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
             .unwrap_or_default();
             let feedback = if restarting {
                 Some((
-                    "Waiting for the Server to come back…".into(),
+                    "Waiting for Condr to come back…".into(),
                     cx.theme().muted_foreground,
                 ))
             } else {
@@ -258,7 +258,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                         .label(if restarting {
                             "Restarting…"
                         } else {
-                            "Restart Server"
+                            "Restart Condr"
                         })
                         .small()
                         .outline()
@@ -272,22 +272,23 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                                 window.open_alert_dialog(cx, move |alert, _, _| {
                                     let owner = owner.clone();
                                     alert
-                                    .confirm()
-                                    .title("Restart Server?")
-                                    .description(
-                                        "Every pane and agent on it stops; Clients reconnect on \
-                                         their own.",
-                                    )
-                                    .button_props(
-                                        DialogButtonProps::default()
-                                            .ok_text("Restart")
-                                            .ok_variant(ButtonVariant::Danger),
-                                    )
-                                    .on_ok(move |_, _, cx| {
-                                        let _ = owner
-                                            .update(cx, |owner, cx| owner.restart_server(key, cx));
-                                        true
-                                    })
+                                        .confirm()
+                                        .title("Restart Condr on this device?")
+                                        .description(
+                                            "Every pane and agent on this device stops; Condr \
+                                         windows reconnect on their own.",
+                                        )
+                                        .button_props(
+                                            DialogButtonProps::default()
+                                                .ok_text("Restart")
+                                                .ok_variant(ButtonVariant::Danger),
+                                        )
+                                        .on_ok(move |_, _, cx| {
+                                            let _ = owner.update(cx, |owner, cx| {
+                                                owner.restart_server(key, cx)
+                                            });
+                                            true
+                                        })
                                 });
                             });
                         }),
@@ -323,7 +324,9 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                 let hint = match (allowed, listening) {
                     (false, _) => "Only a local or SSH connection can invite devices.",
                     (true, false) => "Turn on the TCP listener first: devices pair over TCP.",
-                    (true, true) => "A one-time address for Add Server on the new device.",
+                    (true, true) => {
+                        "A one-time address for Connect Remote Device on the new device."
+                    }
                 };
                 let mut column = v_flex().gap_2().child(
                     h_flex()

@@ -258,7 +258,7 @@ impl ServerConnection {
             self.subscription_pending = false;
             self.bootstrap_resync_session_id = None;
             self.reacquire_after_bootstrap = false;
-            self.error = Some("Disconnected from Server".into());
+            self.error = Some("Disconnected from the device".into());
             self.io = None;
         }
     }

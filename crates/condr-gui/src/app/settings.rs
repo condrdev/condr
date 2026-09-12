@@ -416,7 +416,7 @@ impl Render for SettingsWindow {
                 });
             })
             .prefix(div().w_3())
-            .children([Tab::new().label("Application"), Tab::new().label("Server")])
+            .children([Tab::new().label("Application"), Tab::new().label("Device")])
             .when(tab == SettingsTab::Server, |this| {
                 this.suffix(
                     div()

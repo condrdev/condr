@@ -101,11 +101,7 @@ impl Condr {
                 };
             }
             Incoming::Disconnected(error) => {
-                return self.mark_disconnected(
-                    key,
-                    index,
-                    format!("Server connection closed: {error}"),
-                );
+                return self.mark_disconnected(key, index, format!("Connection closed: {error}"));
             }
         };
 
@@ -626,7 +622,7 @@ impl Condr {
             | ServerMessage::DevicesRevoked { .. }
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
-                let effect = self.mark_disconnected(key, index, "Server stopped".into());
+                let effect = self.mark_disconnected(key, index, "Condr stopped".into());
                 self.schedule_restart_reconnect(key, cx);
                 effect
             }

@@ -32,18 +32,18 @@ pub(super) struct ClientIo {
 fn disconnect_reason(error: &condr_core::protocol::FramingError) -> String {
     use condr_core::protocol::FramingError;
     match error {
-        FramingError::UnexpectedEof => "the Server closed the connection".into(),
+        FramingError::UnexpectedEof => "the device closed the connection".into(),
         FramingError::Io(error) => match error.kind() {
             std::io::ErrorKind::UnexpectedEof
             | std::io::ErrorKind::ConnectionReset
             | std::io::ErrorKind::ConnectionAborted
             | std::io::ErrorKind::BrokenPipe
-            | std::io::ErrorKind::NotConnected => "the Server closed the connection".into(),
+            | std::io::ErrorKind::NotConnected => "the device closed the connection".into(),
             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
-                "the Server stopped answering".into()
+                "the device stopped answering".into()
             }
             std::io::ErrorKind::PermissionDenied => {
-                format!("the Server refused this device: {error}")
+                format!("the device refused this connection: {error}")
             }
             _ => format!("connection error: {error}"),
         },

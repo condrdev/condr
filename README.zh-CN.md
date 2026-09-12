@@ -55,7 +55,7 @@ Condr 是一个轻量的原生 GUI，你可以在一个窗口中同时运行 Cla
 | macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
 
-你可以在侧栏中点击 **Add Server** 添加远程连接：
+你可以在侧栏中点击 **Connect Remote Device** 添加远程连接：
 
 ```text
 ssh://user@build-box                         # 复用你的 OpenSSH 配置和 ssh-agent

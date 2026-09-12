@@ -192,7 +192,7 @@ condr server start
 
 先在 Client 机器的终端完成一次 `ssh <host>` 登录，确认主机密钥和密钥认证可用；GUI 使用系统 OpenSSH 与 ssh-agent，不弹出密码或主机信任提示。端口、IdentityFile、ProxyJump 等可以放在 SSH config 的 Host 条目里。Condr 会禁用该条目继承的端口转发，并覆盖 RemoteCommand、SessionType、StdinNull、ForkAfterAuthentication，保证 bridge 在前台使用协议 stdin/stdout。
 
-在 Add Server 的 Address 中填写：
+在 Connect Remote Device 的 Address 中填写：
 
 ```text
 ssh://user@host
@@ -217,7 +217,7 @@ condr server start --listen 0.0.0.0:4242
 condr server invite
 ```
 
-已启动的 Server 需要 `condr server restart` 才会应用新的 listen 地址。将 invite 打印的 `tcp://<server key>.<invite>@<host>:4242` 中 `<host>` 换成远端可达地址，粘贴到 Add Server。TCP 每次连接仍使用 Noise 双向认证与加密；首次 invite 配对成功后，重连只使用设备密钥。`condr server clients` 列出配对设备，`condr server revoke <key 前缀>` 撤销并断开设备。
+已启动的 Server 需要 `condr server restart` 才会应用新的 listen 地址。将 invite 打印的 `tcp://<server key>.<invite>@<host>:4242` 中 `<host>` 换成远端可达地址，粘贴到 Connect Remote Device。TCP 每次连接仍使用 Noise 双向认证与加密；首次 invite 配对成功后，重连只使用设备密钥。`condr server clients` 列出配对设备，`condr server revoke <key 前缀>` 撤销并断开设备。
 
 ### 保存的 Server
 

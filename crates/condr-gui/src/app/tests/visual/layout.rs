@@ -257,7 +257,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     );
     window
         .debug_bounds("add-server")
-        .expect("Add Server should render in the sidebar header");
+        .expect("Connect Remote Device should render in the sidebar header");
 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -439,7 +439,7 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
 
     let add_server = window
         .debug_bounds("add-server")
-        .expect("Add Server button should be rendered");
+        .expect("Connect Remote Device button should be rendered");
     window.simulate_click(add_server.center(), Modifiers::default());
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
     window.update(|window, cx| window.close_dialog(cx));

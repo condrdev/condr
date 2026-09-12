@@ -51,7 +51,7 @@ impl Condr {
             ok_text,
             String::new(),
             Some("Root directory".into()),
-            Some("Absolute path on Server".into()),
+            Some("Absolute path on the device".into()),
             false,
             apply,
             window,

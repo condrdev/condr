@@ -166,7 +166,7 @@ fn main() {
 ///
 /// ```text
 /// condr-server: failed to stop
-///   no Server is listening at /run/user/1000/condr/condr.sock
+///   nothing is listening at /run/user/1000/condr/condr.sock
 /// ```
 fn dispatch(command: ServerCommand) -> i32 {
     match run_server_command(command) {
@@ -338,7 +338,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .listen
                 .map_or_else(|| "<port>".to_owned(), |address| address.port().to_string());
             println!(
-                "condr-server: invite valid for {} minutes; in Condr, Add Server with",
+                "condr-server: invite valid for {} minutes; in Condr, Connect Remote Device with",
                 noise::INVITE_TTL.as_secs() / 60
             );
             println!(

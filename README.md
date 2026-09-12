@@ -55,7 +55,7 @@ Download installers from [Releases](https://github.com/condrdev/condr/releases).
 | macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64      | `irm https://condr.dev/install.ps1 \| iex`     |
 
-Click **Add Server** in the sidebar to add a remote connection:
+Click **Connect Remote Device** in the sidebar to add a remote connection:
 
 ```text
 ssh://user@build-box                         # uses your OpenSSH config and ssh-agent

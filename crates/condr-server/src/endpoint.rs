@@ -173,13 +173,13 @@ impl Endpoint {
         }
         match error.kind() {
             io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
-                format!("no Server is listening at {self}")
+                format!("nothing is listening at {self}")
             }
             io::ErrorKind::PermissionDenied => {
-                format!("the Server at {self} refused this device: {error}")
+                format!("the device at {self} refused this connection: {error}")
             }
             io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => {
-                format!("the Server at {self} did not answer in time")
+                format!("the device at {self} did not answer in time")
             }
             io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable => {
                 format!("{self} is unreachable from this machine")

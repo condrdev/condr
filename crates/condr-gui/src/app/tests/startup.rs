@@ -15,7 +15,7 @@ fn server_connection_preserves_start_error_and_final_concurrent_probe() {
     );
     assert_eq!(
         failed.unwrap_err(),
-        "Failed to start or discover the local Server: invalid endpoint marker"
+        "Failed to start Condr on this device: invalid endpoint marker"
     );
 
     let (_, concurrent) = connect_to_server_with(

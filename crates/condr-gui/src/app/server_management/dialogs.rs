@@ -11,8 +11,8 @@ impl Condr {
             return;
         }
         self.prompt_text_input(
-            "Add Server".into(),
-            "Add",
+            "Connect Remote Device".into(),
+            "Connect",
             String::new(),
             Some("Address".into()),
             Some("tcp://server-key[.invite]@host:port or ssh://user@host".into()),
@@ -24,7 +24,7 @@ impl Condr {
                         .iter()
                         .any(|c| c.endpoint.to_string() == endpoint.to_string())
                     {
-                        this.app_error = Some("Server already added".into());
+                        this.app_error = Some("This device is already added".into());
                         return false;
                     }
                     this.app_error = None;
@@ -45,7 +45,7 @@ impl Condr {
                     true
                 }
                 Err(error) => {
-                    this.app_error = Some(format!("Invalid server: {error}"));
+                    this.app_error = Some(format!("Invalid address: {error}"));
                     false
                 }
             },
@@ -126,7 +126,7 @@ impl Condr {
                 let content_error = error.clone();
                 let submit_error = error.clone();
                 dialog
-                    .title("Edit Server")
+                    .title("Edit Remote Device")
                     .content(move |content, _, cx| {
                         let field = |(label, input): &(SharedString, Entity<InputState>)| {
                             v_flex()
@@ -216,7 +216,7 @@ impl Condr {
         });
     }
 
-    /// Applies an Edit Server dialog. A changed host or port reconnects the Server at the
+    /// Applies an Edit Remote Device dialog. A changed host or port reconnects the Server at the
     /// new address; the Server key stays. False keeps the dialog open with an error.
     pub(in crate::app) fn apply_server_edit(
         &mut self,
@@ -249,18 +249,18 @@ impl Condr {
         let endpoint = match endpoint {
             Ok(endpoint) => endpoint,
             Err(error) => {
-                self.app_error = Some(format!("Invalid server address: {error}"));
+                self.app_error = Some(format!("Invalid address: {error}"));
                 return false;
             }
         };
         if name.is_empty() {
-            self.app_error = Some("The Server needs a name".into());
+            self.app_error = Some("The device needs a name".into());
             return false;
         }
         if self.connections.iter().any(|connection| {
             connection.key != key && connection.endpoint.to_string() == endpoint.to_string()
         }) {
-            self.app_error = Some("Another Server already uses this address".into());
+            self.app_error = Some("Another device already uses this address".into());
             return false;
         }
         let Some(connection) = self.connection_mut(key) else {
@@ -295,7 +295,7 @@ impl Condr {
                 let owner = owner.clone();
                 alert
                     .title(format!("Delete \"{name}\"?"))
-                    .description("This removes the Server from Condr. Its terminals keep running.")
+                    .description("This removes the device from Condr. Its terminals keep running.")
                     .button_props(
                         DialogButtonProps::default()
                             .ok_text("Delete")

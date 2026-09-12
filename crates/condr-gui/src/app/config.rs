@@ -62,7 +62,7 @@ impl LoadedConfig {
             Err(error) => (
                 None,
                 Some(format!(
-                    "Failed to load the device key, so TCP Servers are unavailable: {error}"
+                    "Failed to load the device key, so TCP devices are unavailable: {error}"
                 )),
             ),
         };
@@ -87,7 +87,7 @@ impl LoadedConfig {
                     (
                         Vec::new(),
                         Some(format!(
-                            "Failed to load {}: {error}. Server list changes are disabled; fix the file and restart Condr.",
+                            "Failed to load {}: {error}. Device list changes are disabled; fix the file and restart Condr.",
                             path.as_deref().map_or_else(
                                 || "config.toml".to_owned(),
                                 |path| path.display().to_string()
