@@ -441,7 +441,13 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
         .debug_bounds("add-server")
         .expect("Connect Remote Device button should be rendered");
     window.simulate_click(add_server.center(), Modifiers::default());
-    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    window.simulate_keystrokes("down enter");
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("dialog-primary-action").is_some());
     window.update(|window, cx| window.close_dialog(cx));
     window.run_until_parked();
     assert!(!window.update(|window, cx| window.has_active_dialog(cx)));

@@ -2,8 +2,59 @@ use super::super::*;
 use crate::app::dialogs::{host_text_is_plausible, port_text_is_plausible};
 
 impl Condr {
+    pub(in crate::app) fn prompt_add_server_ssh(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_add_server_input(
+            "Connect over SSH",
+            "SSH address",
+            "ssh://user@host[:port]",
+            Some("ssh://"),
+            window,
+            cx,
+        );
+    }
+
+    pub(in crate::app) fn prompt_add_server_tcp(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_add_server_input(
+            "Pair a TCP Device",
+            "Pairing link",
+            "Paste tcp://… invite link",
+            Some("tcp://"),
+            window,
+            cx,
+        );
+    }
+
     pub(in crate::app) fn prompt_add_server(
         &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Kept as the direct address prompt for the start page and keyboard workflow.
+        // The sidebar exposes the two explicit modes through its PopupMenu.
+        self.prompt_add_server_input(
+            "Connect Remote Device",
+            "Address",
+            "tcp://server-key.invite@host:port or ssh://user@host",
+            None,
+            window,
+            cx,
+        );
+    }
+
+    fn prompt_add_server_input(
+        &mut self,
+        title: &'static str,
+        field_label: &'static str,
+        placeholder: &'static str,
+        expected_scheme: Option<&'static str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -11,47 +62,59 @@ impl Condr {
             return;
         }
         self.prompt_text_input(
-            "Connect Remote Device".into(),
+            title.into(),
             "Connect",
             String::new(),
-            Some("Address".into()),
-            Some("tcp://server-key[.invite]@host:port or ssh://user@host".into()),
+            Some(field_label.into()),
+            Some(placeholder.into()),
             true,
-            |this, value, _, cx| match Endpoint::parse(&value, this.device_key.as_ref()) {
-                Ok(endpoint) => {
-                    if this
-                        .connections
-                        .iter()
-                        .any(|c| c.endpoint.to_string() == endpoint.to_string())
-                    {
-                        this.app_error = Some("This device is already added".into());
-                        return false;
-                    }
-                    this.app_error = None;
-                    let key = this.next_connection_key;
-                    this.next_connection_key += 1;
-                    let label = match &endpoint {
-                        Endpoint::Tcp(tcp) => tcp.authority(),
-                        Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
-                        Endpoint::Local(_) => unreachable!("remote address parser"),
-                    };
-                    this.connections
-                        .push(ServerConnection::new(key, label, endpoint));
-                    this.save_servers(cx);
-                    this.pending_presentation_request = None;
-                    this.active_connection = key;
-                    this.target_pane = None;
-                    _ = this.start_connect(key);
-                    true
+            move |this, value, _, cx| {
+                if let Some(scheme) = expected_scheme
+                    && !value.trim().to_ascii_lowercase().starts_with(scheme)
+                {
+                    this.app_error = Some(format!("Paste a {scheme} address"));
+                    return false;
                 }
-                Err(error) => {
-                    this.app_error = Some(format!("Invalid address: {error}"));
-                    false
-                }
+                this.add_server_from_address(&value, cx)
             },
             window,
             cx,
         );
+    }
+
+    fn add_server_from_address(&mut self, value: &str, cx: &mut Context<Self>) -> bool {
+        match Endpoint::parse(value, self.device_key.as_ref()) {
+            Ok(endpoint) => {
+                if self
+                    .connections
+                    .iter()
+                    .any(|c| c.endpoint.to_string() == endpoint.to_string())
+                {
+                    self.app_error = Some("This device is already added".into());
+                    return false;
+                }
+                self.app_error = None;
+                let key = self.next_connection_key;
+                self.next_connection_key += 1;
+                let label = match &endpoint {
+                    Endpoint::Tcp(tcp) => tcp.authority(),
+                    Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
+                    Endpoint::Local(_) => unreachable!("remote address parser"),
+                };
+                self.connections
+                    .push(ServerConnection::new(key, label, endpoint));
+                self.save_servers(cx);
+                self.pending_presentation_request = None;
+                self.active_connection = key;
+                self.target_pane = None;
+                _ = self.start_connect(key);
+                true
+            }
+            Err(error) => {
+                self.app_error = Some(format!("Invalid address: {error}"));
+                false
+            }
+        }
     }
 
     /// Edits a remote Server's name, host and port. A TCP Server key is its identity and is
