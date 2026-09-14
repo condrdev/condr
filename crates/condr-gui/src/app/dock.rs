@@ -56,6 +56,26 @@ impl DockAreaRenderer for CondrDockRenderer {
             .overflow_hidden()
     }
 
+    /// The Panes draw their own borders; the Kit's one-pixel divider sits on the seam
+    /// and paints over one pixel of them, so it only shows while a drag is under way.
+    fn render_split_handle(
+        &self,
+        handle: &gpui_kit::base::ResizeHandleContext,
+        _: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        Some(
+            div()
+                .flex_none()
+                .map(|this| match handle.axis() {
+                    Axis::Horizontal => this.h_full().w(px(1.)),
+                    Axis::Vertical => this.w_full().h(px(1.)),
+                })
+                .when(handle.is_active(), |this| this.bg(cx.theme().primary))
+                .into_any_element(),
+        )
+    }
+
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
         Rc::new(CondrTabGroupRenderer)
     }
