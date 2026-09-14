@@ -1094,6 +1094,33 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     });
     assert!(split_down, "Alt+Shift+- did not split down");
 
+    // The new Pane's shell must show its prompt before anything is typed: input that
+    // arrives while bash is still setting up the terminal is discarded, which is what
+    // happens on a slow CI runner.
+    let new_pane = window
+        .read(|app| {
+            view.read(app)
+                .active_session()?
+                .active_workspace()
+                .map(|workspace| workspace.active_tab().focused_pane().id())
+        })
+        .unwrap();
+    let prompt_ready = wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .and_then(|connection| connection.terminals.get(&new_pane))
+                .is_some_and(|terminal| {
+                    terminal
+                        .view
+                        .cells
+                        .iter()
+                        .any(|cell| !cell.text.trim().is_empty())
+                })
+        })
+    });
+    assert!(prompt_ready, "the split Pane's shell did not show a prompt");
+
     window.simulate_input("printf CONDR_E2E");
     window.simulate_keystrokes("enter");
 
