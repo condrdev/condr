@@ -55,10 +55,6 @@ jobs:
         with:
           name: condr-dist
           path: dist
-      - name: Move the nightly tag
-        run: |
-          git tag -f nightly "$GITHUB_SHA"
-          git push origin refs/tags/nightly --force
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,15 +62,12 @@ jobs:
         run: |
           notes="Nightly build of \`main\` at commit \`${GITHUB_SHA}\` ($(date -u +%Y-%m-%d)). This release and the \`nightly\` tag are mutable; all platform installers are rebuilt together. Client and Server must use the same build."
 
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release upload nightly dist/* --clobber
-            gh release edit nightly --title "Nightly" --notes "$notes" --prerelease --latest=false
-          else
-            gh release create nightly dist/* --title "Nightly" --notes "$notes" --prerelease --latest=false
-          fi
-
-          while IFS= read -r asset; do
-            if [ ! -f "dist/$asset" ]; then
-              gh release delete-asset nightly "$asset" --yes
-            fi
-          done < <(gh release view nightly --json assets --jq '.assets[].name')
+          # GITHUB_TOKEN may not push a tag at a commit that touches .github/workflows,
+          # so let the Releases API create the tag instead of git push.
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --target "$GITHUB_SHA" \
+            --title "Nightly" \
+            --notes "$notes" \
+            --prerelease \
+            --latest=false

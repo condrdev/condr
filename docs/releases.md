@@ -6,7 +6,7 @@ Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call t
 
 - Runs daily at 03:17 UTC and on demand (`gh workflow run nightly.yml`).
 - Builds the current `main`. If the `nightly` tag already points at `HEAD`, the scheduled run exits without building.
-- Publishes to the mutable **Nightly** prerelease and force-moves the `nightly` tag to the built commit. Stale assets from earlier builds are removed.
+- Recreates the mutable **Nightly** prerelease and its `nightly` tag at the built commit, so only assets from that commit are attached.
 - Package names carry the 12-character short SHA: `condr-0.1.0-<sha>-linux-x86_64.AppImage`, `condr-cli-0.1.0-<sha>-macos-arm64.tar.gz`.
 - `nightly` is the only tag that may be force-pushed, and only by the workflow.
 
