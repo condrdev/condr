@@ -1,14 +1,9 @@
 name: Release
 
-# Nightly: every day, or on demand, the current `main` is packaged for every
-# platform and published to the mutable `nightly` prerelease. Nothing is built
-# when `nightly` already points at HEAD.
-# Release: pushing an immutable `v*` tag publishes a versioned release.
+# Pushing an immutable `v*` tag builds that commit for every platform and
+# publishes a versioned release marked Latest.
 
 on:
-  schedule:
-    - cron: '17 3 * * *'
-  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -17,244 +12,45 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'nightly' }}
-  cancel-in-progress: true
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.95.0
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  plan:
-    name: Decide what to build
+  check:
+    name: Check the tag against Cargo.toml
     runs-on: ubuntu-24.04
-    outputs:
-      build: ${{ steps.plan.outputs.build }}
-      channel: ${{ steps.plan.outputs.channel }}
-      release: ${{ steps.plan.outputs.release }}
-    steps:
-      - id: plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            echo "channel=release" >> "$GITHUB_OUTPUT"
-            echo "release=1" >> "$GITHUB_OUTPUT"
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "channel=nightly" >> "$GITHUB_OUTPUT"
-          echo "release=0" >> "$GITHUB_OUTPUT"
-          current=$(gh api "repos/${GH_REPO}/git/ref/tags/nightly" --jq .object.sha 2>/dev/null || true)
-          if [ "${GITHUB_EVENT_NAME}" = schedule ] && [ "$current" = "${GITHUB_SHA}" ]; then
-            echo "nightly already points at ${GITHUB_SHA}; nothing to build"
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          fi
-
-  linux:
-    name: Linux GUI, server and CLI (${{ matrix.arch }})
-    needs: plan
-    if: needs.plan.outputs.build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-22.04
-          - arch: aarch64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - name: Install Linux GUI dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libvulkan1 patchelf desktop-file-utils
-      - name: Install Rust
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup default "$RUST_VERSION"
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-      - name: Build GUI and condr
-        run: cargo build --release --locked -p condr-gui -p condr-server
-      - name: Smoke test condr
-        run: target/release/condr server --help
-      - name: Install AppImage tooling
-        run: |
-          tool_arch="${{ matrix.arch }}"
-          curl --fail --location --retry 3 \
-            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${tool_arch}.AppImage" \
-            --output appimagetool
-          curl --fail --location --retry 3 \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${tool_arch}.AppImage" \
-            --output linuxdeploy
-          chmod +x appimagetool
-          chmod +x linuxdeploy
-      - name: Package Linux artifacts
-        env:
-          CONDR_COMMIT: ${{ github.sha }}
-          CONDR_RELEASE: ${{ needs.plan.outputs.release }}
-          CONDR_ARCH: ${{ matrix.arch }}
-          APPIMAGE_TOOL: ${{ github.workspace }}/appimagetool
-          LINUXDEPLOY_TOOL: ${{ github.workspace }}/linuxdeploy
-          APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: script/package-linux.sh
-      - name: Check Linux packages
-        run: sh script/check-linux-package.sh
-      - uses: actions/upload-artifact@v7
-        with:
-          name: condr-linux-${{ matrix.arch }}
-          path: |
-            dist/*.tar.gz
-            dist/*.AppImage
-          if-no-files-found: error
-          retention-days: 1
-
-  windows-bundle:
-    name: Windows GUI, server and CLI (x86_64)
-    needs: plan
-    if: needs.plan.outputs.build == 'true'
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install Rust
-        shell: pwsh
-        run: |
-          rustup toolchain install $env:RUST_VERSION --profile minimal
-          rustup default $env:RUST_VERSION
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-      - name: Build GUI and condr
-        run: cargo build --release --locked -p condr-gui -p condr-server
-      - name: Smoke test condr
-        run: target\release\condr.exe server --help
-      - name: Package Windows artifacts
-        shell: pwsh
-        run: |
-          choco install innosetup --no-progress --yes
-          $env:CONDR_COMMIT = $env:GITHUB_SHA
-          if ('${{ needs.plan.outputs.release }}' -eq '1') {
-            & powershell -File script\package-windows.ps1 -Release
-          } else {
-            & powershell -File script\package-windows.ps1
+      - run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2
+            exit 1
           }
-      - name: Check Windows packages and CLI installation
-        shell: pwsh
-        run: .\script\check-windows-package.ps1
-      - uses: actions/upload-artifact@v7
-        with:
-          name: condr-windows-x86_64
-          path: |
-            dist/*.zip
-            dist/*.exe
-          if-no-files-found: error
-          retention-days: 1
 
-  macos:
-    name: macOS GUI, server and CLI (${{ matrix.arch }})
-    needs: plan
-    if: needs.plan.outputs.build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: macos-15-intel
-          - arch: arm64
-            runner: macos-14
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install Rust
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup default "$RUST_VERSION"
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-      - name: Build GUI and condr
-        run: cargo build --release --locked -p condr-gui -p condr-server
-      - name: Package macOS artifacts
-        env:
-          CONDR_COMMIT: ${{ github.sha }}
-          CONDR_RELEASE: ${{ needs.plan.outputs.release }}
-          CONDR_ARCH: ${{ matrix.arch }}
-        run: script/package-macos.sh
-      - name: Check macOS packages and PATH registration
-        run: sh script/check-macos-package.sh dist/*.pkg dist/condr-cli-*.tar.gz
-      - uses: actions/upload-artifact@v7
-        with:
-          name: condr-macos-${{ matrix.arch }}
-          path: |
-            dist/*.pkg
-            dist/*.tar.gz
-          if-no-files-found: error
-          retention-days: 1
+  build:
+    needs: check
+    uses: ./.github/workflows/build.yml
+    with:
+      release: true
 
   publish:
-    name: Publish ${{ needs.plan.outputs.channel }}
-    needs:
-      - plan
-      - linux
-      - windows-bundle
-      - macos
+    name: Create the release
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
+          name: condr-dist
           path: dist
-          merge-multiple: true
-      - name: Determine package version
-        run: |
-          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
-          test -n "$version"
-          echo "CONDR_VERSION=$version" >> "$GITHUB_ENV"
-      - name: Verify release assets
-        env:
-          CONDR_COMMIT: ${{ github.sha }}
-          CONDR_RELEASE: ${{ needs.plan.outputs.release }}
-        run: |
-          sh script/check-release-assets.sh
-          (cd dist && sha256sum * > SHA256SUMS)
-      - name: Publish nightly
-        if: needs.plan.outputs.channel == 'nightly'
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          CONDR_VERSION: ${{ needs.build.outputs.version }}
         run: |
-          git tag -f nightly "$GITHUB_SHA"
-          git push origin refs/tags/nightly --force
-
-          notes="Nightly build of \`main\` at commit \`${GITHUB_SHA}\` ($(date -u +%Y-%m-%d)). This release and the \`nightly\` tag are mutable; all platform installers are rebuilt together. Client and Server must use the same build."
-
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release upload nightly dist/* --clobber
-            gh release edit nightly --title "Nightly" --notes "$notes" --prerelease --latest=false
-          else
-            gh release create nightly dist/* --title "Nightly" --notes "$notes" --prerelease --latest=false
-          fi
-
-          while IFS= read -r asset; do
-            if [ ! -f "dist/$asset" ]; then
-              gh release delete-asset nightly "$asset" --yes
-            fi
-          done < <(gh release view nightly --json assets --jq '.assets[].name')
-      - name: Publish release
-        if: needs.plan.outputs.channel == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          test "$GITHUB_REF_NAME" = "v$CONDR_VERSION" || {
-            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $CONDR_VERSION" >&2
-            exit 1
-          }
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists; tags are immutable" >&2
             exit 1

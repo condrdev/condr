@@ -1,10 +1,10 @@
 # Releases
 
-Condr publishes two kinds of builds from `.github/workflows/release.yml`. Every build packages the GUI + CLI installer and the CLI-only archive for Linux x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together.
+Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the GUI + CLI installer and the CLI-only archive for Linux x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together.
 
 ## Nightly
 
-- Runs daily at 03:17 UTC and on demand (`gh workflow run release.yml`).
+- Runs daily at 03:17 UTC and on demand (`gh workflow run nightly.yml`).
 - Builds the current `main`. If the `nightly` tag already points at `HEAD`, the scheduled run exits without building.
 - Publishes to the mutable **Nightly** prerelease and force-moves the `nightly` tag to the built commit. Stale assets from earlier builds are removed.
 - Package names carry the 12-character short SHA: `condr-0.1.0-<sha>-linux-x86_64.AppImage`, `condr-cli-0.1.0-<sha>-macos-arm64.tar.gz`.

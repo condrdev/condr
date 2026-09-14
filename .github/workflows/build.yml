@@ -1,0 +1,190 @@
+name: Build packages
+
+# Reusable: builds the GUI + CLI installer and the CLI-only archive for every
+# platform from one commit, verifies them, and uploads the whole set with
+# SHA256SUMS as the `condr-dist` artifact. Called by nightly.yml and release.yml.
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Versioned release (package names without the commit SHA)
+        type: boolean
+        default: false
+    outputs:
+      version:
+        description: Package version from Cargo.toml
+        value: ${{ jobs.verify.outputs.version }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.95.0
+  CONDR_RELEASE: ${{ inputs.release && '1' || '0' }}
+
+jobs:
+  linux:
+    name: Linux GUI, server and CLI (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libvulkan1 patchelf desktop-file-utils
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Build GUI and condr
+        run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Smoke test condr
+        run: target/release/condr server --help
+      - name: Install AppImage tooling
+        run: |
+          tool_arch="${{ matrix.arch }}"
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${tool_arch}.AppImage" \
+            --output appimagetool
+          curl --fail --location --retry 3 \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${tool_arch}.AppImage" \
+            --output linuxdeploy
+          chmod +x appimagetool
+          chmod +x linuxdeploy
+      - name: Package Linux artifacts
+        env:
+          CONDR_COMMIT: ${{ github.sha }}
+          CONDR_ARCH: ${{ matrix.arch }}
+          APPIMAGE_TOOL: ${{ github.workspace }}/appimagetool
+          LINUXDEPLOY_TOOL: ${{ github.workspace }}/linuxdeploy
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: script/package-linux.sh
+      - name: Check Linux packages
+        run: sh script/check-linux-package.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-linux-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Windows GUI, server and CLI (x86_64)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal
+          rustup default $env:RUST_VERSION
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Build GUI and condr
+        run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Smoke test condr
+        run: target\release\condr.exe server --help
+      - name: Package Windows artifacts
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress --yes
+          $env:CONDR_COMMIT = $env:GITHUB_SHA
+          if ($env:CONDR_RELEASE -eq '1') {
+            & powershell -File script\package-windows.ps1 -Release
+          } else {
+            & powershell -File script\package-windows.ps1
+          }
+      - name: Check Windows packages and CLI installation
+        shell: pwsh
+        run: .\script\check-windows-package.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-windows-x86_64
+          path: |
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: macOS GUI, server and CLI (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Build GUI and condr
+        run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Package macOS artifacts
+        env:
+          CONDR_COMMIT: ${{ github.sha }}
+          CONDR_ARCH: ${{ matrix.arch }}
+        run: script/package-macos.sh
+      - name: Check macOS packages and PATH registration
+        run: sh script/check-macos-package.sh dist/*.pkg dist/condr-cli-*.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-macos-${{ matrix.arch }}
+          path: |
+            dist/*.pkg
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    name: Verify the full package set
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - id: version
+        name: Determine package version
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Verify release assets
+        env:
+          CONDR_VERSION: ${{ steps.version.outputs.version }}
+          CONDR_COMMIT: ${{ github.sha }}
+        run: |
+          sh script/check-release-assets.sh
+          (cd dist && sha256sum * > SHA256SUMS)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
