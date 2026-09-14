@@ -485,9 +485,13 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
     window.simulate_mouse_down(click, MouseButton::Left, shift);
     window.simulate_mouse_move(end, MouseButton::Left, shift);
     window.simulate_mouse_up(end, MouseButton::Left, shift);
-    let selection = window.read(|app| view.read(app).terminal_selection.unwrap());
-    assert!(!selection.dragging);
-    assert_ne!(selection.range.start, selection.range.end);
+    let selection = window.read(|app| {
+        view.read(app)
+            .selection_for(1, pane_id)
+            .expect("selection should be available after a drag")
+    });
+    assert_ne!(selection.start, selection.end);
+    assert!(window.read(|app| !view.read(app).is_selecting(1, pane_id)));
 
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
