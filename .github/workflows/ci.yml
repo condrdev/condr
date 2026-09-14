@@ -47,5 +47,8 @@ jobs:
           rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy
           rustup default "$RUST_VERSION"
       - uses: Swatinem/rust-cache@v2
+        with:
+          # PR branches only restore main's cache; saving per branch would evict it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets --features condr-gui/test-support --locked -- -D warnings
       - run: cargo test --workspace --features condr-gui/test-support --locked
