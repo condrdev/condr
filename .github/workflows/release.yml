@@ -19,8 +19,11 @@ jobs:
   check:
     name: Check the tag against Cargo.toml
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
           test "$GITHUB_REF_NAME" = "v$version" || {
@@ -38,6 +41,7 @@ jobs:
     name: Create the release
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

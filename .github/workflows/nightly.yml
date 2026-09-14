@@ -20,6 +20,7 @@ jobs:
   plan:
     name: Check for new commits
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       build: ${{ steps.plan.outputs.build }}
     steps:
@@ -47,10 +48,10 @@ jobs:
     name: Update the nightly prerelease
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: condr-dist

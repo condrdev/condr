@@ -21,7 +21,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.95.0
   CONDR_RELEASE: ${{ inputs.release && '1' || '0' }}
 
 jobs:
@@ -36,16 +35,15 @@ jobs:
           - arch: aarch64
             runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install Linux GUI dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libvulkan1 patchelf desktop-file-utils
-      - name: Install Rust
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup default "$RUST_VERSION"
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
@@ -85,13 +83,11 @@ jobs:
   windows:
     name: Windows GUI, server and CLI (x86_64)
     runs-on: windows-2025
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      - name: Install Rust
-        shell: pwsh
-        run: |
-          rustup toolchain install $env:RUST_VERSION --profile minimal
-          rustup default $env:RUST_VERSION
+        with:
+          persist-credentials: false
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
@@ -131,12 +127,11 @@ jobs:
           - arch: arm64
             runner: macos-14
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      - name: Install Rust
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup default "$RUST_VERSION"
+        with:
+          persist-credentials: false
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
@@ -161,10 +156,13 @@ jobs:
     name: Verify the full package set
     needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           path: dist
