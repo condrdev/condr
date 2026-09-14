@@ -22,7 +22,7 @@ impl Condr {
         pane_id: PaneId,
         previous: Option<AgentState>,
         agent: &AgentSnapshot,
-        cx: &App,
+        cx: &mut App,
     ) {
         if !self.notifications {
             return;
@@ -57,6 +57,13 @@ impl Condr {
             title: title.into(),
             body: body.into(),
             actions: Vec::new(),
+        });
+        // The taskbar button or Dock icon asks for attention too, the way a chat app
+        // does; the platform skips it while the window is active. Deferred because the
+        // Window is out of its table for the duration of the update this runs in.
+        let window = self.window_handle;
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, _| window.request_attention());
         });
     }
 
