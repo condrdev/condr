@@ -182,7 +182,14 @@ impl fmt::Display for SshEndpoint {
 /// Run only in the bridge CLI process: once either direction ends, `main` exits and
 /// closes the other direction too, even if it is blocked on stdin or a local pipe.
 pub fn bridge(path: &std::path::Path) -> io::Result<()> {
-    let endpoint = crate::Endpoint::local(path);
+    // On the Server's own socket the bridge behaves like the GUI on its own machine:
+    // nobody listening means start the Server, not fail. Any other path was chosen on
+    // purpose and is only connected to.
+    let endpoint = if path == crate::default_socket_path() {
+        crate::ensure_local_server()?
+    } else {
+        crate::Endpoint::local(path)
+    };
     let mut reader = endpoint.connect().map_err(|error| {
         io::Error::other(format!(
             "{}; start the remote Server with `condr server start`",

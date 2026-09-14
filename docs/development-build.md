@@ -206,7 +206,7 @@ Client 执行 `ssh -T … 'condr server bridge'`（指定 `bin` 时替换程序�
 
 SSH/Welcome 阶段允许 15 秒无数据；Welcome 后 Bootstrap 的超时按 4 秒无数据计算，持续传输不会因总耗时过长中断。Disconnect 可取消连接中的握手和堵塞的发送。
 
-首版面向 Windows/Linux Client 连接 Linux/macOS Server（远端使用 POSIX shell）；维护者于 2026-09-08 确认 SSH 连接已手工测试通过，见 [M1 完成记录](roadmap.md#m1solo-daily-driver--desktop-daily-driver)。远端 Server 自动启动将在后续 install 安装流程中一起实现。
+首版面向 Windows/Linux Client 连接 Linux/macOS Server（远端使用 POSIX shell）；维护者于 2026-09-08 确认 SSH 连接已手工测试通过，见 [M1 完成记录](roadmap.md#m1solo-daily-driver--desktop-daily-driver)。远端 Server 未运行时由 bridge 自动启动；远端自动安装将在后续 install 安装流程中实现。
 
 ### TCP 连接
 
