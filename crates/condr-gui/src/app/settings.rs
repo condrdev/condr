@@ -518,7 +518,7 @@ fn power_page(owner: &WeakEntity<Condr>) -> SettingPage {
                     )
                     .default_value(false),
                 )
-                .description("No screen blanking, lock or sleep while Condr is running."),
+                .description("No screen blanking, lock or idle sleep while Condr is running."),
             ),
         )
 }

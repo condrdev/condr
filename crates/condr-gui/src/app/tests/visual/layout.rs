@@ -617,7 +617,25 @@ fn the_sidebar_coffee_button_toggles_keep_awake() {
         .debug_bounds("toggle-keep-awake")
         .expect("the sidebar footer shows the keep-awake toggle");
     window.simulate_click(toggle.center(), Modifiers::default());
-    assert!(window.read(|app| view.read(app).keep_awake));
-    window.simulate_click(toggle.center(), Modifiers::default());
-    assert!(!window.read(|app| view.read(app).keep_awake));
+    // A headless test box has no session bus to inhibit, so the request may fail; the
+    // switch then reports the failure instead of claiming a hold that is not there.
+    let held = window.read(|app| {
+        let this = view.read(app);
+        assert_eq!(this.keep_awake, this._keep_awake.is_some());
+        assert!(
+            this.keep_awake
+                || this
+                    .app_error
+                    .as_deref()
+                    .is_some_and(|e| e.contains("awake"))
+        );
+        this.keep_awake
+    });
+    if held {
+        window.simulate_click(toggle.center(), Modifiers::default());
+        assert!(!window.read(|app| {
+            let this = view.read(app);
+            this.keep_awake || this._keep_awake.is_some()
+        }));
+    }
 }

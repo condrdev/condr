@@ -246,6 +246,8 @@ pub(crate) struct Condr {
     /// Whether the machine is kept from sleeping and blanking while Condr runs.
     keep_awake: bool,
     /// The OS request behind `keep_awake`; dropping it lets the machine sleep again.
+    /// Windows implements it with `SetThreadExecutionState`, which is per thread: it must
+    /// be created and dropped on the GPUI main thread, never from a background task.
     _keep_awake: Option<keepawake::KeepAwake>,
     /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
     /// only dragging the handle does.

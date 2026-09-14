@@ -23,7 +23,6 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 /// assets/icons/NOTICE-AGENT-ICONS), kept for every agent Condr may come to name.
 const CONDR_ICON_PATHS: [&str; 22] = [
     "icons/circle.svg",
-    "icons/coffee.svg",
     "icons/circle-filled.svg",
     "icons/circle-alert.svg",
     "icons/server-plus.svg",
@@ -31,6 +30,7 @@ const CONDR_ICON_PATHS: [&str; 22] = [
     "icons/git-branch.svg",
     "icons/maximize-2.svg",
     "icons/minimize-2.svg",
+    "icons/coffee.svg",
     "icons/claude.svg",
     "icons/codex.svg",
     "icons/opencode.svg",
@@ -65,9 +65,6 @@ impl AssetSource for CondrAssets {
             "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle.svg"
             )))),
-            "icons/coffee.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/coffee.svg"
-            )))),
             "icons/circle-filled.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle-filled.svg"
             )))),
@@ -88,6 +85,9 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/minimize-2.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/minimize-2.svg"
+            )))),
+            "icons/coffee.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/coffee.svg"
             )))),
             "icons/claude.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/claude.svg"
