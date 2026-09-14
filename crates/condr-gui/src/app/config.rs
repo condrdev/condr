@@ -12,6 +12,7 @@ use super::{Appearance, Condr, Endpoint, TerminalFont};
 
 const APPEARANCE_KEY: &str = "appearance";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
+const NOTIFICATIONS_KEY: &str = "notifications";
 const SERVERS_KEY: &str = "servers";
 /// `[client.terminal]` holds every Terminal preference.
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
@@ -46,6 +47,7 @@ pub(super) struct LoadedConfig {
     pub error: Option<String>,
     pub appearance: Appearance,
     pub fps_monitor: bool,
+    pub notifications: bool,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
 }
@@ -106,6 +108,10 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_fps_monitor(path).ok())
                 .unwrap_or(false),
+            notifications: path
+                .as_deref()
+                .and_then(|path| load_notifications(path).ok())
+                .unwrap_or(true),
             terminal_font: path
                 .as_deref()
                 .and_then(|path| load_terminal_font(path).ok())
@@ -141,6 +147,14 @@ pub(super) fn load_fps_monitor(path: &Path) -> io::Result<bool> {
         .as_ref()
         .and_then(toml::Value::as_bool)
         .unwrap_or(false))
+}
+
+/// Agent completion toasts are on unless the user turned them off.
+pub(super) fn load_notifications(path: &Path) -> io::Result<bool> {
+    Ok(read_client_value(path, NOTIFICATIONS_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true))
 }
 
 /// A missing or malformed key keeps its default so the terminal always has a font.
@@ -247,6 +261,13 @@ impl Condr {
         let enabled = self.fps_monitor;
         self.save_config(cx, move |path| {
             write_client_value(path, FPS_MONITOR_KEY, toml_edit::value(enabled))
+        });
+    }
+
+    pub(super) fn save_notifications(&mut self, cx: &mut Context<Self>) {
+        let enabled = self.notifications;
+        self.save_config(cx, move |path| {
+            write_client_value(path, NOTIFICATIONS_KEY, toml_edit::value(enabled))
         });
     }
 
@@ -465,6 +486,22 @@ mod tests {
         assert!(!load_fps_monitor(&path).unwrap());
         write_client_value(&path, FPS_MONITOR_KEY, toml_edit::value(true)).unwrap();
         assert!(load_fps_monitor(&path).unwrap());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn notifications_default_on_and_round_trip() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-notifications-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert!(load_notifications(&path).unwrap());
+        write_client_value(&path, NOTIFICATIONS_KEY, toml_edit::value(false)).unwrap();
+        assert!(!load_notifications(&path).unwrap());
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -240,6 +240,8 @@ pub(crate) struct Condr {
     window_handle: AnyWindowHandle,
     appearance: Appearance,
     fps_monitor: bool,
+    /// Whether agent completions in unwatched Panes go to the OS notification center.
+    notifications: bool,
     /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
     /// only dragging the handle does.
     sidebar_width: Pixels,
@@ -293,6 +295,7 @@ impl Condr {
             error: config_error,
             appearance,
             fps_monitor,
+            notifications,
             terminal_font,
             terminal_color_scheme,
         } = config;
@@ -366,6 +369,7 @@ impl Condr {
             window_handle: window.window_handle(),
             appearance,
             fps_monitor,
+            notifications,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             sidebar_collapsed: false,
             sidebar_workspace_open: HashMap::new(),

@@ -24,6 +24,9 @@ impl Condr {
         agent: &AgentSnapshot,
         cx: &App,
     ) {
+        if !self.notifications {
+            return;
+        }
         let title = match (previous, agent.state) {
             (Some(AgentState::Working | AgentState::Blocked), AgentState::Idle) => {
                 format!("{} finished", agent.kind.label())
@@ -53,6 +56,27 @@ impl Condr {
             tag: agent_notification_tag(key, pane_id),
             title: title.into(),
             body: body.into(),
+            actions: Vec::new(),
+        });
+    }
+
+    pub(in crate::app) fn set_notifications(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.notifications == enabled {
+            return;
+        }
+        self.notifications = enabled;
+        self.save_notifications(cx);
+        cx.notify();
+    }
+
+    /// A toast to check that the OS shows them at all; it ignores the switch, since the
+    /// user is asking for it.
+    pub(in crate::app) fn send_test_notification(&self, cx: &App) {
+        cx.show_system_notification(SystemNotification {
+            tag: "test".into(),
+            title: "Condr notifications work".into(),
+            body: "Agents that finish or need you while you look elsewhere show up like this."
+                .into(),
             actions: Vec::new(),
         });
     }

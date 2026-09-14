@@ -389,6 +389,7 @@ impl Render for SettingsWindow {
             SettingsTab::Application => Settings::new("condr-settings-application")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(appearance_page(&self.owner, &settings, &self.color_scheme))
+                .page(notifications_page(&self.owner))
                 .page(shortcuts_page())
                 .page(developer_page(&self.owner))
                 .page(licenses_page(&self.licenses)),
@@ -448,6 +449,50 @@ impl Render for SettingsWindow {
                 .child(div().flex_1().min_h_0().child(content)),
         )
     }
+}
+
+fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
+    let value_owner = owner.clone();
+    let set_owner = owner.clone();
+    let test_owner = owner.clone();
+    SettingPage::new("Notifications")
+        .icon(IconName::Bell)
+        .group(
+            SettingGroup::new()
+                .item(
+                    SettingItem::new(
+                        "Enable notifications",
+                        SettingField::switch(
+                            move |cx| {
+                                value_owner
+                                    .upgrade()
+                                    .is_none_or(|owner| owner.read(cx).notifications)
+                            },
+                            move |enabled, cx| {
+                                let _ = set_owner
+                                    .update(cx, |owner, cx| owner.set_notifications(enabled, cx));
+                            },
+                        )
+                        .default_value(true),
+                    )
+                    .description("Agent finished or needs input."),
+                )
+                .item(SettingItem::new(
+                    "Send a test notification",
+                    SettingField::render(move |_, _, _| {
+                        let owner = test_owner.clone();
+                        Button::new("send-test-notification")
+                            .debug_selector(|| "send-test-notification".into())
+                            .small()
+                            .outline()
+                            .label("Send")
+                            .on_click(move |_, _, cx| {
+                                let _ =
+                                    owner.update(cx, |owner, cx| owner.send_test_notification(cx));
+                            })
+                    }),
+                )),
+        )
 }
 
 fn developer_page(owner: &WeakEntity<Condr>) -> SettingPage {
