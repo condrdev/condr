@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(crate) use local::acquire_local_bind_lock;
 pub use local::{EndpointListener, default_socket_path};
@@ -221,16 +221,19 @@ const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
     use std::net::ToSocketAddrs as _;
+    // One budget for every address the name resolves to, so a dual-stack host with an
+    // unreachable IPv6 route still fails within the timeout rather than N times it.
+    let deadline = Instant::now() + TCP_CONNECT_TIMEOUT;
     let mut last_error = None;
     for address in (host, port).to_socket_addrs()? {
-        match TcpStream::connect_timeout(&address, TCP_CONNECT_TIMEOUT) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            last_error = Some(io::Error::new(io::ErrorKind::TimedOut, "connect timed out"));
+            break;
+        }
+        match TcpStream::connect_timeout(&address, remaining) {
             Ok(stream) => {
-                // Without probes a peer that vanished (sleep, dropped link) leaves the
-                // reader blocked forever and the GUI showing a live connection.
-                let keepalive = socket2::TcpKeepalive::new()
-                    .with_time(Duration::from_secs(15))
-                    .with_interval(Duration::from_secs(5));
-                socket2::SockRef::from(&stream).set_tcp_keepalive(&keepalive)?;
+                enable_keepalive(&stream)?;
                 return Ok(stream);
             }
             Err(error) => last_error = Some(error),
@@ -242,4 +245,13 @@ fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
             format!("{host} did not resolve to any address"),
         )
     }))
+}
+
+/// Without probes a peer that vanished (sleep, dropped link) leaves the reader blocked
+/// forever: the GUI shows a live connection, the Server keeps the client and its control.
+fn enable_keepalive(stream: &TcpStream) -> io::Result<()> {
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(15))
+        .with_interval(Duration::from_secs(5));
+    socket2::SockRef::from(stream).set_tcp_keepalive(&keepalive)
 }

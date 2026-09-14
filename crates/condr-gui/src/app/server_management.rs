@@ -264,6 +264,9 @@ impl Condr {
         connection.status = ConnectionStatus::Disconnected;
         connection.reset_sync_state();
         connection.error = None;
+        // The user chose this: no timer is running to reach the deadline, so an old
+        // restart or reconnect must not keep reporting itself.
+        connection.reconnect_deadline = None;
         self.clear_pending_workspace_selection_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         active_projection_cleared || (was_holding && !self.should_hold_active_surface())
