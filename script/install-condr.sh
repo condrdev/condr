@@ -38,7 +38,7 @@ if [ -z "$source" ]; then
         *) echo "unsupported platform: $(uname -s)" >&2; exit 1 ;;
     esac
     pattern="condr-cli-*-${platform}-${arch}.tar.gz"
-    gh release download "${CONDR_VERSION:-dev}" --repo "${CONDR_REPO:-condrdev/condr}" \
+    gh release download "${CONDR_VERSION:-nightly}" --repo "${CONDR_REPO:-condrdev/condr}" \
         --dir "$stage/download" --pattern "$pattern" --pattern SHA256SUMS --clobber
     set -- "$stage/download"/condr-cli-*.tar.gz
     [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected one CLI archive" >&2; exit 1; }

@@ -1,6 +1,6 @@
 param(
   [string] $From,
-  [string] $Version = 'dev',
+  [string] $Version = 'nightly',
   [switch] $Yes
 )
 # Install only the headless CLI/server; preserve any existing GUI files.

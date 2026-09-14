@@ -1,15 +1,23 @@
-name: Development Build
+name: Release
+
+# Nightly: every day, or on demand, the current `main` is packaged for every
+# platform and published to the mutable `nightly` prerelease. Nothing is built
+# when `nightly` already points at HEAD.
+# Release: pushing an immutable `v*` tag publishes a versioned release.
 
 on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
   push:
     tags:
-      - dev
+      - 'v*'
 
 permissions:
   contents: read
 
 concurrency:
-  group: development-build
+  group: release-${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'nightly' }}
   cancel-in-progress: true
 
 env:
@@ -17,8 +25,39 @@ env:
   RUST_VERSION: 1.95.0
 
 jobs:
+  plan:
+    name: Decide what to build
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      channel: ${{ steps.plan.outputs.channel }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "channel=release" >> "$GITHUB_OUTPUT"
+            echo "release=1" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "channel=nightly" >> "$GITHUB_OUTPUT"
+          echo "release=0" >> "$GITHUB_OUTPUT"
+          current=$(gh api "repos/${GH_REPO}/git/ref/tags/nightly" --jq .object.sha 2>/dev/null || true)
+          if [ "${GITHUB_EVENT_NAME}" = schedule ] && [ "$current" = "${GITHUB_SHA}" ]; then
+            echo "nightly already points at ${GITHUB_SHA}; nothing to build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   linux:
     name: Linux GUI, server and CLI (${{ matrix.arch }})
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +97,7 @@ jobs:
       - name: Package Linux artifacts
         env:
           CONDR_COMMIT: ${{ github.sha }}
+          CONDR_RELEASE: ${{ needs.plan.outputs.release }}
           CONDR_ARCH: ${{ matrix.arch }}
           APPIMAGE_TOOL: ${{ github.workspace }}/appimagetool
           LINUXDEPLOY_TOOL: ${{ github.workspace }}/linuxdeploy
@@ -76,6 +116,8 @@ jobs:
 
   windows-bundle:
     name: Windows GUI, server and CLI (x86_64)
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7
@@ -95,7 +137,11 @@ jobs:
         run: |
           choco install innosetup --no-progress --yes
           $env:CONDR_COMMIT = $env:GITHUB_SHA
-          & powershell -File script\package-windows.ps1
+          if ('${{ needs.plan.outputs.release }}' -eq '1') {
+            & powershell -File script\package-windows.ps1 -Release
+          } else {
+            & powershell -File script\package-windows.ps1
+          }
       - name: Check Windows packages and CLI installation
         shell: pwsh
         run: .\script\check-windows-package.ps1
@@ -110,6 +156,8 @@ jobs:
 
   macos:
     name: macOS GUI, server and CLI (${{ matrix.arch }})
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +180,7 @@ jobs:
       - name: Package macOS artifacts
         env:
           CONDR_COMMIT: ${{ github.sha }}
+          CONDR_RELEASE: ${{ needs.plan.outputs.release }}
           CONDR_ARCH: ${{ matrix.arch }}
         run: script/package-macos.sh
       - name: Check macOS packages and PATH registration
@@ -146,8 +195,9 @@ jobs:
           retention-days: 1
 
   publish:
-    name: Update rolling prerelease
+    name: Publish ${{ needs.plan.outputs.channel }}
     needs:
+      - plan
       - linux
       - windows-bundle
       - macos
@@ -168,25 +218,49 @@ jobs:
       - name: Verify release assets
         env:
           CONDR_COMMIT: ${{ github.sha }}
+          CONDR_RELEASE: ${{ needs.plan.outputs.release }}
         run: |
           sh script/check-release-assets.sh
           (cd dist && sha256sum * > SHA256SUMS)
-      - name: Publish Development Build
+      - name: Publish nightly
+        if: needs.plan.outputs.channel == 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          notes="Rolling development build from commit \`${GITHUB_SHA}\`. This release and the \`dev\` tag are mutable; all platform installers are rebuilt together."
+          git tag -f nightly "$GITHUB_SHA"
+          git push origin refs/tags/nightly --force
 
-          if gh release view dev >/dev/null 2>&1; then
-            gh release upload dev dist/* --clobber
-            gh release edit dev --title "Development Build" --notes "$notes" --prerelease --latest=false
+          notes="Nightly build of \`main\` at commit \`${GITHUB_SHA}\` ($(date -u +%Y-%m-%d)). This release and the \`nightly\` tag are mutable; all platform installers are rebuilt together. Client and Server must use the same build."
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release upload nightly dist/* --clobber
+            gh release edit nightly --title "Nightly" --notes "$notes" --prerelease --latest=false
           else
-            gh release create dev dist/* --title "Development Build" --notes "$notes" --prerelease --latest=false
+            gh release create nightly dist/* --title "Nightly" --notes "$notes" --prerelease --latest=false
           fi
 
           while IFS= read -r asset; do
             if [ ! -f "dist/$asset" ]; then
-              gh release delete-asset dev "$asset" --yes
+              gh release delete-asset nightly "$asset" --yes
             fi
-          done < <(gh release view dev --json assets --jq '.assets[].name')
+          done < <(gh release view nightly --json assets --jq '.assets[].name')
+      - name: Publish release
+        if: needs.plan.outputs.channel == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          test "$GITHUB_REF_NAME" = "v$CONDR_VERSION" || {
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $CONDR_VERSION" >&2
+            exit 1
+          }
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; tags are immutable" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Condr $CONDR_VERSION" \
+            --generate-notes \
+            --verify-tag \
+            --latest

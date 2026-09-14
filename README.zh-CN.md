@@ -35,7 +35,7 @@ Condr 是一个轻量的原生 GUI，你可以在一个窗口中同时运行 Cla
 ## 安装
 
 > [!WARNING]
-> Condr 目前处于早期开发阶段，安装包随 `dev` tag 发布。Client 和 Server 必须使用同一构建版本。
+> Condr 目前处于早期开发阶段，`main` 有变化的每一天都会发布新的 [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) 构建。Client 和 Server 必须使用同一构建版本。
 
 请前往 [Releases](https://github.com/condrdev/condr/releases) 下载安装包
 

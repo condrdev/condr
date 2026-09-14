@@ -35,7 +35,7 @@ Condr is a small desktop app for running Claude Code, Codex, and other CLI agent
 ## Install
 
 > [!WARNING]
-> Condr is in early development. Packages ship with each `dev` tag. Client and Server must use the same build.
+> Condr is in early development. A new [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day `main` changes. Client and Server must use the same build.
 
 Download installers from [Releases](https://github.com/condrdev/condr/releases).
 

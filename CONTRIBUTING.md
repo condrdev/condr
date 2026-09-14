@@ -10,7 +10,7 @@ Thanks for your interest. Condr is early and moving fast, so please open an issu
 
 ## Building
 
-Rust `1.95.0` (see `.github/workflows/development-build.yml`).
+Rust `1.95.0` (see `.github/workflows/ci.yml`). CI runs `cargo fmt --check`, `clippy` and `cargo test` on Linux and Windows for every pull request; see `docs/releases.md` for how builds are published.
 
 ```bash
 cargo build                 # everything

@@ -1,20 +1,16 @@
 # Development Build
 
-Condr 在私有 GitHub 仓库中维护一个滚动的 `Development Build` Pre-release。它只供当前开发者自举使用，不是版本化发布。
+发布流程(nightly 与正式版)见 [releases.md](releases.md)。本文记录包结构、数据目录、各平台打包脚本与运行时行为。
 
 开发时的模块入口、测试归档约定与检查命令见 [代码组织与测试归档](code-organization.md)。
 
-## 发布模型
+## 产物
 
-- `dev` 是可变 tag，指向当前选定的 `main` commit。
-- 普通 commit 和 push 不发布；只有移动并推送 `dev` tag 才触发 GitHub Actions。
-- 每次发布生成所有平台的 GUI + CLI 安装包与 CLI-only 归档：Linux x86_64/arm64 AppImage 与 tar.gz，Windows x86_64 安装器与 ZIP，macOS x86_64/arm64 `.pkg` 与 tar.gz。
+- 每次发布生成所有平台的 GUI + CLI 安装包与 CLI-only 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 ZIP,macOS x86_64/arm64 `.pkg` 与 tar.gz。
 - 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
-- Client 和 Server 没有跨开发版本兼容承诺，必须一起更新。
+- Client 和 Server 没有跨构建兼容承诺,必须一起更新。
 
-产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`（GUI + CLI）和 `condr-cli-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`（CLI-only）。`platform` 为 `linux`、`macos` 或 `windows`；`arch` 为 `x86_64` 或 `arm64`（Linux 的 `aarch64` 也输出为 `arm64`）。开发版包含 12 位短 SHA，例如 `condr-0.1.0-d7912d3f186e-macos-arm64.pkg`、`condr-cli-0.1.0-d7912d3f186e-linux-x86_64.tar.gz`。Windows 安装器使用 `.exe`，便携包使用 `.zip`，不再附加 `setup`。
-
-正式版文件名省略 SHA：Unix 打包脚本设置 `CONDR_RELEASE=1`，Windows 打包脚本传入 `-Release`；完整 commit 仍必须传入并写入包内 `BUILD-COMMIT`。当前 Actions 只发布带 SHA 的开发版。Release 附带 `SHA256SUMS`；安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`，不作为 Release 附件发布。
+产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(GUI + CLI)和 `condr-cli-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(CLI-only)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.pkg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`,不作为 Release 附件发布。
 
 ## 数据位置
 
@@ -38,7 +34,7 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 sh script/install-condr.sh --from ./condr-cli-<version>-<short_sha>-linux-x86_64.tar.gz
 ```
 
-安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `dev` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
+安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `nightly` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
 
 检测到已有 `condr` 时，脚本提示确认覆盖，默认取消；确认后只更新 CLI，保留已有 GUI 文件。自动化环境通过 Unix 的 `--yes` 或 PowerShell 的 `-Yes` 显式确认。两个脚本都支持 `CONDR_INSTALL_DIR` 覆盖安装目录；默认 Unix 使用 `~/.local/opt/condr`，Windows 与 GUI 共用 `%LOCALAPPDATA%\Programs\Condr`。安装不会自动启动 Server，需要时执行 `condr server start`。
 
@@ -111,23 +107,13 @@ GUI 启动时在 runtime 目录取一把 `condr.lock` 独占文件锁；锁已�
 
 Server 不受此限制 —— 每个 endpoint 本来就由 socket/named pipe 的绑定天然互斥。
 
-发布一个已经测试并推送到 `main` 的 commit：
-
-```bash
-git tag -f dev <commit>
-git push origin refs/tags/dev --force
-gh run list --workflow development-build.yml --limit 1
-```
-
-`dev` 是唯一允许 force push 的 tag。正式版本 tag 必须保持不可变。
-
 ## Windows
 
-在已登录私有仓库的 PowerShell 中下载并解压最新 bundle：
+在 PowerShell 中下载并解压最新 nightly bundle：
 
 ```powershell
 New-Item -ItemType Directory -Force .\condr-download | Out-Null
-gh release download dev --repo condrdev/condr --dir .\condr-download --pattern 'condr-[0-9]*-windows-x86_64.zip' --clobber
+gh release download nightly --repo condrdev/condr --dir .\condr-download --pattern 'condr-[0-9]*-windows-x86_64.zip' --clobber
 $archive = Get-ChildItem .\condr-download\*.zip | Where-Object { $_.Name -like 'condr-[0-9]*-windows-x86_64.zip' } | Select-Object -First 1
 Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
 ```
@@ -176,7 +162,7 @@ Linux/macOS 原生检查共用 `script/check-cli-package.sh`：归档必须只�
 arch=$(uname -m)
 case "$arch" in aarch64) arch=arm64 ;; esac
 mkdir -p condr-download
-gh release download dev --repo condrdev/condr --dir condr-download \
+gh release download nightly --repo condrdev/condr --dir condr-download \
   --pattern "condr-cli-*-linux-${arch}.tar.gz" --clobber
 archive=$(find "$PWD/condr-download" -name "condr-cli-*-linux-${arch}.tar.gz" -print -quit)
 tar -C condr-download -xzf "$archive"
