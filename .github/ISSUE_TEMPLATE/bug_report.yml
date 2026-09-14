@@ -1,0 +1,58 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug", "needs-triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Condr build
+      description: Release name, or `git rev-parse HEAD` for a source build. The `BUILD-COMMIT` file in a package also has it.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Server connection
+      options:
+        - Local
+        - Remote (TCP / invite)
+        - Remote (SSH)
+        - Not sure
+  - type: input
+    id: agent
+    attributes:
+      label: Agent CLI in the pane
+      placeholder: e.g. Claude Code 2.1, Codex 0.9, plain shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Server log lives under the state directory listed in `docs/development-build.md`. Redact anything private.
+      render: text
