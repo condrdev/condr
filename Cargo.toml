@@ -54,6 +54,10 @@ alacritty_terminal = { opt-level = 3 }
 bincode = { opt-level = 3 }
 gpui-pre = { opt-level = 3 }
 gpui-pre-platform = { opt-level = 3 }
+gpui-pre-windows = { opt-level = 3 }
+gpui-base = { opt-level = 3 }
+gpui-component = { opt-level = 3 }
+gpui-kit = { opt-level = 3 }
 condr-core = { opt-level = 2 }
 condr-gui = { opt-level = 2 }
 condr-server = { opt-level = 2 }
