@@ -404,6 +404,9 @@ pub(super) fn title_bar(title: &'static str, cx: &App) -> TitleBar {
 const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 #[cfg(not(target_os = "macos"))]
 const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
+/// The Kit Sidebar pads its content by this much, so the title segment ends its own
+/// content on the same line and the buttons down the right edge line up.
+const SIDEBAR_CONTENT_GUTTER: Pixels = px(12.);
 
 /// The main window's title bar continues the sidebar and the Workspace: its left segment
 /// is the sidebar's width and color, its right segment hosts the Tab strip, so the two
@@ -450,6 +453,7 @@ fn workspace_title_bar(
                         .w(title_sidebar_width - TITLE_BAR_LEFT_PADDING)
                         .flex_none()
                         .h_full()
+                        .pr(SIDEBAR_CONTENT_GUTTER)
                         .gap_2()
                         .items_center()
                         .justify_between()
