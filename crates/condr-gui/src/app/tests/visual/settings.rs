@@ -276,7 +276,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
             let view = cx.new(|cx| {
                 Condr::new(
                     endpoint.clone(),
-                    Ok(initial),
+                    Some(Ok(initial)),
                     config::LoadedConfig::read(Some(config_path.clone())),
                     window,
                     cx,
@@ -348,7 +348,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
         let view = cx.new(|cx| {
             Condr::new(
                 endpoint,
-                Ok(initial),
+                Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path)),
                 window,
                 cx,
@@ -385,7 +385,7 @@ fn font_changes_reach_the_config_once_the_debounce_elapses() {
         let view = cx.new(|cx| {
             Condr::new(
                 endpoint.clone(),
-                Ok(initial),
+                Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path.clone())),
                 window,
                 cx,
@@ -450,7 +450,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
         let view = cx.new(|cx| {
             Condr::new(
                 endpoint.clone(),
-                Ok(initial),
+                Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path.clone())),
                 window,
                 cx,
@@ -688,7 +688,7 @@ fn the_settings_window_draws_its_confirm_dialogs() {
         view.read(app)
             .connection(1)
             .unwrap()
-            .restart_deadline
+            .reconnect_deadline
             .is_some()
     }));
 }

@@ -694,7 +694,7 @@ fn invalid_saved_server_protects_the_list_but_allows_preferences() {
         let view = cx.new(|cx| {
             Condr::new(
                 Endpoint::local(directory.0.join("unused.sock")),
-                Err("offline for config test".into()),
+                Some(Err("offline for config test".into())),
                 config,
                 window,
                 cx,
@@ -781,7 +781,7 @@ fn added_server_survives_gui_restart() {
             let view = cx.new(|cx| {
                 Condr::new(
                     endpoint.clone(),
-                    Ok(initial),
+                    Some(Ok(initial)),
                     config::LoadedConfig::read(Some(config_path.clone())),
                     window,
                     cx,
@@ -818,7 +818,7 @@ fn added_server_survives_gui_restart() {
         let view = cx.new(|cx| {
             Condr::new(
                 endpoint,
-                Ok(initial),
+                Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path)),
                 window,
                 cx,
@@ -1102,5 +1102,50 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
     assert_eq!(
         shown[0].tag,
         crate::app::notifications::agent_notification_tag(1, pane_id)
+    );
+}
+
+#[test]
+fn an_unexpected_disconnect_reconnects_on_its_own_and_says_so() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Disconnected("the device closed the connection".into()),
+                cx,
+            );
+            let connection = this.connection(1).unwrap();
+            assert!(connection.status == ConnectionStatus::Disconnected);
+            assert!(connection.reconnect_deadline.is_some());
+            assert_eq!(
+                connection.error.as_deref(),
+                Some("the device closed the connection")
+            );
+            cx.notify();
+        });
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds("connection-status-1").is_some(),
+        "the start page reports the reconnect"
+    );
+    // The faked disconnect leaves the old socket open, so the Server may keep control
+    // with it for a while; the connection itself must come back and settle.
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app).connection(1).is_some_and(|connection| {
+                    connection.status == ConnectionStatus::Connected
+                        && connection.reconnect_deadline.is_none()
+                })
+            })
+        }),
+        "the GUI did not reconnect on its own"
     );
 }

@@ -478,10 +478,7 @@ impl Condr {
     }
 
     pub(super) fn reconnect_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.start_connect(self.active_connection) {
-            self.refresh_target_pane(self.active_connection);
-            self.rebuild_dock(window, cx);
-        }
+        self.connect_server(self.active_connection, window, cx);
     }
 
     pub(super) fn new_workspace_on(

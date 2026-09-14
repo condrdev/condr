@@ -24,7 +24,7 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        connection.restart_deadline = Some(Instant::now() + RESTART_RECONNECT_TIMEOUT);
+        connection.reconnect_deadline = Some(Instant::now() + RESTART_RECONNECT_TIMEOUT);
         connection.error = None;
         self.server_admin(key, ServerAdminCommand::Restart);
         cx.notify();
@@ -32,20 +32,41 @@ impl Condr {
 
     pub(super) fn clear_restart(&mut self, key: ConnectionKey) {
         if let Some(connection) = self.connection_mut(key) {
-            connection.restart_deadline = None;
+            connection.reconnect_deadline = None;
         }
     }
 
-    /// After a restart the Server is gone for a moment; retry until it is back or the
-    /// deadline passes, then leave the last error showing.
-    pub(super) fn schedule_restart_reconnect(
+    /// The connection ended without this Client asking: the Server restarted, crashed or
+    /// the link dropped. Keep trying for a while before leaving the error to the user.
+    pub(super) fn begin_reconnect(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        if let Some(connection) = self.connection_mut(key)
+            && connection.reconnect_deadline.is_none()
+        {
+            connection.reconnect_deadline = Some(Instant::now() + RESTART_RECONNECT_TIMEOUT);
+        }
+        self.schedule_reconnect(key, cx);
+    }
+
+    /// The user asked for this device: connect now and show it.
+    pub(super) fn connect_server(
         &mut self,
         key: ConnectionKey,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.start_connect(key) {
+            self.refresh_target_pane(self.active_connection);
+            self.rebuild_dock(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// While a reconnect deadline stands, retry until the device is back or the deadline
+    /// passes, then leave the last error showing.
+    pub(super) fn schedule_reconnect(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         let Some(deadline) = self
             .connection(key)
-            .and_then(|connection| connection.restart_deadline)
+            .and_then(|connection| connection.reconnect_deadline)
         else {
             return;
         };
@@ -61,7 +82,7 @@ impl Condr {
             let _ = cx.update_window(window, |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     let reconnect = this.connection(key).is_some_and(|connection| {
-                        connection.restart_deadline.is_some()
+                        connection.reconnect_deadline.is_some()
                             && connection.status == ConnectionStatus::Disconnected
                     });
                     if reconnect && this.start_connect(key) {
@@ -333,7 +354,7 @@ impl Condr {
         if application.is_some() {
             self.clear_restart(key);
         } else {
-            self.schedule_restart_reconnect(key, cx);
+            self.schedule_reconnect(key, cx);
         }
         if let Some(application) = application {
             let presentation_before = self.pending_presentation_request;

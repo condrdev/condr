@@ -30,7 +30,12 @@ impl Condr {
         let Some(connection) = self.active_connection() else {
             return (None, div().size_full().into_any_element());
         };
-        let error = self.app_error.clone().or_else(|| connection.error.clone());
+        let status = self.render_connection_status(connection, cx);
+        // The status line carries the connection error itself; the strip shows the rest.
+        let error = self
+            .app_error
+            .clone()
+            .or_else(|| status.is_none().then(|| connection.error.clone()).flatten());
         let can_mutate = connection.can_mutate()
             && self
                 .pending_workspace_selection_for(connection.key)
@@ -47,7 +52,10 @@ impl Condr {
         };
         let key = connection.key;
         let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
-            return (None, self.render_welcome(key, can_mutate, error, cx));
+            return (
+                None,
+                self.render_welcome(key, can_mutate, status, error, cx),
+            );
         };
         let workspace = session
             .workspace(workspace_id)
@@ -227,9 +235,27 @@ impl Condr {
                         .child(error),
                 )
             });
+        // The banner floats over the Panes rather than reflowing them: the dock keeps
+        // its geometry, and the frozen output under it is what the user is waiting on.
         let body = div()
             .size_full()
+            .relative()
             .when_some(dock_area, |view, dock_area| view.child(dock_area))
+            .when_some(status, |view, status| {
+                view.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .px_3()
+                        .py_1()
+                        .bg(cx.theme().background)
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .child(status),
+                )
+            })
             .into_any_element();
         (Some(strip.into_any_element()), body)
     }
@@ -259,6 +285,7 @@ impl Condr {
         &self,
         key: ConnectionKey,
         can_mutate: bool,
+        status: Option<AnyElement>,
         error: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -335,6 +362,9 @@ impl Condr {
                             Condr::add_server_menu(menu, connect_owner.clone())
                         }),
                     )
+                    .when_some(status, |column, status| {
+                        column.child(div().pt_2().child(status))
+                    })
                     .when_some(error, |column, error| {
                         column.child(
                             div()

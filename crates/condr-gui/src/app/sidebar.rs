@@ -428,22 +428,39 @@ impl Condr {
             CondrSidebarSection::new(
                 connection.label.clone(),
                 format!("server-heading-{key}"),
-                move |_, _| {
+                move |_, cx| {
                     let owner = new_workspace_owner.clone();
                     let tooltip = format!("New Workspace on {new_workspace_label}");
-                    Button::new(("new-workspace", key))
-                        .debug_selector(move || format!("new-workspace-server-{key}"))
-                        .ghost()
-                        .xsmall()
-                        .icon(Icon::new(CondrIconName::FolderPlus))
-                        .tooltip(tooltip)
-                        .disabled(!connected)
-                        .on_click(move |_, window, cx| {
-                            cx.stop_propagation();
-                            let _ = owner.update(cx, |this, cx| {
-                                this.choose_workspace_directory_on(key, window, cx)
-                            });
-                        })
+                    // A device that is not connected says so in its heading, since its
+                    // Workspaces below look the same either way.
+                    let indicator = match status {
+                        ConnectionStatus::Connected => None,
+                        ConnectionStatus::Connecting => {
+                            Some(Spinner::new().xsmall().into_any_element())
+                        }
+                        ConnectionStatus::Disconnected => {
+                            status_badge(SidebarGlyph::CircleAlert, SidebarIconTone::Danger, cx)
+                        }
+                    };
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .children(indicator)
+                        .child(
+                            Button::new(("new-workspace", key))
+                                .debug_selector(move || format!("new-workspace-server-{key}"))
+                                .ghost()
+                                .xsmall()
+                                .icon(Icon::new(CondrIconName::FolderPlus))
+                                .tooltip(tooltip)
+                                .disabled(!connected)
+                                .on_click(move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.choose_workspace_directory_on(key, window, cx)
+                                    });
+                                }),
+                        )
                         .into_any_element()
                 },
                 workspaces,
@@ -503,10 +520,7 @@ impl Condr {
                                         }
                                     }
                                     ConnectionStatus::Disconnected => {
-                                        if this.start_connect(key) {
-                                            this.refresh_target_pane(this.active_connection);
-                                            this.rebuild_dock(window, cx);
-                                        }
+                                        this.connect_server(key, window, cx);
                                     }
                                     ConnectionStatus::Connecting => {}
                                 }

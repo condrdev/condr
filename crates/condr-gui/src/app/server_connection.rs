@@ -62,9 +62,9 @@ pub(super) struct ServerConnection {
     /// pending layout projections, because responses may have been lost to writer lag.
     pub(super) reacquire_after_bootstrap: bool,
     pub(super) error: Option<String>,
-    /// Set when this Client asked the Server to restart: until then the GUI reconnects
-    /// on its own once the Server stops, giving up at the deadline.
-    pub(super) restart_deadline: Option<Instant>,
+    /// Set while the GUI reconnects on its own, after a restart it asked for or a
+    /// connection that ended without it; cleared on success or at the deadline.
+    pub(super) reconnect_deadline: Option<Instant>,
     pub(super) next_layout_request_id: u64,
 }
 
@@ -112,7 +112,7 @@ impl ServerConnection {
             connected_devices: Vec::new(),
             admin_error: None,
             invite: None,
-            restart_deadline: None,
+            reconnect_deadline: None,
             io: None,
             cancellation: ConnectionCancellation::default(),
             connect_generation: 0,

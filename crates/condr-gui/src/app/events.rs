@@ -101,7 +101,9 @@ impl Condr {
                 };
             }
             Incoming::Disconnected(error) => {
-                return self.mark_disconnected(key, index, format!("Connection closed: {error}"));
+                let effect = self.mark_disconnected(key, index, error);
+                self.begin_reconnect(key, cx);
+                return effect;
             }
         };
 
@@ -542,7 +544,7 @@ impl Condr {
             ServerMessage::Error { message } => {
                 // A refused or failed admin command; a pending restart is not happening.
                 self.connections[index].error = Some(message);
-                self.connections[index].restart_deadline = None;
+                self.connections[index].reconnect_deadline = None;
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -633,7 +635,7 @@ impl Condr {
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
                 let effect = self.mark_disconnected(key, index, "Condr stopped".into());
-                self.schedule_restart_reconnect(key, cx);
+                self.begin_reconnect(key, cx);
                 effect
             }
             ServerMessage::Subscribed {

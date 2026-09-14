@@ -143,7 +143,7 @@ fn connected_condr_with(
         let view = cx.new(|cx| {
             Condr::new(
                 endpoint,
-                initial,
+                Some(initial),
                 config::LoadedConfig::read(None),
                 window,
                 cx,

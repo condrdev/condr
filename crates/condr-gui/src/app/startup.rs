@@ -199,10 +199,7 @@ pub(crate) fn run() {
             return;
         }
     };
-    let (endpoint, initial) = connect_to_server(
-        ServerConfig::default().local_endpoint(),
-        ConnectionCancellation::default(),
-    );
+    let endpoint = ServerConfig::default().local_endpoint();
     let config = config::LoadedConfig::read(config::default_path());
     let app = gpui_kit::application().with_assets(CondrAssets::new());
 
@@ -216,7 +213,7 @@ pub(crate) fn run() {
             cx.open_window(window_options, |window, cx| {
                 // The drawn title bar carries no OS title; the taskbar still needs one.
                 window.set_window_title("Condr");
-                let view = cx.new(|cx| Condr::new(endpoint, initial, config, window, cx));
+                let view = cx.new(|cx| Condr::new(endpoint, None, config, window, cx));
                 let handle = window.window_handle();
                 let target = view.downgrade();
                 cx.on_system_notification_response(move |response, cx| {

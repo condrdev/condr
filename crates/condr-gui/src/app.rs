@@ -1,6 +1,7 @@
 mod actions;
 mod config;
 mod connection;
+mod connection_status;
 mod dialogs;
 mod dock;
 mod events;
@@ -266,7 +267,7 @@ pub(crate) struct Condr {
 impl Condr {
     fn new(
         endpoint: Endpoint,
-        initial: Result<ClientConnection, String>,
+        initial: Option<Result<ClientConnection, String>>,
         config: config::LoadedConfig,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -274,7 +275,12 @@ impl Condr {
         let (connect_results_tx, connect_results_rx) =
             async_channel::bounded(CONNECTION_RESULT_BUFFER_CAPACITY);
         let mut connection = ServerConnection::new(1, "Local".into(), endpoint);
-        if let Err(error) = Self::install_connection(&mut connection, initial, window, cx) {
+        // Without a ready connection the window opens first and connects like any
+        // other device, so a slow or absent local Server never holds it back.
+        let connect_local = initial.is_none();
+        if let Some(initial) = initial
+            && let Err(error) = Self::install_connection(&mut connection, initial, window, cx)
+        {
             connection.status = ConnectionStatus::Disconnected;
             connection.error = Some(error);
         }
@@ -395,6 +401,9 @@ impl Condr {
             }
         });
 
+        if connect_local {
+            _ = this.start_connect(1);
+        }
         for key in 2..this.next_connection_key {
             _ = this.start_connect(key);
         }

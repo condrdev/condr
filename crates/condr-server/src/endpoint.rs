@@ -143,7 +143,7 @@ impl Endpoint {
         match self {
             Self::Local(path) => connect_local(path).map(EndpointStream::Local),
             Self::Tcp(tcp) => NoiseStream::initiator(
-                TcpStream::connect((tcp.host.as_str(), tcp.port))?,
+                connect_tcp(&tcp.host, tcp.port)?,
                 &tcp.server_key,
                 &tcp.client_key,
                 tcp.invite.as_ref(),
@@ -213,4 +213,33 @@ impl fmt::Display for Endpoint {
             Self::Ssh(ssh) => ssh.fmt(f),
         }
     }
+}
+
+/// How long a TCP connect may take before the device is reported as not answering;
+/// the OS default is several times longer and the GUI would sit on "Connecting…".
+const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
+    use std::net::ToSocketAddrs as _;
+    let mut last_error = None;
+    for address in (host, port).to_socket_addrs()? {
+        match TcpStream::connect_timeout(&address, TCP_CONNECT_TIMEOUT) {
+            Ok(stream) => {
+                // Without probes a peer that vanished (sleep, dropped link) leaves the
+                // reader blocked forever and the GUI showing a live connection.
+                let keepalive = socket2::TcpKeepalive::new()
+                    .with_time(Duration::from_secs(15))
+                    .with_interval(Duration::from_secs(5));
+                socket2::SockRef::from(&stream).set_tcp_keepalive(&keepalive)?;
+                return Ok(stream);
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{host} did not resolve to any address"),
+        )
+    }))
 }

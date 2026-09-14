@@ -239,7 +239,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
             let settings = restart.clone();
             let allowed = server_admin_allowed(&settings, cx);
             let (restarting, error) = selected_connection(&settings, cx, |c| {
-                (c.restart_deadline.is_some(), c.error.clone())
+                (c.reconnect_deadline.is_some(), c.error.clone())
             })
             .unwrap_or_default();
             let feedback = if restarting {
