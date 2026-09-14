@@ -21,8 +21,9 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 
 /// Condr's own icons: status glyphs, then the marks of the agent CLIs (see
 /// assets/icons/NOTICE-AGENT-ICONS), kept for every agent Condr may come to name.
-const CONDR_ICON_PATHS: [&str; 21] = [
+const CONDR_ICON_PATHS: [&str; 22] = [
     "icons/circle.svg",
+    "icons/coffee.svg",
     "icons/circle-filled.svg",
     "icons/circle-alert.svg",
     "icons/server-plus.svg",
@@ -63,6 +64,9 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle.svg"
+            )))),
+            "icons/coffee.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/coffee.svg"
             )))),
             "icons/circle-filled.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle-filled.svg"

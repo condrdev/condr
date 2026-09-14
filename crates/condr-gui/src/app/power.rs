@@ -1,3 +1,4 @@
+use super::sidebar::CondrIconName;
 use super::*;
 
 impl Condr {
@@ -35,4 +36,30 @@ impl Condr {
             }
         }
     }
+}
+
+/// The keep-awake toggle: a coffee cup, as caffeinate and its kin draw it, lit while
+/// the request is held. It flips the same switch as Settings > Power.
+pub(super) fn keep_awake_button(keep_awake: bool, owner: WeakEntity<Condr>, cx: &App) -> Button {
+    let label = if keep_awake {
+        "Keeping the screen awake"
+    } else {
+        "Keep the screen awake"
+    };
+    Button::new("toggle-keep-awake")
+        .debug_selector(|| "toggle-keep-awake".into())
+        .ghost()
+        .small()
+        .icon(Icon::new(CondrIconName::Coffee))
+        .selected(keep_awake)
+        .text_color(if keep_awake {
+            cx.theme().success
+        } else {
+            cx.theme().muted_foreground
+        })
+        .tooltip(label)
+        .accessibility_label(label)
+        .on_click(move |_, _, cx| {
+            let _ = owner.update(cx, |this, cx| this.set_keep_awake(!this.keep_awake, cx));
+        })
 }

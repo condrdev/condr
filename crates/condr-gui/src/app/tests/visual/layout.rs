@@ -604,3 +604,20 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
         "the sidebar width is absolute, not a share of the window"
     );
 }
+
+#[test]
+fn the_sidebar_coffee_button_toggles_keep_awake() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(!window.read(|app| view.read(app).keep_awake));
+    let toggle = window
+        .debug_bounds("toggle-keep-awake")
+        .expect("the sidebar footer shows the keep-awake toggle");
+    window.simulate_click(toggle.center(), Modifiers::default());
+    assert!(window.read(|app| view.read(app).keep_awake));
+    window.simulate_click(toggle.center(), Modifiers::default());
+    assert!(!window.read(|app| view.read(app).keep_awake));
+}

@@ -67,6 +67,14 @@ fn condr_assets_include_custom_and_kit_icons() {
         assert!(bytes.starts_with(b"<svg"), "invalid SVG asset: {path}");
         assert!(listed.iter().any(|listed| listed.as_ref() == path));
     }
+    // Listing an icon is not embedding it: a path added to the list without its
+    // `load` arm draws as an empty button.
+    for path in &listed {
+        assert!(
+            assets.load(path).unwrap().is_some(),
+            "listed icon is not embedded: {path}"
+        );
+    }
     let listed = assets.list("icons/circle").unwrap();
     assert!(
         listed

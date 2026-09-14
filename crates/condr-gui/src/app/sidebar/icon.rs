@@ -34,6 +34,8 @@ pub(in crate::app) enum CondrIconName {
     /// Lucide `maximize-2` / `minimize-2`: a Pane's zoom toggle.
     Maximize2,
     Minimize2,
+    /// Lucide `coffee`: the keep-awake toggle, as caffeinate and its kin draw it.
+    Coffee,
     /// The agent CLIs' marks (assets/icons/NOTICE-AGENT-ICONS), recolored to
     /// `currentColor` so they follow the text like every other icon.
     Claude,
@@ -86,6 +88,7 @@ impl IconNamed for CondrIconName {
             Self::GitBranch => "icons/git-branch.svg",
             Self::Maximize2 => "icons/maximize-2.svg",
             Self::Minimize2 => "icons/minimize-2.svg",
+            Self::Coffee => "icons/coffee.svg",
             Self::Claude => "icons/claude.svg",
             Self::Codex => "icons/codex.svg",
             Self::OpenCode => "icons/opencode.svg",

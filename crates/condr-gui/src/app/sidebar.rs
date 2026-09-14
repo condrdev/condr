@@ -548,18 +548,25 @@ impl Condr {
 
         let add_owner = cx.weak_entity();
         let settings_owner = cx.weak_entity();
+        let keep_awake_owner = cx.weak_entity();
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
             .children(items)
-            // The app name lives in the title bar; the actions sit at the bottom right,
-            // Connect Remote Device left of Settings. Reconnect is the `ReconnectServer`
-            // action; it has no button here.
+            // The app name lives in the title bar; the keep-awake toggle sits at the bottom
+            // left, the actions at the bottom right, Connect Remote Device left of Settings.
+            // Reconnect is the `ReconnectServer` action; it has no button here.
             .footer(
                 h_flex()
                     .w_full()
-                    .justify_end()
+                    .justify_between()
                     .gap_1()
+                    .child(power::keep_awake_button(
+                        self.keep_awake,
+                        keep_awake_owner,
+                        cx,
+                    ))
+                    .child(div().flex_1())
                     .child(
                         Button::new("add-server")
                             .debug_selector(|| "add-server".into())
