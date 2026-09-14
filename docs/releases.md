@@ -8,7 +8,8 @@ Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call t
 - Builds the current `main`. If the `nightly` tag already points at `HEAD`, the scheduled run exits without building.
 - Recreates the mutable **Nightly** prerelease and its `nightly` tag at the built commit, so only assets from that commit are attached.
 - Package names carry the 12-character short SHA: `condr-0.1.0-<sha>-linux-x86_64.AppImage`, `condr-cli-0.1.0-<sha>-macos-arm64.tar.gz`.
-- `nightly` is the only tag that may be force-pushed, and only by the workflow.
+- `nightly` is the only mutable tag, and only the workflow recreates it.
+- The workflow creates the tag with the built-in `GITHUB_TOKEN`, which GitHub refuses when the target commit's `.github/workflows/` files differ from `main`. In practice that only happens when a workflow change lands on `main` while a nightly is still building; the publish step then fails with HTTP 403 and the next run succeeds.
 
 ## Versioned release
 
