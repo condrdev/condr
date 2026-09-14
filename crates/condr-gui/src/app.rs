@@ -8,6 +8,7 @@ mod events;
 mod ime;
 mod navigation;
 mod notifications;
+mod power;
 mod presentation;
 mod server_connection;
 mod server_management;
@@ -242,6 +243,10 @@ pub(crate) struct Condr {
     fps_monitor: bool,
     /// Whether agent completions in unwatched Panes go to the OS notification center.
     notifications: bool,
+    /// Whether the machine is kept from sleeping and blanking while Condr runs.
+    keep_awake: bool,
+    /// The OS request behind `keep_awake`; dropping it lets the machine sleep again.
+    _keep_awake: Option<keepawake::KeepAwake>,
     /// Absolute, as Zed keeps its dock sizes: a window resize never changes it,
     /// only dragging the handle does.
     sidebar_width: Pixels,
@@ -296,6 +301,7 @@ impl Condr {
             appearance,
             fps_monitor,
             notifications,
+            keep_awake,
             terminal_font,
             terminal_color_scheme,
         } = config;
@@ -370,6 +376,8 @@ impl Condr {
             appearance,
             fps_monitor,
             notifications,
+            keep_awake,
+            _keep_awake: None,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             sidebar_collapsed: false,
             sidebar_workspace_open: HashMap::new(),
@@ -390,6 +398,7 @@ impl Condr {
         this.sync_sidebar_workspace_open(cx);
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);
+        this.apply_keep_awake();
 
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {
             while let Ok(result) = connect_results_rx.recv().await {

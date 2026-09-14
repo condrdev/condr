@@ -390,6 +390,7 @@ impl Render for SettingsWindow {
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(appearance_page(&self.owner, &settings, &self.color_scheme))
                 .page(notifications_page(&self.owner))
+                .page(power_page(&self.owner))
                 .page(shortcuts_page())
                 .page(developer_page(&self.owner))
                 .page(licenses_page(&self.licenses)),
@@ -492,6 +493,33 @@ fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
                             })
                     }),
                 )),
+        )
+}
+
+fn power_page(owner: &WeakEntity<Condr>) -> SettingPage {
+    let value_owner = owner.clone();
+    let set_owner = owner.clone();
+    SettingPage::new("Power")
+        .icon(IconName::BatteryCharging)
+        .group(
+            SettingGroup::new().item(
+                SettingItem::new(
+                    "Keep the screen awake",
+                    SettingField::switch(
+                        move |cx| {
+                            value_owner
+                                .upgrade()
+                                .is_some_and(|owner| owner.read(cx).keep_awake)
+                        },
+                        move |enabled, cx| {
+                            let _ =
+                                set_owner.update(cx, |owner, cx| owner.set_keep_awake(enabled, cx));
+                        },
+                    )
+                    .default_value(false),
+                )
+                .description("No screen blanking, lock or sleep while Condr is running."),
+            ),
         )
 }
 

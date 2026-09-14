@@ -25,6 +25,7 @@ serde.workspace = true
 smol_str.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
+keepawake = { version = "0.6", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-registry.workspace = true

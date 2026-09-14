@@ -13,6 +13,7 @@ use super::{Appearance, Condr, Endpoint, TerminalFont};
 const APPEARANCE_KEY: &str = "appearance";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
 const NOTIFICATIONS_KEY: &str = "notifications";
+const KEEP_AWAKE_KEY: &str = "keep_awake";
 const SERVERS_KEY: &str = "servers";
 /// `[client.terminal]` holds every Terminal preference.
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
@@ -48,6 +49,7 @@ pub(super) struct LoadedConfig {
     pub appearance: Appearance,
     pub fps_monitor: bool,
     pub notifications: bool,
+    pub keep_awake: bool,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
 }
@@ -112,6 +114,10 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_notifications(path).ok())
                 .unwrap_or(true),
+            keep_awake: path
+                .as_deref()
+                .and_then(|path| load_keep_awake(path).ok())
+                .unwrap_or(false),
             terminal_font: path
                 .as_deref()
                 .and_then(|path| load_terminal_font(path).ok())
@@ -155,6 +161,13 @@ pub(super) fn load_notifications(path: &Path) -> io::Result<bool> {
         .as_ref()
         .and_then(toml::Value::as_bool)
         .unwrap_or(true))
+}
+
+pub(super) fn load_keep_awake(path: &Path) -> io::Result<bool> {
+    Ok(read_client_value(path, KEEP_AWAKE_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false))
 }
 
 /// A missing or malformed key keeps its default so the terminal always has a font.
@@ -268,6 +281,13 @@ impl Condr {
         let enabled = self.notifications;
         self.save_config(cx, move |path| {
             write_client_value(path, NOTIFICATIONS_KEY, toml_edit::value(enabled))
+        });
+    }
+
+    pub(super) fn save_keep_awake(&mut self, cx: &mut Context<Self>) {
+        let enabled = self.keep_awake;
+        self.save_config(cx, move |path| {
+            write_client_value(path, KEEP_AWAKE_KEY, toml_edit::value(enabled))
         });
     }
 
