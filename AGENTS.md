@@ -2,110 +2,94 @@
 
 Guidance for coding agents working in this repository.
 
-## 项目定位
+## What Condr is
 
-**Condr**(由 conductor 缩写而来)— 一个 multi-agent GUI 应用,参考原型是 [herdr](https://github.com/herdrdev/herdr)(纯 TUI 的 multi-agent 编排工具)。
+**Condr** (short for *conductor*) is a native multi-agent GUI. It orchestrates several coding-agent CLIs (Claude Code, Codex, OpenCode, …) side by side, each running in its own terminal pane, and shows their state at a glance.
 
-核心定位:**Orca 的易上手 + herdr 的架构(嵌入原生 CLI 作为 agent 后端)− 两者的缺点**。
+The design bet: embed the vendor's own agent CLI as a subprocess instead of re-implementing a chat loop, and render everything with a native GUI instead of a webview. That keeps Condr cross-platform, light, and fast while staying easy to pick up.
 
-- herdr:架构对(直接嵌原生 agent CLI),但纯 TUI 上手门槛高
-- [paseo](https://github.com/getpaseo/paseo):需要自己维护对话 GUI,负担重
-- orca:webview 实现,卡、重
+## Tech stack
 
-Condr 用原生 GUI 解决:跨端、轻量、快。
+- **Rust** + **[GPUI Kit](https://github.com/longbridge/gpui-kit)** (re-exports GPUI, the base layer, components and assets)
+- Agent backend: native agent CLIs embedded as subprocesses; Condr never runs its own conversation/tool loop
 
-### 参考仓库
+### Decided choices
 
-- `../herdr`:Herdr 的本地 checkout,用于参考 Server/Client、Terminal、Agent 编排和跨平台生命周期实现。
-- `../paseo`:Paseo 的本地 checkout,用于参考产品交互、UI/UX 等 GUI 设计。
-- 两者都是独立的只读参考仓库,不是 Condr workspace member 或依赖。研究时优先读取本地 checkout,并在产出的研究文档中记录 `git -C ../<repo> rev-parse HEAD` 的精确 commit;只有任务需要最新上游时才执行 `git -C ../<repo> pull --ff-only`。
-- 引用或移植实现前按文件核对许可证和 third-party notice;不能仅依据仓库顶层许可证判断代码兼容性。
+- **License: Apache-2.0.** Only borrow ideas from GPL-licensed terminal implementations; never copy their code.
+- **VT emulation: `alacritty_terminal`.** Pure Rust, no FFI, already proven under GPUI renderers.
+- **PTY: `portable-pty`** (Unix pty / Windows ConPTY).
+- **Async: `tokio` in server/core; the GPUI executor in the GUI.** The two talk only through the protocol.
+- **Transport: versioned binary protocol over transport adapters.** Frames are `bincode + serde` with a length prefix and a strict version handshake. Locally, `interprocess` Unix domain sockets / Windows named pipes; remotely, the same protocol over a TCP endpoint. Every TCP connection is authenticated and encrypted with WireGuard-style `Noise_IKpsk2` (`snow`) using mutual static keys; new devices pair with a one-time invite (ADR 0011). Capability-based authorization comes later. SSH connections run the system `ssh -T` to execute `condr server bridge` remotely and forward the remote private socket; SSH handles auth and encryption (ADR 0015). The Server only exposes a local private endpoint by default and never listens on the public internet.
+- **Persistence: `bincode + serde`** for sessions, **TOML** for config.
+- **Terminal rendering: a custom GPUI element.** This is the largest home-grown piece; GPUI Kit has no terminal component.
+- **Layout: GPUI Kit's Dock** (`gpui_kit::component::dock`), mapped onto the workspace/tab/pane model.
+- **Agent state detection: only from the agent CLI's own hooks** (ADR 0014). The process table identifies the agent; `condr agent-hook` writes hook events back to the controlling terminal as OSC 777; the Server intercepts them ahead of the VT and drives `AgentState`. Nothing reported means `Unknown`; there is no screen-text classification. The GUI layers "done" on top.
+- **Git: `gix` (gitoxide, pure Rust).** All read-only queries and worktree add/remove go through the gix API. Never shell out to `git`, never add git2 (libgit2 C dependency). gix has no `worktree add/remove` porcelain, so `condr-core/src/git.rs` builds it from primitives (ref transactions, `index_from_tree`, `gix::worktree::state::checkout`) following git's own `worktrees/<id>` layout.
+- **Dependencies: declare only `gpui-kit = "0.6"` from crates.io.** Use `gpui_kit::*` for GPUI types, `gpui_kit::component` for components, `gpui_kit::assets` for assets; create the app with `gpui_kit::application()` and initialize with `gpui_kit::init(cx)`. The matching `gpui-pre` crates are managed by Kit and pinned by `Cargo.lock`; do not declare GPUI/platform/component/asset crates directly. GUI tests use `gpui-kit/test-support`.
 
-## 技术栈
+### Architecture and repository layout
 
-- **Rust** + **[GPUI Kit](https://github.com/longbridge/gpui-kit)**(统一导出 GPUI、基础层、组件和资源)
-- Agent 后端:嵌入原生 agent CLI(如 Claude Code)作为子进程,而非自己实现对话循环
-
-### 技术选型(已定,尽量与 herdr 对齐)
-
-herdr 实际栈(v0.8.2):libghostty-vt(VT,vendor Zig 库)、portable-pty、tokio、interprocess、bincode+serde、ratatui、server/client 架构、Apache-2.0。
-
-- **许可证:Apache-2.0**(与 herdr 一致)。⚠️ 因此 Zed 的 `terminal`/`terminal_view`(GPL-3.0)只能参考思路,禁止复制代码。
-- **VT 终端模拟:`alacritty_terminal`**— 纯 Rust、免 Zig/FFI、有 Zed 的 GPUI 渲染先例;herdr 用 libghostty-vt 是 TUI 场景的选择。
-- **PTY:`portable-pty`**(对齐 herdr;Unix pty / Windows ConPTY)。
-- **异步:server/core 用 tokio**(对齐 herdr);**GUI 用 GPUI 自带 executor**,两者通过协议连接。
-- **传输:版本化二进制协议 over transport adapters**。协议使用 `bincode + serde` 长度前缀帧与严格版本握手;本地优先使用 `interprocess` 的 Unix domain socket / Windows named pipe,远程通过 TCP endpoint 接入同一协议,每个 TCP 连接都用 WireGuard 式的 `Noise_IKpsk2`(`snow`)做双向静态密钥认证与加密,新设备靠一次性 invite 配对(见 ADR 0011);capability 授权后置。SSH 连接由 Client 调系统 `ssh -T` 执行远端 `condr server bridge`,转接远端私有 socket,认证与加密交给 SSH(见 ADR 0015)。Server 默认只暴露本地私有 endpoint,不监听公网。
-- **持久化:bincode + serde**(会话),**TOML**(配置)(对齐)。
-- **终端渲染:自研 GPUI element**(项目最大自研件)— GPUI Kit 无终端组件。
-- **布局:GPUI Kit 的 Dock**(`gpui_kit::component::dock`) → 映射 workspace/tab/pane 模型。
-- **Agent 状态检测:** 只来自 agent CLI 自己的 hooks(ADR 0014)。进程表识别 agent 身份;`condr agent-hook` 把 hook 事件作为 OSC 777 写回控制终端,Server 在 VT 前截获并驱动 `AgentState`;未上报即 `Unknown`,不做屏幕文本分类。GUI 在此之上叠加 done。
-- **Git:`gix`(gitoxide,纯 Rust)**,只读查询和 worktree add/remove 全走 gix API,不 shell out `git`,不引 git2(libgit2 C 依赖)。gix 没有 `worktree add/remove` porcelain,`condr-core/src/git.rs` 用它的原语(ref 事务、`index_from_tree`、`gix::worktree::state::checkout`)按 git 自己的 `worktrees/<id>` 布局实现。
-- **依赖:只声明 crates.io 的 `gpui-kit = "0.6"`**。GPUI 类型使用 `gpui_kit::*`,组件使用 `gpui_kit::component`,资源使用 `gpui_kit::assets`;通过 `gpui_kit::application()` 创建应用、`gpui_kit::init(cx)` 初始化。底层匹配的 `gpui-pre` 系列由 Kit 管理,所有实际版本由 `Cargo.lock` 锁定,无需直接声明 GPUI/平台/组件/资源 crates。GUI 测试通过 `gpui-kit/test-support` 启用。
-
-### 架构与工程结构
-
-Condr 从第一版起采用独立 server/client 架构。local 不是另一种 backend,只是 GUI 在本机发现或启动同一个 `condr server` 后连接。一台机器只有一个 Server:它始终监听本地私有 socket,配置了 `[server] listen` 时再额外监听一个 TCP 地址,两者服务同一份 Session(见 ADR 0013)。编排能力全部在 Server,所以 CLI 和 Server 是同一个二进制 `condr`;GUI 是独立二进制 `condr-gui`,只是 Server 的一个 client:
+Condr has been a separate server/client system from the first version. "Local" is not another backend: the GUI simply discovers or starts the same `condr server` on this machine and connects to it. One machine runs exactly one Server. It always listens on a local private socket and, when `[server] listen` is configured, on one extra TCP address; both serve the same Session (ADR 0013). All orchestration lives in the Server, so the CLI and the Server are the same binary `condr`. The GUI is a separate binary `condr-gui` and is just one Server client:
 
 ```
-crates/condr-core    # 领域、协议、PTY、VT、agent 检测、Git — 无 GUI 依赖,headless 可测
-crates/condr-server  # 产出 `condr`:Server 进程(`condr server …`)与 CLI 子命令;拥有 Session、Terminal runtime、持久化与连接
-crates/condr-gui     # 产出 `condr-gui`:纯 client,连接一个或多个 server,负责 GPUI 渲染
+crates/condr-core    # domain, protocol, PTY, VT, agent detection, Git — no GUI deps, testable headless
+crates/condr-server  # builds `condr`: the Server process (`condr server …`) and CLI subcommands; owns Session, terminal runtime, persistence and connections
+crates/condr-gui     # builds `condr-gui`: pure client, connects to one or more servers, renders with GPUI
 ```
 
-GUI 关闭只断开连接。server、PTY、agent 与 Session 继续运行;重新打开 GUI 时优先连接已有本地 server。停止 server 是显式操作。
+Closing the GUI only disconnects. The server, PTYs, agents and Session keep running; reopening the GUI reconnects to the existing local server first. Stopping the server is an explicit action.
 
-### 开发环境(双机)
+### Development environment (two machines)
 
-- **Linux server(arm64,headless)**:condr-core 的全部开发与测试(`cargo test/clippy` 无需显示器)。GUI 无法在此运行。
-- **Windows 笔记本**:GUI 原生构建与手动验证(GPUI 不做交叉编译),同时验证 ConPTY 路径。
+- **Linux server (arm64, headless):** all condr-core development and tests (`cargo test/clippy` need no display). The GUI cannot run here.
+- **Windows laptop:** native GUI builds and manual verification (GPUI does not cross-compile), plus the ConPTY path.
 
-### 开发阶段兼容性
+### Pre-release compatibility policy
 
-- 当前项目处于未发布开发阶段。允许破坏性变更,不要求向后兼容。
-- 优先选择边界清晰、实现简单的最终设计;不要仅为旧实现保留兼容层、迁移路径或废弃 API。
-- 发生破坏性变更时,同步更新仓库内调用方、测试和源文档。只有任务明确要求时才实现旧版本迁移或兼容。
+- The project is unreleased. Breaking changes are allowed; backward compatibility is not required.
+- Prefer the simplest final design with clear boundaries. Do not keep compatibility layers, migration paths or deprecated APIs just for old implementations.
+- When breaking something, update in-repo callers, tests and source docs in the same change. Implement migrations only when the task explicitly asks for them.
 
-## 常用命令
+## Common commands
 
 ```bash
-cargo build            # 构建
-cargo run              # 运行
-cargo test             # 全部测试
-cargo test <name>      # 单个测试
+cargo build            # build
+cargo run              # run
+cargo test             # all tests
+cargo test <name>      # one test
 cargo clippy           # lint
-cargo fmt              # 格式化
+cargo fmt              # format
 ```
 
-## 架构原则
+## Architecture principles
 
-- GUI 只做编排与呈现,对话/工具循环交给嵌入的 agent CLI 子进程,不重复造轮子
-- server 是 Session、PTY、VT、agent 与 Git/worktree runtime 的唯一所有者;GUI 的 local/remote 功能走同一协议。Client 重连先获取 Server/Session 的权威结构快照和各 Pane 的 live terminal view,再订阅增量事件;GUI 关闭不会停止 server 或其子进程。
-- 保持轻量:避免 webview、避免不必要的依赖
+- The GUI only orchestrates and renders; the conversation/tool loop belongs to the embedded agent CLI subprocess.
+- The server is the sole owner of Session, PTY, VT, agent and Git/worktree runtime; local and remote GUI features use the same protocol. On reconnect a client first fetches the authoritative Server/Session structure snapshot and each Pane's live terminal view, then subscribes to incremental events. Closing the GUI never stops the server or its children.
+- Stay light: no webview, no unnecessary dependencies.
 
-### 终端渲染性能要求
+### Terminal rendering performance requirements
 
-终端是 Condr 的核心交互面,流畅度必须接近 herdr/原生终端,不能把卡顿视为可推迟的视觉问题。代表性 agent CLI(尤其 Codex)持续输出、spinner/动画刷新时,鼠标拖选、键盘输入、滚动和 Pane 操作仍需跟手,目标显示节奏为 60 Hz 且不能积压过期帧。
+The terminal is Condr's core surface. It must feel as smooth as a native terminal; stutter is not a cosmetic issue to defer. While a representative agent CLI (especially Codex) streams output and redraws spinners/animations, mouse drag-selection, keyboard input, scrolling and Pane operations must stay responsive, targeting 60 Hz display cadence with no backlog of stale frames.
 
-- PTY read chunk 只是终端状态 wakeup,不是必须逐条展示的 GUI frame。Server 必须合并连续 wakeup、发布最新状态并保证尾帧/退出帧不丢;不得让无界旧 `TerminalView` 队列增加输入延迟。
-- GUI 消费终端事件时应批量处理并丢弃或覆盖已过期的中间视觉状态;控制、生命周期和布局事件仍必须可靠、有序。
-- 终端视觉更新使用独立于可靠 Session event cursor 的 per-client stream:每个 client writer 只有一个可丢弃的批量视觉槽,可靠消息优先。只有视觉帧成功入槽后才能推进该 client 的 baseline;槽满时只记录待刷新的 Pane,writer drain 后必须从 Server 权威 VT 状态重新生成最新帧。Bootstrap 必须清空排队视觉帧并重置 baseline;GUI 检测到 revision gap 时只请求一次新 Bootstrap。
-- 小范围终端变化不得使整屏 shaping cache 失效。缓存按 cell/row/run 的实际内容与样式失效;避免逐帧整屏字符串分配、整屏 shaping 和不必要的逐 cell paint。全量 view 成为瓶颈时,优先引入 per-client baseline/damage 增量,同时保持 reconnect bootstrap 正确。
-- 拖选进行中等纯 GUI 交互必须留在 Client 本地;拖选结束后的选择交给 Server 的 VT 跟踪(随输出滚动、resize/alt screen 时清除),视图帧携带裁剪到 viewport 的选择,Client 绘制它并用它复制。持续终端输出时也要复用未变化的渲染缓存,不能只优化静止画面。
-- 普通开发命令 `cargo run -p condr-gui` 也必须具备可用帧率。不要移除根 `Cargo.toml` 中 GPUI、文本 shaping、VT 和 Condr 热路径的 dev profile 优化,除非有等效替代并完成 Windows 实测。
-- 性能相关变更至少覆盖:burst wakeup 合并到最新 revision、尾帧不丢、跨 revision 未变化 cell 不重复 shaping、真实 GPUI 拖选。静止终端上的单次拖选测试不足以证明性能;Windows 验收还需在代表性 agent 动画/高频输出下手动观察交互和帧率。
-- 优化前先定位 parse、snapshot/serialization、事件队列、prepaint/shaping、paint 中的实际热点。可以参考 herdr 的 render baseline/frame coalescing;Zed `terminal`/`terminal_view` 仅可参考思路,继续遵守 GPL-3.0 代码禁止复制的许可证边界。
-
+- A PTY read chunk is a terminal-state wakeup, not a GUI frame that must be shown one-for-one. The Server must coalesce consecutive wakeups, publish the latest state, and never drop the final/exit frame. An unbounded queue of old `TerminalView`s must not add input latency.
+- The GUI consumes terminal events in batches and drops or overwrites stale intermediate visual states; control, lifecycle and layout events stay reliable and ordered.
+- Terminal visual updates use a per-client stream independent of the reliable Session event cursor: each client writer has exactly one droppable batched visual slot, and reliable messages take priority. The client's baseline advances only after a visual frame is successfully slotted; when the slot is full, only record the Panes that need refresh, and after the writer drains, regenerate the latest frame from the Server's authoritative VT state. Bootstrap must clear queued visual frames and reset the baseline; when the GUI detects a revision gap it requests exactly one new Bootstrap.
+- A small terminal change must not invalidate the whole-screen shaping cache. Invalidate by actual cell/row/run content and style; avoid per-frame whole-screen string allocation, whole-screen shaping and needless per-cell paint. When full views become the bottleneck, add per-client baseline/damage deltas while keeping reconnect bootstrap correct.
+- Pure GUI interactions such as an in-progress drag-selection stay local to the Client. Once the drag ends, the selection is handed to the Server's VT tracking (it scrolls with output and clears on resize/alt screen); view frames carry the selection clipped to the viewport, and the Client draws it and uses it for copy. Rendering caches for unchanged content must be reused during continuous output too, not just on a static screen.
+- The ordinary dev command `cargo run -p condr-gui` must also have a usable frame rate. Do not remove the dev-profile optimizations in the root `Cargo.toml` for GPUI, text shaping, VT and Condr hot paths unless an equivalent replacement is in place and verified on Windows.
+- Performance changes must at least cover: burst wakeups coalescing to the latest revision, the final frame never dropping, unchanged cells not being re-shaped across revisions, and real GPUI drag-selection. A single drag-selection test on a static terminal is not enough; Windows acceptance also requires manually observing interaction and frame rate under representative agent animation / high-frequency output.
+- Before optimizing, locate the real hot spot among parse, snapshot/serialization, event queue, prepaint/shaping and paint. When studying other terminal renderers for ideas, respect the license boundary above: Condr is Apache-2.0, so GPL code may only inform the approach, never be copied.
 
 ## Agent skills
 
 ### Issue tracker
 
-GitHub Issues(`gh` CLI)。See `docs/agents/issue-tracker.md`.
+GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-默认五标签:needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix。See `docs/agents/triage-labels.md`.
+Five default labels: needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context:根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+Single context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
