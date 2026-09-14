@@ -1030,3 +1030,77 @@ fn server_events_wake_gui_without_polling_clock() {
         "server events should wake GPUI without a timer tick"
     );
 }
+
+#[test]
+fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    cx.update(|cx| cx.set_app_identity("dev.condr.gui", "Condr"));
+    let (view, window, _server) = connected_condr(&mut cx);
+    let pane_id = window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.connect_generation;
+            let server_id = connection.server_id.unwrap();
+            let session_id = connection.session_id.unwrap();
+            let sequence = connection.sequence;
+            let mut session = Session::restore(connection.snapshot.clone()).unwrap();
+            session.create_workspace(std::env::temp_dir()).unwrap();
+            let pane_id = session
+                .active_workspace()
+                .unwrap()
+                .active_tab()
+                .focused_pane()
+                .id();
+            let agent = |state| {
+                Some(AgentSnapshot {
+                    session_id: None,
+                    kind: AgentKind::Claude,
+                    state,
+                })
+            };
+            for (offset, event) in [
+                SessionEvent::LayoutChanged {
+                    snapshot: session.snapshot(),
+                    zoomed_panes: Vec::new(),
+                },
+                SessionEvent::AgentChanged {
+                    pane_id,
+                    agent: agent(AgentState::Working),
+                },
+                SessionEvent::AgentChanged {
+                    pane_id,
+                    agent: agent(AgentState::Idle),
+                },
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::Event {
+                        server_id,
+                        session_id,
+                        sequence: sequence + offset as u64 + 1,
+                        event,
+                    }),
+                    cx,
+                );
+            }
+            pane_id
+        })
+    });
+    let shown = cx.shown_system_notifications();
+    assert_eq!(
+        shown.len(),
+        1,
+        "only the Working -> Idle transition notifies"
+    );
+    assert_eq!(shown[0].title.as_ref(), "Claude finished");
+    assert_eq!(
+        shown[0].tag,
+        crate::app::notifications::agent_notification_tag(1, pane_id)
+    );
+}

@@ -208,7 +208,8 @@ pub(crate) fn run() {
 
     app.run(move |cx| {
         gpui_kit::init(cx);
-        cx.set_app_identity("dev.condr.gui", "Condr");
+        cx.set_app_identity(APP_IDENTITY, "Condr");
+        register_notification_icon();
         bind_keys(cx);
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
@@ -216,6 +217,17 @@ pub(crate) fn run() {
                 // The drawn title bar carries no OS title; the taskbar still needs one.
                 window.set_window_title("Condr");
                 let view = cx.new(|cx| Condr::new(endpoint, initial, config, window, cx));
+                let handle = window.window_handle();
+                let target = view.downgrade();
+                cx.on_system_notification_response(move |response, cx| {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        target
+                            .update(cx, |this, cx| {
+                                this.handle_system_notification_response(response, window, cx)
+                            })
+                            .ok();
+                    });
+                });
                 let root = cx.new(|cx| Root::new(view, window, cx));
                 window.resize(DEFAULT_WINDOW_SIZE);
                 root
@@ -225,3 +237,32 @@ pub(crate) fn run() {
         .detach();
     });
 }
+
+const APP_IDENTITY: &str = "dev.condr.gui";
+
+/// An unpackaged Windows app gets its toast icon from `IconUri` on its AUMID key. GPUI
+/// registers only the display name, so point it at a copy of the packaged icon.
+#[cfg(windows)]
+fn register_notification_icon() {
+    let Some(directory) = condr_core::data_directory() else {
+        return;
+    };
+    let icon = directory.join("condr.png");
+    if fs::create_dir_all(&directory)
+        .and_then(|()| {
+            fs::write(
+                &icon,
+                include_bytes!("../../../../packaging/icons/condr.png"),
+            )
+        })
+        .is_err()
+    {
+        return;
+    }
+    let _ = windows_registry::CURRENT_USER
+        .create(format!(r"Software\Classes\AppUserModelId\{APP_IDENTITY}"))
+        .and_then(|key| key.set_string("IconUri", icon.display().to_string()));
+}
+
+#[cfg(not(windows))]
+fn register_notification_icon() {}

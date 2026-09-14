@@ -26,6 +26,9 @@ smol_str.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-registry.workspace = true
+
 [build-dependencies]
 embed-resource.workspace = true
 

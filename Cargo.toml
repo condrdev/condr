@@ -44,6 +44,7 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
 widestring = "1.2"
 windows-spawn = "0.1.0"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-registry = "0.6"
 
 [profile.dev]
 codegen-units = 16

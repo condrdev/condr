@@ -6,6 +6,7 @@ mod dock;
 mod events;
 mod ime;
 mod navigation;
+mod notifications;
 mod presentation;
 mod server_connection;
 mod server_management;

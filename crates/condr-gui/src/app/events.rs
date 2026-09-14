@@ -210,6 +210,7 @@ impl Condr {
                             // The Server only publishes changed snapshots, so Unknown here is
                             // a new process, not a repeat that would reopen a manual collapse.
                             let started = previous
+                                .as_ref()
                                 .is_none_or(|previous| previous.kind != agent.kind)
                                 || agent.state == AgentState::Unknown;
                             if started
@@ -243,6 +244,15 @@ impl Condr {
                                     }
                                 })
                                 .or_insert_with(|| AgentTracker::new(agent.state));
+                            if !visible {
+                                self.notify_agent_change(
+                                    key,
+                                    pane_id,
+                                    previous.map(|previous| previous.state),
+                                    &agent,
+                                    cx,
+                                );
+                            }
                         } else {
                             self.connections[index].agents.remove(&pane_id);
                             self.connections[index].agent_trackers.remove(&pane_id);
