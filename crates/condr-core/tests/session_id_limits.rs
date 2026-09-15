@@ -17,16 +17,18 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
             tabs: vec![EncodedTab {
                 id: MAX_STABLE_ID - 1,
                 name: String::new(),
-                panes: vec![EncodedPane {
-                    id: MAX_STABLE_ID,
-                    cwd: Some(PathBuf::from("projects/boundary")),
-                    agent_resume: None,
-                }],
-                focused_pane: MAX_STABLE_ID,
-                focus_history: Vec::new(),
-                layout: EncodedLayout {
-                    root: 0,
-                    nodes: vec![EncodedLayoutNode::Pane(MAX_STABLE_ID)],
+                content: EncodedTabContent::Terminals {
+                    panes: vec![EncodedPane {
+                        id: MAX_STABLE_ID,
+                        cwd: Some(PathBuf::from("projects/boundary")),
+                        agent_resume: None,
+                    }],
+                    focused_pane: MAX_STABLE_ID,
+                    focus_history: Vec::new(),
+                    layout: EncodedLayout {
+                        root: 0,
+                        nodes: vec![EncodedLayoutNode::Pane(MAX_STABLE_ID)],
+                    },
                 },
             }],
             active_tab: MAX_STABLE_ID - 1,
@@ -79,10 +81,20 @@ struct EncodedWorkspace {
 struct EncodedTab {
     id: u64,
     name: String,
-    panes: Vec<EncodedPane>,
-    focused_pane: u64,
-    focus_history: Vec<u64>,
-    layout: EncodedLayout,
+    content: EncodedTabContent,
+}
+
+/// Mirrors the snapshot's Tab content enum, variant order included.
+#[derive(Serialize)]
+enum EncodedTabContent {
+    Terminals {
+        panes: Vec<EncodedPane>,
+        focused_pane: u64,
+        focus_history: Vec<u64>,
+        layout: EncodedLayout,
+    },
+    #[expect(dead_code, reason = "the Diff variant keeps the wire order honest")]
+    Diff { path: PathBuf },
 }
 
 #[derive(Serialize)]
