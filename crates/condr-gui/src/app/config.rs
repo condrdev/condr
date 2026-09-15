@@ -16,6 +16,8 @@ const APPEARANCE_KEY: &str = "appearance";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const KEEP_AWAKE_KEY: &str = "keep_awake";
+/// `[client] changes_sidebar`: whether the Changes sidebar was left open.
+const CHANGES_SIDEBAR_KEY: &str = "changes_sidebar";
 const SERVERS_KEY: &str = "servers";
 /// `[client] editor`: the "Open in" target used last, and so the default for a project
 /// without its own choice.
@@ -66,6 +68,7 @@ pub(super) struct LoadedConfig {
     pub fps_monitor: bool,
     pub notifications: bool,
     pub keep_awake: bool,
+    pub changes_sidebar: bool,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
     pub default_editor: Option<String>,
@@ -149,6 +152,10 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_keep_awake(path).ok())
                 .unwrap_or(false),
+            changes_sidebar: path
+                .as_deref()
+                .and_then(|path| load_changes_sidebar(path).ok())
+                .unwrap_or(false),
             terminal_font: path
                 .as_deref()
                 .and_then(|path| load_terminal_font(path).ok())
@@ -205,6 +212,14 @@ pub(super) fn load_notifications(path: &Path) -> io::Result<bool> {
 
 pub(super) fn load_keep_awake(path: &Path) -> io::Result<bool> {
     Ok(read_client_value(path, KEEP_AWAKE_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false))
+}
+
+/// The Changes sidebar starts closed on a fresh install and then remembers its last state.
+pub(super) fn load_changes_sidebar(path: &Path) -> io::Result<bool> {
+    Ok(read_client_value(path, CHANGES_SIDEBAR_KEY)?
         .as_ref()
         .and_then(toml::Value::as_bool)
         .unwrap_or(false))
@@ -357,6 +372,13 @@ impl Condr {
         let enabled = self.keep_awake;
         self.save_config(cx, move |path| {
             write_client_value(path, KEEP_AWAKE_KEY, toml_edit::value(enabled))
+        });
+    }
+
+    pub(super) fn save_changes_sidebar(&mut self, cx: &mut Context<Self>) {
+        let open = self.changes_open;
+        self.save_config(cx, move |path| {
+            write_client_value(path, CHANGES_SIDEBAR_KEY, toml_edit::value(open))
         });
     }
 
@@ -601,6 +623,24 @@ mod tests {
         assert!(!load_fps_monitor(&path).unwrap());
         write_client_value(&path, FPS_MONITOR_KEY, toml_edit::value(true)).unwrap();
         assert!(load_fps_monitor(&path).unwrap());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn changes_sidebar_defaults_closed_and_round_trips() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-changes-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert!(!load_changes_sidebar(&path).unwrap());
+        write_client_value(&path, CHANGES_SIDEBAR_KEY, toml_edit::value(true)).unwrap();
+        assert!(load_changes_sidebar(&path).unwrap());
+        write_client_value(&path, CHANGES_SIDEBAR_KEY, toml_edit::value(false)).unwrap();
+        assert!(!load_changes_sidebar(&path).unwrap());
         fs::remove_dir_all(directory).unwrap();
     }
 

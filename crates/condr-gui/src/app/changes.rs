@@ -219,7 +219,24 @@ pub(super) enum DiffContent {
 impl Condr {
     pub(super) fn toggle_changes_sidebar(&mut self, cx: &mut Context<Self>) {
         self.changes_open = !self.changes_open;
+        self.save_changes_sidebar(cx);
         cx.notify();
+    }
+
+    /// Whether some Workspace is presented for the sidebar to review. Without one the
+    /// column stays hidden and its toggle disabled; the preference itself is kept, so
+    /// opening a Workspace brings the sidebar back the way the user left it.
+    pub(super) fn presents_a_workspace(&self) -> bool {
+        self.active_connection().is_some_and(|connection| {
+            Session::restore(connection.snapshot.clone()).is_ok_and(|session| {
+                self.presented_workspace_id(connection.key, &session)
+                    .is_some()
+            })
+        })
+    }
+
+    pub(super) fn shows_changes_sidebar(&self) -> bool {
+        self.changes_open && self.presents_a_workspace()
     }
 
     fn toggle_changes_section(&mut self, section: ChangesSection, cx: &mut Context<Self>) {
@@ -250,6 +267,7 @@ impl Condr {
     /// The title bar's toggle for the Changes sidebar, next to "Open in".
     pub(super) fn render_changes_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
+        let has_workspace = self.presents_a_workspace();
         let label = if self.changes_open {
             "Hide Changes"
         } else {
@@ -273,6 +291,7 @@ impl Condr {
                     .ghost()
                     .small()
                     .icon(Icon::new(icon))
+                    .disabled(!has_workspace)
                     .tooltip(label)
                     .accessibility_label(label)
                     .on_click(move |_, _, cx| {

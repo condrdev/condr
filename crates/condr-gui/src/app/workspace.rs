@@ -620,7 +620,9 @@ impl Render for Condr {
             body,
         } = self.render_workspace(cx);
         let changes_toggle = self.render_changes_toggle(cx);
-        let changes_column = self.changes_open.then(|| self.render_changes_sidebar(cx));
+        let changes_column = self
+            .shows_changes_sidebar()
+            .then(|| self.render_changes_sidebar(cx));
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {
