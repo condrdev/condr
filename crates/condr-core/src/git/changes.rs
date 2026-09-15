@@ -172,15 +172,18 @@ impl GitRepository {
         Ok(GitChanges { entries, truncated })
     }
 
-    /// `path`'s working-tree content against `HEAD`, as structured hunks. A path in neither is
-    /// an error; a path in both with identical content yields no hunks.
-    pub fn file_diff(&self, path: &Path) -> Result<FileDiff, GitError> {
-        if !crate::valid_diff_path(path) {
+    /// `path`'s working-tree content against `HEAD`, as structured hunks. `old_path` is where
+    /// `HEAD` has a renamed file, as [`GitChangeEntry::old_path`] reports it; without it a
+    /// rename diffs as wholly added. A path in neither side is an error; a path in both with
+    /// identical content yields no hunks.
+    pub fn file_diff(&self, path: &Path, old_path: Option<&Path>) -> Result<FileDiff, GitError> {
+        if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
+        {
             return Err(GitError("invalid path for a diff".into()));
         }
         let repo = self.open()?;
         let mut differ = Differ::new(&repo)?;
-        let content = differ.diff(path, None, |diff, input| {
+        let content = differ.diff(path, old_path, |diff, input| {
             let hunks = UnifiedDiff::new(
                 diff,
                 input,

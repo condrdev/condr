@@ -190,7 +190,7 @@ fn file_diff_numbers_every_line_and_flags_binary_and_oversized_files() {
 
     let repository = discover_repository(&root).unwrap().unwrap();
 
-    let notes = repository.file_diff(Path::new("notes.txt")).unwrap();
+    let notes = repository.file_diff(Path::new("notes.txt"), None).unwrap();
     let FileDiffContent::Text { hunks } = &notes.content else {
         panic!("a text file diffs as text: {notes:?}");
     };
@@ -229,7 +229,7 @@ fn file_diff_numbers_every_line_and_flags_binary_and_oversized_files() {
         ]
     );
 
-    let fresh = repository.file_diff(Path::new("fresh.txt")).unwrap();
+    let fresh = repository.file_diff(Path::new("fresh.txt"), None).unwrap();
     let FileDiffContent::Text { hunks } = &fresh.content else {
         panic!("an untracked file diffs against nothing: {fresh:?}");
     };
@@ -239,18 +239,77 @@ fn file_diff_numbers_every_line_and_flags_binary_and_oversized_files() {
 
     assert_eq!(
         repository
-            .file_diff(Path::new("image.bin"))
+            .file_diff(Path::new("image.bin"), None)
             .unwrap()
             .content,
         FileDiffContent::Binary
     );
     assert!(matches!(
-        repository.file_diff(Path::new("huge.txt")).unwrap().content,
+        repository
+            .file_diff(Path::new("huge.txt"), None)
+            .unwrap()
+            .content,
         FileDiffContent::TooLarge { .. }
     ));
     assert!(
-        repository.file_diff(Path::new("missing.txt")).is_err(),
+        repository
+            .file_diff(Path::new("missing.txt"), None)
+            .is_err(),
         "a path in neither HEAD nor the work tree has no diff"
     );
-    assert!(repository.file_diff(Path::new("../outside.txt")).is_err());
+    assert!(
+        repository
+            .file_diff(Path::new("../outside.txt"), None)
+            .is_err()
+    );
+    assert!(
+        repository
+            .file_diff(Path::new("notes.txt"), Some(Path::new("../outside.txt")))
+            .is_err()
+    );
+}
+
+#[test]
+fn file_diff_of_a_rename_compares_against_the_old_path() {
+    let root = scratch_repository("rename");
+    commit_file(&root, "old.txt", "one\ntwo\n");
+    git(&root, ["mv", "old.txt", "new.txt"]);
+    fs::write(root.join("new.txt"), "one\n2\n").unwrap();
+
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let entry = repository.changes().unwrap().entries.remove(0);
+    assert_eq!(entry.status, GitChangeStatus::Renamed);
+    assert_eq!(entry.old_path.as_deref(), Some(Path::new("old.txt")));
+
+    let diff = repository
+        .file_diff(&entry.path, entry.old_path.as_deref())
+        .unwrap();
+    let FileDiffContent::Text { hunks } = &diff.content else {
+        panic!("a renamed text file diffs as text: {diff:?}");
+    };
+    let kinds: Vec<DiffLineKind> = hunks
+        .iter()
+        .flat_map(|hunk| &hunk.lines)
+        .map(|line| line.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            DiffLineKind::Context,
+            DiffLineKind::Removed,
+            DiffLineKind::Added
+        ],
+        "only the edited line differs, not the whole file"
+    );
+
+    let FileDiffContent::Text { hunks } = repository.file_diff(&entry.path, None).unwrap().content
+    else {
+        panic!("without the old path the file is new");
+    };
+    assert!(
+        hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .all(|line| line.kind == DiffLineKind::Added)
+    );
 }

@@ -970,14 +970,23 @@ pub(super) fn handle_client(
                         state
                             .workspace_git
                             .get(&workspace_id)
-                            .map(|git| git.repository.clone())
+                            .map(|git| {
+                                // A renamed file diffs against where HEAD has it.
+                                let old_path = git
+                                    .changes
+                                    .entries
+                                    .iter()
+                                    .find(|entry| entry.path == path)
+                                    .and_then(|entry| entry.old_path.clone());
+                                (git.repository.clone(), old_path)
+                            })
                             .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
                     }
                 };
                 // The diff reads blobs and files: never under the state lock.
-                let result = repository.and_then(|repository| {
+                let result = repository.and_then(|(repository, old_path)| {
                     repository
-                        .file_diff(&path)
+                        .file_diff(&path, old_path.as_deref())
                         .map_err(|error| error.to_string())
                 });
                 queue_message(

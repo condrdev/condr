@@ -120,6 +120,18 @@ impl LoadedConfig {
                 },
                 |servers| (servers, None),
             );
+        // A malformed `[[client.editors]]` is reported, not dropped: the user should learn
+        // why their editor is missing from the menu.
+        let (custom_editors, editors_error) = match path
+            .as_deref()
+            .map_or_else(|| Ok(Vec::new()), load_custom_editors)
+        {
+            Ok(editors) => (editors, None),
+            Err(error) => (
+                Vec::new(),
+                Some(format!("Failed to load [[client.editors]]: {error}")),
+            ),
+        };
         Self {
             appearance: path
                 .as_deref()
@@ -149,10 +161,7 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_default_editor(path).ok())
                 .flatten(),
-            custom_editors: path
-                .as_deref()
-                .and_then(|path| load_custom_editors(path).ok())
-                .unwrap_or_default(),
+            custom_editors,
             workspace_editors: path
                 .as_deref()
                 .and_then(|path| load_workspace_editors(path).ok())
@@ -160,7 +169,7 @@ impl LoadedConfig {
             path,
             device_key,
             servers,
-            error: servers_error.clone().or(key_error),
+            error: servers_error.clone().or(key_error).or(editors_error),
             servers_error,
         }
     }

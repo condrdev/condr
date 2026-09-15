@@ -29,14 +29,18 @@ impl WorkspaceGit {
     /// Everything the sidebar shows, computed in one pass. Runs unlocked: status walks the
     /// whole work tree.
     pub(super) fn scan(root: &Path) -> Result<Option<Self>, GitError> {
-        let Some(repository) = discover_repository(root)? else {
-            return Ok(None);
-        };
+        discover_repository(root)?
+            .map(Self::from_repository)
+            .transpose()
+    }
+
+    /// The change list of a repository already discovered; the expensive half of `scan`.
+    pub(super) fn from_repository(repository: GitRepository) -> Result<Self, GitError> {
         let changes = repository.changes()?;
-        Ok(Some(Self {
+        Ok(Self {
             repository,
             changes,
-        }))
+        })
     }
 }
 
@@ -360,7 +364,23 @@ fn run_watcher(
             let pending = std::mem::take(&mut entry.pending);
             let forced = std::mem::take(&mut entry.forced);
             let root = entry.root.clone();
-            let next = match WorkspaceGit::scan(&root) {
+            // Discovery is cheap; the status walk is not, so the ignore check sits between.
+            let next = match discover_repository(&root) {
+                Ok(None) => Ok(None),
+                Ok(Some(repository)) => {
+                    if !forced && repository.ignores_all(&pending) {
+                        continue;
+                    }
+                    watch_git_dir(
+                        entry,
+                        watcher.as_mut(),
+                        repository.git_directory().to_path_buf(),
+                    );
+                    WorkspaceGit::from_repository(repository).map(Some)
+                }
+                Err(error) => Err(error),
+            };
+            let next = match next {
                 Ok(next) => next,
                 Err(error) => {
                     eprintln!(
@@ -370,16 +390,6 @@ fn run_watcher(
                     continue;
                 }
             };
-            if let Some(next) = &next {
-                if !forced && next.repository.ignores_all(&pending) {
-                    continue;
-                }
-                watch_git_dir(
-                    entry,
-                    watcher.as_mut(),
-                    next.repository.git_directory().to_path_buf(),
-                );
-            }
             let Some(state) = state.upgrade() else {
                 return;
             };
