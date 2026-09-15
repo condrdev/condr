@@ -501,6 +501,8 @@ const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
 /// The Kit Sidebar pads its content by this much, so the title segment ends its own
 /// content on the same line and the buttons down the right edge line up.
 const SIDEBAR_CONTENT_GUTTER: Pixels = px(12.);
+/// A small icon-only Kit button: the least the title segment must hold for its toggle.
+const TITLE_TOGGLE_SLOT: Pixels = px(24.);
 
 /// The main window's title bar continues the sidebar and the Workspace: its left segment
 /// is the sidebar's width and color, its right segment hosts the Tab strip, so the two
@@ -532,6 +534,11 @@ fn workspace_title_bar(
         IconName::PanelLeftClose
     };
     let toggle_owner = owner.clone();
+    // On macOS a collapsed sidebar is narrower than the traffic-light inset, so the
+    // segment cannot match it: it sizes to its toggle instead and drops the border that
+    // could no longer line up with the sidebar below.
+    let segment_width = title_sidebar_width - TITLE_BAR_LEFT_PADDING;
+    let segment_fits = segment_width >= TITLE_TOGGLE_SLOT + SIDEBAR_CONTENT_GUTTER;
     TitleBar::new()
         .h(WORKSPACE_TITLE_BAR_HEIGHT)
         // The sidebar's color reaches the window edge, traffic-light inset included.
@@ -546,15 +553,17 @@ fn workspace_title_bar(
                 .child(
                     h_flex()
                         .debug_selector(|| "title-sidebar".into())
-                        .w(title_sidebar_width - TITLE_BAR_LEFT_PADDING)
                         .flex_none()
                         .h_full()
                         .pr(SIDEBAR_CONTENT_GUTTER)
                         .gap_2()
                         .items_center()
                         .justify_between()
-                        .border_r_1()
-                        .border_color(theme.sidebar_border)
+                        .when(segment_fits, |this| {
+                            this.w(segment_width)
+                                .border_r_1()
+                                .border_color(theme.sidebar_border)
+                        })
                         .when(!sidebar_collapsed, |this| {
                             this.child(
                                 h_flex()

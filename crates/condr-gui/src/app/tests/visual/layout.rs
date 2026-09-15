@@ -559,7 +559,14 @@ fn the_sidebar_keeps_its_dragged_width_across_window_resizes() {
         px(48.),
         "collapsing keeps the workspace avatar rail"
     );
+    // The collapsed rail is narrower than the macOS traffic-light inset; the toggle must
+    // still sit inside its title segment rather than run under the Tab strip.
     let toggle = window.debug_bounds("toggle-sidebar").unwrap();
+    let segment = window.debug_bounds("title-sidebar").unwrap();
+    assert!(
+        toggle.left() >= segment.left() && toggle.right() <= segment.right() + px(1.),
+        "the sidebar toggle overflows its title segment: {toggle:?} vs {segment:?}"
+    );
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));

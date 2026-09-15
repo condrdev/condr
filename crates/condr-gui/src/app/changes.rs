@@ -283,6 +283,8 @@ impl Condr {
             .h_full()
             .items_center()
             .pl_2()
+            // The same gutter the sidebar keeps before the window edge.
+            .pr_3()
             // Inside the title bar an unclaimed press starts a window move on Windows.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
