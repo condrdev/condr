@@ -26,28 +26,37 @@ install -m 644 LICENSE "$cli/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
 tar -C "$stage" -czf "$DIST_DIR/condr-cli-${package_version}-macos-${arch}.tar.gz" condr-cli
 
-app="$stage/payload/Applications/Condr.app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$stage/payload/.local/bin"
+app="$stage/dmg/Condr.app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 iconutil --convert icns --output "$app/Contents/Resources/condr.icns" packaging/icons/condr.iconset
 install -m 755 target/release/condr target/release/condr-gui "$app/Contents/MacOS/"
 install -m 644 LICENSE "$app/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$app/BUILD-COMMIT"
+# A drag-and-drop DMG has no installer step, so the launcher registers the CLI on
+# every start (`condr server install` is idempotent) and then becomes the GUI.
+cat >"$app/Contents/MacOS/Condr" <<'EOF'
+#!/bin/sh
+set -u
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+if "$here/condr" server install >/dev/null 2>&1; then
+    export CONDR_SERVER_EXECUTABLE="${CONDR_INSTALL_DIR:-$HOME/.local/opt/condr}/condr"
+fi
+exec "$here/condr-gui" "$@"
+EOF
+chmod 755 "$app/Contents/MacOS/Condr"
 cat >"$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>condr-gui</string>
+<key>CFBundleExecutable</key><string>Condr</string>
 <key>CFBundleIdentifier</key><string>dev.condr.gui</string>
 <key>CFBundleName</key><string>Condr</string>
 <key>CFBundleIconFile</key><string>condr.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>$CONDR_VERSION</string>
+<key>CFBundleShortVersionString</key><string>$CONDR_VERSION</string>
 </dict></plist>
 EOF
-ln -s ../../Applications/Condr.app/Contents/MacOS/condr "$stage/payload/.local/bin/condr"
-sed -e "s/@VERSION@/$CONDR_VERSION/g" -e "s/@ARCH@/$arch/g" \
-  packaging/macos/Distribution.xml >"$stage/Distribution.xml"
-pkgbuild --root "$stage/payload" --identifier dev.condr.condr --version "$CONDR_VERSION" \
-  --scripts packaging/macos/scripts --install-location / "$stage/condr-component.pkg"
-productbuild --distribution "$stage/Distribution.xml" --package-path "$stage" \
-  "$DIST_DIR/condr-${package_version}-macos-${arch}.pkg"
+ln -s /Applications "$stage/dmg/Applications"
+hdiutil create -quiet -volname Condr -srcfolder "$stage/dmg" -format UDZO \
+  "$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"

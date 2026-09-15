@@ -44,7 +44,7 @@ Condr 是一个轻量的原生 GUI，你可以在一个窗口中同时运行 Cla
 | Platform             | 安装包   |
 | -------------------- | -------- |
 | Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.pkg`   |
+| macOS x86_64 / arm64 | `.dmg`   |
 | Windows x86_64       | `.exe`   |
 
 ### Headless server

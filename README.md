@@ -44,7 +44,7 @@ Download installers from [Releases](https://github.com/condrdev/condr/releases).
 | Platform            | Package  |
 | ------------------- | -------- |
 | Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.pkg`   |
+| macOS x86_64 / arm64 | `.dmg`   |
 | Windows x86_64      | `.exe`   |
 
 ### Headless server

@@ -6,11 +6,11 @@
 
 ## 产物
 
-- 每次发布生成所有平台的 GUI + CLI 安装包与 CLI-only 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 ZIP,macOS x86_64/arm64 `.pkg` 与 tar.gz。
+- 每次发布生成所有平台的 GUI + CLI 安装包与 CLI-only 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 ZIP,macOS x86_64/arm64 `.dmg` 与 tar.gz。
 - 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨构建兼容承诺,必须一起更新。
 
-产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(GUI + CLI)和 `condr-cli-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(CLI-only)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.pkg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`,不作为 Release 附件发布。
+产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(GUI + CLI)和 `condr-cli-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(CLI-only)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.dmg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`,不作为 Release 附件发布。
 
 ## 数据位置
 
@@ -144,15 +144,15 @@ CONDR_COMMIT=<commit> script/package-linux.sh
 
 AppImage 需要先赋予执行权限；它只是桌面分发包，CLI-only 环境仍使用上面的安装脚本。AppImage 运行时使用临时挂载目录，因此 PATH 入口必须指向安装后的稳定用户目录。
 
-macOS GUI + CLI 使用用户域 `.pkg`（可放进 DMG），构建机需要 Xcode Command Line Tools：
+macOS GUI + CLI 使用拖放安装的 `.dmg`（内含 `Condr.app` 与 `/Applications` 链接），构建机需要 Xcode Command Line Tools：
 
 ```bash
 CONDR_COMMIT=<commit> script/package-macos.sh
 ```
 
-`.pkg` 将 GUI 和 CLI 安装到 `~/Applications/Condr.app`，并建立 `~/.local/bin/condr` 链接。安装后脚本把 `~/.local/bin` 加入 zsh 的 `~/.zprofile`，以及 bash 首个存在的登录配置（依次为 `~/.bash_profile`、`~/.bash_login`、`~/.profile`，都不存在时创建 `~/.profile`）。保留原有内容，重复安装不会重复追加。使用标准启动配置的 zsh/bash 重新打开终端后即可运行 `condr --help`；已打开的终端需重新启动 shell。
+DMG 没有安装脚本，所以 `Condr.app` 的启动器 `Contents/MacOS/Condr` 每次启动先运行 bundle 内的 `condr server install`（ADR 0016，幂等）：把 CLI 复制到 `~/.local/opt/condr`，建立 `~/.local/bin/condr` 链接，并在 `~/.zprofile` 追加一次带标记的 PATH 行；随后 `exec` 成 `condr-gui`，并让 GUI 用安装后的稳定副本启动 Server，与 Linux AppImage 的 `AppRun` 一致。安装失败时 GUI 仍照常启动。重新打开 zsh 终端后即可运行 `condr --help`；bash 登录 shell 不注册，需要时手工把 `~/.local/bin` 加入 PATH。
 
-`sh script/check-macos-package.sh` 可在 Linux/macOS 检查 PATH 注册、配置保留与重复安装，无需 Python。macOS Actions 另传入生成的 `.pkg` 和 CLI tar.gz，核对安装包声明的架构，在 runner 当前用户下实际安装两次，并验证提交号及全新 zsh/bash 登录 shell 能直接执行 `condr server --help`。每个 `.pkg` 按构建架构声明 `hostArchitectures`。
+`sh script/check-macos-package.sh <dmg> <cli tar.gz>` 只在 macOS 上运行：挂载镜像，核对 `/Applications` 链接、提交号、图标、启动器语法和二进制架构与 runner 一致，再把 app 复制到 `~/Applications`，连续执行两次 `condr server install` 验证 `~/.zprofile` 不重复追加，并在全新 zsh 登录 shell 中执行 `condr server --help`。
 
 Linux/macOS 原生检查共用 `script/check-cli-package.sh`：归档必须只包含对应顶层目录、可执行 `condr`、`LICENSE` 和 `BUILD-COMMIT`；随后实际运行 CLI，验证安装、覆盖确认和已有 GUI 文件保留。提交号默认比对 `GITHUB_SHA`（本地为当前 HEAD），检查旧产物时用 `CONDR_COMMIT` 显式指定期望 SHA。
 

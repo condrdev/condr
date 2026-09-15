@@ -10,7 +10,7 @@ if [ "${CONDR_RELEASE:-0}" != 1 ]; then
 fi
 
 for target in linux-x86_64.AppImage linux-arm64.AppImage \
-    macos-x86_64.pkg macos-arm64.pkg windows-x86_64.exe windows-x86_64.zip; do
+    macos-x86_64.dmg macos-arm64.dmg windows-x86_64.exe windows-x86_64.zip; do
     test -s "$dist/condr-${package_version}-${target}"
 done
 for target in linux-x86_64.tar.gz linux-arm64.tar.gz \
