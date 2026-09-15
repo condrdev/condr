@@ -19,11 +19,11 @@ test "$(readlink "$stage/volume/Applications")" = /Applications
 app="$stage/volume/Condr.app"
 test "$(cat "$app/BUILD-COMMIT")" = "$commit"
 contents="$app/Contents"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = Condr
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = condr-launcher
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$contents/Info.plist")" = condr.icns
 iconutil --convert iconset --output "$stage/condr.iconset" "$contents/Resources/condr.icns"
 test -s "$stage/condr.iconset/icon_512x512@2x.png"
-sh -n "$contents/MacOS/Condr"
+sh -n "$contents/MacOS/condr-launcher"
 for binary in condr condr-gui; do
     test "$(lipo -archs "$contents/MacOS/$binary")" = "$(uname -m)"
 done

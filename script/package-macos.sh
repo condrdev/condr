@@ -32,9 +32,11 @@ iconutil --convert icns --output "$app/Contents/Resources/condr.icns" packaging/
 install -m 755 target/release/condr target/release/condr-gui "$app/Contents/MacOS/"
 install -m 644 LICENSE "$app/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$app/BUILD-COMMIT"
+# The launcher is not called `Condr`: the default case-insensitive APFS would merge it
+# with the `condr` CLI binary next to it.
 # A drag-and-drop DMG has no installer step, so the launcher registers the CLI on
 # every start (`condr server install` is idempotent) and then becomes the GUI.
-cat >"$app/Contents/MacOS/Condr" <<'EOF'
+cat >"$app/Contents/MacOS/condr-launcher" <<'EOF'
 #!/bin/sh
 set -u
 here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -43,12 +45,12 @@ if "$here/condr" server install >/dev/null 2>&1; then
 fi
 exec "$here/condr-gui" "$@"
 EOF
-chmod 755 "$app/Contents/MacOS/Condr"
+chmod 755 "$app/Contents/MacOS/condr-launcher"
 cat >"$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>Condr</string>
+<key>CFBundleExecutable</key><string>condr-launcher</string>
 <key>CFBundleIdentifier</key><string>dev.condr.gui</string>
 <key>CFBundleName</key><string>Condr</string>
 <key>CFBundleIconFile</key><string>condr.icns</string>
