@@ -174,8 +174,8 @@ impl Condr {
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
                         .ghost()
                         .small()
-                        .min_w(px(96.))
-                        .max_w(px(128.))
+                        .min_w(rems(6.))
+                        .max_w(rems(8.))
                         .selected(tab_id == active_tab)
                         .label(tab_label.clone())
                         .tooltip(tab_label)
@@ -357,7 +357,7 @@ impl WorkspaceChrome {
 
 /// The width of the welcome page's action column: wide enough for the longest row,
 /// narrow enough that the labels stay one short reading column in a maximized window.
-const WELCOME_COLUMN_WIDTH: Pixels = px(400.);
+const WELCOME_COLUMN_WIDTH: Rems = rems(25.);
 
 /// One welcome row. A Button centers its content, so the trailing spacer takes the
 /// leftover width and leaves the icons and labels on one left spine.

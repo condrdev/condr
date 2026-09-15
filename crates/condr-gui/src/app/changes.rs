@@ -184,10 +184,13 @@ struct TreeContext<'a> {
     shown: Option<&'a Path>,
 }
 
-const CHANGES_ROW_PADDING: Pixels = px(8.);
-const CHANGES_TREE_INDENT: Pixels = px(14.);
-/// The chevron a directory row starts with; a file row leaves the same room so names align.
-const CHANGES_CHEVRON_SLOT: Pixels = px(18.);
+/// A tree row's left padding: the section gutter plus one indent per level. A file row
+/// also skips the chevron slot a directory row starts with, so names line up; both scale
+/// with the font since they frame text.
+fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
+    let chevron = if past_chevron { 1.125 } else { 0. };
+    rems(0.5 + 0.875 * depth as f32 + chevron)
+}
 
 /// The Diff Tab's Editor and what it currently shows.
 pub(super) struct DiffEditor {
@@ -479,7 +482,7 @@ impl Condr {
             .h_7()
             .w_full()
             .min_w_0()
-            .pl(CHANGES_ROW_PADDING + CHANGES_TREE_INDENT * depth as f32)
+            .pl(tree_indent(depth, false))
             .pr_2()
             .gap_1()
             .items_center()
@@ -534,8 +537,7 @@ impl Condr {
             .h_7()
             .w_full()
             .min_w_0()
-            // A file sits level with a directory's name, past the chevron slot.
-            .pl(CHANGES_ROW_PADDING + CHANGES_TREE_INDENT * depth as f32 + CHANGES_CHEVRON_SLOT)
+            .pl(tree_indent(depth, true))
             .pr_2()
             .gap_2()
             .items_center()

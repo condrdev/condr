@@ -40,7 +40,7 @@ pub(in crate::app) type SidebarDropMoveHandler = Rc<dyn Fn(Option<bool>, &mut Ap
 
 /// Heights of the label and detail lines of a two-line row. A suffix that wants to sit
 /// beside both lines stacks two boxes of these heights.
-pub(in crate::app) const DETAIL_LINE_HEIGHTS: (Pixels, Pixels) = (px(20.), px(16.));
+pub(in crate::app) const DETAIL_LINE_HEIGHTS: (Rems, Rems) = (rems(1.25), rems(1.));
 
 impl FluentBuilder for CondrSidebarTreeItem {}
 

@@ -66,6 +66,7 @@ cargo fmt              # format
 - The GUI only orchestrates and renders; the conversation/tool loop belongs to the embedded agent CLI subprocess.
 - The server is the sole owner of Session, PTY, VT, agent and Git/worktree runtime; local and remote GUI features use the same protocol. On reconnect a client first fetches the authoritative Server/Session structure snapshot and each Pane's live terminal view, then subscribes to incremental events. Closing the GUI never stops the server or its children.
 - Stay light: no webview, no unnecessary dependencies.
+- GUI sizes: a length that text flows into (row heights, label widths, indents, menu widths) is `rems`, so it follows the interface font; pure geometry (hairlines, drag handles, icon slots, widths the user dragged, insets that mirror platform or Kit pixel constants, Dock pixel arithmetic) is `px`. Both are logical pixels; DPI scaling is GPUI's.
 
 ### Terminal rendering performance requirements
 
