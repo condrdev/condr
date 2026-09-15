@@ -74,17 +74,6 @@ fn status_glyph(status: GitChangeStatus, cx: &App) -> Icon {
     name.size_4().text_color(color)
 }
 
-fn status_label(status: GitChangeStatus) -> &'static str {
-    match status {
-        GitChangeStatus::Added => "Added",
-        GitChangeStatus::Modified => "Modified",
-        GitChangeStatus::Deleted => "Deleted",
-        GitChangeStatus::Renamed => "Renamed",
-        GitChangeStatus::Untracked => "Untracked",
-        GitChangeStatus::Conflicted => "Conflicted",
-    }
-}
-
 /// `+N −N`, each half only when it is not zero.
 fn diff_stat(stat: GitDiffStat, cx: &App) -> AnyElement {
     h_flex()
@@ -108,18 +97,97 @@ fn diff_stat(stat: GitDiffStat, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// A path split for display: the file name first, its directory after it, dimmed.
-fn split_path(path: &Path) -> (String, Option<String>) {
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
-    let directory = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .map(|parent| parent.display().to_string().replace('\\', "/"));
-    (name, directory)
+/// The rows of one section as a directory tree, the way Zed's git panel shows them: a
+/// directory that holds nothing but one directory folds into it (`src/app`), files sort after
+/// directories, and both sort by name.
+#[derive(Debug, PartialEq)]
+enum ChangeNode<'a> {
+    Directory {
+        /// The folded segments joined with `/`.
+        label: String,
+        /// The directory's repository-relative path, the key of its collapsed state.
+        path: PathBuf,
+        children: Vec<ChangeNode<'a>>,
+    },
+    File {
+        name: String,
+        entry: &'a GitChangeEntry,
+    },
 }
+
+fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
+    #[derive(Default)]
+    struct Builder<'a> {
+        directories: std::collections::BTreeMap<String, Builder<'a>>,
+        files: Vec<(String, &'a GitChangeEntry)>,
+    }
+
+    fn insert<'a>(builder: &mut Builder<'a>, components: &[String], entry: &'a GitChangeEntry) {
+        match components {
+            [] => {}
+            [name] => builder.files.push((name.clone(), entry)),
+            [directory, rest @ ..] => insert(
+                builder.directories.entry(directory.clone()).or_default(),
+                rest,
+                entry,
+            ),
+        }
+    }
+
+    fn finish<'a>(builder: Builder<'a>, parent: &Path) -> Vec<ChangeNode<'a>> {
+        let mut nodes = Vec::new();
+        for (name, mut child) in builder.directories {
+            let mut label = name.clone();
+            let mut path = parent.join(&name);
+            // Fold a chain of lone directories into one row.
+            while child.files.is_empty() && child.directories.len() == 1 {
+                let (next_name, next) = child.directories.pop_first().expect("one entry");
+                label.push('/');
+                label.push_str(&next_name);
+                path.push(&next_name);
+                child = next;
+            }
+            nodes.push(ChangeNode::Directory {
+                label,
+                children: finish(child, &path),
+                path,
+            });
+        }
+        let mut files = builder.files;
+        files.sort_by(|(a, _), (b, _)| a.cmp(b));
+        nodes.extend(
+            files
+                .into_iter()
+                .map(|(name, entry)| ChangeNode::File { name, entry }),
+        );
+        nodes
+    }
+
+    let mut root = Builder::default();
+    for entry in entries {
+        let components: Vec<String> = entry
+            .path
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        insert(&mut root, &components, entry);
+    }
+    finish(root, Path::new(""))
+}
+
+/// What every row of one section's tree shares.
+#[derive(Clone, Copy)]
+struct TreeContext<'a> {
+    key: ConnectionKey,
+    workspace_id: WorkspaceId,
+    /// The file the Diff Tab shows, drawn selected.
+    shown: Option<&'a Path>,
+}
+
+const CHANGES_ROW_PADDING: Pixels = px(8.);
+const CHANGES_TREE_INDENT: Pixels = px(14.);
+/// The chevron a directory row starts with; a file row leaves the same room so names align.
+const CHANGES_CHEVRON_SLOT: Pixels = px(18.);
 
 /// The Diff Tab's Editor and what it currently shows.
 pub(super) struct DiffEditor {
@@ -332,50 +400,136 @@ impl Condr {
             if collapsed {
                 continue;
             }
-            for entry in rows {
-                list = list.child(self.render_change_row(
-                    key,
-                    workspace_id,
-                    entry,
-                    shown.as_deref() == Some(entry.path.as_path()),
-                    cx,
-                ));
-            }
+            let tree = change_tree(&rows);
+            let mut elements = Vec::new();
+            let context = TreeContext {
+                key,
+                workspace_id,
+                shown: shown.as_deref(),
+            };
+            self.render_change_tree(&context, &tree, 0, &mut elements, cx);
+            list = list.children(elements);
         }
         column.child(list).into_any_element()
     }
 
-    fn render_change_row(
+    fn render_change_tree(
         &self,
-        key: ConnectionKey,
+        context: &TreeContext<'_>,
+        nodes: &[ChangeNode],
+        depth: usize,
+        list: &mut Vec<AnyElement>,
+        cx: &mut Context<Self>,
+    ) {
+        for node in nodes {
+            match node {
+                ChangeNode::Directory {
+                    label,
+                    path,
+                    children,
+                } => {
+                    let collapsed = self
+                        .collapsed_change_dirs
+                        .contains(&(context.workspace_id, path.clone()));
+                    list.push(self.render_change_directory(
+                        context.workspace_id,
+                        label,
+                        path,
+                        depth,
+                        collapsed,
+                        cx,
+                    ));
+                    if !collapsed {
+                        self.render_change_tree(context, children, depth + 1, list, cx);
+                    }
+                }
+                ChangeNode::File { name, entry } => {
+                    let selected = context.shown == Some(entry.path.as_path());
+                    list.push(self.render_change_file(context, name, entry, depth, selected, cx));
+                }
+            }
+        }
+    }
+
+    fn render_change_directory(
+        &self,
         workspace_id: WorkspaceId,
-        entry: &GitChangeEntry,
-        selected: bool,
+        label: &str,
+        path: &Path,
+        depth: usize,
+        collapsed: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let (name, directory) = split_path(&entry.path);
-        let path_text = entry.path.display().to_string().replace('\\', "/");
-        let id: SharedString = format!("change-{path_text}").into();
-        let selector = id.clone();
-        let deleted = entry.status == GitChangeStatus::Deleted;
+        let path_text = path.display().to_string().replace('\\', "/");
+        let selector: SharedString = format!("change-dir-{path_text}").into();
+        let id = selector.clone();
         let owner = cx.weak_entity();
-        let path = entry.path.clone();
-        let tooltip = match &entry.old_path {
-            Some(old) => format!(
-                "{}: {} → {path_text}",
-                status_label(entry.status),
-                old.display().to_string().replace('\\', "/")
-            ),
-            None => format!("{}: {path_text}", status_label(entry.status)),
-        };
+        let toggle_path = path.to_path_buf();
         h_flex()
             .id(id)
             .debug_selector(move || selector.to_string())
             .h_7()
             .w_full()
             .min_w_0()
-            .px_2()
+            .pl(CHANGES_ROW_PADDING + CHANGES_TREE_INDENT * depth as f32)
+            .pr_2()
+            .gap_1()
+            .items_center()
+            .cursor_pointer()
+            .rounded(theme.radius)
+            .text_sm()
+            .hover(|this| this.bg(theme.sidebar_accent.opacity(0.8)))
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    let dir = (workspace_id, toggle_path.clone());
+                    if !this.collapsed_change_dirs.remove(&dir) {
+                        this.collapsed_change_dirs.insert(dir);
+                    }
+                    cx.notify();
+                });
+            })
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .size_3p5()
+                    .text_color(theme.muted_foreground)
+                    .when(!collapsed, |icon| icon.rotate(percentage(90. / 360.))),
+            )
+            .child(
+                Icon::new(IconName::Folder)
+                    .size_4()
+                    .text_color(theme.muted_foreground),
+            )
+            .child(div().min_w_0().flex_1().truncate().child(label.to_owned()))
+            .into_any_element()
+    }
+
+    fn render_change_file(
+        &self,
+        context: &TreeContext<'_>,
+        name: &str,
+        entry: &GitChangeEntry,
+        depth: usize,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let path_text = entry.path.display().to_string().replace('\\', "/");
+        let selector: SharedString = format!("change-{path_text}").into();
+        let id = selector.clone();
+        let deleted = entry.status == GitChangeStatus::Deleted;
+        let owner = cx.weak_entity();
+        let path = entry.path.clone();
+        let (key, workspace_id) = (context.key, context.workspace_id);
+        h_flex()
+            .id(id)
+            .debug_selector(move || selector.to_string())
+            .h_7()
+            .w_full()
+            .min_w_0()
+            // A file sits level with a directory's name, past the chevron slot.
+            .pl(CHANGES_ROW_PADDING + CHANGES_TREE_INDENT * depth as f32 + CHANGES_CHEVRON_SLOT)
+            .pr_2()
             .gap_2()
             .items_center()
             .cursor_pointer()
@@ -391,7 +545,6 @@ impl Condr {
                 this.bg(theme.tokens.sidebar_accent)
                     .text_color(theme.sidebar_accent_foreground)
             })
-            .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     this.show_diff_on(key, workspace_id, path.clone(), window, cx);
@@ -399,30 +552,14 @@ impl Condr {
             })
             .child(status_glyph(entry.status, cx))
             .child(
-                h_flex()
+                div()
                     .min_w_0()
                     .flex_1()
-                    .gap_1p5()
-                    .items_baseline()
-                    .child(
-                        div()
-                            .flex_none()
-                            .when(deleted, |this| {
-                                this.line_through().text_color(theme.muted_foreground)
-                            })
-                            .child(name),
-                    )
-                    .when_some(directory, |this, directory| {
-                        this.child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(directory),
-                        )
-                    }),
+                    .truncate()
+                    .when(deleted, |this| {
+                        this.line_through().text_color(theme.muted_foreground)
+                    })
+                    .child(name.to_owned()),
             )
             .when_some(entry.stat, |this, stat| this.child(diff_stat(stat, cx)))
             .into_any_element()
@@ -720,12 +857,21 @@ fn unified_text(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChangesSection, split_path};
-    use condr_core::GitChangeStatus;
-    use std::path::Path;
+    use super::{ChangeNode, ChangesSection, change_tree};
+    use condr_core::{GitChangeEntry, GitChangeStatus};
+    use std::path::{Path, PathBuf};
+
+    fn entry(path: &str) -> GitChangeEntry {
+        GitChangeEntry {
+            path: PathBuf::from(path),
+            old_path: None,
+            status: GitChangeStatus::Modified,
+            stat: None,
+        }
+    }
 
     #[test]
-    fn statuses_land_in_zed_sections_and_paths_split_name_first() {
+    fn statuses_land_in_zed_sections() {
         assert_eq!(
             ChangesSection::of(GitChangeStatus::Conflicted),
             ChangesSection::Conflicts
@@ -742,13 +888,48 @@ mod tests {
         ] {
             assert_eq!(ChangesSection::of(status), ChangesSection::Tracked);
         }
+    }
+
+    #[test]
+    fn the_tree_folds_lone_directories_and_puts_files_after_them() {
+        let entries = [
+            entry("crates/gui/src/app.rs"),
+            entry("crates/gui/src/dock.rs"),
+            entry("crates/core/lib.rs"),
+            entry("README.md"),
+            entry("Cargo.toml"),
+        ];
+        let refs: Vec<&GitChangeEntry> = entries.iter().collect();
+        let tree = change_tree(&refs);
+        let ChangeNode::Directory {
+            label,
+            path,
+            children,
+        } = &tree[0]
+        else {
+            panic!("directories come first: {tree:?}");
+        };
+        assert_eq!(label, "crates");
+        assert_eq!(path, Path::new("crates"));
+        let labels: Vec<&str> = children
+            .iter()
+            .map(|node| match node {
+                ChangeNode::Directory { label, .. } => label.as_str(),
+                ChangeNode::File { name, .. } => name.as_str(),
+            })
+            .collect();
         assert_eq!(
-            split_path(Path::new("crates/condr-gui/src/app.rs")),
-            ("app.rs".to_owned(), Some("crates/condr-gui/src".to_owned()))
+            labels,
+            ["core", "gui/src"],
+            "a lone chain folds into one row"
         );
-        assert_eq!(
-            split_path(Path::new("README.md")),
-            ("README.md".to_owned(), None)
-        );
+        let ChangeNode::Directory { path, children, .. } = &children[1] else {
+            panic!("gui/src is a directory");
+        };
+        assert_eq!(path, Path::new("crates/gui/src"));
+        assert!(matches!(&children[0], ChangeNode::File { name, .. } if name == "app.rs"));
+        assert!(matches!(&children[1], ChangeNode::File { name, .. } if name == "dock.rs"));
+        assert!(matches!(&tree[1], ChangeNode::File { name, .. } if name == "Cargo.toml"));
+        assert!(matches!(&tree[2], ChangeNode::File { name, .. } if name == "README.md"));
     }
 }

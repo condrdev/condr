@@ -261,6 +261,8 @@ pub(crate) struct Condr {
     changes_open: bool,
     changes_width: Pixels,
     collapsed_changes_sections: HashSet<ChangesSection>,
+    /// Directories folded shut in the Changes tree, by Workspace and repository path.
+    collapsed_change_dirs: HashSet<(WorkspaceId, PathBuf)>,
     /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
     diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
     /// Diffs asked of a Server and not yet answered, so a redraw asks only once.
@@ -407,6 +409,7 @@ impl Condr {
             changes_open: true,
             changes_width: INITIAL_CHANGES_WIDTH,
             collapsed_changes_sections: HashSet::new(),
+            collapsed_change_dirs: HashSet::new(),
             diff_editors: HashMap::new(),
             pending_diffs: HashSet::new(),
             sidebar_workspace_open: HashMap::new(),

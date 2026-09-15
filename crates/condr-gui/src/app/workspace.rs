@@ -1,6 +1,7 @@
 use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target, drop_index};
 use super::*;
 use gpui_fps::fps_monitor;
+use gpui_kit::component::Colorize as _;
 
 #[derive(Clone)]
 struct DraggedTab {
@@ -90,9 +91,27 @@ impl Condr {
                 tab_id,
                 after: false,
             };
+            let hover_group: SharedString = format!("tab-hover-{}", tab_id.as_u64()).into();
+            let close_owner = cx.weak_entity();
+            // The ghost Button's hovered (or, once selected, pressed) tint over the title
+            // bar, made opaque, so the chip matches the Tab under the pointer.
+            let tint = {
+                let theme = cx.theme();
+                let amount = if tab_id == active_tab { 0.2 } else { 0.1 };
+                if theme.mode.is_dark() {
+                    theme.secondary.lighten(amount)
+                } else {
+                    theme.secondary.darken(amount)
+                }
+                .opacity(0.8)
+            };
+            let close_chip = cx.theme().background.blend(tint);
+            let close_radius = cx.theme().radius;
             let tab_row = h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
                 .flex_shrink_0()
+                .relative()
+                .group(hover_group.clone())
                 // Inside the title bar a press would otherwise start a window move;
                 // the Tab's own drag needs it.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -155,7 +174,7 @@ impl Condr {
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
                         .ghost()
                         .small()
-                        .min_w(px(64.))
+                        .min_w(px(96.))
                         .max_w(px(128.))
                         .selected(tab_id == active_tab)
                         .label(tab_label.clone())
@@ -166,6 +185,60 @@ impl Condr {
                                 this.activate_tab_on(key, tab_id, window, cx)
                             });
                         }),
+                )
+                // Hovering the Tab reveals a close button over its trailing end, as browser
+                // tabs do. It sits on a chip in the hovered Tab's own colour, with a short
+                // fade before it, so a long name runs under it instead of colliding with it.
+                .child(
+                    h_flex()
+                        .absolute()
+                        .right_0()
+                        .top_0()
+                        .bottom_0()
+                        .items_center()
+                        .opacity(0.)
+                        .group_hover(hover_group, |style| style.opacity(1.))
+                        .child(div().w(px(14.)).h_full().bg(linear_gradient(
+                            90.,
+                            linear_color_stop(close_chip.opacity(0.), 0.),
+                            linear_color_stop(close_chip, 1.),
+                        )))
+                        .child(
+                            div()
+                                .h_full()
+                                .flex()
+                                .items_center()
+                                .pr_1()
+                                .bg(close_chip)
+                                .rounded_tr(close_radius)
+                                .rounded_br(close_radius)
+                                .child(
+                                    Button::new(("close-tab", tab_id.as_u64()))
+                                        .debug_selector(move || {
+                                            format!("close-tab-{}", tab_id.as_u64())
+                                        })
+                                        .xsmall()
+                                        .ghost()
+                                        .icon(Icon::new(IconName::Close).size_3())
+                                        .tooltip("Close Tab")
+                                        .disabled(!can_mutate)
+                                        // Neither a window move nor a Tab drag may start here.
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(move |_, window, cx| {
+                                            let _ = close_owner.update(cx, |this, cx| {
+                                                this.close_tab_id(
+                                                    key,
+                                                    tab_id,
+                                                    closes_workspace,
+                                                    window,
+                                                    cx,
+                                                )
+                                            });
+                                        }),
+                                ),
+                        ),
                 )
                 .context_menu(move |menu, _, _| {
                     let rename_owner = menu_owner.clone();

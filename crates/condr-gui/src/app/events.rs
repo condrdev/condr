@@ -166,9 +166,13 @@ impl Condr {
                         // and terminal views are untouched.
                         let connection = &mut self.connections[index];
                         let previous_layout = connection.dock_projection();
+                        let previous_diff = connection.presented_diff();
                         connection.snapshot = snapshot;
                         connection.zoomed_panes = zoomed_panes.into_iter().collect();
-                        let layout_changed = connection.dock_projection() != previous_layout;
+                        // A Diff Tab retargeted to another file needs the rebuild too: that
+                        // is where its Editor learns to ask for the new diff.
+                        let layout_changed = connection.dock_projection() != previous_layout
+                            || connection.presented_diff() != previous_diff;
                         // Terminals of closed Panes go; a new Pane's terminal arrives with
                         // its first full frame.
                         if let Ok(session) = Session::restore(connection.snapshot.clone()) {

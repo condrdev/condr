@@ -230,6 +230,14 @@ impl ServerConnection {
         }
     }
 
+    /// The Diff Tab the Session presents, if the active Tab is one: its identity and file.
+    /// A retarget changes the file and nothing the Dock projection sees.
+    pub(super) fn presented_diff(&self) -> Option<(TabId, PathBuf)> {
+        let session = Session::restore(self.snapshot.clone()).ok()?;
+        let tab = session.active_workspace()?.active_tab();
+        Some((tab.id(), tab.diff()?.path().to_path_buf()))
+    }
+
     pub(super) fn dock_projection(&self) -> Option<PaneLayout> {
         let session = Session::restore(self.snapshot.clone()).ok()?;
         let tab = session.active_workspace()?.active_tab();

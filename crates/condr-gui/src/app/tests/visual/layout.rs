@@ -497,10 +497,6 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
         "server-scoped button should create a Workspace"
     );
     let tab_id = tab_id.unwrap();
-    assert!(
-        window.debug_bounds("close-tab").is_none(),
-        "Tab row should not render a close button"
-    );
 
     let tab = window
         .debug_bounds(tab_selector(tab_id))
@@ -513,12 +509,22 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
     window.simulate_keystrokes("down enter");
     window.run_until_parked();
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
-    window.update(|window, cx| {
-        window.close_dialog(cx);
-        view.update(cx, |this, _| {
-            this.send_layout(LayoutCommand::CloseTab { tab_id });
-        });
-    });
+    window.update(|window, cx| window.close_dialog(cx));
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+
+    // Hovering the Tab reveals its close button; closing the only Tab asks first, since
+    // it takes the Workspace with it.
+    let close = window
+        .debug_bounds(leaked_selector(format!("close-tab-{}", tab_id.as_u64())))
+        .expect("the Tab row should carry a hover close button");
+    assert!(
+        close.right() <= tab.right() + px(2.) && close.left() >= tab.left(),
+        "the close button overlays the Tab's trailing end: {close:?} vs {tab:?}"
+    );
+    window.simulate_mouse_move(tab.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_click(close.center(), Modifiers::default());
+    confirm_alert_dialog(window);
 
     let empty = wait_until(window, |window| {
         window.read(|app| {

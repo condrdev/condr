@@ -126,6 +126,19 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
             })
         })
     }));
+    // And its diff replaces the first one's in the Editor after that single click.
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.update(|_, cx| {
+                view.read(cx).diff_editors.values().any(|editor| {
+                    let text = editor.state.read(cx).value();
+                    text.contains("+new") && !text.contains("BETA")
+                })
+            })
+        }),
+        "the retargeted Diff Tab should show the second file's hunks"
+    );
 
     // The title bar toggle hides the sidebar.
     let toggle = window
