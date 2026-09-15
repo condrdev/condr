@@ -76,9 +76,11 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
     let root = std::env::temp_dir().join(format!("condr-bridge-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();
     let endpoint = Endpoint::local(root.join("server.sock"));
+    // An explicit `--endpoint` only connects (ADR 0015): nothing listening is an error,
+    // not a reason to start a Server there.
     let missing = Command::new(env!("CARGO_BIN_EXE_condr"))
-        .args(["server", "bridge"])
-        .env("CONDR_SOCKET_PATH", endpoint.as_local_path().unwrap())
+        .args(["server", "bridge", "--endpoint"])
+        .arg(endpoint.as_local_path().unwrap())
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -87,7 +89,7 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("condr server start"));
     assert!(
         !endpoint.as_local_path().unwrap().exists(),
-        "bridge must not start a Server"
+        "an explicit endpoint must not start a Server"
     );
 
     let server =
@@ -146,4 +148,77 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
     handle.stop();
     runtime.join().unwrap();
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// On the Server's own socket the bridge behaves like the GUI on its own machine (ADR
+/// 0015): nobody listening means the Server is started and connected to. The Server then
+/// outlives the bridge, so the test stops it the way `condr server stop` does.
+#[test]
+fn bridge_starts_the_server_on_the_default_socket_when_none_runs() {
+    let root = std::env::temp_dir().join(format!("condr-bridge-start-{}", uuid::Uuid::new_v4()));
+    let config = root.join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    let socket = root.join("server.sock");
+    let condr = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_condr"));
+        command
+            .args(args)
+            .env("CONDR_SOCKET_PATH", &socket)
+            .env("CONDR_CONFIG_DIR", &config)
+            .env_remove("CONDR_PANE_ID")
+            .env_remove("CONDR_ENV");
+        command
+    };
+
+    let mut bridge = condr(&["server", "bridge"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut input = bridge.stdin.take().unwrap();
+    let mut stdout = bridge.stdout.take().unwrap();
+    protocol::write_message(
+        &mut input,
+        &ClientMessage::Hello(Hello {
+            version: PROTOCOL_VERSION,
+            client_name: "ssh".into(),
+        }),
+    )
+    .unwrap();
+    let welcome: ServerMessage = protocol::read_message(&mut stdout).unwrap();
+    assert!(
+        matches!(welcome, ServerMessage::Welcome { error: None, .. }),
+        "the bridge should have started a Server and relayed its Welcome: {welcome:?}"
+    );
+    assert!(
+        socket.exists(),
+        "the started Server owns the default socket"
+    );
+    drop(input);
+    for _ in 0..200 {
+        if bridge.try_wait().unwrap().is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let _ = bridge.kill();
+    let _ = bridge.wait();
+
+    let stop = condr(&["server", "stop"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        stop.status.success(),
+        "the Server the bridge started keeps running until stopped: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for _ in 0..200 {
+        if std::fs::remove_dir_all(&root).is_ok() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("the stopped Server should release {}", root.display());
 }
