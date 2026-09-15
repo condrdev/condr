@@ -317,13 +317,13 @@ impl Condr {
         });
         let Some((key, workspace_id, workspace_name, git, shown)) = presented else {
             return column
-                .child(changes_header("Changes", None, cx))
+                .child(changes_header("Changes", None, None, cx))
                 .child(empty_state("No Workspace", cx))
                 .into_any_element();
         };
         let Some(git) = git else {
             return column
-                .child(changes_header("Changes", None, cx))
+                .child(changes_header("Changes", None, None, cx))
                 .child(empty_state(
                     format!("{workspace_name} is not a Git repository"),
                     cx,
@@ -331,7 +331,14 @@ impl Condr {
                 .into_any_element();
         };
         let entries = &git.changes.entries;
-        let column = column.child(changes_header("Changes", Some(entries.len()), cx));
+        let total = entries
+            .iter()
+            .filter_map(|entry| entry.stat)
+            .reduce(|sum, stat| GitDiffStat {
+                added: sum.added + stat.added,
+                deleted: sum.deleted + stat.deleted,
+            });
+        let column = column.child(changes_header("Changes", Some(entries.len()), total, cx));
         if entries.is_empty() {
             return column
                 .child(empty_state("No changes", cx))
@@ -772,7 +779,14 @@ impl Condr {
     }
 }
 
-fn changes_header(title: &str, count: Option<usize>, cx: &App) -> AnyElement {
+/// "Changes (N)" with the list's summed `+N −N` at the far end, the way Zed totals a
+/// branch; the total is left out when no file has a count.
+fn changes_header(
+    title: &str,
+    count: Option<usize>,
+    total: Option<GitDiffStat>,
+    cx: &App,
+) -> AnyElement {
     h_flex()
         .flex_none()
         .h_9()
@@ -789,6 +803,9 @@ fn changes_header(title: &str, count: Option<usize>, cx: &App) -> AnyElement {
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("({count})")),
             )
+        })
+        .when_some(total, |this, total| {
+            this.child(div().flex_1()).child(diff_stat(total, cx))
         })
         .into_any_element()
 }
