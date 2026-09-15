@@ -1,4 +1,5 @@
 mod actions;
+mod changes;
 mod config;
 mod connection;
 mod connection_status;
@@ -25,6 +26,7 @@ use crate::terminal_element::{
     HoveredTerminalLink, TerminalElement, TerminalElementProps, TerminalPalette,
     TerminalRenderCache, link_at,
 };
+use changes::*;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
     AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
@@ -255,6 +257,14 @@ pub(crate) struct Condr {
     /// only dragging the handle does.
     sidebar_width: Pixels,
     sidebar_collapsed: bool,
+    /// The Changes sidebar on the right (ADR 0017): shown, and how wide.
+    changes_open: bool,
+    changes_width: Pixels,
+    collapsed_changes_sections: HashSet<ChangesSection>,
+    /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
+    diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
+    /// Diffs asked of a Server and not yet answered, so a redraw asks only once.
+    pending_diffs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -394,6 +404,11 @@ impl Condr {
             _keep_awake: None,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             sidebar_collapsed: false,
+            changes_open: true,
+            changes_width: INITIAL_CHANGES_WIDTH,
+            collapsed_changes_sections: HashSet::new(),
+            diff_editors: HashMap::new(),
+            pending_diffs: HashSet::new(),
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

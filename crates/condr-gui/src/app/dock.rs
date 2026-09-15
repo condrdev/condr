@@ -190,6 +190,9 @@ impl Condr {
     }
 
     pub(super) fn rebuild_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.diff_editors.is_empty() {
+            self.prune_diff_editors();
+        }
         let Some(connection) = self.active_connection() else {
             self.active_dock_surface = None;
             return;
@@ -226,6 +229,10 @@ impl Condr {
         let Some(tab_layout) = tab.layout().cloned() else {
             self.target_pane = None;
             self.active_dock_surface = None;
+            if let Some(diff) = tab.diff() {
+                let path = diff.path().to_path_buf();
+                self.sync_diff_view(key, _workspace_id, tab_id, path, window, cx);
+            }
             return;
         };
         let focused = self

@@ -65,6 +65,11 @@ impl Condr {
             .then(|| self.dock_surfaces.get(&surface_key))
             .flatten()
             .map(|surface| surface.area.clone());
+        // A Diff Tab has no Dock; its body is the diff view (ADR 0017).
+        let viewer = session
+            .tab(active_tab)
+            .and_then(condr_core::Tab::diff)
+            .map(|diff| self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx));
         let closes_workspace = workspace.tabs().len() == 1;
         // Drop handlers need the source index of the dragged Tab.
         let tab_ids = Rc::new(
@@ -234,6 +239,7 @@ impl Condr {
             .size_full()
             .relative()
             .when_some(dock_area, |view, dock_area| view.child(dock_area))
+            .children(viewer)
             .when_some(status, |view, status| {
                 view.child(
                     div()
@@ -432,6 +438,7 @@ fn workspace_title_bar(
     sidebar_collapsed: bool,
     tab_strip: Option<AnyElement>,
     open_in: Option<AnyElement>,
+    changes_toggle: AnyElement,
     owner: WeakEntity<Condr>,
     cx: &App,
 ) -> TitleBar {
@@ -513,7 +520,8 @@ fn workspace_title_bar(
                         .h_full()
                         .bg(theme.background)
                         .children(tab_strip)
-                        .children(open_in),
+                        .children(open_in)
+                        .child(changes_toggle),
                 ),
         )
 }
@@ -538,6 +546,8 @@ impl Render for Condr {
             open_in,
             body,
         } = self.render_workspace(cx);
+        let changes_toggle = self.render_changes_toggle(cx);
+        let changes_column = self.changes_open.then(|| self.render_changes_sidebar(cx));
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {
@@ -594,6 +604,7 @@ impl Render for Condr {
                 self.sidebar_collapsed,
                 tab_strip,
                 open_in,
+                changes_toggle,
                 sidebar_toggle_owner,
                 cx,
             ))
@@ -610,6 +621,16 @@ impl Render for Condr {
                             let width = event.event.position.x - event.bounds.origin.x;
                             this.sidebar_width =
                                 width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
+                            cx.notify();
+                        },
+                    ))
+                    // The Changes sidebar mirrors it: its handle is on its left edge.
+                    .on_drag_move(cx.listener(
+                        |this, event: &DragMoveEvent<DraggedChanges>, _, cx| {
+                            let right = event.bounds.origin.x + event.bounds.size.width;
+                            let width = right - event.event.position.x;
+                            this.changes_width =
+                                width.max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH).round();
                             cx.notify();
                         },
                     ))
@@ -646,7 +667,36 @@ impl Render for Condr {
                                 ))
                             }),
                     )
-                    .child(workspace),
+                    .child(workspace)
+                    .when_some(changes_column, |this, changes| {
+                        this.child(
+                            div()
+                                .debug_selector(|| "condr-changes-column".into())
+                                .relative()
+                                .w(self.changes_width)
+                                .flex_none()
+                                .h_full()
+                                .child(changes)
+                                .child(deferred(
+                                    div()
+                                        .id("condr-changes-resize")
+                                        .debug_selector(|| "condr-changes-resize".into())
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .left(-SIDEBAR_RESIZE_HANDLE_WIDTH / 2.)
+                                        .w(SIDEBAR_RESIZE_HANDLE_WIDTH)
+                                        .occlude()
+                                        .cursor_col_resize()
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_drag(DraggedChanges, |_, _, _, cx| {
+                                            cx.new(|_| EmptyView)
+                                        }),
+                                )),
+                        )
+                    }),
             )
             .children(dialog_layer)
             .when(self.fps_monitor, |this| this.child(fps_monitor(window, cx)))

@@ -36,6 +36,11 @@ pub(in crate::app) enum CondrIconName {
     Minimize2,
     /// Lucide `coffee`: the keep-awake toggle, as caffeinate and its kin draw it.
     Coffee,
+    /// Lucide `square-plus` / `square-dot` / `square-minus`: a change's status in the
+    /// Changes sidebar, as Zed's git panel draws added, modified and deleted.
+    SquarePlus,
+    SquareDot,
+    SquareMinus,
     /// The agent CLIs' marks (assets/icons/NOTICE-AGENT-ICONS), recolored to
     /// `currentColor` so they follow the text like every other icon.
     Claude,
@@ -93,6 +98,9 @@ impl IconNamed for CondrIconName {
             Self::Maximize2 => "icons/maximize-2.svg",
             Self::Minimize2 => "icons/minimize-2.svg",
             Self::Coffee => "icons/coffee.svg",
+            Self::SquarePlus => "icons/square-plus.svg",
+            Self::SquareDot => "icons/square-dot.svg",
+            Self::SquareMinus => "icons/square-minus.svg",
             Self::Claude => "icons/claude.svg",
             Self::Codex => "icons/codex.svg",
             Self::OpenCode => "icons/opencode.svg",

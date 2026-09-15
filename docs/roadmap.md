@@ -121,6 +121,7 @@ M0 原本不做安装器、checksums 和 macOS 构建，M1 关闭后这些已经
 - Pane header 新增缩放切换按钮，缩放中的 Pane 保留活动边框，不再与单 Pane Tab 混淆；远程粘贴图片期间 header 显示「Pasting image…」直到整帧送出。
 - Workspace 的 Tab 条移入标题栏，标题栏左段与侧栏同宽同色，Pane 拿回 Tab 条原来占用的高度。标题栏内的可点元素必须在按下时截获事件，否则 Windows 会把按下当作拖动窗口而丢掉点击。
 - 标题栏 Tab 条右侧新增「Open in」分割按钮：左半用当前项目的编辑器打开 Workspace 根目录，右半下拉列出可用项。可用项 = 启动时在 GUI 这台机器上探测到的内置预设（Zed、VS Code、Cursor、IntelliJ IDEA；PATH 加各平台已知安装路径）、`[[client.editors]]` 里的自定义命令（目录追加为末参数）、永远存在的系统文件管理器。探测和 spawn 都在 GUI 进程内，因此只对本机 Server 启用，远程 Server 上禁用并说明原因；VS Code Remote over SSH 留作后续。选择按项目（worktree 的父仓库根）记在 `[[client.workspace_editors]]`，最近一次成功启动的编辑器记在 `[client] editor` 作为新项目的默认；只在启动成功后写入。
+- 右侧新增「Changes」侧栏（[ADR 0017](adr/0017-changes-sidebar-and-diff-tab.md)）：Server 用 gix 把 `git status` 折成每路径一个状态（Conflicts / Tracked / Untracked 三段，按路径平铺，行内 `+N −N`），随 `WorkspaceGitChanged` 推送，`notify` 监听工作树与终端活动共同触发同一次重算。点击文件发 `ShowDiff`，每 Workspace 只有一个「Diff」Tab（Tab 的内容类型，不是 Pane），按需向 Server 请求单文件 hunk，用 Kit 只读 `Editor` + `diff` grammar + 行底色渲染。只读；分支 vs base、语法高亮、split 视图留待后续。
 
 M1 可选项中的桌面通知、终端内搜索和命令注册表至今没有出现足以触发实现的摩擦记录，仍保持未实现。
 

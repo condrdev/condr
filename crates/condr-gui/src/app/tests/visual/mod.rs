@@ -1,3 +1,4 @@
+mod changes;
 mod connection;
 mod dock;
 mod layout;

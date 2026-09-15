@@ -37,6 +37,8 @@ pub(super) struct ServerConnection {
     /// File diffs the Server answered, by Workspace and path (ADR 0017). Cleared for a
     /// Workspace whenever its Git state changes, so a shown diff is refetched.
     pub(super) diffs: HashMap<(WorkspaceId, PathBuf), Result<FileDiff, String>>,
+    /// Bumped whenever `diffs` changes, so a Diff Tab knows its text is stale.
+    pub(super) diffs_generation: u64,
     pub(super) zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
     pub(super) settings: ServerSettings,
@@ -107,6 +109,7 @@ impl ServerConnection {
             pasting_images: HashSet::new(),
             workspace_git: HashMap::new(),
             diffs: HashMap::new(),
+            diffs_generation: 0,
             zoomed_panes: HashSet::new(),
             settings: ServerSettings::default(),
             hooks: Vec::new(),
@@ -208,6 +211,7 @@ impl ServerConnection {
                 .or_insert_with(|| AgentTracker::new(agent.state));
         }
         self.diffs.clear();
+        self.diffs_generation += 1;
         self.workspace_git = bootstrap
             .workspace_git
             .into_iter()

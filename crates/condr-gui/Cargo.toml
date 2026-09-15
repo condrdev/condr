@@ -16,7 +16,7 @@ test-support = ["gpui-kit/test-support"]
 
 [dependencies]
 async-channel.workspace = true
-gpui-kit.workspace = true
+gpui-kit = { workspace = true, features = ["tree-sitter-diff"] }
 gpui-fps.workspace = true
 image.workspace = true
 condr-core = { path = "../condr-core" }

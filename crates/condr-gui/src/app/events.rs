@@ -155,6 +155,7 @@ impl Condr {
                 }
                 self.connections[index].sequence = sequence;
                 let notify;
+                let mut git_changed = false;
                 match event {
                     SessionEvent::LayoutChanged {
                         snapshot,
@@ -268,10 +269,17 @@ impl Condr {
                         } else {
                             connection.workspace_git.remove(&workspace_id);
                         }
-                        // The working tree moved: every diff of it is stale.
+                        // The working tree moved: every diff of it is stale, and a Diff Tab
+                        // showing one asks again on the rebuild.
                         connection
                             .diffs
                             .retain(|(diff_workspace, _), _| *diff_workspace != workspace_id);
+                        connection.diffs_generation += 1;
+                        self.pending_diffs
+                            .retain(|(pending_key, pending_workspace, _)| {
+                                *pending_key != key || *pending_workspace != workspace_id
+                            });
+                        git_changed = true;
                         notify = true;
                     }
                     SessionEvent::TerminalTitleChanged { pane_id, title } => {
@@ -301,6 +309,8 @@ impl Condr {
                     }
                 }
                 IncomingEffect {
+                    // A presented Diff Tab refetches its file on the rebuild.
+                    rebuild: git_changed && self.active_connection == key,
                     notify,
                     ..IncomingEffect::default()
                 }
@@ -599,10 +609,14 @@ impl Condr {
                 result,
                 ..
             } => {
-                self.connections[index]
-                    .diffs
-                    .insert((workspace_id, path), result);
+                self.pending_diffs
+                    .remove(&(key, workspace_id, path.clone()));
+                let connection = &mut self.connections[index];
+                connection.diffs.insert((workspace_id, path), result);
+                connection.diffs_generation += 1;
+                // The rebuild hands the answer to the Diff Tab's Editor.
                 IncomingEffect {
+                    rebuild: self.active_connection == key,
                     notify: true,
                     ..IncomingEffect::default()
                 }

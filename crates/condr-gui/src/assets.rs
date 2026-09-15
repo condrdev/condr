@@ -22,7 +22,7 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 /// Condr's own icons: status glyphs, the marks of the agent CLIs, kept for every agent
 /// Condr may come to name, then the marks of the editors "Open in" launches (both under
 /// assets/icons/NOTICE-AGENT-ICONS).
-const CONDR_ICON_PATHS: [&str; 25] = [
+const CONDR_ICON_PATHS: [&str; 28] = [
     "icons/circle.svg",
     "icons/circle-filled.svg",
     "icons/circle-alert.svg",
@@ -45,6 +45,9 @@ const CONDR_ICON_PATHS: [&str; 25] = [
     "icons/cursor.svg",
     "icons/grok.svg",
     "icons/antigravity.svg",
+    "icons/square-plus.svg",
+    "icons/square-minus.svg",
+    "icons/square-dot.svg",
     "icons/vscode.svg",
     "icons/zed.svg",
     "icons/intellij.svg",
@@ -131,6 +134,15 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/antigravity.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/antigravity.svg"
+            )))),
+            "icons/square-plus.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/square-plus.svg"
+            )))),
+            "icons/square-minus.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/square-minus.svg"
+            )))),
+            "icons/square-dot.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/square-dot.svg"
             )))),
             "icons/vscode.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/vscode.svg"

@@ -110,7 +110,7 @@ impl Condr {
         }
     }
 
-    fn restored_sessions(&self) -> HashMap<ConnectionKey, Session> {
+    pub(super) fn restored_sessions(&self) -> HashMap<ConnectionKey, Session> {
         self.connections
             .iter()
             .filter_map(|connection| {
