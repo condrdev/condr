@@ -262,13 +262,16 @@ impl Condr {
                         notify = true;
                     }
                     SessionEvent::WorkspaceGitChanged { workspace_id, git } => {
+                        let connection = &mut self.connections[index];
                         if let Some(git) = git {
-                            self.connections[index]
-                                .workspace_git
-                                .insert(workspace_id, git);
+                            connection.workspace_git.insert(workspace_id, git);
                         } else {
-                            self.connections[index].workspace_git.remove(&workspace_id);
+                            connection.workspace_git.remove(&workspace_id);
                         }
+                        // The working tree moved: every diff of it is stale.
+                        connection
+                            .diffs
+                            .retain(|(diff_workspace, _), _| *diff_workspace != workspace_id);
                         notify = true;
                     }
                     SessionEvent::TerminalTitleChanged { pane_id, title } => {
@@ -585,6 +588,20 @@ impl Condr {
                 if let Some(settings) = self.settings_view.as_ref().and_then(WeakEntity::upgrade) {
                     settings.update(cx, |_, cx| cx.notify());
                 }
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::GitDiff {
+                workspace_id,
+                path,
+                result,
+                ..
+            } => {
+                self.connections[index]
+                    .diffs
+                    .insert((workspace_id, path), result);
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()

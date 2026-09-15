@@ -70,6 +70,18 @@ pub enum ClientMessage {
         pane_id: PaneId,
         lines: u32,
     },
+    /// One file's working-tree diff against `HEAD` (ADR 0017), answered with
+    /// [`ServerMessage::GitDiff`]. No Session control needed. `against` is fixed to `HEAD`
+    /// today and reserved for the branch-against-base view.
+    GitDiff {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root.
+        path: PathBuf,
+        against: DiffBase,
+    },
     /// Agent orchestration is owned by the Server, including name resolution and waits.
     Agent {
         server_id: ServerId,
@@ -99,6 +111,13 @@ pub enum ClientMessage {
         command: ServerAdminCommand,
     },
     Detach,
+}
+
+/// What a diff compares the working tree against.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum DiffBase {
+    #[default]
+    Head,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -297,6 +316,13 @@ pub enum LayoutCommand {
     CloseWorkspace {
         workspace_id: WorkspaceId,
     },
+    /// Shows `path`'s working-tree diff in the Workspace's single Diff Tab, creating the
+    /// Tab the first time and retargeting it afterwards, and activates it (ADR 0017).
+    ShowDiff {
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root.
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -314,6 +340,9 @@ pub enum LayoutResult {
     },
     PaneCreated {
         pane_id: PaneId,
+    },
+    DiffShown {
+        tab_id: TabId,
     },
 }
 
@@ -430,6 +459,8 @@ pub struct WorkspaceGitSnapshot {
     pub branch: Option<String>,
     pub linked_worktree: bool,
     pub upstream: Option<crate::GitUpstream>,
+    /// The working tree against `HEAD` (ADR 0017), computed in the same pass as the rest.
+    pub changes: crate::GitChanges,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -613,6 +644,14 @@ pub enum ServerMessage {
     PaneText {
         pane_id: PaneId,
         text: String,
+    },
+    /// The reply to [`ClientMessage::GitDiff`].
+    GitDiff {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root, as requested.
+        path: PathBuf,
+        result: Result<crate::FileDiff, String>,
     },
     AgentResult {
         result: Result<AgentResponse, AgentError>,

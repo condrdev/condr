@@ -121,6 +121,7 @@ fn restart_falls_back_from_a_missing_pane_cwd_and_persists_the_repair() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     assert!(session.set_pane_cwd(pane_id, Some(missing_cwd)));
     let absent_cwd_pane = session
@@ -203,6 +204,7 @@ fn restart_prunes_only_failed_panes_and_persists_the_repair() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     assert!(session.set_pane_cwd(surviving_pane, Some(valid_cwd.clone())));
     let failed_pane = session
@@ -236,13 +238,16 @@ fn restart_prunes_only_failed_panes_and_persists_the_repair() {
     assert_eq!(workspace.active_tab().id(), tab_id);
     assert_eq!(workspace.active_tab().name(), "Recovered Tab");
     assert_eq!(workspace.active_tab().panes().len(), 1);
-    assert_eq!(workspace.active_tab().focused_pane().id(), surviving_pane);
     assert_eq!(
-        workspace.active_tab().layout(),
+        workspace.active_tab().focused_pane().unwrap().id(),
+        surviving_pane
+    );
+    assert_eq!(
+        workspace.active_tab().layout().unwrap(),
         &condr_core::PaneLayout::Pane(surviving_pane)
     );
     assert_eq!(
-        workspace.active_tab().focused_pane().cwd(),
+        workspace.active_tab().focused_pane().unwrap().cwd(),
         Some(valid_cwd.as_path())
     );
     let repaired_snapshot = bootstrap.snapshot.clone();
@@ -381,7 +386,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
             (
                 workspace.id(),
                 workspace.active_tab().id(),
-                workspace.active_tab().focused_pane().id(),
+                workspace.active_tab().focused_pane().unwrap().id(),
             )
         };
         mutate(LayoutCommand::RenameWorkspace {
@@ -636,6 +641,7 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     write_snapshot_fixture(snapshot_path.clone(), session.snapshot());
 

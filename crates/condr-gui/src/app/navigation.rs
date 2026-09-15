@@ -119,7 +119,15 @@ impl Condr {
     pub(super) fn connection_focused_pane(&self, key: ConnectionKey) -> Option<PaneId> {
         self.connection(key)
             .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
-            .and_then(|session| Some(session.active_workspace()?.active_tab().focused_pane().id()))
+            .and_then(|session| {
+                Some(
+                    session
+                        .active_workspace()?
+                        .active_tab()
+                        .focused_pane()?
+                        .id(),
+                )
+            })
     }
 
     pub(super) fn select_server(
@@ -262,7 +270,10 @@ impl Condr {
                 let authoritative_target = session.active_workspace().is_some_and(|workspace| {
                     workspace.id() == workspace_id
                         && workspace.active_tab().id() == tab_id
-                        && workspace.active_tab().focused_pane().id() == pane_id
+                        && workspace
+                            .active_tab()
+                            .focused_pane()
+                            .is_some_and(|pane| pane.id() == pane_id)
                 });
                 let (Some(server_id), Some(runtime_epoch), Some(session_id)) = (
                     connection.server_id,

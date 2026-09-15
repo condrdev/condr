@@ -60,6 +60,19 @@ fn write_snapshot_fixture(path: PathBuf, snapshot: condr_core::SessionSnapshot) 
     std::fs::write(path, snapshot.to_bytes().unwrap()).unwrap();
 }
 
+/// Mirrors the snapshot's Tab content enum, variant order included.
+#[derive(serde::Serialize)]
+enum EncodedTabContent {
+    Terminals {
+        panes: Vec<(PaneId, Option<PathBuf>, Option<condr_core::AgentResume>)>,
+        focused_pane: PaneId,
+        focus_history: Vec<PaneId>,
+        layout: (u32, Vec<(u32, PaneId)>),
+    },
+    #[expect(dead_code, reason = "the Diff variant keeps the wire order honest")]
+    Diff { path: PathBuf },
+}
+
 fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
     let mut session = Session::new();
     let workspace_id = session
@@ -67,7 +80,7 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
         .expect("Workspace capacity");
     let tab = session.active_workspace().unwrap().active_tab();
     let tab_id = tab.id();
-    let pane_id = tab.focused_pane().id();
+    let pane_id = tab.focused_pane().unwrap().id();
     bincode::serialize(&(
         1u32,
         vec![(
@@ -78,10 +91,12 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
             vec![(
                 tab_id,
                 String::new(),
-                vec![(pane_id, Some(root), Option::<condr_core::AgentResume>::None)],
-                pane_id,
-                Vec::<PaneId>::new(),
-                (u32::MAX, vec![(0u32, pane_id)]),
+                EncodedTabContent::Terminals {
+                    panes: vec![(pane_id, Some(root), Option::<condr_core::AgentResume>::None)],
+                    focused_pane: pane_id,
+                    focus_history: Vec::<PaneId>::new(),
+                    layout: (u32::MAX, vec![(0u32, pane_id)]),
+                },
             )],
             tab_id,
         )],

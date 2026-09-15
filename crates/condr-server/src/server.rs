@@ -10,6 +10,7 @@ mod subscriptions;
 mod terminal_monitor;
 mod terminal_state;
 mod terminal_stream;
+mod workspace_git;
 
 use crate::ClientConnection;
 use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};
@@ -24,7 +25,7 @@ use client::*;
 #[cfg(test)]
 use condr_core::protocol::BootstrapAssembler;
 use condr_core::protocol::{
-    BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage, FramingError, Hello,
+    BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage, DiffBase, FramingError, Hello,
     LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
     PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerId,
@@ -59,6 +60,7 @@ use terminal_stream::{
     TerminalRenderPaneSnapshot, TerminalRenderSnapshot, frame_terminal_batches,
     prepare_terminal_render,
 };
+use workspace_git::*;
 
 pub use config::{ServerConfig, load_listen, save_listen};
 pub use local::{
@@ -186,13 +188,18 @@ impl BoundServer {
                 return Err(error);
             }
         };
+        let state = Arc::new(Mutex::new(state));
+        state
+            .lock()
+            .expect("server state lock poisoned")
+            .start_git_watcher(Arc::downgrade(&state));
         Ok(Self {
             local,
             tcp,
             endpoint,
             stop: Arc::new(AtomicBool::new(false)),
             lifecycle: Arc::new(ServerLifecycle::default()),
-            state: Arc::new(Mutex::new(state)),
+            state,
             startup_terminals,
         })
     }
@@ -443,7 +450,10 @@ struct RuntimeState {
     terminal_titles: std::collections::HashMap<PaneId, String>,
     /// BEL attention is controller-only because PTY focus has one authoritative owner.
     pending_terminal_bells: std::collections::HashSet<PaneId>,
-    workspace_git: std::collections::HashMap<WorkspaceId, GitRepository>,
+    workspace_git: std::collections::HashMap<WorkspaceId, WorkspaceGit>,
+    /// Recomputes `workspace_git` when files change; `None` until the state has its shared
+    /// handle, and in unit tests.
+    git_watcher: Option<GitWatcher>,
     workspace_git_scanned_at: std::collections::HashMap<WorkspaceId, Instant>,
     /// HEAD fingerprints at the last rediscovery, shared by every Pane of the Workspace.
     workspace_git_heads: std::collections::HashMap<WorkspaceId, GitFingerprint>,
@@ -586,6 +596,7 @@ impl RuntimeState {
             terminal_titles: std::collections::HashMap::new(),
             pending_terminal_bells: std::collections::HashSet::new(),
             workspace_git: std::collections::HashMap::new(),
+            git_watcher: None,
             workspace_git_scanned_at: std::collections::HashMap::new(),
             workspace_git_heads: std::collections::HashMap::new(),
             worktree_root: default_worktree_root(),

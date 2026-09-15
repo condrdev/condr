@@ -52,7 +52,7 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
         .expect("test Workspace capacity");
     let workspace = session.workspace(workspace_id).unwrap();
     let tab_id = workspace.active_tab().id();
-    let first_pane = workspace.active_tab().focused_pane().id();
+    let first_pane = workspace.active_tab().focused_pane().unwrap().id();
     let second_pane = session
         .split_pane(first_pane, SplitDirection::Horizontal, 0.3)
         .expect("test Pane capacity");
@@ -137,7 +137,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
             };
             condr.dock_surfaces.contains_key(&surface_key).then_some((
                 tab.id(),
-                tab.focused_pane().id(),
+                tab.focused_pane().unwrap().id(),
                 surface_key,
             ))
         });
@@ -159,7 +159,8 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
             let session = condr.active_session().unwrap();
             session.tab(tab_id).is_some_and(|tab| {
                 tab.panes().len() == 2
-                    && condr.dock_surfaces[&surface_key].projection.as_ref() == Some(tab.layout())
+                    && condr.dock_surfaces[&surface_key].projection.as_ref()
+                        == Some(tab.layout().unwrap())
             })
         })
     }));
@@ -177,7 +178,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
         view.update(cx, |this, cx| {
             let mut local = Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
             assert!(local.set_tab_split_ratios(tab_id, &[0.72]));
-            let local_layout = local.tab(tab_id).unwrap().layout().clone();
+            let local_layout = local.tab(tab_id).unwrap().layout().unwrap().clone();
             let surface = this.dock_surfaces.get(&surface_key).unwrap();
             assert_eq!(surface.programmatic_layout_events, 0);
             let available_size = surface.area.read(cx).bounds().size;
@@ -200,7 +201,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
         let session = condr.active_session().unwrap();
         let tab = session.tab(tab_id).unwrap();
         (
-            tab.layout().clone(),
+            tab.layout().unwrap().clone(),
             tab.panes().iter().map(|pane| pane.id()).collect::<Vec<_>>(),
         )
     });
@@ -274,7 +275,10 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         tree_ids = window.read(|app| {
             let session = view.read(app).active_session()?;
             let workspace = session.active_workspace()?;
-            Some((workspace.id(), workspace.active_tab().focused_pane().id()))
+            Some((
+                workspace.id(),
+                workspace.active_tab().focused_pane().unwrap().id(),
+            ))
         });
         tree_ids.is_some()
     }));

@@ -169,7 +169,7 @@ impl RuntimeState {
             LayoutCommand::CreateTab { workspace_id, .. } => self
                 .session
                 .workspace(*workspace_id)
-                .map(|workspace| workspace.active_tab().focused_pane().id()),
+                .and_then(|workspace| Some(workspace.active_tab().focused_pane()?.id())),
             LayoutCommand::SplitPane { pane_id, .. } => Some(*pane_id),
             _ => None,
         };

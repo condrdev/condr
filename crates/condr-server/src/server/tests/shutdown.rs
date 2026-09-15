@@ -95,6 +95,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
 
     let stopper_connection = ClientConnection::connect(&endpoint, "blocked-resize-stop").unwrap();

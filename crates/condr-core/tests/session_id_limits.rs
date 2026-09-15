@@ -42,6 +42,7 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let before = session.snapshot();
 

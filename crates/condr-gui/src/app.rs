@@ -34,11 +34,12 @@ use condr_core::protocol::{
     TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame, relative_age,
 };
 use condr_core::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, PaneDirection, PaneId,
-    PaneLayout, Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun, TerminalCommand,
-    TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
-    TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, WorkspaceId,
+    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, FileDiff, PaneDirection,
+    PaneId, PaneLayout, Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun,
+    TerminalCommand, TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers,
+    TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
+    TerminalSelection, TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame,
+    WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, Endpoint, ServerConfig, StaticKey, TcpEndpoint,

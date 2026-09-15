@@ -1,4 +1,5 @@
 use super::*;
+use crate::snapshot::TabContentSnapshot;
 
 impl Session {
     pub fn snapshot(&self) -> SessionSnapshot {
@@ -18,18 +19,25 @@ impl Session {
                         .map(|tab| TabSnapshot {
                             id: tab.id,
                             name: tab.name.clone(),
-                            panes: tab
-                                .panes
-                                .iter()
-                                .map(|pane| PaneSnapshot {
-                                    id: pane.id,
-                                    cwd: pane.cwd.clone(),
-                                    agent_resume: pane.agent_resume.clone(),
-                                })
-                                .collect(),
-                            focused_pane: tab.focused_pane,
-                            focus_history: tab.focus_history.clone(),
-                            layout: LayoutSnapshot::from_layout(&tab.layout),
+                            content: match &tab.content {
+                                TabContent::Terminals(terminals) => TabContentSnapshot::Terminals {
+                                    panes: terminals
+                                        .panes
+                                        .iter()
+                                        .map(|pane| PaneSnapshot {
+                                            id: pane.id,
+                                            cwd: pane.cwd.clone(),
+                                            agent_resume: pane.agent_resume.clone(),
+                                        })
+                                        .collect(),
+                                    focused_pane: terminals.focused_pane,
+                                    focus_history: terminals.focus_history.clone(),
+                                    layout: LayoutSnapshot::from_layout(&terminals.layout),
+                                },
+                                TabContent::Diff(diff) => TabContentSnapshot::Diff {
+                                    path: diff.path.clone(),
+                                },
+                            },
                         })
                         .collect(),
                     active_tab: workspace.active_tab,
@@ -49,22 +57,32 @@ impl Session {
         for workspace in snapshot.workspaces {
             let mut tabs = Vec::with_capacity(workspace.tabs.len());
             for tab in workspace.tabs {
+                let content = match tab.content {
+                    TabContentSnapshot::Terminals {
+                        panes,
+                        focused_pane,
+                        focus_history,
+                        layout,
+                    } => TabContent::Terminals(TerminalLayout {
+                        panes: panes
+                            .into_iter()
+                            .map(|pane| Pane {
+                                id: pane.id,
+                                cwd: pane.cwd,
+                                agent_resume: pane.agent_resume,
+                            })
+                            .collect(),
+                        focused_pane,
+                        focus_history,
+                        layout: restore_layout(&layout),
+                        zoomed_pane: None,
+                    }),
+                    TabContentSnapshot::Diff { path } => TabContent::Diff(DiffView { path }),
+                };
                 tabs.push(Tab {
                     id: tab.id,
                     name: tab.name,
-                    panes: tab
-                        .panes
-                        .into_iter()
-                        .map(|pane| Pane {
-                            id: pane.id,
-                            cwd: pane.cwd,
-                            agent_resume: pane.agent_resume,
-                        })
-                        .collect(),
-                    focused_pane: tab.focused_pane,
-                    focus_history: tab.focus_history,
-                    layout: restore_layout(&tab.layout),
-                    zoomed_pane: None,
+                    content,
                 });
             }
             workspaces.push(Workspace {
@@ -128,17 +146,33 @@ impl Session {
             {
                 return Err(SnapshotError::Invalid("active Tab is missing"));
             }
+            let mut diff_tabs = 0;
             for tab in &workspace.tabs {
                 validate_id(tab.id.0, &mut max_id)?;
                 if !tab_ids.insert(tab.id) {
                     return Err(SnapshotError::Invalid("duplicate Tab ID"));
                 }
-                if tab.panes.is_empty() {
+                let terminals = match &tab.content {
+                    TabContent::Terminals(terminals) => terminals,
+                    TabContent::Diff(diff) => {
+                        if !valid_diff_path(&diff.path) {
+                            return Err(SnapshotError::Invalid("invalid Diff Tab path"));
+                        }
+                        diff_tabs += 1;
+                        if diff_tabs > 1 {
+                            return Err(SnapshotError::Invalid(
+                                "a Workspace has at most one Diff Tab",
+                            ));
+                        }
+                        continue;
+                    }
+                };
+                if terminals.panes.is_empty() {
                     return Err(SnapshotError::Invalid("invalid Tab"));
                 }
 
                 let mut tab_pane_ids = HashSet::new();
-                for pane in &tab.panes {
+                for pane in &terminals.panes {
                     validate_id(pane.id.0, &mut max_id)?;
                     if pane
                         .agent_resume
@@ -151,17 +185,19 @@ impl Session {
                         return Err(SnapshotError::Invalid("duplicate Pane ID"));
                     }
                 }
-                if !tab_pane_ids.contains(&tab.focused_pane) {
+                if !tab_pane_ids.contains(&terminals.focused_pane) {
                     return Err(SnapshotError::Invalid("focused Pane is missing"));
                 }
                 let mut history = HashSet::new();
-                if tab.focus_history.iter().any(|id| {
-                    *id == tab.focused_pane || !tab_pane_ids.contains(id) || !history.insert(*id)
+                if terminals.focus_history.iter().any(|id| {
+                    *id == terminals.focused_pane
+                        || !tab_pane_ids.contains(id)
+                        || !history.insert(*id)
                 }) {
                     return Err(SnapshotError::Invalid("invalid Pane focus history"));
                 }
                 let mut layout_panes = HashSet::new();
-                validate_layout(&tab.layout, &mut layout_panes)?;
+                validate_layout(&terminals.layout, &mut layout_panes)?;
                 if layout_panes != tab_pane_ids {
                     return Err(SnapshotError::Invalid("layout Pane set does not match Tab"));
                 }
@@ -187,14 +223,17 @@ fn validate_snapshot_resources(snapshot: &SessionSnapshot) -> Result<(), Snapsho
             return Err(SnapshotError::Invalid("too many Tabs"));
         }
         for tab in &workspace.tabs {
+            let TabContentSnapshot::Terminals { panes, layout, .. } = &tab.content else {
+                continue;
+            };
             pane_count = pane_count
-                .checked_add(tab.panes.len())
+                .checked_add(panes.len())
                 .ok_or(SnapshotError::Invalid("too many Panes"))?;
             if pane_count > MAX_SNAPSHOT_PANES {
                 return Err(SnapshotError::Invalid("too many Panes"));
             }
             layout_node_count = layout_node_count
-                .checked_add(tab.layout.nodes.len())
+                .checked_add(layout.nodes.len())
                 .ok_or(SnapshotError::Invalid("too many layout nodes"))?;
             if layout_node_count > MAX_SNAPSHOT_LAYOUT_NODES {
                 return Err(SnapshotError::Invalid("too many layout nodes"));
@@ -204,11 +243,14 @@ fn validate_snapshot_resources(snapshot: &SessionSnapshot) -> Result<(), Snapsho
 
     for workspace in &snapshot.workspaces {
         for tab in &workspace.tabs {
-            let pane_ids = tab.panes.iter().map(|pane| pane.id).collect::<HashSet<_>>();
-            if pane_ids.len() != tab.panes.len() {
+            let TabContentSnapshot::Terminals { panes, layout, .. } = &tab.content else {
+                continue;
+            };
+            let pane_ids = panes.iter().map(|pane| pane.id).collect::<HashSet<_>>();
+            if pane_ids.len() != panes.len() {
                 return Err(SnapshotError::Invalid("duplicate Pane ID"));
             }
-            validate_layout_snapshot(&tab.layout, &pane_ids)?;
+            validate_layout_snapshot(layout, &pane_ids)?;
         }
     }
     Ok(())

@@ -41,6 +41,7 @@ fn workspace_pane(
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     // Leave room for the shell's echoed input markers.
     send_terminal(

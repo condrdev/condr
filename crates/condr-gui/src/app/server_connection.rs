@@ -34,6 +34,9 @@ pub(super) struct ServerConnection {
     /// Panes with a clipboard image still on its way to the Server; the header says so.
     pub(super) pasting_images: HashSet<PaneId>,
     pub(super) workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
+    /// File diffs the Server answered, by Workspace and path (ADR 0017). Cleared for a
+    /// Workspace whenever its Git state changes, so a shown diff is refetched.
+    pub(super) diffs: HashMap<(WorkspaceId, PathBuf), Result<FileDiff, String>>,
     pub(super) zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
     pub(super) settings: ServerSettings,
@@ -103,6 +106,7 @@ impl ServerConnection {
             attention: HashSet::new(),
             pasting_images: HashSet::new(),
             workspace_git: HashMap::new(),
+            diffs: HashMap::new(),
             zoomed_panes: HashSet::new(),
             settings: ServerSettings::default(),
             hooks: Vec::new(),
@@ -203,6 +207,7 @@ impl ServerConnection {
                 .and_modify(|tracker| tracker.update(agent.state, false))
                 .or_insert_with(|| AgentTracker::new(agent.state));
         }
+        self.diffs.clear();
         self.workspace_git = bootstrap
             .workspace_git
             .into_iter()
@@ -229,7 +234,7 @@ impl ServerConnection {
             .copied()
             .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
             .map(PaneLayout::Pane)
-            .or_else(|| Some(tab.layout().clone()))
+            .or_else(|| tab.layout().cloned())
     }
 
     /// Asks the Server to install, remove or report one agent's hooks on its machine.

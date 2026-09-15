@@ -47,13 +47,19 @@ An absolute directory on the owning Server, selected when a Workspace is created
 _Avoid_: Current directory, identity cwd
 
 **Tab**:
-A terminal layout within a Workspace, optionally named by the user. It owns an arrangement of Panes and its current focus. The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
+A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (today the single Diff Tab, ADR 0017). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
 
 `Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace. A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
 
 **Pane**:
-A terminal location and layout leaf within a Tab. It may show a shell or an Agent running inside that shell.
+A terminal location and layout leaf within a terminal Tab. It may show a shell or an Agent running inside that shell.
 _Avoid_: Agent
+
+**Diff Tab**:
+The one viewer Tab a Workspace may have, showing one file's working-tree changes against `HEAD` as the Server computes them (ADR 0017). Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its name starts as "Diff" and is display only.
+
+**Changes**:
+The right sidebar listing the presented Workspace's working-tree changes against `HEAD`, index and worktree folded into one status per path, read-only (ADR 0017).
 
 **Terminal**:
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent.

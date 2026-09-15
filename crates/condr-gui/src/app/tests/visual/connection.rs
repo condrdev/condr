@@ -23,6 +23,7 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
                 .unwrap()
                 .active_tab()
                 .focused_pane()
+                .unwrap()
                 .id();
             for (offset, event) in [
                 SessionEvent::LayoutChanged {
@@ -362,7 +363,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
             condr
                 .dock_surfaces
                 .contains_key(&surface_key)
-                .then_some((surface_key, tab.focused_pane().id()))
+                .then_some((surface_key, tab.focused_pane().unwrap().id()))
         });
         active_surface.is_some()
     }));
@@ -392,7 +393,12 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
         view.update(cx, |this, cx| {
             let mut local = Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
             assert!(local.set_tab_split_ratios(surface_key.tab_id, &[0.72]));
-            let local_layout = local.tab(surface_key.tab_id).unwrap().layout().clone();
+            let local_layout = local
+                .tab(surface_key.tab_id)
+                .unwrap()
+                .layout()
+                .unwrap()
+                .clone();
             let surface = this.dock_surfaces.get(&surface_key).unwrap();
             let available_size = surface.area.read(cx).bounds().size;
             let area = surface.area.clone();
@@ -431,6 +437,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
                 .tab(surface_key.tab_id)
                 .unwrap()
                 .layout()
+                .unwrap()
                 .clone();
             let rebuilds = this.dock_rebuild_count;
             this.pending_sizes
@@ -501,7 +508,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
         surface.pending_projection_request.is_none()
             && surface.pending_projection_applied_sequence.is_none()
             && surface.projection.as_ref()
-                == Some(session.tab(surface_key.tab_id).unwrap().layout())
+                == Some(session.tab(surface_key.tab_id).unwrap().layout().unwrap())
     }));
 
     window.update(|window, cx| {
@@ -556,6 +563,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
             .unwrap()
             .active_tab()
             .focused_pane()
+            .unwrap()
             .id();
         (
             connection.server_id,
@@ -1052,6 +1060,7 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
                 .unwrap()
                 .active_tab()
                 .focused_pane()
+                .unwrap()
                 .id();
             let agent = |state| {
                 Some(AgentSnapshot {

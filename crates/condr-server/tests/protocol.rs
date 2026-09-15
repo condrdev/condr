@@ -98,7 +98,10 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
                 };
                 let session = client.session().unwrap();
                 assert_eq!(session.workspace(workspace_id).unwrap().name(), name);
-                assert_eq!(session.tab(tab_id).unwrap().focused_pane().id(), pane_id);
+                assert_eq!(
+                    session.tab(tab_id).unwrap().focused_pane().unwrap().id(),
+                    pane_id
+                );
                 let LayoutResult::TabCreated { tab_id, pane_id } = client
                     .layout(LayoutCommand::CreateTab {
                         workspace_id: anchor,
@@ -118,6 +121,7 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
                         .tab(tab_id)
                         .unwrap()
                         .focused_pane()
+                        .unwrap()
                         .id(),
                     pane_id
                 );
@@ -160,7 +164,12 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
         anchor_tab
     );
     assert_eq!(
-        session.tab(anchor_tab).unwrap().focused_pane().id(),
+        session
+            .tab(anchor_tab)
+            .unwrap()
+            .focused_pane()
+            .unwrap()
+            .id(),
         anchor_pane
     );
     let before = session.snapshot();

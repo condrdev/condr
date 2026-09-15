@@ -33,7 +33,7 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -106,7 +106,7 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -176,7 +176,7 @@ fn terminal_drag_selection_updates_locally() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -311,7 +311,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         pane_id.is_some_and(|pane_id| {
             window.read(|app| {
@@ -419,7 +419,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -557,7 +557,7 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -698,7 +698,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -965,7 +965,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -1175,7 +1175,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -1444,7 +1444,14 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
     assert!(wait_until_event_driven(window, |window| {
         pane_id = window.read(|app| {
             let session = view.read(app).active_session()?;
-            Some(session.active_workspace()?.active_tab().focused_pane().id())
+            Some(
+                session
+                    .active_workspace()?
+                    .active_tab()
+                    .focused_pane()
+                    .unwrap()
+                    .id(),
+            )
         });
         pane_id.is_some()
     }));

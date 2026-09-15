@@ -181,7 +181,7 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         (
             state.session.snapshot(),
             state.sequence,
-            (workspace.id(), tab.id(), tab.focused_pane().id()),
+            (workspace.id(), tab.id(), tab.focused_pane().unwrap().id()),
             state.terminal_instances.clone(),
         )
     };
@@ -292,7 +292,7 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             "a rejected layout command published a layout event"
         );
         assert_eq!(
-            (workspace.id(), tab.id(), tab.focused_pane().id()),
+            (workspace.id(), tab.id(), tab.focused_pane().unwrap().id()),
             focus_before
         );
         assert_eq!(state.terminal_instances, terminal_instances_before);
@@ -373,7 +373,10 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     let (workspace_id, pane_id) = {
         let state = handle.state.lock().unwrap();
         let workspace = state.session.active_workspace().unwrap();
-        (workspace.id(), workspace.active_tab().focused_pane().id())
+        (
+            workspace.id(),
+            workspace.active_tab().focused_pane().unwrap().id(),
+        )
     };
     send_terminal(
         &mut stream,

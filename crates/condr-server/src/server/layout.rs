@@ -448,7 +448,10 @@ pub(super) fn apply_layout_command(
                 .workspace(workspace_id)
                 .expect("new Workspace exists")
                 .active_tab();
-            let pane_id = tab.focused_pane().id();
+            let pane_id = tab
+                .focused_pane()
+                .expect("a new Workspace opens on a terminal Tab")
+                .id();
             result = LayoutResult::WorkspaceCreated {
                 workspace_id,
                 tab_id: tab.id(),
@@ -475,6 +478,7 @@ pub(super) fn apply_layout_command(
                     .tab(tab_id)
                     .expect("new Tab exists")
                     .focused_pane()
+                    .expect("a new Tab is a terminal Tab")
                     .id(),
             );
             if let Some(name) = name
@@ -581,6 +585,9 @@ pub(super) fn apply_layout_command(
             let tab = candidate
                 .tab(tab_id)
                 .ok_or_else(|| "unknown Tab".to_string())?;
+            if tab.layout().is_none() {
+                return Err("a viewer Tab has no Panes to size".into());
+            }
             if ratios.iter().any(|ratio| !ratio.is_finite()) {
                 return Err("split ratios must be finite".into());
             }
@@ -635,6 +642,12 @@ pub(super) fn apply_layout_command(
                     .close_workspace(workspace_id)
                     .ok_or_else(|| "unknown Workspace".to_string())?,
             );
+        }
+        LayoutCommand::ShowDiff { workspace_id, path } => {
+            let tab_id = candidate.show_diff(workspace_id, path).ok_or_else(|| {
+                "unknown Workspace, invalid path, or Session Tab limit reached".to_string()
+            })?;
+            result = LayoutResult::DiffShown { tab_id };
         }
     }
 
@@ -694,6 +707,7 @@ pub(super) fn commit_layout_candidate(
     state
         .workspace_git_heads
         .retain(|workspace_id, _| session.workspace(*workspace_id).is_some());
+    state.unwatch_closed_workspaces();
     let mut removed_terminals = Vec::new();
     if let Some(closed) = closed {
         for pane_id in closed.panes() {
@@ -783,6 +797,7 @@ pub(super) fn apply_prepared_external_layout(
                 .expect("created Workspace exists")
                 .active_tab()
                 .focused_pane()
+                .expect("a new Workspace opens on a terminal Tab")
                 .id();
             let snapshot = candidate.snapshot();
             if let Err(error) = validate_persistable_snapshot(&snapshot) {
@@ -860,6 +875,7 @@ pub(super) fn apply_prepared_external_layout(
                     .expect("created Workspace exists")
                     .active_tab()
                     .focused_pane()
+                    .expect("a new Workspace opens on a terminal Tab")
                     .id();
                 let launch = state.shell_launch();
                 let mut runtime = TerminalRuntime::spawn_shell(
@@ -898,34 +914,6 @@ pub(super) fn apply_prepared_external_layout(
                 .expect("validated Workspace exists");
             commit_layout_candidate(state, candidate, Some(closed), None)
         }
-    }
-}
-
-pub(super) fn set_workspace_git(
-    state: &mut RuntimeState,
-    workspace_id: WorkspaceId,
-    git: Option<GitRepository>,
-) {
-    state
-        .workspace_git_scanned_at
-        .insert(workspace_id, Instant::now());
-    let changed = state.workspace_git.get(&workspace_id) != git.as_ref();
-    match git {
-        Some(repository) => {
-            state.workspace_git.insert(workspace_id, repository);
-        }
-        None => {
-            state.workspace_git.remove(&workspace_id);
-        }
-    }
-    // Clients learn Git state from events now that a layout change no longer makes
-    // them fetch a Bootstrap; a Workspace created on a repository announces it here.
-    if changed {
-        let git = state
-            .workspace_git
-            .get(&workspace_id)
-            .map(|repository| workspace_git_snapshot(workspace_id, repository));
-        state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
     }
 }
 

@@ -113,5 +113,6 @@ fn pane_id() -> condr_core::PaneId {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id()
 }

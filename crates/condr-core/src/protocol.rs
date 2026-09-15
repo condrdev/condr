@@ -29,11 +29,11 @@ pub use framing::{
 };
 pub use messages::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, Hello, LayoutCommand, LayoutResult,
-    PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch,
-    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerMessage,
-    ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
-    TerminalFrameChunk, WorkspaceGitSnapshot, relative_age,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, Hello, LayoutCommand,
+    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
+    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview,
+    TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, relative_age,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;

@@ -43,12 +43,23 @@ pub(crate) struct WorkspaceSnapshot {
 pub(crate) struct TabSnapshot {
     pub(crate) id: TabId,
     pub(crate) name: String,
-    #[serde(deserialize_with = "deserialize_panes")]
-    pub(crate) panes: Vec<PaneSnapshot>,
-    pub(crate) focused_pane: PaneId,
-    #[serde(deserialize_with = "deserialize_focus_history")]
-    pub(crate) focus_history: Vec<PaneId>,
-    pub(crate) layout: LayoutSnapshot,
+    pub(crate) content: TabContentSnapshot,
+}
+
+/// A Tab's content (ADR 0017): its terminal layout, or the file a Diff Tab shows.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) enum TabContentSnapshot {
+    Terminals {
+        #[serde(deserialize_with = "deserialize_panes")]
+        panes: Vec<PaneSnapshot>,
+        focused_pane: PaneId,
+        #[serde(deserialize_with = "deserialize_focus_history")]
+        focus_history: Vec<PaneId>,
+        layout: LayoutSnapshot,
+    },
+    Diff {
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

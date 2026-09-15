@@ -311,6 +311,7 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let terminal = PaneTerminalSnapshot {
         pane_id,

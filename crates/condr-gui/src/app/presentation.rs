@@ -194,9 +194,12 @@ impl Condr {
         }
         let target_is_active = session.active_workspace_id() == Some(pending.workspace_id)
             && pending.pane_id.is_none_or(|pane_id| {
-                session
-                    .active_workspace()
-                    .is_some_and(|workspace| workspace.active_tab().focused_pane().id() == pane_id)
+                session.active_workspace().is_some_and(|workspace| {
+                    workspace
+                        .active_tab()
+                        .focused_pane()
+                        .is_some_and(|pane| pane.id() == pane_id)
+                })
             });
         // Without an acknowledgement, keep waiting while the authoritative structure still
         // points elsewhere.  This preserves an in-flight, supersedable click while allowing a

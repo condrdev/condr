@@ -153,7 +153,7 @@ impl Condr {
                     self.active_session()?
                         .active_workspace()?
                         .active_tab()
-                        .focused_pane()
+                        .focused_pane()?
                         .id(),
                 )
             })
@@ -222,18 +222,28 @@ impl Condr {
         let tab = session
             .tab(tab_id)
             .expect("presented Tab belongs to the restored Session");
+        // A viewer Tab has no Panes and no Dock (ADR 0017); the body renders it directly.
+        let Some(tab_layout) = tab.layout().cloned() else {
+            self.target_pane = None;
+            self.active_dock_surface = None;
+            return;
+        };
         let focused = self
             .pending_workspace_selection_for(key)
             .and_then(|pending| pending.pane_id)
             .filter(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
-            .unwrap_or_else(|| tab.focused_pane().id());
+            .unwrap_or_else(|| {
+                tab.focused_pane()
+                    .expect("a terminal Tab has a focused Pane")
+                    .id()
+            });
         let authoritative_layout = connection
             .zoomed_panes
             .iter()
             .copied()
             .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
             .map(PaneLayout::Pane)
-            .unwrap_or_else(|| tab.layout().clone());
+            .unwrap_or(tab_layout);
         let surface_key = DockSurfaceKey {
             connection_key: key,
             tab_id,
@@ -432,7 +442,9 @@ impl Condr {
         let Some(tab) = session.tab(surface_key.tab_id) else {
             return;
         };
-        let layout = tab.layout().clone();
+        let Some(layout) = tab.layout().cloned() else {
+            return;
+        };
         let zoomed = connection
             .zoomed_panes
             .iter()
@@ -457,6 +469,7 @@ impl Condr {
                         .tab(surface_key.tab_id)
                         .expect("resized Tab remains in the Session")
                         .layout()
+                        .expect("a resized Tab is a terminal Tab")
                         .clone()
                 });
             let sent = self.send_layout_to(

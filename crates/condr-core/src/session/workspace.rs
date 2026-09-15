@@ -1,5 +1,9 @@
 use super::*;
 
+/// The display name every Diff Tab starts with; the Tab is identified by its content, not by
+/// this name, which the user may change.
+pub const DIFF_TAB_NAME: &str = "Diff";
+
 impl Session {
     pub fn activate_workspace(&mut self, workspace_id: WorkspaceId) -> bool {
         if self
@@ -35,10 +39,13 @@ impl Session {
             if let Some(old) = previous.workspace(workspace.id) {
                 workspace.active_tab = old.active_tab;
                 for tab in &mut workspace.tabs {
-                    if let Some(old) = old.tabs.iter().find(|old| old.id == tab.id) {
-                        tab.focused_pane = old.focused_pane;
-                        tab.focus_history.clone_from(&old.focus_history);
-                        tab.zoomed_pane = old.zoomed_pane;
+                    let old = old.tabs.iter().find(|old| old.id == tab.id);
+                    if let (Some(terminals), Some(old)) =
+                        (tab.terminals_mut(), old.and_then(Tab::terminals))
+                    {
+                        terminals.focused_pane = old.focused_pane;
+                        terminals.focus_history.clone_from(&old.focus_history);
+                        terminals.zoomed_pane = old.zoomed_pane;
                     }
                 }
             }
@@ -64,15 +71,11 @@ impl Session {
             tabs: vec![Tab {
                 id: tab_id,
                 name: String::new(),
-                panes: vec![Pane {
+                content: TabContent::Terminals(TerminalLayout::single(Pane {
                     id: pane_id,
                     cwd: Some(root_directory),
                     agent_resume: None,
-                }],
-                focused_pane: pane_id,
-                focus_history: Vec::new(),
-                layout: PaneLayout::Pane(pane_id),
-                zoomed_pane: None,
+                })),
             }],
             active_tab: tab_id,
         };
@@ -91,11 +94,11 @@ impl Session {
             .iter()
             .position(|workspace| workspace.id == workspace_id)?;
         let workspace = &mut self.workspaces[workspace_ix];
+        // A viewer Tab has no Pane to inherit from, so the Workspace root serves.
         let cwd = workspace
             .active_tab()
             .focused_pane()
-            .cwd
-            .clone()
+            .and_then(|pane| pane.cwd.clone())
             .unwrap_or_else(|| workspace.root_directory.clone());
         let first_id = reserve_ids(2)?;
         let tab_id = TabId(first_id);
@@ -103,16 +106,49 @@ impl Session {
         workspace.tabs.push(Tab {
             id: tab_id,
             name: String::new(),
-            panes: vec![Pane {
+            content: TabContent::Terminals(TerminalLayout::single(Pane {
                 id: pane_id,
                 cwd: Some(cwd),
                 agent_resume: None,
-            }],
-            focused_pane: pane_id,
-            focus_history: Vec::new(),
-            layout: PaneLayout::Pane(pane_id),
-            zoomed_pane: None,
+            })),
         });
+        workspace.active_tab = tab_id;
+        self.active_workspace = Some(workspace_id);
+        Some(tab_id)
+    }
+
+    /// Shows `path`'s diff in the Workspace's Diff Tab, creating the Tab the first time and
+    /// retargeting it afterwards, and activates it (ADR 0017). `None` for an unknown
+    /// Workspace, an invalid path, or when the Tab limit is reached.
+    pub fn show_diff(&mut self, workspace_id: WorkspaceId, path: PathBuf) -> Option<TabId> {
+        if !valid_diff_path(&path) {
+            return None;
+        }
+        let workspace_ix = self
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == workspace_id)?;
+        let workspace = &mut self.workspaces[workspace_ix];
+        let tab_id = match workspace.tabs.iter_mut().find(|tab| tab.diff().is_some()) {
+            Some(tab) => {
+                tab.content = TabContent::Diff(DiffView { path });
+                tab.id
+            }
+            None => {
+                if self.tab_count() >= MAX_SNAPSHOT_TABS {
+                    return None;
+                }
+                let tab_id = TabId(reserve_ids(1)?);
+                let workspace = &mut self.workspaces[workspace_ix];
+                workspace.tabs.push(Tab {
+                    id: tab_id,
+                    name: DIFF_TAB_NAME.to_owned(),
+                    content: TabContent::Diff(DiffView { path }),
+                });
+                tab_id
+            }
+        };
+        let workspace = &mut self.workspaces[workspace_ix];
         workspace.active_tab = tab_id;
         self.active_workspace = Some(workspace_id);
         Some(tab_id)
@@ -169,7 +205,7 @@ impl Session {
 
             let tab = self.workspaces[workspace_ix].tabs.remove(tab_ix);
             let outcome = CloseOutcome {
-                panes: tab.panes.into_iter().map(|pane| pane.id).collect(),
+                panes: tab.panes().iter().map(|pane| pane.id).collect(),
                 tabs: vec![tab_id],
                 workspaces: Vec::new(),
             };
@@ -197,7 +233,7 @@ impl Session {
         let mut tabs = Vec::new();
         for tab in workspace.tabs {
             tabs.push(tab.id);
-            panes.extend(tab.panes.into_iter().map(|pane| pane.id));
+            panes.extend(tab.panes().iter().map(|pane| pane.id));
         }
         if self.active_workspace == Some(workspace_id) {
             self.active_workspace = self

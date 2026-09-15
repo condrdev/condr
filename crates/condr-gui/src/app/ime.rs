@@ -302,6 +302,7 @@ mod ime_tests {
             .unwrap()
             .active_tab()
             .focused_pane()
+            .unwrap()
             .id();
         let second = session
             .split_pane(first, SplitDirection::Horizontal, 0.5)

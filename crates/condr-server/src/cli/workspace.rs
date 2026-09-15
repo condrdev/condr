@@ -82,7 +82,8 @@ pub(super) struct TabInfo {
     /// The active Tab of its Workspace.
     pub(super) focused: bool,
     pub(super) pane_count: usize,
-    pub(super) focused_pane_id: u64,
+    /// `None` for a viewer Tab, which has no Panes (ADR 0017).
+    pub(super) focused_pane_id: Option<u64>,
 }
 
 pub(super) fn workspace_info(session: &Session, workspace: &Workspace) -> WorkspaceInfo {
@@ -109,7 +110,7 @@ pub(super) fn tab_info(workspace: &Workspace, tab: &Tab) -> TabInfo {
         name: tab.name().to_owned(),
         focused: workspace.active_tab().id() == tab.id(),
         pane_count: tab.panes().len(),
-        focused_pane_id: tab.focused_pane().id().as_u64(),
+        focused_pane_id: tab.focused_pane().map(|pane| pane.id().as_u64()),
     }
 }
 
@@ -186,7 +187,9 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
             Ok(json!({
                 "workspace": workspace_info(&session, workspace),
                 "tab": tab_info(workspace, tab),
-                "root_pane": pane_info(client, workspace, tab, tab.focused_pane().id()),
+                "root_pane": tab
+                    .focused_pane()
+                    .map(|pane| pane_info(client, workspace, tab, pane.id())),
             }))
         }
         WorkspaceCommand::Get { workspace_id } => {
@@ -284,7 +287,9 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
             let (workspace, tab) = find_tab(&session, tab_id.as_u64())?;
             Ok(json!({
                 "tab": tab_info(workspace, tab),
-                "root_pane": pane_info(client, workspace, tab, tab.focused_pane().id()),
+                "root_pane": tab
+                    .focused_pane()
+                    .map(|pane| pane_info(client, workspace, tab, pane.id())),
             }))
         }
         TabCommand::Get { tab_id } => {

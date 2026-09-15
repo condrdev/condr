@@ -55,6 +55,7 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
 
     apply_for_test(
@@ -73,6 +74,7 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     apply_for_test(
         &mut state,
@@ -99,7 +101,13 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
             direction: SplitDirection::Horizontal,
         },
     );
-    let pane_three = state.session.tab(tab_two).unwrap().focused_pane().id();
+    let pane_three = state
+        .session
+        .tab(tab_two)
+        .unwrap()
+        .focused_pane()
+        .unwrap()
+        .id();
     apply_for_test(
         &mut state,
         &mut updates,
@@ -114,7 +122,13 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         },
     );
     assert_eq!(
-        state.session.tab(tab_two).unwrap().focused_pane().id(),
+        state
+            .session
+            .tab(tab_two)
+            .unwrap()
+            .focused_pane()
+            .unwrap()
+            .id(),
         pane_three
     );
     apply_for_test(
@@ -148,7 +162,7 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         },
     );
     assert!(matches!(
-        state.session.tab(tab_two).unwrap().layout(),
+        state.session.tab(tab_two).unwrap().layout().unwrap(),
         PaneLayout::Split { ratio, .. } if (*ratio - 0.6).abs() < f32::EPSILON
     ));
     apply_for_test(
@@ -180,7 +194,7 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         },
     );
     assert!(matches!(
-        state.session.tab(tab_two).unwrap().layout(),
+        state.session.tab(tab_two).unwrap().layout().unwrap(),
         PaneLayout::Split { direction: SplitDirection::Vertical, first, .. }
             if **first == PaneLayout::Pane(pane_three)
     ));
@@ -325,7 +339,7 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
         state
             .workspace_git
             .get(&child_workspace_id)
-            .and_then(GitRepository::branch),
+            .and_then(|git| git.repository.branch()),
         Some("feature/server-flow")
     );
 
@@ -401,7 +415,7 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     let child_workspace_id = state.session.active_workspace_id().unwrap();
     let child = state.session.workspace(child_workspace_id).unwrap();
     let child_root = child.root_directory().to_path_buf();
-    let pane_id = child.active_tab().focused_pane().id();
+    let pane_id = child.active_tab().focused_pane().unwrap().id();
     let previous_instance = state.terminal_instances[&pane_id];
 
     let command = LayoutCommand::RemoveWorktree {
@@ -554,6 +568,7 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let second_pane = state
         .session
@@ -575,13 +590,13 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
     else {
         panic!("second Pane activity should reserve its Workspace Git scan");
     };
-    let next = discover_repository(&root).unwrap();
+    let next = WorkspaceGit::scan(&root).unwrap();
     apply_workspace_git_refresh(&mut state, workspace_id, &root, next);
     assert_eq!(
         state
             .workspace_git
             .get(&workspace_id)
-            .and_then(GitRepository::branch),
+            .and_then(|git| git.repository.branch()),
         Some("feature/second-pane")
     );
     assert!(matches!(
@@ -718,6 +733,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let pid_command = if cfg!(windows) {
         "Write-Output ('condr-' + 'pid=' + $PID)\r"
@@ -887,4 +903,85 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     handle.stop();
     drop(second);
     thread.join().unwrap().unwrap();
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    let mut updates = Vec::new();
+    apply_for_test(
+        &mut state,
+        &mut updates,
+        LayoutCommand::CreateWorkspace {
+            name: None,
+            focus: true,
+            root_directory: std::env::temp_dir(),
+        },
+    );
+    let workspace_id = state.session.active_workspace_id().unwrap();
+    let terminal_tab = state.session.active_workspace().unwrap().active_tab().id();
+    let terminals_before = state.terminals.len();
+
+    let effect = apply_layout_command(
+        &mut state,
+        LayoutCommand::ShowDiff {
+            workspace_id,
+            path: PathBuf::from("src/lib.rs"),
+        },
+    )
+    .unwrap();
+    let LayoutResult::DiffShown { tab_id } = effect.result else {
+        panic!("ShowDiff reports the Diff Tab: {:?}", effect.result);
+    };
+    assert!(effect.started_terminals.is_empty());
+    assert_eq!(state.terminals.len(), terminals_before);
+    let workspace = state.session.active_workspace().unwrap();
+    assert_eq!(workspace.active_tab().id(), tab_id);
+    assert_ne!(tab_id, terminal_tab);
+    assert_eq!(
+        workspace.active_tab().diff().unwrap().path(),
+        std::path::Path::new("src/lib.rs")
+    );
+
+    let again = apply_layout_command(
+        &mut state,
+        LayoutCommand::ShowDiff {
+            workspace_id,
+            path: PathBuf::from("README.md"),
+        },
+    )
+    .unwrap();
+    assert_eq!(again.result, LayoutResult::DiffShown { tab_id });
+    assert_eq!(state.session.active_workspace().unwrap().tabs().len(), 2);
+
+    assert!(
+        apply_layout_command(
+            &mut state,
+            LayoutCommand::ShowDiff {
+                workspace_id,
+                path: PathBuf::from("../outside"),
+            },
+        )
+        .is_err()
+    );
+    assert!(
+        apply_layout_command(
+            &mut state,
+            LayoutCommand::SetSplitRatios {
+                tab_id,
+                ratios: Vec::new(),
+            },
+        )
+        .is_err(),
+        "a viewer Tab has no split to size"
+    );
+
+    // Closing the viewer Tab removes no terminal and re-activates the terminal Tab.
+    let closed = apply_layout_command(&mut state, LayoutCommand::CloseTab { tab_id }).unwrap();
+    assert!(closed.removed_terminals.is_empty());
+    assert_eq!(
+        state.session.active_workspace().unwrap().active_tab().id(),
+        terminal_tab
+    );
 }

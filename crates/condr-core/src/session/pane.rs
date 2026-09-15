@@ -16,7 +16,7 @@ impl Session {
         let Some((workspace, tab, pane)) = self.find_pane(pane_id) else {
             return false;
         };
-        let pane = &mut self.workspaces[workspace].tabs[tab].panes[pane];
+        let pane = &mut self.terminal_layout_mut(workspace, tab).panes[pane];
         if pane.agent_resume == resume {
             return false;
         }
@@ -37,17 +37,15 @@ impl Session {
         let workspace = &mut self.workspaces[workspace_ix];
         let workspace_id = workspace.id;
         let tab_id = workspace.tabs[tab_ix].id;
-        let cwd = workspace.tabs[tab_ix].panes[pane_ix]
-            .cwd
-            .clone()
-            .unwrap_or_else(|| workspace.root_directory.clone());
-        if pane_layout_depth(&workspace.tabs[tab_ix].layout, pane_id, 1)?
-            >= MAX_SNAPSHOT_LAYOUT_DEPTH
-        {
+        let root_directory = workspace.root_directory.clone();
+        let tab = workspace.tabs[tab_ix]
+            .terminals_mut()
+            .expect("a Pane lives in a terminal Tab");
+        let cwd = tab.panes[pane_ix].cwd.clone().unwrap_or(root_directory);
+        if pane_layout_depth(&tab.layout, pane_id, 1)? >= MAX_SNAPSHOT_LAYOUT_DEPTH {
             return None;
         }
         let new_pane_id = PaneId(reserve_ids(1)?);
-        let tab = &mut workspace.tabs[tab_ix];
         let side = match direction {
             SplitDirection::Horizontal => PaneDirection::Right,
             SplitDirection::Vertical => PaneDirection::Down,
@@ -72,14 +70,14 @@ impl Session {
             cwd: Some(cwd),
             agent_resume: None,
         });
-        workspace.active_tab = tab_id;
+        self.workspaces[workspace_ix].active_tab = tab_id;
         self.active_workspace = Some(workspace_id);
         Some(new_pane_id)
     }
 
     pub fn set_pane_cwd(&mut self, pane_id: PaneId, cwd: Option<PathBuf>) -> bool {
         for workspace in &mut self.workspaces {
-            for tab in &mut workspace.tabs {
+            for tab in workspace.tabs.iter_mut().filter_map(Tab::terminals_mut) {
                 if let Some(pane) = tab.panes.iter_mut().find(|pane| pane.id == pane_id) {
                     pane.cwd = cwd;
                     return true;
@@ -97,7 +95,7 @@ impl Session {
         let tab_id = self.workspaces[workspace_ix].tabs[tab_ix].id;
         self.active_workspace = Some(workspace_id);
         self.workspaces[workspace_ix].active_tab = tab_id;
-        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
         let previous_focus = tab.focused_pane;
         if previous_focus != pane_id {
             tab.focus_history
@@ -117,8 +115,8 @@ impl Session {
             ..CloseOutcome::default()
         };
 
-        if self.workspaces[workspace_ix].tabs[tab_ix].panes.len() > 1 {
-            let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        if self.workspaces[workspace_ix].tabs[tab_ix].panes().len() > 1 {
+            let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
             tab.layout = remove_from_layout(&tab.layout, pane_id)
                 .expect("a multi-pane layout remains after one pane closes");
             tab.panes.remove(pane_ix);
@@ -168,7 +166,7 @@ impl Session {
             return false;
         };
         let Some(neighbor) = neighbor_pane_id(
-            &self.workspaces[workspace_ix].tabs[tab_ix].layout,
+            &self.terminal_layout_mut(workspace_ix, tab_ix).layout,
             pane_id,
             direction,
         ) else {
@@ -184,7 +182,7 @@ impl Session {
         let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
             return false;
         };
-        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
         // tmux semantics: the command moves a boundary of the pane in `direction`.
         // The trailing boundary (right or bottom) moves when the pane has one, else
         // the leading boundary, so a pane can shrink as well as grow and the same
@@ -215,7 +213,7 @@ impl Session {
         let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
             return false;
         };
-        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
         let Some(neighbor) = neighbor_pane_id(&tab.layout, pane_id, direction) else {
             return false;
         };
@@ -232,7 +230,7 @@ impl Session {
         let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
             return false;
         };
-        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
         if !tab.panes.iter().any(|pane| pane.id == target) {
             return false;
         }
@@ -257,6 +255,9 @@ impl Session {
             let Some(tab) = workspace.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
                 continue;
             };
+            let Some(tab) = tab.terminals_mut() else {
+                return false;
+            };
             if split_count(&tab.layout) != ratios.len() {
                 return false;
             }
@@ -275,7 +276,7 @@ impl Session {
         let (workspace_ix, tab_ix, _) = self
             .find_pane(pane_id)
             .expect("focused Pane remains in the Session");
-        let tab = &mut self.workspaces[workspace_ix].tabs[tab_ix];
+        let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
         if tab.panes.len() == 1 {
             return false;
         }

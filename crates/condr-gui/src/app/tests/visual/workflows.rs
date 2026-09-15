@@ -466,7 +466,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         });
         agent_pane.is_some()
     }));
@@ -485,7 +485,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         other_pane = window.read(|app| {
             let session = view.read(app).active_session()?;
             let tab = session.active_workspace()?.active_tab();
-            (tab.panes().len() == 2).then(|| tab.focused_pane().id())
+            (tab.panes().len() == 2).then(|| tab.focused_pane().unwrap().id())
         });
         other_pane.is_some_and(|pane_id| pane_id != agent_pane)
     }));
@@ -557,7 +557,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
                 session.active_workspace().is_some_and(|workspace| {
-                    workspace.active_tab().focused_pane().id() == agent_pane
+                    workspace.active_tab().focused_pane().unwrap().id() == agent_pane
                 })
             })
         })
@@ -742,7 +742,7 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
                 (
                     workspace.tabs()[0].id(),
                     workspace.active_tab().id(),
-                    workspace.active_tab().focused_pane().id(),
+                    workspace.active_tab().focused_pane().unwrap().id(),
                 )
             })
         });
@@ -810,7 +810,10 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
         assert_eq!(session.active_workspace_id(), Some(second_workspace));
         let workspace = session.workspace(second_workspace).unwrap();
         assert_eq!(workspace.active_tab().id(), active_tab);
-        assert_eq!(workspace.active_tab().focused_pane().id(), focused_pane);
+        assert_eq!(
+            workspace.active_tab().focused_pane().unwrap().id(),
+            focused_pane
+        );
     };
     window.read(|app| assert_identity(&view.read(app).active_session().unwrap()));
     let authoritative = Session::restore(server.handle.snapshot()).unwrap();
@@ -901,7 +904,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         })
         .unwrap();
     let new_tab_focused = wait_until(window, |window| {
@@ -982,7 +985,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         })
         .unwrap();
     let initial_terminal = terminal_selector(initial_pane);
@@ -1053,7 +1056,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         let condr = view.read(app);
         let workspace = condr.active_session().unwrap();
         let tab = workspace.active_workspace().unwrap().active_tab();
-        let focused = tab.focused_pane().id();
+        let focused = tab.focused_pane().unwrap().id();
         let other = tab
             .panes()
             .iter()
@@ -1070,7 +1073,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
                 session.active_workspace().is_some_and(|workspace| {
-                    workspace.active_tab().focused_pane().id() == pane_to_focus
+                    workspace.active_tab().focused_pane().unwrap().id() == pane_to_focus
                 })
             })
         })
@@ -1102,7 +1105,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             view.read(app)
                 .active_session()?
                 .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().id())
+                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
         })
         .unwrap();
     let prompt_ready = wait_until(window, |window| {

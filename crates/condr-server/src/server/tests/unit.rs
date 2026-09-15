@@ -13,6 +13,7 @@ fn an_observed_terminal_exit_cannot_be_undone_by_its_final_hook_drain() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let resume = condr_core::AgentResume {
         kind: condr_core::AgentKind::Codex,
@@ -88,6 +89,7 @@ fn only_cwd_inheriting_layout_commands_require_process_observation() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
 
     assert!(layout_command_needs_cwd_observation(
@@ -196,6 +198,7 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     state
         .terminal_views
@@ -234,6 +237,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let events = |state: &RuntimeState| {
         state
@@ -445,6 +449,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let view = |revision| TerminalView {
         selection: None,
@@ -500,6 +505,7 @@ fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let mut current = terminal_test_view(1, "x");
     current.cells[0].hyperlink = Some("x".repeat(8 * 1024 + 1).into());
@@ -561,6 +567,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let linked_cell = |index: usize| {
         let mut cell = terminal_test_view(0, "x").cells.remove(0);
@@ -664,6 +671,7 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let clipboard_text = |item| {
         let Some(ClientWriteItem::Reliable(frame)) = item else {
@@ -729,6 +737,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let capture = state.capture_bootstrap();
     let (writer, receiver) = ClientWriter::channel();
@@ -799,6 +808,7 @@ fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let baseline = Arc::new(terminal_test_view(7, "baseline"));
     let (writer, _receiver) = ClientWriter::channel();
@@ -838,6 +848,7 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let initial = Arc::new(terminal_test_view(1, "old"));
     let latest = terminal_test_view(3, "oXd");
@@ -912,6 +923,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let large_view = |revision| TerminalView {
         selection: None,
@@ -972,6 +984,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let expected = PaneTerminalFrame {
         pane_id,
@@ -1028,6 +1041,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let second_pane = session
         .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
@@ -1076,6 +1090,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
             branch: Some("b".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024)),
             linked_worktree: false,
             upstream: None,
+            changes: Default::default(),
         }],
         zoomed_panes: vec![first_pane],
     };
@@ -1116,6 +1131,7 @@ fn untransportable_durable_mutations_leave_the_session_unchanged() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let before = state.session.snapshot();
 
@@ -1156,6 +1172,7 @@ fn non_utf8_terminal_cwd_does_not_poison_the_durable_snapshot() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let before = state.session.snapshot();
     let cwd = PathBuf::from(OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0xff]));
@@ -1183,6 +1200,7 @@ fn invalid_terminal_cwd_does_not_discard_valid_sibling_observations() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let second_pane = state
         .session
@@ -1237,6 +1255,7 @@ fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let mut runtime =
         TerminalRuntime::spawn_shell(&initial, TerminalSize::new(24, 80), None, None).unwrap();

@@ -950,6 +950,46 @@ pub(super) fn handle_client(
                     }
                 }
             }
+            ClientMessage::GitDiff {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path,
+                against: DiffBase::Head,
+            } => {
+                let repository = {
+                    let state = state.lock().expect("server state lock poisoned");
+                    if server_id != state.server_id {
+                        Err("unknown Server".to_string())
+                    } else if session_id != state.session_id {
+                        Err("unknown Session".to_string())
+                    } else if state.session.workspace(workspace_id).is_none() {
+                        Err("unknown Workspace".to_string())
+                    } else {
+                        state
+                            .workspace_git
+                            .get(&workspace_id)
+                            .map(|git| git.repository.clone())
+                            .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
+                    }
+                };
+                // The diff reads blobs and files: never under the state lock.
+                let result = repository.and_then(|repository| {
+                    repository
+                        .file_diff(&path)
+                        .map_err(|error| error.to_string())
+                });
+                queue_message(
+                    &outbound,
+                    ServerMessage::GitDiff {
+                        request_id,
+                        workspace_id,
+                        path,
+                        result,
+                    },
+                )
+            }
             ClientMessage::Agent {
                 server_id,
                 session_id,

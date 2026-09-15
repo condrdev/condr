@@ -15,6 +15,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+pub use workspace::DIFF_TAB_NAME;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_STABLE_ID: u64 = u64::MAX / 2;
@@ -117,11 +118,30 @@ pub struct Workspace {
 pub struct Tab {
     id: TabId,
     name: String,
+    content: TabContent,
+}
+
+/// What a Tab shows: a layout of terminal Panes, or a viewer with no Panes at all
+/// (ADR 0017). Pane commands only ever reach terminal Tabs, since a viewer has none.
+#[derive(Clone, Debug)]
+pub enum TabContent {
+    Terminals(TerminalLayout),
+    Diff(DiffView),
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalLayout {
     panes: Vec<Pane>,
     focused_pane: PaneId,
     focus_history: Vec<PaneId>,
     layout: PaneLayout,
     zoomed_pane: Option<PaneId>,
+}
+
+/// One file's working-tree diff against `HEAD`, named relative to the Workspace root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffView {
+    path: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -198,6 +218,14 @@ impl Session {
         })
     }
 
+    /// The Workspace's Diff Tab, if it has one; at most one exists (ADR 0017).
+    pub fn diff_tab(&self, workspace_id: WorkspaceId) -> Option<&Tab> {
+        self.workspace(workspace_id)?
+            .tabs
+            .iter()
+            .find(|tab| tab.diff().is_some())
+    }
+
     pub fn workspace_by_root(&self, root_directory: &Path) -> Option<&Workspace> {
         self.workspaces
             .iter()
@@ -208,12 +236,19 @@ impl Session {
         // ponytail: collections are small; add ID indexes only if profiling shows lookup cost.
         for (workspace_ix, workspace) in self.workspaces.iter().enumerate() {
             for (tab_ix, tab) in workspace.tabs.iter().enumerate() {
-                if let Some(pane_ix) = tab.panes.iter().position(|pane| pane.id == pane_id) {
+                if let Some(pane_ix) = tab.panes().iter().position(|pane| pane.id == pane_id) {
                     return Some((workspace_ix, tab_ix, pane_ix));
                 }
             }
         }
         None
+    }
+
+    /// The terminal layout of the Tab `find_pane` located: a Pane is always in one.
+    fn terminal_layout_mut(&mut self, workspace_ix: usize, tab_ix: usize) -> &mut TerminalLayout {
+        self.workspaces[workspace_ix].tabs[tab_ix]
+            .terminals_mut()
+            .expect("a Pane lives in a terminal Tab")
     }
 
     fn tab_count(&self) -> usize {
@@ -227,7 +262,7 @@ impl Session {
         self.workspaces
             .iter()
             .flat_map(|workspace| &workspace.tabs)
-            .map(|tab| tab.panes.len())
+            .map(|tab| tab.panes().len())
             .sum()
     }
 }
@@ -286,40 +321,106 @@ impl Tab {
         &self.name
     }
 
-    pub fn panes(&self) -> &[Pane] {
-        &self.panes
+    pub fn content(&self) -> &TabContent {
+        &self.content
     }
 
-    pub fn focused_pane(&self) -> &Pane {
-        self.panes
-            .iter()
-            .find(|pane| pane.id == self.focused_pane)
-            .expect("focused pane belongs to tab")
+    pub fn terminals(&self) -> Option<&TerminalLayout> {
+        match &self.content {
+            TabContent::Terminals(terminals) => Some(terminals),
+            TabContent::Diff(_) => None,
+        }
+    }
+
+    fn terminals_mut(&mut self) -> Option<&mut TerminalLayout> {
+        match &mut self.content {
+            TabContent::Terminals(terminals) => Some(terminals),
+            TabContent::Diff(_) => None,
+        }
+    }
+
+    pub fn diff(&self) -> Option<&DiffView> {
+        match &self.content {
+            TabContent::Diff(diff) => Some(diff),
+            TabContent::Terminals(_) => None,
+        }
+    }
+
+    /// Empty for a viewer Tab.
+    pub fn panes(&self) -> &[Pane] {
+        self.terminals()
+            .map_or(&[], |terminals| terminals.panes.as_slice())
+    }
+
+    /// `None` for a viewer Tab; a terminal Tab always has one.
+    pub fn focused_pane(&self) -> Option<&Pane> {
+        let terminals = self.terminals()?;
+        Some(
+            terminals
+                .panes
+                .iter()
+                .find(|pane| pane.id == terminals.focused_pane)
+                .expect("focused pane belongs to tab"),
+        )
     }
 
     pub fn focus_history(&self) -> &[PaneId] {
-        &self.focus_history
+        self.terminals()
+            .map_or(&[], |terminals| terminals.focus_history.as_slice())
     }
 
-    pub fn layout(&self) -> &PaneLayout {
-        &self.layout
+    pub fn layout(&self) -> Option<&PaneLayout> {
+        self.terminals().map(|terminals| &terminals.layout)
     }
 
-    /// Where every Pane sits, in layout order.
+    /// Where every Pane sits, in layout order; empty for a viewer Tab.
     pub fn pane_rects(&self) -> Vec<PaneRect> {
-        let mut rects = Vec::with_capacity(self.panes.len());
-        collect_pane_rects(&self.layout, 0.0, 0.0, 1.0, 1.0, &mut rects);
+        let Some(terminals) = self.terminals() else {
+            return Vec::new();
+        };
+        let mut rects = Vec::with_capacity(terminals.panes.len());
+        collect_pane_rects(&terminals.layout, 0.0, 0.0, 1.0, 1.0, &mut rects);
         rects
     }
 
     /// The Pane that focus, swap and resize in `direction` would reach.
     pub fn neighbor(&self, pane_id: PaneId, direction: PaneDirection) -> Option<PaneId> {
-        neighbor_pane_id(&self.layout, pane_id, direction)
+        neighbor_pane_id(&self.terminals()?.layout, pane_id, direction)
     }
 
     pub fn zoomed_pane_id(&self) -> Option<PaneId> {
-        self.zoomed_pane
+        self.terminals()?.zoomed_pane
     }
+}
+
+impl TerminalLayout {
+    fn single(pane: Pane) -> Self {
+        let pane_id = pane.id;
+        Self {
+            panes: vec![pane],
+            focused_pane: pane_id,
+            focus_history: Vec::new(),
+            layout: PaneLayout::Pane(pane_id),
+            zoomed_pane: None,
+        }
+    }
+}
+
+impl DiffView {
+    /// Relative to the Workspace root.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// A Diff Tab names its file relative to the Workspace root: non-empty, relative and
+/// without `..`, so it cannot reach outside the working tree.
+pub fn valid_diff_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path.is_relative()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
 }
 
 impl Pane {

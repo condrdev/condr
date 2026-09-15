@@ -143,6 +143,7 @@ fn bootstrap_header_round_trip_uses_the_flat_snapshot_schema() {
         .expect("Workspace is active")
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     session
         .split_pane(pane_id, SplitDirection::Horizontal, 0.5)
@@ -222,6 +223,7 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
                 ahead: 2,
                 behind: 1,
             }),
+            changes: Default::default(),
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];
@@ -395,6 +397,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
             branch: None,
             linked_worktree: false,
             upstream: None,
+            changes: Default::default(),
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];
@@ -444,6 +447,7 @@ fn bootstrap_header(batch_count: u32) -> (BootstrapHeader, PaneId, WorkspaceId) 
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     (
         BootstrapHeader {

@@ -470,6 +470,7 @@ fn a_conversation_reference_round_trips_without_copying_it_to_new_panes() {
             .unwrap()
             .active_tab()
             .focused_pane()
+            .unwrap()
             .id();
         let resume = AgentResume {
             kind,

@@ -27,6 +27,7 @@ toml.workspace = true
 toml_edit.workspace = true
 condr-core = { path = "../condr-core" }
 tokio.workspace = true
+notify.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true

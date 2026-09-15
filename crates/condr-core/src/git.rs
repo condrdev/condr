@@ -2,6 +2,8 @@
 //! Nothing here spawns `git` and nothing contacts a remote; the upstream numbers come from
 //! the remote-tracking ref as the user's last fetch left it.
 
+mod changes;
+
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +13,11 @@ use std::time::SystemTime;
 use gix::bstr::ByteSlice as _;
 use gix::refs::transaction::PreviousValue;
 use serde::{Deserialize, Serialize};
+
+pub use changes::{
+    DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitChangeEntry, GitChangeStatus,
+    GitChanges, GitDiffStat, MAX_DIFF_BYTES, MAX_GIT_CHANGES,
+};
 
 /// Modification times of the files that move the branch, its head or its upstream. Equal
 /// fingerprints mean a rediscovery would report the same branch and ahead/behind counts, so
@@ -49,6 +56,12 @@ impl GitRepository {
 
     pub fn is_linked_worktree(&self) -> bool {
         self.linked_worktree
+    }
+
+    /// Where this work tree's `HEAD` and index live: under the root for the main worktree,
+    /// under the common directory for a linked one.
+    pub fn git_directory(&self) -> &Path {
+        &self.git_directory
     }
 
     pub fn upstream(&self) -> Option<GitUpstream> {

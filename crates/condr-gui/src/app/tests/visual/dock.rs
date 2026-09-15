@@ -31,7 +31,14 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
             };
             (condr.active_dock_surface == Some(surface)
                 && condr.dock_surfaces.contains_key(&surface))
-            .then(|| (workspace.id(), tab.id(), tab.focused_pane().id(), surface))
+            .then(|| {
+                (
+                    workspace.id(),
+                    tab.id(),
+                    tab.focused_pane().unwrap().id(),
+                    surface,
+                )
+            })
         });
         first.is_some()
     }));
@@ -58,7 +65,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                         .dock_surfaces
                         .get(&first_surface)
                         .and_then(|surface| surface.projection.as_ref())
-                        == Some(tab.layout())
+                        == Some(tab.layout().unwrap())
             })
         })
     }));
@@ -84,7 +91,12 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                     connection_key: 1,
                     tab_id: tab.id(),
                 };
-                (workspace.id(), tab.id(), tab.focused_pane().id(), surface)
+                (
+                    workspace.id(),
+                    tab.id(),
+                    tab.focused_pane().unwrap().id(),
+                    surface,
+                )
             })
         });
         second.is_some_and(|(_, _, _, surface)| {
@@ -122,14 +134,14 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
             second_panes = tab.panes().iter().map(|pane| pane.id()).collect();
             second_panes.len() == 2
                 && matches!(
-                    tab.layout(),
+                    tab.layout().unwrap(),
                     PaneLayout::Split { ratio, .. } if (*ratio - 0.35).abs() < 0.001
                 )
                 && condr
                     .dock_surfaces
                     .get(&second_surface)
                     .and_then(|surface| surface.projection.as_ref())
-                    == Some(tab.layout())
+                    == Some(tab.layout().unwrap())
         })
     }));
 
@@ -141,6 +153,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 .tab(second_tab)
                 .unwrap()
                 .focused_pane()
+                .unwrap()
                 .id();
             let same_surface_target = *second_panes
                 .iter()
@@ -174,7 +187,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 && condr.active_session().is_some_and(|session| {
                     session
                         .tab(second_tab)
-                        .is_some_and(|tab| tab.focused_pane().id() == focused_before)
+                        .is_some_and(|tab| tab.focused_pane().unwrap().id() == focused_before)
                 })
         })
     }));
@@ -200,7 +213,7 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 && condr.active_session().is_some_and(|session| {
                     session
                         .tab(second_tab)
-                        .is_some_and(|tab| tab.focused_pane().id() == same_surface_target)
+                        .is_some_and(|tab| tab.focused_pane().unwrap().id() == same_surface_target)
                 })
         })
     }));
@@ -392,7 +405,12 @@ fn cached_dock_navigation_avoids_visible_rebuilds_and_background_layout() {
                 assert!(intermediate.set_tab_split_ratios(second_tab, &[0.45]));
                 let mut final_session = intermediate.clone();
                 assert!(final_session.set_tab_split_ratios(second_tab, &[0.35]));
-                let final_projection = final_session.tab(second_tab).unwrap().layout().clone();
+                let final_projection = final_session
+                    .tab(second_tab)
+                    .unwrap()
+                    .layout()
+                    .unwrap()
+                    .clone();
                 (
                     connection.connect_generation,
                     connection.server_id.unwrap(),

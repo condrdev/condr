@@ -190,7 +190,7 @@ pub(super) fn pane_info(
         pane_id: pane_id.as_u64(),
         tab_id: tab.id().as_u64(),
         workspace_id: workspace.id().as_u64(),
-        focused: tab.focused_pane().id() == pane_id,
+        focused: tab.focused_pane().is_some_and(|pane| pane.id() == pane_id),
         // Zoom is live state, not part of the structural Snapshot (ADR 0005).
         zoomed: overview.zoomed_panes.contains(&pane_id),
         cwd: tab
@@ -384,7 +384,10 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             let tab = session
                 .tab(tab_id)
                 .ok_or_else(|| CliError::new("pane_not_found", "the Tab vanished"))?;
-            let focused = tab.focused_pane().id();
+            let focused = tab
+                .focused_pane()
+                .ok_or_else(|| CliError::new("pane_not_found", "the Tab shows no Panes"))?
+                .id();
             let (workspace, tab) = find_pane(&session, focused.as_u64())?;
             Ok(json!({
                 "pane": pane_info(client, workspace, tab, focused),
@@ -478,7 +481,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             Ok(json!({
                 "workspace_id": workspace.id().as_u64(),
                 "tab_id": tab.id().as_u64(),
-                "focused_pane_id": tab.focused_pane().id().as_u64(),
+                "focused_pane_id": tab.focused_pane().map(|pane| pane.id().as_u64()),
                 "zoomed_pane_id": client.overview().zoomed_panes.iter()
                     .find(|zoomed| tab.panes().iter().any(|pane| pane.id() == **zoomed))
                     .map(|zoomed| zoomed.as_u64()),
@@ -496,7 +499,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
                     "pane_id": rect.id.as_u64(),
                     "left": rect.left, "top": rect.top, "right": rect.right, "bottom": rect.bottom,
                 })).collect::<Vec<_>>(),
-                "tree": layout_tree(tab.layout()),
+                "tree": tab.layout().map(layout_tree),
             }))
         }
         PaneCommand::Close { pane_id } => {
@@ -584,13 +587,19 @@ fn arrange(
     let before = client.session()?;
     let (_, tab) = find_pane(&before, pane_id.as_u64())?;
     let tab_id = tab.id();
-    let previous = (tab.layout().clone(), tab.focused_pane().id());
+    let previous = (
+        tab.layout().cloned(),
+        tab.focused_pane().map(|pane| pane.id()),
+    );
     apply(client, command)?;
     let after = client.session()?;
     let tab = after
         .tab(tab_id)
         .ok_or_else(|| CliError::new("pane_not_found", "the Tab vanished"))?;
-    let changed = (tab.layout().clone(), tab.focused_pane().id()) != previous;
+    let changed = (
+        tab.layout().cloned(),
+        tab.focused_pane().map(|pane| pane.id()),
+    ) != previous;
     Ok((changed, tab_id))
 }
 

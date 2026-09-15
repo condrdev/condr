@@ -212,7 +212,10 @@ fn probe_terminal(
                             if !state.terminal_is_current(pane_id, instance_id) {
                                 break;
                             }
-                            state.workspace_git.get(&workspace_id).cloned()
+                            state
+                                .workspace_git
+                                .get(&workspace_id)
+                                .map(|git| git.repository.clone())
                         };
                         let fingerprint = known.as_ref().and_then(GitRepository::fingerprint);
                         {
@@ -236,7 +239,7 @@ fn probe_terminal(
                                 }
                             }
                         }
-                        if let Ok(next) = discover_repository(&root) {
+                        if let Ok(next) = WorkspaceGit::scan(&root) {
                             let mut state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
                                 break;
@@ -395,46 +398,4 @@ pub(super) fn reserve_workspace_git_scan(
     }
     state.workspace_git_scanned_at.insert(workspace_id, now);
     WorkspaceGitScan::Ready { workspace_id, root }
-}
-
-pub(super) fn apply_workspace_git_refresh(
-    state: &mut RuntimeState,
-    workspace_id: WorkspaceId,
-    root: &std::path::Path,
-    next: Option<GitRepository>,
-) {
-    if state
-        .session
-        .workspace(workspace_id)
-        .is_none_or(|workspace| workspace.root_directory() != root)
-    {
-        return;
-    }
-    if state.workspace_git.get(&workspace_id) == next.as_ref() {
-        return;
-    }
-    let git = match next {
-        Some(repository) => {
-            let snapshot = workspace_git_snapshot(workspace_id, &repository);
-            state.workspace_git.insert(workspace_id, repository);
-            Some(snapshot)
-        }
-        None => {
-            state.workspace_git.remove(&workspace_id);
-            None
-        }
-    };
-    state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
-}
-
-pub(super) fn workspace_git_snapshot(
-    workspace_id: WorkspaceId,
-    repository: &GitRepository,
-) -> WorkspaceGitSnapshot {
-    WorkspaceGitSnapshot {
-        workspace_id,
-        branch: repository.branch().map(str::to_owned),
-        linked_worktree: repository.is_linked_worktree(),
-        upstream: repository.upstream(),
-    }
 }

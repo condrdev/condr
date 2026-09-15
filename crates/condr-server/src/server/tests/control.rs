@@ -21,6 +21,7 @@ fn controller_can_acknowledge_attention_while_terminal_is_closing() {
             .unwrap()
             .active_tab()
             .focused_pane()
+            .unwrap()
             .id();
         state.closing_terminals.insert(pane_id);
         state.pending_terminal_bells.insert(pane_id);
@@ -213,6 +214,7 @@ fn releasing_control_releases_reported_mouse_before_focus() {
         .unwrap()
         .active_tab()
         .focused_pane()
+        .unwrap()
         .id();
     let mut views = std::collections::HashMap::new();
     send_terminal(
