@@ -51,7 +51,7 @@ impl EndpointListener {
                 local.listener.set_nonblocking(if nonblocking {
                     ListenerNonblockingMode::Accept
                 } else {
-                    ListenerNonblockingMode::Both
+                    ListenerNonblockingMode::Neither
                 })
             }
             Self::Tcp { listener, .. } => listener.set_nonblocking(nonblocking),
@@ -62,7 +62,16 @@ impl EndpointListener {
     /// client's own thread, so a slow peer cannot stall accepting.
     pub fn accept(&self) -> io::Result<EndpointStream> {
         match self {
-            Self::Local(local) => local.listener.accept().map(EndpointStream::Local),
+            Self::Local(local) => {
+                use interprocess::local_socket::traits::Stream as _;
+
+                let stream = local.listener.accept()?;
+                // BSD accept() hands back a socket that inherited the listener's
+                // O_NONBLOCK, so on macOS every framed read would fail with WouldBlock.
+                // Client handlers use blocking reads, so normalize on every platform.
+                stream.set_nonblocking(false)?;
+                Ok(EndpointStream::Local(stream))
+            }
             Self::Tcp { listener, identity } => {
                 let (stream, _) = listener.accept()?;
                 // Accepted sockets inherit nonblocking mode on Windows. Client handlers use
@@ -383,6 +392,7 @@ fn restrict_permissions(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::unique_suffix;
 
     const CHILD_ENDPOINT_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_PATH";
     const CHILD_READY_ENV: &str = "CONDR_ENDPOINT_BIND_CHILD_READY";
@@ -492,6 +502,44 @@ mod tests {
         drop(listener);
         assert!(!path.exists());
         assert!(local_bind_lock_path(&path).exists());
+        cleanup_test_artifacts(&path);
+    }
+
+    /// The accept loop polls, so the listener is nonblocking. BSD hands that flag down to
+    /// the accepted socket, which would break every framed read on the client thread.
+    #[test]
+    fn accepted_streams_block_on_a_nonblocking_listener() {
+        use std::io::{Read as _, Write as _};
+
+        let path = test_path("accept-blocking");
+        let endpoint = Endpoint::local(&path);
+        let listener = EndpointListener::local(endpoint.as_local_path().unwrap()).unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        let client = std::thread::spawn(move || {
+            let mut stream = endpoint.connect().unwrap();
+            // The Server reaches its first read well before this write arrives.
+            std::thread::sleep(Duration::from_millis(200));
+            stream.write_all(b"condr").unwrap();
+            stream.flush().unwrap();
+        });
+        let mut accepted = loop {
+            match listener.accept() {
+                Ok(stream) => break stream,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        };
+
+        let mut greeting = [0_u8; 5];
+        accepted.read_exact(&mut greeting).unwrap();
+        assert_eq!(&greeting, b"condr");
+
+        client.join().unwrap();
+        drop(accepted);
+        drop(listener);
         cleanup_test_artifacts(&path);
     }
 
@@ -648,16 +696,22 @@ mod tests {
         drop(sender);
 
         let mut owner = None;
+        let mut refusals = Vec::new();
         for result in receiver {
             match result {
                 Ok(listener) => assert!(owner.replace(listener).is_none()),
-                Err(error) => assert_eq!(error.kind(), io::ErrorKind::AddrInUse),
+                Err(error) => {
+                    assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
+                    refusals.push(error.to_string());
+                }
             }
         }
         for thread in threads {
             thread.join().unwrap();
         }
-        let owner = owner.expect("exactly one concurrent binder owns the endpoint");
+        let owner = owner.unwrap_or_else(|| {
+            panic!("exactly one concurrent binder owns the endpoint; both refused: {refusals:?}")
+        });
         let stream = endpoint.connect().unwrap();
 
         drop(stream);
@@ -718,12 +772,5 @@ mod tests {
     fn cleanup_test_artifacts(path: &Path) {
         let _ = fs::remove_file(path);
         let _ = fs::remove_file(local_bind_lock_path(path));
-    }
-
-    fn unique_suffix() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
     }
 }

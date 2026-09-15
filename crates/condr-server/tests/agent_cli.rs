@@ -11,6 +11,9 @@ use condr_core::protocol::{
 use condr_server::{ClientConnection, Endpoint};
 use serde_json::Value;
 
+mod common;
+use common::unique_suffix;
+
 struct Server {
     child: Child,
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -22,7 +25,7 @@ struct Server {
 
 impl Server {
     fn start() -> Self {
-        let root = std::env::temp_dir().join(format!("condr-agent-cli-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("condr-agent-cli-{}", unique_suffix()));
         let bin = root.join("bin directory");
         std::fs::create_dir_all(&bin).unwrap();
         let config = root.join("config/condr");

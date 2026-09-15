@@ -138,10 +138,12 @@ impl ServerConfig {
     pub fn ephemeral_tcp(address: std::net::SocketAddr) -> io::Result<Self> {
         let client_key = StaticKey::generate()?;
         let identity = ServerIdentity::ephemeral()?.with_authorized(client_key.public());
+        // The low 64 bits carry the clock; the full epoch would push the path past the
+        // 104-byte `sun_path` limit under the macOS temporary directory.
         let socket_path = std::env::temp_dir().join(format!(
-            "condr-tcp-{}-{}.sock",
+            "condr-tcp-{}-{:x}.sock",
             std::process::id(),
-            runtime_epoch()
+            runtime_epoch() as u64
         ));
         Ok(Self {
             socket_path,

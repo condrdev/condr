@@ -1,6 +1,8 @@
 #[cfg(target_os = "linux")]
 mod clipboard_image;
 mod control;
+// Layout tests run only where CI exercises the Server's worktree and PTY paths.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod layout;
 mod persistence;
 mod protocol;
@@ -9,6 +11,7 @@ mod subscriptions;
 mod unit;
 
 use super::*;
+use crate::test_support::unique_suffix;
 
 fn test_endpoint() -> Endpoint {
     Endpoint::local(std::env::temp_dir().join(format!(
@@ -18,12 +21,7 @@ fn test_endpoint() -> Endpoint {
     )))
 }
 
-/// Random rather than clock-based: the Windows system clock ticks coarsely, so
-/// parallel tests used to share an endpoint path and talk to each other's Server.
-fn unique_suffix() -> u128 {
-    uuid::Uuid::new_v4().as_u128()
-}
-
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn run_git(cwd: &std::path::Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .arg("-C")
@@ -53,6 +51,7 @@ fn start() -> (ServerHandle, Endpoint, thread::JoinHandle<io::Result<()>>) {
     panic!("server did not start");
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn write_snapshot_fixture(path: PathBuf, snapshot: condr_core::SessionSnapshot) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).unwrap();
@@ -105,6 +104,7 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
     .unwrap()
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn wait_for_connection(endpoint: &Endpoint) {
     for _ in 0..100 {
         if endpoint.connect().is_ok() {
@@ -145,7 +145,6 @@ fn subscribe(stream: &mut EndpointStream, session_id: SessionId, after_sequence:
     ));
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn send_terminal(
     stream: &mut EndpointStream,
     server_id: ServerId,
@@ -224,12 +223,10 @@ fn wait_for_message(
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn read_server(stream: &mut EndpointStream) -> ServerMessage {
     condr_core::protocol::read_message(stream).unwrap()
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn assert_layout_applied(
     stream: &mut EndpointStream,
     server_id: ServerId,
@@ -252,7 +249,6 @@ fn assert_layout_applied(
     ));
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn view_text(view: &condr_core::TerminalView) -> String {
     (0..view.size.rows)
         .map(|row| {

@@ -8,6 +8,8 @@ pub mod noise;
 pub(crate) mod persistence;
 mod server;
 pub mod ssh;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub use client::ClientConnection;
 pub use endpoint::{

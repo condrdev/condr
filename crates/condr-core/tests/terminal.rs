@@ -1,4 +1,6 @@
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "linux")]
 use condr_core::{
@@ -7,9 +9,9 @@ use condr_core::{
     TerminalMouseTracking, TerminalMouseWheel, TerminalPosition, TerminalScroll, TerminalSide,
     TerminalUpdate,
 };
-use condr_core::{
-    CommandBuilder, PaneEnvironment, PaneId, TerminalCommand, TerminalRuntime, TerminalSize,
-};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use condr_core::{CommandBuilder, PaneEnvironment, PaneId, TerminalCommand};
+use condr_core::{TerminalRuntime, TerminalSize};
 #[cfg(target_os = "windows")]
 use sysinfo::{Pid, System};
 
@@ -1007,6 +1009,7 @@ fn conpty_close_terminates_descendant_processes() {
     let _ = std::fs::remove_file(pid_file);
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn wait_for_text(runtime: &TerminalRuntime, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {

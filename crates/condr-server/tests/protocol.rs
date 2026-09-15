@@ -9,18 +9,15 @@ use condr_server::{
 };
 use std::{io, sync::Arc, thread, time::Duration};
 
+mod common;
+use common::unique_suffix;
+
 fn test_endpoint() -> Endpoint {
     Endpoint::local(std::env::temp_dir().join(format!(
         "condr-server-{}-{}.sock",
         std::process::id(),
         unique_suffix()
     )))
-}
-
-/// Random rather than clock-based: the Windows system clock ticks coarsely, so
-/// parallel tests used to share an endpoint path and talk to each other's Server.
-fn unique_suffix() -> u128 {
-    uuid::Uuid::new_v4().as_u128()
 }
 
 fn start() -> (ServerHandle, Endpoint, thread::JoinHandle<io::Result<()>>) {

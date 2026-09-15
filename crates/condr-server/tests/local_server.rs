@@ -2,11 +2,14 @@ use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use condr_core::Session;
 use condr_core::protocol::{ClientMessage, LayoutCommand, ServerId, ServerMessage, SessionEvent};
 use condr_server::{ClientConnection, Endpoint, ServerConfig, ensure_local_server, stop_server};
+
+mod common;
+use common::unique_suffix;
 
 const HELPER_ENV: &str = "CONDR_LOCAL_SERVER_TEST_HELPER";
 const WORKSPACE_ENV: &str = "CONDR_LOCAL_SERVER_TEST_WORKSPACE";
@@ -300,11 +303,16 @@ fn auto_started_server_survives_launcher_exit() {
 
 #[test]
 fn lifecycle_commands_manage_a_detached_server() {
-    let data_directory = std::env::temp_dir().join(format!(
-        "condr-command-test-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ));
+    // The Workspace root doubles as the Pane's cwd, which the Server observes from the
+    // live shell as a canonical path. macOS puts the temporary directory behind the
+    // `/var -> /private/var` symlink, so start canonical or the snapshots differ.
+    let data_directory = std::fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!(
+            "condr-command-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
     std::fs::create_dir_all(&data_directory).unwrap();
     let socket_path = data_directory.join("condr.sock");
     let snapshot_path = data_directory.join("state.snapshot");
@@ -523,11 +531,4 @@ fn wait_for_stop(endpoint: &Endpoint) {
 
 fn read_server(stream: &mut condr_server::EndpointStream) -> ServerMessage {
     condr_core::protocol::read_message(stream).unwrap()
-}
-
-fn unique_suffix() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
 }

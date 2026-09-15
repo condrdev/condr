@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn apply_for_test(
     state: &mut RuntimeState,
     updates: &mut Vec<mpsc::Receiver<TerminalUpdate>>,
@@ -26,7 +25,6 @@ fn apply_for_test(
     removed_count
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
     use condr_core::{PaneDirection, PaneLayout, SplitDirection};
@@ -289,7 +287,6 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
     assert!(state.session.tab(tab_one).is_none());
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_branch() {
     let temp = std::env::temp_dir().join(format!(
@@ -371,7 +368,6 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
     let _ = std::fs::remove_dir_all(temp);
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     let temp = std::env::temp_dir().join(format!(
@@ -480,7 +476,6 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     let _ = std::fs::remove_dir_all(temp);
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn stopping_server_rolls_back_a_prepared_worktree() {
     let temp = std::env::temp_dir().join(format!(
@@ -537,7 +532,6 @@ fn stopping_server_rolls_back_a_prepared_worktree() {
     let _ = std::fs::remove_dir_all(temp);
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
     let temp = std::env::temp_dir().join(format!(
@@ -608,7 +602,6 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
     let _ = std::fs::remove_dir_all(temp);
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn opening_an_already_open_worktree_records_parent_membership() {
     let temp = std::env::temp_dir().join(format!(
@@ -680,7 +673,6 @@ fn opening_an_already_open_worktree_records_parent_membership() {
     let _ = std::fs::remove_dir_all(temp);
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     use condr_core::{TerminalPosition, TerminalScroll, TerminalSide};
@@ -905,7 +897,6 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     thread.join().unwrap().unwrap();
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
 fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());

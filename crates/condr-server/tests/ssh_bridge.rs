@@ -6,6 +6,9 @@ use std::time::Duration;
 use condr_core::protocol::{self, ClientMessage, Hello, PROTOCOL_VERSION, ServerMessage};
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig};
 
+mod common;
+use common::unique_suffix;
+
 struct Bridge {
     child: Child,
     input: Option<ChildStdin>,
@@ -73,7 +76,7 @@ impl Drop for Bridge {
 
 #[test]
 fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
-    let root = std::env::temp_dir().join(format!("condr-bridge-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("condr-bridge-{}", unique_suffix()));
     std::fs::create_dir(&root).unwrap();
     let endpoint = Endpoint::local(root.join("server.sock"));
     // An explicit `--endpoint` only connects (ADR 0015): nothing listening is an error,
@@ -155,7 +158,7 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
 /// outlives the bridge, so the test stops it the way `condr server stop` does.
 #[test]
 fn bridge_starts_the_server_on_the_default_socket_when_none_runs() {
-    let root = std::env::temp_dir().join(format!("condr-bridge-start-{}", uuid::Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("condr-bridge-start-{}", unique_suffix()));
     let config = root.join("config");
     std::fs::create_dir_all(&config).unwrap();
     let socket = root.join("server.sock");

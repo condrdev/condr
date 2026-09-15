@@ -158,20 +158,21 @@ fn terminal_keys_follow_platform_keystroke_semantics() {
     assert_eq!(key("alt-space"), character(" "));
     // Windows leaves key_char empty under Alt: the shifted letter is still uppercase.
     assert_eq!(key("alt-shift-s"), character("S"));
-    assert_eq!(key("alt-shift-s->S"), character("S"));
     // Keys a terminal cannot encode are not turned into their names.
     assert_eq!(key("ctrl-pause"), None);
     assert_eq!(key("shift-tab"), Some(TerminalKey::BackTab));
     assert_eq!(key("ctrl-f13"), Some(TerminalKey::Function(13)));
 
-    // macOS Option produces a character (ß), which is typed rather than sent as ESC ß;
-    // elsewhere Alt is Meta.
+    // macOS Option produces a character (ß, or S with Shift), which is typed rather than
+    // sent as ESC ß; elsewhere Alt is Meta.
     let option_s = key("alt-s->ß");
     if cfg!(target_os = "macos") {
         assert_eq!(option_s, None);
+        assert_eq!(key("alt-shift-s->S"), None);
         assert_eq!(key("ctrl-alt-s"), character("s"));
     } else {
         assert_eq!(option_s, character("ß"));
+        assert_eq!(key("alt-shift-s->S"), character("S"));
         assert_eq!(key("alt-s->s"), character("s"));
     }
 }
