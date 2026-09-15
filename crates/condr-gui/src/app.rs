@@ -8,6 +8,7 @@ mod events;
 mod ime;
 mod navigation;
 mod notifications;
+mod open_in;
 mod power;
 mod presentation;
 mod server_connection;
@@ -256,6 +257,13 @@ pub(crate) struct Condr {
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
+    /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
+    open_targets: Option<Vec<open_in::OpenTarget>>,
+    /// The "Open in" target used last: the default for a project without its own choice.
+    default_editor: Option<String>,
+    custom_editors: Vec<open_in::CustomEditor>,
+    /// Each project's "Open in" choice, keyed by its repository root.
+    workspace_editors: BTreeMap<PathBuf, String>,
     settings_window: Option<WindowHandle<Root>>,
     settings_view: Option<WeakEntity<SettingsWindow>>,
     _settings_window_closed: Option<Subscription>,
@@ -306,6 +314,9 @@ impl Condr {
             keep_awake,
             terminal_font,
             terminal_color_scheme,
+            default_editor,
+            custom_editors,
+            workspace_editors,
         } = config;
         let mut connections = vec![connection];
         for (index, (name, endpoint)) in saved_servers.into_iter().enumerate() {
@@ -385,6 +396,10 @@ impl Condr {
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,
+            open_targets: None,
+            default_editor,
+            custom_editors,
+            workspace_editors,
             settings_window: None,
             settings_view: None,
             _settings_window_closed: None,
@@ -401,6 +416,7 @@ impl Condr {
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);
         this.apply_keep_awake();
+        this.scan_open_targets(cx);
 
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {
             while let Ok(result) = connect_results_rx.recv().await {

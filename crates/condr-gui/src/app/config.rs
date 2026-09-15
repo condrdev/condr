@@ -8,13 +8,22 @@ use serde::Deserialize;
 
 use condr_server::StaticKey;
 
+use super::open_in::CustomEditor;
 use super::{Appearance, Condr, Endpoint, TerminalFont};
+use std::collections::BTreeMap;
 
 const APPEARANCE_KEY: &str = "appearance";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const KEEP_AWAKE_KEY: &str = "keep_awake";
 const SERVERS_KEY: &str = "servers";
+/// `[client] editor`: the "Open in" target used last, and so the default for a project
+/// without its own choice.
+const EDITOR_KEY: &str = "editor";
+/// `[[client.editors]]`: the user's own "Open in" commands.
+const EDITORS_KEY: &str = "editors";
+/// `[[client.workspace_editors]]`: each project's "Open in" choice, keyed by its root.
+const WORKSPACE_EDITORS_KEY: &str = "workspace_editors";
 /// `[client.terminal]` holds every Terminal preference.
 const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
@@ -36,6 +45,13 @@ impl SavedServer {
     }
 }
 
+/// One `[[client.workspace_editors]]` entry.
+#[derive(Deserialize)]
+struct SavedWorkspaceEditor {
+    root: PathBuf,
+    editor: String,
+}
+
 pub(super) fn default_path() -> Option<PathBuf> {
     condr_core::config_directory().map(|root| root.join("config.toml"))
 }
@@ -52,6 +68,9 @@ pub(super) struct LoadedConfig {
     pub keep_awake: bool,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
+    pub default_editor: Option<String>,
+    pub custom_editors: Vec<CustomEditor>,
+    pub workspace_editors: BTreeMap<PathBuf, String>,
 }
 
 impl LoadedConfig {
@@ -126,6 +145,18 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_terminal_color_scheme(path).ok())
                 .unwrap_or_default(),
+            default_editor: path
+                .as_deref()
+                .and_then(|path| load_default_editor(path).ok())
+                .flatten(),
+            custom_editors: path
+                .as_deref()
+                .and_then(|path| load_custom_editors(path).ok())
+                .unwrap_or_default(),
+            workspace_editors: path
+                .as_deref()
+                .and_then(|path| load_workspace_editors(path).ok())
+                .unwrap_or_default(),
             path,
             device_key,
             servers,
@@ -198,6 +229,35 @@ pub(super) fn load_terminal_color_scheme(path: &Path) -> io::Result<SharedString
         .and_then(toml::Value::as_str)
         .map(|name| name.trim().to_string().into())
         .unwrap_or_default())
+}
+
+/// `None` when unset or blank; an unknown id is kept, since the editor may be installed later.
+pub(super) fn load_default_editor(path: &Path) -> io::Result<Option<String>> {
+    Ok(read_client_value(path, EDITOR_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|editor| !editor.is_empty())
+        .map(str::to_owned))
+}
+
+pub(super) fn load_custom_editors(path: &Path) -> io::Result<Vec<CustomEditor>> {
+    read_client_value(path, EDITORS_KEY)?.map_or_else(
+        || Ok(Vec::new()),
+        |value| value.try_into().map_err(invalid_data),
+    )
+}
+
+pub(super) fn load_workspace_editors(path: &Path) -> io::Result<BTreeMap<PathBuf, String>> {
+    let saved: Vec<SavedWorkspaceEditor> = read_client_value(path, WORKSPACE_EDITORS_KEY)?
+        .map_or_else(
+            || Ok(Vec::new()),
+            |value| value.try_into().map_err(invalid_data),
+        )?;
+    Ok(saved
+        .into_iter()
+        .map(|entry| (entry.root, entry.editor))
+        .collect())
 }
 
 fn read_client_value(path: &Path, key: &str) -> io::Result<Option<toml::Value>> {
@@ -300,6 +360,32 @@ impl Condr {
                 vec![
                     (FONT_FAMILY_KEY, toml_edit::value(font.family.as_ref())),
                     (FONT_SIZE_KEY, toml_edit::value(f64::from(font.size))),
+                ],
+            )
+        });
+    }
+
+    /// The last-used editor and every project's choice, written together: a launch
+    /// changes both.
+    pub(super) fn save_open_in_choices(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.default_editor.clone() else {
+            return;
+        };
+        let workspace_editors = self.workspace_editors.clone();
+        self.save_config(cx, move |path| {
+            let mut saved = toml_edit::ArrayOfTables::new();
+            for (root, editor) in workspace_editors {
+                let mut table = toml_edit::Table::new();
+                table["root"] = toml_edit::value(root.to_string_lossy().into_owned());
+                table["editor"] = toml_edit::value(editor);
+                saved.push(table);
+            }
+            write_values(
+                path,
+                &["client"],
+                vec![
+                    (EDITOR_KEY, toml_edit::value(editor)),
+                    (WORKSPACE_EDITORS_KEY, toml_edit::Item::ArrayOfTables(saved)),
                 ],
             )
         });
@@ -587,6 +673,61 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_terminal_color_scheme(&path).unwrap(), "Gruvbox Dark");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn open_in_choices_round_trip_and_tolerate_a_bad_entry() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-open-in-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            &path,
+            "[client]\nappearance = 'dark'\n\n[[client.editors]]\nname = 'Helix'\ncommand = ['wezterm', 'start', 'hx']\n",
+        )
+        .unwrap();
+
+        assert_eq!(load_default_editor(&path).unwrap(), None);
+        assert!(load_workspace_editors(&path).unwrap().is_empty());
+        assert_eq!(
+            load_custom_editors(&path).unwrap(),
+            [CustomEditor {
+                name: "Helix".into(),
+                command: vec!["wezterm".into(), "start".into(), "hx".into()],
+            }]
+        );
+
+        let mut saved = toml_edit::ArrayOfTables::new();
+        let mut table = toml_edit::Table::new();
+        table["root"] = toml_edit::value("/repo/a");
+        table["editor"] = toml_edit::value("zed");
+        saved.push(table);
+        write_values(
+            &path,
+            &["client"],
+            vec![
+                (EDITOR_KEY, toml_edit::value("zed")),
+                (WORKSPACE_EDITORS_KEY, toml_edit::Item::ArrayOfTables(saved)),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(load_default_editor(&path).unwrap().as_deref(), Some("zed"));
+        assert_eq!(
+            load_workspace_editors(&path).unwrap(),
+            BTreeMap::from([(PathBuf::from("/repo/a"), "zed".to_owned())])
+        );
+        assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
+        assert_eq!(load_custom_editors(&path).unwrap().len(), 1);
+
+        // A custom entry missing its command is a load error, not a silent drop, so the
+        // user learns why their editor is not in the menu.
+        fs::write(&path, "[[client.editors]]\nname = 'Broken'\n").unwrap();
+        assert!(load_custom_editors(&path).is_err());
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -1,7 +1,8 @@
-The agent marks in this directory name the coding-agent CLI running in a Pane.
-Each is a trademark of its owner; Condr uses them nominatively, recolored to
-`currentColor` so the theme tints them like every other icon, and otherwise
-geometrically unchanged unless noted. Fetched on 2026-09-07.
+The agent marks in this directory name the coding-agent CLI running in a Pane; the
+editor marks name the editor the title bar's "Open in" button launches. Each is a
+trademark of its owner; Condr uses them nominatively, recolored to `currentColor` so
+the theme tints them like every other icon, and otherwise geometrically unchanged
+unless noted. Agent marks fetched on 2026-09-07, editor marks on 2026-09-15.
 
 From theSVG (https://thesvg.org, https://github.com/glincker/thesvg; the
 collection's code and tooling are MIT, Copyright (c) 2025 thesvg.org; it
@@ -22,6 +23,13 @@ https://thesvg.org/icons/<slug>/default.svg:
   antigravity.svg  google-antigravity  Antigravity, of Google LLC; the source is a
                                        masked multi-colour composition, and only
                                        its mask silhouette is kept
+  vscode.svg       visual-studio-code  Visual Studio Code, of Microsoft Corporation;
+                                       likewise only the mask silhouette is kept
+  zed.svg          zed                 Zed, of Zed Industries, Inc.
+  intellij.svg     intellij-idea       IntelliJ IDEA, of JetBrains s.r.o.; the four
+                                       gradient facets are flattened to their outline
+                                       and the badge with its letters is kept as a
+                                       cutout
 
 From lobe-icons (https://github.com/lobehub/lobe-icons, MIT, Copyright (c) 2023
 LobeHub), packages/static-svg/icons/qoder.svg:

@@ -639,3 +639,120 @@ fn the_sidebar_coffee_button_toggles_keep_awake() {
         }));
     }
 }
+
+/// The title bar's "Open in" split button: hidden without a Workspace, placed after the
+/// Tab strip, failing loudly when the program is gone, and remembering the editor a
+/// launch succeeded with.
+#[test]
+fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds("open-in").is_none(),
+        "without a Workspace there is nothing to open"
+    );
+
+    let button = window
+        .debug_bounds("open-project")
+        .expect("new workspace button should be rendered");
+    window.simulate_click(button.center(), Modifiers::default());
+    assert!(window.did_prompt_for_paths());
+    let workspace_root = std::env::temp_dir();
+    let selected_root = workspace_root.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| session.active_workspace().is_some())
+        })
+    }));
+
+    // Stand in for the machine's scan: one program that does not exist, one that exits
+    // at once, so the test opens no real editor.
+    let (program, args) = if cfg!(windows) {
+        ("cmd.exe", vec!["/c".into(), "exit".into()])
+    } else {
+        ("true", Vec::new())
+    };
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.open_targets = Some(vec![
+                OpenTarget {
+                    id: "missing".into(),
+                    label: "Missing".into(),
+                    icon: OpenTargetIcon::Custom,
+                    program: "condr-no-such-editor".into(),
+                    args: Vec::new(),
+                },
+                OpenTarget {
+                    id: "ok".into(),
+                    label: "OK".into(),
+                    icon: OpenTargetIcon::Custom,
+                    program: program.into(),
+                    args,
+                },
+            ]);
+            cx.notify();
+        });
+    });
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+
+    let open_in = window
+        .debug_bounds("open-in")
+        .expect("the title bar should show Open in once the Workspace is presented");
+    let tabs = window
+        .debug_bounds("workspace-tabs")
+        .expect("the Tab strip should be rendered");
+    assert!(
+        open_in.left() >= tabs.right(),
+        "Open in sits after the Tab strip: {open_in:?} vs {tabs:?}"
+    );
+    assert!(
+        open_in.bottom() <= tabs.bottom() + px(1.),
+        "Open in stays inside the title bar: {open_in:?} vs {tabs:?}"
+    );
+
+    // The primary half opens with the first target, whose program is missing.
+    window.simulate_click(open_in.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| !window.notifications(cx).is_empty())
+        }),
+        "a failed launch should show a notification"
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).default_editor.clone()),
+        None,
+        "a failed launch must not become the default"
+    );
+
+    // The caret half lists every target; the second one launches and is remembered.
+    let control = window.debug_bounds("open-in-control").unwrap();
+    window.simulate_click(
+        point(control.right() - px(12.), control.center().y),
+        Modifiers::default(),
+    );
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_keystrokes("down down enter");
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| view.read(app).default_editor.as_deref() == Some("ok"))
+        }),
+        "a successful launch becomes the last-used editor"
+    );
+    assert_eq!(
+        window.read(|app| view
+            .read(app)
+            .workspace_editors
+            .get(&workspace_root)
+            .cloned()),
+        Some("ok".to_owned()),
+        "and the project's own choice"
+    );
+}

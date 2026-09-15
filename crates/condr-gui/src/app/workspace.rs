@@ -23,12 +23,9 @@ impl Condr {
     /// The active Workspace as two pieces: its Tab strip, which the title bar hosts so
     /// the Panes get the full body height, and the body under it. No strip without a
     /// Workspace; the empty state carries the error itself.
-    pub(super) fn render_workspace(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> (Option<AnyElement>, AnyElement) {
+    pub(super) fn render_workspace(&self, cx: &mut Context<Self>) -> WorkspaceChrome {
         let Some(connection) = self.active_connection() else {
-            return (None, div().size_full().into_any_element());
+            return WorkspaceChrome::body(div().size_full().into_any_element());
         };
         let status = self.render_connection_status(connection, cx);
         // The status line carries the connection error itself; the strip shows the rest.
@@ -42,8 +39,7 @@ impl Condr {
                 .is_none()
             && !self.has_pending_projection_for(connection.key);
         let Ok(session) = Session::restore(connection.snapshot.clone()) else {
-            return (
-                None,
+            return WorkspaceChrome::body(
                 div()
                     .size_full()
                     .child("Invalid Session state")
@@ -52,10 +48,7 @@ impl Condr {
         };
         let key = connection.key;
         let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
-            return (
-                None,
-                self.render_welcome(key, can_mutate, status, error, cx),
-            );
+            return WorkspaceChrome::body(self.render_welcome(key, can_mutate, status, error, cx));
         };
         let workspace = session
             .workspace(workspace_id)
@@ -257,7 +250,29 @@ impl Condr {
                 )
             })
             .into_any_element();
-        (Some(strip.into_any_element()), body)
+        WorkspaceChrome {
+            tab_strip: Some(strip.into_any_element()),
+            open_in: self.render_open_in(connection, workspace, cx),
+            body,
+        }
+    }
+}
+
+/// What `render_workspace` hands the window: the title bar's Tab strip and "Open in"
+/// control, and the body under them.
+pub(super) struct WorkspaceChrome {
+    pub(super) tab_strip: Option<AnyElement>,
+    pub(super) open_in: Option<AnyElement>,
+    pub(super) body: AnyElement,
+}
+
+impl WorkspaceChrome {
+    fn body(body: AnyElement) -> Self {
+        Self {
+            tab_strip: None,
+            open_in: None,
+            body,
+        }
     }
 }
 
@@ -416,6 +431,7 @@ fn workspace_title_bar(
     sidebar_width: Pixels,
     sidebar_collapsed: bool,
     tab_strip: Option<AnyElement>,
+    open_in: Option<AnyElement>,
     owner: WeakEntity<Condr>,
     cx: &App,
 ) -> TitleBar {
@@ -489,12 +505,15 @@ fn workspace_title_bar(
                         ),
                 )
                 .child(
-                    div()
+                    // The Tab strip yields to the "Open in" control: the control keeps
+                    // its width and the strip truncates.
+                    h_flex()
                         .flex_1()
                         .min_w_0()
                         .h_full()
                         .bg(theme.background)
-                        .children(tab_strip),
+                        .children(tab_strip)
+                        .children(open_in),
                 ),
         )
 }
@@ -514,7 +533,11 @@ impl Render for Condr {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
-        let (tab_strip, body) = self.render_workspace(cx);
+        let WorkspaceChrome {
+            tab_strip,
+            open_in,
+            body,
+        } = self.render_workspace(cx);
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {
@@ -570,6 +593,7 @@ impl Render for Condr {
                 self.sidebar_width,
                 self.sidebar_collapsed,
                 tab_strip,
+                open_in,
                 sidebar_toggle_owner,
                 cx,
             ))

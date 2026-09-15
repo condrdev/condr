@@ -15,6 +15,7 @@ use super::super::{
     step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
 use crate::app::config;
+use crate::app::open_in::{OpenTarget, OpenTargetIcon};
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 use condr_core::SplitDirection;
 use condr_core::protocol::{

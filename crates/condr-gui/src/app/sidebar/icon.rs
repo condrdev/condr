@@ -48,6 +48,10 @@ pub(in crate::app) enum CondrIconName {
     Cursor,
     Copilot,
     Kimi,
+    /// The editor marks "Open in" launches with (same notice), recolored the same way.
+    VsCode,
+    Zed,
+    IntellijIdea,
 }
 
 impl CondrIconName {
@@ -99,6 +103,9 @@ impl IconNamed for CondrIconName {
             Self::Cursor => "icons/cursor.svg",
             Self::Copilot => "icons/copilot.svg",
             Self::Kimi => "icons/kimi.svg",
+            Self::VsCode => "icons/vscode.svg",
+            Self::Zed => "icons/zed.svg",
+            Self::IntellijIdea => "icons/intellij.svg",
         }
         .into()
     }

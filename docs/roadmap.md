@@ -120,8 +120,9 @@ M0 原本不做安装器、checksums 和 macOS 构建，M1 关闭后这些已经
 - Settings 的 Server 标签拆成 Terminal、Daemon、Clients、Agents 四个顶层页。Daemon 页显示当前 Client 的连接状态与连接类型（Local/SSH/TCP），可编辑 TCP 监听地址（失焦或回车保存，改动重启后生效），可签发带复制按钮和有效期的 invite，可确认后重启 Server，GUI 在 Server 报告停止后自动重连。Clients 页与 `condr server clients` 共用同一份 NAME / LAST SEEN / FINGERPRINT 列，可撤销设备。
 - Pane header 新增缩放切换按钮，缩放中的 Pane 保留活动边框，不再与单 Pane Tab 混淆；远程粘贴图片期间 header 显示「Pasting image…」直到整帧送出。
 - Workspace 的 Tab 条移入标题栏，标题栏左段与侧栏同宽同色，Pane 拿回 Tab 条原来占用的高度。标题栏内的可点元素必须在按下时截获事件，否则 Windows 会把按下当作拖动窗口而丢掉点击。
+- 标题栏 Tab 条右侧新增「Open in」分割按钮：左半用当前项目的编辑器打开 Workspace 根目录，右半下拉列出可用项。可用项 = 启动时在 GUI 这台机器上探测到的内置预设（Zed、VS Code、Cursor、IntelliJ IDEA；PATH 加各平台已知安装路径）、`[[client.editors]]` 里的自定义命令（目录追加为末参数）、永远存在的系统文件管理器。探测和 spawn 都在 GUI 进程内，因此只对本机 Server 启用，远程 Server 上禁用并说明原因；VS Code Remote over SSH 留作后续。选择按项目（worktree 的父仓库根）记在 `[[client.workspace_editors]]`，最近一次成功启动的编辑器记在 `[client] editor` 作为新项目的默认；只在启动成功后写入。
 
-M1 可选项中的桌面通知、终端内搜索、命令注册表和 Reveal / 在 IDE 中打开等 context action 至今没有出现足以触发实现的摩擦记录，仍保持未实现。
+M1 可选项中的桌面通知、终端内搜索和命令注册表至今没有出现足以触发实现的摩擦记录，仍保持未实现。
 
 **核心交付**
 
@@ -132,11 +133,11 @@ M1 可选项中的桌面通知、终端内搜索、命令注册表和 Reveal / �
 - 在既有 SSH tunnel 验证稳定后，已增加原生 `ssh://` 连接项：Client 通过系统 `ssh` 的 stdio 连接远端 `condr server bridge`，bridge 只负责连接远端私有 endpoint 并双向转发现有协议；远端 Server 仍独立存活。保留 Local/TCP，首版要求远端预装 `condr`；Server 未运行时 bridge 用与本机 GUI 相同的 `ensure_local_server` 自动启动它。支持 `?bin=/absolute/path` 指定可执行文件，不做自动安装、升级或 live handoff；远端自动安装留到后续 install 安装流程实现。设计依据见 [Herdr SSH remote 调查](research/herdr-ssh-v0.8.2.md)。
 - 明确配置归属：GUI 外观与快捷键属于 Client；Shell、Agent Profile 和 Server 配置属于 Server；GUI 偏好不进入 Session Snapshot。
 - 根据真实使用加入桌面通知：Agent `done/blocked`、Server 离线、重连成功，并提供静默/过滤选项。
-- 根据真实使用加入跨平台的搜索、复制路径、Reveal in Explorer/Finder、在 IDE 或自定义命令中打开当前 `pwd` 等 context action。
+- 根据真实使用加入跨平台的搜索、复制路径等 context action。「在编辑器 / 文件管理器中打开 Workspace 根目录」已落地为标题栏的「Open in」按钮；按当前 Pane 的 `pwd` 打开留待出现真实需求。
 
 **非目标**
 
-- 不为每一个 IDE 或 Agent 写硬编码入口。
+- 不为每一个 IDE 或 Agent 写专门入口：「Open in」只内置一小份可探测的预设，其余编辑器走 `[[client.editors]]` 自定义命令。
 - 不因为“功能完整”而提前实现罕见终端协议；按真实 Agent 工作流逐项加入。
 
 **退出条件**
