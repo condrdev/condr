@@ -144,7 +144,13 @@ actions!(
         SwapDown,
         ToggleZoom,
         TerminalTab,
-        TerminalBackTab
+        TerminalBackTab,
+        QuitApp,
+        HideApp,
+        HideOtherApps,
+        ShowAllApps,
+        MinimizeWindow,
+        ZoomWindow
     ]
 );
 

@@ -84,6 +84,11 @@ fn fixed_bindings() -> Vec<KeyBinding> {
             KeyBinding::new("cmd-ctrl-up", ResizeUp, Some("Condr")),
             KeyBinding::new("cmd-ctrl-down", ResizeDown, Some("Condr")),
             KeyBinding::new("cmd-shift-enter", ToggleZoom, Some("Condr")),
+            // The system chords every macOS app answers; the app menu shows them too.
+            KeyBinding::new("cmd-q", QuitApp, Some("Condr")),
+            KeyBinding::new("cmd-h", HideApp, Some("Condr")),
+            KeyBinding::new("cmd-alt-h", HideOtherApps, Some("Condr")),
+            KeyBinding::new("cmd-m", MinimizeWindow, Some("Condr")),
         ]);
     } else {
         bindings.extend([
@@ -112,6 +117,37 @@ pub(super) fn bind_keys(cx: &mut App) {
     ]);
     FIXED_BINDINGS.with(|bindings| cx.bind_keys(bindings.clone()));
 }
+
+/// The macOS menu bar. GPUI only answers Cmd+Q, Cmd+H and Cmd+M through menu items,
+/// so without these the system shortcuts do nothing; the key equivalents come from the
+/// bindings above. Quit runs the `on_app_quit` hooks, so pending config saves finish.
+#[cfg(target_os = "macos")]
+pub(super) fn install_app_menus(cx: &mut App) {
+    cx.on_action(|_: &QuitApp, cx| cx.quit());
+    cx.on_action(|_: &HideApp, cx| cx.hide());
+    cx.on_action(|_: &HideOtherApps, cx| cx.hide_other_apps());
+    cx.on_action(|_: &ShowAllApps, cx| cx.unhide_other_apps());
+    cx.set_menus([
+        Menu::new(condr_core::APP_NAME).items([
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action(format!("Hide {}", condr_core::APP_NAME), HideApp),
+            MenuItem::action("Hide Others", HideOtherApps),
+            MenuItem::action("Show All", ShowAllApps),
+            MenuItem::separator(),
+            MenuItem::action(format!("Quit {}", condr_core::APP_NAME), QuitApp),
+        ]),
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", MinimizeWindow),
+            MenuItem::action("Zoom", ZoomWindow),
+        ]),
+    ]);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn install_app_menus(_cx: &mut App) {}
 
 pub(super) fn connect_to_server_with<T>(
     endpoint: Endpoint,
@@ -208,6 +244,7 @@ pub(crate) fn run() {
         cx.set_app_identity(APP_IDENTITY, "Condr");
         register_notification_icon();
         bind_keys(cx);
+        install_app_menus(cx);
         let window_options = default_window_options(cx);
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
