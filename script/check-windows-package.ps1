@@ -43,9 +43,9 @@ try {
     }
   } finally { $expectedBitmap.Dispose(); $expectedIcon.Dispose() }
 
-  # Install GUI + CLI, without creating shortcuts on the test runner.
+  # Install the desktop build, without creating shortcuts on the test runner.
   $process = Start-Process -FilePath $installer[0].FullName -Wait -PassThru -ArgumentList @(
-    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS', '/TYPE=full',
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS',
     "/DIR=`"$gui`"", "/LOG=`"$(Join-Path $stage 'installer.log')`""
   )
   if ($process.ExitCode -ne 0) {
@@ -58,6 +58,14 @@ try {
   & (Join-Path $gui 'condr.exe') server --help
   if ($LASTEXITCODE -ne 0) { throw 'installed GUI bundle CLI failed' }
   if ($gui -notin ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';')) { throw 'GUI installer did not register PATH' }
+
+  # An upgrade over the same directory must not add a second PATH entry.
+  $process = Start-Process -FilePath $installer[0].FullName -Wait -PassThru -ArgumentList @(
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOICONS', "/DIR=`"$gui`""
+  )
+  if ($process.ExitCode -ne 0) { throw "GUI installer upgrade failed: $($process.ExitCode)" }
+  $guiPathEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $gui })
+  if ($guiPathEntries.Count -ne 1) { throw 'GUI installer must register PATH exactly once' }
 
   # Empty input must cancel an update, even when a GUI shares this directory.
   $env:CONDR_INSTALL_DIR = $gui

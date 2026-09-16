@@ -126,9 +126,9 @@ CLI-only 安装可直接运行仓库内脚本（PowerShell 会写入当前用户
 powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-cli-<version>-<short_sha>-windows-x86_64.zip
 ```
 
-GUI + CLI 的安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器与 GUI ZIP 共用打包输入目录，默认安装两个相邻的 EXE，CLI-only 类型只安装 `condr.exe`；两种类型均附带 `LICENSE` 和 `BUILD-COMMIT`。
+GUI + CLI 的安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器与 GUI ZIP 共用打包输入目录，没有组件选择：始终安装两个相邻的 EXE 以及 `LICENSE` 和 `BUILD-COMMIT`。向导只有目标目录、附加任务（默认都勾选加入 PATH 和桌面快捷方式）和完成页的启动选项；升级时先执行已安装的 `condr.exe server stop` 并等待 Server 退出再覆盖文件，PATH 只注册一次，卸载时同样先停 Server 并移除 PATH 项。只需要 headless Server/CLI 时不用安装器，直接用上面的 CLI-only 脚本。
 
-`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 GUI ZIP、CLI ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，并验证 CLI 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
+`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 GUI ZIP、CLI ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，重复安装确认 PATH 不重复，并验证 CLI 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
 
 更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 

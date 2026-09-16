@@ -14,8 +14,8 @@ cargo run --locked -p condr-gui --example generate_icons
 
 - `condr.png`: embedded in the GUI title bars and Start Page, and supplied to X11.
 - `condr.ico`: 16, 32, 48, 64, 128 and 256 pixel images, embedded as resource 1
-  in both Windows executables and used by Inno Setup. Shortcuts inherit the GUI
-  executable's icon; the uninstall entry uses the CLI so it also works for CLI-only installs.
+  in both Windows executables and used by Inno Setup. Shortcuts and the uninstall
+  entry use the GUI executable's icon.
 - `condr.iconset/`: standard macOS 1x/2x images through 1024 pixels. The macOS
   packaging script uses the system `iconutil` to produce `Contents/Resources/condr.icns`,
   referenced by `CFBundleIconFile` for Finder, Dock and the application switcher.

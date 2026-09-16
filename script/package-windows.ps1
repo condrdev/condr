@@ -29,7 +29,8 @@ Compress-Archive -Path $cliStage -DestinationPath (Join-Path $Dist "condr-cli-$p
 
 $iscc = @(
   (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
-  (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+  (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 is required' }
 $bundleDir = (Resolve-Path -LiteralPath $fullStage).Path
