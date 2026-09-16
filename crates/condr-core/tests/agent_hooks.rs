@@ -2,15 +2,18 @@ use condr_core::agent_hooks::*;
 use condr_core::{AgentEventKind, AgentKind};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
+static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
+
+/// A counter rather than a timestamp: macOS's realtime clock ticks in microseconds, so
+/// the tests in this file, started together, used to draw the same "nanosecond" and
+/// share one root.
 fn target() -> (HookTarget, PathBuf) {
     let root = std::env::temp_dir().join(format!(
         "condr-hooks-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
     ));
     let target = HookTarget::in_home(&root, "\"/opt/condr bin/condr\"".to_owned());
     (target, root)
