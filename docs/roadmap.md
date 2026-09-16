@@ -1,8 +1,8 @@
 # Condr Roadmap
 
-> 状态：M1 自举已完成（2026-09-08），post-M1 持续 dogfood 中（最近核对 2026-09-10）
+> 状态：M0/M1 已完成，post-M1 持续 dogfood 中；发布基础设施（nightly、三平台 desktop/headless 产物、安装脚本、社区文档）已就位，是否邀请外部用户尚未决定（最近核对 2026-09-16）
 >
-> MVP Phase 7 验收见 [GitHub #16](https://github.com/condrdev/condr/issues/16)；M0 滚动开发版已建立，M1 自举验收记录见下文。M1 关闭后两天里落地了全平台安装包、Server 管理设置页和一批 GUI 打磨，其中安装包与校验和原属 R0/M2 的交付，已提前完成；见各里程碑下的「M1 之后」记录。下一阶段评估 R0 与 M2 的决定尚未做出。
+> MVP Phase 7 验收见 [GitHub #16](https://github.com/condrdev/condr/issues/16)，M1 自举验收记录在下文「已完成」一节。功能细节以 [ADR](adr/)、[Development Build](development-build.md)、[Releases](releases.md) 和 git 历史为准，本文只记录方向、边界和决定。
 
 本文档描述 MVP 通过 Phase 7 发布门之后的方向。它不修改 [MVP 验收计划](mvp-plan.md) 中已经约定的 Server、Session、Terminal、Agent 和 Git 边界。
 
@@ -22,9 +22,9 @@ Condr 的北极星不是“功能最多的终端”，而是一个可靠、易�
 
 Agent 仍然是 Terminal 中的可选进程，Condr 负责编排、呈现和生命周期，不自建对话循环，也不把自己定位成 IDE、通用 SaaS 或云端 Agent 平台。
 
-Phase 7 release gate 已在 [GitHub #16](https://github.com/condrdev/condr/issues/16) 完成，Condr 已进入 post-MVP。后续每个发布候选仍需在同一 commit 上通过适用的自动化与人工验证。
+用户只需要认识两种构建：**desktop**（GUI + CLI，各平台安装包）和 **headless**（仅 `condr` 二进制，安装脚本）。两者来自同一 commit，Client 与 Server 之间没有跨构建兼容承诺。
 
-当前项目由单个开发者维护，近期没有对外发布计划。可下载、可更新的滚动开发版已建立，维护者已实际使用 Condr 开发 Condr 本身；下一阶段重新决定对外发布范围，不提前承担 Private Alpha 的安装、兼容和支持成本。
+当前项目由单个开发者维护，维护者用 Condr 开发 Condr。发布基础设施已经完成，但没有对外发布计划；在决定邀请外部用户之前，不承担 Private Alpha 的兼容和支持成本。
 
 ## 排序原则
 
@@ -38,21 +38,21 @@ Phase 7 release gate 已在 [GitHub #16](https://github.com/condrdev/condr/issue
 
 | 优先级 | 方向 | 判断 |
 | --- | --- | --- |
-| P0 | 自举与日常体验 | 滚动开发版、真实 dogfood、Pane/Tab 操作、命令可发现性和最小设置 |
+| P0 | 日常体验 | 真实 dogfood 中出现的摩擦、Pane/Tab 操作、命令可发现性和最小设置 |
 | P0-C | 核心可靠性 | 数据安全、重连、终端性能和真实故障所需的诊断能力 |
 | P0-R | Remote 安全门 | 对外 remote 前必须有鉴权、配对、授权、撤销和加密 |
 | P1 | 自动化与壁垒 | 稳定 Client API、CLI、Agent Profile、Skill |
-| Gate | 对外发布信任 | 有明确发布计划后再做诊断、安装/升级、支持矩阵和兼容策略 |
+| Gate | 对外发布信任 | 有明确发布计划后再做诊断、签名、支持矩阵和兼容策略 |
 | P3 | 分发与扩张 | Relay、Web、Mobile、团队协作和 Hosted 服务，按需求证据推进 |
 
 ## 依赖关系
 
 ```text
-M0  Rolling Developer Preview
+M0  Rolling Developer Preview        [完成]
  |
- \---- M1  Solo Daily Driver / 自举
+ \---- M1  Solo Daily Driver / 自举   [完成，持续 dogfood]
           |\
-          | \-- R0  Release Readiness / Private Alpha（有发布计划后）
+          | \-- R0  Release Readiness / Private Alpha（基础设施就位，等待发布决定）
           |
           \---- M2  Protocol/Client API + Headless Server 发布
               |\
@@ -63,110 +63,67 @@ M0  Rolling Developer Preview
               \---- M4  condr-cli Workflow -> Agent Profile -> Skill
 
 M3 + 稳定语义 API -> M6 Web 只读 -> Mobile Companion -> 受控交互
-
-开发文档从 M0 开始按需维护；面向用户的品牌、社区治理和正式推广在 R0 再启动，不需要等待完整 Mobile。
 ```
 
-M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完成后再决定进入 R0 还是继续 M2；M3 需要 M2 的 Server 发布和协议/客户端边界。M1 已在 `condr` 中落地自举所需的 CLI 编排与 Skill；M2 再建立独立的 `condr-cli` 和可复用客户端边界，M4 按需扩展 Agent workflow。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
+R0 与 M2 互不阻塞：R0 取决于是否邀请外部用户，M2 的协议/客户端拆分是 M3 授权模型和 M4 `condr-cli` 的共同前置。M1 已在 `condr` 中落地自举所需的 CLI 编排与 Skill；M2 再建立独立的 `condr-cli` 和可复用客户端边界。Relay 和新客户端都不能绕过 M3 的身份与授权模型。
 
-## 里程碑
+## 已完成：M0 与 M1（截至 2026-09-16）
 
-### M0：Rolling Developer Preview
+M0 原本只要求一个手动移动 `dev` tag 的滚动开发版，M1 只要求自举；两者关闭后的一周里，发布和日常体验都超出了原定范围。以下是现状，不再逐条重述过程。
 
-**核心交付**
+**发布与安装**（[Releases](releases.md)、[Development Build](development-build.md)）
 
-- 在私有 GitHub 仓库中只维护一个标记为 Pre-release 的 `Development Build`，由固定的可变 `dev` tag 指向当前选定 commit。
-- 开发中的每个 commit 不自动发布；只有主动移动并推送 `dev` tag 才触发更新。
-- 从同一个 tagged commit 生成 Windows GUI 与同目录 Server bundle，以及 Linux x64/arm64 Server artifacts；asset 名称、release notes 和 artifact 都记录 commit SHA，避免滚动更新后混淆版本。
-- 先手工完成一次构建、打包和解压验证，再把已验证流程做成由 `dev` tag 触发的最小 GitHub Actions 自动化。
-- 提供仅供开发者使用的下载、启动、SSH 连接和更新说明，使日常运行不依赖 `cargo run`。
+- `nightly.yml` 每日构建 `main` 并重建可变的 Nightly 预发布；`release.yml` 由 `v*` 标签触发不可变正式版；两者共用 `build.yml`。PR 有 CI 检查，工具链由 `rust-toolchain.toml` 固定。
+- 每次发布从同一 commit 生成 Linux x86_64/arm64 AppImage、Windows x86_64 Inno Setup 安装器与 ZIP、macOS x86_64/arm64 拖放式 DMG，以及各平台 `condr-headless-*` 归档；Release 附带 `SHA256SUMS`，包内 `BUILD-COMMIT` 记录 SHA。
+- Windows 安装器只有 desktop 一种形态：升级前停掉运行中的 Server，PATH 只注册一次，卸载时停 Server 并清理 PATH。macOS 启动器每次启动幂等执行 `condr server install`（[ADR 0016](adr/0016-server-install-installs-the-running-binary.md)）。
+- `script/install-condr.sh` / `.ps1` 安装 headless 归档，处理校验和、PATH 与覆盖确认；各平台包检查脚本在 CI 中实际安装并卸载。
+- 仓库已有双语 README、CONTRIBUTING、SECURITY、Code of Conduct、Issue 模板和 triage 标签。
 
-**非目标**
+**桌面体验**
 
-- 不作为 Private Alpha，不承诺外部用户或 Windows x64、Linux x64/arm64 之外的平台支持。
-- 不做安装器、代码签名、checksums、自动升级、系统服务、遥测、协议兼容层或完整发布流水线。
-- 不为尚未发生的故障预建结构化日志、health/status、诊断包或性能基准；在 M1 的真实使用需要时加入最小工具。
+- Settings 拆为 Appearance、Terminal、Daemon、Clients、Agents、Notifications 页；Daemon 页可改 TCP 监听、签发 invite、重启 Server，Clients 页可撤销设备。
+- Agent 完成或需要输入时发送 OS 通知并请求窗口注意；可选「保持屏幕唤醒」。
+- 连接状态可见并自动重连；Server 报告停止后 GUI 自行重连。无 Workspace 的 Device 显示 Welcome 页；界面统一用「Device」指一台机器。
+- Workspace 的 Tab 条移入标题栏；标题栏「Open in」按可探测的编辑器预设、`[[client.editors]]` 自定义命令或系统文件管理器打开 Workspace 根目录（仅本地 Server）。
+- Pane 缩放、拖动分割条、Tab 悬停关闭、远程图片粘贴进度提示。
+- 右侧栏 Files / Changes 两个视图：Changes 由 Server 用 gix 计算并推送，点击打开每 Workspace 唯一的只读 Diff Tab（[ADR 0017](adr/0017-changes-sidebar-and-diff-tab.md)）；Files 按需列目录、标记 ignore 与变更、右键复制路径/用编辑器打开/插入终端，点击打开只读 Preview Tab（[ADR 0018](adr/0018-files-sidebar-and-preview-tab.md)）。
+- macOS 有原生菜单栏（Cmd+Q/H/M），本地 socket 在 macOS 上可连。
 
-**退出条件**
+**远程与安全**
 
-- Windows 可以从 `Development Build` 解压并启动 GUI；GUI 能发现同目录 Server，且不需要从源码启动。
-- 同一 release 的 Windows GUI 能通过既有 SSH tunnel 连接 Linux Server，并完成一次断开、重连和恢复；Linux x64/arm64 artifacts 均能独立启动。
-- 所有目标构建成功后才更新 release assets；成功更新后 `dev` tag、release notes 和所有 artifacts 指向同一 commit。
-- Condr 可以用该滚动开发版开始开发 Condr 自身。
+- TCP 连接按 WireGuard 模型认证加密：`Noise_IKpsk2`、持久静态密钥、一次性 invite 配对、`condr server clients|revoke`（[ADR 0011](adr/0011-tcp-endpoints-authenticate-like-wireguard.md)）。
+- 原生 `ssh://` 连接：系统 `ssh -T` 运行远端 `condr server bridge` 转发私有 socket，远端 Server 未运行时自动启动；要求远端预装 `condr`（[ADR 0015](adr/0015-ssh-forwards-the-remote-private-socket.md)）。
 
-**M1 之后的扩展（2026-09-08～09）**
+**Agent**
 
-M0 原本不做安装器、checksums 和 macOS 构建，M1 关闭后这些已经落地，滚动开发版的形态因此超出上面的非目标：
+- Agent 状态只来自 Agent CLI 自己的 hooks，经 OSC 777 回写（[ADR 0014](adr/0014-agent-status-comes-from-hooks-over-osc-777.md)）；Windows hooks 验收见 [#30](https://github.com/condrdev/condr/issues/30)，跨 Pane 编排见 [#27](https://github.com/condrdev/condr/issues/27)，远程图片粘贴见 [#29](https://github.com/condrdev/condr/issues/29)。
 
-- 每次发布从同一 commit 生成 Linux x86_64/arm64 AppImage 与 tar.gz、Windows x86_64 Inno Setup 安装器与 ZIP、macOS x86_64/arm64 `.dmg` 与 tar.gz，另有各平台 headless 归档；Release 附带 `SHA256SUMS`，包内 `BUILD-COMMIT` 记录 SHA。
-- 仓库提供 `script/install-condr.sh` 与 `script/install-condr.ps1` 安装 headless CLI/Server，处理 PATH 注册与覆盖确认；卸载时清理 PATH。
-- 应用图标与品牌资源已统一到各平台。
+**M1 遗留的可选项**
 
-仍未做的仍是 M0 非目标：代码签名、自动升级、系统服务、遥测、协议兼容层。细节见 [Development Build](development-build.md)。
+- 终端内搜索和命令注册表 / 命令面板至今没有出现足以触发实现的摩擦记录，仍未实现。
+- Changes 的「分支 vs base」比较模式（`GitDiff.against` 已预留）等摩擦出现后单独立 ADR。
+- 已知限制独立跟踪：[颜色查询 #23](https://github.com/condrdev/condr/issues/23)、[Kitty keyboard #28](https://github.com/condrdev/condr/issues/28)、[OpenCode 真机验证 #36](https://github.com/condrdev/condr/issues/36)、[OSC 支持对照 #26](https://github.com/condrdev/condr/issues/26)。当前状态以 GitHub Issues 为准。
 
-### M1：Solo Daily Driver / Desktop Daily Driver
+**仍是非目标**：自动升级、系统服务、遥测、协议兼容层、代码签名。
 
-**完成记录（2026-09-08）**
-
-- 维护者确认已实际使用 Condr 开发 Condr，此前未单独记录；本次补记自举验收。SSH 连接与 Server 重启后的 Agent 会话恢复均已手工测试通过。
-- 本次代码核对基线为 `ad538e2b2d7c47a1559a9ca1b84dd39f616dc6d7`。既有跨 Pane 编排验收见 [#27](https://github.com/condrdev/condr/issues/27)，Windows hooks 验收见 [#30](https://github.com/condrdev/condr/issues/30)，远程图片粘贴验收见 [#29](https://github.com/condrdev/condr/issues/29)。手工结果由维护者确认，本阶段未单独采集上手计时或 FPS 数据。
-- 自动化收尾修正两处把 Session event cursor 当作布局命令计数的测试断言，并覆盖元数据事件推进 cursor 的情况。Linux arm64 上 `cargo test --workspace --features condr-gui/test-support --locked` 通过 423 项（含 121 项 GUI 测试），1 项辅助测试忽略；`cargo clippy --workspace --all-targets --features condr-gui/test-support --locked -- -D warnings` 与格式检查通过。
-- 已知限制继续独立跟踪：[颜色查询 #23](https://github.com/condrdev/condr/issues/23) 已延期、[Kitty keyboard #28](https://github.com/condrdev/condr/issues/28) 与 [OpenCode 真机验证 #36](https://github.com/condrdev/condr/issues/36) 后续按需求推进。命令注册表、通知、搜索和 context action 仍按实际摩擦决定，不阻塞 M1 关闭。
-
-**M1 之后的 dogfood 改动（2026-09-09～10）**
-
-这些改动来自日常使用中的直接摩擦，不扩充 M1 范围：
-
-- Settings 的 Server 标签拆成 Terminal、Daemon、Clients、Agents 四个顶层页。Daemon 页显示当前 Client 的连接状态与连接类型（Local/SSH/TCP），可编辑 TCP 监听地址（失焦或回车保存，改动重启后生效），可签发带复制按钮和有效期的 invite，可确认后重启 Server，GUI 在 Server 报告停止后自动重连。Clients 页与 `condr server clients` 共用同一份 NAME / LAST SEEN / FINGERPRINT 列，可撤销设备。
-- Pane header 新增缩放切换按钮，缩放中的 Pane 保留活动边框，不再与单 Pane Tab 混淆；远程粘贴图片期间 header 显示「Pasting image…」直到整帧送出。
-- Workspace 的 Tab 条移入标题栏，标题栏左段与侧栏同宽同色，Pane 拿回 Tab 条原来占用的高度。标题栏内的可点元素必须在按下时截获事件，否则 Windows 会把按下当作拖动窗口而丢掉点击。
-- 标题栏 Tab 条右侧新增「Open in」分割按钮：左半用当前项目的编辑器打开 Workspace 根目录，右半下拉列出可用项。可用项 = 启动时在 GUI 这台机器上探测到的内置预设（Zed、VS Code、Cursor、IntelliJ IDEA；PATH 加各平台已知安装路径）、`[[client.editors]]` 里的自定义命令（目录追加为末参数）、永远存在的系统文件管理器。探测和 spawn 都在 GUI 进程内，因此只对本机 Server 启用，远程 Server 上禁用并说明原因；VS Code Remote over SSH 留作后续。选择按项目（worktree 的父仓库根）记在 `[[client.workspace_editors]]`，最近一次成功启动的编辑器记在 `[client] editor` 作为新项目的默认；只在启动成功后写入。
-- 右侧新增「Changes」侧栏（[ADR 0017](adr/0017-changes-sidebar-and-diff-tab.md)）：Server 用 gix 把 `git status` 折成每路径一个状态（Conflicts / Tracked / Untracked 三段，按路径平铺，行内 `+N −N`），随 `WorkspaceGitChanged` 推送，`notify` 监听工作树与终端活动共同触发同一次重算。点击文件发 `ShowDiff`，每 Workspace 只有一个「Diff」Tab（Tab 的内容类型，不是 Pane），按需向 Server 请求单文件 hunk，用 Kit 只读 `Editor` + `diff` grammar + 行底色渲染。只读；分支 vs base、语法高亮、split 视图留待后续。
-- 右侧栏头部改为 Files / Changes 两个 Tab（Kit 默认 Tab 样式，按标签宽度排列，Files 在前，Changes 带计数，`+N −N` 总计常驻右端），新增「Files」视图（[ADR 0018](adr/0018-files-sidebar-and-preview-tab.md)）：按需向 Server 请求 Workspace 根目录的单层列表（`ListDirectory`，隐藏 `.git`、显示 dotfiles、目录优先），展开一层请求一层；仓库内被 ignore 的项由 Server 用 gix excludes 标记、GUI 变灰但仍列出；含变更的目录带圆点、变更文件名按状态着色。文件与目录图标用 Material Icon Theme（MIT，822 个 SVG 约 640 KiB，`script/generate-file-icons.mjs` 从其映射源重新生成查表，按文件名精确匹配再按最长点分后缀）。点击文件发 `ShowFile`，每 Workspace 只有一个「Preview」Tab，与 Diff Tab 并存，内容经 `ReadFile` 取回后用只读 `Editor` 按扩展名高亮显示（Kit 全部 grammar，SQL 除外；1 MiB 上限、NUL 判二进制）。现有 watcher 每个防抖批次多发一个 `WorkspaceFilesChanged`（Git 与非 Git 一致，全是忽略项的批次不发），客户端静默重取已缓存的列表与文件。文件行右键：复制相对/绝对路径、用当前编辑器打开（仅本地）、把路径插入 Workspace 最近的终端 Tab。非 Git Workspace 默认落到 Files。视图选择、展开状态不持久化。参考 Superset / Paseo / Orca 后明确不做：编辑、staging / commit / discard、树内搜索、键盘导航、Markdown 渲染。
-- 待办：Changes 的「分支 vs base」比较模式（三家参考项目都有，`GitDiff.against` 已预留），等摩擦记录出现再单独立 ADR。
-
-M1 可选项中的桌面通知、终端内搜索和命令注册表至今没有出现足以触发实现的摩擦记录，仍保持未实现。
-
-**核心交付**
-
-- 使用 Condr 完成真实的 Condr 开发任务，记录仍需退回其他终端或手工处理的原因，并优先消除最高频摩擦。
-- 先完善实际阻塞自举的 Pane/Tab/Workspace 创建、关闭、移动、聚焦、拆分、交换、缩放和恢复反馈。
-- 当快捷键、菜单、Toolbar、右键菜单或命令面板出现真实的重复与不一致时，再建立覆盖当前命令的最小 `Command Registry`。
-- 按实际需要加入最小设置。已落地 `Settings` 窗口与 Appearance 页（System/Light/Dark）、终端字体/字号、终端配色方案（独立于 Appearance），以及 Server 端的默认 Shell（`[server.terminal] shell`，留空取系统默认）；候选范围继续包括启动行为、连接项、快捷键和通知。
-- 在既有 SSH tunnel 验证稳定后，已增加原生 `ssh://` 连接项：Client 通过系统 `ssh` 的 stdio 连接远端 `condr server bridge`，bridge 只负责连接远端私有 endpoint 并双向转发现有协议；远端 Server 仍独立存活。保留 Local/TCP，首版要求远端预装 `condr`；Server 未运行时 bridge 用与本机 GUI 相同的 `ensure_local_server` 自动启动它。支持 `?bin=/absolute/path` 指定可执行文件，不做自动安装、升级或 live handoff；远端自动安装留到后续 install 安装流程实现。设计依据见 [Herdr SSH remote 调查](research/herdr-ssh-v0.8.2.md)。
-- 明确配置归属：GUI 外观与快捷键属于 Client；Shell、Agent Profile 和 Server 配置属于 Server；GUI 偏好不进入 Session Snapshot。
-- 根据真实使用加入桌面通知：Agent `done/blocked`、Server 离线、重连成功，并提供静默/过滤选项。
-- 根据真实使用加入跨平台的搜索、复制路径等 context action。「在编辑器 / 文件管理器中打开 Workspace 根目录」已落地为标题栏的「Open in」按钮；按当前 Pane 的 `pwd` 打开留待出现真实需求。
-
-**非目标**
-
-- 不为每一个 IDE 或 Agent 写专门入口：「Open in」只内置一小份可探测的预设，其余编辑器走 `[[client.editors]]` 自定义命令。
-- 不因为“功能完整”而提前实现罕见终端协议；按真实 Agent 工作流逐项加入。
-
-**退出条件**
-
-- 已使用 Condr 完成多个真实的 Condr 开发任务，主要回退原因已经记录并处理或明确接受。
-- 新用户可以在几分钟内创建三个 Pane、启动一个代表性 Agent 并完成一次切换/介入流程。
-- 高速 Agent 输出下，拖选、输入、滚动和 Pane 操作仍保持可用帧率。
-- 所有布局变更仍经过 Server 权威状态确认，GUI 缓存不能成为真相来源。
-
-### R0：Release Readiness / Private Alpha（延期）
+## R0：Release Readiness / Private Alpha（等待发布决定）
 
 **进入条件**
 
-- M1 已完成自举，并且已经明确决定邀请外部用户、目标平台和发布范围。
+- 明确决定邀请外部用户、目标平台和发布范围。
 
-**已提前完成的部分**
+**已就位**
 
-三大桌面平台的安装包、CLI 归档、`SHA256SUMS` 和安装脚本已随滚动开发版落地（见 M0 的「M1 之后的扩展」），安装与数据目录说明在 [Development Build](development-build.md)。R0 剩下的是可复现的候选版本流程、诊断能力、协议语义冻结、支持矩阵和外部 dogfood；代码中尚无结构化日志、health/status 或终端 burst 基准。
+三平台安装包、headless 归档、校验和、安装脚本、nightly/正式版流水线和社区文档（见上一节）。R0 的基础设施部分已经完成；剩余部分全是“有外部用户才值得做”的工作。
 
-**核心交付**
+**剩余交付**
 
-- 以已完成的 Phase 7 验收证据和后续 dogfood 为基线，维护一个可复现的 Private Alpha 候选版本。
-- 增加结构化日志、Server health/status、故障诊断、崩溃/PTY 孤儿排查信息和终端 burst 基准。
+- 代码签名：Windows 安装器与 EXE（否则 SmartScreen 拦截「未知发布者」）、macOS 签名与公证。需要证书，是流程决定而非脚本改动。
+- 诊断：结构化日志、Server health/status、崩溃与 PTY 孤儿排查信息、终端 burst 基准。代码中目前一项都没有。
 - 冻结 Session、Bootstrap、可靠事件和视觉流语义；定义从当前严格协议版本到公开版本的兼容策略。
-- 固定首发支持矩阵，不提前承诺所有平台。
-- 建立小规模外部 dogfood，使用同一个 canonical workflow：多个 worktree/Agent、断开 GUI、重连和 Server 重启。
+- 固定首发支持矩阵（当前实际构建：Linux x86_64/arm64、Windows x86_64、macOS x86_64/arm64），不提前承诺更多。
+- 用户文档：Quickstart、远程安全边界、故障排查和一个 canonical demo。
+- 小规模外部 dogfood，使用同一个 canonical workflow：多个 worktree/Agent、断开 GUI、重连和 Server 重启。
 
 **退出条件**
 
@@ -174,21 +131,20 @@ M1 可选项中的桌面通知、终端内搜索和命令注册表至今没有�
 - 输入延迟、视觉丢帧、重连成功率、Agent 状态误报和 Server 崩溃都有可重复的测量方法。
 - 已知限制和安全边界可被用户理解；诊断默认不采集终端内容，额外数据采用 opt-in。
 
-### M2：Headless Server 与稳定 Client API
+## M2：Headless Server 与稳定 Client API
 
-Server 的 Linux x86_64/arm64、Windows 和 macOS 构建产物与 checksums 已由滚动开发版覆盖，`condr server restart|clients|revoke|invite` 与 Settings 的 Daemon/Clients 页提供了基本的运维入口。以下仍全部未开始：协议/客户端 crate 拆分、`condr-cli`、health/status、系统服务、签名、升级与回滚。
+headless 构建产物、校验和、安装脚本、`condr server restart|clients|revoke|invite` 与 Settings 的 Daemon/Clients 页已经存在。以下仍全部未开始：协议/客户端 crate 拆分、独立 `condr-cli`、health/status、系统服务、升级与回滚。
 
 **核心交付**
 
-- 发布独立的 `condr-server`：Linux x64/arm64、Windows Server 构建产物、checksum/signing、配置、数据目录、日志、health/status、systemd 或 Windows service。
-- 明确升级、回滚、备份和 Server identity 的持久化位置。
+- headless Server 的运维闭环：配置、数据目录、日志、health/status、systemd 或 Windows service；明确升级、回滚、备份和 Server identity 的持久化位置。
 - 从当前实现中拆出可复用的 `condr-protocol` 和 `condr-client` 边界；Server 保留 Runtime，GUI 不再反向定义协议。
 - 在 Hello/Welcome 和语义 API 中加入 client kind、capabilities、typed errors、幂等 request ID、event cursor、权限上下文和 controller lease。
 - 发布独立的 `condr-cli` 只读骨架：它是面向 Agent 的纯 Client，不依赖 GPUI、不承载 Server 生命周期；先提供 Session、Workspace、Tab、Pane 的 `list/status`，统一 `--json`、稳定退出码、超时和诊断信息。
 
 **协议原则**
 
-当前 `bincode + serde` 适合作为 native 内部传输，但不要把当前 Rust enum 编码形式当作跨语言公共 ABI。公开后应区分 wire codec、语义 API、capability 和 build version；破坏性变更升 major，增量能力通过协商。
+当前 `bincode + serde` 适合作为 native 内部传输，但不要把当前 Rust enum 编码形式当作跨语言公共 ABI。公开后应区分 wire codec、语义 API、capability 和 build version；破坏性变更升 major，增量能力通过协商。开发阶段仍保持 `PROTOCOL_VERSION = 1`，不做兼容层。
 
 **退出条件**
 
@@ -196,9 +152,9 @@ Server 的 Linux x86_64/arm64、Windows 和 macOS 构建产物与 checksums 已�
 - GUI 与 `condr-cli` 可以共享同一客户端状态机，并能清楚区分版本不兼容、未授权和运行时错误。
 - Server 断开 GUI 不会停止 Session、PTY 或 Agent。
 
-### M3：Secure Direct Remote
+## M3：Secure Direct Remote
 
-这是对外宣传 remote 的硬门槛。M1 已按 WireGuard 模型落地了传输层认证与加密（[ADR 0011](adr/0011-tcp-endpoints-authenticate-like-wireguard.md)）：Server 与设备各持久 X25519 静态密钥，`Noise_IKpsk2` 握手，`condr server invite` 生成 10 分钟有效的一次性 invite 配对新设备，`condr server clients|revoke` 管理设备；Settings 的 Daemon/Clients 页已能签发 invite、查看设备指纹和撤销设备。以下为仍未完成的部分；其中 capability 授权在代码中尚无任何雏形，认证通过即拥有全部权限。
+这是对外宣传 remote 的硬门槛。传输层认证与加密、invite 配对和设备管理已在 M1 落地（见「已完成」）。以下为仍未完成的部分；其中 capability 授权在代码中尚无任何雏形，认证通过即拥有全部权限。
 
 **核心交付**
 
@@ -218,7 +174,7 @@ Server 的 Linux x86_64/arm64、Windows 和 macOS 构建产物与 checksums 已�
 - 未授权客户端无法观察到结构或终端数据；安全失败有明确诊断。
 - 单用户自托管场景的部署和恢复有完整文档。
 
-### M4：condr-cli Agent Workflow
+## M4：condr-cli Agent Workflow
 
 **实施顺序**
 
@@ -241,9 +197,9 @@ Skill 是调用 `condr-cli`/API 的受限工作流模板，不是新的对话循
 
 自研 Agent 对话协议、每个厂商的深度插件、插件市场和静默执行任意脚本。
 
-### M5：Relay Server（需求门控）
+## M5：Relay Server（需求门控）
 
-Relay 不是第二个 Condr Server。它只解决 rendezvous、NAT/防火墙穿透和加密流转，Session、PTY、Snapshot、终端明文和 Agent 状态仍只存在于 `condr-server`。
+Relay 不是第二个 Condr Server。它只解决 rendezvous、NAT/防火墙穿透和加密流转，Session、PTY、Snapshot、终端明文和 Agent 状态仍只存在于 Server。
 
 **首版原则**
 
@@ -257,7 +213,7 @@ Relay 不是第二个 Condr Server。它只解决 rendezvous、NAT/防火墙穿�
 
 先用 SSH、Tailscale、反向代理和文档验证需求。只有远程用户经常因 NAT/防火墙失败，且明确需要免 SSH 配置的体验时，才进入 Relay 实现；上线前要有 NAT 测试矩阵、限速/配额、连接过期、审计和安全审查。
 
-### M6：Web 与 Mobile Companion
+## M6：Web 与 Mobile Companion
 
 Web 和 Mobile 共享语义 API、鉴权、capability、事件 cursor 和测试向量，但不共享 GPUI，也不把含 PTY/系统调用的 Server Runtime 编译到浏览器。
 
@@ -284,20 +240,20 @@ Web 和 Mobile 共享语义 API、鉴权、capability、事件 cursor 和测试�
 
 ## 文档、品牌与社区
 
-这条线按当前阶段控制投入：
+已完成：滚动开发版与安装说明、发布流程说明、双语 README 与 hero 图、CONTRIBUTING、SECURITY、Code of Conduct、Issue 模板、triage 标签、应用图标与各平台品牌资源。
 
-- M0：仅维护滚动开发版的下载、启动、SSH 连接和更新说明。
-- M1：记录实际 dogfood workflow、已知限制和需要回退到其他工具的场景。
-- R0：补齐 Quickstart、安装、支持矩阵、远程安全边界、故障排查和 canonical demo。
+按阶段继续：
+
+- R0：Quickstart、支持矩阵、远程安全边界、故障排查和 canonical demo。
 - M2：Server 运维、数据目录、升级/回滚、版本兼容矩阵、录屏和部署示例。
-- 公共 Beta：官网、品牌/图标/截图和文案统一，CHANGELOG、SECURITY.md、贡献指南、Code of Conduct、Issue/Discussion 模板和发布节奏。
+- 公共 Beta：官网、截图和文案统一、CHANGELOG、Discussion 模板和发布节奏。
 - Hosted Relay、账号体系、团队协作、企业 SSO/RBAC 和云端数据存储不在早期宣传中承诺。
 
 首发内容应围绕一个可演示闭环：同一项目的多个 worktree/Agent、GUI 断开后继续运行、重新连接后恢复，而不是堆叠营销功能。
 
 ## 持续指标
 
-M0/M1 不建设遥测，只记录自举中直接观察到的摩擦与性能问题。进入 R0 后再考虑以下指标；诊断数据默认不包含 Terminal 内容，并采用 opt-in：
+当前不建设遥测，只记录 dogfood 中直接观察到的摩擦与性能问题。进入 R0 后再考虑以下指标；诊断数据默认不包含 Terminal 内容，并采用 opt-in：
 
 - 首次安装到第一个 Agent 的时间。
 - 新用户创建三个 Pane 并完成一次任务的时间。
@@ -317,7 +273,7 @@ M0/M1 不建设遥测，只记录自举中直接观察到的摩擦与性能问�
 
 ## 当前下一步
 
-1. 持续使用 Condr 开发 Condr，记录并处理真实出现的摩擦；不再扩充 M1 范围。M1 可选项（通知、搜索、命令注册表、context action）只在摩擦记录出现后实现。
-2. 决定下一阶段是 R0 还是 M2。安装包与 checksums 已经做完，R0 剩余部分取决于是否邀请外部用户；M2 的协议/客户端拆分是 M3 授权模型和 M4 `condr-cli` 的共同前置。没有对外发布计划时，R0 继续延期。
-3. 保持主动更新 `dev` tag 的滚动开发版流程；普通 commit 不自动发布。每次日常使用依赖的修复合入 main 后应及时移动 `dev` tag，避免安装版长期落后于 main（2026-09-10 核对时 `dev` 停在 `dff225f`，落后 main 十余个提交）。
-4. 待处理 Issue 中只有 [#28](https://github.com/condrdev/condr/issues/28) 处于 ready-for-agent；[#26](https://github.com/condrdev/condr/issues/26) 是 OSC 支持对照文档；#23 与 #36 延期。
+1. 持续用 Condr 开发 Condr，只处理真实出现的摩擦；终端内搜索、命令面板和「分支 vs base」比较等可选项在摩擦记录出现后再实现。
+2. 决定是否邀请外部用户。是，则进入 R0，第一步是代码签名证书和诊断能力；否，则 R0 继续等待，工程主线转向 M2 的协议/客户端拆分。
+3. 发布节奏交给 nightly：日常修复合入 `main` 即进入次日 Nightly，不再手工移动 tag；需要固定版本时按 [Releases](releases.md) 打 `v*` 标签。
+4. 已知限制和延期项以 GitHub Issues 与 triage 标签为准，本文不再重复其状态。
