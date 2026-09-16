@@ -213,6 +213,7 @@ pub(in crate::app) fn enforce_terminal_chunk_reliable_fence(
                 | ServerMessage::Event {
                     event: SessionEvent::AgentChanged { .. }
                         | SessionEvent::WorkspaceGitChanged { .. }
+                        | SessionEvent::WorkspaceFilesChanged { .. }
                         | SessionEvent::TerminalTitleChanged { .. }
                         | SessionEvent::TerminalAttentionChanged { .. },
                     ..

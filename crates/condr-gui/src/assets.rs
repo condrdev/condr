@@ -21,7 +21,8 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 
 /// Condr's own icons: status glyphs, the marks of the agent CLIs, kept for every agent
 /// Condr may come to name, then the marks of the editors "Open in" launches (both under
-/// assets/icons/NOTICE-AGENT-ICONS).
+/// assets/icons/NOTICE-AGENT-ICONS). The file-type icons under `icons/material/` are
+/// served from `app::file_icons` instead (assets/icons/NOTICE-FILE-ICONS).
 const CONDR_ICON_PATHS: [&str; 28] = [
     "icons/circle.svg",
     "icons/circle-filled.svg",
@@ -65,6 +66,10 @@ impl CondrAssets {
 
 impl AssetSource for CondrAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        // The file-type icons (assets/icons/NOTICE-FILE-ICONS) come from their own table.
+        if let Some(bytes) = crate::app::file_icons::icon_bytes(path) {
+            return Ok(Some(Cow::Borrowed(bytes)));
+        }
         match path {
             APP_LOGO => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../../../packaging/icons/condr.png"
@@ -165,6 +170,11 @@ impl AssetSource for CondrAssets {
         assets.extend(
             CONDR_ICON_PATHS
                 .into_iter()
+                .filter(|asset| asset.starts_with(path))
+                .map(SharedString::from),
+        );
+        assets.extend(
+            crate::app::file_icons::icon_paths()
                 .filter(|asset| asset.starts_with(path))
                 .map(SharedString::from),
         );

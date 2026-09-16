@@ -39,6 +39,13 @@ pub(super) struct ServerConnection {
     pub(super) diffs: HashMap<(WorkspaceId, PathBuf), Result<FileDiff, String>>,
     /// Bumped whenever `diffs` changes, so a Diff Tab knows its text is stale.
     pub(super) diffs_generation: u64,
+    /// Directory listings the Server answered for the Files sidebar (ADR 0018), by
+    /// Workspace and root-relative path; a Git change asks for every cached one again.
+    pub(super) directories: HashMap<(WorkspaceId, PathBuf), Result<DirectoryListing, String>>,
+    /// File contents the Server answered for Preview Tabs, refreshed the same way.
+    pub(super) files: HashMap<(WorkspaceId, PathBuf), Result<FileContent, String>>,
+    /// Bumped whenever `files` changes, so a Preview Tab knows its text is stale.
+    pub(super) files_generation: u64,
     pub(super) zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
     pub(super) settings: ServerSettings,
@@ -110,6 +117,9 @@ impl ServerConnection {
             workspace_git: HashMap::new(),
             diffs: HashMap::new(),
             diffs_generation: 0,
+            directories: HashMap::new(),
+            files: HashMap::new(),
+            files_generation: 0,
             zoomed_panes: HashSet::new(),
             settings: ServerSettings::default(),
             hooks: Vec::new(),
@@ -212,6 +222,9 @@ impl ServerConnection {
         }
         self.diffs.clear();
         self.diffs_generation += 1;
+        self.directories.clear();
+        self.files.clear();
+        self.files_generation += 1;
         self.workspace_git = bootstrap
             .workspace_git
             .into_iter()
@@ -230,12 +243,16 @@ impl ServerConnection {
         }
     }
 
-    /// The Diff Tab the Session presents, if the active Tab is one: its identity and file.
-    /// A retarget changes the file and nothing the Dock projection sees.
-    pub(super) fn presented_diff(&self) -> Option<(TabId, PathBuf)> {
+    /// The viewer Tab the Session presents, if the active Tab is one: its identity and
+    /// file. A retarget changes the file and nothing the Dock projection sees.
+    pub(super) fn presented_viewer(&self) -> Option<(TabId, PathBuf)> {
         let session = Session::restore(self.snapshot.clone()).ok()?;
         let tab = session.active_workspace()?.active_tab();
-        Some((tab.id(), tab.diff()?.path().to_path_buf()))
+        let path = tab
+            .diff()
+            .map(|diff| diff.path())
+            .or_else(|| tab.file().map(|file| file.path()))?;
+        Some((tab.id(), path.to_path_buf()))
     }
 
     pub(super) fn dock_projection(&self) -> Option<PaneLayout> {

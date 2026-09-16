@@ -410,19 +410,20 @@ pub(super) fn available_targets(roots: &InstallRoots, custom: &[CustomEditor]) -
     targets
 }
 
-/// Starts the program on `directory` and returns once it has been spawned. The child
+/// Starts the program on `path`, a directory or a file, and returns once it has been
+/// spawned. The child
 /// is reaped on a helper thread so a CLI that exits at once leaves no zombie behind.
-pub(super) fn launch(target: &OpenTarget, directory: &Path) -> io::Result<()> {
-    if !directory.is_dir() {
+pub(super) fn launch(target: &OpenTarget, path: &Path) -> io::Result<()> {
+    if !path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("{} is not a directory", directory.display()),
+            format!("{} does not exist", path.display()),
         ));
     }
     let mut command = std::process::Command::new(&target.program);
     command
         .args(&target.args)
-        .arg(directory)
+        .arg(path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -442,7 +443,13 @@ pub(super) fn launch(target: &OpenTarget, directory: &Path) -> io::Result<()> {
 
 /// The key a Workspace's editor choice is saved under: the repository, so every worktree
 /// of it shares one choice.
-fn project_root(workspace: &condr_core::Workspace) -> &Path {
+/// How long a successful launch keeps the button spinning. Spawning returns in
+/// milliseconds while the editor's window takes seconds to appear, and nothing tells us
+/// when it does; the floor is what makes the click visibly land.
+// ponytail: fixed floor; watch the child's first window if editors ever report it.
+const OPEN_IN_FEEDBACK: Duration = Duration::from_millis(1500);
+
+pub(super) fn project_root(workspace: &condr_core::Workspace) -> &Path {
     workspace
         .worktree()
         .map_or(workspace.root_directory(), |worktree| {
@@ -470,7 +477,7 @@ impl Condr {
 
     /// This project's choice, else the last editor used anywhere, else the first target;
     /// a saved choice whose program is gone falls through rather than being rewritten.
-    fn open_target_for(&self, project_root: &Path) -> Option<&OpenTarget> {
+    pub(super) fn open_target_for(&self, project_root: &Path) -> Option<&OpenTarget> {
         let targets = self.open_targets.as_deref()?;
         let find = |id: &str| targets.iter().find(|target| target.id == id);
         self.workspace_editors
@@ -500,6 +507,7 @@ impl Condr {
         };
         let primary_owner = cx.weak_entity();
         let current_id = current.id.clone();
+        let opening = self.opening_workspace == Some((key, workspace_id));
         let primary = Button::new("open-in")
             .debug_selector(|| "open-in".into())
             // The default variant: the border is what tells the split control apart
@@ -509,6 +517,7 @@ impl Condr {
             .tooltip(tooltip.clone())
             .accessibility_label(tooltip)
             .disabled(!is_local)
+            .loading(opening)
             .on_click(move |_, window, cx| {
                 let _ = primary_owner.update(cx, |this, cx| {
                     this.open_workspace_in(key, workspace_id, current_id.clone(), window, cx)
@@ -595,8 +604,13 @@ impl Condr {
         else {
             return;
         };
+        if self.opening_workspace.is_some() {
+            return;
+        }
         let root = workspace.root_directory().to_path_buf();
         let project = project_root(workspace).to_path_buf();
+        self.opening_workspace = Some((key, workspace_id));
+        cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_spawn({
@@ -605,6 +619,7 @@ impl Condr {
                     async move { launch(&target, &root) }
                 })
                 .await;
+            let launched = result.is_ok();
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(()) => this.remember_open_target(project, target.id, cx),
                 Err(error) => window.push_notification(
@@ -615,6 +630,15 @@ impl Condr {
                     )),
                     cx,
                 ),
+            });
+            // The error notification is feedback enough; only a launch that went quiet
+            // keeps the spinner up.
+            if launched {
+                cx.background_executor().timer(OPEN_IN_FEEDBACK).await;
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.opening_workspace = None;
+                cx.notify();
             });
         })
         .detach();
@@ -860,7 +884,7 @@ mod tests {
         );
         let error = launch(&target, &sandbox.0.join("gone")).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
-        assert!(error.to_string().contains("is not a directory"), "{error}");
+        assert!(error.to_string().contains("does not exist"), "{error}");
         let error = launch(&target, &sandbox.0).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }

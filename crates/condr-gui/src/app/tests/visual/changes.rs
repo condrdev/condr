@@ -28,7 +28,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     let (view, window, _server) = connected_condr(&mut cx);
     window.update(|window, cx| _ = window.draw(cx));
     assert!(
-        window.debug_bounds("condr-changes").is_none(),
+        window.debug_bounds("condr-right-sidebar").is_none(),
         "the Changes sidebar starts closed on a fresh config"
     );
     // Without a Workspace there is nothing to review: the toggle is disabled and a click
@@ -39,7 +39,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds("condr-changes").is_none());
+    assert!(window.debug_bounds("condr-right-sidebar").is_none());
     assert!(!window.read(|app| view.read(app).changes_open));
 
     let button = window
@@ -59,12 +59,12 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     // A Workspace alone does not open the sidebar; the user does, and the column then
     // sits at the window's right edge.
     window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds("condr-changes").is_none());
+    assert!(window.debug_bounds("condr-right-sidebar").is_none());
     let toggle = window.debug_bounds("toggle-changes").unwrap();
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds("condr-changes").is_some());
+    assert!(window.debug_bounds("condr-right-sidebar").is_some());
     assert!(window.debug_bounds("condr-changes-column").is_some());
 
     // The Server scans the repository off its own lock and publishes the list.
@@ -163,7 +163,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.simulate_click(toggle.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds("condr-changes").is_none());
+    assert!(window.debug_bounds("condr-right-sidebar").is_none());
 
     let _ = std::fs::remove_dir_all(&repository);
 }

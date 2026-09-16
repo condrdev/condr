@@ -166,13 +166,13 @@ impl Condr {
                         // and terminal views are untouched.
                         let connection = &mut self.connections[index];
                         let previous_layout = connection.dock_projection();
-                        let previous_diff = connection.presented_diff();
+                        let previous_viewer = connection.presented_viewer();
                         connection.snapshot = snapshot;
                         connection.zoomed_panes = zoomed_panes.into_iter().collect();
-                        // A Diff Tab retargeted to another file needs the rebuild too: that
-                        // is where its Editor learns to ask for the new diff.
+                        // A viewer Tab retargeted to another file needs the rebuild too:
+                        // that is where its Editor learns to ask for the new content.
                         let layout_changed = connection.dock_projection() != previous_layout
-                            || connection.presented_diff() != previous_diff;
+                            || connection.presented_viewer() != previous_viewer;
                         // Terminals of closed Panes go; a new Pane's terminal arrives with
                         // its first full frame.
                         if let Ok(session) = Session::restore(connection.snapshot.clone()) {
@@ -284,6 +284,11 @@ impl Condr {
                                 *pending_key != key || *pending_workspace != workspace_id
                             });
                         git_changed = true;
+                        notify = true;
+                    }
+                    SessionEvent::WorkspaceFilesChanged { workspace_id } => {
+                        // Listings and previews keep showing while fresh ones are fetched.
+                        self.refresh_workspace_files(key, workspace_id);
                         notify = true;
                     }
                     SessionEvent::TerminalTitleChanged { pane_id, title } => {
@@ -619,6 +624,40 @@ impl Condr {
                 connection.diffs.insert((workspace_id, path), result);
                 connection.diffs_generation += 1;
                 // The rebuild hands the answer to the Diff Tab's Editor.
+                IncomingEffect {
+                    rebuild: self.active_connection == key,
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::Directory {
+                workspace_id,
+                path,
+                result,
+                ..
+            } => {
+                self.pending_directories
+                    .remove(&(key, workspace_id, path.clone()));
+                self.connections[index]
+                    .directories
+                    .insert((workspace_id, path), result);
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::FileContent {
+                workspace_id,
+                path,
+                result,
+                ..
+            } => {
+                self.pending_files
+                    .remove(&(key, workspace_id, path.clone()));
+                let connection = &mut self.connections[index];
+                connection.files.insert((workspace_id, path), result);
+                connection.files_generation += 1;
+                // The rebuild hands the answer to the Preview Tab's Editor.
                 IncomingEffect {
                     rebuild: self.active_connection == key,
                     notify: true,

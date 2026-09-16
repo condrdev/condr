@@ -15,7 +15,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-pub use workspace::DIFF_TAB_NAME;
+pub use workspace::{DIFF_TAB_NAME, FILE_TAB_NAME};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_STABLE_ID: u64 = u64::MAX / 2;
@@ -122,11 +122,23 @@ pub struct Tab {
 }
 
 /// What a Tab shows: a layout of terminal Panes, or a viewer with no Panes at all
-/// (ADR 0017). Pane commands only ever reach terminal Tabs, since a viewer has none.
+/// (ADR 0017, ADR 0018). Pane commands only ever reach terminal Tabs, since a viewer has
+/// none. A Workspace has at most one viewer Tab of each kind.
 #[derive(Clone, Debug)]
 pub enum TabContent {
     Terminals(TerminalLayout),
     Diff(DiffView),
+    File(FileView),
+}
+
+impl TabContent {
+    /// Whether two contents are the same viewer kind; terminal layouts never are.
+    fn same_viewer_kind(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Diff(_), Self::Diff(_)) | (Self::File(_), Self::File(_))
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +154,18 @@ pub struct TerminalLayout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffView {
     path: PathBuf,
+}
+
+/// One file's content as it is on disk (ADR 0018), named relative to the Workspace root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileView {
+    path: PathBuf,
+}
+
+impl FileView {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +248,14 @@ impl Session {
             .tabs
             .iter()
             .find(|tab| tab.diff().is_some())
+    }
+
+    /// The Workspace's Preview Tab, if it has one; at most one exists (ADR 0018).
+    pub fn file_tab(&self, workspace_id: WorkspaceId) -> Option<&Tab> {
+        self.workspace(workspace_id)?
+            .tabs
+            .iter()
+            .find(|tab| tab.file().is_some())
     }
 
     pub fn workspace_by_root(&self, root_directory: &Path) -> Option<&Workspace> {
@@ -328,21 +360,28 @@ impl Tab {
     pub fn terminals(&self) -> Option<&TerminalLayout> {
         match &self.content {
             TabContent::Terminals(terminals) => Some(terminals),
-            TabContent::Diff(_) => None,
+            TabContent::Diff(_) | TabContent::File(_) => None,
         }
     }
 
     fn terminals_mut(&mut self) -> Option<&mut TerminalLayout> {
         match &mut self.content {
             TabContent::Terminals(terminals) => Some(terminals),
-            TabContent::Diff(_) => None,
+            TabContent::Diff(_) | TabContent::File(_) => None,
         }
     }
 
     pub fn diff(&self) -> Option<&DiffView> {
         match &self.content {
             TabContent::Diff(diff) => Some(diff),
-            TabContent::Terminals(_) => None,
+            TabContent::Terminals(_) | TabContent::File(_) => None,
+        }
+    }
+
+    pub fn file(&self) -> Option<&FileView> {
+        match &self.content {
+            TabContent::File(file) => Some(file),
+            TabContent::Terminals(_) | TabContent::Diff(_) => None,
         }
     }
 

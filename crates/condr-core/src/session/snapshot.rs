@@ -37,6 +37,9 @@ impl Session {
                                 TabContent::Diff(diff) => TabContentSnapshot::Diff {
                                     path: diff.path.clone(),
                                 },
+                                TabContent::File(file) => TabContentSnapshot::File {
+                                    path: file.path.clone(),
+                                },
                             },
                         })
                         .collect(),
@@ -78,6 +81,7 @@ impl Session {
                         zoomed_pane: None,
                     }),
                     TabContentSnapshot::Diff { path } => TabContent::Diff(DiffView { path }),
+                    TabContentSnapshot::File { path } => TabContent::File(FileView { path }),
                 };
                 tabs.push(Tab {
                     id: tab.id,
@@ -146,7 +150,7 @@ impl Session {
             {
                 return Err(SnapshotError::Invalid("active Tab is missing"));
             }
-            let mut diff_tabs = 0;
+            let (mut diff_tabs, mut file_tabs) = (0, 0);
             for tab in &workspace.tabs {
                 validate_id(tab.id.0, &mut max_id)?;
                 if !tab_ids.insert(tab.id) {
@@ -162,6 +166,18 @@ impl Session {
                         if diff_tabs > 1 {
                             return Err(SnapshotError::Invalid(
                                 "a Workspace has at most one Diff Tab",
+                            ));
+                        }
+                        continue;
+                    }
+                    TabContent::File(file) => {
+                        if !valid_diff_path(&file.path) {
+                            return Err(SnapshotError::Invalid("invalid Preview Tab path"));
+                        }
+                        file_tabs += 1;
+                        if file_tabs > 1 {
+                            return Err(SnapshotError::Invalid(
+                                "a Workspace has at most one Preview Tab",
                             ));
                         }
                         continue;

@@ -193,6 +193,9 @@ impl Condr {
         if !self.diff_editors.is_empty() {
             self.prune_diff_editors();
         }
+        if !self.file_editors.is_empty() {
+            self.prune_file_editors();
+        }
         let Some(connection) = self.active_connection() else {
             self.active_dock_surface = None;
             return;
@@ -232,6 +235,9 @@ impl Condr {
             if let Some(diff) = tab.diff() {
                 let path = diff.path().to_path_buf();
                 self.sync_diff_view(key, _workspace_id, tab_id, path, window, cx);
+            } else if let Some(file) = tab.file() {
+                let path = file.path().to_path_buf();
+                self.sync_file_view(key, _workspace_id, tab_id, path, window, cx);
             }
             return;
         };
@@ -251,6 +257,8 @@ impl Condr {
             .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
             .map(PaneLayout::Pane)
             .unwrap_or(tab_layout);
+        // Where "Insert Path into Terminal" goes once a viewer Tab takes the active slot.
+        self.last_terminal_tabs.insert((key, _workspace_id), tab_id);
         let surface_key = DockSurfaceKey {
             connection_key: key,
             tab_id,

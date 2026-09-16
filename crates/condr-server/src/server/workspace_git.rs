@@ -57,22 +57,23 @@ pub(super) fn workspace_git_snapshot(
     }
 }
 
-/// Records a scan result and tells clients when it differs from what they know.
+/// Records a scan result and tells clients when it differs from what they know. `false`
+/// when the Workspace is gone or has moved, so the result was for nobody.
 pub(super) fn apply_workspace_git_refresh(
     state: &mut RuntimeState,
     workspace_id: WorkspaceId,
     root: &Path,
     next: Option<WorkspaceGit>,
-) {
+) -> bool {
     if state
         .session
         .workspace(workspace_id)
         .is_none_or(|workspace| workspace.root_directory() != root)
     {
-        return;
+        return false;
     }
     if state.workspace_git.get(&workspace_id) == next.as_ref() {
-        return;
+        return true;
     }
     let git = match next {
         Some(git) => {
@@ -87,6 +88,7 @@ pub(super) fn apply_workspace_git_refresh(
         }
     };
     state.publish_background(SessionEvent::WorkspaceGitChanged { workspace_id, git });
+    true
 }
 
 /// Installs a freshly discovered repository for a Workspace that was just created or
@@ -394,7 +396,11 @@ fn run_watcher(
                 return;
             };
             let mut state = state.lock().expect("server state lock poisoned");
-            apply_workspace_git_refresh(&mut state, workspace_id, &root, next);
+            if apply_workspace_git_refresh(&mut state, workspace_id, &root, next) {
+                // The same batch is what the Files sidebar and Preview Tabs follow
+                // (ADR 0018); ignored-only batches were skipped above.
+                state.publish_background(SessionEvent::WorkspaceFilesChanged { workspace_id });
+            }
         }
     }
 }

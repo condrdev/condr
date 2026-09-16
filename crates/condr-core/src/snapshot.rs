@@ -60,6 +60,10 @@ pub(crate) enum TabContentSnapshot {
     Diff {
         path: PathBuf,
     },
+    /// The file a Preview Tab shows (ADR 0018).
+    File {
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

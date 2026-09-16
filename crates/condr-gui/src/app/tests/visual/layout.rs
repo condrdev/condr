@@ -747,6 +747,10 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
         None,
         "a failed launch must not become the default"
     );
+    assert!(
+        window.read(|app| view.read(app).opening_workspace.is_none()),
+        "the notification replaces the spinner after a failed launch"
+    );
 
     // The caret half lists every target; the second one launches and is remembered.
     let control = window.debug_bounds("open-in-control").unwrap();
@@ -762,6 +766,18 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
             window.read(|app| view.read(app).default_editor.as_deref() == Some("ok"))
         }),
         "a successful launch becomes the last-used editor"
+    );
+    // The editor's window takes a while to show up, so the button keeps spinning for a
+    // moment after the spawn returned, then settles.
+    assert!(
+        window.read(|app| view.read(app).opening_workspace.is_some()),
+        "a successful launch keeps the button loading while the editor starts"
+    );
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| view.read(app).opening_workspace.is_none())
+        }),
+        "the loading state ends on its own"
     );
     assert_eq!(
         window.read(|app| view

@@ -66,11 +66,16 @@ impl Condr {
             .then(|| self.dock_surfaces.get(&surface_key))
             .flatten()
             .map(|surface| surface.area.clone());
-        // A Diff Tab has no Dock; its body is the diff view (ADR 0017).
-        let viewer = session
-            .tab(active_tab)
-            .and_then(condr_core::Tab::diff)
-            .map(|diff| self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx));
+        // A viewer Tab has no Dock; its body is the diff or the file (ADR 0017, ADR 0018).
+        let viewer = session.tab(active_tab).and_then(|tab| {
+            if let Some(diff) = tab.diff() {
+                Some(self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx))
+            } else {
+                tab.file().map(|file| {
+                    self.render_file_tab(key, workspace_id, active_tab, file.path(), cx)
+                })
+            }
+        });
         let closes_workspace = workspace.tabs().len() == 1;
         // Drop handlers need the source index of the dragged Tab.
         let tab_ids = Rc::new(
@@ -631,7 +636,7 @@ impl Render for Condr {
         let has_workspace = self.presents_a_workspace();
         let changes_toggle = self.render_changes_toggle(has_workspace, cx);
         let changes_column =
-            (self.changes_open && has_workspace).then(|| self.render_changes_sidebar(cx));
+            (self.changes_open && has_workspace).then(|| self.render_right_sidebar(cx));
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {

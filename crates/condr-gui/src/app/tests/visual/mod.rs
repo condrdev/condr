@@ -1,6 +1,7 @@
 mod changes;
 mod connection;
 mod dock;
+mod files;
 mod layout;
 mod settings;
 mod terminal;

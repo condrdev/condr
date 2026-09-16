@@ -3,6 +3,8 @@ use super::*;
 /// The display name every Diff Tab starts with; the Tab is identified by its content, not by
 /// this name, which the user may change.
 pub const DIFF_TAB_NAME: &str = "Diff";
+/// The same for the Preview Tab (ADR 0018).
+pub const FILE_TAB_NAME: &str = "Preview";
 
 impl Session {
     pub fn activate_workspace(&mut self, workspace_id: WorkspaceId) -> bool {
@@ -121,7 +123,34 @@ impl Session {
     /// retargeting it afterwards, and activates it (ADR 0017). `None` for an unknown
     /// Workspace, an invalid path, or when the Tab limit is reached.
     pub fn show_diff(&mut self, workspace_id: WorkspaceId, path: PathBuf) -> Option<TabId> {
-        if !valid_diff_path(&path) {
+        self.show_viewer(
+            workspace_id,
+            TabContent::Diff(DiffView { path }),
+            DIFF_TAB_NAME,
+        )
+    }
+
+    /// Shows `path`'s content in the Workspace's Preview Tab, the same way (ADR 0018).
+    pub fn show_file(&mut self, workspace_id: WorkspaceId, path: PathBuf) -> Option<TabId> {
+        self.show_viewer(
+            workspace_id,
+            TabContent::File(FileView { path }),
+            FILE_TAB_NAME,
+        )
+    }
+
+    fn show_viewer(
+        &mut self,
+        workspace_id: WorkspaceId,
+        content: TabContent,
+        name: &str,
+    ) -> Option<TabId> {
+        let path = match &content {
+            TabContent::Diff(diff) => &diff.path,
+            TabContent::File(file) => &file.path,
+            TabContent::Terminals(_) => return None,
+        };
+        if !valid_diff_path(path) {
             return None;
         }
         let workspace_ix = self
@@ -129,9 +158,13 @@ impl Session {
             .iter()
             .position(|workspace| workspace.id == workspace_id)?;
         let workspace = &mut self.workspaces[workspace_ix];
-        let tab_id = match workspace.tabs.iter_mut().find(|tab| tab.diff().is_some()) {
+        let tab_id = match workspace
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.content.same_viewer_kind(&content))
+        {
             Some(tab) => {
-                tab.content = TabContent::Diff(DiffView { path });
+                tab.content = content;
                 tab.id
             }
             None => {
@@ -142,8 +175,8 @@ impl Session {
                 let workspace = &mut self.workspaces[workspace_ix];
                 workspace.tabs.push(Tab {
                     id: tab_id,
-                    name: DIFF_TAB_NAME.to_owned(),
-                    content: TabContent::Diff(DiffView { path }),
+                    name: name.to_owned(),
+                    content,
                 });
                 tab_id
             }

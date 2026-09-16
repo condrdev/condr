@@ -999,6 +999,63 @@ pub(super) fn handle_client(
                     },
                 )
             }
+            ClientMessage::ListDirectory {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path,
+            } => {
+                // The listing reads the disk: never under the state lock.
+                let repository = {
+                    let state = state.lock().expect("server state lock poisoned");
+                    state
+                        .workspace_git
+                        .get(&workspace_id)
+                        .map(|git| git.repository.clone())
+                };
+                let result =
+                    workspace_root(&state, server_id, session_id, workspace_id).and_then(|root| {
+                        let mut listing = condr_core::list_directory(&root, &path)?;
+                        // The ignore rules are the repository's, so the directory is
+                        // named from the work tree root, which may be above the Workspace.
+                        if let Some(repository) = repository
+                            && let Ok(in_repository) =
+                                root.join(&path).strip_prefix(repository.root())
+                        {
+                            repository.mark_ignored(in_repository, &mut listing);
+                        }
+                        Ok(listing)
+                    });
+                queue_message(
+                    &outbound,
+                    ServerMessage::Directory {
+                        request_id,
+                        workspace_id,
+                        path,
+                        result,
+                    },
+                )
+            }
+            ClientMessage::ReadFile {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path,
+            } => {
+                let result = workspace_root(&state, server_id, session_id, workspace_id)
+                    .and_then(|root| condr_core::read_file(&root, &path));
+                queue_message(
+                    &outbound,
+                    ServerMessage::FileContent {
+                        request_id,
+                        workspace_id,
+                        path,
+                        result,
+                    },
+                )
+            }
             ClientMessage::Agent {
                 server_id,
                 session_id,
@@ -1217,6 +1274,28 @@ pub(super) fn handle_client(
     }
     drop(outbound);
     let _ = writer.join();
+}
+
+/// The Root Directory a Files request reads under, or why it cannot; takes and releases
+/// the state lock so the disk is read outside it.
+fn workspace_root(
+    state: &Arc<Mutex<RuntimeState>>,
+    server_id: ServerId,
+    session_id: SessionId,
+    workspace_id: WorkspaceId,
+) -> Result<PathBuf, String> {
+    let state = state.lock().expect("server state lock poisoned");
+    if server_id != state.server_id {
+        Err("unknown Server".into())
+    } else if session_id != state.session_id {
+        Err("unknown Session".into())
+    } else {
+        state
+            .session
+            .workspace(workspace_id)
+            .map(|workspace| workspace.root_directory().to_path_buf())
+            .ok_or_else(|| "unknown Workspace".into())
+    }
 }
 
 fn server_admin(

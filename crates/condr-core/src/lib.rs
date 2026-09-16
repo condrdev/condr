@@ -1,5 +1,6 @@
 mod agent;
 pub mod agent_discovery;
+mod files;
 mod git;
 mod paths;
 pub mod protocol;
@@ -13,6 +14,10 @@ pub use agent::{
     AgentResume, AgentSnapshot, AgentState, AgentTracker, ProcessInfo, ProcessProbeResult,
     hook as agent_hook, hooks as agent_hooks, identify_agent_among, identify_agent_process,
 };
+pub use files::{
+    DirectoryEntry, DirectoryListing, FileContent, FileKind, MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES,
+    list_directory, read_file, valid_directory_path,
+};
 pub use git::{
     DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitChangeEntry, GitChangeStatus,
     GitChanges, GitDiffStat, GitError, GitFingerprint, GitRepository, GitUpstream, MAX_DIFF_BYTES,
@@ -23,9 +28,9 @@ pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,
 };
 pub use session::{
-    CloseOutcome, DIFF_TAB_NAME, DiffView, Pane, PaneDirection, PaneId, PaneLayout, PaneRect,
-    Session, SplitDirection, Tab, TabContent, TabId, TerminalLayout, Workspace, WorkspaceId,
-    WorktreeAssociation, valid_diff_path,
+    CloseOutcome, DIFF_TAB_NAME, DiffView, FILE_TAB_NAME, FileView, Pane, PaneDirection, PaneId,
+    PaneLayout, PaneRect, Session, SplitDirection, Tab, TabContent, TabId, TerminalLayout,
+    Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
 pub use terminal::{

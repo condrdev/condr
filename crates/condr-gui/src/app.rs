@@ -6,6 +6,8 @@ mod connection_status;
 mod dialogs;
 mod dock;
 mod events;
+pub(crate) mod file_icons;
+mod files;
 mod ime;
 mod navigation;
 mod notifications;
@@ -36,12 +38,12 @@ use condr_core::protocol::{
     TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame, relative_age,
 };
 use condr_core::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, FileDiff, PaneDirection,
-    PaneId, PaneLayout, Session, SessionSnapshot, SplitDirection, TabId, TerminalCellRun,
-    TerminalCommand, TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalModifiers,
-    TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
-    TerminalSelection, TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame,
-    WorkspaceId,
+    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, DirectoryListing,
+    FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot,
+    SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
+    TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
+    TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, Endpoint, ServerConfig, StaticKey, TcpEndpoint,
@@ -50,6 +52,7 @@ use connection::*;
 #[cfg(test)]
 use dialogs::accepted_text_input;
 use dock::*;
+use files::*;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
 use gpui_kit::component::dock::{
@@ -273,11 +276,25 @@ pub(crate) struct Condr {
     diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
     /// Diffs asked of a Server and not yet answered, so a redraw asks only once.
     pending_diffs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
+    /// Which view the right sidebar shows for each Workspace the user chose one for
+    /// (ADR 0018); not persisted. Others open on Changes, or Files outside a repository.
+    sidebar_views: HashMap<(ConnectionKey, WorkspaceId), SidebarView>,
+    /// The terminal Tab each Workspace presented last: where "Insert Path into Terminal"
+    /// sends its text once a viewer Tab has taken the Workspace's active slot.
+    last_terminal_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
+    /// Directories unfolded in the Files tree, by Workspace and root-relative path.
+    expanded_dirs: HashSet<(WorkspaceId, PathBuf)>,
+    /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
+    file_editors: HashMap<(ConnectionKey, TabId), FileEditor>,
+    pending_directories: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
+    pending_files: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
     /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
     open_targets: Option<Vec<open_in::OpenTarget>>,
+    /// The Workspace whose "Open in" launch is in flight; its button shows a spinner.
+    opening_workspace: Option<(ConnectionKey, WorkspaceId)>,
     /// The "Open in" target used last: the default for a project without its own choice.
     default_editor: Option<String>,
     custom_editors: Vec<open_in::CustomEditor>,
@@ -419,10 +436,17 @@ impl Condr {
             collapsed_change_dirs: HashSet::new(),
             diff_editors: HashMap::new(),
             pending_diffs: HashSet::new(),
+            sidebar_views: HashMap::new(),
+            last_terminal_tabs: HashMap::new(),
+            expanded_dirs: HashSet::new(),
+            file_editors: HashMap::new(),
+            pending_directories: HashSet::new(),
+            pending_files: HashSet::new(),
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,
             open_targets: None,
+            opening_workspace: None,
             default_editor,
             custom_editors,
             workspace_editors,

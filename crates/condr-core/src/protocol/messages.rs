@@ -82,6 +82,26 @@ pub enum ClientMessage {
         path: PathBuf,
         against: DiffBase,
     },
+    /// One level of a Workspace's directory tree for the Files sidebar (ADR 0018),
+    /// answered with [`ServerMessage::Directory`]. No Session control needed.
+    ListDirectory {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root; empty for the root itself.
+        path: PathBuf,
+    },
+    /// One file's content for the Preview Tab (ADR 0018), answered with
+    /// [`ServerMessage::FileContent`]. No Session control needed.
+    ReadFile {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root.
+        path: PathBuf,
+    },
     /// Agent orchestration is owned by the Server, including name resolution and waits.
     Agent {
         server_id: ServerId,
@@ -323,6 +343,13 @@ pub enum LayoutCommand {
         /// Relative to the Workspace root.
         path: PathBuf,
     },
+    /// Shows `path`'s content in the Workspace's single Preview Tab the same way
+    /// (ADR 0018).
+    ShowFile {
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root.
+        path: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -342,6 +369,9 @@ pub enum LayoutResult {
         pane_id: PaneId,
     },
     DiffShown {
+        tab_id: TabId,
+    },
+    FileShown {
         tab_id: TabId,
     },
 }
@@ -516,6 +546,13 @@ pub enum SessionEvent {
         workspace_id: WorkspaceId,
         git: Option<WorkspaceGitSnapshot>,
     },
+    /// Something under the Workspace root changed on disk (ADR 0018): one debounced
+    /// batch of watcher events, repository or not. Which paths is not said; a client
+    /// asks again for the listings and files it holds. Batches that touch only ignored
+    /// paths are not reported.
+    WorkspaceFilesChanged {
+        workspace_id: WorkspaceId,
+    },
     TerminalTitleChanged {
         pane_id: PaneId,
         title: Option<String>,
@@ -652,6 +689,22 @@ pub enum ServerMessage {
         /// Relative to the Workspace root, as requested.
         path: PathBuf,
         result: Result<crate::FileDiff, String>,
+    },
+    /// The reply to [`ClientMessage::ListDirectory`].
+    Directory {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root, as requested.
+        path: PathBuf,
+        result: Result<crate::DirectoryListing, String>,
+    },
+    /// The reply to [`ClientMessage::ReadFile`].
+    FileContent {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        /// Relative to the Workspace root, as requested.
+        path: PathBuf,
+        result: Result<crate::FileContent, String>,
     },
     AgentResult {
         result: Result<AgentResponse, AgentError>,

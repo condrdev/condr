@@ -446,6 +446,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
                     .all(|event| matches!(
                         event.event,
                         SessionEvent::TerminalTitleChanged { .. }
+                            | SessionEvent::WorkspaceFilesChanged { .. }
                             | SessionEvent::TerminalAttentionChanged { .. }
                     )),
                 "cwd observation published a layout event"
@@ -518,8 +519,8 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
     assert_eq!(bootstrap.server_id, first_server_id);
     assert_ne!(bootstrap.runtime_epoch, first_epoch);
     // A fresh runtime starts its event log empty; the restarted shells may already have
-    // reported their titles and the restored Workspaces their Git state, the only kinds
-    // of event allowed here.
+    // reported their titles and the restored Workspaces their Git and file state, the
+    // only kinds of event allowed here.
     assert!(
         replacement_handle
             .state
@@ -531,6 +532,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
                 event.event,
                 SessionEvent::TerminalTitleChanged { .. }
                     | SessionEvent::WorkspaceGitChanged { .. }
+                    | SessionEvent::WorkspaceFilesChanged { .. }
                     | SessionEvent::TerminalAttentionChanged { .. }
             ))
     );

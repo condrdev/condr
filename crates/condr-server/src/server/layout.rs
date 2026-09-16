@@ -649,6 +649,12 @@ pub(super) fn apply_layout_command(
             })?;
             result = LayoutResult::DiffShown { tab_id };
         }
+        LayoutCommand::ShowFile { workspace_id, path } => {
+            let tab_id = candidate.show_file(workspace_id, path).ok_or_else(|| {
+                "unknown Workspace, invalid path, or Session Tab limit reached".to_string()
+            })?;
+            result = LayoutResult::FileShown { tab_id };
+        }
     }
 
     if preserve_selection {

@@ -47,7 +47,7 @@ An absolute directory on the owning Server, selected when a Workspace is created
 _Avoid_: Current directory, identity cwd
 
 **Tab**:
-A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (today the single Diff Tab, ADR 0017). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
+A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (the Diff Tab, ADR 0017, and the Preview Tab, ADR 0018; at most one of each per Workspace). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.
 
 `Alt+1` through `Alt+9` (`Cmd+1` through `Cmd+9` on macOS) activate the corresponding displayed Tab number in the current Workspace. A missing number does nothing, and 9 means the ninth Tab, not the last. These GUI shortcuts are consumed before terminal input and do not switch Tabs while a modal dialog is open.
 
@@ -58,8 +58,14 @@ _Avoid_: Agent
 **Diff Tab**:
 The one viewer Tab a Workspace may have, showing one file's working-tree changes against `HEAD` as the Server computes them (ADR 0017). Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its name starts as "Diff" and is display only.
 
+**Preview Tab**:
+The one viewer Tab a Workspace may have for a file's content as it is on disk, read by the Server under the Root Directory (ADR 0018). Clicking a file in the Files view creates it or retargets it; it sits beside the Diff Tab and behaves like it. Its name starts as "Preview" and is display only.
+
 **Changes**:
-The right sidebar listing the presented Workspace's working-tree changes against `HEAD`, index and worktree folded into one status per path, read-only (ADR 0017).
+One of the two views of the right sidebar: the presented Workspace's working-tree changes against `HEAD`, index and worktree folded into one status per path, read-only (ADR 0017). The default view for a Workspace inside a repository.
+
+**Files**:
+The other view of the right sidebar: the presented Workspace's directory tree under its Root Directory, one level per Server answer, unfolded by the user, read-only (ADR 0018). `.git` is hidden, dotfiles are shown, ignored entries are dimmed but listed, rows carry Material Icon Theme file-type icons, a changed file's name takes its status colour, and a directory holding a change carries a dot. The default view for a Workspace outside a repository. The Server's watcher refreshes it through `WorkspaceFilesChanged`. A file row's context menu copies its path, opens it in the "Open in" editor, or inserts its path into the Workspace's terminal.
 
 **Terminal**:
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent.

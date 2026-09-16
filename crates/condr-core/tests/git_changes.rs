@@ -313,3 +313,38 @@ fn file_diff_of_a_rename_compares_against_the_old_path() {
             .all(|line| line.kind == DiffLineKind::Added)
     );
 }
+
+#[test]
+fn mark_ignored_flags_the_listing_entries_the_ignore_rules_exclude() {
+    let root = scratch_repository("ignored");
+    commit_file(&root, ".gitignore", "target/\n*.log\n");
+    fs::create_dir_all(root.join("target/debug")).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    fs::write(root.join("src/build.log"), "noise\n").unwrap();
+    let repository = discover_repository(&root).unwrap().unwrap();
+
+    let mut listing = condr_core::list_directory(&root, Path::new("")).unwrap();
+    repository.mark_ignored(Path::new(""), &mut listing);
+    let flags: Vec<(&str, bool)> = listing
+        .entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.ignored))
+        .collect();
+    assert_eq!(
+        flags,
+        [("src", false), ("target", true), (".gitignore", false)]
+    );
+
+    let mut src = condr_core::list_directory(&root, Path::new("src")).unwrap();
+    repository.mark_ignored(Path::new("src"), &mut src);
+    assert_eq!(
+        src.entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.ignored))
+            .collect::<Vec<_>>(),
+        [("build.log", true), ("main.rs", false)]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

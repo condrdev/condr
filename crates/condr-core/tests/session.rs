@@ -1287,6 +1287,75 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
 }
 
 #[test]
+fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot() {
+    let mut session = Session::new();
+    let workspace_id = session
+        .create_workspace(PathBuf::from("projects/files"))
+        .unwrap();
+    let terminal_tab = session.active_workspace().unwrap().active_tab().id();
+
+    assert_eq!(
+        session.show_file(workspace_id, PathBuf::from("../escape.rs")),
+        None
+    );
+    assert_eq!(session.show_file(workspace_id, PathBuf::new()), None);
+
+    let diff_tab = session
+        .show_diff(workspace_id, PathBuf::from("src/lib.rs"))
+        .unwrap();
+    let file_tab = session
+        .show_file(workspace_id, PathBuf::from("src/main.rs"))
+        .unwrap();
+    assert_ne!(file_tab, diff_tab, "the Preview Tab is its own viewer kind");
+    assert_ne!(file_tab, terminal_tab);
+    let workspace = session.active_workspace().unwrap();
+    assert_eq!(workspace.active_tab().id(), file_tab);
+    assert_eq!(workspace.active_tab().name(), condr_core::FILE_TAB_NAME);
+    assert!(workspace.active_tab().panes().is_empty());
+    assert!(workspace.active_tab().diff().is_none());
+    assert_eq!(
+        workspace.active_tab().file().unwrap().path(),
+        Path::new("src/main.rs")
+    );
+
+    // A second file retargets the Preview Tab and leaves the Diff Tab alone.
+    assert_eq!(
+        session.show_file(workspace_id, PathBuf::from("README.md")),
+        Some(file_tab)
+    );
+    let workspace = session.active_workspace().unwrap();
+    assert_eq!(workspace.tabs().len(), 3);
+    assert_eq!(
+        session
+            .file_tab(workspace_id)
+            .unwrap()
+            .file()
+            .unwrap()
+            .path(),
+        Path::new("README.md")
+    );
+    assert_eq!(
+        session
+            .diff_tab(workspace_id)
+            .unwrap()
+            .diff()
+            .unwrap()
+            .path(),
+        Path::new("src/lib.rs")
+    );
+
+    let restored = Session::restore(session.snapshot()).unwrap();
+    let tab = restored.tab(file_tab).unwrap();
+    assert_eq!(tab.file().unwrap().path(), Path::new("README.md"));
+    assert_eq!(tab.name(), condr_core::FILE_TAB_NAME);
+
+    let outcome = session.close_tab(file_tab).unwrap();
+    assert!(outcome.panes().is_empty());
+    assert!(session.file_tab(workspace_id).is_none());
+    assert!(session.diff_tab(workspace_id).is_some());
+}
+
+#[test]
 fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
     let one_diff = bincode::serialize(&EncodedSession {
         version: 1,

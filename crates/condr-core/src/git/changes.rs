@@ -213,37 +213,61 @@ impl GitRepository {
     /// Whether every one of `paths`, relative to the work tree, is excluded by the ignore
     /// rules, so a change to them cannot change the status. `false` on any doubt.
     pub fn ignores_all<P: AsRef<Path>>(&self, paths: impl IntoIterator<Item = P>) -> bool {
-        let Ok(repo) = self.open() else {
-            return false;
-        };
-        let Ok(index) = repo.index_or_load_from_head_or_empty() else {
-            return false;
-        };
-        let Ok(mut excludes) = repo.excludes(
-            &index,
-            None,
-            gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
-        ) else {
-            return false;
-        };
-        let mut any = false;
-        for path in paths {
-            let path = path.as_ref();
-            any = true;
-            // A deleted path has no metadata; treating it as a file only matters for a
-            // directory-only ignore pattern, where a wrong answer costs one recomputation.
-            let mode = if fs::metadata(self.root.join(path)).is_ok_and(|meta| meta.is_dir()) {
-                gix::index::entry::Mode::DIR
-            } else {
-                gix::index::entry::Mode::FILE
-            };
-            match excludes.at_path(path, Some(mode)) {
-                Ok(platform) if platform.is_excluded() => {}
-                _ => return false,
+        self.with_excludes(|root, excludes| {
+            let mut any = false;
+            for path in paths {
+                let path = path.as_ref();
+                any = true;
+                // A deleted path has no metadata; treating it as a file only matters for a
+                // directory-only ignore pattern, where a wrong answer costs one
+                // recomputation.
+                let is_dir = fs::metadata(root.join(path)).is_ok_and(|meta| meta.is_dir());
+                if !is_excluded(excludes, path, is_dir) {
+                    return false;
+                }
             }
-        }
-        any
+            any
+        })
+        .unwrap_or(false)
     }
+
+    /// Flags the entries of `listing`, a directory `directory` relative to the work tree,
+    /// that the ignore rules exclude (ADR 0018). On any doubt nothing is flagged.
+    pub fn mark_ignored(&self, directory: &Path, listing: &mut crate::DirectoryListing) {
+        self.with_excludes(|_, excludes| {
+            for entry in &mut listing.entries {
+                let path = directory.join(&entry.name);
+                entry.ignored =
+                    is_excluded(excludes, &path, entry.kind == crate::FileKind::Directory);
+            }
+        });
+    }
+
+    /// Runs `f` with the repository's ignore stack, or `None` when it cannot be built.
+    fn with_excludes<R>(
+        &self,
+        f: impl FnOnce(&Path, &mut gix::AttributeStack<'_>) -> R,
+    ) -> Option<R> {
+        let repo = self.open().ok()?;
+        let index = repo.index_or_load_from_head_or_empty().ok()?;
+        let mut excludes = repo
+            .excludes(
+                &index,
+                None,
+                gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
+            )
+            .ok()?;
+        Some(f(&self.root, &mut excludes))
+    }
+}
+
+fn is_excluded(excludes: &mut gix::AttributeStack<'_>, path: &Path, is_dir: bool) -> bool {
+    let mode = if is_dir {
+        gix::index::entry::Mode::DIR
+    } else {
+        gix::index::entry::Mode::FILE
+    };
+    matches!(excludes.at_path(path, Some(mode)), Ok(platform) if platform.is_excluded())
 }
 
 /// The wire cost of a [`DiffLine`] beyond its text.

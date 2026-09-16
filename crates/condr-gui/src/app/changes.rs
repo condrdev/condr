@@ -10,7 +10,16 @@ use condr_core::{
 };
 use gpui_kit::component::input::{TextDecoration, TextDecorationCollection};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::tab::{Tab, TabBar};
 use std::path::Path;
+
+/// What the right sidebar shows (ADR 0018).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum SidebarView {
+    #[default]
+    Changes,
+    Files,
+}
 
 pub(super) const INITIAL_CHANGES_WIDTH: Pixels = px(300.);
 pub(super) const MIN_CHANGES_WIDTH: Pixels = px(200.);
@@ -60,22 +69,27 @@ impl ChangesSection {
 
 /// The glyph and colour a status shows, as Zed draws them: a square with a plus, a dot or
 /// a minus in the theme's success, warning and danger colours; a conflict warns.
-fn status_glyph(status: GitChangeStatus, cx: &App) -> Icon {
-    let (name, color): (Icon, Hsla) = match status {
-        GitChangeStatus::Added | GitChangeStatus::Untracked => {
-            (Icon::new(CondrIconName::SquarePlus), cx.theme().success)
-        }
-        GitChangeStatus::Modified | GitChangeStatus::Renamed => {
-            (Icon::new(CondrIconName::SquareDot), cx.theme().warning)
-        }
-        GitChangeStatus::Deleted => (Icon::new(CondrIconName::SquareMinus), cx.theme().danger),
-        GitChangeStatus::Conflicted => (Icon::new(IconName::TriangleAlert), cx.theme().danger),
+pub(super) fn status_glyph(status: GitChangeStatus, cx: &App) -> Icon {
+    let name = match status {
+        GitChangeStatus::Added | GitChangeStatus::Untracked => Icon::new(CondrIconName::SquarePlus),
+        GitChangeStatus::Modified | GitChangeStatus::Renamed => Icon::new(CondrIconName::SquareDot),
+        GitChangeStatus::Deleted => Icon::new(CondrIconName::SquareMinus),
+        GitChangeStatus::Conflicted => Icon::new(IconName::TriangleAlert),
     };
-    name.size_4().text_color(color)
+    name.size_4().text_color(status_color(status, cx))
+}
+
+/// The theme's version-control colour for a status: success, warning or danger.
+pub(super) fn status_color(status: GitChangeStatus, cx: &App) -> Hsla {
+    match status {
+        GitChangeStatus::Added | GitChangeStatus::Untracked => cx.theme().success,
+        GitChangeStatus::Modified | GitChangeStatus::Renamed => cx.theme().warning,
+        GitChangeStatus::Deleted | GitChangeStatus::Conflicted => cx.theme().danger,
+    }
 }
 
 /// `+N −N`, each half only when it is not zero.
-fn diff_stat(stat: GitDiffStat, cx: &App) -> AnyElement {
+pub(super) fn diff_stat(stat: GitDiffStat, cx: &App) -> AnyElement {
     h_flex()
         .flex_none()
         .gap_1()
@@ -187,7 +201,7 @@ struct TreeContext<'a> {
 /// A tree row's left padding: the section gutter plus one indent per level. A file row
 /// also skips the chevron slot a directory row starts with, so names line up; both scale
 /// with the font since they frame text.
-fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
+pub(super) fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
     let chevron = if past_chevron { 1.125 } else { 0. };
     rems(0.5 + 0.875 * depth as f32 + chevron)
 }
@@ -260,7 +274,7 @@ impl Condr {
         );
     }
 
-    /// The title bar's toggle for the Changes sidebar, next to "Open in".
+    /// The title bar's toggle for the right sidebar, next to "Open in".
     pub(super) fn render_changes_toggle(
         &self,
         has_workspace: bool,
@@ -268,9 +282,9 @@ impl Condr {
     ) -> AnyElement {
         let owner = cx.weak_entity();
         let label = if self.changes_open {
-            "Hide Changes"
+            "Hide Changes & Files"
         } else {
-            "Show Changes"
+            "Show Changes & Files"
         };
         let icon = if self.changes_open {
             IconName::PanelRightClose
@@ -302,18 +316,42 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The right sidebar: the presented Workspace's changes against `HEAD`.
-    pub(super) fn render_changes_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
-        // Copied out so the rows below can take `cx` again.
+    /// The user's pick for this Workspace; a Workspace outside any repository opens on
+    /// Files, since its Changes view has nothing to show (ADR 0018).
+    fn sidebar_view_for(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        in_repository: bool,
+    ) -> SidebarView {
+        self.sidebar_views
+            .get(&(key, workspace_id))
+            .copied()
+            .unwrap_or(if in_repository {
+                SidebarView::Changes
+            } else {
+                SidebarView::Files
+            })
+    }
+
+    fn set_sidebar_view(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        view: SidebarView,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sidebar_views.insert((key, workspace_id), view) != Some(view) {
+            cx.notify();
+        }
+    }
+
+    /// The right sidebar: the presented Workspace's changes against `HEAD`, or its files
+    /// (ADR 0018), chosen by the tabs in the header.
+    pub(super) fn render_right_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
-        let (radius, accent, muted, warning) = (
-            theme.radius,
-            theme.sidebar_accent,
-            theme.muted_foreground,
-            theme.warning,
-        );
         let column = v_flex()
-            .debug_selector(|| "condr-changes".into())
+            .debug_selector(|| "condr-right-sidebar".into())
             .size_full()
             .bg(theme.sidebar)
             .text_color(theme.sidebar_foreground)
@@ -324,48 +362,124 @@ impl Condr {
             let session = Session::restore(connection.snapshot.clone()).ok()?;
             let workspace_id = self.presented_workspace_id(connection.key, &session)?;
             let workspace = session.workspace(workspace_id)?;
-            let shown = session
+            let presented_tab = self.presented_tab_id(connection.key, &session, workspace_id);
+            let shown_diff = session
                 .diff_tab(workspace_id)
-                .filter(|tab| {
-                    self.presented_tab_id(connection.key, &session, workspace_id) == Some(tab.id())
-                })
+                .filter(|tab| presented_tab == Some(tab.id()))
                 .and_then(|tab| tab.diff().map(|diff| diff.path().to_path_buf()));
+            let shown_file = session
+                .file_tab(workspace_id)
+                .filter(|tab| presented_tab == Some(tab.id()))
+                .and_then(|tab| tab.file().map(|file| file.path().to_path_buf()));
             Some((
                 connection.key,
                 workspace_id,
                 workspace.name().to_owned(),
                 connection.workspace_git.get(&workspace_id).cloned(),
-                shown,
+                shown_diff,
+                shown_file,
             ))
         });
-        let Some((key, workspace_id, workspace_name, git, shown)) = presented else {
+        let Some((key, workspace_id, workspace_name, git, shown_diff, shown_file)) = presented
+        else {
             return column
-                .child(changes_header("Changes", None, None, cx))
+                .child(self.sidebar_header(None, SidebarView::Changes, None, None, cx))
                 .child(empty_state("No Workspace", cx))
                 .into_any_element();
         };
-        let Some(git) = git else {
-            return column
-                .child(changes_header("Changes", None, None, cx))
-                .child(empty_state(
-                    format!("{workspace_name} is not a Git repository"),
-                    cx,
-                ))
-                .into_any_element();
+        let view = self.sidebar_view_for(key, workspace_id, git.is_some());
+        let count = git.as_ref().map(|git| git.changes.entries.len());
+        let total = git.as_ref().and_then(|git| {
+            git.changes
+                .entries
+                .iter()
+                .filter_map(|entry| entry.stat)
+                .reduce(|sum, stat| GitDiffStat {
+                    added: sum.added + stat.added,
+                    deleted: sum.deleted + stat.deleted,
+                })
+        });
+        let header = self.sidebar_header(Some((key, workspace_id)), view, count, total, cx);
+        let body = match view {
+            SidebarView::Files => {
+                self.render_files_list(key, workspace_id, shown_file.as_deref(), cx)
+            }
+            SidebarView::Changes => match git {
+                Some(git) => self.render_changes_list(key, workspace_id, &git, shown_diff, cx),
+                None => empty_state(format!("{workspace_name} is not a Git repository"), cx),
+            },
         };
+        column.child(header).child(body).into_any_element()
+    }
+
+    /// The Files / Changes tabs, sized to their labels, with the change count in the
+    /// Changes tab and the summed `+N −N` at the far end whichever view is shown, the way
+    /// Zed totals a branch.
+    fn sidebar_header(
+        &self,
+        target: Option<(ConnectionKey, WorkspaceId)>,
+        view: SidebarView,
+        count: Option<usize>,
+        total: Option<GitDiffStat>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // GPUI Kit's own tab strip, as the Kit gallery shows it; the count rides in the
+        // Changes tab and the total takes the strip's free end.
+        let owner = cx.weak_entity();
+        let selected = match view {
+            SidebarView::Files => 0,
+            SidebarView::Changes => 1,
+        };
+        let stat = total.map(|total| div().pr_3().child(diff_stat(total, cx)));
+        TabBar::new("condr-sidebar-view")
+            .selected_index(selected)
+            .on_click(move |index, _, cx| {
+                let view = if *index == 1 {
+                    SidebarView::Changes
+                } else {
+                    SidebarView::Files
+                };
+                let _ = owner.update(cx, |this, cx| {
+                    if let Some((key, workspace_id)) = target {
+                        this.set_sidebar_view(key, workspace_id, view, cx);
+                    }
+                });
+            })
+            .children([
+                Tab::new()
+                    .label("Files")
+                    .debug_selector(|| "sidebar-view-files".into()),
+                Tab::new()
+                    .label(match count {
+                        Some(count) => format!("Changes ({count})"),
+                        None => "Changes".to_owned(),
+                    })
+                    .debug_selector(|| "sidebar-view-changes".into()),
+            ])
+            .when_some(stat, |this, stat| this.suffix(stat))
+            .into_any_element()
+    }
+
+    /// The Changes view's body: the sections and their trees, or why there are none.
+    fn render_changes_list(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        git: &WorkspaceGitSnapshot,
+        shown: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Copied out so the rows below can take `cx` again.
+        let theme = cx.theme();
+        let (radius, accent, muted, warning) = (
+            theme.radius,
+            theme.sidebar_accent,
+            theme.muted_foreground,
+            theme.warning,
+        );
         let entries = &git.changes.entries;
-        let total = entries
-            .iter()
-            .filter_map(|entry| entry.stat)
-            .reduce(|sum, stat| GitDiffStat {
-                added: sum.added + stat.added,
-                deleted: sum.deleted + stat.deleted,
-            });
-        let column = column.child(changes_header("Changes", Some(entries.len()), total, cx));
         if entries.is_empty() {
-            return column
-                .child(empty_state("No changes", cx))
-                .into_any_element();
+            return empty_state("No changes", cx);
         }
 
         let mut list = v_flex()
@@ -440,7 +554,7 @@ impl Condr {
             self.render_change_tree(&context, &tree, 0, &mut elements, cx);
             list = list.children(elements);
         }
-        column.child(list).into_any_element()
+        list.into_any_element()
     }
 
     fn render_change_tree(
@@ -579,6 +693,7 @@ impl Condr {
                     this.show_diff_on(key, workspace_id, path.clone(), window, cx);
                 });
             })
+            .context_menu(self.file_context_menu(key, workspace_id, &entry.path, cx))
             .child(status_glyph(entry.status, cx))
             .child(
                 div()
@@ -801,38 +916,7 @@ impl Condr {
     }
 }
 
-/// "Changes (N)" with the list's summed `+N −N` at the far end, the way Zed totals a
-/// branch; the total is left out when no file has a count.
-fn changes_header(
-    title: &str,
-    count: Option<usize>,
-    total: Option<GitDiffStat>,
-    cx: &App,
-) -> AnyElement {
-    h_flex()
-        .flex_none()
-        .h_9()
-        .w_full()
-        .px_3()
-        .items_center()
-        .gap_1()
-        .text_sm()
-        .font_medium()
-        .child(title.to_owned())
-        .when_some(count, |this, count| {
-            this.child(
-                div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("({count})")),
-            )
-        })
-        .when_some(total, |this, total| {
-            this.child(div().flex_1()).child(diff_stat(total, cx))
-        })
-        .into_any_element()
-}
-
-fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+pub(super) fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
     div()
         .flex_1()
         .flex()
