@@ -306,13 +306,15 @@ fn lifecycle_commands_manage_a_detached_server() {
     // The Workspace root doubles as the Pane's cwd, which the Server observes from the
     // live shell as a canonical path. macOS puts the temporary directory behind the
     // `/var -> /private/var` symlink, so start canonical or the snapshots differ.
-    let data_directory = std::fs::canonicalize(std::env::temp_dir())
-        .unwrap()
-        .join(format!(
-            "condr-command-{}-{}",
-            std::process::id(),
-            unique_suffix()
-        ));
+    let temp_dir = std::env::temp_dir();
+    // Windows canonicalizes to a verbatim `\\?\` path, which the Pane shell cannot use as cwd.
+    #[cfg(unix)]
+    let temp_dir = std::fs::canonicalize(temp_dir).unwrap();
+    let data_directory = temp_dir.join(format!(
+        "condr-command-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
     std::fs::create_dir_all(&data_directory).unwrap();
     let socket_path = data_directory.join("condr.sock");
     let snapshot_path = data_directory.join("state.snapshot");

@@ -77,7 +77,7 @@ pub fn restart_server_from(config: ServerConfig, executable: &Path) -> io::Resul
                 io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
             ) =>
         {
-            return ensure_server_from(config, executable);
+            // Nothing answers, but a Server that just stopped may still hold its bind lock.
         }
         Err(error) => return Err(error),
     }
@@ -97,6 +97,8 @@ pub fn wait_for_shutdown(socket_path: &Path) -> io::Result<()> {
                 return Ok(());
             }
             Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
+            // No Server ever bound here: the socket directory does not exist yet.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
         }
         if Instant::now() >= deadline {
