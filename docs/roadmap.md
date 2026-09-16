@@ -98,7 +98,7 @@ M0 只建立自举所需的滚动开发版，完成后进入 M1。M1 自举完�
 
 M0 原本不做安装器、checksums 和 macOS 构建，M1 关闭后这些已经落地，滚动开发版的形态因此超出上面的非目标：
 
-- 每次发布从同一 commit 生成 Linux x86_64/arm64 AppImage 与 tar.gz、Windows x86_64 Inno Setup 安装器与 ZIP、macOS x86_64/arm64 `.dmg` 与 tar.gz，另有各平台 CLI-only 归档；Release 附带 `SHA256SUMS`，包内 `BUILD-COMMIT` 记录 SHA。
+- 每次发布从同一 commit 生成 Linux x86_64/arm64 AppImage 与 tar.gz、Windows x86_64 Inno Setup 安装器与 ZIP、macOS x86_64/arm64 `.dmg` 与 tar.gz，另有各平台 headless 归档；Release 附带 `SHA256SUMS`，包内 `BUILD-COMMIT` 记录 SHA。
 - 仓库提供 `script/install-condr.sh` 与 `script/install-condr.ps1` 安装 headless CLI/Server，处理 PATH 注册与覆盖确认；卸载时清理 PATH。
 - 应用图标与品牌资源已统一到各平台。
 

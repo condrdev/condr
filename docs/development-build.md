@@ -6,11 +6,11 @@
 
 ## 产物
 
-- 每次发布生成所有平台的 GUI + CLI 安装包与 CLI-only 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 ZIP,macOS x86_64/arm64 `.dmg` 与 tar.gz。
+- 每次发布生成所有平台的 desktop 安装包与 headless 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 ZIP,macOS x86_64/arm64 `.dmg` 与 tar.gz。
 - 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨构建兼容承诺,必须一起更新。
 
-产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(GUI + CLI)和 `condr-cli-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(CLI-only)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.dmg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`,不作为 Release 附件发布。
+产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(desktop:GUI + CLI)和 `condr-headless-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(headless:仅 CLI/Server,归档内目录为 `condr-headless/`)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.dmg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`,不作为 Release 附件发布。
 
 ## 数据位置
 
@@ -28,10 +28,10 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 
 ### 安装 CLI
 
-仓库内的安装脚本只用于安装 headless CLI/server（同一个 `condr` 二进制）；GUI + CLI 使用对应平台的安装包。Unix 脚本把 CLI 放到用户目录并只追加自己的 PATH 标记；不会修改 Condr 数据目录：
+仓库内的安装脚本只用于安装 headless 版本（同一个 `condr` 二进制）；desktop 版本使用对应平台的安装包。Unix 脚本把 CLI 放到用户目录并只追加自己的 PATH 标记；不会修改 Condr 数据目录：
 
 ```bash
-sh script/install-condr.sh --from ./condr-cli-<version>-<short_sha>-linux-x86_64.tar.gz
+sh script/install-condr.sh --from ./condr-headless-<version>-<short_sha>-linux-x86_64.tar.gz
 ```
 
 安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `nightly` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
@@ -120,15 +120,15 @@ Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Forc
 
 运行 `condr-dev\condr\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr\condr.exe server start|restart|status|stop|run`。
 
-CLI-only 安装可直接运行仓库内脚本（PowerShell 会写入当前用户 PATH）：
+headless 安装可直接运行仓库内脚本（PowerShell 会写入当前用户 PATH）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-cli-<version>-<short_sha>-windows-x86_64.zip
+powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-<short_sha>-windows-x86_64.zip
 ```
 
-GUI + CLI 的安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器与 GUI ZIP 共用打包输入目录，没有组件选择：始终安装两个相邻的 EXE 以及 `LICENSE` 和 `BUILD-COMMIT`。向导只有目标目录、附加任务（默认都勾选加入 PATH 和桌面快捷方式）和完成页的启动选项；升级时先执行已安装的 `condr.exe server stop` 并等待 Server 退出再覆盖文件，PATH 只注册一次，卸载时同样先停 Server 并移除 PATH 项。只需要 headless Server/CLI 时不用安装器，直接用上面的 CLI-only 脚本。
+desktop 安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器与 GUI ZIP 共用打包输入目录，没有组件选择：始终安装两个相邻的 EXE 以及 `LICENSE` 和 `BUILD-COMMIT`。向导只有目标目录、附加任务（默认都勾选加入 PATH 和桌面快捷方式）和完成页的启动选项；升级时先执行已安装的 `condr.exe server stop` 并等待 Server 退出再覆盖文件，PATH 只注册一次，卸载时同样先停 Server 并移除 PATH 项。只需要 headless 版本时不用安装器，直接用上面的脚本。
 
-`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 GUI ZIP、CLI ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，重复安装确认 PATH 不重复，并验证 CLI 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
+`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 desktop ZIP、headless ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，重复安装确认 PATH 不重复，并验证 headless 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
 
 更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
@@ -136,13 +136,13 @@ GUI + CLI 的安装器工程在 `packaging/condr.iss`，通过 `powershell -File
 
 Linux artifacts are built on Ubuntu 22.04 and require glibc 2.35 or newer.
 
-GUI + CLI 的 Linux 包使用 AppImage。构建机需要 `linuxdeploy` 和 `appimagetool`：
+desktop 的 Linux 包使用 AppImage。构建机需要 `linuxdeploy` 和 `appimagetool`：
 
 ```bash
 CONDR_COMMIT=<commit> script/package-linux.sh
 ```
 
-AppImage 需要先赋予执行权限；它只是桌面分发包，CLI-only 环境仍使用上面的安装脚本。AppImage 运行时使用临时挂载目录，因此 PATH 入口必须指向安装后的稳定用户目录。
+AppImage 需要先赋予执行权限；它只是桌面分发包，headless 环境仍使用上面的安装脚本。AppImage 运行时使用临时挂载目录，因此 PATH 入口必须指向安装后的稳定用户目录。
 
 macOS GUI + CLI 使用拖放安装的 `.dmg`（内含 `Condr.app` 与 `/Applications` 链接），构建机需要 Xcode Command Line Tools：
 
@@ -154,7 +154,7 @@ DMG 没有安装脚本，所以 `Condr.app` 的启动器 `Contents/MacOS/condr-l
 
 `sh script/check-macos-package.sh <dmg> <cli tar.gz>` 只在 macOS 上运行：挂载镜像，核对 `/Applications` 链接、提交号、图标、启动器语法和二进制架构与 runner 一致，再把 app 复制到 `~/Applications`，连续执行两次 `condr server install` 验证 `~/.zprofile` 不重复追加，并在全新 zsh 登录 shell 中执行 `condr server --help`。
 
-Linux/macOS 原生检查共用 `script/check-cli-package.sh`：归档必须只包含对应顶层目录、可执行 `condr`、`LICENSE` 和 `BUILD-COMMIT`；随后实际运行 CLI，验证安装、覆盖确认和已有 GUI 文件保留。提交号默认比对 `GITHUB_SHA`（本地为当前 HEAD），检查旧产物时用 `CONDR_COMMIT` 显式指定期望 SHA。
+Linux/macOS 原生检查共用 `script/check-headless-package.sh`：归档必须只包含顶层目录 `condr-headless/`、可执行 `condr`、`LICENSE` 和 `BUILD-COMMIT`；随后实际运行 CLI，验证安装、覆盖确认和已有 GUI 文件保留。提交号默认比对 `GITHUB_SHA`（本地为当前 HEAD），检查旧产物时用 `CONDR_COMMIT` 显式指定期望 SHA。
 
 根据机器架构下载一个 Server artifact：
 
@@ -163,8 +163,8 @@ arch=$(uname -m)
 case "$arch" in aarch64) arch=arm64 ;; esac
 mkdir -p condr-download
 gh release download nightly --repo condrdev/condr --dir condr-download \
-  --pattern "condr-cli-*-linux-${arch}.tar.gz" --clobber
-archive=$(find "$PWD/condr-download" -name "condr-cli-*-linux-${arch}.tar.gz" -print -quit)
+  --pattern "condr-headless-*-linux-${arch}.tar.gz" --clobber
+archive=$(find "$PWD/condr-download" -name "condr-headless-*-linux-${arch}.tar.gz" -print -quit)
 tar -C condr-download -xzf "$archive"
 ```
 

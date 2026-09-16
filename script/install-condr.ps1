@@ -3,7 +3,7 @@ param(
   [string] $Version = 'nightly',
   [switch] $Yes
 )
-# Install only the headless CLI/server; preserve any existing GUI files.
+# Install the headless build (the condr CLI/Server binary); preserve any existing desktop files.
 $ErrorActionPreference = 'Stop'
 
 $root = $env:CONDR_INSTALL_DIR
@@ -18,10 +18,10 @@ try {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'pass -From ARCHIVE or install GitHub CLI (gh)' }
     $repo = $env:CONDR_REPO
     if (-not $repo) { $repo = 'condrdev/condr' }
-    gh release download $Version --repo $repo --dir $stage --pattern 'condr-cli-*-windows-x86_64.zip' --pattern SHA256SUMS --clobber
-    if ($LASTEXITCODE -ne 0) { throw 'CLI download failed' }
-    $archives = @(Get-ChildItem $stage -Filter 'condr-cli-*.zip')
-    if ($archives.Count -ne 1) { throw 'expected one Windows CLI archive' }
+    gh release download $Version --repo $repo --dir $stage --pattern 'condr-headless-*-windows-x86_64.zip' --pattern SHA256SUMS --clobber
+    if ($LASTEXITCODE -ne 0) { throw 'headless archive download failed' }
+    $archives = @(Get-ChildItem $stage -Filter 'condr-headless-*.zip')
+    if ($archives.Count -ne 1) { throw 'expected one Windows headless archive' }
     $From = $archives[0].FullName
   }
   if (-not (Test-Path -LiteralPath $From -PathType Leaf)) { throw "archive not found: $From" }
@@ -38,13 +38,13 @@ try {
   }
   $extracted = Join-Path $stage 'extracted'
   Expand-Archive -LiteralPath $From -DestinationPath $extracted
-  $payload = Join-Path $extracted 'condr-cli'
+  $payload = Join-Path $extracted 'condr-headless'
   if (-not (Test-Path (Join-Path $payload 'condr.exe')) -or
       (Get-ChildItem $extracted -Recurse -Filter 'condr-gui.exe')) {
-    throw 'expected a CLI-only archive containing condr-cli\condr.exe'
+    throw 'expected a headless archive containing condr-headless\condr.exe'
   }
   foreach ($name in 'condr.exe', 'LICENSE', 'BUILD-COMMIT') {
-    if (-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)) { throw "CLI archive is missing $name" }
+    if (-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)) { throw "headless archive is missing $name" }
   }
   $binary = Join-Path $root 'condr.exe'
   if ((Test-Path -LiteralPath $binary) -and -not $Yes) {

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the headless condr CLI/server only; GUI users use a platform package.
+# Install the headless build (the condr CLI/Server binary); desktop users use a platform package.
 set -eu
 
 source=
@@ -9,7 +9,7 @@ while [ "$#" -gt 0 ]; do
         --from) shift; source=${1:?--from needs a file} ;;
         --yes) yes=yes ;;
         -h|--help)
-            echo "usage: install-condr.sh [--from CLI_ARCHIVE] [--yes]"
+            echo "usage: install-condr.sh [--from HEADLESS_ARCHIVE] [--yes]"
             exit 0
             ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -37,11 +37,11 @@ if [ -z "$source" ]; then
         Darwin) platform=macos ;;
         *) echo "unsupported platform: $(uname -s)" >&2; exit 1 ;;
     esac
-    pattern="condr-cli-*-${platform}-${arch}.tar.gz"
+    pattern="condr-headless-*-${platform}-${arch}.tar.gz"
     gh release download "${CONDR_VERSION:-nightly}" --repo "${CONDR_REPO:-condrdev/condr}" \
         --dir "$stage/download" --pattern "$pattern" --pattern SHA256SUMS --clobber
-    set -- "$stage/download"/condr-cli-*.tar.gz
-    [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected one CLI archive" >&2; exit 1; }
+    set -- "$stage/download"/condr-headless-*.tar.gz
+    [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected one headless archive" >&2; exit 1; }
     source=$1
     downloaded=yes
 fi

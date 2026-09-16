@@ -21,11 +21,11 @@ Copy-Item target\release\condr-gui.exe, target\release\condr.exe, LICENSE $fullS
 Set-Content -Encoding ascii -Path (Join-Path $fullStage BUILD-COMMIT) -Value $Commit
 Compress-Archive -Path $fullStage -DestinationPath (Join-Path $Dist "condr-$packageVersion-windows-x86_64.zip") -Force
 
-$cliStage = Join-Path $Dist 'condr-cli'
-New-Item -ItemType Directory -Force -Path $cliStage | Out-Null
-Copy-Item target\release\condr.exe, LICENSE $cliStage
-Set-Content -Encoding ascii -Path (Join-Path $cliStage BUILD-COMMIT) -Value $Commit
-Compress-Archive -Path $cliStage -DestinationPath (Join-Path $Dist "condr-cli-$packageVersion-windows-x86_64.zip") -Force
+$headlessStage = Join-Path $Dist 'condr-headless'
+New-Item -ItemType Directory -Force -Path $headlessStage | Out-Null
+Copy-Item target\release\condr.exe, LICENSE $headlessStage
+Set-Content -Encoding ascii -Path (Join-Path $headlessStage BUILD-COMMIT) -Value $Commit
+Compress-Archive -Path $headlessStage -DestinationPath (Join-Path $Dist "condr-headless-$packageVersion-windows-x86_64.zip") -Force
 
 $iscc = @(
   (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),

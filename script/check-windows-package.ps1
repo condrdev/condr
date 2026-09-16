@@ -12,10 +12,10 @@ $gui = Join-Path $stage 'gui'
 New-Item -ItemType Directory -Path $stage | Out-Null
 
 try {
-  $guiZip = @(Get-ChildItem $Dist -Filter 'condr-*-windows-x86_64.zip' | Where-Object Name -NotLike 'condr-cli-*')
-  $cliZip = @(Get-ChildItem $Dist -Filter 'condr-cli-*-windows-x86_64.zip')
+  $guiZip = @(Get-ChildItem $Dist -Filter 'condr-*-windows-x86_64.zip' | Where-Object Name -NotLike 'condr-headless-*')
+  $headlessZip = @(Get-ChildItem $Dist -Filter 'condr-headless-*-windows-x86_64.zip')
   $installer = @(Get-ChildItem $Dist -Filter 'condr-*-windows-x86_64.exe')
-  if ($guiZip.Count -ne 1 -or $cliZip.Count -ne 1 -or $installer.Count -ne 1) { throw 'expected one GUI ZIP, CLI ZIP and installer' }
+  if ($guiZip.Count -ne 1 -or $headlessZip.Count -ne 1 -or $installer.Count -ne 1) { throw 'expected one desktop ZIP, headless ZIP and installer' }
   Expand-Archive $guiZip[0].FullName (Join-Path $stage 'bundle')
   $bundle = Join-Path $stage 'bundle\condr'
   foreach ($name in 'condr.exe', 'condr-gui.exe', 'LICENSE', 'BUILD-COMMIT') {
@@ -71,9 +71,9 @@ try {
   $env:CONDR_INSTALL_DIR = $gui
   Set-Content (Join-Path $gui 'condr.exe') 'previous-cli'
   $previousHash = (Get-FileHash (Join-Path $gui 'condr.exe')).Hash
-  '' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName
+  '' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $headlessZip[0].FullName
   if ($LASTEXITCODE -ne 0 -or (Get-FileHash (Join-Path $gui 'condr.exe')).Hash -ne $previousHash) { throw 'cancelled installation changed the CLI' }
-  'yes' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName
+  'yes' | powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'install-condr.ps1') -From $headlessZip[0].FullName
   if ($LASTEXITCODE -ne 0 -or (Get-FileHash (Join-Path $gui 'condr.exe')).Hash -eq $previousHash) { throw 'confirmed installation did not update the CLI' }
 
   # Resolve a relative CLI directory against PowerShell's location, even when
@@ -86,10 +86,10 @@ try {
     [Environment]::CurrentDirectory = $stage
     foreach ($destination in (Join-Path $currentDirectory 'cli'), $gui) {
       $env:CONDR_INSTALL_DIR = if ($destination -eq $gui) { $gui } else { 'cli' }
-      & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $cliZip[0].FullName -Yes
+      & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $headlessZip[0].FullName -Yes
       & (Join-Path $destination 'condr.exe') server --help
       if ($LASTEXITCODE -ne 0) { throw 'installed CLI failed' }
-      if ((Get-Content (Join-Path $destination 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'CLI ZIP has the wrong commit' }
+      if ((Get-Content (Join-Path $destination 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'headless ZIP has the wrong commit' }
       $pathEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $destination })
       if ($pathEntries.Count -ne 1) { throw 'CLI installer must register PATH exactly once' }
     }
@@ -103,8 +103,8 @@ try {
   $rejected = $false
   try { & (Join-Path $PSScriptRoot 'install-condr.ps1') -From $guiZip[0].FullName -Yes }
   catch { $rejected = $true }
-  if (-not $rejected) { throw 'CLI script accepted a GUI ZIP' }
-  Write-Output 'Windows package content, native installation and CLI update checks passed.'
+  if (-not $rejected) { throw 'headless script accepted a desktop ZIP' }
+  Write-Output 'Windows package content, native installation and headless update checks passed.'
 } finally {
   try {
     $uninstaller = Join-Path $gui 'unins000.exe'

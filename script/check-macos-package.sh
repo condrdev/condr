@@ -1,5 +1,5 @@
 #!/bin/sh
-# Check the macOS DMG and CLI archive natively (intended for a macOS test runner):
+# Check the macOS DMG and headless archive natively (intended for a macOS test runner):
 # mount the image, copy the app into the current user's home the way drag-and-drop
 # would, run the launcher's install step twice, and verify a fresh zsh login shell
 # reaches the CLI.
@@ -12,7 +12,7 @@ commit=${CONDR_COMMIT:-${GITHUB_SHA:-$(git -C "$repo" rev-parse HEAD)}}
 stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-macos-check.XXXXXX")
 trap 'hdiutil detach "$stage/volume" -force >/dev/null 2>&1 || true; rm -rf "$stage"' EXIT INT TERM
 
-CONDR_COMMIT="$commit" sh "$repo/script/check-cli-package.sh" "$2" condr-cli
+CONDR_COMMIT="$commit" sh "$repo/script/check-headless-package.sh" "$2"
 
 hdiutil attach -quiet -nobrowse -readonly -mountpoint "$stage/volume" "$1"
 test "$(readlink "$stage/volume/Applications")" = /Applications
@@ -39,4 +39,4 @@ for attempt in 1 2; do
         test "$(command -v condr)" = "$HOME/.local/bin/condr" && condr server --help
     ' >/dev/null
 done
-echo 'macOS DMG, CLI installation and login-shell checks passed.'
+echo 'macOS DMG, headless installation and login-shell checks passed.'

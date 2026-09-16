@@ -19,12 +19,12 @@ mkdir -p "$DIST_DIR"
 stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-macos.XXXXXX")
 trap 'rm -rf "$stage"' EXIT INT TERM
 
-cli="$stage/condr-cli"
+cli="$stage/condr-headless"
 mkdir -p "$cli"
 install -m 755 target/release/condr "$cli/condr"
 install -m 644 LICENSE "$cli/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
-tar -C "$stage" -czf "$DIST_DIR/condr-cli-${package_version}-macos-${arch}.tar.gz" condr-cli
+tar -C "$stage" -czf "$DIST_DIR/condr-headless-${package_version}-macos-${arch}.tar.gz" condr-headless
 
 app="$stage/dmg/Condr.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

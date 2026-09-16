@@ -10,7 +10,7 @@
 #endif
 
 ; Desktop build only: the GUI and the CLI/Server are always installed together.
-; Headless machines use script/install-condr.ps1 with the CLI-only ZIP instead.
+; Headless machines use script/install-condr.ps1 with the condr-headless ZIP instead.
 [Setup]
 SourceDir=..
 AppId={{9B6E4C3B-502D-4CBF-A2E3-39B5E9E0A1A8}

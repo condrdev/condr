@@ -22,7 +22,7 @@ grep -Fxq 'StartupWMClass=condr' "$appdir/condr.desktop"
 test -s "$appdir/LICENSE"
 test "$(cat "$appdir/BUILD-COMMIT")" = "$commit"
 
-set -- "$dist"/condr-cli-*-linux-*.tar.gz
+set -- "$dist"/condr-headless-*-linux-*.tar.gz
 [ "$#" -eq 1 ]
-CONDR_COMMIT="$commit" sh "$repo/script/check-cli-package.sh" "$1" condr
-echo 'Linux package content and CLI installation checks passed.'
+CONDR_COMMIT="$commit" sh "$repo/script/check-headless-package.sh" "$1"
+echo 'Linux package content and headless installation checks passed.'

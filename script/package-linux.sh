@@ -21,13 +21,13 @@ fi
 stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-linux.XXXXXX")
 trap 'rm -rf "$stage"' EXIT INT TERM
 
-cli="$stage/condr"
+cli="$stage/condr-headless"
 mkdir -p "$cli"
 install -m 755 target/release/condr "$cli/condr"
 install -m 644 LICENSE "$cli/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$cli/BUILD-COMMIT"
 mkdir -p "$DIST_DIR"
-tar -C "$stage" -czf "$DIST_DIR/condr-cli-${package_version}-linux-${arch}.tar.gz" condr
+tar -C "$stage" -czf "$DIST_DIR/condr-headless-${package_version}-linux-${arch}.tar.gz" condr-headless
 
 appdir="$stage/condr.AppDir"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications"

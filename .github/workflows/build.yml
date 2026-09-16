@@ -1,6 +1,6 @@
 name: Build packages
 
-# Reusable: builds the GUI + CLI installer and the CLI-only archive for every
+# Reusable: builds the desktop installer and the headless archive for every
 # platform from one commit, verifies them, and uploads the whole set with
 # SHA256SUMS as the `condr-dist` artifact. Called by nightly.yml and release.yml.
 
@@ -104,7 +104,7 @@ jobs:
           } else {
             & powershell -File script\package-windows.ps1
           }
-      - name: Check Windows packages and CLI installation
+      - name: Check Windows packages and headless installation
         shell: pwsh
         run: .\script\check-windows-package.ps1
       - uses: actions/upload-artifact@v7
@@ -142,7 +142,7 @@ jobs:
           CONDR_ARCH: ${{ matrix.arch }}
         run: script/package-macos.sh
       - name: Check macOS packages and PATH registration
-        run: sh script/check-macos-package.sh dist/*.dmg dist/condr-cli-*.tar.gz
+        run: sh script/check-macos-package.sh dist/*.dmg dist/condr-headless-*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: condr-macos-${{ matrix.arch }}

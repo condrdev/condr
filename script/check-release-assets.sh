@@ -15,5 +15,5 @@ for target in linux-x86_64.AppImage linux-arm64.AppImage \
 done
 for target in linux-x86_64.tar.gz linux-arm64.tar.gz \
     macos-x86_64.tar.gz macos-arm64.tar.gz windows-x86_64.zip; do
-    test -s "$dist/condr-cli-${package_version}-${target}"
+    test -s "$dist/condr-headless-${package_version}-${target}"
 done

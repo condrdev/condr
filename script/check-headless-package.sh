@@ -1,12 +1,12 @@
 #!/bin/sh
-# Check a native Unix CLI archive and install it in an isolated user directory.
+# Check a native Unix headless archive and install it in an isolated user directory.
 set -eu
 
-archive=${1:?usage: check-cli-package.sh ARCHIVE PAYLOAD_DIRECTORY}
-payload_directory=${2:?expected the archive payload directory}
+archive=${1:?usage: check-headless-package.sh ARCHIVE}
+payload_directory=condr-headless
 repo=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 commit=${CONDR_COMMIT:-${GITHUB_SHA:-$(git -C "$repo" rev-parse HEAD)}}
-stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-cli-check.XXXXXX")
+stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-headless-check.XXXXXX")
 trap 'rm -rf "$stage"' EXIT INT TERM
 
 # Reject missing, duplicate or extra members, including a bundled GUI.
@@ -21,7 +21,7 @@ payload="$stage/payload/$payload_directory"
 test -x "$payload/condr"
 test -s "$payload/LICENSE"
 if [ "$(cat "$payload/BUILD-COMMIT")" != "$commit" ]; then
-    echo 'CLI archive has the wrong commit' >&2
+    echo 'headless archive has the wrong commit' >&2
     exit 1
 fi
 "$payload/condr" server --help > /dev/null
@@ -42,4 +42,4 @@ CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
 "$stage/home/.local/bin/condr" server --help > /dev/null
 test "$(cat "$stage/install/condr-gui")" = 'keep GUI'
 test "$(grep -Fxc '# condr user bin' "$stage/profile")" = 1
-echo 'CLI archive content, commit and installation checks passed.'
+echo 'headless archive content, commit and installation checks passed.'
