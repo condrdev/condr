@@ -31,6 +31,7 @@ impl Condr {
             .flat_map(|tab| tab.panes())
             .map(|pane| pane.id())
             .collect::<HashSet<_>>();
+        self.prune_files_state(key, &session);
 
         self.dock_surfaces.retain(|surface, _| {
             surface.connection_key != key || tab_ids.contains(&surface.tab_id)

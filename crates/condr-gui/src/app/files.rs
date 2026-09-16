@@ -9,14 +9,17 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use std::path::Path;
 
-/// The text "Insert Path into Terminal" writes: the relative path, quoted when a shell
-/// would otherwise split or expand it, and a trailing space so typing can go on.
+/// The text "Insert Path into Terminal" writes: the relative path, single-quoted when a
+/// shell would otherwise split or expand it, and a trailing space so typing can go on.
+/// Single quotes are literal in POSIX shells and PowerShell alike, so `$`, backticks and
+/// `$(…)` stay inert; a quote inside the name uses the POSIX `'\''` idiom.
+// ponytail: cmd.exe has no single quotes; a Pane running it gets POSIX quoting.
 pub(super) fn terminal_path_text(relative: &str) -> String {
     let needs_quotes = relative
         .chars()
         .any(|c| c.is_whitespace() || "\"'$&|;<>()*?[]{}!#~`\\".contains(c));
     if needs_quotes {
-        format!("\"{}\" ", relative.replace('"', "\\\""))
+        format!("'{}' ", relative.replace('\'', "'\\''"))
     } else {
         format!("{relative} ")
     }
@@ -159,9 +162,11 @@ impl Condr {
             let path = directory.join(&entry.name);
             match entry.kind {
                 FileKind::Directory => {
-                    let expanded = self
-                        .expanded_dirs
-                        .contains(&(context.workspace_id, path.clone()));
+                    let expanded = self.expanded_dirs.contains(&(
+                        context.key,
+                        context.workspace_id,
+                        path.clone(),
+                    ));
                     rows.push(self.render_directory_row(
                         context,
                         &entry.name,
@@ -528,7 +533,7 @@ impl Condr {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let dir = (workspace_id, path.clone());
+        let dir = (key, workspace_id, path.clone());
         if self.expanded_dirs.remove(&dir) {
             if let Some(connection) = self.connection_mut(key) {
                 connection
@@ -808,6 +813,64 @@ impl Condr {
         }
     }
 
+    /// Forgets the requests in flight on `key`: their answers will never come once the
+    /// connection they were sent on is gone, and a Bootstrap has just replaced every
+    /// cache they would have filled. Without this a listing or file stays "pending" and
+    /// is never asked for again.
+    pub(super) fn clear_pending_requests(&mut self, key: ConnectionKey) {
+        self.pending_diffs
+            .retain(|(pending_key, _, _)| *pending_key != key);
+        self.pending_directories
+            .retain(|(pending_key, _, _)| *pending_key != key);
+        self.pending_files
+            .retain(|(pending_key, _, _)| *pending_key != key);
+    }
+
+    /// Drops the sidebar state of Workspaces and Tabs that left `session`, the way
+    /// `prune_dock_cache` does for Panes: fold state, view choice and the terminal Tab
+    /// "Insert Path" targets.
+    pub(super) fn prune_files_state(&mut self, key: ConnectionKey, session: &Session) {
+        let workspace_ids: HashSet<WorkspaceId> = session
+            .workspaces()
+            .iter()
+            .map(|workspace| workspace.id())
+            .collect();
+        let live = |connection_key: ConnectionKey, workspace_id: WorkspaceId| {
+            connection_key != key || workspace_ids.contains(&workspace_id)
+        };
+        self.expanded_dirs
+            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
+        self.collapsed_change_dirs
+            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
+        self.sidebar_views
+            .retain(|(connection_key, workspace_id), _| live(*connection_key, *workspace_id));
+        self.last_terminal_tabs
+            .retain(|(connection_key, _), tab_id| {
+                *connection_key != key
+                    || session
+                        .tab(*tab_id)
+                        .is_some_and(|tab| tab.terminals().is_some())
+            });
+        self.pending_directories
+            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
+        self.pending_files
+            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
+    }
+
+    /// Everything `prune_files_state` keeps per Workspace, dropped for the whole
+    /// connection: the Server or Session behind `key` is a different one now.
+    pub(super) fn clear_files_state(&mut self, key: ConnectionKey) {
+        self.expanded_dirs
+            .retain(|(connection_key, _, _)| *connection_key != key);
+        self.collapsed_change_dirs
+            .retain(|(connection_key, _, _)| *connection_key != key);
+        self.sidebar_views
+            .retain(|(connection_key, _), _| *connection_key != key);
+        self.last_terminal_tabs
+            .retain(|(connection_key, _), _| *connection_key != key);
+        self.clear_pending_requests(key);
+    }
+
     /// Drops Editors whose Tabs are gone, so a closed Preview Tab frees its text.
     pub(super) fn prune_file_editors(&mut self) {
         let sessions = self.restored_sessions();
@@ -867,17 +930,16 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn inserted_paths_are_quoted_only_when_a_shell_would_split_them() {
+    fn inserted_paths_are_quoted_only_when_a_shell_would_split_or_expand_them() {
         assert_eq!(terminal_path_text("src/main.rs"), "src/main.rs ");
         assert_eq!(
             terminal_path_text("docs/my notes.md"),
-            "\"docs/my notes.md\" "
+            "'docs/my notes.md' "
         );
-        assert_eq!(terminal_path_text("a$b"), "\"a$b\" ");
-        assert_eq!(
-            terminal_path_text("say \"hi\".txt"),
-            "\"say \\\"hi\\\".txt\" "
-        );
+        // Single quotes keep expansions inert, which double quotes would not.
+        assert_eq!(terminal_path_text("a$(id).txt"), "'a$(id).txt' ");
+        assert_eq!(terminal_path_text("say \"hi\".txt"), "'say \"hi\".txt' ");
+        assert_eq!(terminal_path_text("it's.md"), "'it'\\''s.md' ");
     }
 
     #[test]

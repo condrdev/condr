@@ -572,17 +572,14 @@ impl Condr {
                     path,
                     children,
                 } => {
-                    let collapsed = self
-                        .collapsed_change_dirs
-                        .contains(&(context.workspace_id, path.clone()));
-                    list.push(self.render_change_directory(
+                    let collapsed = self.collapsed_change_dirs.contains(&(
+                        context.key,
                         context.workspace_id,
-                        label,
-                        path,
-                        depth,
-                        collapsed,
-                        cx,
+                        path.clone(),
                     ));
+                    list.push(
+                        self.render_change_directory(context, label, path, depth, collapsed, cx),
+                    );
                     if !collapsed {
                         self.render_change_tree(context, children, depth + 1, list, cx);
                     }
@@ -597,13 +594,14 @@ impl Condr {
 
     fn render_change_directory(
         &self,
-        workspace_id: WorkspaceId,
+        context: &TreeContext<'_>,
         label: &str,
         path: &Path,
         depth: usize,
         collapsed: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let (key, workspace_id) = (context.key, context.workspace_id);
         let theme = cx.theme();
         let path_text = path.display().to_string().replace('\\', "/");
         let selector: SharedString = format!("change-dir-{path_text}").into();
@@ -626,7 +624,7 @@ impl Condr {
             .hover(|this| this.bg(theme.sidebar_accent.opacity(0.8)))
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| {
-                    let dir = (workspace_id, toggle_path.clone());
+                    let dir = (key, workspace_id, toggle_path.clone());
                     if !this.collapsed_change_dirs.remove(&dir) {
                         this.collapsed_change_dirs.insert(dir);
                     }

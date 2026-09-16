@@ -42,6 +42,9 @@ impl Condr {
                 } else {
                     self.prune_dock_cache(key);
                 }
+                // The Bootstrap replaced every listing, file and diff cache; answers to
+                // requests sent before it were dropped with the old connection.
+                self.clear_pending_requests(key);
                 self.sync_sidebar_workspace_open(cx);
                 if application.reacquire_control {
                     // Layout responses may have been lost to writer lag; this Bootstrap is

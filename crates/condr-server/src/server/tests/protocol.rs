@@ -288,6 +288,7 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
                     event.event,
                     SessionEvent::TerminalTitleChanged { .. }
                         | SessionEvent::TerminalAttentionChanged { .. }
+                        | SessionEvent::WorkspaceFilesChanged { .. }
                 )),
             "a rejected layout command published a layout event"
         );

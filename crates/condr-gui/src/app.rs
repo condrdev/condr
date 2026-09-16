@@ -270,8 +270,9 @@ pub(crate) struct Condr {
     changes_open: bool,
     changes_width: Pixels,
     collapsed_changes_sections: HashSet<ChangesSection>,
-    /// Directories folded shut in the Changes tree, by Workspace and repository path.
-    collapsed_change_dirs: HashSet<(WorkspaceId, PathBuf)>,
+    /// Directories folded shut in the Changes tree, by connection, Workspace and
+    /// repository path; Workspace ids repeat across Servers.
+    collapsed_change_dirs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
     /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
     diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
     /// Diffs asked of a Server and not yet answered, so a redraw asks only once.
@@ -282,8 +283,9 @@ pub(crate) struct Condr {
     /// The terminal Tab each Workspace presented last: where "Insert Path into Terminal"
     /// sends its text once a viewer Tab has taken the Workspace's active slot.
     last_terminal_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
-    /// Directories unfolded in the Files tree, by Workspace and root-relative path.
-    expanded_dirs: HashSet<(WorkspaceId, PathBuf)>,
+    /// Directories unfolded in the Files tree, by connection, Workspace and root-relative
+    /// path.
+    expanded_dirs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
     /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
     file_editors: HashMap<(ConnectionKey, TabId), FileEditor>,
     pending_directories: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,

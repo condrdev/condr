@@ -166,6 +166,48 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         "the retargeted Preview Tab should show the second file"
     );
 
+    // A reconnect while a listing is in flight: the old connection's answer never comes
+    // and the Bootstrap empties the caches, so the request must be forgotten with it, or
+    // the root would say "Loading…" forever. The same-authority Bootstrap is fed directly:
+    // a real reconnect ends in exactly this message, and nothing else may run in between.
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.pending_directories
+                .insert((1, workspace_id, std::path::PathBuf::new()));
+            let connection = this.connection(1).unwrap();
+            let bootstrap = SessionBootstrap {
+                server_id: connection.server_id.unwrap(),
+                runtime_epoch: connection.runtime_epoch.unwrap(),
+                session_id: connection.session_id.unwrap(),
+                sequence: connection.sequence,
+                snapshot: connection.snapshot.clone(),
+                settings: connection.settings.clone(),
+                terminals: Vec::new(),
+                agents: Vec::new(),
+                workspace_git: Vec::new(),
+                zoomed_panes: Vec::new(),
+            };
+            let generation = connection.connect_generation;
+            this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);
+            assert!(
+                this.pending_directories.is_empty() && this.pending_files.is_empty(),
+                "a request from before the Bootstrap must be forgotten with it"
+            );
+            assert!(
+                this.connection(1).unwrap().directories.is_empty(),
+                "the Bootstrap replaces every listing"
+            );
+        });
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("file-README.md").is_some()
+                && window.debug_bounds("file-src/main.rs").is_some()
+        }),
+        "the listings should be asked for again after the reconnect"
+    );
+
     // Folding the directory hides its rows again, and switching back to Changes keeps the
     // Files state for the next visit.
     let src = window.debug_bounds("file-dir-src").unwrap();
