@@ -235,10 +235,6 @@ impl Condr {
         })
     }
 
-    pub(super) fn shows_changes_sidebar(&self) -> bool {
-        self.changes_open && self.presents_a_workspace()
-    }
-
     fn toggle_changes_section(&mut self, section: ChangesSection, cx: &mut Context<Self>) {
         if !self.collapsed_changes_sections.remove(&section) {
             self.collapsed_changes_sections.insert(section);
@@ -265,9 +261,12 @@ impl Condr {
     }
 
     /// The title bar's toggle for the Changes sidebar, next to "Open in".
-    pub(super) fn render_changes_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_changes_toggle(
+        &self,
+        has_workspace: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let owner = cx.weak_entity();
-        let has_workspace = self.presents_a_workspace();
         let label = if self.changes_open {
             "Hide Changes"
         } else {

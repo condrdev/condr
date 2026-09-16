@@ -628,10 +628,10 @@ impl Render for Condr {
             open_in,
             body,
         } = self.render_workspace(cx);
-        let changes_toggle = self.render_changes_toggle(cx);
-        let changes_column = self
-            .shows_changes_sidebar()
-            .then(|| self.render_changes_sidebar(cx));
+        let has_workspace = self.presents_a_workspace();
+        let changes_toggle = self.render_changes_toggle(has_workspace, cx);
+        let changes_column =
+            (self.changes_open && has_workspace).then(|| self.render_changes_sidebar(cx));
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {
