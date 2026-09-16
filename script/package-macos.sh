@@ -60,5 +60,15 @@ cat >"$app/Contents/Info.plist" <<EOF
 </dict></plist>
 EOF
 ln -s /Applications "$stage/dmg/Applications"
-hdiutil create -quiet -volname Condr -srcfolder "$stage/dmg" -format UDZO \
-  "$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"
+dmg="$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"
+# GitHub's macOS runners occasionally fail `hdiutil create` with "Resource busy";
+# retry a few times, and keep its stderr visible so the failure is diagnosable.
+for attempt in 1 2 3; do
+    rm -f "$dmg"
+    if hdiutil create -volname Condr -srcfolder "$stage/dmg" -format UDZO "$dmg"; then
+        break
+    fi
+    [ "$attempt" = 3 ] && exit 1
+    echo "hdiutil create failed (attempt $attempt), retrying..." >&2
+    sleep 5
+done
