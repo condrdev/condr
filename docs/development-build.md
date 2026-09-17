@@ -24,6 +24,8 @@ Condr 按数据用途遵循 XDG 和各平台目录规范：
 | Log | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Logs/condr` |
 | 本地 endpoint 与 GUI 实例锁 | `$XDG_RUNTIME_DIR/condr` | `%LOCALAPPDATA%\condr\runtime` | `$TMPDIR/condr` |
 
+Log 目录里每个进程一组按天滚动的文件，保留最近 7 天：Server 写 `condr-server-<endpoint id>.<日期>.log`，GUI 写 `condr-gui.<日期>.log`；由 GUI 或 CLI 拉起的 detached Server 另有一个 `condr-server-<endpoint id>.stderr`，那是父进程重定向的 stderr，只收 `error` 级别和绕过日志器的崩溃输出（后缀不是 `.log`，否则会被按天清理当成旧文件删掉）。级别由 `CONDR_LOG` 控制，语法同 `RUST_LOG`（如 `CONDR_LOG=debug` 或 `CONDR_LOG=condr_server::server=trace,warn`），默认 `warn,condr_core=info,condr_server=info,condr_gui=info`；设置后整体替换默认值。stderr 是终端时同一份日志也打到终端：前台 `condr server run` 各平台都如此，`cargo run -p condr-gui` 只在 Linux/macOS 如此，Windows 的 GUI 是无控制台的子系统程序，只能看 `condr-gui.<日期>.log`。`CONDR_LOG_DIR` 覆盖日志目录，测试用它把辅助 Server 的日志指到临时目录。设计见 [ADR 0019](adr/0019-logging-uses-tracing-off-the-hot-path.md)。
+
 Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下的 `runtime/`。`CONDR_SOCKET_PATH` 和 `CONDR_SNAPSHOT_PATH` 仍可覆盖 Server 的默认路径。仅解压普通归档不会修改 PATH；使用对应平台的安装包或安装脚本注册全局命令。
 
 ### 安装 CLI

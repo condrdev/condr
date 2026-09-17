@@ -11,6 +11,7 @@
 | `crates/condr-core/src/agent/mod.rs` | Agent 领域类型；`process` 识别进程，`event` 定义 Hook 事件，`detector` 更新状态，`hook`/`hooks` 发送和安装 Hook |
 | `crates/condr-core/src/terminal.rs` | 终端公共入口；`runtime` 集中管理 PTY 启动、失败回滚与关闭，`input_queue`/`pty_io`/`resize` 处理 I/O，`osc`/`notices` 截获上报，`probes` 探测进程与 cwd，`shell` 配置 Shell，`view`/`view_source` 生成和传输视图 |
 | `crates/condr-server/src/client.rs` | 公共 `ClientConnection`，供 GUI 和 CLI 使用 |
+| `crates/condr-server/src/logging.rs` | `tracing` subscriber、按天滚动的非阻塞文件层、`CONDR_LOG` 过滤和 panic hook；`condr server run` 与 GUI 共用（ADR 0019） |
 | `crates/condr-server/src/endpoint.rs` | 地址解析与选择；`local` 管理 socket/named pipe 的监听和所有权，`stream` 统一流操作与取消 |
 | `crates/condr-server/src/ssh.rs` | SSH 地址和远端命令；`stream` 管理 SSH 子进程及原生管道 |
 | `crates/condr-server/src/noise.rs` | 密钥类型与 TCP 安全传输入口；`identity` 管理身份、设备和 invite，`stream` 实现握手与加密记录 |

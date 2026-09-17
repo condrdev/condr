@@ -15,6 +15,15 @@ impl Drop for PeerRegistration {
     }
 }
 
+/// Logs when the connection's thread leaves `handle_client`, whichever way it leaves.
+struct DisconnectLog;
+
+impl Drop for DisconnectLog {
+    fn drop(&mut self) {
+        tracing::info!("disconnected");
+    }
+}
+
 pub(super) fn handle_client(
     mut stream: EndpointStream,
     client_id: u64,
@@ -22,6 +31,9 @@ pub(super) fn handle_client(
     stop: Arc<AtomicBool>,
     lifecycle: Arc<ServerLifecycle>,
 ) {
+    // One of the two spans ADR 0019 allows: every line this connection logs carries it.
+    let _client_span =
+        tracing::info_span!("client", id = client_id, transport = stream.transport()).entered();
     if stream
         .set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))
         .is_err()
@@ -31,10 +43,12 @@ pub(super) fn handle_client(
     let hello = match condr_core::protocol::read_message::<_, ClientMessage>(&mut stream) {
         Ok(ClientMessage::Hello(hello)) => hello,
         Ok(_) => {
+            tracing::warn!("refused: expected Hello as first message");
             let _ = send_error(&mut stream, &state, "expected Hello as first message");
             return;
         }
         Err(error) => {
+            tracing::warn!("refused: invalid handshake frame: {error}");
             let _ = send_error(
                 &mut stream,
                 &state,
@@ -49,6 +63,7 @@ pub(super) fn handle_client(
         (state.server_id, state.runtime_epoch, state.session_id)
     };
     if let VersionCheck::Incompatible(reason) = check_version(hello.version) {
+        tracing::warn!(name = %hello.client_name, version = hello.version, "refused: {reason}");
         let _ = send_message(
             &mut stream,
             &ServerMessage::Welcome {
@@ -65,6 +80,7 @@ pub(super) fn handle_client(
     // Reading Hello proved the peer held its invite, if it used one; record the device
     // before it learns anything about this Server.
     if let Err(error) = stream.complete_pairing(&hello.client_name) {
+        tracing::warn!(name = %hello.client_name, "refused: pairing failed: {error}");
         let _ = send_error(&mut stream, &state, &format!("pairing failed: {error}"));
         return;
     }
@@ -89,11 +105,13 @@ pub(super) fn handle_client(
             }
             Ok(false) => {
                 drop(state_guard);
+                tracing::warn!(name = %hello.client_name, "refused: device revoked");
                 let _ = send_error(&mut stream, &state, "device revoked");
                 return;
             }
             Err(error) => {
                 drop(state_guard);
+                tracing::warn!(name = %hello.client_name, "refused: authorization check failed: {error}");
                 let _ = send_error(
                     &mut stream,
                     &state,
@@ -118,6 +136,9 @@ pub(super) fn handle_client(
     {
         return;
     }
+    tracing::info!(name = %hello.client_name, "connected");
+    // Declared after the span, so it drops (and logs) while the span is still entered.
+    let _disconnect_log = DisconnectLog;
     let _ = stream.set_handshake_timeout(None);
 
     let mut writer_stream = match stream.try_clone() {
@@ -534,7 +555,7 @@ pub(super) fn handle_client(
                                     let failed = queue_message(&outbound, *message);
                                     let cleanup_failed = cancel_prepared_external_layout(prepared)
                                         .is_err_and(|message| {
-                                            eprintln!("condr-server: {message}");
+                                            tracing::warn!("{message}");
                                             queue_message(
                                                 &outbound,
                                                 ServerMessage::Error { message },
@@ -631,7 +652,7 @@ pub(super) fn handle_client(
                                                 let cleanup_failed =
                                                     cancel_prepared_external_layout(prepared)
                                                         .is_err_and(|message| {
-                                                            eprintln!("condr-server: {message}");
+                                                            tracing::warn!("{message}");
                                                             queue_message(
                                                                 &outbound,
                                                                 ServerMessage::Error { message },

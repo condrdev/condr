@@ -15,6 +15,14 @@ pub struct ServerConfig {
     pub(super) test_device: Option<StaticKey>,
 }
 
+impl ServerConfig {
+    /// The stem of this Server's log files, derived from its local socket like its
+    /// stderr redirect, so helper Servers in tests do not share a file.
+    pub fn log_file_stem(&self) -> String {
+        super::local::server_log_stem(&self.socket_path)
+    }
+}
+
 impl Default for ServerConfig {
     /// The host's Server: default socket, and the TCP address `config.toml` names, if any.
     fn default() -> Self {

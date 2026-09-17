@@ -42,6 +42,10 @@ notify = "7"
 portable-pty = "0.9.0"
 sysinfo = "0.31.4"
 tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
+# Logging (ADR 0019): the facade everywhere, the subscriber only in condr-server.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "env-filter", "ansi", "tracing-log"] }
+tracing-appender = "0.2"
 widestring = "1.2"
 windows-spawn = "0.1.0"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }

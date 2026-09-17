@@ -28,18 +28,18 @@ impl RuntimeState {
                             session = loaded;
                             restored = true;
                         }
-                        Err(error) => eprintln!(
-                            "condr-server: ignoring invalid Session Snapshot at {}: {error}",
+                        Err(error) => tracing::warn!(
+                            "ignoring invalid Session Snapshot at {}: {error}",
                             persistence.path().display()
                         ),
                     },
-                    Err(error) => eprintln!(
-                        "condr-server: ignoring invalid Session Snapshot at {}: {error}",
+                    Err(error) => tracing::warn!(
+                        "ignoring invalid Session Snapshot at {}: {error}",
                         persistence.path().display()
                     ),
                 },
-                SnapshotLoad::Rejected(reason) => eprintln!(
-                    "condr-server: ignoring invalid Session Snapshot at {}: {reason}",
+                SnapshotLoad::Rejected(reason) => tracing::warn!(
+                    "ignoring invalid Session Snapshot at {}: {reason}",
                     persistence.path().display()
                 ),
             }
@@ -82,8 +82,8 @@ impl RuntimeState {
             ) {
                 Ok(runtime) => Some((runtime, requested_cwd.to_path_buf())),
                 Err(error) if requested_cwd != workspace_root.as_path() => {
-                    eprintln!(
-                        "condr-server: fresh shell failed for Pane {} in saved cwd {}; retrying Workspace Root {}: {error}",
+                    tracing::warn!(
+                        "fresh shell failed for Pane {} in saved cwd {}; retrying Workspace Root {}: {error}",
                         pane_id.as_u64(),
                         requested_cwd.display(),
                         workspace_root.display()
@@ -96,8 +96,8 @@ impl RuntimeState {
                     ) {
                         Ok(runtime) => Some((runtime, workspace_root)),
                         Err(fallback_error) => {
-                            eprintln!(
-                                "condr-server: pruning Pane {} after fresh shell also failed in Workspace Root: {fallback_error}",
+                            tracing::warn!(
+                                "pruning Pane {} after fresh shell also failed in Workspace Root: {fallback_error}",
                                 pane_id.as_u64()
                             );
                             None
@@ -105,8 +105,8 @@ impl RuntimeState {
                     }
                 }
                 Err(error) => {
-                    eprintln!(
-                        "condr-server: pruning Pane {} after fresh shell failed in {}: {error}",
+                    tracing::warn!(
+                        "pruning Pane {} after fresh shell failed in {}: {error}",
                         pane_id.as_u64(),
                         requested_cwd.display()
                     );
@@ -180,8 +180,8 @@ impl RuntimeState {
                 continue;
             }
             if cwd.to_str().is_none() {
-                eprintln!(
-                    "condr-server: ignoring unpersistable Terminal cwd update for Pane {}: path is not valid UTF-8",
+                tracing::warn!(
+                    "ignoring unpersistable Terminal cwd update for Pane {}: path is not valid UTF-8",
                     pane_id.as_u64()
                 );
                 continue;
@@ -217,8 +217,8 @@ impl RuntimeState {
                 }
                 Err(error) => {
                     candidate.set_pane_cwd(pane_id, previous);
-                    eprintln!(
-                        "condr-server: ignoring unpersistable Terminal cwd update for Pane {}: {error}",
+                    tracing::warn!(
+                        "ignoring unpersistable Terminal cwd update for Pane {}: {error}",
                         pane_id.as_u64()
                     );
                 }
@@ -315,8 +315,8 @@ fn clear_invalid_restored_worktrees(session: &mut Session) -> usize {
             continue;
         }
         if session.clear_worktree_association(workspace_id) {
-            eprintln!(
-                "condr-server: clearing stale worktree association for Workspace {} at {}",
+            tracing::info!(
+                "clearing stale worktree association for Workspace {} at {}",
                 workspace_id.as_u64(),
                 root.display()
             );

@@ -168,6 +168,7 @@ fn bridge_starts_the_server_on_the_default_socket_when_none_runs() {
             .args(args)
             .env("CONDR_SOCKET_PATH", &socket)
             .env("CONDR_CONFIG_DIR", &config)
+            .env("CONDR_LOG_DIR", &config)
             .env_remove("CONDR_PANE_ID")
             .env_remove("CONDR_ENV");
         command

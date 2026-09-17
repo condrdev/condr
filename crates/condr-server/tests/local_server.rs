@@ -41,6 +41,7 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
         .env("CONDR_SOCKET_PATH", &endpoint_path)
         // The host's own config.toml may name a TCP listener that is already in use.
         .env("CONDR_CONFIG_DIR", endpoint_path.with_extension("config"))
+        .env("CONDR_LOG_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
         .output()
@@ -255,7 +256,10 @@ fn local_server_helper() {
     stop_server(&empty_endpoint).unwrap();
     wait_for_stop(&empty_endpoint);
     empty_guard.disarm();
-    let _ = std::fs::remove_file(server_log_path(server_id));
+    let _ = std::fs::remove_file(server_log_path(
+        &condr_core::log_directory().expect("log directory"),
+        server_id,
+    ));
 }
 
 #[test]
@@ -274,6 +278,7 @@ fn auto_started_server_survives_launcher_exit() {
         .env("CONDR_SOCKET_PATH", &endpoint_path)
         // The host's own config.toml may name a TCP listener that is already in use.
         .env("CONDR_CONFIG_DIR", endpoint_path.with_extension("config"))
+        .env("CONDR_LOG_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
         .status()
@@ -283,7 +288,10 @@ fn auto_started_server_survives_launcher_exit() {
     let endpoint = Endpoint::local(&endpoint_path);
     let guard = ServerGuard(endpoint.clone());
     let client = ClientConnection::connect(&endpoint, "detached-process-check").unwrap();
-    let log_path = server_log_path(client.bootstrap().unwrap().server_id);
+    let log_path = server_log_path(
+        &endpoint_path.with_extension("config"),
+        client.bootstrap().unwrap().server_id,
+    );
     #[cfg(unix)]
     assert_is_session_leader(client.bootstrap().unwrap().runtime_epoch);
     drop(client);
@@ -329,6 +337,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         command
             .args(args)
             .env("CONDR_CONFIG_DIR", &data_directory)
+            .env("CONDR_LOG_DIR", &data_directory)
             .env("CONDR_SOCKET_PATH", &socket_path)
             .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
             .env_remove("CONDR_PANE_ID");
@@ -361,7 +370,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         String::from_utf8_lossy(&output.stderr)
     );
     let client = ClientConnection::connect(&endpoint, "log-path-check").unwrap();
-    let log_path = server_log_path(client.bootstrap().unwrap().server_id);
+    let log_path = server_log_path(&data_directory, client.bootstrap().unwrap().server_id);
     drop(client);
 
     // The same Server answers on TCP: a remote device pairs with the invite the host
@@ -500,10 +509,9 @@ fn assert_is_session_leader(runtime_epoch: condr_core::protocol::RuntimeEpoch) {
     assert_eq!(nix::unistd::getsid(Some(pid)).unwrap(), pid);
 }
 
-fn server_log_path(server_id: ServerId) -> std::path::PathBuf {
-    condr_core::log_directory()
-        .expect("platform log directory")
-        .join(format!("condr-server-{:016x}.log", server_id.0))
+/// The detached Server's stderr file under `directory`, the `CONDR_LOG_DIR` its launcher was given.
+fn server_log_path(directory: &std::path::Path, server_id: ServerId) -> std::path::PathBuf {
+    directory.join(format!("condr-server-{:016x}.stderr", server_id.0))
 }
 
 struct ServerGuard(Endpoint);

@@ -21,7 +21,12 @@ pub fn state_directory() -> Option<PathBuf> {
         .map(|root| root.join(DIRECTORY_NAME))
 }
 
+/// Condr's log directory: `CONDR_LOG_DIR` when set (tests point helper Servers at a
+/// temporary directory), else the platform's.
 pub fn log_directory() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("CONDR_LOG_DIR") {
+        return Some(PathBuf::from(path));
+    }
     #[cfg(target_os = "macos")]
     return dirs::home_dir().map(|root| root.join("Library/Logs").join(DIRECTORY_NAME));
 

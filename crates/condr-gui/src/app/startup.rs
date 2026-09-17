@@ -227,11 +227,12 @@ pub(super) fn lock_exclusively(path: &std::path::Path) -> io::Result<File> {
 }
 
 pub(crate) fn run() {
-    // Held until `run` returns, which is when the GUI exits.
+    // Both held until `run` returns, which is when the GUI exits.
+    let _log_guard = condr_server::logging::init("condr-gui");
     let _instance_lock = match acquire_single_instance_lock() {
         Ok(lock) => lock,
         Err(error) => {
-            eprintln!("Condr is already running, or its lock is unavailable: {error}");
+            tracing::error!("Condr is already running, or its lock is unavailable: {error}");
             return;
         }
     };

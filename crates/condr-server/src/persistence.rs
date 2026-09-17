@@ -209,8 +209,8 @@ impl SnapshotPersistence {
 impl Drop for SnapshotPersistence {
     fn drop(&mut self) {
         if let Err(error) = self.shutdown() {
-            eprintln!(
-                "condr-server: failed to flush Session Snapshot {}: {error}",
+            tracing::error!(
+                "failed to flush Session Snapshot {}: {error}",
                 self.path.display()
             );
         }
@@ -246,8 +246,8 @@ fn run_worker_with(
                     thread::sleep(SHUTDOWN_RETRY_DELAY);
                     continue;
                 }
-                eprintln!(
-                    "condr-server: failed to persist Session Snapshot {}: {error}",
+                tracing::error!(
+                    "failed to persist Session Snapshot {}: {error}",
                     path.display()
                 );
                 if state.pending.is_none() {

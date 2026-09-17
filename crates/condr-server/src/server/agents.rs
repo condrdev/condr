@@ -173,7 +173,7 @@ impl RuntimeState {
             resume.kind.executable(),
             resume.args().join(" "),
         );
-        eprintln!("condr-server: Pane {}: {message}", pane_id.as_u64());
+        tracing::info!("Pane {}: {message}", pane_id.as_u64());
         if let Some(terminal) = self.terminals.get(&pane_id) {
             terminal.print_notice(&message);
         }
@@ -197,8 +197,8 @@ impl RuntimeState {
                 Ok(()) => self.schedule_snapshot(snapshot),
                 Err(error) => {
                     self.session.set_pane_agent_resume(pane_id, previous);
-                    eprintln!(
-                        "condr-server: cannot persist agent resume for Pane {}: {error}",
+                    tracing::warn!(
+                        "cannot persist agent resume for Pane {}: {error}",
                         pane_id.as_u64()
                     );
                 }

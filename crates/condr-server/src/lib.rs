@@ -4,6 +4,7 @@ mod client;
 mod client_writer;
 mod endpoint;
 pub mod install;
+pub mod logging;
 pub mod noise;
 pub(crate) mod persistence;
 mod server;

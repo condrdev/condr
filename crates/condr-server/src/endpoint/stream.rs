@@ -145,6 +145,15 @@ impl EndpointStream {
         matches!(self, Self::Local(_) | Self::Ssh(_))
     }
 
+    /// The transport's name for log spans.
+    pub fn transport(&self) -> &'static str {
+        match self {
+            Self::Local(_) => "local",
+            Self::Tcp(_) => "tcp",
+            Self::Ssh(_) => "ssh",
+        }
+    }
+
     /// Closes TCP/SSH for all clones; local streams close on drop.
     pub fn shutdown(&self) -> io::Result<()> {
         match self {

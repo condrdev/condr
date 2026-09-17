@@ -316,6 +316,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             if let Some(path) = snapshot {
                 config = config.with_snapshot_path(path);
             }
+            // Dropped when this arm returns, before `exit`, so the writer drains.
+            let _log_guard = condr_server::logging::init(&config.log_file_stem());
             if detached {
                 #[cfg(unix)]
                 nix::unistd::setsid().map_err(|error| {

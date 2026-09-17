@@ -25,12 +25,13 @@ fn endpoint_file(
     socket_path: &Path,
     extension: &str,
 ) -> Option<PathBuf> {
-    directory.map(|directory| {
-        directory.join(format!(
-            "condr-server-{:016x}.{extension}",
-            stable_endpoint_id(socket_path)
-        ))
-    })
+    directory
+        .map(|directory| directory.join(format!("{}.{extension}", server_log_stem(socket_path))))
+}
+
+/// The file stem this Server's stderr redirect and its rolling log files share.
+pub(super) fn server_log_stem(socket_path: &Path) -> String {
+    format!("condr-server-{:016x}", stable_endpoint_id(socket_path))
 }
 
 /// The Server identity is its local socket path; the TCP listener is an extra door
@@ -223,8 +224,10 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
 }
 
+/// Where a detached Server's stderr goes. Not `.log`: the rolling appender prunes every
+/// `<stem>*log` in the directory as an old day's file, and this one must stay.
 fn server_log_path(socket_path: &Path) -> io::Result<PathBuf> {
-    endpoint_file(condr_core::log_directory(), socket_path, "log").ok_or_else(|| {
+    endpoint_file(condr_core::log_directory(), socket_path, "stderr").ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
             "no platform log directory is available",

@@ -252,8 +252,8 @@ fn run_watcher(
     let mut watcher = match watcher {
         Ok(watcher) => Some(watcher),
         Err(error) => {
-            eprintln!(
-                "condr-server: file watching is unavailable, Git changes refresh on terminal activity only: {error}"
+            tracing::warn!(
+                "file watching is unavailable, Git changes refresh on terminal activity only: {error}"
             );
             None
         }
@@ -332,7 +332,7 @@ fn run_watcher(
                 }
             }
             Some(WatchMessage::Filesystem(Err(error))) => {
-                eprintln!("condr-server: file watcher: {error}");
+                tracing::warn!("file watcher: {error}");
             }
             Some(WatchMessage::Filesystem(Ok(event))) => {
                 let now = Instant::now();
@@ -385,10 +385,7 @@ fn run_watcher(
             let next = match next {
                 Ok(next) => next,
                 Err(error) => {
-                    eprintln!(
-                        "condr-server: Git scan of {} failed: {error}",
-                        root.display()
-                    );
+                    tracing::warn!("Git scan of {} failed: {error}", root.display());
                     continue;
                 }
             };
@@ -417,10 +414,7 @@ fn subscribe(
     match watcher.watch(path, mode) {
         Ok(()) => true,
         Err(error) => {
-            eprintln!(
-                "condr-server: cannot watch {} for Git changes: {error}",
-                path.display()
-            );
+            tracing::warn!("cannot watch {} for Git changes: {error}", path.display());
             false
         }
     }

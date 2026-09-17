@@ -256,6 +256,12 @@ impl BoundServer {
             });
         }
 
+        tracing::info!(
+            version = env!("CARGO_PKG_VERSION"),
+            pid = std::process::id(),
+            tcp = self.tcp.is_some(),
+            "Server started"
+        );
         let mut run_result = Ok(());
         let mut next_client_id = 1_u64;
         let mut agent_expiry_due = Instant::now();
@@ -293,6 +299,7 @@ impl BoundServer {
             }
         }
 
+        tracing::info!("Server stopping");
         self.lifecycle.begin_stop();
         self.stop.store(true, Ordering::Release);
         self.lifecycle.wait_for_operations();
@@ -317,8 +324,8 @@ impl BoundServer {
             let cwd_probe = runtime.cwd_probe();
             let before_close = cwd_probe.observe();
             if let Err(error) = runtime.close() {
-                eprintln!(
-                    "condr-server: failed to close Terminal for Pane {}: {error}",
+                tracing::warn!(
+                    "failed to close Terminal for Pane {}: {error}",
                     pane_id.as_u64()
                 );
                 if terminal_result.is_ok() {
@@ -347,7 +354,7 @@ impl BoundServer {
             .as_mut()
             .map_or(Ok(()), SnapshotPersistence::shutdown);
         if let Err(error) = &persistence_result {
-            eprintln!("condr-server: final Session Snapshot flush failed: {error}");
+            tracing::error!("final Session Snapshot flush failed: {error}");
         }
         drop(persistence);
         drop(terminals);
@@ -356,8 +363,9 @@ impl BoundServer {
             .cleanup()
             .and(self.tcp.as_ref().map_or(Ok(()), EndpointListener::cleanup));
         if let Err(error) = &cleanup_result {
-            eprintln!("condr-server: endpoint cleanup failed: {error}");
+            tracing::warn!("endpoint cleanup failed: {error}");
         }
+        tracing::info!("Server stopped");
         run_result
             .and(terminal_result)
             .and(persistence_result)

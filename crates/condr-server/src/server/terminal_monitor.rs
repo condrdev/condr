@@ -24,6 +24,8 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
         Arc::clone(&state),
     );
     thread::spawn(move || {
+        // The other span ADR 0019 allows; this thread owns the Pane's terminal runtime.
+        let _pane_span = tracing::info_span!("pane", id = pane_id.as_u64()).entered();
         let mut last_view_publish = Instant::now()
             .checked_sub(TERMINAL_FRAME_INTERVAL)
             .unwrap_or_else(Instant::now);
@@ -88,10 +90,7 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
                         break;
                     };
                     if let Err(error) = runtime.close() {
-                        eprintln!(
-                            "condr-server: failed to reap Terminal for Pane {} after PTY EOF: {error}",
-                            pane_id.as_u64()
-                        );
+                        tracing::warn!("failed to reap Terminal after PTY EOF: {error}");
                     }
                     let cwd = shutdown_cwd(cwd_before_shutdown, cwd_probe.observe());
                     let final_view = view_source.view();
