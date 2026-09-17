@@ -38,7 +38,7 @@ struct Steps {
 impl Steps {
     fn say(&self, text: impl AsRef<str>) {
         if !self.json {
-            println!("condr-server: {}", text.as_ref());
+            println!("{}", text.as_ref());
         }
     }
 }

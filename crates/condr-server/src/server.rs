@@ -28,10 +28,10 @@ use condr_core::protocol::{
     BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage, DiffBase, FramingError, Hello,
     LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerId,
-    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview,
-    TerminalFrameBatch, TerminalFrameChunk, VersionCheck, WorkspaceGitSnapshot, check_version,
-    encode_bootstrap_record, encode_pane_terminal_frame,
+    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand,
+    ServerAdminResponse, ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
+    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, VersionCheck,
+    WorkspaceGitSnapshot, check_version, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentSnapshot, GitFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
@@ -65,7 +65,8 @@ use workspace_git::*;
 pub use config::{ServerConfig, load_listen, save_listen};
 pub use local::{
     connected_devices, ensure_local_server, ensure_server, ensure_server_from, probe_server,
-    restart_server, restart_server_from, revoke_devices, stop_server, wait_for_shutdown,
+    restart_server, restart_server_from, revoke_devices, server_status, stop_server,
+    wait_for_shutdown,
 };
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
@@ -483,6 +484,7 @@ struct RuntimeState {
     config_path: Option<PathBuf>,
     /// This Server's endpoint as Panes see it in `CONDR_SOCKET_PATH`.
     socket_path: String,
+    started_at: Instant,
 }
 
 /// What every new shell is started with: the configured program plus the Server identity
@@ -622,6 +624,7 @@ impl RuntimeState {
             settings,
             config_path,
             socket_path: socket_path.to_string_lossy().into_owned(),
+            started_at: Instant::now(),
         }
     }
 

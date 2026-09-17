@@ -300,7 +300,7 @@ fn auto_started_server_survives_launcher_exit() {
     guard.disarm();
 
     let log = std::fs::read_to_string(&log_path).unwrap();
-    assert!(log.contains("condr-server: detached process"));
+    assert!(log.contains("detached process"));
 
     let _ = std::fs::remove_file(&snapshot_path);
     let mut snapshot_lock = snapshot_path.into_os_string();

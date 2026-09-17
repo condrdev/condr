@@ -1342,12 +1342,26 @@ fn server_admin(
         keys
     };
     match command {
-        ServerAdminCommand::Status => Ok(ServerAdminResponse::Status {
-            listen: ServerConfig::default()
-                .listen
-                .map(|address| address.to_string()),
-            connected: connected(),
-        }),
+        ServerAdminCommand::Status => {
+            let connected = connected();
+            let state = state.lock().expect("server state lock poisoned");
+            let workspaces = state.session.workspaces();
+            let tabs = workspaces.iter().flat_map(|workspace| workspace.tabs());
+            Ok(ServerAdminResponse::Status {
+                listen: ServerConfig::default()
+                    .listen
+                    .map(|address| address.to_string()),
+                connected,
+                version: env!("CARGO_PKG_VERSION").into(),
+                uptime_secs: state.started_at.elapsed().as_secs(),
+                workspaces: workspaces.len() as u32,
+                tabs: tabs.clone().count() as u32,
+                panes: tabs.map(|tab| tab.panes().len() as u32).sum(),
+                agents: state.agents.len() as u32,
+                clients: state.subscribers.len() as u32,
+                recent_errors: crate::logging::recent_errors(),
+            })
+        }
         ServerAdminCommand::SaveListen { address } => {
             let listen = address
                 .as_deref()

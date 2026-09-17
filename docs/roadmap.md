@@ -30,11 +30,12 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排 |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes/Files、Diff Tab（对 HEAD）、Preview Tab（ADR 0017/0018） |
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；Settings 可签 invite、撤销设备 |
+| 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、Workspace/Tab/Pane/Agent 计数、订阅客户端数、最近 warn/error |
 | 发布 | nightly + `v*` 正式版共用一条流水线；Linux/macOS/Windows 各两种架构的 desktop 与 headless 产物、校验和、安装脚本；README/CONTRIBUTING/SECURITY/CoC/Issue 模板 |
 
 **代码里确实没有的**
 
-- 可观测性：无 `tracing`/`log`，只有 57 处 `eprintln!`；无 panic hook、无日志文件、无基准测试。AGENTS.md 要求的 burst 合并、最终帧不丢等性能验收目前只能靠手工观察。
+- 可观测性：burst 合并、最终帧不丢、未变 cell 不重 shaping 各有一个单元测试，但没有带负载的可重复基准；AGENTS.md 要求的性能验收仍靠手工观察。
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、首连指纹确认、密钥进 Keychain。
 - 多客户端各看各的：当前 Workspace/Tab 的选择是 Session 全局状态，两台机器同时连同一 Server 会互相抢视图。
 - 代码签名、自动更新、Quickstart 文档、支持矩阵和协议兼容策略。
@@ -60,12 +61,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **为什么**：单人 dogfood 也已遇到只能靠猜的故障（重连、hook 配对、PTY 收尾）；有外部用户之前必须先能拿到证据，否则 Issue 无法处理。
 
-**做到哪**：
-
-- `tracing` 写到 [数据位置](development-build.md#数据位置) 里的 Log 目录，按天滚动，默认不记录终端内容。
-- panic hook 把 backtrace 写进同一日志。
-- `condr server status --json` 加运行时信息：uptime、Session 计数、连接数、最近错误。
-- 一个可重复跑的终端 burst 基准（合并到最新 revision、最终帧不丢、未变 cell 不重新 shaping），放进 `cargo test`，不引入 criterion 之外的东西。
+**做到哪**：日志、panic hook 和 `server status --json` 已在现状表里。剩下一项：一个可重复跑的终端 burst 基准（合并到最新 revision、最终帧不丢、未变 cell 不重新 shaping），放进 `cargo test`，不引入 criterion 之外的东西。
 
 **停在哪**：不做遥测上报、不做 metrics exporter。
 

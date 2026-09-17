@@ -195,6 +195,64 @@ fn server_status_row(settings: &Entity<SettingsWindow>) -> SettingItem {
     .keywords(["status", "connected", "local", "ssh", "tcp"])
 }
 
+/// What the Server last reported about itself: version, uptime, Session counts and the
+/// `warn`/`error` records it kept. Refreshed every `STATUS_REFRESH` while Settings is open.
+fn server_health_row(settings: &Entity<SettingsWindow>) -> SettingItem {
+    let settings = settings.clone();
+    SettingItem::render(move |_, _, cx| {
+        let health = selected_connection(&settings, cx, |c| c.health.clone()).flatten();
+        let muted = cx.theme().muted_foreground;
+        let Some(health) = health else {
+            return div()
+                .text_sm()
+                .text_color(muted)
+                .child("Waiting for the Server's status…")
+                .into_any_element();
+        };
+        let version_color = if health.version == env!("CARGO_PKG_VERSION") {
+            muted
+        } else {
+            cx.theme().warning
+        };
+        v_flex()
+            .gap_1()
+            .text_sm()
+            .child(
+                h_flex()
+                    .gap_4()
+                    .child(format!("Up {}", uptime_text(health.uptime_secs)))
+                    .child(
+                        div()
+                            .text_color(version_color)
+                            .child(format!("Version {}", health.version)),
+                    ),
+            )
+            .child(div().text_color(muted).child(format!(
+                "{} workspaces · {} tabs · {} panes · {} agents · {} clients",
+                health.workspaces, health.tabs, health.panes, health.agents, health.clients
+            )))
+            .when(!health.recent_errors.is_empty(), |column| {
+                column
+                    .child("Recent errors")
+                    .children(health.recent_errors.iter().rev().map(|record| {
+                        let color = if record.level == "ERROR" {
+                            cx.theme().danger
+                        } else {
+                            cx.theme().warning
+                        };
+                        h_flex()
+                            .gap_2()
+                            .items_start()
+                            .child(div().text_color(color).child(record.level.clone()))
+                            .child(div().text_color(muted).child(relative_age(record.at)))
+                            .child(record.message.clone())
+                    }))
+            })
+            .into_any_element()
+    })
+    .keywords(["uptime", "version", "errors", "health"])
+}
+
 fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     let value = settings.clone();
     let restart = settings.clone();
@@ -204,6 +262,7 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
     );
     group
         .item(server_status_row(settings))
+        .item(server_health_row(settings))
         .item(SettingItem::new(
             "TCP listener",
             SettingField::switch(

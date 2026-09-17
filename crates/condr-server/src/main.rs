@@ -3,9 +3,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use condr_core::protocol::relative_age;
+use condr_core::protocol::{ServerAdminResponse, relative_age, uptime_text};
 use condr_server::ServerConfig;
 use condr_server::noise::{self, ServerIdentity};
+use serde_json::json;
 
 mod cli;
 
@@ -86,8 +87,12 @@ enum ServerCommand {
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
     },
-    /// Report whether the Server is running
-    Status,
+    /// Report whether the Server is running, with its uptime, Session counts and recent errors
+    Status {
+        /// Print one JSON object instead of lines
+        #[arg(long)]
+        json: bool,
+    },
     /// Copy this executable into the user's Condr directory and put it on PATH
     Install {
         /// Start the Server from the installed copy if none is running
@@ -165,27 +170,26 @@ fn main() {
 /// Every failure prints as a headline followed by indented detail lines:
 ///
 /// ```text
-/// condr-server: failed to stop
+/// error: failed to stop
 ///   nothing is listening at /run/user/1000/condr/condr.sock
 /// ```
 fn dispatch(command: ServerCommand) -> i32 {
     match run_server_command(command) {
         Ok(code) => code,
         Err(error) => {
-            report("condr-server", &error.to_string());
+            let text = error.to_string();
+            let (headline, details) = text.split_once('\n').unwrap_or((&text, ""));
+            report(&format!("error: {headline}"), details);
             1
         }
     }
 }
 
-/// Prints `headline` prefixed with `prefix`, then each following line indented.
-fn report(prefix: &str, text: &str) {
-    for (index, line) in text.lines().enumerate() {
-        if index == 0 {
-            eprintln!("{prefix}: {line}");
-        } else {
-            eprintln!("  {line}");
-        }
+/// Prints `headline`, then each detail line indented.
+fn report(headline: &str, details: &str) {
+    eprintln!("{headline}");
+    for line in details.lines() {
+        eprintln!("  {line}");
     }
 }
 
@@ -238,15 +242,15 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 condr_server::ensure_server(config.clone())
                     .map_err(|error| failure("failed to start the Server", [error.to_string()]))?
             };
-            println!("condr-server: running at {endpoint}");
+            println!("running at {endpoint}");
             match (config.listen, already_running) {
                 (Some(address), false) => {
-                    println!("condr-server: also listening at tcp://{address}");
-                    println!("condr-server: pair another device with `condr server invite`");
+                    println!("also listening at tcp://{address}");
+                    println!("pair another device with `condr server invite`");
                 }
                 (Some(address), true) => {
                     println!(
-                        "condr-server: the running Server keeps its previous TCP listener; \
+                        "the running Server keeps its previous TCP listener; \
                          restart it to listen at tcp://{address}"
                     );
                 }
@@ -254,29 +258,90 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             }
             Ok(0)
         }
-        ServerCommand::Status => {
-            let config = ServerConfig::default();
-            let endpoint = config.local_endpoint();
-            match condr_server::probe_server(&endpoint) {
-                Ok(()) => {
-                    // First, so it lines up with the Fingerprint field in the GUI's Edit
-                    // Server dialog for a side-by-side check.
-                    let identity = load_identity(&identity_directory()?)?;
-                    println!("condr-server: fingerprint {}", identity.public_key());
-                    println!("condr-server: running at {endpoint}");
-                    if let Some(address) = config.listen {
-                        println!("condr-server: configured to listen at tcp://{address}");
-                    }
-                    Ok(0)
-                }
+        ServerCommand::Status { json } => {
+            let endpoint = ServerConfig::default().local_endpoint();
+            let status = match condr_server::server_status(&endpoint) {
+                Ok(status) => status,
                 Err(error) => {
-                    report(
-                        "condr-server",
-                        &format!("not running\n{}", endpoint.describe_connect_error(&error)),
+                    let detail = endpoint.describe_connect_error(&error);
+                    if json {
+                        println!(
+                            "{}",
+                            json!({ "running": false, "endpoint": endpoint.to_string(), "error": detail })
+                        );
+                    } else {
+                        report("not running", &detail);
+                    }
+                    return Ok(1);
+                }
+            };
+            let ServerAdminResponse::Status {
+                listen,
+                connected,
+                version,
+                uptime_secs,
+                workspaces,
+                tabs,
+                panes,
+                agents,
+                clients,
+                recent_errors,
+            } = status
+            else {
+                unreachable!("server_status only returns Status");
+            };
+            let identity = load_identity(&identity_directory()?)?;
+            if json {
+                println!(
+                    "{}",
+                    json!({
+                        "running": true,
+                        "endpoint": endpoint.to_string(),
+                        "fingerprint": identity.public_key().to_string(),
+                        "version": version,
+                        "protocol": condr_core::protocol::PROTOCOL_VERSION,
+                        "listen": listen,
+                        "connected_devices": connected,
+                        "uptime_secs": uptime_secs,
+                        "workspaces": workspaces,
+                        "tabs": tabs,
+                        "panes": panes,
+                        "agents": agents,
+                        "clients": clients,
+                        "recent_errors": recent_errors,
+                    })
+                );
+                return Ok(0);
+            }
+            // First, so it lines up with the Fingerprint field in the GUI's Edit Server
+            // dialog for a side-by-side check.
+            println!("fingerprint {}", identity.public_key());
+            println!(
+                "running at {endpoint}, version {version}, up {}",
+                uptime_text(uptime_secs)
+            );
+            if let Some(address) = listen {
+                println!("listening at tcp://{address}");
+            }
+            println!(
+                "{workspaces} workspace(s), {tabs} tab(s), {panes} pane(s), {agents} agent(s)"
+            );
+            println!(
+                "{clients} client(s) subscribed, {} device(s) connected over TCP",
+                connected.len()
+            );
+            if !recent_errors.is_empty() {
+                println!("recent errors:");
+                for record in recent_errors {
+                    println!(
+                        "  {:<5} {}  {}",
+                        record.level,
+                        relative_age(record.at),
+                        record.message
                     );
-                    Ok(1)
                 }
             }
+            Ok(0)
         }
         ServerCommand::Install {
             start,
@@ -297,7 +362,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             condr_server::stop_server(&endpoint).map_err(|error| {
                 failure("failed to stop", [endpoint.describe_connect_error(&error)])
             })?;
-            println!("condr-server: stopping");
+            println!("stopping");
             Ok(0)
         }
         ServerCommand::Run {
@@ -323,10 +388,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 nix::unistd::setsid().map_err(|error| {
                     io::Error::other(format!("failed to detach from the parent session: {error}"))
                 })?;
-                eprintln!(
-                    "condr-server: detached process {} starting",
-                    std::process::id()
-                );
+                eprintln!("detached process {} starting", std::process::id());
             }
             condr_server::run(config)
                 .map(|()| 0)
@@ -340,7 +402,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .listen
                 .map_or_else(|| "<port>".to_owned(), |address| address.port().to_string());
             println!(
-                "condr-server: invite valid for {} minutes; in Condr, Connect Remote Device with",
+                "invite valid for {} minutes; in Condr, Connect Remote Device with",
                 noise::INVITE_TTL.as_secs() / 60
             );
             println!(
@@ -350,7 +412,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             );
             if port == "<port>" {
                 println!(
-                    "condr-server: no TCP listener is configured yet; start one with \
+                    "no TCP listener is configured yet; start one with \
                      `condr server start --listen <addr>`"
                 );
             }
@@ -360,7 +422,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             let directory = identity_directory()?;
             let clients = noise::read_authorized(&directory)?;
             if clients.is_empty() {
-                println!("condr-server: no paired devices");
+                println!("no paired devices");
                 return Ok(0);
             }
             // A Server that is not running has no live connections; every device then
@@ -394,13 +456,13 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     ["list paired devices with `condr server clients`".to_owned()],
                 ));
             };
-            println!("condr-server: revoked device {key}");
+            println!("revoked device {key}");
             // The file already refuses their next handshake; a running Server also drops
             // the connections they hold now.
             let endpoint = ServerConfig::default().local_endpoint();
             match condr_server::revoke_devices(&endpoint, &key) {
                 Ok(disconnected) => {
-                    println!("condr-server: closed {disconnected} live connection(s)");
+                    println!("closed {disconnected} live connection(s)");
                     Ok(0)
                 }
                 // The file edit stands, but nobody closed the device's live connections;
@@ -504,7 +566,13 @@ mod tests {
         assert_eq!(listen, None);
         assert!(detached);
 
-        assert!(matches!(parse(&["status"]), Ok(ServerCommand::Status)));
+        assert!(matches!(
+            parse(&["status"]),
+            Ok(ServerCommand::Status { json: false })
+        ));
+        assert_eq!(uptime_text(59), "59s");
+        assert_eq!(uptime_text(3_720), "1h 2m");
+        assert_eq!(uptime_text(90_061), "1d 1h 1m");
         assert!(matches!(
             parse(&["install", "--restart", "--yes", "--json"]),
             Ok(ServerCommand::Install {

@@ -218,7 +218,7 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
             .collect::<Vec<_>>();
         for line in tail.into_iter().rev() {
             message.push('\n');
-            message.push_str(line.trim_start_matches("condr-server: ").trim());
+            message.push_str(line.trim());
         }
     }
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
@@ -309,6 +309,30 @@ pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unexpected connected-devices response: {other:?}"),
+        )),
+    }
+}
+
+/// Asks the running Server for its `Status` admin report.
+pub fn server_status(endpoint: &Endpoint) -> io::Result<ServerAdminResponse> {
+    let (mut stream, server_id, _) =
+        ClientConnection::welcome(endpoint.connect()?, "condr-status")?;
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::ServerAdmin {
+            server_id,
+            command: ServerAdminCommand::Status,
+        },
+    )
+    .map_err(|error| io::Error::other(error.to_string()))?;
+    match condr_core::protocol::read_message(&mut stream)
+        .map_err(|error| io::Error::other(error.to_string()))?
+    {
+        ServerMessage::ServerAdmin(response @ ServerAdminResponse::Status { .. }) => Ok(response),
+        ServerMessage::Error { message } => Err(io::Error::other(message)),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unexpected status response: {other:?}"),
         )),
     }
 }

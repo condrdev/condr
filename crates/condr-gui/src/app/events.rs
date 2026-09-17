@@ -579,9 +579,30 @@ impl Condr {
                 let connection = &mut self.connections[index];
                 connection.admin_error = None;
                 match response {
-                    ServerAdminResponse::Status { listen, connected } => {
+                    ServerAdminResponse::Status {
+                        listen,
+                        connected,
+                        version,
+                        uptime_secs,
+                        workspaces,
+                        tabs,
+                        panes,
+                        agents,
+                        clients,
+                        recent_errors,
+                    } => {
                         connection.listen = listen;
                         connection.connected_devices = connected;
+                        connection.health = Some(ServerHealth {
+                            version,
+                            uptime_secs,
+                            workspaces,
+                            tabs,
+                            panes,
+                            agents,
+                            clients,
+                            recent_errors,
+                        });
                     }
                     ServerAdminResponse::Clients { clients, connected } => {
                         connection.clients = clients;

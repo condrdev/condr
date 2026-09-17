@@ -157,6 +157,26 @@ pub struct ServerClientInfo {
     pub last_seen: u64,
 }
 
+/// One `warn` or `error` log record the Server keeps for `condr server status`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ServerLogRecord {
+    /// Unix seconds.
+    pub at: u64,
+    pub level: String,
+    pub message: String,
+}
+
+/// A duration as `1d 2h 3m`, dropping leading zero units; seconds only under a minute.
+pub fn uptime_text(secs: u64) -> String {
+    let (days, hours, minutes) = (secs / 86_400, secs / 3_600 % 24, secs / 60 % 60);
+    match (days, hours, minutes) {
+        (0, 0, 0) => format!("{secs}s"),
+        (0, 0, m) => format!("{m}m"),
+        (0, h, m) => format!("{h}h {m}m"),
+        (d, h, m) => format!("{d}d {h}h {m}m"),
+    }
+}
+
 /// How long ago a unix timestamp was, as the CLI and GUI both print it.
 pub fn relative_age(unix_seconds: u64) -> String {
     let now = std::time::SystemTime::now()
@@ -734,6 +754,17 @@ pub enum ServerAdminResponse {
     Status {
         listen: Option<String>,
         connected: Vec<String>,
+        /// The Server binary's crate version.
+        version: String,
+        uptime_secs: u64,
+        workspaces: u32,
+        tabs: u32,
+        panes: u32,
+        agents: u32,
+        /// Subscribed clients (GUIs and CLIs holding a live subscription).
+        clients: u32,
+        /// Newest last; `warn` and `error` records the Server kept in memory.
+        recent_errors: Vec<ServerLogRecord>,
     },
     ListenSaved {
         listen: Option<String>,

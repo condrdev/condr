@@ -32,8 +32,9 @@ pub use messages::{
     BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, Hello, LayoutCommand,
     LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
     RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview,
-    TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, relative_age,
+    ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
+    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, relative_age,
+    uptime_text,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;

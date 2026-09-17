@@ -140,7 +140,13 @@ pub(super) struct SettingsWindow {
     /// The Licenses page text, in a read-only editor because it is far too long
     /// for a plain text element.
     licenses: Entity<EditorState>,
+    /// Re-asks the selected Server for its `Status` while this window is open, so uptime
+    /// and recent errors on the Daemon page stay current. Dropped with the window.
+    _status_refresh: Task<()>,
 }
+
+/// How often the Daemon page's health figures are refreshed while Settings is open.
+const STATUS_REFRESH: Duration = Duration::from_secs(5);
 
 /// The two halves of Settings: this Client's own preferences and one Server's.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -299,6 +305,20 @@ impl SettingsWindow {
             server_keys,
             server_labels,
             licenses,
+            _status_refresh: cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(STATUS_REFRESH).await;
+                    let refreshed = this.update(cx, |this, cx| {
+                        let key = this.selected_server;
+                        let _ = this.owner.update(cx, |owner, _| {
+                            owner.server_admin(key, ServerAdminCommand::Status)
+                        });
+                    });
+                    if refreshed.is_err() {
+                        break;
+                    }
+                }
+            }),
         }
     }
 

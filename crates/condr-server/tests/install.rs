@@ -140,9 +140,7 @@ fn human_output_is_one_line_per_step() {
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout
-            .lines()
-            .all(|line| line.starts_with("condr-server: ")),
+        stdout.lines().all(|line| !line.trim().is_empty()),
         "{stdout}"
     );
     assert!(stdout.contains("installed "), "{stdout}");

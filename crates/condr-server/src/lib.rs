@@ -21,7 +21,7 @@ pub use persistence::{read_config_text, update_config_values};
 pub use server::{
     BoundServer, ServerConfig, ServerHandle, connected_devices, ensure_local_server, ensure_server,
     ensure_server_from, load_listen, probe_server, restart_server, restart_server_from,
-    revoke_devices, save_listen, stop_server, wait_for_shutdown,
+    revoke_devices, save_listen, server_status, stop_server, wait_for_shutdown,
 };
 pub use ssh::SshEndpoint;
 

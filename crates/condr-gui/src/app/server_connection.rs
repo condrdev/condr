@@ -55,6 +55,8 @@ pub(super) struct ServerConnection {
     /// Why the last hooks request failed, until the next report.
     pub(super) hooks_error: Option<String>,
     pub(super) listen: Option<String>,
+    /// The Server's last `Status` report; `None` until the first one arrives.
+    pub(super) health: Option<ServerHealth>,
     pub(super) clients: Vec<ServerClientInfo>,
     pub(super) connected_devices: Vec<String>,
     pub(super) admin_error: Option<String>,
@@ -125,6 +127,7 @@ impl ServerConnection {
             hooks: Vec::new(),
             hooks_error: None,
             listen: None,
+            health: None,
             clients: Vec::new(),
             connected_devices: Vec::new(),
             admin_error: None,
@@ -360,4 +363,17 @@ impl ServerConnection {
         self.request_snapshot_for(authoritative_session_id);
         true
     }
+}
+
+/// Runtime figures from the Server's `Status` reply, shown on the Daemon settings page.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ServerHealth {
+    pub(super) version: String,
+    pub(super) uptime_secs: u64,
+    pub(super) workspaces: u32,
+    pub(super) tabs: u32,
+    pub(super) panes: u32,
+    pub(super) agents: u32,
+    pub(super) clients: u32,
+    pub(super) recent_errors: Vec<ServerLogRecord>,
 }
