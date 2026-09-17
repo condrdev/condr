@@ -283,12 +283,7 @@ fn register_notification_icon() {
     };
     let icon = directory.join("condr.png");
     if fs::create_dir_all(&directory)
-        .and_then(|()| {
-            fs::write(
-                &icon,
-                include_bytes!("../../../../packaging/icons/condr.png"),
-            )
-        })
+        .and_then(|()| fs::write(&icon, include_bytes!("../../../../assets/brand/condr.png")))
         .is_err()
     {
         return;

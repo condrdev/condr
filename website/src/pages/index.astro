@@ -1,4 +1,6 @@
 ---
+import { Image } from 'astro:assets';
+import hero from '../../../assets/screenshots/hero.png';
 import '../styles/home.css';
 
 const features = [
@@ -58,7 +60,7 @@ const agents = [
 
       <section class="product-shot shell" aria-label="Condr workspace screenshot">
         <div class="shot-halo" aria-hidden="true"></div>
-        <figure><img src="/condr-workspace.png" alt="Condr workspace showing Claude Code, Codex, a remote dev server, and multiple terminal panes" loading="eager" /><figcaption><span>One workspace</span><span>Claude Code · Codex · any CLI</span></figcaption></figure>
+        <figure><Image src={hero} alt="Condr workspace showing Claude Code, Codex, a remote dev server, and multiple terminal panes" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" /><figcaption><span>One workspace</span><span>Claude Code · Codex · any CLI</span></figcaption></figure>
         <div class="agent-strip" aria-label="Supported agent CLIs">
           {agents.map((agent) => <span class="agent-item"><img src={`/agents/${agent.icon}.svg`} alt="" aria-hidden="true" />{agent.name}</span>)}
           <span class="agent-more">More...</span>

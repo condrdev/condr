@@ -33,7 +33,7 @@ CloseApplications=yes
 WizardStyle=modern
 OutputDir=dist
 OutputBaseFilename={#OutputBaseFilename}
-SetupIconFile=packaging\icons\condr.ico
+SetupIconFile=assets\brand\condr.ico
 UninstallDisplayIcon={app}\condr-gui.exe
 
 [Files]

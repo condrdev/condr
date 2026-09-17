@@ -35,13 +35,14 @@ Condr has been a separate server/client system from the first version. "Local" i
 crates/condr-core    # domain, protocol, PTY, VT, agent detection, Git — no GUI deps, testable headless
 crates/condr-server  # builds `condr`: the Server process (`condr server …`) and CLI subcommands; owns Session, terminal runtime, persistence and connections
 crates/condr-gui     # builds `condr-gui`: pure client, connects to one or more servers, renders with GPUI
+assets/              # one copy of everything the GUI, packaging, README and website share: brand/ (logo and its generated icons), agents/ (agent CLI marks), screenshots/
 ```
 
 Closing the GUI only disconnects. The server, PTYs, agents and Session keep running; reopening the GUI reconnects to the existing local server first. Stopping the server is an explicit action.
 
 ### Website (`website/`)
 
-[condr.dev](https://condr.dev) lives in `website/`: Astro + Starlight, pnpm. `website.yml` builds it and uploads `dist/` to the Cloudflare Pages project `condr` (Direct Upload, not connected to GitHub) on every push to `main` that touches `website/**` or the install scripts. It is documentation, not part of the Rust build: `ci.yml` ignores it, and `website/README.md` has its own commands. `https://condr.dev/install.sh` and `install.ps1` are `script/install-condr.sh` / `.ps1`, copied into `website/public/` at build time; edit the scripts in `script/`.
+[condr.dev](https://condr.dev) lives in `website/`: Astro + Starlight, pnpm. `website.yml` builds it and uploads `dist/` to the Cloudflare Pages project `condr` (Direct Upload, not connected to GitHub) on every push to `main` that touches `website/**` or the install scripts. It is documentation, not part of the Rust build: `ci.yml` ignores it, and `website/README.md` has its own commands. `https://condr.dev/install.sh` and `install.ps1` are `script/install-condr.sh` / `.ps1`, and the logo and agent marks come from `assets/`; `prebuild` copies them into `website/public/` (gitignored), so edit the originals, never `public/`. The hero screenshot is imported from `assets/screenshots/` so Astro can optimize it.
 
 ### Development environment (two machines)
 

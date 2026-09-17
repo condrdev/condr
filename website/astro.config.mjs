@@ -2,11 +2,10 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-
-
-
 export default defineConfig({
   site: 'https://condr.dev',
+  // The hero screenshot is imported from ../assets, outside the Vite root.
+  vite: { server: { fs: { allow: ['..'] } } },
 
   integrations: [
     starlight({

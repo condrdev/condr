@@ -27,7 +27,7 @@ fn rounded_platform_svg(source: &str) -> String {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/icons");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/brand");
     let source = fs::read_to_string(root.join("condr.svg"))?;
     let source_tree = usvg::Tree::from_str(&source, &Default::default())?;
     // The checked-in SVG is the platform-neutral source. Desktop application icon formats

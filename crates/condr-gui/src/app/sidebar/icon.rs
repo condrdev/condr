@@ -41,7 +41,7 @@ pub(in crate::app) enum CondrIconName {
     SquarePlus,
     SquareDot,
     SquareMinus,
-    /// The agent CLIs' marks (assets/icons/NOTICE-AGENT-ICONS), recolored to
+    /// The agent CLIs' marks (assets/agents/NOTICE at the repository root), recolored to
     /// `currentColor` so they follow the text like every other icon.
     Claude,
     Codex,

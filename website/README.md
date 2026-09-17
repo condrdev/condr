@@ -22,6 +22,6 @@ pnpm preview
 - `src/pages/index.astro`：官网首页。
 - `src/styles/home.css`：首页样式。
 - `src/content/docs/docs/`：文档，对应 `/docs/`。
-- `public/`：项目图标、真实产品截图。`install.sh` / `install.ps1` 由 `prebuild` 从 `../script/install-condr.*` 拷入，已 gitignore；要改就改 `script/` 里的源文件。
+- `public/`：只放网站自己的静态文件（favicon、`_headers`）。`install.sh` / `install.ps1`、`condr.svg`、`agents/*.svg` 由 `prebuild` 从仓库根的 `script/` 和 `assets/` 拷入，已 gitignore；要改就改原件。首页截图从 `../assets/screenshots/hero.png` import，由 Astro 优化输出。
 
 产品文案和资源以仓库根目录的 README 为准。

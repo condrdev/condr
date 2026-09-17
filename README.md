@@ -1,7 +1,7 @@
 # Condr
 
 <p align="center">
-  <img src="packaging/icons/condr.svg" alt="Condr" width="64" />
+  <img src="assets/brand/condr.svg" alt="Condr" width="64" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" />
+  <img src="assets/screenshots/hero.png" alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" />
 </p>
 
 Condr is a small desktop app for running Claude Code, Codex, and other CLI agents in one window.

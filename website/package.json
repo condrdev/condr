@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "prebuild": "cp ../script/install-condr.sh public/install.sh && cp ../script/install-condr.ps1 public/install.ps1",
+    "prebuild": "cp ../script/install-condr.sh public/install.sh && cp ../script/install-condr.ps1 public/install.ps1 && cp ../assets/brand/condr.svg public/condr.svg && mkdir -p public/agents && cp ../assets/agents/*.svg public/agents/",
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",

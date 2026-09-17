@@ -9,7 +9,7 @@ pub fn embed_icon(binary: &str) {
         return;
     }
     let manifest = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set");
-    let icon = Path::new(&manifest).join("../../packaging/icons/condr.ico");
+    let icon = Path::new(&manifest).join("../../assets/brand/condr.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     let resource = Path::new(&env::var("OUT_DIR").expect("OUT_DIR is set")).join("condr.rc");
     // GPUI's Windows platform loads icon resource 1 from the executable. This

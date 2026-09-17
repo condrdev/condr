@@ -1,0 +1,19 @@
+The editor marks in this directory name the editor the title bar's "Open in" button
+launches. Each is a trademark of its owner; Condr uses them nominatively, recolored to
+`currentColor` so the theme tints them like every other icon, and otherwise
+geometrically unchanged unless noted. Fetched on 2026-09-15. The agent marks live in
+assets/agents/ with their own NOTICE.
+
+From theSVG (https://thesvg.org, https://github.com/glincker/thesvg; the
+collection's code and tooling are MIT, Copyright (c) 2025 thesvg.org; it
+distributes the marks under nominative fair use), as
+https://thesvg.org/icons/<slug>/default.svg:
+
+  vscode.svg       visual-studio-code  Visual Studio Code, of Microsoft Corporation;
+                                       only the mask silhouette is kept
+  zed.svg          zed                 Zed, of Zed Industries, Inc.
+  intellij.svg     intellij-idea       IntelliJ IDEA, of JetBrains s.r.o.; the four
+                                       gradient facets are flattened to their outline
+                                       and the badge with its letters is kept as a
+                                       cutout
+

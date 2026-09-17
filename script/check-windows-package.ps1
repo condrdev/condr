@@ -26,7 +26,7 @@ try {
 
   # Exercise the shell's icon extraction, including the installer executable.
   Add-Type -AssemblyName System.Drawing
-  $expectedIcon = [Drawing.Icon]::new((Join-Path $PSScriptRoot '../packaging/icons/condr.ico'), 32, 32)
+  $expectedIcon = [Drawing.Icon]::new((Join-Path $PSScriptRoot '../assets/brand/condr.ico'), 32, 32)
   $expectedBitmap = $expectedIcon.ToBitmap()
   try {
     foreach ($executable in (Join-Path $bundle 'condr.exe'), (Join-Path $bundle 'condr-gui.exe'), $installer[0].FullName) {

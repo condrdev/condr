@@ -4,3 +4,5 @@ node_modules/
 .DS_Store
 public/install.sh
 public/install.ps1
+public/condr.svg
+public/agents/

@@ -28,7 +28,7 @@ tar -C "$stage" -czf "$DIST_DIR/condr-headless-${package_version}-macos-${arch}.
 
 app="$stage/dmg/Condr.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-iconutil --convert icns --output "$app/Contents/Resources/condr.icns" packaging/icons/condr.iconset
+iconutil --convert icns --output "$app/Contents/Resources/condr.icns" assets/brand/condr.iconset
 install -m 755 target/release/condr target/release/condr-gui "$app/Contents/MacOS/"
 install -m 644 LICENSE "$app/LICENSE"
 printf '%s\n' "$CONDR_COMMIT" >"$app/BUILD-COMMIT"

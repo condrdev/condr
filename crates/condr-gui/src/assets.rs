@@ -11,7 +11,7 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
         app_id: Some("condr".into()),
         #[cfg(target_os = "linux")]
         icon: Some(std::sync::Arc::new(
-            image::load_from_memory(include_bytes!("../../../packaging/icons/condr.png"))
+            image::load_from_memory(include_bytes!("../../../assets/brand/condr.png"))
                 .expect("bundled application icon is a valid PNG")
                 .into_rgba8(),
         )),
@@ -20,8 +20,9 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 }
 
 /// Condr's own icons: status glyphs, the marks of the agent CLIs, kept for every agent
-/// Condr may come to name, then the marks of the editors "Open in" launches (both under
-/// assets/icons/NOTICE-AGENT-ICONS). The file-type icons under `icons/material/` are
+/// Condr may come to name (shared with the website from the repository's assets/agents/,
+/// see its NOTICE), then the marks of the editors "Open in" launches
+/// (assets/icons/NOTICE-EDITOR-ICONS). The file-type icons under `icons/material/` are
 /// served from `app::file_icons` instead (assets/icons/NOTICE-FILE-ICONS).
 const CONDR_ICON_PATHS: [&str; 28] = [
     "icons/circle.svg",
@@ -72,7 +73,7 @@ impl AssetSource for CondrAssets {
         }
         match path {
             APP_LOGO => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../../../packaging/icons/condr.png"
+                "../../../assets/brand/condr.png"
             )))),
             "icons/circle.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/circle.svg"
@@ -102,43 +103,43 @@ impl AssetSource for CondrAssets {
                 "../assets/icons/coffee.svg"
             )))),
             "icons/claude.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/claude.svg"
+                "../../../assets/agents/claude.svg"
             )))),
             "icons/codex.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/codex.svg"
+                "../../../assets/agents/codex.svg"
             )))),
             "icons/opencode.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/opencode.svg"
+                "../../../assets/agents/opencode.svg"
             )))),
             "icons/pi.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/pi.svg"
+                "../../../assets/agents/pi.svg"
             )))),
             "icons/omp.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/omp.svg"
+                "../../../assets/agents/omp.svg"
             )))),
             "icons/copilot.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/copilot.svg"
+                "../../../assets/agents/copilot.svg"
             )))),
             "icons/kimi.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/kimi.svg"
+                "../../../assets/agents/kimi.svg"
             )))),
             "icons/kilo.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/kilo.svg"
+                "../../../assets/agents/kilo.svg"
             )))),
             "icons/qoder.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/qoder.svg"
+                "../../../assets/agents/qoder.svg"
             )))),
             "icons/qwen.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/qwen.svg"
+                "../../../assets/agents/qwen.svg"
             )))),
             "icons/cursor.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/cursor.svg"
+                "../../../assets/agents/cursor.svg"
             )))),
             "icons/grok.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/grok.svg"
+                "../../../assets/agents/grok.svg"
             )))),
             "icons/antigravity.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/antigravity.svg"
+                "../../../assets/agents/antigravity.svg"
             )))),
             "icons/square-plus.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/square-plus.svg"

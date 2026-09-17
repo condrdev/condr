@@ -2,13 +2,15 @@ name: Website
 
 # Builds website/ and uploads it to the Cloudflare Pages project `condr`
 # (a Direct Upload project; it is not connected to GitHub). The install
-# scripts come from script/, so changes there also redeploy the site.
+# scripts come from script/ and the logo and agent marks from assets/, so
+# changes there also redeploy the site.
 
 on:
   push:
     branches: [main]
     paths:
       - 'website/**'
+      - 'assets/**'
       - 'script/install-condr.sh'
       - 'script/install-condr.ps1'
       - '.github/workflows/website.yml'

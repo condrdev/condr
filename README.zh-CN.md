@@ -1,7 +1,7 @@
 # Condr
 
 <p align="center">
-  <img src="packaging/icons/condr.svg" alt="Condr" width="64" />
+  <img src="assets/brand/condr.svg" alt="Condr" width="64" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="Condr 同时连接本地和远程 Server，每个 Workspace 里并排运行 Claude Code 和 Codex" />
+  <img src="assets/screenshots/hero.png" alt="Condr 同时连接本地和远程 Server，每个 Workspace 里并排运行 Claude Code 和 Codex" />
 </p>
 
 Condr 是一个轻量的原生 GUI，你可以在一个窗口中同时运行 Claude Code，Codex 等 CLI agent，也可以运行其他终端程序。
