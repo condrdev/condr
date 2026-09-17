@@ -9,6 +9,7 @@ use crate::snapshot::{
     SessionSnapshot, SnapshotError, TabSnapshot, WorkspaceSnapshot,
 };
 use layout::*;
+use relative_path::{RelativePath, RelativePathBuf};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -153,17 +154,17 @@ pub struct TerminalLayout {
 /// One file's working-tree diff against `HEAD`, named relative to the Workspace root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffView {
-    path: PathBuf,
+    path: RelativePathBuf,
 }
 
 /// One file's content as it is on disk (ADR 0018), named relative to the Workspace root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileView {
-    path: PathBuf,
+    path: RelativePathBuf,
 }
 
 impl FileView {
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &RelativePath {
         &self.path
     }
 }
@@ -447,19 +448,19 @@ impl TerminalLayout {
 
 impl DiffView {
     /// Relative to the Workspace root.
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &RelativePath {
         &self.path
     }
 }
 
-/// A Diff Tab names its file relative to the Workspace root: non-empty, relative and
-/// without `..`, so it cannot reach outside the working tree.
-pub fn valid_diff_path(path: &Path) -> bool {
-    !path.as_os_str().is_empty()
-        && path.is_relative()
+/// A Diff Tab names its file relative to the Workspace root: non-empty and made of plain
+/// names only, so it cannot reach outside the working tree. A [`RelativePath`] is
+/// `/`-separated on every platform; the Server turns it into a native path under the root.
+pub fn valid_diff_path(path: &RelativePath) -> bool {
+    !path.as_str().is_empty()
         && path
             .components()
-            .all(|component| matches!(component, std::path::Component::Normal(_)))
+            .all(|component| matches!(component, relative_path::Component::Normal(_)))
 }
 
 impl Pane {

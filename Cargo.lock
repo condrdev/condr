@@ -1275,6 +1275,7 @@ dependencies = [
  "nix",
  "portable-pty",
  "regex",
+ "relative-path",
  "serde",
  "serde_json",
  "smol_str",
@@ -1296,6 +1297,7 @@ dependencies = [
  "gpui-kit",
  "image",
  "keepawake",
+ "relative-path",
  "resvg 0.46.0",
  "serde",
  "smol_str",
@@ -1319,6 +1321,7 @@ dependencies = [
  "interprocess",
  "nix",
  "notify",
+ "relative-path",
  "serde",
  "serde_json",
  "snow",
@@ -7228,6 +7231,15 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "relative-path"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "renderdoc-sys"

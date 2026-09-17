@@ -3,6 +3,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use relative_path::RelativePath;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -78,11 +80,8 @@ fn changes_fold_index_and_worktree_into_one_status_per_path() {
         .iter()
         .map(|entry| {
             (
-                entry.path.to_string_lossy().replace('\\', "/"),
-                entry
-                    .old_path
-                    .as_ref()
-                    .map(|old| old.to_string_lossy().replace('\\', "/")),
+                entry.path.to_string(),
+                entry.old_path.as_ref().map(|old| old.to_string()),
                 entry.status,
             )
         })
@@ -116,7 +115,7 @@ fn changes_fold_index_and_worktree_into_one_status_per_path() {
         changes
             .entries
             .iter()
-            .find(|entry| entry.path.to_string_lossy().replace('\\', "/") == path)
+            .find(|entry| entry.path == path)
             .unwrap()
             .stat
     };
@@ -190,7 +189,9 @@ fn file_diff_numbers_every_line_and_flags_binary_and_oversized_files() {
 
     let repository = discover_repository(&root).unwrap().unwrap();
 
-    let notes = repository.file_diff(Path::new("notes.txt"), None).unwrap();
+    let notes = repository
+        .file_diff(RelativePath::new("notes.txt"), None)
+        .unwrap();
     let FileDiffContent::Text { hunks } = &notes.content else {
         panic!("a text file diffs as text: {notes:?}");
     };
@@ -229,7 +230,9 @@ fn file_diff_numbers_every_line_and_flags_binary_and_oversized_files() {
         ]
     );
 
-    let fresh = repository.file_diff(Path::new("fresh.txt"), None).unwrap();
+    let fresh = repository
+        .file_diff(RelativePath::new("fresh.txt"), None)
+        .unwrap();
     let FileDiffContent::Text { hunks } = &fresh.content else {
         panic!("an untracked file diffs against nothing: {fresh:?}");
     };
@@ -239,32 +242,35 @@ fn file_diff_numbers_every_line_and_flags_binary_and_oversized_files() {
 
     assert_eq!(
         repository
-            .file_diff(Path::new("image.bin"), None)
+            .file_diff(RelativePath::new("image.bin"), None)
             .unwrap()
             .content,
         FileDiffContent::Binary
     );
     assert!(matches!(
         repository
-            .file_diff(Path::new("huge.txt"), None)
+            .file_diff(RelativePath::new("huge.txt"), None)
             .unwrap()
             .content,
         FileDiffContent::TooLarge { .. }
     ));
     assert!(
         repository
-            .file_diff(Path::new("missing.txt"), None)
+            .file_diff(RelativePath::new("missing.txt"), None)
             .is_err(),
         "a path in neither HEAD nor the work tree has no diff"
     );
     assert!(
         repository
-            .file_diff(Path::new("../outside.txt"), None)
+            .file_diff(RelativePath::new("../outside.txt"), None)
             .is_err()
     );
     assert!(
         repository
-            .file_diff(Path::new("notes.txt"), Some(Path::new("../outside.txt")))
+            .file_diff(
+                RelativePath::new("notes.txt"),
+                Some(RelativePath::new("../outside.txt"))
+            )
             .is_err()
     );
 }
@@ -279,7 +285,10 @@ fn file_diff_of_a_rename_compares_against_the_old_path() {
     let repository = discover_repository(&root).unwrap().unwrap();
     let entry = repository.changes().unwrap().entries.remove(0);
     assert_eq!(entry.status, GitChangeStatus::Renamed);
-    assert_eq!(entry.old_path.as_deref(), Some(Path::new("old.txt")));
+    assert_eq!(
+        entry.old_path.as_deref(),
+        Some(RelativePath::new("old.txt"))
+    );
 
     let diff = repository
         .file_diff(&entry.path, entry.old_path.as_deref())
@@ -324,8 +333,8 @@ fn mark_ignored_flags_the_listing_entries_the_ignore_rules_exclude() {
     fs::write(root.join("src/build.log"), "noise\n").unwrap();
     let repository = discover_repository(&root).unwrap().unwrap();
 
-    let mut listing = condr_core::list_directory(&root, Path::new("")).unwrap();
-    repository.mark_ignored(Path::new(""), &mut listing);
+    let mut listing = condr_core::list_directory(&root, RelativePath::new("")).unwrap();
+    repository.mark_ignored(RelativePath::new(""), &mut listing);
     let flags: Vec<(&str, bool)> = listing
         .entries
         .iter()
@@ -336,8 +345,8 @@ fn mark_ignored_flags_the_listing_entries_the_ignore_rules_exclude() {
         [("src", false), ("target", true), (".gitignore", false)]
     );
 
-    let mut src = condr_core::list_directory(&root, Path::new("src")).unwrap();
-    repository.mark_ignored(Path::new("src"), &mut src);
+    let mut src = condr_core::list_directory(&root, RelativePath::new("src")).unwrap();
+    repository.mark_ignored(RelativePath::new("src"), &mut src);
     assert_eq!(
         src.entries
             .iter()

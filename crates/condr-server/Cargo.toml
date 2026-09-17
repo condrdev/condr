@@ -17,6 +17,7 @@ atomicwrites.workspace = true
 bincode.workspace = true
 clap.workspace = true
 interprocess.workspace = true
+relative-path.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 snow.workspace = true

@@ -23,6 +23,7 @@ gpui-fps.workspace = true
 image.workspace = true
 condr-core = { path = "../condr-core" }
 condr-server = { path = "../condr-server" }
+relative-path.workspace = true
 serde.workspace = true
 smol_str.workspace = true
 toml.workspace = true

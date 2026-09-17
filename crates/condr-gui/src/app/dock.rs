@@ -233,10 +233,10 @@ impl Condr {
             self.target_pane = None;
             self.active_dock_surface = None;
             if let Some(diff) = tab.diff() {
-                let path = diff.path().to_path_buf();
+                let path = diff.path().to_relative_path_buf();
                 self.sync_diff_view(key, _workspace_id, tab_id, path, window, cx);
             } else if let Some(file) = tab.file() {
-                let path = file.path().to_path_buf();
+                let path = file.path().to_relative_path_buf();
                 self.sync_file_view(key, _workspace_id, tab_id, path, window, cx);
             }
             return;

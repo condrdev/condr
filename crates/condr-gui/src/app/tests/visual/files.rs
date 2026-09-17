@@ -107,10 +107,9 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.read(|app| {
                 view.read(app).active_session().is_some_and(|session| {
                     session.active_workspace().is_some_and(|workspace| {
-                        workspace
-                            .active_tab()
-                            .file()
-                            .is_some_and(|file| file.path() == std::path::Path::new("src/main.rs"))
+                        workspace.active_tab().file().is_some_and(|file| {
+                            file.path() == relative_path::RelativePath::new("src/main.rs")
+                        })
                     })
                 })
             })
@@ -148,7 +147,9 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
                 session
                     .file_tab(workspace_id)
                     .and_then(|tab| tab.file())
-                    .is_some_and(|file| file.path() == std::path::Path::new("README.md"))
+                    .is_some_and(|file| {
+                        file.path() == relative_path::RelativePath::new("README.md")
+                    })
                     && session.workspace(workspace_id).unwrap().tabs().len() == 2
             })
         })
@@ -172,8 +173,11 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     // a real reconnect ends in exactly this message, and nothing else may run in between.
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
-            this.pending_directories
-                .insert((1, workspace_id, std::path::PathBuf::new()));
+            this.pending_directories.insert((
+                1,
+                workspace_id,
+                relative_path::RelativePathBuf::new(),
+            ));
             let connection = this.connection(1).unwrap();
             let bootstrap = SessionBootstrap {
                 server_id: connection.server_id.unwrap(),

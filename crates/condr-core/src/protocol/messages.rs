@@ -79,7 +79,7 @@ pub enum ClientMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root.
-        path: PathBuf,
+        path: RelativePathBuf,
         against: DiffBase,
     },
     /// One level of a Workspace's directory tree for the Files sidebar (ADR 0018),
@@ -90,7 +90,7 @@ pub enum ClientMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root; empty for the root itself.
-        path: PathBuf,
+        path: RelativePathBuf,
     },
     /// One file's content for the Preview Tab (ADR 0018), answered with
     /// [`ServerMessage::FileContent`]. No Session control needed.
@@ -100,7 +100,7 @@ pub enum ClientMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root.
-        path: PathBuf,
+        path: RelativePathBuf,
     },
     /// Agent orchestration is owned by the Server, including name resolution and waits.
     Agent {
@@ -361,14 +361,14 @@ pub enum LayoutCommand {
     ShowDiff {
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root.
-        path: PathBuf,
+        path: RelativePathBuf,
     },
     /// Shows `path`'s content in the Workspace's single Preview Tab the same way
     /// (ADR 0018).
     ShowFile {
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root.
-        path: PathBuf,
+        path: RelativePathBuf,
     },
 }
 
@@ -707,7 +707,7 @@ pub enum ServerMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root, as requested.
-        path: PathBuf,
+        path: RelativePathBuf,
         result: Result<crate::FileDiff, String>,
     },
     /// The reply to [`ClientMessage::ListDirectory`].
@@ -715,7 +715,7 @@ pub enum ServerMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root, as requested.
-        path: PathBuf,
+        path: RelativePathBuf,
         result: Result<crate::DirectoryListing, String>,
     },
     /// The reply to [`ClientMessage::ReadFile`].
@@ -723,7 +723,7 @@ pub enum ServerMessage {
         request_id: u64,
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root, as requested.
-        path: PathBuf,
+        path: RelativePathBuf,
         result: Result<crate::FileContent, String>,
     },
     AgentResult {

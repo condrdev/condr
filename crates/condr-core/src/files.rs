@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use relative_path::RelativePath;
 use serde::{Deserialize, Serialize};
 
 use crate::valid_diff_path;
@@ -48,16 +49,16 @@ pub enum FileContent {
 }
 
 /// The Workspace root itself, or a directory inside it.
-pub fn valid_directory_path(path: &Path) -> bool {
-    path.as_os_str().is_empty() || valid_diff_path(path)
+pub fn valid_directory_path(path: &RelativePath) -> bool {
+    path.as_str().is_empty() || valid_diff_path(path)
 }
 
 /// `relative` under `root`, one level deep, `.git` left out. `relative` empty lists the root.
-pub fn list_directory(root: &Path, relative: &Path) -> Result<DirectoryListing, String> {
+pub fn list_directory(root: &Path, relative: &RelativePath) -> Result<DirectoryListing, String> {
     if !valid_directory_path(relative) {
         return Err("invalid directory path".into());
     }
-    let directory = root.join(relative);
+    let directory = relative.to_path(root);
     let read = fs::read_dir(&directory).map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
     let mut truncated = false;
@@ -92,11 +93,11 @@ pub fn list_directory(root: &Path, relative: &Path) -> Result<DirectoryListing, 
 }
 
 /// `relative`'s content under `root`, as text when it looks like text.
-pub fn read_file(root: &Path, relative: &Path) -> Result<FileContent, String> {
+pub fn read_file(root: &Path, relative: &RelativePath) -> Result<FileContent, String> {
     if !valid_diff_path(relative) {
         return Err("invalid file path".into());
     }
-    let path: PathBuf = root.join(relative);
+    let path: PathBuf = relative.to_path(root);
     let meta = fs::metadata(&path).map_err(|error| error.to_string())?;
     if meta.is_dir() {
         return Err("is a directory".into());

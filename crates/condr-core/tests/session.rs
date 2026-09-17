@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use relative_path::{RelativePath, RelativePathBuf};
+
 use condr_core::{
     PaneDirection, PaneLayout, Session, SessionSnapshot, SnapshotError, SplitDirection, WorkspaceId,
 };
@@ -1226,14 +1228,17 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
     let terminal_tab = session.active_workspace().unwrap().active_tab().id();
 
     assert_eq!(
-        session.show_diff(workspace_id, PathBuf::from("../escape.rs")),
+        session.show_diff(workspace_id, RelativePathBuf::from("../escape.rs")),
         None,
         "a path outside the Workspace root is refused"
     );
-    assert_eq!(session.show_diff(workspace_id, PathBuf::new()), None);
+    assert_eq!(
+        session.show_diff(workspace_id, RelativePathBuf::new()),
+        None
+    );
 
     let diff_tab = session
-        .show_diff(workspace_id, PathBuf::from("src/lib.rs"))
+        .show_diff(workspace_id, RelativePathBuf::from("src/lib.rs"))
         .unwrap();
     assert_ne!(diff_tab, terminal_tab);
     let workspace = session.active_workspace().unwrap();
@@ -1244,13 +1249,13 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
     assert!(workspace.active_tab().layout().is_none());
     assert_eq!(
         workspace.active_tab().diff().unwrap().path(),
-        Path::new("src/lib.rs")
+        RelativePath::new("src/lib.rs")
     );
 
     // A second file retargets the same Tab; nothing accumulates.
     assert!(session.activate_tab(terminal_tab));
     assert_eq!(
-        session.show_diff(workspace_id, PathBuf::from("README.md")),
+        session.show_diff(workspace_id, RelativePathBuf::from("README.md")),
         Some(diff_tab)
     );
     let workspace = session.active_workspace().unwrap();
@@ -1263,7 +1268,7 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
             .diff()
             .unwrap()
             .path(),
-        Path::new("README.md")
+        RelativePath::new("README.md")
     );
 
     // A Tab created beside it inherits the Workspace root rather than a Pane cwd.
@@ -1275,7 +1280,7 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
 
     let restored = Session::restore(session.snapshot()).unwrap();
     let tab = restored.tab(diff_tab).unwrap();
-    assert_eq!(tab.diff().unwrap().path(), Path::new("README.md"));
+    assert_eq!(tab.diff().unwrap().path(), RelativePath::new("README.md"));
     assert_eq!(tab.name(), condr_core::DIFF_TAB_NAME);
 
     // Closing the Diff Tab frees no Panes and leaves the terminals alone.
@@ -1295,16 +1300,19 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
     let terminal_tab = session.active_workspace().unwrap().active_tab().id();
 
     assert_eq!(
-        session.show_file(workspace_id, PathBuf::from("../escape.rs")),
+        session.show_file(workspace_id, RelativePathBuf::from("../escape.rs")),
         None
     );
-    assert_eq!(session.show_file(workspace_id, PathBuf::new()), None);
+    assert_eq!(
+        session.show_file(workspace_id, RelativePathBuf::new()),
+        None
+    );
 
     let diff_tab = session
-        .show_diff(workspace_id, PathBuf::from("src/lib.rs"))
+        .show_diff(workspace_id, RelativePathBuf::from("src/lib.rs"))
         .unwrap();
     let file_tab = session
-        .show_file(workspace_id, PathBuf::from("src/main.rs"))
+        .show_file(workspace_id, RelativePathBuf::from("src/main.rs"))
         .unwrap();
     assert_ne!(file_tab, diff_tab, "the Preview Tab is its own viewer kind");
     assert_ne!(file_tab, terminal_tab);
@@ -1315,12 +1323,12 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
     assert!(workspace.active_tab().diff().is_none());
     assert_eq!(
         workspace.active_tab().file().unwrap().path(),
-        Path::new("src/main.rs")
+        RelativePath::new("src/main.rs")
     );
 
     // A second file retargets the Preview Tab and leaves the Diff Tab alone.
     assert_eq!(
-        session.show_file(workspace_id, PathBuf::from("README.md")),
+        session.show_file(workspace_id, RelativePathBuf::from("README.md")),
         Some(file_tab)
     );
     let workspace = session.active_workspace().unwrap();
@@ -1332,7 +1340,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
             .file()
             .unwrap()
             .path(),
-        Path::new("README.md")
+        RelativePath::new("README.md")
     );
     assert_eq!(
         session
@@ -1341,12 +1349,12 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
             .diff()
             .unwrap()
             .path(),
-        Path::new("src/lib.rs")
+        RelativePath::new("src/lib.rs")
     );
 
     let restored = Session::restore(session.snapshot()).unwrap();
     let tab = restored.tab(file_tab).unwrap();
-    assert_eq!(tab.file().unwrap().path(), Path::new("README.md"));
+    assert_eq!(tab.file().unwrap().path(), RelativePath::new("README.md"));
     assert_eq!(tab.name(), condr_core::FILE_TAB_NAME);
 
     let outcome = session.close_tab(file_tab).unwrap();
@@ -1394,7 +1402,7 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
             .diff()
             .unwrap()
             .path(),
-        Path::new("src/main.rs")
+        RelativePath::new("src/main.rs")
     );
 
     let two_diffs = bincode::serialize(&EncodedSession {

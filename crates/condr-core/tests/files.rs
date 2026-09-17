@@ -1,5 +1,7 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use relative_path::RelativePath;
 
 use condr_core::{FileContent, FileKind, MAX_FILE_BYTES, list_directory, read_file};
 
@@ -20,7 +22,7 @@ fn listing_puts_directories_first_hides_git_and_refuses_escapes() {
     fs::write(root.join("A.txt"), "a").unwrap();
     fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
 
-    let listing = list_directory(&root, Path::new("")).unwrap();
+    let listing = list_directory(&root, RelativePath::new("")).unwrap();
     let names: Vec<(&str, FileKind)> = listing
         .entries
         .iter()
@@ -37,12 +39,12 @@ fn listing_puts_directories_first_hides_git_and_refuses_escapes() {
     );
     assert!(!listing.truncated);
 
-    let src = list_directory(&root, Path::new("src")).unwrap();
+    let src = list_directory(&root, RelativePath::new("src")).unwrap();
     assert_eq!(src.entries[0].name, "app");
     assert_eq!(src.entries[1].name, "main.rs");
 
-    assert!(list_directory(&root, Path::new("../")).is_err());
-    assert!(list_directory(&root, Path::new("missing")).is_err());
+    assert!(list_directory(&root, RelativePath::new("../")).is_err());
+    assert!(list_directory(&root, RelativePath::new("missing")).is_err());
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -60,22 +62,22 @@ fn reading_tells_text_binary_and_oversized_files_apart() {
     fs::create_dir_all(root.join("dir")).unwrap();
 
     assert_eq!(
-        read_file(&root, Path::new("notes.txt")).unwrap(),
+        read_file(&root, RelativePath::new("notes.txt")).unwrap(),
         FileContent::Text {
             text: "alpha\nbeta\n".into()
         }
     );
     assert_eq!(
-        read_file(&root, Path::new("image.bin")).unwrap(),
+        read_file(&root, RelativePath::new("image.bin")).unwrap(),
         FileContent::Binary
     );
     assert!(matches!(
-        read_file(&root, Path::new("huge.txt")).unwrap(),
+        read_file(&root, RelativePath::new("huge.txt")).unwrap(),
         FileContent::TooLarge { bytes } if bytes == MAX_FILE_BYTES + 1
     ));
-    assert!(read_file(&root, Path::new("dir")).is_err());
-    assert!(read_file(&root, Path::new("")).is_err());
-    assert!(read_file(&root, Path::new("../notes.txt")).is_err());
+    assert!(read_file(&root, RelativePath::new("dir")).is_err());
+    assert!(read_file(&root, RelativePath::new("")).is_err());
+    assert!(read_file(&root, RelativePath::new("../notes.txt")).is_err());
 
     let _ = fs::remove_dir_all(&root);
 }

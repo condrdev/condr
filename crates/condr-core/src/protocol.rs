@@ -21,6 +21,8 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
+pub use relative_path::{RelativePath, RelativePathBuf};
+
 pub use bootstrap::BootstrapAssembler;
 pub use framing::{
     FramingError, decode_bootstrap_record, decode_pane_terminal_frame, encode_bootstrap_record,

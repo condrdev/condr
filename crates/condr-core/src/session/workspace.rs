@@ -122,7 +122,7 @@ impl Session {
     /// Shows `path`'s diff in the Workspace's Diff Tab, creating the Tab the first time and
     /// retargeting it afterwards, and activates it (ADR 0017). `None` for an unknown
     /// Workspace, an invalid path, or when the Tab limit is reached.
-    pub fn show_diff(&mut self, workspace_id: WorkspaceId, path: PathBuf) -> Option<TabId> {
+    pub fn show_diff(&mut self, workspace_id: WorkspaceId, path: RelativePathBuf) -> Option<TabId> {
         self.show_viewer(
             workspace_id,
             TabContent::Diff(DiffView { path }),
@@ -131,7 +131,7 @@ impl Session {
     }
 
     /// Shows `path`'s content in the Workspace's Preview Tab, the same way (ADR 0018).
-    pub fn show_file(&mut self, workspace_id: WorkspaceId, path: PathBuf) -> Option<TabId> {
+    pub fn show_file(&mut self, workspace_id: WorkspaceId, path: RelativePathBuf) -> Option<TabId> {
         self.show_viewer(
             workspace_id,
             TabContent::File(FileView { path }),

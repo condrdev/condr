@@ -11,7 +11,6 @@ use condr_core::{
 use gpui_kit::component::input::{TextDecoration, TextDecorationCollection};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
-use std::path::Path;
 
 /// What the right sidebar shows (ADR 0018).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -120,7 +119,7 @@ enum ChangeNode<'a> {
         /// The folded segments joined with `/`.
         label: String,
         /// The directory's repository-relative path, the key of its collapsed state.
-        path: PathBuf,
+        path: RelativePathBuf,
         children: Vec<ChangeNode<'a>>,
     },
     File {
@@ -148,7 +147,7 @@ fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
         }
     }
 
-    fn finish<'a>(builder: Builder<'a>, parent: &Path) -> Vec<ChangeNode<'a>> {
+    fn finish<'a>(builder: Builder<'a>, parent: &RelativePath) -> Vec<ChangeNode<'a>> {
         let mut nodes = Vec::new();
         for (name, mut child) in builder.directories {
             let mut label = name.clone();
@@ -182,11 +181,11 @@ fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
         let components: Vec<String> = entry
             .path
             .components()
-            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .map(|component| component.as_str().to_owned())
             .collect();
         insert(&mut root, &components, entry);
     }
-    finish(root, Path::new(""))
+    finish(root, RelativePath::new(""))
 }
 
 /// What every row of one section's tree shares.
@@ -195,7 +194,7 @@ struct TreeContext<'a> {
     key: ConnectionKey,
     workspace_id: WorkspaceId,
     /// The file the Diff Tab shows, drawn selected.
-    shown: Option<&'a Path>,
+    shown: Option<&'a RelativePath>,
 }
 
 /// A tree row's left padding: the section gutter plus one indent per level. A file row
@@ -211,7 +210,7 @@ pub(super) struct DiffEditor {
     pub(super) state: Entity<EditorState>,
     decorations: TextDecorationCollection,
     /// The path and the connection's diff generation the Editor text was built from.
-    shown: Option<(PathBuf, u64)>,
+    shown: Option<(RelativePathBuf, u64)>,
     pub(super) content: DiffContent,
 }
 
@@ -262,7 +261,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        path: PathBuf,
+        path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -366,11 +365,11 @@ impl Condr {
             let shown_diff = session
                 .diff_tab(workspace_id)
                 .filter(|tab| presented_tab == Some(tab.id()))
-                .and_then(|tab| tab.diff().map(|diff| diff.path().to_path_buf()));
+                .and_then(|tab| tab.diff().map(|diff| diff.path().to_relative_path_buf()));
             let shown_file = session
                 .file_tab(workspace_id)
                 .filter(|tab| presented_tab == Some(tab.id()))
-                .and_then(|tab| tab.file().map(|file| file.path().to_path_buf()));
+                .and_then(|tab| tab.file().map(|file| file.path().to_relative_path_buf()));
             Some((
                 connection.key,
                 workspace_id,
@@ -466,7 +465,7 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         git: &WorkspaceGitSnapshot,
-        shown: Option<PathBuf>,
+        shown: Option<RelativePathBuf>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Copied out so the rows below can take `cx` again.
@@ -585,7 +584,7 @@ impl Condr {
                     }
                 }
                 ChangeNode::File { name, entry } => {
-                    let selected = context.shown == Some(entry.path.as_path());
+                    let selected = context.shown == Some(entry.path.as_relative_path());
                     list.push(self.render_change_file(context, name, entry, depth, selected, cx));
                 }
             }
@@ -596,18 +595,18 @@ impl Condr {
         &self,
         context: &TreeContext<'_>,
         label: &str,
-        path: &Path,
+        path: &RelativePath,
         depth: usize,
         collapsed: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (key, workspace_id) = (context.key, context.workspace_id);
         let theme = cx.theme();
-        let path_text = path.display().to_string().replace('\\', "/");
+        let path_text = path.to_string();
         let selector: SharedString = format!("change-dir-{path_text}").into();
         let id = selector.clone();
         let owner = cx.weak_entity();
-        let toggle_path = path.to_path_buf();
+        let toggle_path = path.to_relative_path_buf();
         h_flex()
             .id(id)
             .debug_selector(move || selector.to_string())
@@ -656,7 +655,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let path_text = entry.path.display().to_string().replace('\\', "/");
+        let path_text = entry.path.to_string();
         let selector: SharedString = format!("change-{path_text}").into();
         let id = selector.clone();
         let deleted = entry.status == GitChangeStatus::Deleted;
@@ -713,11 +712,11 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         tab_id: TabId,
-        path: &Path,
+        path: &RelativePath,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let path_text = path.display().to_string().replace('\\', "/");
+        let path_text = path.to_string();
         let entry = self
             .connection(key)
             .and_then(|connection| connection.workspace_git.get(&workspace_id))
@@ -803,7 +802,7 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         tab_id: TabId,
-        path: PathBuf,
+        path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -879,7 +878,12 @@ impl Condr {
         editor.decorations.set(decorations, cx);
     }
 
-    fn request_diff(&mut self, key: ConnectionKey, workspace_id: WorkspaceId, path: PathBuf) {
+    fn request_diff(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: RelativePathBuf,
+    ) {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
@@ -980,11 +984,11 @@ fn unified_text(
 mod tests {
     use super::{ChangeNode, ChangesSection, change_tree};
     use condr_core::{GitChangeEntry, GitChangeStatus};
-    use std::path::{Path, PathBuf};
+    use relative_path::{RelativePath, RelativePathBuf};
 
     fn entry(path: &str) -> GitChangeEntry {
         GitChangeEntry {
-            path: PathBuf::from(path),
+            path: RelativePathBuf::from(path),
             old_path: None,
             status: GitChangeStatus::Modified,
             stat: None,
@@ -1031,7 +1035,7 @@ mod tests {
             panic!("directories come first: {tree:?}");
         };
         assert_eq!(label, "crates");
-        assert_eq!(path, Path::new("crates"));
+        assert_eq!(path, RelativePath::new("crates"));
         let labels: Vec<&str> = children
             .iter()
             .map(|node| match node {
@@ -1047,7 +1051,7 @@ mod tests {
         let ChangeNode::Directory { path, children, .. } = &children[1] else {
             panic!("gui/src is a directory");
         };
-        assert_eq!(path, Path::new("crates/gui/src"));
+        assert_eq!(path, RelativePath::new("crates/gui/src"));
         assert!(matches!(&children[0], ChangeNode::File { name, .. } if name == "app.rs"));
         assert!(matches!(&children[1], ChangeNode::File { name, .. } if name == "dock.rs"));
         assert!(matches!(&tree[1], ChangeNode::File { name, .. } if name == "Cargo.toml"));

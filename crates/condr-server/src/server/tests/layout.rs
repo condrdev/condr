@@ -1,4 +1,5 @@
 use super::*;
+use relative_path::RelativePath;
 
 fn apply_for_test(
     state: &mut RuntimeState,
@@ -918,7 +919,7 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
         &mut state,
         LayoutCommand::ShowDiff {
             workspace_id,
-            path: PathBuf::from("src/lib.rs"),
+            path: RelativePathBuf::from("src/lib.rs"),
         },
     )
     .unwrap();
@@ -932,14 +933,14 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
     assert_ne!(tab_id, terminal_tab);
     assert_eq!(
         workspace.active_tab().diff().unwrap().path(),
-        std::path::Path::new("src/lib.rs")
+        RelativePath::new("src/lib.rs")
     );
 
     let again = apply_layout_command(
         &mut state,
         LayoutCommand::ShowDiff {
             workspace_id,
-            path: PathBuf::from("README.md"),
+            path: RelativePathBuf::from("README.md"),
         },
     )
     .unwrap();
@@ -951,7 +952,7 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
             &mut state,
             LayoutCommand::ShowDiff {
                 workspace_id,
-                path: PathBuf::from("../outside"),
+                path: RelativePathBuf::from("../outside"),
             },
         )
         .is_err()
@@ -996,7 +997,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
         &mut state,
         LayoutCommand::ShowDiff {
             workspace_id,
-            path: PathBuf::from("src/lib.rs"),
+            path: RelativePathBuf::from("src/lib.rs"),
         },
     )
     .unwrap();
@@ -1005,7 +1006,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
         &mut state,
         LayoutCommand::ShowFile {
             workspace_id,
-            path: PathBuf::from("src/main.rs"),
+            path: RelativePathBuf::from("src/main.rs"),
         },
     )
     .unwrap();
@@ -1020,14 +1021,14 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
     assert_eq!(workspace.tabs().len(), 3);
     assert_eq!(
         workspace.active_tab().file().unwrap().path(),
-        std::path::Path::new("src/main.rs")
+        RelativePath::new("src/main.rs")
     );
 
     let again = apply_layout_command(
         &mut state,
         LayoutCommand::ShowFile {
             workspace_id,
-            path: PathBuf::from("README.md"),
+            path: RelativePathBuf::from("README.md"),
         },
     )
     .unwrap();
@@ -1038,7 +1039,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
             &mut state,
             LayoutCommand::ShowFile {
                 workspace_id,
-                path: PathBuf::from("../outside"),
+                path: RelativePathBuf::from("../outside"),
             },
         )
         .is_err()

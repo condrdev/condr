@@ -47,6 +47,7 @@ use layout::*;
 use local::snapshot_path_for_endpoint;
 use local::{default_snapshot_path, runtime_epoch, stable_endpoint_id};
 use recovery::{observe_terminal_cwds, shutdown_cwd};
+use relative_path::RelativePathBuf;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

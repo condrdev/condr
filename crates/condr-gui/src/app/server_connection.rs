@@ -36,14 +36,15 @@ pub(super) struct ServerConnection {
     pub(super) workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
     /// File diffs the Server answered, by Workspace and path (ADR 0017). Cleared for a
     /// Workspace whenever its Git state changes, so a shown diff is refetched.
-    pub(super) diffs: HashMap<(WorkspaceId, PathBuf), Result<FileDiff, String>>,
+    pub(super) diffs: HashMap<(WorkspaceId, RelativePathBuf), Result<FileDiff, String>>,
     /// Bumped whenever `diffs` changes, so a Diff Tab knows its text is stale.
     pub(super) diffs_generation: u64,
     /// Directory listings the Server answered for the Files sidebar (ADR 0018), by
     /// Workspace and root-relative path; a Git change asks for every cached one again.
-    pub(super) directories: HashMap<(WorkspaceId, PathBuf), Result<DirectoryListing, String>>,
+    pub(super) directories:
+        HashMap<(WorkspaceId, RelativePathBuf), Result<DirectoryListing, String>>,
     /// File contents the Server answered for Preview Tabs, refreshed the same way.
-    pub(super) files: HashMap<(WorkspaceId, PathBuf), Result<FileContent, String>>,
+    pub(super) files: HashMap<(WorkspaceId, RelativePathBuf), Result<FileContent, String>>,
     /// Bumped whenever `files` changes, so a Preview Tab knows its text is stale.
     pub(super) files_generation: u64,
     pub(super) zoomed_panes: HashSet<PaneId>,
@@ -248,14 +249,14 @@ impl ServerConnection {
 
     /// The viewer Tab the Session presents, if the active Tab is one: its identity and
     /// file. A retarget changes the file and nothing the Dock projection sees.
-    pub(super) fn presented_viewer(&self) -> Option<(TabId, PathBuf)> {
+    pub(super) fn presented_viewer(&self) -> Option<(TabId, RelativePathBuf)> {
         let session = Session::restore(self.snapshot.clone()).ok()?;
         let tab = session.active_workspace()?.active_tab();
         let path = tab
             .diff()
             .map(|diff| diff.path())
             .or_else(|| tab.file().map(|file| file.path()))?;
-        Some((tab.id(), path.to_path_buf()))
+        Some((tab.id(), path.to_relative_path_buf()))
     }
 
     pub(super) fn dock_projection(&self) -> Option<PaneLayout> {

@@ -7,7 +7,7 @@ use super::*;
 use condr_core::{DirectoryEntry, FileKind};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The text "Insert Path into Terminal" writes: the relative path, single-quoted when a
 /// shell would otherwise split or expand it, and a trailing space so typing can go on.
@@ -27,9 +27,8 @@ pub(super) fn terminal_path_text(relative: &str) -> String {
 
 /// The highlighter name for a file: its extension, which GPUI Kit's registry resolves
 /// (`rs` → Rust); an unknown one leaves the text plain.
-fn language_for(path: &Path) -> SharedString {
+fn language_for(path: &RelativePath) -> SharedString {
     path.extension()
-        .and_then(|extension| extension.to_str())
         .map(|extension| extension.to_ascii_lowercase())
         .unwrap_or_else(|| "text".to_owned())
         .into()
@@ -39,7 +38,7 @@ fn language_for(path: &Path) -> SharedString {
 pub(super) struct FileEditor {
     pub(super) state: Entity<EditorState>,
     /// The path and the connection's file generation the Editor text was built from.
-    shown: Option<(PathBuf, u64)>,
+    shown: Option<(RelativePathBuf, u64)>,
     pub(super) content: FileViewContent,
 }
 
@@ -58,11 +57,17 @@ struct FilesContext<'a> {
     key: ConnectionKey,
     workspace_id: WorkspaceId,
     /// The file the Preview Tab shows, drawn selected.
-    shown: Option<&'a Path>,
+    shown: Option<&'a RelativePath>,
 }
 
-fn path_text(path: &Path) -> String {
-    path.display().to_string().replace('\\', "/")
+/// `relative` under the Workspace root, spelled the way the root is: the root is the
+/// Server's path, so a POSIX root stays `/`-separated when this client is Windows.
+fn absolute_path(root: &Path, relative: &RelativePath) -> PathBuf {
+    if root.to_string_lossy().starts_with('/') {
+        PathBuf::from(format!("{}/{relative}", root.display()))
+    } else {
+        relative.to_path(root)
+    }
 }
 
 /// A file-type icon at row size, dimmed when ignored. The Material set is drawn for
@@ -82,10 +87,10 @@ impl Condr {
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        shown: Option<&Path>,
+        shown: Option<&RelativePath>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let root = PathBuf::new();
+        let root = RelativePathBuf::new();
         self.ensure_directory(key, workspace_id, root.clone(), cx);
         let listing = self
             .connection(key)
@@ -104,7 +109,14 @@ impl Condr {
             shown,
         };
         let mut rows = Vec::new();
-        self.render_directory_rows(&context, Path::new(""), &listing.entries, 0, &mut rows, cx);
+        self.render_directory_rows(
+            &context,
+            RelativePath::new(""),
+            &listing.entries,
+            0,
+            &mut rows,
+            cx,
+        );
         let mut list = v_flex()
             .id("condr-files-list")
             .debug_selector(|| "condr-files-list".into())
@@ -126,7 +138,7 @@ impl Condr {
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        path: PathBuf,
+        path: RelativePathBuf,
         cx: &mut Context<Self>,
     ) {
         let known = self.connection(key).is_some_and(|connection| {
@@ -152,7 +164,7 @@ impl Condr {
     fn render_directory_rows(
         &self,
         context: &FilesContext<'_>,
-        directory: &Path,
+        directory: &RelativePath,
         entries: &[DirectoryEntry],
         depth: usize,
         rows: &mut Vec<AnyElement>,
@@ -205,7 +217,7 @@ impl Condr {
                     }
                 }
                 FileKind::File => {
-                    let selected = context.shown == Some(path.as_path());
+                    let selected = context.shown == Some(path.as_relative_path());
                     rows.push(self.render_file_row(
                         context,
                         &entry.name,
@@ -225,18 +237,21 @@ impl Condr {
         &self,
         context: &FilesContext<'_>,
         name: &str,
-        path: &Path,
+        path: &RelativePath,
         depth: usize,
         expanded: bool,
         ignored: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let selector: SharedString = format!("file-dir-{}", path_text(path)).into();
+        let selector: SharedString = format!("file-dir-{}", path.as_str()).into();
         let id = selector.clone();
         let owner = cx.weak_entity();
-        let (key, workspace_id, toggle_path) =
-            (context.key, context.workspace_id, path.to_path_buf());
+        let (key, workspace_id, toggle_path) = (
+            context.key,
+            context.workspace_id,
+            path.to_relative_path_buf(),
+        );
         // A folded directory still tells whether something under it changed.
         let has_changes = self
             .connection(key)
@@ -284,7 +299,7 @@ impl Condr {
             .when(has_changes, |this| {
                 this.child(
                     div()
-                        .debug_selector(move || format!("file-dir-changed-{}", path_text(path)))
+                        .debug_selector(move || format!("file-dir-changed-{}", path.as_str()))
                         .flex_none()
                         .size(px(6.))
                         .rounded_full()
@@ -299,18 +314,22 @@ impl Condr {
         &self,
         context: &FilesContext<'_>,
         name: &str,
-        path: &Path,
+        path: &RelativePath,
         depth: usize,
         selected: bool,
         ignored: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let selector: SharedString = format!("file-{}", path_text(path)).into();
+        let selector: SharedString = format!("file-{}", path.as_str()).into();
         let id = selector.clone();
         let owner = cx.weak_entity();
         let menu = self.file_context_menu(context.key, context.workspace_id, path, cx);
-        let (key, workspace_id, path) = (context.key, context.workspace_id, path.to_path_buf());
+        let (key, workspace_id, path) = (
+            context.key,
+            context.workspace_id,
+            path.to_relative_path_buf(),
+        );
         // A changed file carries its status glyph, so the two views tell the same story.
         let status = self
             .connection(key)
@@ -372,11 +391,11 @@ impl Condr {
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        path: &Path,
+        path: &RelativePath,
         cx: &Context<Self>,
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let owner = cx.weak_entity();
-        let relative = path_text(path);
+        let relative = path.to_string();
         let (root, target_pane) = self
             .connection(key)
             .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
@@ -399,7 +418,7 @@ impl Condr {
                 is_local && root.is_absolute(),
             ))
         });
-        let absolute = root.map(|root| root.join(path));
+        let absolute = root.map(|root| absolute_path(&root, path));
         move |menu, _, _| {
             let copy_relative = relative.clone();
             let copy_absolute = absolute.clone();
@@ -530,7 +549,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        path: PathBuf,
+        path: RelativePathBuf,
         cx: &mut Context<Self>,
     ) {
         let dir = (key, workspace_id, path.clone());
@@ -561,7 +580,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        path: PathBuf,
+        path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -579,11 +598,11 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         tab_id: TabId,
-        path: &Path,
+        path: &RelativePath,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let path_text = path_text(path);
+        let path_text = path.to_string();
         let entry = self
             .connection(key)
             .and_then(|connection| connection.workspace_git.get(&workspace_id))
@@ -600,7 +619,10 @@ impl Condr {
             .items_center()
             .border_b_1()
             .border_color(theme.border)
-            .child(type_icon(file_icons::file_icon_for_path(path), false))
+            .child(type_icon(
+                file_icons::file_icon_for_path(Path::new(path.as_str())),
+                false,
+            ))
             .child(
                 div()
                     .min_w_0()
@@ -657,7 +679,7 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         tab_id: TabId,
-        path: PathBuf,
+        path: RelativePathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -728,7 +750,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        path: PathBuf,
+        path: RelativePathBuf,
     ) {
         let Some(connection) = self.connection_mut(key) else {
             return;
@@ -752,7 +774,12 @@ impl Condr {
         self.pending_directories.insert((key, workspace_id, path));
     }
 
-    fn request_file(&mut self, key: ConnectionKey, workspace_id: WorkspaceId, path: PathBuf) {
+    fn request_file(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: RelativePathBuf,
+    ) {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
@@ -785,13 +812,13 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let directories: Vec<PathBuf> = connection
+        let directories: Vec<RelativePathBuf> = connection
             .directories
             .keys()
             .filter(|(listed_workspace, _)| *listed_workspace == workspace_id)
             .map(|(_, path)| path.clone())
             .collect();
-        let files: Vec<PathBuf> = connection
+        let files: Vec<RelativePathBuf> = connection
             .files
             .keys()
             .filter(|(read_workspace, _)| *read_workspace == workspace_id)
@@ -926,8 +953,25 @@ fn truncated_note(cx: &App) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{language_for, terminal_path_text};
+    use super::{absolute_path, language_for, terminal_path_text};
+    use relative_path::RelativePath;
     use std::path::Path;
+
+    #[test]
+    fn absolute_paths_follow_the_roots_own_separator() {
+        assert_eq!(
+            absolute_path(
+                Path::new("/home/me/condr"),
+                RelativePath::new("crates/core")
+            )
+            .to_string_lossy(),
+            "/home/me/condr/crates/core"
+        );
+        assert_eq!(
+            absolute_path(Path::new(r"C:\me\condr"), RelativePath::new("crates/core")),
+            Path::new(r"C:\me\condr").join("crates").join("core")
+        );
+    }
 
     #[test]
     fn inserted_paths_are_quoted_only_when_a_shell_would_split_or_expand_them() {
@@ -944,9 +988,21 @@ mod tests {
 
     #[test]
     fn the_highlighter_follows_the_extension_and_falls_back_to_plain_text() {
-        assert_eq!(language_for(Path::new("src/main.RS")).as_ref(), "rs");
-        assert_eq!(language_for(Path::new("Cargo.toml")).as_ref(), "toml");
-        assert_eq!(language_for(Path::new("Dockerfile")).as_ref(), "text");
-        assert_eq!(language_for(Path::new(".gitignore")).as_ref(), "text");
+        assert_eq!(
+            language_for(RelativePath::new("src/main.RS")).as_ref(),
+            "rs"
+        );
+        assert_eq!(
+            language_for(RelativePath::new("Cargo.toml")).as_ref(),
+            "toml"
+        );
+        assert_eq!(
+            language_for(RelativePath::new("Dockerfile")).as_ref(),
+            "text"
+        );
+        assert_eq!(
+            language_for(RelativePath::new(".gitignore")).as_ref(),
+            "text"
+        );
     }
 }

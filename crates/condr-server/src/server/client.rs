@@ -1042,9 +1042,10 @@ pub(super) fn handle_client(
                         // named from the work tree root, which may be above the Workspace.
                         if let Some(repository) = repository
                             && let Ok(in_repository) =
-                                root.join(&path).strip_prefix(repository.root())
+                                path.to_path(&root).strip_prefix(repository.root())
+                            && let Ok(in_repository) = RelativePathBuf::from_path(in_repository)
                         {
-                            repository.mark_ignored(in_repository, &mut listing);
+                            repository.mark_ignored(&in_repository, &mut listing);
                         }
                         Ok(listing)
                     });

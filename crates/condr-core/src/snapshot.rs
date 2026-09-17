@@ -58,11 +58,11 @@ pub(crate) enum TabContentSnapshot {
         layout: LayoutSnapshot,
     },
     Diff {
-        path: PathBuf,
+        path: relative_path::RelativePathBuf,
     },
     /// The file a Preview Tab shows (ADR 0018).
     File {
-        path: PathBuf,
+        path: relative_path::RelativePathBuf,
     },
 }
 

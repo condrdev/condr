@@ -14,6 +14,7 @@ use gix::diff::blob::unified_diff::{
 };
 use gix::diff::blob::{Diff, InternedInput, ResourceKind, UnifiedDiff};
 use gix::object::tree::EntryKind;
+use relative_path::{RelativePath, RelativePathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{GitError, GitRepository, git_error};
@@ -42,9 +43,9 @@ pub struct GitDiffStat {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitChangeEntry {
     /// Relative to the work tree root.
-    pub path: PathBuf,
+    pub path: RelativePathBuf,
     /// The previous path of a renamed file.
-    pub old_path: Option<PathBuf>,
+    pub old_path: Option<RelativePathBuf>,
     pub status: GitChangeStatus,
     /// `None` for binary files, files over [`MAX_DIFF_BYTES`], conflicts, and whenever the
     /// list hit [`MAX_GIT_CHANGES`].
@@ -109,7 +110,7 @@ pub enum FileDiffContent {
 /// One file's working tree against `HEAD`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FileDiff {
-    pub path: PathBuf,
+    pub path: RelativePathBuf,
     pub content: FileDiffContent,
 }
 
@@ -119,7 +120,7 @@ impl GitRepository {
     /// counts unless the list is truncated.
     pub fn changes(&self) -> Result<GitChanges, GitError> {
         let repo = self.open()?;
-        let mut folded = BTreeMap::<PathBuf, GitChangeEntry>::new();
+        let mut folded = BTreeMap::<RelativePathBuf, GitChangeEntry>::new();
         let iter = repo
             .status(gix::progress::Discard)
             .map_err(git_error)?
@@ -176,7 +177,11 @@ impl GitRepository {
     /// `HEAD` has a renamed file, as [`GitChangeEntry::old_path`] reports it; without it a
     /// rename diffs as wholly added. A path in neither side is an error; a path in both with
     /// identical content yields no hunks.
-    pub fn file_diff(&self, path: &Path, old_path: Option<&Path>) -> Result<FileDiff, GitError> {
+    pub fn file_diff(
+        &self,
+        path: &RelativePath,
+        old_path: Option<&RelativePath>,
+    ) -> Result<FileDiff, GitError> {
         if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
         {
             return Err(GitError("invalid path for a diff".into()));
@@ -205,7 +210,7 @@ impl GitRepository {
             Ok(FileDiffContent::Text { hunks })
         })?;
         Ok(FileDiff {
-            path: path.to_path_buf(),
+            path: path.to_relative_path_buf(),
             content,
         })
     }
@@ -233,10 +238,10 @@ impl GitRepository {
 
     /// Flags the entries of `listing`, a directory `directory` relative to the work tree,
     /// that the ignore rules exclude (ADR 0018). On any doubt nothing is flagged.
-    pub fn mark_ignored(&self, directory: &Path, listing: &mut crate::DirectoryListing) {
+    pub fn mark_ignored(&self, directory: &RelativePath, listing: &mut crate::DirectoryListing) {
         self.with_excludes(|_, excludes| {
             for entry in &mut listing.entries {
-                let path = directory.join(&entry.name);
+                let path = directory.join(&entry.name).to_path("");
                 entry.ignored =
                     is_excluded(excludes, &path, entry.kind == crate::FileKind::Directory);
             }
@@ -285,10 +290,9 @@ fn status_rank(status: GitChangeStatus) -> u8 {
     }
 }
 
-/// `git` spells repository paths with `/`; a `PathBuf` built from them is the platform's
-/// spelling and compares equal to one built from the Workspace root.
-fn git_path(path: &BStr) -> PathBuf {
-    gix::path::from_bstr(path).into_owned()
+/// `git` spells repository paths with `/`, exactly as a [`RelativePathBuf`] does.
+fn git_path(path: &BStr) -> RelativePathBuf {
+    RelativePathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 
 type FoldedStatus = (BString, Option<BString>, GitChangeStatus);
@@ -395,11 +399,17 @@ impl<'repo> Differ<'repo> {
     }
 
     /// The `HEAD` side of `path`: its blob and mode, or `None` when HEAD lacks the path.
-    fn head_entry(&self, path: &Path) -> Result<Option<(gix::ObjectId, EntryKind)>, GitError> {
+    fn head_entry(
+        &self,
+        path: &RelativePath,
+    ) -> Result<Option<(gix::ObjectId, EntryKind)>, GitError> {
         let Some(tree) = &self.head_tree else {
             return Ok(None);
         };
-        let Some(entry) = tree.lookup_entry_by_path(path).map_err(git_error)? else {
+        let Some(entry) = tree
+            .lookup_entry_by_path(path.as_str())
+            .map_err(git_error)?
+        else {
             return Ok(None);
         };
         let kind = entry.mode().kind();
@@ -413,8 +423,8 @@ impl<'repo> Differ<'repo> {
     }
 
     /// The worktree side of `path`: its mode, or `None` when the file is gone.
-    fn worktree_kind(&self, path: &Path) -> Option<EntryKind> {
-        let metadata = fs::symlink_metadata(self.workdir.join(path)).ok()?;
+    fn worktree_kind(&self, path: &RelativePath) -> Option<EntryKind> {
+        let metadata = fs::symlink_metadata(path.to_path(&self.workdir)).ok()?;
         if metadata.file_type().is_symlink() {
             Some(EntryKind::Link)
         } else if metadata.is_file() {
@@ -428,8 +438,8 @@ impl<'repo> Differ<'repo> {
     /// why there is none. `old_path` is where `HEAD` has the file when it was renamed.
     fn diff<T>(
         &mut self,
-        path: &Path,
-        old_path: Option<&Path>,
+        path: &RelativePath,
+        old_path: Option<&RelativePath>,
         render: impl FnOnce(&Diff, &InternedInput<&[u8]>) -> Result<T, GitError>,
     ) -> Result<T, GitError>
     where
@@ -443,7 +453,7 @@ impl<'repo> Differ<'repo> {
         if head.is_none() && worktree.is_none() {
             return Err(GitError(format!(
                 "{} is neither in HEAD nor in the work tree",
-                path.display()
+                path.as_str()
             )));
         }
         let rela_path = repository_path(path);
@@ -504,9 +514,9 @@ impl<'repo> Differ<'repo> {
     }
 }
 
-/// gix wants repository paths `/`-separated whatever the platform.
-fn repository_path(path: &Path) -> BString {
-    gix::path::to_unix_separators_on_windows(gix::path::into_bstr(path)).into_owned()
+/// gix wants repository paths `/`-separated whatever the platform, as they already are.
+fn repository_path(path: &RelativePath) -> BString {
+    BString::from(path.as_str())
 }
 
 /// `stat` wants counts where `file_diff` wants hunks; both get the same placeholders back.

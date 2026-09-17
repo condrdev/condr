@@ -80,6 +80,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ime::TerminalComposition;
 use presentation::*;
+use relative_path::{RelativePath, RelativePathBuf};
 use server_connection::*;
 use settings::{
     Appearance, SettingsWindow, TerminalFont, apply_appearance, apply_terminal_color_scheme,
@@ -273,11 +274,11 @@ pub(crate) struct Condr {
     collapsed_changes_sections: HashSet<ChangesSection>,
     /// Directories folded shut in the Changes tree, by connection, Workspace and
     /// repository path; Workspace ids repeat across Servers.
-    collapsed_change_dirs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
+    collapsed_change_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
     diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
     /// Diffs asked of a Server and not yet answered, so a redraw asks only once.
-    pending_diffs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
+    pending_diffs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     /// Which view the right sidebar shows for each Workspace the user chose one for
     /// (ADR 0018); not persisted. Others open on Changes, or Files outside a repository.
     sidebar_views: HashMap<(ConnectionKey, WorkspaceId), SidebarView>,
@@ -286,11 +287,11 @@ pub(crate) struct Condr {
     last_terminal_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
     /// Directories unfolded in the Files tree, by connection, Workspace and root-relative
     /// path.
-    expanded_dirs: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
+    expanded_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
     file_editors: HashMap<(ConnectionKey, TabId), FileEditor>,
-    pending_directories: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
-    pending_files: HashSet<(ConnectionKey, WorkspaceId, PathBuf)>,
+    pending_directories: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
+    pending_files: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
