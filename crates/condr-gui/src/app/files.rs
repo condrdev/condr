@@ -728,6 +728,10 @@ impl Condr {
             return;
         }
         let shown_path = path.clone();
+        let same_file = editor
+            .shown
+            .as_ref()
+            .is_some_and(|(shown, _)| *shown == path);
         editor.shown = Some((path, generation));
         let (text, content) = match answer {
             Err(reason) => (String::new(), FileViewContent::Failed(reason)),
@@ -737,11 +741,28 @@ impl Condr {
             }
             Ok(FileContent::Text { text }) => (text, FileViewContent::Text),
         };
+        let text_to_text = same_file
+            && editor.content == FileViewContent::Text
+            && content == FileViewContent::Text;
         editor.content = content;
         let language = language_for(&shown_path);
         editor.state.update(cx, |state, cx| {
-            state.set_highlighter(language, cx);
-            state.set_value(text, window, cx);
+            if text_to_text {
+                // The file the Tab shows changed under it, as when an agent edits it: an
+                // edit to the open document, not a new one. Kit keeps the highlighter and
+                // its old tree, so the colours stay while the new parse runs, and the
+                // viewport stays where it was instead of jumping to the top.
+                // ponytail: each update also lands in Kit's undo history, which nothing can
+                // clear or use in a read-only viewer; revisit if a long session shows it.
+                let scroll = state.scroll_offset();
+                state.select_all(window, cx);
+                state.replace(text, window, cx);
+                state.set_selected_range(0..0, cx);
+                state.set_scroll_offset(scroll, cx);
+            } else {
+                state.set_highlighter(language, cx);
+                state.set_value(text, window, cx);
+            }
         });
     }
 
@@ -801,8 +822,10 @@ impl Condr {
         self.pending_files.insert((key, workspace_id, path));
     }
 
-    /// The working tree moved: asks again for every listing and file of the Workspace
-    /// that is cached, keeping the old answers on screen until the new ones land.
+    /// The working tree moved: asks again for every cached listing of the Workspace and
+    /// for the file its Preview Tab shows, keeping the old answers on screen until the new
+    /// ones land. Every other cached file is dropped rather than refetched; a Tab that
+    /// comes back to one asks for it again.
     pub(super) fn refresh_workspace_files(
         &mut self,
         key: ConnectionKey,
@@ -817,12 +840,17 @@ impl Condr {
             .filter(|(listed_workspace, _)| *listed_workspace == workspace_id)
             .map(|(_, path)| path.clone())
             .collect();
-        let files: Vec<RelativePathBuf> = connection
-            .files
-            .keys()
-            .filter(|(read_workspace, _)| *read_workspace == workspace_id)
-            .map(|(_, path)| path.clone())
-            .collect();
+        let shown = Session::restore(connection.snapshot.clone())
+            .ok()
+            .and_then(|session| {
+                let file = session.file_tab(workspace_id)?.file()?;
+                Some(file.path().to_relative_path_buf())
+            });
+        if let Some(connection) = self.connection_mut(key) {
+            connection.files.retain(|(read_workspace, path), _| {
+                *read_workspace != workspace_id || shown.as_ref() == Some(path)
+            });
+        }
         self.pending_directories
             .retain(|(pending_key, pending_workspace, _)| {
                 *pending_key != key || *pending_workspace != workspace_id
@@ -834,7 +862,7 @@ impl Condr {
         for path in directories {
             self.request_directory(key, workspace_id, path);
         }
-        for path in files {
+        if let Some(path) = shown {
             self.request_file(key, workspace_id, path);
         }
     }

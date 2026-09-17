@@ -1,5 +1,17 @@
 use super::*;
 
+/// A Server answer for `README.md` of `workspace_id`, fed the way the connection task does.
+fn readme_answer(workspace_id: WorkspaceId, text: &str) -> Incoming {
+    Incoming::Message(condr_core::protocol::ServerMessage::FileContent {
+        request_id: 0,
+        workspace_id,
+        path: relative_path::RelativePathBuf::from("README.md"),
+        result: Ok(condr_core::FileContent::Text {
+            text: text.to_owned(),
+        }),
+    })
+}
+
 /// The right sidebar opens on Files for a Workspace outside a repository, lists the root
 /// from the real Server, follows the Server's watcher, unfolds a directory on click, and a
 /// file click opens the Preview Tab with the file's text (ADR 0018).
@@ -175,16 +187,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             let connection = this.connection(1).unwrap();
             let generation = connection.files_generation;
             let connect_generation = connection.connect_generation;
-            let answer = |text: &str| {
-                Incoming::Message(condr_core::protocol::ServerMessage::FileContent {
-                    request_id: 0,
-                    workspace_id,
-                    path: relative_path::RelativePathBuf::from("README.md"),
-                    result: Ok(condr_core::FileContent::Text {
-                        text: text.to_owned(),
-                    }),
-                })
-            };
+            let answer = |text| readme_answer(workspace_id, text);
             // Applied the way the connection task applies an answer: a rebuild.
             this.handle_incoming(1, connect_generation, answer("# Files\n"), cx);
             this.rebuild_dock(window, cx);
@@ -213,6 +216,95 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             })
         }),
         "changed content should reach the Editor"
+    );
+
+    // A working-tree batch refetches only the file the Preview Tab shows; src/main.rs,
+    // cached when it was shown earlier, is dropped rather than asked for again.
+    let cached_files = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            let mut cached: Vec<String> = view
+                .read(app)
+                .connection(1)
+                .unwrap()
+                .files
+                .keys()
+                .filter(|(cached_workspace, _)| *cached_workspace == workspace_id)
+                .map(|(_, path)| path.to_string())
+                .collect();
+            cached.sort();
+            cached
+        })
+    };
+    assert_eq!(cached_files(window), ["README.md", "src/main.rs"]);
+    std::fs::write(root.join("TOUCH.txt"), "touch\n").unwrap();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            cached_files(window) == ["README.md"]
+                && window.update(|_, cx| {
+                    view.read(cx).file_editors.values().any(|editor| {
+                        let text = editor.state.read(cx).value();
+                        text.contains("# Files") && !text.contains("More.")
+                    })
+                })
+        }),
+        "a working-tree change should refetch the shown file and drop the other cached one"
+    );
+
+    // New content for the file the Tab already shows is an edit to the open document:
+    // the viewport stays where the user scrolled it instead of jumping to the top.
+    let long_readme = |lines: usize| {
+        let mut text = String::from("# Files\n");
+        for line in 0..lines {
+            text.push_str(&format!("line {line}\n"));
+        }
+        text
+    };
+    let feed = |window: &mut VisualTestContext, text: String| {
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| {
+                let connect_generation = this.connection(1).unwrap().connect_generation;
+                this.handle_incoming(
+                    1,
+                    connect_generation,
+                    readme_answer(workspace_id, &text),
+                    cx,
+                );
+                this.rebuild_dock(window, cx);
+            });
+            _ = window.draw(cx);
+        });
+    };
+    feed(window, long_readme(300));
+    let editor = window.read(|app| {
+        view.read(app)
+            .file_editors
+            .values()
+            .next()
+            .expect("the Preview Tab has an Editor")
+            .state
+            .clone()
+    });
+    window.update(|_, cx| {
+        editor.update(cx, |state, cx| {
+            state.set_scroll_offset(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(-200.)), cx);
+        });
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    let scrolled = window.read(|app| editor.read(app).scroll_offset());
+    assert!(
+        scrolled.y < gpui_kit::px(0.),
+        "the fixture should be scrolled down, got {scrolled:?}"
+    );
+    feed(window, long_readme(301));
+    assert!(
+        window.read(|app| editor.read(app).value().contains("line 300")),
+        "the edit should land"
+    );
+    assert_eq!(
+        window.read(|app| editor.read(app).scroll_offset()),
+        scrolled,
+        "an edit to the shown file must keep the viewport"
     );
 
     // A reconnect while a listing is in flight: the old connection's answer never comes
