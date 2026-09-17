@@ -41,7 +41,7 @@ Closing the GUI only disconnects. The server, PTYs, agents and Session keep runn
 
 ### Website (`website/`)
 
-[condr.dev](https://condr.dev) lives in `website/`: Astro + Starlight, pnpm, deployed by Cloudflare Pages from `main` (root directory `website`). It is documentation, not part of the Rust build: `ci.yml` ignores it, and `website/README.md` has its own commands. `https://condr.dev/install.sh` and `install.ps1` are `script/install-condr.sh` / `.ps1`, copied into `website/public/` at build time; edit the scripts in `script/`.
+[condr.dev](https://condr.dev) lives in `website/`: Astro + Starlight, pnpm. `website.yml` builds it and uploads `dist/` to the Cloudflare Pages project `condr` (Direct Upload, not connected to GitHub) on every push to `main` that touches `website/**` or the install scripts. It is documentation, not part of the Rust build: `ci.yml` ignores it, and `website/README.md` has its own commands. `https://condr.dev/install.sh` and `install.ps1` are `script/install-condr.sh` / `.ps1`, copied into `website/public/` at build time; edit the scripts in `script/`.
 
 ### Development environment (two machines)
 

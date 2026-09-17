@@ -1,0 +1,51 @@
+name: Website
+
+# Builds website/ and uploads it to the Cloudflare Pages project `condr`
+# (a Direct Upload project; it is not connected to GitHub). The install
+# scripts come from script/, so changes there also redeploy the site.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'script/install-condr.sh'
+      - 'script/install-condr.ps1'
+      - '.github/workflows/website.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy condr.dev
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: website/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: website/.node-version
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: website
+          command: pages deploy dist --project-name condr --branch main --commit-hash ${{ github.sha }}
