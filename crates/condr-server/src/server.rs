@@ -76,6 +76,9 @@ const MAX_SHELL_SETTING_BYTES: usize = 4 * 1024;
 /// Process cwd reads are rate-limited behind terminal output; agent detection has its
 /// own cadence inside `TerminalAgentProbe`.
 const CWD_SCAN_INTERVAL: Duration = Duration::from_millis(500);
+/// A pending native resume checks whether the shell is idle at most this often: the
+/// check scans the whole process table, and a starting shell wakes the probe per chunk.
+const RESUME_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
 const TERMINAL_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 const BOOTSTRAP_METADATA_HEADROOM: usize = 64 * 1024;

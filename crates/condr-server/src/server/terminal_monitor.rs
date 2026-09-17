@@ -148,6 +148,7 @@ fn probe_terminal(
 ) {
     thread::spawn(move || {
         let mut resume_pending = true;
+        let mut resume_retry_at = Instant::now();
         let mut cwd_scan_due: Option<Instant> = None;
         let mut git_scan_pending: Option<Instant> = None;
         loop {
@@ -161,10 +162,11 @@ fn probe_terminal(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
-            if resume_pending {
-                resume_pending = agents::resume_agent(&state, pane_id, instance_id);
-            }
             let now = Instant::now();
+            if resume_pending && now >= resume_retry_at {
+                resume_pending = agents::resume_agent(&state, pane_id, instance_id);
+                resume_retry_at = now + RESUME_RETRY_INTERVAL;
+            }
             let agent_update = agent_probe.poll();
             let agent_resume = agent_probe.resume();
             // Debounced behind output: a burst must not turn into a process cwd read per
