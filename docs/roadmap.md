@@ -108,6 +108,35 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 进入条件是一句明确的"邀请外部用户"，退出条件是新机器按文档能装、能连、能恢复，并且方向 1 的日志能支撑排障。
 
+### 6. 本机作为编排端驾驭远程 Device
+
+**为什么**：GUI 已能同时连多台 Device，但 `condr` CLI 只认 `CONDR_SOCKET_PATH` 指向的 Server 或本机默认 Server。跑在本机的编排 Agent 看不到远端 Workspace，`agent start|prompt|wait` 跨不了机器；多机的价值停在"看"，没到"编排"。
+
+**做到哪**（按顺序，第 1 步先做）：
+
+1. 配置解析按归属分三层，先于任何 CLI 改动：通用的 TOML 读写底座（按路径读一个键、用 `toml_edit` 原地改一个键）下沉到 `condr-core`，替换掉 GUI `config.rs` 与 Server `load_listen/save_listen` 里的两份重复；`[[client.servers]]` 的 `SavedServer` 解码与写回从 GUI 挪到 `condr-server` 的 `Endpoint` 旁边，CLI 与 GUI 共用；appearance、终端字体、editors 等 GUI 专属键留在 GUI。不把 `Endpoint`、`StaticKey` 或 SSH 目标类型拖进 core。
+2. `condr` 子命令加 `--device <name>`（及 `CONDR_DEVICE` 环境变量），按名字取 `[[client.servers]]` 里的 Endpoint 直连目标 Server；每次调用独立建连，和今天连本机 socket 一样。`workspace|tab|pane|agent` 的命令与 JSON 输出不变，只多一个 Device 维度。
+3. `condr device list` 列出已配置的 Device 与连通状态；`workspace list --all-devices` 汇总。
+4. 内嵌 Skill 补上跨 Device 用法，让本机 Agent 能把任务派给远端 Workspace 并 `wait`。
+5. SSH Device 的重复调用靠 OpenSSH `ControlMaster`/`ControlPersist` 复用连接（先尊重用户 `~/.ssh/config`，不够再由 Condr 传 `-o ControlPath=<数据目录>/…`），不引入常驻代理进程。Windows OpenSSH 不支持 ControlMaster，先只在 Unix 客户端生效。
+
+Device 名字在 GUI 与 CLI 里一致。
+
+**停在哪**：不做 Server 联邦（本机 Server 不代理别的 Server、不持有别机的连接与凭据，ADR 0013 的边界不动）、不做跨 Device 的 Workspace 迁移、不做任务队列或调度器。
+
+### 7. 探测 Workspace 里的端口并转发到本机
+
+**为什么**：Agent 在远端 Workspace 里起了前端 dev server，用户要在本机浏览器看效果，今天只能自己开 `ssh -L`。"看见 Agent 做出来的东西"是介入/收尾闭环的一部分；Server 已有 per-OS 进程表（Agent 检测用），加一步"该进程树在监听哪些端口"是同一条路。
+
+**做到哪**（按顺序）：
+
+1. 探测：Server 在进程表变化时查 Pane 进程树的监听端口（Linux `/proc/net/tcp*`，macOS `proc_pidfdinfo`，Windows `GetExtendedTcpTable`），作为 Pane 状态经事件下发；GUI 在 Workspace/Pane 上显示端口徽标，`condr pane|workspace` JSON 携带。
+2. 转发（SSH Device）：点击端口即在本机开 listener，另起一条 `ssh -N -L` 到远端 `localhost:<port>`；`condr port forward <device> <port>` 同义。
+3. 转发（TCP/Noise Device）：协议增加一种 multiplexed 字节流帧，把本机 listener 的连接经 Noise 隧道接到远端 `localhost:<port>`。需要方向 4 的 capability：只有 `control` 能开转发。
+4. 一键在浏览器打开本机转发地址。
+
+**停在哪**：不做反向转发、不做 UDP、不自动转发所有探测到的端口（默认只列出，点了才转）、不解析进程输出里的 URL。
+
 ## 按摩擦记录再做
 
 这些都通过了第一问，但还没有足够的使用证据；出现两次以上真实摩擦再排：
