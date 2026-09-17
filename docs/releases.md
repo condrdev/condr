@@ -25,17 +25,20 @@ Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call t
 
 ## Installing a build
 
-Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use the install scripts, which fetch the headless archive for the current machine through the GitHub CLI:
+Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use `script/install-condr.sh` / `.ps1`, which condr.dev serves as `install.sh` / `install.ps1`: the script picks the headless archive for the current machine from GitHub Releases, verifies it against `SHA256SUMS`, and runs `condr server install` with any remaining arguments (ADR 0016).
 
 ```bash
-sh script/install-condr.sh                      # latest nightly
-CONDR_VERSION=v0.1.0 sh script/install-condr.sh # a versioned release
+curl -fsSL https://condr.dev/install.sh | sh                          # latest nightly
+CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh     # a versioned release
+curl -fsSL https://condr.dev/install.sh | sh -s -- --start            # also start the Server
 sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File script\install-condr.ps1              # latest nightly
-powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -Version v0.1.0
+irm https://condr.dev/install.ps1 | iex                                 # latest nightly
+$env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
+$env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
+powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-windows-x86_64.zip
 ```
 
 Package layout, data directories and per-platform packaging scripts are described in [development-build.md](development-build.md).

@@ -10,7 +10,7 @@
 - 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨构建兼容承诺,必须一起更新。
 
-产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(desktop:GUI + CLI)和 `condr-headless-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(headless:仅 CLI/Server,归档内目录为 `condr-headless/`)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.dmg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本保留在仓库 `script/install-condr.sh` / `script/install-condr.ps1`,不作为 Release 附件发布。
+产物命名统一为 `condr-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(desktop:GUI + CLI)和 `condr-headless-{version}[-{short_sha}]-{platform}-{arch}.{suffix}`(headless:仅 CLI/Server,归档内目录为 `condr-headless/`)。`platform` 为 `linux`、`macos` 或 `windows`;`arch` 为 `x86_64` 或 `arm64`(Linux 的 `aarch64` 也输出为 `arm64`)。Nightly 包含 12 位短 SHA,例如 `condr-0.1.0-d7912d3f186e-macos-arm64.dmg`;正式版省略 SHA:Unix 打包脚本设置 `CONDR_RELEASE=1`,Windows 打包脚本传入 `-Release`,完整 commit 仍写入包内 `BUILD-COMMIT`。Windows 安装器使用 `.exe`,便携包使用 `.zip`。Release 附带 `SHA256SUMS`;安装脚本 `script/install-condr.sh` / `script/install-condr.ps1` 由官网以 `https://condr.dev/install.sh` / `install.ps1` 提供(`website/` 构建时拷贝),不作为 Release 附件发布。
 
 ## 数据位置
 

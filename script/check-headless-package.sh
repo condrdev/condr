@@ -29,16 +29,11 @@ fi
 CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
     HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive"
 "$stage/home/.local/bin/condr" server --help > /dev/null
+# Updating replaces the CLI without asking and leaves GUI files alone (ADR 0016).
 printf '#!/bin/sh\necho previous-cli\n' >"$stage/install/condr"
 printf 'keep GUI\n' >"$stage/install/condr-gui"
-printf 'n\n' | CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive"
-test "$("$stage/install/condr")" = previous-cli
-printf 'Yes\n' | CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive"
-"$stage/home/.local/bin/condr" server --help > /dev/null
 CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
-    HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive" --yes
+    HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive" </dev/null
 "$stage/home/.local/bin/condr" server --help > /dev/null
 test "$(cat "$stage/install/condr-gui")" = 'keep GUI'
 test "$(grep -Fxc '# condr user bin' "$stage/profile")" = 1

@@ -1,101 +1,75 @@
 #!/bin/sh
-# Install the headless build (the condr CLI/Server binary); desktop users use a platform package.
+# Install the Condr headless build (the condr CLI/Server binary) on Linux or macOS.
+#   curl -fsSL https://condr.dev/install.sh | sh
+#   curl -fsSL https://condr.dev/install.sh | sh -s -- --start
+#   CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
+#   sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz
+# Downloads the archive for this machine from GitHub Releases (or takes --from),
+# verifies it against SHA256SUMS, then runs `condr server install` with the
+# remaining arguments (ADR 0016). Desktop users use a platform package instead.
 set -eu
 
-source=
-yes=no
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --from) shift; source=${1:?--from needs a file} ;;
-        --yes) yes=yes ;;
-        -h|--help)
-            echo "usage: install-condr.sh [--from HEADLESS_ARCHIVE] [--yes]"
-            exit 0
-            ;;
-        *) echo "unknown option: $1" >&2; exit 2 ;;
-    esac
-    shift
-done
-
-user_home=${HOME:?HOME is not set}
-root=${CONDR_INSTALL_DIR:-"$user_home/.local/opt/condr"}
-bin_dir="$user_home/.local/bin"
-stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-install.XXXXXX")
-trap 'rm -rf "$stage"' EXIT INT TERM
-downloaded=no
-
-if [ -z "$source" ]; then
-    command -v gh >/dev/null 2>&1 || { echo "install gh or pass --from ARCHIVE" >&2; exit 1; }
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64|amd64) arch=x86_64 ;;
-        aarch64|arm64) arch=arm64 ;;
-        *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
-    esac
-    case "$(uname -s)" in
-        Linux) platform=linux ;;
-        Darwin) platform=macos ;;
-        *) echo "unsupported platform: $(uname -s)" >&2; exit 1 ;;
-    esac
-    pattern="condr-headless-*-${platform}-${arch}.tar.gz"
-    gh release download "${CONDR_VERSION:-nightly}" --repo "${CONDR_REPO:-condrdev/condr}" \
-        --dir "$stage/download" --pattern "$pattern" --pattern SHA256SUMS --clobber
-    set -- "$stage/download"/condr-headless-*.tar.gz
-    [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected one headless archive" >&2; exit 1; }
-    source=$1
-    downloaded=yes
-fi
-[ -f "$source" ] || { echo "archive not found: $source" >&2; exit 1; }
-source=$(cd "$(dirname "$source")" && pwd)/$(basename "$source")
-
-checksum_file=$(dirname "$source")/SHA256SUMS
-if [ "$downloaded" = yes ] || [ -f "$checksum_file" ]; then
-    [ -f "$checksum_file" ] || { echo "SHA256SUMS is missing" >&2; exit 1; }
-    expected=$(awk -v name="$(basename "$source")" '$2 == name { print $1; exit }' "$checksum_file")
-    [ -n "$expected" ] || { echo "no checksum for $(basename "$source")" >&2; exit 1; }
-    if command -v sha256sum >/dev/null 2>&1; then
-        actual=$(sha256sum "$source" | awk '{print $1}')
-    else
-        actual=$(shasum -a 256 "$source" | awk '{print $1}')
+main() {
+    repo=${CONDR_REPO:-condrdev/condr}
+    version=${CONDR_VERSION:-nightly}
+    source=
+    if [ "${1:-}" = --from ]; then
+        source=${2:?--from needs an archive}
+        shift 2
     fi
-    [ "$actual" = "$expected" ] || { echo "checksum mismatch: $source" >&2; exit 1; }
-fi
 
-case "$source" in
-    *.tar.gz|*.tgz)
-        mkdir "$stage/payload"
-        tar -xzf "$source" -C "$stage/payload"
-        condr=$(find "$stage/payload" -type f -name condr -perm -111 | head -n 1)
-        [ -n "$condr" ] || { echo "archive does not contain an executable condr" >&2; exit 1; }
-        if [ "$yes" != yes ] && { [ -e "$root/condr" ] || [ -e "$bin_dir/condr" ] || [ -L "$bin_dir/condr" ]; }; then
-            printf 'Condr is already installed. Replace the CLI (keep other files)? [y/N] '
-            answer=
-            read -r answer || true
-            case "$answer" in [Yy]|[Yy][Ee][Ss]) ;; *) echo 'Installation cancelled.'; exit 0 ;; esac
+    stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-install.XXXXXX")
+    trap 'rm -rf "$stage"' EXIT INT TERM
+
+    if [ -z "$source" ]; then
+        command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
+        case "$(uname -s)" in
+            Linux) platform=linux ;;
+            Darwin) platform=macos ;;
+            *) echo "unsupported platform: $(uname -s); download a package from https://github.com/$repo/releases" >&2; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+            x86_64|amd64) arch=x86_64 ;;
+            aarch64|arm64) arch=arm64 ;;
+            *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        case "$version" in
+            latest) api="https://api.github.com/repos/$repo/releases/latest" ;;
+            *) api="https://api.github.com/repos/$repo/releases/tags/$version" ;;
+        esac
+        urls=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api" \
+            | sed -n 's/.*"browser_download_url": *"\([^"]*\)".*/\1/p')
+        archive_url=$(printf '%s\n' "$urls" | grep "/condr-headless-.*-${platform}-${arch}\.tar\.gz$" | head -n 1)
+        sums_url=$(printf '%s\n' "$urls" | grep '/SHA256SUMS$' | head -n 1)
+        [ -n "$archive_url" ] && [ -n "$sums_url" ] || {
+            echo "no headless build for ${platform}-${arch} in release '$version' of $repo" >&2; exit 1; }
+        mkdir "$stage/download"
+        source="$stage/download/$(basename "$archive_url")"
+        echo "Downloading $(basename "$archive_url")"
+        curl -fSL --progress-bar -o "$source" "$archive_url"
+        curl -fsSL -o "$stage/download/SHA256SUMS" "$sums_url"
+    fi
+    [ -f "$source" ] || { echo "archive not found: $source" >&2; exit 1; }
+    name=$(basename "$source")
+
+    # A downloaded archive always has SHA256SUMS beside it; a --from archive may.
+    checksums=$(dirname "$source")/SHA256SUMS
+    if [ -f "$checksums" ]; then
+        expected=$(awk -v name="$name" '$2 == name { print $1; exit }' "$checksums")
+        [ -n "$expected" ] || { echo "no checksum for $name" >&2; exit 1; }
+        if command -v sha256sum >/dev/null 2>&1; then
+            actual=$(sha256sum "$source" | awk '{print $1}')
+        else
+            actual=$(shasum -a 256 "$source" | awk '{print $1}')
         fi
-        mkdir -p "$root" "$bin_dir"
-        install -m 755 "$condr" "$root/condr.new"
-        mv "$root/condr.new" "$root/condr"
-        ln -sfn "$root/condr" "$bin_dir/condr"
-        ;;
-    *) echo "unsupported archive: $source" >&2; exit 2 ;;
-esac
+        [ "$actual" = "$expected" ] || { echo "checksum mismatch: $name" >&2; exit 1; }
+    fi
 
-profile=${CONDR_PROFILE:-}
-if [ -z "$profile" ]; then
-    case "$(uname -s)" in
-        Darwin) profile="$user_home/.zprofile" ;;
-        *) profile="$user_home/.profile" ;;
-    esac
-fi
-mkdir -p "$(dirname "$profile")"
-marker='# condr user bin'
-if ! grep -Fqx "$marker" "$profile" 2>/dev/null; then
-    {
-        printf '\n%s\n' "$marker"
-        printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"'
-    } >>"$profile"
-fi
+    mkdir "$stage/payload"
+    tar -xzf "$source" -C "$stage/payload"
+    condr="$stage/payload/condr-headless/condr"
+    [ -x "$condr" ] || { echo "$name does not contain condr-headless/condr" >&2; exit 1; }
+    "$condr" server install "$@"
+}
 
-echo "Condr installed in $root"
-echo "Open a new terminal, then run: condr --help"
+main "$@"

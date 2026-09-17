@@ -2,3 +2,5 @@ dist/
 .astro/
 node_modules/
 .DS_Store
+public/install.sh
+public/install.ps1

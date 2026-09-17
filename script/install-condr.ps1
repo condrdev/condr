@@ -1,72 +1,63 @@
+# Install the Condr headless build (the condr CLI/Server binary) on Windows x86_64.
+#   irm https://condr.dev/install.ps1 | iex
+#   $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
+#   $env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
+#   powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-windows-x86_64.zip
+# Downloads the archive from GitHub Releases (or takes -From), verifies it against
+# SHA256SUMS, then runs `condr server install` with the remaining arguments or
+# $env:CONDR_INSTALL_ARGS (ADR 0016). Desktop users use the installer instead.
 param(
   [string] $From,
-  [string] $Version = 'nightly',
-  [switch] $Yes
+  [string] $Version,
+  [Parameter(ValueFromRemainingArguments)] [string[]] $InstallArgs
 )
-# Install the headless build (the condr CLI/Server binary); preserve any existing desktop files.
 $ErrorActionPreference = 'Stop'
 
-$root = $env:CONDR_INSTALL_DIR
-if (-not $root) { $root = Join-Path $env:LOCALAPPDATA 'Programs\Condr' }
-$root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($root)
+$repo = if ($env:CONDR_REPO) { $env:CONDR_REPO } else { 'condrdev/condr' }
+if (-not $Version) { $Version = if ($env:CONDR_VERSION) { $env:CONDR_VERSION } else { 'nightly' } }
+if (-not $InstallArgs -and $env:CONDR_INSTALL_ARGS) { $InstallArgs = $env:CONDR_INSTALL_ARGS -split '\s+' }
+# The binary resolves a relative CONDR_INSTALL_DIR against the process directory; use PowerShell's location.
+if ($env:CONDR_INSTALL_DIR) {
+  $env:CONDR_INSTALL_DIR = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:CONDR_INSTALL_DIR)
+}
+
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("condr-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force $stage | Out-Null
-$pending = $null
 try {
-  $downloaded = -not $From
   if (-not $From) {
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'pass -From ARCHIVE or install GitHub CLI (gh)' }
-    $repo = $env:CONDR_REPO
-    if (-not $repo) { $repo = 'condrdev/condr' }
-    gh release download $Version --repo $repo --dir $stage --pattern 'condr-headless-*-windows-x86_64.zip' --pattern SHA256SUMS --clobber
-    if ($LASTEXITCODE -ne 0) { throw 'headless archive download failed' }
-    $archives = @(Get-ChildItem $stage -Filter 'condr-headless-*.zip')
-    if ($archives.Count -ne 1) { throw 'expected one Windows headless archive' }
-    $From = $archives[0].FullName
+    $api = if ($Version -eq 'latest') { "https://api.github.com/repos/$repo/releases/latest" }
+           else { "https://api.github.com/repos/$repo/releases/tags/$Version" }
+    $assets = (Invoke-RestMethod -Uri $api -Headers @{ Accept = 'application/vnd.github+json' }).assets
+    $archiveAsset = $assets | Where-Object { $_.name -like 'condr-headless-*-windows-x86_64.zip' } | Select-Object -First 1
+    $sumsAsset = $assets | Where-Object { $_.name -eq 'SHA256SUMS' } | Select-Object -First 1
+    if (-not $archiveAsset -or -not $sumsAsset) { throw "no Windows headless build in release '$Version' of $repo" }
+    $download = Join-Path $stage 'download'
+    New-Item -ItemType Directory -Force $download | Out-Null
+    $From = Join-Path $download $archiveAsset.name
+    Write-Output "Downloading $($archiveAsset.name)"
+    Invoke-WebRequest -Uri $archiveAsset.browser_download_url -OutFile $From
+    Invoke-WebRequest -Uri $sumsAsset.browser_download_url -OutFile (Join-Path $download 'SHA256SUMS')
   }
   if (-not (Test-Path -LiteralPath $From -PathType Leaf)) { throw "archive not found: $From" }
   $From = (Resolve-Path -LiteralPath $From).Path
+  $name = [IO.Path]::GetFileName($From)
+
+  # A downloaded archive always has SHA256SUMS beside it; a -From archive may.
   $checksums = Join-Path (Split-Path -Parent $From) 'SHA256SUMS'
-  if ($downloaded -and -not (Test-Path $checksums)) { throw 'SHA256SUMS is missing' }
-  if (Test-Path $checksums) {
-    $name = [IO.Path]::GetFileName($From)
+  if (Test-Path -LiteralPath $checksums) {
     $line = Get-Content $checksums | Where-Object { $_ -match ("\s" + [regex]::Escape($name) + "$") } | Select-Object -First 1
     if (-not $line) { throw "no checksum for $name" }
     $expected = ($line -split '\s+')[0].ToUpperInvariant()
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $From).Hash.ToUpperInvariant()
     if ($actual -ne $expected) { throw "checksum mismatch: $name" }
   }
-  $extracted = Join-Path $stage 'extracted'
-  Expand-Archive -LiteralPath $From -DestinationPath $extracted
-  $payload = Join-Path $extracted 'condr-headless'
-  if (-not (Test-Path (Join-Path $payload 'condr.exe')) -or
-      (Get-ChildItem $extracted -Recurse -Filter 'condr-gui.exe')) {
-    throw 'expected a headless archive containing condr-headless\condr.exe'
-  }
-  foreach ($name in 'condr.exe', 'LICENSE', 'BUILD-COMMIT') {
-    if (-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)) { throw "headless archive is missing $name" }
-  }
-  $binary = Join-Path $root 'condr.exe'
-  if ((Test-Path -LiteralPath $binary) -and -not $Yes) {
-    $answer = Read-Host "Condr is already installed in $root. Replace the CLI (keep other files)? [y/N]"
-    if ($answer -notin 'y', 'yes') { Write-Output 'Installation cancelled.'; return }
-  }
-  New-Item -ItemType Directory -Force $root | Out-Null
-  $pending = Join-Path $root ('condr-' + [guid]::NewGuid() + '.new')
-  Copy-Item -LiteralPath (Join-Path $payload 'condr.exe') -Destination $pending
-  if (Test-Path -LiteralPath $binary) {
-    [IO.File]::Replace($pending, $binary, [System.Management.Automation.Language.NullString]::Value)
-  } else {
-    [IO.File]::Move($pending, $binary)
-  }
-  foreach ($name in 'LICENSE', 'BUILD-COMMIT') {
-    Copy-Item -LiteralPath (Join-Path $payload $name) -Destination $root -Force
-  }
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  $parts = @($userPath -split ';' | Where-Object { $_ -and $_ -ne $root })
-  [Environment]::SetEnvironmentVariable('Path', (($parts + $root) -join ';'), 'User')
-  Write-Output "Condr installed in $root. Open a new terminal to use condr."
+
+  $payload = Join-Path $stage 'payload'
+  Expand-Archive -LiteralPath $From -DestinationPath $payload
+  $condr = Join-Path $payload 'condr-headless\condr.exe'
+  if (-not (Test-Path -LiteralPath $condr -PathType Leaf)) { throw "$name does not contain condr-headless\condr.exe" }
+  & $condr server install @InstallArgs
+  if ($LASTEXITCODE -ne 0) { throw "condr server install failed with exit code $LASTEXITCODE" }
 } finally {
-  if ($pending -and (Test-Path -LiteralPath $pending)) { Remove-Item -LiteralPath $pending -Force }
   if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 }
