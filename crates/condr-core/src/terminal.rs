@@ -117,8 +117,8 @@ const IO_CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// How long a process tree gets to leave after a signal it may handle (hangup, term).
 const PROCESS_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
 /// How long it gets after a kill it cannot handle. Exit is then certain, only the
-/// scheduler's timing is not: each poll enumerates every process twice, which on a
-/// loaded machine costs more than the whole handled-signal grace, and declaring a
+/// scheduler's timing is not: each poll enumerates every process, which on a loaded
+/// machine can cost more than the whole handled-signal grace, and declaring a
 /// terminating process leaked turns a slow machine into a shutdown error.
 const PROCESS_KILL_GRACE: Duration = Duration::from_secs(2);
 #[cfg(unix)]

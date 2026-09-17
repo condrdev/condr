@@ -27,12 +27,14 @@ fn process_exit_checks_reject_a_reused_pid_identity() {
     let pid = Pid::from_u32(std::process::id());
     let started_at = system.process(pid).unwrap().start_time();
     assert!(!process_tree_exited(
+        &system,
         &[OwnedProcess { pid, started_at }],
         None,
         false,
         false
     ));
     assert!(process_tree_exited(
+        &system,
         &[OwnedProcess {
             pid,
             started_at: started_at.saturating_add(1),
@@ -53,10 +55,10 @@ fn process_refresh_keeps_retained_identity_after_shell_disappears() {
     };
     let mut owned = vec![identity];
 
-    refresh_owned_processes(ProcessProbe::new(None), &mut owned);
+    let system = refresh_owned_processes(ProcessProbe::new(None), &mut owned);
 
     assert_eq!(owned, [identity]);
-    assert!(!process_tree_exited(&owned, None, false, false));
+    assert!(!process_tree_exited(&system, &owned, None, false, false));
 }
 
 #[test]

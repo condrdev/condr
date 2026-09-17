@@ -26,10 +26,30 @@ fn command_line_processes(pids: &[Pid]) -> System {
     system
 }
 
+/// A fresh process table with only pids, names, parents and start times: the shutdown
+/// path polls it several times per signal, and a full `System::new_all()` (CPU, memory,
+/// every process's cmd, env and cwd) costs more than the handled-signal grace itself.
+pub(super) fn process_table() -> System {
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::All, ProcessRefreshKind::new());
+    system
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct OwnedProcess {
     pub(super) pid: Pid,
     pub(super) started_at: u64,
+}
+
+/// Only the processes already known to belong to the tree, for a cheap exit poll.
+fn owned_process_table(owned: &[OwnedProcess]) -> System {
+    let pids = owned.iter().map(|process| process.pid).collect::<Vec<_>>();
+    let mut system = System::new();
+    if !pids.is_empty() {
+        system
+            .refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
+    }
+    system
 }
 
 #[derive(Default)]
@@ -46,8 +66,9 @@ pub(super) fn attempt_process_tree_shutdown(
     state: &mut ProcessShutdownState,
 ) -> io::Result<()> {
     poll_child_exit(child, &mut state.status, &mut state.child_error);
-    refresh_owned_processes(process, &mut state.owned);
+    let mut system = refresh_owned_processes(process, &mut state.owned);
     if process_tree_exited(
+        &system,
         &state.owned,
         process.shell_pid,
         state.status.is_some(),
@@ -56,11 +77,14 @@ pub(super) fn attempt_process_tree_shutdown(
         return Ok(());
     }
 
-    for signal in [Signal::Hangup, Signal::Term, Signal::Kill]
+    for (index, signal) in [Signal::Hangup, Signal::Term, Signal::Kill]
         .into_iter()
         .filter(|signal| sysinfo::SUPPORTED_SIGNALS.contains(signal))
+        .enumerate()
     {
-        let system = refresh_owned_processes(process, &mut state.owned);
+        if index > 0 {
+            system = refresh_owned_processes(process, &mut state.owned);
+        }
         signal_processes(&system, &state.owned, signal);
         let grace = if signal == Signal::Kill {
             PROCESS_KILL_GRACE
@@ -160,14 +184,27 @@ pub(super) fn wait_for_process_tree(
     let deadline = Instant::now() + timeout;
     loop {
         poll_child_exit(child, status, child_error);
-        refresh_owned_processes(process, owned);
+        // Poll only the known processes; a full scan per poll costs more than the grace
+        // on a loaded machine. Once they are gone, one full scan confirms no descendant
+        // forked since the last one still holds the tree open.
+        let known = owned_process_table(owned);
         if process_tree_exited(
+            &known,
             owned,
             process.shell_pid,
             status.is_some(),
             requires_child_status,
         ) {
-            return true;
+            let system = refresh_owned_processes(process, owned);
+            if process_tree_exited(
+                &system,
+                owned,
+                process.shell_pid,
+                status.is_some(),
+                requires_child_status,
+            ) {
+                return true;
+            }
         }
         if Instant::now() >= deadline {
             return false;
@@ -180,7 +217,7 @@ pub(super) fn refresh_owned_processes(
     process: ProcessProbe,
     owned: &mut Vec<OwnedProcess>,
 ) -> System {
-    let system = System::new_all();
+    let system = process_table();
     let Some(shell_pid) = process.shell_pid.map(Pid::from_u32) else {
         return system;
     };
@@ -224,6 +261,7 @@ pub(super) fn signal_processes(system: &System, owned: &[OwnedProcess], signal: 
 }
 
 pub(super) fn process_tree_exited(
+    system: &System,
     owned: &[OwnedProcess],
     shell_pid: Option<u32>,
     child_reaped: bool,
@@ -232,7 +270,6 @@ pub(super) fn process_tree_exited(
     if requires_child_status && !child_reaped {
         return false;
     }
-    let system = System::new_all();
     owned.iter().all(|owned_process| {
         (child_reaped && Some(owned_process.pid.as_u32()) == shell_pid)
             || system
@@ -254,7 +291,7 @@ pub(super) fn existing_absolute_directory(cwd: PathBuf) -> Option<PathBuf> {
 impl ProcessProbe {
     pub(super) fn new(shell_pid: Option<u32>) -> Self {
         let shell_started_at = shell_pid.and_then(|pid| {
-            System::new_all()
+            process_table()
                 .process(Pid::from_u32(pid))
                 .map(|process| process.start_time())
         });
