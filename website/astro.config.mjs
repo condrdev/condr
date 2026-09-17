@@ -10,6 +10,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Condr Docs',
+      favicon: '/condr.svg',
       description: 'A calm command center for agent work.',
       sidebar: [
         {
