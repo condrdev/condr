@@ -995,16 +995,26 @@ fn conpty_close_terminates_descendant_processes() {
     command.args(["-NoLogo", "-NoProfile", "-Command", &script]);
     let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
     let descendant = wait_for_pid_file(&pid_file);
-    assert!(windows_process_exists(descendant));
+    let started_at = System::new_all()
+        .process(Pid::from_u32(descendant))
+        .expect("descendant is running")
+        .start_time();
 
     runtime.close().unwrap();
+    // Windows reuses PIDs quickly and the suite spawns many shells at once, so the
+    // process at this PID counts as the descendant only while its start time matches;
+    // the runtime's own shutdown tracks ownership the same way.
+    let survivor =
+        || windows_process_identity(descendant).filter(|(_, started, _)| *started == started_at);
     let deadline = Instant::now() + Duration::from_secs(3);
-    while windows_process_exists(descendant) && Instant::now() < deadline {
+    let mut alive = survivor();
+    while alive.is_some() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
+        alive = survivor();
     }
     assert!(
-        !windows_process_exists(descendant),
-        "ConPTY descendant {descendant} survived Terminal close"
+        alive.is_none(),
+        "ConPTY descendant {descendant} (started {started_at}) survived Terminal close: {alive:?}"
     );
     let _ = std::fs::remove_file(pid_file);
 }
@@ -1038,9 +1048,20 @@ fn wait_for_pid_file(path: &std::path::Path) -> u32 {
     panic!("Terminal never reported its descendant PID");
 }
 
+/// Name, start time and command line of the process at `pid`, if any.
 #[cfg(target_os = "windows")]
-fn windows_process_exists(pid: u32) -> bool {
-    System::new_all().process(Pid::from_u32(pid)).is_some()
+fn windows_process_identity(pid: u32) -> Option<(String, u64, Vec<String>)> {
+    let system = System::new_all();
+    let process = system.process(Pid::from_u32(pid))?;
+    Some((
+        process.name().to_string_lossy().into_owned(),
+        process.start_time(),
+        process
+            .cmd()
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect(),
+    ))
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

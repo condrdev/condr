@@ -62,6 +62,11 @@ pub(super) fn attempt_process_tree_shutdown(
     {
         let system = refresh_owned_processes(process, &mut state.owned);
         signal_processes(&system, &state.owned, signal);
+        let grace = if signal == Signal::Kill {
+            PROCESS_KILL_GRACE
+        } else {
+            PROCESS_SHUTDOWN_GRACE
+        };
         if wait_for_process_tree(
             process,
             &mut state.owned,
@@ -69,7 +74,7 @@ pub(super) fn attempt_process_tree_shutdown(
             &mut state.status,
             &mut state.child_error,
             requires_child_status,
-            PROCESS_SHUTDOWN_GRACE,
+            grace,
         ) {
             return Ok(());
         }
@@ -88,7 +93,7 @@ pub(super) fn attempt_process_tree_shutdown(
             &mut state.status,
             &mut state.child_error,
             requires_child_status,
-            PROCESS_SHUTDOWN_GRACE,
+            PROCESS_KILL_GRACE,
         ) {
             return Ok(());
         }

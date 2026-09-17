@@ -423,6 +423,26 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
             workspace_cwd.to_string_lossy().replace('\'', "'\\''")
         )
     };
+    // The first prompt proves the shell is reading input. Under parallel test load pwsh
+    // can take several seconds to start, which must not eat the cwd change's budget.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let prompted = {
+            let state = first_handle.state.lock().unwrap();
+            state
+                .terminals
+                .get(&first_pane)
+                .is_some_and(|runtime| !view_text(&runtime.view()).trim().is_empty())
+        };
+        if prompted {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "shell never printed its first prompt"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
     send_terminal(
         &mut stream,
         first_server_id,

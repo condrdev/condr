@@ -349,18 +349,29 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
         "agent", "start", "worker", "--kind", "claude", "--pane", &pane, "--",
     ];
     launch.extend(args);
-    let pending = server
+    let mut pending = server
         .command(&launch)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // The name is reserved once the Server accepts the launch; how soon that is depends
+    // on how fast a CLI process starts under parallel test load, so the wait is bounded
+    // by the launch's own timeout and ends early when the launcher fails.
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let listed = server.ok(&["agent", "list"]);
         if !listed["agents"].as_array().unwrap().is_empty() {
             assert_eq!(listed["agents"][0]["launch_pending"], true);
             break;
+        }
+        if let Some(status) = pending.try_wait().unwrap()
+            && !status.success()
+        {
+            panic!(
+                "agent start exited with {status} before its name was reserved\n{}",
+                server.diagnostics()
+            );
         }
         assert!(Instant::now() < deadline, "launch name was not reserved");
         thread::sleep(Duration::from_millis(20));
