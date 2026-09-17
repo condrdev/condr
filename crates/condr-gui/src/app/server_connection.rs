@@ -43,9 +43,12 @@ pub(super) struct ServerConnection {
     /// Workspace and root-relative path; a Git change asks for every cached one again.
     pub(super) directories:
         HashMap<(WorkspaceId, RelativePathBuf), Result<DirectoryListing, String>>,
-    /// File contents the Server answered for Preview Tabs, refreshed the same way.
-    pub(super) files: HashMap<(WorkspaceId, RelativePathBuf), Result<FileContent, String>>,
-    /// Bumped whenever `files` changes, so a Preview Tab knows its text is stale.
+    /// File contents the Server answered for Preview Tabs, refreshed the same way, each
+    /// with the `files_generation` it landed at. A refetch that returns the same content
+    /// keeps its generation, so the Preview Tab's Editor is left alone (no re-highlight,
+    /// no scroll reset).
+    pub(super) files: HashMap<(WorkspaceId, RelativePathBuf), (u64, Result<FileContent, String>)>,
+    /// Bumped whenever an entry of `files` changes.
     pub(super) files_generation: u64,
     pub(super) zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.

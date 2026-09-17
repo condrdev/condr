@@ -167,6 +167,54 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         "the retargeted Preview Tab should show the second file"
     );
 
+    // The Server's watcher re-answers every cached file after a working-tree batch. An
+    // answer with the same content must not count as a change: the Editor would drop its
+    // highlighter and scroll back to the top on every refetch. Different content does land.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.files_generation;
+            let connect_generation = connection.connect_generation;
+            let answer = |text: &str| {
+                Incoming::Message(condr_core::protocol::ServerMessage::FileContent {
+                    request_id: 0,
+                    workspace_id,
+                    path: relative_path::RelativePathBuf::from("README.md"),
+                    result: Ok(condr_core::FileContent::Text {
+                        text: text.to_owned(),
+                    }),
+                })
+            };
+            // Applied the way the connection task applies an answer: a rebuild.
+            this.handle_incoming(1, connect_generation, answer("# Files\n"), cx);
+            this.rebuild_dock(window, cx);
+            assert_eq!(
+                this.connection(1).unwrap().files_generation,
+                generation,
+                "identical content is not a change"
+            );
+            this.handle_incoming(1, connect_generation, answer("# Files\n\nMore.\n"), cx);
+            this.rebuild_dock(window, cx);
+            assert_eq!(
+                this.connection(1).unwrap().files_generation,
+                generation + 1,
+                "new content is a change"
+            );
+        });
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.update(|_, cx| {
+                view.read(cx)
+                    .file_editors
+                    .values()
+                    .any(|editor| editor.state.read(cx).value().contains("More."))
+            })
+        }),
+        "changed content should reach the Editor"
+    );
+
     // A reconnect while a listing is in flight: the old connection's answer never comes
     // and the Bootstrap empties the caches, so the request must be forgotten with it, or
     // the root would say "Loading…" forever. The same-authority Bootstrap is fed directly:

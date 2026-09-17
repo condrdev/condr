@@ -679,8 +679,17 @@ impl Condr {
                 self.pending_files
                     .remove(&(key, workspace_id, path.clone()));
                 let connection = &mut self.connections[index];
-                connection.files.insert((workspace_id, path), result);
-                connection.files_generation += 1;
+                let slot = (workspace_id, path);
+                if connection
+                    .files
+                    .get(&slot)
+                    .is_none_or(|(_, cached)| *cached != result)
+                {
+                    connection.files_generation += 1;
+                    connection
+                        .files
+                        .insert(slot, (connection.files_generation, result));
+                }
                 // The rebuild hands the answer to the Preview Tab's Editor.
                 IncomingEffect {
                     rebuild: self.active_connection == key,

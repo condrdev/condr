@@ -37,7 +37,7 @@ fn language_for(path: &RelativePath) -> SharedString {
 /// The Preview Tab's Editor and what it currently shows.
 pub(super) struct FileEditor {
     pub(super) state: Entity<EditorState>,
-    /// The path and the connection's file generation the Editor text was built from.
+    /// The path and the generation of the cached answer the Editor text was built from.
     shown: Option<(RelativePathBuf, u64)>,
     pub(super) content: FileViewContent,
 }
@@ -686,7 +686,6 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let generation = connection.files_generation;
         let answer = connection.files.get(&(workspace_id, path.clone())).cloned();
         if answer.is_none()
             && !self
@@ -714,7 +713,7 @@ impl Condr {
                 content: FileViewContent::Loading,
             }
         });
-        let Some(answer) = answer else {
+        let Some((generation, answer)) = answer else {
             if editor
                 .shown
                 .as_ref()

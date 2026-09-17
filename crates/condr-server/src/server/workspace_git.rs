@@ -365,6 +365,11 @@ fn run_watcher(
             entry.due = None;
             let pending = std::mem::take(&mut entry.pending);
             let forced = std::mem::take(&mut entry.forced);
+            // `git status` rewriting the index, a commit or a fetch touch only `.git`: the
+            // Git state may move, the working tree the Files sidebar and Preview Tabs show
+            // did not. Without this every status-line poll refetched every open file.
+            let working_tree_changed =
+                forced || pending.iter().any(|path| path != Path::new(".git"));
             let root = entry.root.clone();
             // Discovery is cheap; the status walk is not, so the ignore check sits between.
             let next = match discover_repository(&root) {
@@ -393,7 +398,9 @@ fn run_watcher(
                 return;
             };
             let mut state = state.lock().expect("server state lock poisoned");
-            if apply_workspace_git_refresh(&mut state, workspace_id, &root, next) {
+            if apply_workspace_git_refresh(&mut state, workspace_id, &root, next)
+                && working_tree_changed
+            {
                 // The same batch is what the Files sidebar and Preview Tabs follow
                 // (ADR 0018); ignored-only batches were skipped above.
                 state.publish_background(SessionEvent::WorkspaceFilesChanged { workspace_id });
