@@ -39,6 +39,10 @@ crates/condr-gui     # builds `condr-gui`: pure client, connects to one or more 
 
 Closing the GUI only disconnects. The server, PTYs, agents and Session keep running; reopening the GUI reconnects to the existing local server first. Stopping the server is an explicit action.
 
+### Website (`website/`)
+
+[condr.dev](https://condr.dev) lives in `website/`: Astro + Starlight, pnpm, deployed by Cloudflare Pages from `main` (root directory `website`). It is documentation, not part of the Rust build: `ci.yml` ignores it, and `website/README.md` has its own commands. `website/public/install.sh` and `install.ps1` are the online installers behind `curl -fsSL https://condr.dev/install.sh | sh`; keep them in step with `script/install-condr.*` and the README install table.
+
 ### Development environment (two machines)
 
 - **Linux server (arm64, headless):** all condr-core development and tests (`cargo test/clippy` need no display). The GUI cannot run here.
