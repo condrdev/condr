@@ -417,7 +417,7 @@ impl Render for SettingsWindow {
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(server_terminal_page(&settings))
-                .page(server_network_page(&settings))
+                .page(server_network_page(self, &settings, cx))
                 .page(server_clients_page(&settings))
                 .page(agents_page(&settings, self.connection_hooks(cx))),
         };

@@ -89,11 +89,16 @@ pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> Setting
         )
 }
 
-pub(super) fn server_network_page(settings: &Entity<SettingsWindow>) -> SettingPage {
+/// `this` is the window being rendered, so it must not go through `settings.read(cx)`.
+pub(super) fn server_network_page(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
     SettingPage::new("Daemon")
         .icon(IconName::Cpu)
-        .default_open(true)
-        .group(server_network_group(settings))
+        .group(server_status_group(this, cx))
+        .group(server_network_group(this, settings, cx))
 }
 
 pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingPage {
@@ -166,135 +171,140 @@ impl SettingsWindow {
     }
 }
 
-/// The Client's view of the selected Server: the connection type, colored by whether it
-/// is up. A Server can run while this GUI is disconnected, so this never claims "running".
-fn server_status_row(settings: &Entity<SettingsWindow>) -> SettingItem {
-    let settings = settings.clone();
-    SettingItem::render(move |_, _, cx| {
-        let (status, kind) = selected_connection(&settings, cx, |c| {
-            let kind = match c.endpoint {
-                Endpoint::Local(_) => "Local",
-                Endpoint::Ssh(_) => "SSH",
-                Endpoint::Tcp(_) => "TCP",
+/// Which Server this page describes and what it last reported about itself: the
+/// connection (a Server can run while this GUI is disconnected, so it never claims
+/// "running"), version, uptime, Session counts and the `warn`/`error` records it kept.
+/// Health is refreshed every `STATUS_REFRESH` while Settings is open.
+fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
+    let (status, kind, address) = this
+        .selected_connection(cx, |c| {
+            let (kind, address) = match &c.endpoint {
+                Endpoint::Local(_) => ("Local", None),
+                Endpoint::Ssh(ssh) => ("SSH", Some(ssh.destination().to_owned())),
+                Endpoint::Tcp(tcp) => ("TCP", Some(tcp.authority())),
             };
-            (c.status, kind)
+            (c.status, kind, address)
         })
-        .unwrap_or((ConnectionStatus::Disconnected, "Local"));
-        let tag = match status {
-            ConnectionStatus::Connected => Tag::success(),
-            ConnectionStatus::Connecting => Tag::warning(),
-            ConnectionStatus::Disconnected => Tag::secondary(),
-        };
-        h_flex()
-            .justify_between()
-            .items_center()
-            .gap_2()
-            .child("Status")
-            .child(tag.outline().small().child(kind))
-    })
-    .keywords(["status", "connected", "local", "ssh", "tcp"])
-}
+        .unwrap_or((ConnectionStatus::Disconnected, "Local", None));
+    let state = match status {
+        ConnectionStatus::Connected => "Connected",
+        ConnectionStatus::Connecting => "Connecting",
+        ConnectionStatus::Disconnected => "Disconnected",
+    };
+    let status_row = SettingItem::new(
+        "Status",
+        SettingField::render(move |_, _, _| {
+            match status {
+                ConnectionStatus::Connected => Tag::success(),
+                ConnectionStatus::Connecting => Tag::warning(),
+                ConnectionStatus::Disconnected => Tag::secondary(),
+            }
+            .outline()
+            .small()
+            .child(state)
+        }),
+    )
+    .keywords(["status", "connected"]);
+    let connection = SettingItem::new(
+        "Connection",
+        SettingField::render(move |_, _, _| div().text_sm().child(kind)),
+    )
+    .keywords(["connection", "local", "ssh", "tcp"]);
+    let connection = match address {
+        Some(address) => connection.description(SharedString::from(address)),
+        None => connection,
+    };
+    let group = SettingGroup::new()
+        .title("Status")
+        .item(status_row)
+        .item(connection);
 
-/// What the Server last reported about itself: version, uptime, Session counts and the
-/// `warn`/`error` records it kept. Refreshed every `STATUS_REFRESH` while Settings is open.
-fn server_health_row(settings: &Entity<SettingsWindow>) -> SettingItem {
-    let settings = settings.clone();
-    SettingItem::render(move |_, _, cx| {
-        let health = selected_connection(&settings, cx, |c| c.health.clone()).flatten();
-        let muted = cx.theme().muted_foreground;
-        let Some(health) = health else {
-            return div()
+    let health = this.selected_connection(cx, |c| c.health.clone()).flatten();
+    let Some(health) = health else {
+        return group.item(SettingItem::render(|_, _, cx| {
+            div()
                 .text_sm()
-                .text_color(muted)
+                .text_color(cx.theme().muted_foreground)
                 .child("Waiting for the Server's status…")
-                .into_any_element();
-        };
-        let version_color = if health.version == env!("CARGO_PKG_VERSION") {
-            muted
-        } else {
-            cx.theme().warning
-        };
-        v_flex()
-            .gap_1()
-            .text_sm()
-            .child(
-                h_flex()
-                    .gap_4()
-                    .child(format!("Up {}", uptime_text(health.uptime_secs)))
-                    .child(
-                        div()
-                            .text_color(version_color)
-                            .child(format!("Version {}", health.version)),
-                    ),
-            )
-            .child(div().text_color(muted).child(format!(
-                "{} workspaces · {} tabs · {} panes · {} agents · {} clients",
-                health.workspaces, health.tabs, health.panes, health.agents, health.clients
-            )))
-            .when(!health.recent_errors.is_empty(), |column| {
-                column
-                    .child("Recent errors")
-                    .children(health.recent_errors.iter().rev().map(|record| {
-                        let color = if record.level == "ERROR" {
-                            cx.theme().danger
-                        } else {
-                            cx.theme().warning
-                        };
-                        h_flex()
-                            .gap_2()
-                            .items_start()
-                            .child(div().text_color(color).child(record.level.clone()))
-                            .child(div().text_color(muted).child(relative_age(record.at)))
-                            .child(record.message.clone())
-                    }))
-            })
-            .into_any_element()
-    })
-    .keywords(["uptime", "version", "errors", "health"])
-}
-
-fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
-    let value = settings.clone();
-    let restart = settings.clone();
-    let group = SettingGroup::new().description(
-        "Changes take effect when Condr restarts on this device. Only a local or SSH \
-         connection can change them; over TCP this page is read-only.",
-    );
-    group
-        .item(server_status_row(settings))
-        .item(server_health_row(settings))
-        .item(SettingItem::new(
-            "TCP listener",
-            SettingField::switch(
-                {
-                    let settings = settings.clone();
-                    move |cx| server_listen_enabled(&settings, cx)
-                },
-                {
-                    let settings = settings.clone();
-                    move |enabled, cx| set_server_listen_enabled(&settings, enabled, cx)
-                },
-            )
-            .default_value(false),
-        ))
+        }));
+    };
+    let value =
+        |text: String| SettingField::render(move |_, _, _| div().text_sm().child(text.clone()));
+    let this_version = env!("CARGO_PKG_VERSION");
+    let mismatch = health.version != this_version;
+    let version = health.version.clone();
+    let version = SettingItem::new(
+        "Version",
+        SettingField::render(move |_, _, cx| {
+            div()
+                .text_sm()
+                .when(mismatch, |this| this.text_color(cx.theme().warning))
+                .child(version.clone())
+        }),
+    )
+    .keywords(["version"]);
+    let version = if mismatch {
+        version.description(SharedString::from(format!(
+            "This window is {this_version}."
+        )))
+    } else {
+        version
+    };
+    let session = [
+        count(health.workspaces, "workspace"),
+        count(health.tabs, "tab"),
+        count(health.panes, "pane"),
+        count(health.agents, "agent"),
+        count(health.clients, "client"),
+    ]
+    .join(" · ");
+    let errors = health.recent_errors;
+    let mut group = group
+        .item(version)
         .item(
+            SettingItem::new("Uptime", value(uptime_text(health.uptime_secs))).keywords(["uptime"]),
+        )
+        .item(SettingItem::new("Session", value(session)).keywords(["workspaces", "panes"]));
+    if !errors.is_empty() {
+        group = group.item(
             SettingItem::new(
-                "Listen address",
-                // Not `SettingField::input`: that saves on every keystroke, and this field
-                // saves when it is left. ponytail: no reset-to-default arrow as a result.
-                SettingField::render(move |_, window, cx| {
-                    let input = value.read(cx).listen_input.clone();
-                    // Picking another Server replaces the draft under the field.
-                    let draft = server_listen(&value, cx);
-                    if input.read(cx).value() != draft {
-                        input.update(cx, |input, cx| input.set_value(draft, window, cx));
-                    }
-                    Input::new(&input).w_64()
+                "Recent errors",
+                SettingField::render(move |_, _, cx| {
+                    let muted = cx.theme().muted_foreground;
+                    v_flex()
+                        .gap_1()
+                        .text_sm()
+                        .children(errors.iter().rev().map(|record| {
+                            let color = if record.level == "ERROR" {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().warning
+                            };
+                            h_flex()
+                                .gap_2()
+                                .items_start()
+                                .child(div().text_color(color).child(record.level.clone()))
+                                .child(div().text_color(muted).child(relative_age(record.at)))
+                                .child(record.message.clone())
+                        }))
                 }),
             )
-            .description("host:port, saved when you leave the field."),
-        )
-        .item(SettingItem::render(move |_, _, cx| {
+            .layout(Axis::Vertical)
+            .keywords(["errors", "health"]),
+        );
+    }
+    group
+}
+
+fn count(n: u32, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
+fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
+    let restart = settings.clone();
+    SettingItem::new(
+        "Restart Condr",
+        SettingField::render(move |_, _, cx| {
             let settings = restart.clone();
             let allowed = server_admin_allowed(&settings, cx);
             let (restarting, error) = selected_connection(&settings, cx, |c| {
@@ -312,6 +322,9 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
             h_flex()
                 .gap_3()
                 .items_center()
+                .when_some(feedback, |row, (text, color)| {
+                    row.child(div().text_sm().text_color(color).child(text))
+                })
                 .child(
                     Button::new("server-restart")
                         .label(if restarting {
@@ -352,10 +365,61 @@ fn server_network_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                             });
                         }),
                 )
-                .when_some(feedback, |row, (text, color)| {
-                    row.child(div().text_sm().text_color(color).child(text))
-                })
-        }))
+        }),
+    )
+    .description("Applies the changes above. Stops every pane and agent on this device.")
+    .keywords(["restart", "apply"])
+}
+
+fn server_network_group(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingGroup {
+    let value = settings.clone();
+    let over_tcp = this
+        .selected_connection(cx, |c| matches!(c.endpoint, Endpoint::Tcp(_)))
+        .unwrap_or(false);
+    let group = SettingGroup::new().title("Network");
+    // The Server refuses admin commands over TCP (ADR 0015); say so only when it applies.
+    let group = if over_tcp {
+        group.description("Read-only over TCP. Connect locally or over SSH to change these.")
+    } else {
+        group
+    };
+    group
+        .item(SettingItem::new(
+            "TCP listener",
+            SettingField::switch(
+                {
+                    let settings = settings.clone();
+                    move |cx| server_listen_enabled(&settings, cx)
+                },
+                {
+                    let settings = settings.clone();
+                    move |enabled, cx| set_server_listen_enabled(&settings, enabled, cx)
+                },
+            )
+            .default_value(false),
+        ))
+        .item(
+            SettingItem::new(
+                "Listen address",
+                // Not `SettingField::input`: that saves on every keystroke, and this field
+                // saves when it is left. ponytail: no reset-to-default arrow as a result.
+                SettingField::render(move |_, window, cx| {
+                    let input = value.read(cx).listen_input.clone();
+                    // Picking another Server replaces the draft under the field.
+                    let draft = server_listen(&value, cx);
+                    if input.read(cx).value() != draft {
+                        input.update(cx, |input, cx| input.set_value(draft, window, cx));
+                    }
+                    Input::new(&input).w_64()
+                }),
+            )
+            .description("host:port"),
+        )
+        .item(server_restart_row(settings))
 }
 
 fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
