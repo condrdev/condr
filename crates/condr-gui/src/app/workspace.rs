@@ -518,7 +518,7 @@ fn workspace_title_bar(
     sidebar_collapsed: bool,
     tab_strip: Option<AnyElement>,
     open_in: Option<AnyElement>,
-    changes_toggle: AnyElement,
+    changes_toggle: Option<AnyElement>,
     owner: WeakEntity<Condr>,
     cx: &App,
 ) -> TitleBar {
@@ -608,7 +608,7 @@ fn workspace_title_bar(
                         .bg(theme.background)
                         .children(tab_strip)
                         .children(open_in)
-                        .child(changes_toggle),
+                        .children(changes_toggle),
                 ),
         )
 }
@@ -634,7 +634,7 @@ impl Render for Condr {
             body,
         } = self.render_workspace(cx);
         let has_workspace = self.presents_a_workspace();
-        let changes_toggle = self.render_changes_toggle(has_workspace, cx);
+        let changes_toggle = has_workspace.then(|| self.render_changes_toggle(cx));
         let changes_column =
             (self.changes_open && has_workspace).then(|| self.render_right_sidebar(cx));
         let workspace = div()

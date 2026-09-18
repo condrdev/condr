@@ -273,12 +273,9 @@ impl Condr {
         );
     }
 
-    /// The title bar's toggle for the right sidebar, next to "Open in".
-    pub(super) fn render_changes_toggle(
-        &self,
-        has_workspace: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// The title bar's toggle for the right sidebar, next to "Open in". Only a Workspace
+    /// has anything to show, so the welcome page renders none.
+    pub(super) fn render_changes_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
         let label = if self.changes_open {
             "Hide Changes & Files"
@@ -305,7 +302,6 @@ impl Condr {
                     .ghost()
                     .small()
                     .icon(Icon::new(icon))
-                    .disabled(!has_workspace)
                     .tooltip(label)
                     .accessibility_label(label)
                     .on_click(move |_, _, cx| {

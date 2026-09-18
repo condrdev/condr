@@ -31,16 +31,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         window.debug_bounds("condr-right-sidebar").is_none(),
         "the Changes sidebar starts closed on a fresh config"
     );
-    // Without a Workspace there is nothing to review: the toggle is disabled and a click
-    // leaves the preference alone.
-    let toggle = window
-        .debug_bounds("toggle-changes")
-        .expect("the title bar should expose the Changes toggle");
-    window.simulate_click(toggle.center(), Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds("condr-right-sidebar").is_none());
-    assert!(!window.read(|app| view.read(app).changes_open));
+    // Without a Workspace there is nothing to review: the title bar has no toggle.
+    assert!(window.debug_bounds("toggle-changes").is_none());
 
     let button = window
         .debug_bounds("open-project")
