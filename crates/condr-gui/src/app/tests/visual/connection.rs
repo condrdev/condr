@@ -308,7 +308,7 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
             view.read(app).connection(1).is_some_and(|connection| {
                 connection.status == ConnectionStatus::Connected
                     && !connection.controlling
-                    && connection.error.as_deref() == Some(CONTROL_BUSY_REASON)
+                    && connection.control_denied.as_deref() == Some(CONTROL_BUSY_REASON)
             })
         })
     }));
@@ -1150,8 +1150,12 @@ fn an_unexpected_disconnect_reconnects_on_its_own_and_says_so() {
     });
     window.update(|window, cx| _ = window.draw(cx));
     assert!(
-        window.debug_bounds("connection-status-1").is_some(),
-        "the start page reports the reconnect"
+        window.debug_bounds("disconnected-page-1").is_some(),
+        "a device with nothing open shows the disconnected page, not Welcome"
+    );
+    assert!(
+        window.debug_bounds("connect-server-1").is_none(),
+        "no Connect button while the GUI reconnects on its own"
     );
     // The faked disconnect leaves the old socket open, so the Server may keep control
     // with it for a while; the connection itself must come back and settle.
@@ -1166,4 +1170,28 @@ fn an_unexpected_disconnect_reconnects_on_its_own_and_says_so() {
         }),
         "the GUI did not reconnect on its own"
     );
+}
+
+#[test]
+fn a_device_that_cannot_be_reached_gets_its_own_page_with_connect_and_edit() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let mut lab = ServerConnection::new(2, "lab".into(), tcp("10.0.0.5:4242"));
+            lab.error = Some("nothing is listening at tcp://10.0.0.5:4242".into());
+            this.connections.push(lab);
+            this.active_connection = 2;
+            cx.notify();
+        });
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("disconnected-page-2").is_some());
+    assert!(
+        window.debug_bounds("connect-remote-device").is_none(),
+        "the Welcome page must not appear for a device that is not connected"
+    );
+    assert!(window.debug_bounds("connect-server-2").is_some());
 }

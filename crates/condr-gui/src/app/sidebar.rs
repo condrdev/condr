@@ -422,6 +422,7 @@ impl Condr {
             let server_menu_owner = owner.clone();
             let server_name = connection.label.clone();
             let status = connection.status;
+            let connect_reason = connection.error.clone();
             let is_local = connection.endpoint.as_local_path().is_some();
             let new_workspace_label = connection.label.clone();
             let descendant_selected = workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
@@ -432,14 +433,39 @@ impl Condr {
                     let owner = new_workspace_owner.clone();
                     let tooltip = format!("New Workspace on {new_workspace_label}");
                     // A device that is not connected says so in its heading, since its
-                    // Workspaces below look the same either way.
+                    // Workspaces below look the same either way; the mark tells why on
+                    // hover and connects on click.
                     let indicator = match status {
                         ConnectionStatus::Connected => None,
                         ConnectionStatus::Connecting => {
                             Some(Spinner::new().xsmall().into_any_element())
                         }
                         ConnectionStatus::Disconnected => {
-                            status_badge(SidebarGlyph::CircleAlert, SidebarIconTone::Danger, cx)
+                            let connect_owner = owner.clone();
+                            let why = connect_reason
+                                .clone()
+                                .map_or("Not connected. Click to connect.".to_owned(), |reason| {
+                                    format!("Not connected: {reason}\nClick to connect.")
+                                });
+                            Some(
+                                Button::new(("connect-indicator", key))
+                                    .debug_selector(move || format!("connect-indicator-{key}"))
+                                    .ghost()
+                                    .xsmall()
+                                    .compact()
+                                    .icon(
+                                        Icon::new(CondrIconName::CircleAlert)
+                                            .text_color(cx.theme().danger),
+                                    )
+                                    .tooltip(why)
+                                    .on_click(move |_, window, cx| {
+                                        cx.stop_propagation();
+                                        let _ = connect_owner.update(cx, |this, cx| {
+                                            this.connect_server(key, window, cx)
+                                        });
+                                    })
+                                    .into_any_element(),
+                            )
                         }
                     };
                     h_flex()

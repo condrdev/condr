@@ -71,8 +71,7 @@ impl Condr {
             return false;
         }
         if bytes.len() > condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES {
-            connection.error = Some("Image exceeds 16 MiB".into());
-            cx.notify();
+            self.report_error("Image exceeds 16 MiB", cx);
             return true;
         }
         // The Pane is fixed here; a focus change while the upload is in flight must not

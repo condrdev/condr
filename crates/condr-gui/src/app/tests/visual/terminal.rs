@@ -765,10 +765,10 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
     window.simulate_keystrokes("alt-v");
     assert!(wait_until_event_driven(window, |window| {
         window.read(|app| {
-            let connection = view.read(app).connection(1).unwrap();
-            connection.status == ConnectionStatus::Connected
-                && connection
-                    .error
+            let condr = view.read(app);
+            condr.connection(1).unwrap().status == ConnectionStatus::Connected
+                && condr
+                    .last_error
                     .as_ref()
                     .is_some_and(|error| error.contains("Could not convert clipboard image"))
         })
@@ -934,9 +934,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
     )));
     assert!(window.read(|app| {
         view.read(app)
-            .connection(key)
-            .unwrap()
-            .error
+            .last_error
             .as_ref()
             .is_some_and(|error| error.contains("16 MiB"))
     }));

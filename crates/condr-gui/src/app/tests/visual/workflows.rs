@@ -327,14 +327,17 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
     let dirty_rejected = wait_until(window, |window| {
         window.read(|app| {
             view.read(app)
-                .connection(1)
-                .and_then(|connection| connection.error.as_deref())
+                .last_error
+                .as_deref()
                 .is_some_and(|error| error.contains("modified or untracked"))
         })
     });
     let (sequence, error) = window.read(|app| {
-        let connection = view.read(app).connection(1).unwrap();
-        (connection.sequence, connection.error.clone())
+        let condr = view.read(app);
+        (
+            condr.connection(1).unwrap().sequence,
+            condr.last_error.clone(),
+        )
     });
     assert!(
         dirty_rejected,
@@ -382,7 +385,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
                 .active_session()
                 .is_some_and(|session| session.workspace(managed_workspace_id).is_some()),
             connection.sequence,
-            connection.error.clone(),
+            condr.last_error.clone(),
         )
     });
     let server_has_workspace = Session::restore(server.handle.snapshot())
@@ -532,7 +535,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
                     .collect::<String>()
             })
         }),
-        window.read(|app| view.read(app).connection(1).unwrap().error.clone()),
+        window.read(|app| view.read(app).last_error.clone()),
     );
     assert!(wait_until(window, |window| {
         window.read(|app| {
@@ -866,7 +869,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         .workspaces()
         .len()),
         window.read(|app| view.read(app).connection(1).unwrap().sequence),
-        window.read(|app| view.read(app).connection(1).unwrap().error.clone()),
+        window.read(|app| view.read(app).last_error.clone()),
     );
     assert_eq!(
         window.read(|app| {

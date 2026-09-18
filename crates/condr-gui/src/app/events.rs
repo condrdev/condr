@@ -429,7 +429,7 @@ impl Condr {
                 self.connections[index].controlling = true;
                 self.connections[index].control_retry_attempts = 0;
                 self.connections[index].control_retry_scheduled = false;
-                self.connections[index].error = None;
+                self.connections[index].control_denied = None;
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -466,7 +466,7 @@ impl Condr {
                 let retry_control = reason == CONTROL_BUSY_REASON;
                 self.connections[index].controlling = false;
                 self.connections[index].attention.clear();
-                self.connections[index].error = Some(reason);
+                self.connections[index].control_denied = Some(reason);
                 if retry_control {
                     self.schedule_control_retry(key, cx);
                 }
@@ -484,7 +484,10 @@ impl Condr {
                 if !connection.recover_rejected_subscription(server_id, session_id) {
                     return IncomingEffect::default();
                 }
-                connection.error = Some(reason);
+                tracing::warn!(
+                    reason,
+                    "the Server rejected the subscription; resynchronizing"
+                );
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -535,7 +538,8 @@ impl Condr {
                 {
                     return IncomingEffect::default();
                 }
-                self.connections[index].error = Some(reason);
+                // One refused request, not a state of the connection: a toast.
+                self.report_error(reason, cx);
                 let workspace_rejected = self
                     .pending_workspace_selection_for(key)
                     .is_some_and(|pending| pending.request_id == request_id);
@@ -567,9 +571,9 @@ impl Condr {
                 }
             }
             ServerMessage::Error { message } => {
-                // A refused or failed admin command; a pending restart is not happening.
-                self.connections[index].error = Some(message);
+                // A refused or failed command; a pending restart is not happening.
                 self.connections[index].reconnect_deadline = None;
+                self.report_error(message, cx);
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
@@ -762,8 +766,9 @@ impl Condr {
                     connection.subscribed = true;
                 } else {
                     connection.subscribed = false;
-                    connection.error =
-                        Some("subscription cursor did not match client state".into());
+                    tracing::warn!(
+                        "subscription cursor did not match client state; resynchronizing"
+                    );
                     connection.request_snapshot();
                 }
                 IncomingEffect {

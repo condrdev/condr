@@ -196,6 +196,9 @@ const MAX_CONTROL_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// How often the GUI retries the Server after asking it to restart, and for how long;
 /// `condr server restart` itself waits up to 30 s for the old process to let go.
 const RESTART_RECONNECT_DELAY: Duration = Duration::from_millis(500);
+/// How long an unexpected drop may take to heal before the Workspace says "Reconnecting";
+/// a blip that comes back inside this never shows.
+const RECONNECT_GRACE: Duration = Duration::from_secs(2);
 const RESTART_RECONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;

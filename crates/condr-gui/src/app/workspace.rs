@@ -23,14 +23,17 @@ pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
 impl Condr {
     /// The active Workspace as two pieces: its Tab strip, which the title bar hosts so
     /// the Panes get the full body height, and the body under it. No strip without a
-    /// Workspace; the empty state carries the error itself.
+    /// Workspace.
     pub(super) fn render_workspace(&self, cx: &mut Context<Self>) -> WorkspaceChrome {
         let Some(connection) = self.active_connection() else {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
         let status = self.render_connection_status(connection, cx);
-        // The status line carries the connection error itself; otherwise the strip does.
-        let error = status.is_none().then(|| connection.error.clone()).flatten();
+        // Viewing only is a mode, not a failure: muted, and only while it lasts.
+        let viewing_only = connection
+            .control_denied
+            .as_deref()
+            .map(|reason| viewing_only_text(reason).to_owned());
         let can_mutate = connection.can_mutate()
             && self
                 .pending_workspace_selection_for(connection.key)
@@ -46,7 +49,11 @@ impl Condr {
         };
         let key = connection.key;
         let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
-            return WorkspaceChrome::body(self.render_welcome(key, can_mutate, status, error, cx));
+            // Nothing to show and not connected: say so, instead of a greyed-out Welcome.
+            if connection.status != ConnectionStatus::Connected {
+                return WorkspaceChrome::body(self.render_disconnected(connection, cx));
+            }
+            return WorkspaceChrome::body(self.render_welcome(key, can_mutate, cx));
         };
         let workspace = session
             .workspace(workspace_id)
@@ -297,18 +304,18 @@ impl Condr {
                         });
                     }),
             )
-            .when_some(error, |row, error| {
+            .when_some(viewing_only, |row, text| {
                 row.child(
                     div()
                         .ml_auto()
                         .min_w_0()
                         .truncate()
                         .text_xs()
-                        .text_color(cx.theme().danger)
-                        .child(error),
+                        .text_color(cx.theme().muted_foreground)
+                        .child(text),
                 )
             });
-        // The banner floats over the Panes rather than reflowing them: the dock keeps
+        // The pill floats over the Panes rather than reflowing them: the dock keeps
         // its geometry, and the frozen output under it is what the user is waiting on.
         let body = div()
             .size_full()
@@ -317,16 +324,12 @@ impl Condr {
             .children(viewer)
             .when_some(status, |view, status| {
                 view.child(
-                    div()
+                    h_flex()
                         .absolute()
-                        .top_0()
+                        .top_2()
                         .left_0()
                         .right_0()
-                        .px_3()
-                        .py_1()
-                        .bg(cx.theme().background)
-                        .border_b_1()
-                        .border_color(cx.theme().border)
+                        .justify_center()
                         .child(status),
                 )
             })
@@ -373,16 +376,21 @@ fn welcome_row(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> 
         .child(div().flex_1())
 }
 
+/// The strip's wording for a denied control; the busy reason is the Server's own words.
+fn viewing_only_text(reason: &str) -> &str {
+    if reason == CONTROL_BUSY_REASON {
+        "Viewing only: another Condr window controls this device"
+    } else {
+        reason
+    }
+}
+
 impl Condr {
-    /// What a Server with no Workspace shows: the brand, then the ways in. The
-    /// connection's error belongs here too, since this page replaces the Tab strip
-    /// that would otherwise carry it.
+    /// What a Server with no Workspace shows: the brand, then the ways in.
     fn render_welcome(
         &self,
         key: ConnectionKey,
         can_mutate: bool,
-        status: Option<AnyElement>,
-        error: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let open_owner = cx.weak_entity();
@@ -457,19 +465,7 @@ impl Condr {
                         .dropdown_menu(move |menu, _, _| {
                             Condr::add_server_menu(menu, connect_owner.clone())
                         }),
-                    )
-                    .when_some(status, |column, status| {
-                        column.child(div().pt_2().child(status))
-                    })
-                    .when_some(error, |column, error| {
-                        column.child(
-                            div()
-                                .pt_2()
-                                .text_sm()
-                                .text_color(cx.theme().danger)
-                                .child(error),
-                        )
-                    }),
+                    ),
             )
             .into_any_element()
     }

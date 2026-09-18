@@ -79,10 +79,17 @@ pub(super) struct ServerConnection {
     /// Set by a subscription rejection: the next Bootstrap must re-acquire control and drop
     /// pending layout projections, because responses may have been lost to writer lag.
     pub(super) reacquire_after_bootstrap: bool,
+    /// Why the connection is not up: the connect attempt's or the disconnect's reason.
+    /// Only that; a refused command is a toast and a denied control is `control_denied`.
     pub(super) error: Option<String>,
+    /// The Server's reason for not granting this Client control, while it stands. Not an
+    /// error: the Session is still viewable, and the busy case retries on its own.
+    pub(super) control_denied: Option<String>,
     /// Set while the GUI reconnects on its own, after a restart it asked for or a
     /// connection that ended without it; cleared on success or at the deadline.
     pub(super) reconnect_deadline: Option<Instant>,
+    /// When an established connection last went down, for `RECONNECT_GRACE`.
+    pub(super) disconnected_at: Option<Instant>,
     pub(super) next_layout_request_id: u64,
 }
 
@@ -148,6 +155,8 @@ impl ServerConnection {
             bootstrap_resync_session_id: None,
             reacquire_after_bootstrap: false,
             error: None,
+            control_denied: None,
+            disconnected_at: None,
             next_layout_request_id: 1,
         }
     }
@@ -158,6 +167,7 @@ impl ServerConnection {
 
     pub(super) fn reset_sync_state(&mut self) {
         self.controlling = false;
+        self.control_denied = None;
         self.attention.clear();
         self.pasting_images.clear();
         self.subscribed = false;
@@ -242,6 +252,7 @@ impl ServerConnection {
         self.status = ConnectionStatus::Connected;
         self.bootstrap_resync_session_id = None;
         self.error = None;
+        self.disconnected_at = None;
         BootstrapApplication {
             rebuild: previous_layout != self.dock_projection(),
             resubscribe: resubscribe || authority_changed,
@@ -347,7 +358,10 @@ impl ServerConnection {
         self.bootstrap_resync_session_id = None;
         self.subscribed = false;
         self.subscription_pending = false;
-        self.error = Some(reason);
+        tracing::warn!(
+            reason,
+            "the Server rejected the Bootstrap; requesting a fresh snapshot"
+        );
         self.request_snapshot_for(authoritative_session_id)
     }
 

@@ -25,7 +25,6 @@ impl Condr {
             return;
         };
         connection.reconnect_deadline = Some(Instant::now() + RESTART_RECONNECT_TIMEOUT);
-        connection.error = None;
         self.server_admin(key, ServerAdminCommand::Restart);
         cx.notify();
     }
@@ -45,6 +44,12 @@ impl Condr {
             connection.reconnect_deadline = Some(Instant::now() + RESTART_RECONNECT_TIMEOUT);
         }
         self.schedule_reconnect(key, cx);
+        // The banner waits out the grace; nothing else would repaint when it ends.
+        cx.spawn(async move |owner, cx| {
+            cx.background_executor().timer(RECONNECT_GRACE).await;
+            let _ = owner.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
     }
 
     /// The user asked for this device: connect now and show it.
@@ -393,6 +398,7 @@ impl Condr {
         connection.status = ConnectionStatus::Disconnected;
         connection.reset_sync_state();
         connection.error = Some(message);
+        connection.disconnected_at = Some(Instant::now());
         connection.cancellation.cancel();
         connection.io = None;
         let active_projection_cleared = self.clear_pending_projections_for(key);

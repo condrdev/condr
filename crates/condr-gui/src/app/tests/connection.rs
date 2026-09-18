@@ -218,7 +218,10 @@ fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
     assert!(!connection.subscribed);
     assert!(!connection.subscription_pending);
     assert!(!connection.can_mutate());
-    assert_eq!(connection.error.as_deref(), Some("unknown Session"));
+    assert!(
+        connection.error.is_none(),
+        "a resync is not a connection failure"
+    );
 }
 
 #[test]

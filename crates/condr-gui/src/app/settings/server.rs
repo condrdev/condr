@@ -304,23 +304,18 @@ fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
         SettingField::render(move |_, _, cx| {
             let settings = restart.clone();
             let allowed = server_admin_allowed(&settings, cx);
-            let (restarting, error) = selected_connection(&settings, cx, |c| {
-                (c.reconnect_deadline.is_some(), c.error.clone())
-            })
-            .unwrap_or_default();
-            let feedback = if restarting {
-                Some((
-                    "Waiting for Condr to come back…".into(),
-                    cx.theme().muted_foreground,
-                ))
-            } else {
-                error.map(|error| (error, cx.theme().danger))
-            };
+            let restarting = selected_connection(&settings, cx, |c| c.reconnect_deadline.is_some())
+                .unwrap_or_default();
             h_flex()
                 .gap_3()
                 .items_center()
-                .when_some(feedback, |row, (text, color)| {
-                    row.child(div().text_sm().text_color(color).child(text))
+                .when(restarting, |row| {
+                    row.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Waiting for Condr to come back…"),
+                    )
                 })
                 .child(
                     Button::new("server-restart")
