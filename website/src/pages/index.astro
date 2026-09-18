@@ -4,13 +4,16 @@ import hero from '../../../assets/screenshots/hero.png';
 import '../styles/home.css';
 
 const features = [
-  { title: 'Always on', copy: 'The Server stays on. Close the window or disconnect — your agents keep working.' },
-  { title: 'Remote access', copy: 'Manage local and remote machines in one window. Connect over SSH or pair over TCP.' },
-  { title: 'Agent awareness', copy: 'See every agent’s state in the sidebar. Get notified when work is done.' },
-  { title: 'Agent driven', copy: 'Agents can use Condr too: create panes, read output, assign tasks, and talk to each other.' },
-  { title: 'Real terminals', copy: 'Every pane is a real terminal powered by the alacritty core. Run any CLI program.' },
-  { title: 'Fast by default', copy: 'Built entirely in Rust. No Electron. Responsive even while agents are busy.' },
+  { title: 'Always on', copy: 'Close the window or disconnect. The Server and your agents keep working.' },
+  { title: 'Remote access', copy: 'Manage local and remote devices in one window, over SSH or TCP.' },
+  { title: 'Agent status', copy: 'The sidebar shows what each agent is doing. Condr notifies you when an agent finishes.' },
+  { title: 'Agent driven', copy: 'Agents can use Condr too: create panes, read output, assign tasks, and talk to other agents.' },
+  { title: 'Real terminals', copy: 'Every pane is a real terminal built on the alacritty core. Run any CLI agent or terminal program.' },
+  { title: 'Fast', copy: 'Written entirely in Rust, with no Electron. Small and responsive, even while agents are busy.' },
 ];
+
+const releases = 'https://github.com/condrdev/condr/releases';
+const github = 'https://github.com/condrdev/condr';
 
 const agents = [
   { name: 'Claude Code', icon: 'claude' },
@@ -42,8 +45,9 @@ const agents = [
       <div class="header-actions">
         <nav aria-label="Main navigation">
           <a href="/docs/">Docs</a>
+          <a href={github}>GitHub</a>
         </nav>
-        <span class="header-button is-disabled" aria-disabled="true">Coming soon</span>
+        <a class="header-button" href={releases}>Download</a>
       </div>
     </header>
 
@@ -52,18 +56,18 @@ const agents = [
         <h1>Keep your agents<br /><span>running.</span></h1>
         <p class="hero-lede">One window for all your agents.<br />Local or remote, step away and pick up where you left off.</p>
         <div class="hero-actions">
-          <span class="button button-primary is-disabled" aria-disabled="true">Coming soon</span>
-          <a class="button button-secondary" href="/docs/">Read the docs <span>→</span></a>
+          <a class="button button-primary" href={releases}>Download</a>
+          <a class="button button-secondary" href="/docs/getting-started/">Get started <span>→</span></a>
         </div>
         <div class="hero-meta"><span>Windows</span><i></i><span>macOS</span><i></i><span>Linux</span><i></i><span>Built in Rust</span></div>
       </section>
 
       <section class="product-shot shell" aria-label="Condr workspace screenshot">
         <div class="shot-halo" aria-hidden="true"></div>
-        <figure><Image src={hero} alt="Condr workspace showing Claude Code, Codex, a remote dev server, and multiple terminal panes" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" /><figcaption><span>One workspace</span><span>Claude Code · Codex · any CLI</span></figcaption></figure>
+        <figure><Image src={hero} alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" /><figcaption><span>One workspace</span><span>Claude Code · Codex · any CLI</span></figcaption></figure>
         <div class="agent-strip" aria-label="Supported agent CLIs">
           {agents.map((agent) => <span class="agent-item"><img src={`/agents/${agent.icon}.svg`} alt="" aria-hidden="true" />{agent.name}</span>)}
-          <span class="agent-more">More...</span>
+          <span class="agent-more">and more</span>
         </div>
       </section>
 
@@ -71,35 +75,35 @@ const agents = [
         <div class="statement">
           <p class="section-label">Everything in one window</p>
           <h2>Give every agent a place<br /><span>to work.</span></h2>
-          <p class="statement-copy">Condr is a small native GUI for running Claude Code, Codex, and other CLI agents side by side. The work stays in real terminals. You get one clear view.</p>
+          <p class="statement-copy">Condr is a small desktop app. It runs Claude Code, Codex, and other CLI agents in one window, along with any other terminal program. Each agent gets a real terminal. You get one clear view.</p>
         </div>
         <div class="feature-grid">
-          {features.map((feature, index) => (
-            <article class="feature-card"><h3>{index + 1}. {feature.title}</h3><p>{feature.copy}</p></article>
+          {features.map((feature) => (
+            <article class="feature-card"><h3>{feature.title}</h3><p>{feature.copy}</p></article>
           ))}
         </div>
       </section>
 
       <section class="remote shell" id="remote">
-        <div class="remote-copy"><div class="section-label">Local or remote</div><h2>Leave the machine.<br /><span>Keep the work.</span></h2><p>Connect your laptop to a headless build box over SSH, or pair devices with a short-lived invite over TCP. Condr keeps the same workspace model either way.</p><a class="text-link" href="/docs/concepts/">How the connection works <span>→</span></a></div>
+        <div class="remote-copy"><div class="section-label">Local or remote</div><h2>Leave the machine.<br /><span>Keep the work.</span></h2><p>Install the headless Server on any device, then connect from your desktop over SSH or pair over TCP with a one-time link. Either way, you get the same window and the same workspaces.</p><a class="text-link" href="/docs/getting-started/#connect-to-a-remote-device">How to connect a remote device <span>→</span></a></div>
         <div class="connection-card">
           <div class="connection-head"><span class="connection-live"></span><span>Remote connections</span><span class="connection-count">SSH · TCP</span></div>
           <div class="remote-method">
             <div class="method-icon">↗</div>
             <strong>SSH</strong>
-            <small class="method-description">Connect to a remote machine.</small>
+            <small class="method-description">Uses your OpenSSH configuration and ssh-agent.</small>
           </div>
           <code class="remote-code">ssh://user@build-box</code>
           <div class="remote-method">
             <div class="method-icon method-tcp">⌁</div>
             <strong>TCP pairing</strong>
-            <small class="method-description">Pair another Condr device.</small>
+            <small class="method-description">Pairing link from <code>condr server invite</code>.</small>
           </div>
           <code class="remote-code">tcp://&lt;server key&gt;.&lt;invite&gt;@&lt;host&gt;:&lt;port&gt;</code>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer shell"><a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a><span>Keep your agents running.</span><div><a href="/docs/">Docs</a></div></footer>
+    <footer class="site-footer shell"><a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a><span>Keep your agents running.</span><div><a href="/docs/">Docs</a> <a href={github}>GitHub</a></div></footer>
   </body>
 </html>

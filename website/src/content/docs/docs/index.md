@@ -1,9 +1,9 @@
 ---
 title: Condr documentation
-description: Learn how Condr brings agents, sessions, and terminals together.
+description: Install Condr, connect remote devices, and learn how it works.
 template: splash
 hero:
-  tagline: A calm command center for agent work.
+  tagline: Keep your agents running. One window for all your agents, local or remote.
   actions:
     - text: Get started
       link: /docs/getting-started/
@@ -13,4 +13,4 @@ hero:
       icon: open-book
 ---
 
-Condr keeps the orchestration layer close to the tools you already use.
+Condr runs Claude Code, Codex, and other CLI agents in one window. The Server keeps them running after you close the window, on this device or a remote one.

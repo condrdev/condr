@@ -11,7 +11,7 @@ export default defineConfig({
     starlight({
       title: 'Condr Docs',
       favicon: '/condr.svg',
-      description: 'A calm command center for agent work.',
+      description: 'Keep your agents running. One window for all your agents, local or remote.',
       sidebar: [
         {
           label: 'Start here',
