@@ -1,6 +1,7 @@
 use super::*;
 
-/// How long after the last font keystroke the config file is written.
+/// How long after the last font change the config file is written, so a run of
+/// stepper clicks rewrites it once.
 pub(super) const FONT_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// The GUI appearance preference. `System` follows the OS; the other two pin a mode.
@@ -164,23 +165,25 @@ pub(in crate::app) fn select_appearance(owner: &WeakEntity<Condr>, value: &str, 
     let _ = owner.update(cx, |this, cx| this.set_appearance(appearance, cx));
 }
 
-/// What the Font field shows: the value as typed in this window.
+/// What the Font field shows; tests read it without the widget.
+#[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn terminal_font_family(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SharedString {
-    settings.read(cx).font_draft.family.clone()
+    settings.read(cx).font_family.draft.clone()
 }
 
-/// What the Font field does on every change.
+/// What typing a family and leaving the Font field does; tests call it without the widget.
+#[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn select_terminal_font_family(
     settings: &Entity<SettingsWindow>,
     family: SharedString,
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| {
-        this.font_draft.family = family;
-        this.commit_font(cx);
+        this.font_family.draft = family;
+        this.commit(TextFieldId::FontFamily, cx);
     });
 }
 
@@ -251,8 +254,6 @@ pub(super) fn appearance_page(
         .map(|appearance| (appearance.as_str().into(), appearance.label().into()))
         .to_vec();
     let default_font = TerminalFont::default();
-    let family_get = settings.clone();
-    let family_set = settings.clone();
     let size_get = settings.clone();
     let size_set = settings.clone();
     let size_dirty = settings.clone();
@@ -280,13 +281,11 @@ pub(super) fn appearance_page(
                 .item(
                     SettingItem::new(
                         "Font",
-                        SettingField::input(
-                            move |cx| terminal_font_family(&family_get, cx),
-                            move |value: SharedString, cx| {
-                                select_terminal_font_family(&family_set, value, cx)
-                            },
-                        )
-                        .default_value(default_font.family.clone()),
+                        text_field_row(
+                            settings,
+                            TextFieldId::FontFamily,
+                            default_font.family.clone(),
+                        ),
                     )
                     .description("Font family used by every terminal."),
                 )

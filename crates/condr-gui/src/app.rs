@@ -309,9 +309,7 @@ pub(crate) struct Condr {
     _settings_window_closed: Option<Subscription>,
     /// The pending debounced font save; replacing it cancels the previous one.
     _font_save: Option<Task<()>>,
-    _shell_save: Option<Task<()>>,
     /// The Shell value waiting for its debounce, and the Server it belongs to.
-    pending_shell: Option<(ConnectionKey, String)>,
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
@@ -385,7 +383,6 @@ impl Condr {
             if this._font_save.is_some() {
                 this.save_terminal_font(cx);
             }
-            this.flush_server_shell();
             let pending = this.config_save.take();
             async move {
                 if let Some(pending) = pending {
@@ -458,8 +455,6 @@ impl Condr {
             settings_view: None,
             _settings_window_closed: None,
             _font_save: None,
-            _shell_save: None,
-            pending_shell: None,
             drop_target: None,
             _quit_subscription: quit_subscription,
             app_error: config_error,

@@ -1,6 +1,7 @@
 mod appearance;
 mod server;
 mod shortcuts;
+mod text_field;
 
 use super::*;
 use gpui_kit::component::kbd::Kbd;
@@ -9,6 +10,7 @@ use shortcuts::shortcuts_page;
 
 pub(super) use appearance::*;
 pub(super) use server::*;
+pub(super) use text_field::*;
 
 // Sized in rems so the window zooms with the base font, resolved against the main
 // window's rem size when it opens.
@@ -116,20 +118,21 @@ pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
     pub(super) color_scheme: Entity<ColorSchemeSelect>,
-    /// The font as typed in this window. `Condr` only ever holds the normalized
-    /// form, so a half-edited value never reaches the theme or the config file, and
-    /// reopening Settings starts from what is actually in use.
+    /// The font as last committed from this window. `Condr` only ever holds the
+    /// normalized form, so a half-edited value never reaches the theme or the config
+    /// file, and reopening Settings starts from what is actually in use.
     pub(super) font_draft: TerminalFont,
     /// Which Server the Server page edits; starts at the active connection.
     pub(super) selected_server: ConnectionKey,
-    /// The Shell field as typed. The Server stores the trimmed value and echoes it
-    /// through its settings; the field is not rewritten under the user meanwhile.
-    pub(super) shell_draft: SharedString,
-    /// The Listen address as typed; see `set_server_listen`.
-    pub(super) listen_draft: SharedString,
-    /// The Listen address field. Typing only moves the draft; leaving the field or
-    /// pressing Enter saves it, so a half-typed address never reaches the Server.
-    pub(super) listen_input: Entity<InputState>,
+    /// The three free-text fields; see `TextField` for how they commit.
+    pub(super) font_family: TextField,
+    pub(super) shell: TextField,
+    pub(super) listen: TextField,
+    /// The field whose value just went out, for the "Saved" hint beside it.
+    pub(super) saved: Option<TextFieldId>,
+    _saved_clear: Option<Task<()>>,
+    /// The Listen draft is not a `host:port`; shown beside the field until it is.
+    pub(super) listen_refused: bool,
     /// Which tab is showing: this Client's settings or one Server's.
     pub(super) tab: SettingsTab,
     /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
@@ -236,22 +239,24 @@ impl SettingsWindow {
             .upgrade()
             .map(|owner| owner.read(cx).active_connection)
             .unwrap_or_default();
-        let shell_draft = connection_shell(&owner, selected_server, cx);
-        let listen_draft = connection_listen(&owner, selected_server, cx);
-        let listen_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(listen_draft.clone()));
-        cx.subscribe(
-            &listen_input,
-            |this, input, event: &InputEvent, cx| match event {
-                InputEvent::Change => {
-                    this.listen_draft = input.read(cx).value();
-                    cx.notify();
-                }
-                InputEvent::Blur | InputEvent::PressEnter { .. } => this.commit_listen(cx),
-                InputEvent::Focus => {}
-            },
-        )
-        .detach();
+        let font_family = Self::text_field(
+            TextFieldId::FontFamily,
+            font_draft.family.clone(),
+            window,
+            cx,
+        );
+        let shell = Self::text_field(
+            TextFieldId::Shell,
+            connection_shell(&owner, selected_server, cx),
+            window,
+            cx,
+        );
+        let listen = Self::text_field(
+            TextFieldId::Listen,
+            connection_listen(&owner, selected_server, cx),
+            window,
+            cx,
+        );
         // Connection status and admin replies live on `Condr`; the Server pages show them.
         if let Some(owner) = owner.upgrade() {
             cx.observe(&owner, |_, _, cx| cx.notify()).detach();
@@ -297,9 +302,12 @@ impl SettingsWindow {
             color_scheme,
             font_draft,
             selected_server,
-            shell_draft,
-            listen_draft,
-            listen_input,
+            font_family,
+            shell,
+            listen,
+            saved: None,
+            _saved_clear: None,
+            listen_refused: false,
             tab: SettingsTab::default(),
             server_select,
             server_keys,
@@ -325,8 +333,9 @@ impl SettingsWindow {
     /// Switches the Server tab to another connection and reloads its shell.
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         self.selected_server = key;
-        self.shell_draft = connection_shell(&self.owner, key, cx);
-        self.listen_draft = connection_listen(&self.owner, key, cx);
+        self.shell.reset(connection_shell(&self.owner, key, cx));
+        self.listen.reset(connection_listen(&self.owner, key, cx));
+        self.listen_refused = false;
         let _ = self.owner.update(cx, |owner, _| {
             owner.request_agent_hooks(key);
             owner.request_server_admin(key);

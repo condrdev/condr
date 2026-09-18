@@ -44,23 +44,22 @@ pub(in crate::app) fn select_settings_tab(
     });
 }
 
-/// What the Shell field shows.
+/// What the Shell field shows; tests read it without the widget.
+#[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn server_shell(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
-    settings.read(cx).shell_draft.clone()
+    settings.read(cx).shell.draft.clone()
 }
 
-/// What the Shell field does on every change.
+/// What typing a shell and leaving the field does; tests call it without the widget.
+#[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn select_server_shell(
     settings: &Entity<SettingsWindow>,
     shell: SharedString,
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| {
-        this.shell_draft = shell.clone();
-        let key = this.selected_server;
-        let _ = this
-            .owner
-            .update(cx, |owner, cx| owner.set_server_shell(key, &shell, cx));
+        this.shell.draft = shell;
+        this.commit(TextFieldId::Shell, cx);
     });
 }
 
@@ -69,8 +68,6 @@ const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
 /// Preferences a Server owns, edited for one connection at a time; the Server picker sits
 /// in the tab bar. Each page mirrors one `condr server` concern.
 pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> SettingPage {
-    let shell_get = settings.clone();
-    let shell_set = settings.clone();
     SettingPage::new("Terminal")
         .icon(IconName::SquareTerminal)
         .default_open(true)
@@ -78,11 +75,7 @@ pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> Setting
             SettingGroup::new().item(
                 SettingItem::new(
                     "Shell",
-                    SettingField::input(
-                        move |cx| server_shell(&shell_get, cx),
-                        move |value: SharedString, cx| select_server_shell(&shell_set, value, cx),
-                    )
-                    .default_value(""),
+                    text_field_row(settings, TextFieldId::Shell, "".into()),
                 )
                 .description("Empty uses the system default."),
             ),
@@ -145,18 +138,22 @@ impl SettingsWindow {
             .map(read)
     }
 
-    /// Saves the Listen address draft if it is a complete `host:port` and the listener is
-    /// on; anything else stays in the field. Runs when the field is left or Enter pressed.
-    pub(in crate::app) fn commit_listen(&mut self, cx: &mut Context<Self>) {
+    /// Saves the Listen address draft if it is a complete `host:port`; anything else is
+    /// refused and stays in the field. With the listener off nothing goes out: the
+    /// address is used when it is switched on. See `SettingsWindow::commit`.
+    pub(in crate::app) fn commit_listen(&mut self, cx: &mut Context<Self>) -> Option<bool> {
+        let Ok(address) = self.listen.draft.trim().parse::<std::net::SocketAddr>() else {
+            self.listen_refused = true;
+            return None;
+        };
+        self.listen_refused = false;
         let listening = self
             .selected_connection(cx, |c| c.listen.is_some())
             .unwrap_or(false);
-        if !listening {
-            return;
-        }
-        if let Ok(address) = self.listen_draft.trim().parse::<std::net::SocketAddr>() {
+        if listening {
             self.send_listen(Some(address.to_string()), cx);
         }
+        Some(listening)
     }
 
     fn send_listen(&mut self, address: Option<String>, cx: &mut Context<Self>) {
@@ -376,7 +373,6 @@ fn server_network_group(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingGroup {
-    let value = settings.clone();
     let over_tcp = this
         .selected_connection(cx, |c| matches!(c.endpoint, Endpoint::Tcp(_)))
         .unwrap_or(false);
@@ -405,17 +401,7 @@ fn server_network_group(
         .item(
             SettingItem::new(
                 "Listen address",
-                // Not `SettingField::input`: that saves on every keystroke, and this field
-                // saves when it is left. ponytail: no reset-to-default arrow as a result.
-                SettingField::render(move |_, window, cx| {
-                    let input = value.read(cx).listen_input.clone();
-                    // Picking another Server replaces the draft under the field.
-                    let draft = server_listen(&value, cx);
-                    if input.read(cx).value() != draft {
-                        input.update(cx, |input, cx| input.set_value(draft, window, cx));
-                    }
-                    Input::new(&input).w_64()
-                }),
+                text_field_row(settings, TextFieldId::Listen, DEFAULT_LISTEN.into()),
             )
             .description("host:port"),
         )
@@ -665,7 +651,7 @@ pub(super) fn connection_listen(
 /// What the Listen address field shows: the draft, so typing is not rewritten under the
 /// user while the Server has only the last complete address.
 pub(in crate::app) fn server_listen(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
-    settings.read(cx).listen_draft.clone()
+    settings.read(cx).listen.draft.clone()
 }
 
 fn server_listen_enabled(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
@@ -695,9 +681,8 @@ pub(in crate::app) fn set_server_listen(
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| {
-        this.listen_draft = address;
-        this.commit_listen(cx);
-        cx.notify();
+        this.listen.draft = address;
+        this.commit(TextFieldId::Listen, cx);
     });
 }
 
@@ -826,38 +811,9 @@ pub(super) fn agent_hooks_field(
 
 impl Condr {
     /// Asks a Server to store a new shell preference. The stored value comes back as a
-    /// `ServerSettingsChanged` event; nothing is assumed locally.
-    pub(in crate::app) fn set_server_shell(
-        &mut self,
-        key: ConnectionKey,
-        shell: &str,
-        cx: &mut Context<Self>,
-    ) {
-        // Debounced like the font: the Server persists every value it receives, so a
-        // half-typed path must not reach config.toml or the next new terminal. A value
-        // for another Server still goes out before this one replaces it.
-        if self
-            .pending_shell
-            .as_ref()
-            .is_some_and(|(pending_key, _)| *pending_key != key)
-        {
-            self.flush_server_shell();
-        }
-        self.pending_shell = Some((key, shell.to_owned()));
-        self._shell_save = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
-            let _ = this.update(cx, |this, _| this.flush_server_shell());
-        }));
-    }
-
-    /// Sends the debounced Shell value now, if one is waiting.
-    pub(in crate::app) fn flush_server_shell(&mut self) {
-        if let Some((key, shell)) = self.pending_shell.take() {
-            self.send_server_shell(key, &shell);
-        }
-    }
-
-    fn send_server_shell(&mut self, key: ConnectionKey, shell: &str) {
+    /// `ServerSettingsChanged` event; nothing is assumed locally. The Server persists
+    /// every value it receives, so only a committed field calls this, never a keystroke.
+    pub(in crate::app) fn set_server_shell(&mut self, key: ConnectionKey, shell: &str) {
         let Some(connection) = self
             .connections
             .iter_mut()

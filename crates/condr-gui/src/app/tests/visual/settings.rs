@@ -172,12 +172,6 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         " nu ",
         "the field keeps what was typed"
     );
-    // The value goes out after the same debounce as the font: let the task register its
-    // timer, then move the test clock past it.
-    window.run_until_parked();
-    window
-        .executor()
-        .advance_clock(std::time::Duration::from_millis(300));
     assert!(
         wait_until_event_driven(window, |window| {
             window.read(|app| {
@@ -189,10 +183,6 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         "the Server must store the trimmed shell and publish it"
     );
     window.update(|_, cx| select_server_shell(&settings_view, "".into(), cx));
-    window.run_until_parked();
-    window
-        .executor()
-        .advance_clock(std::time::Duration::from_millis(300));
     assert!(wait_until_event_driven(window, |window| {
         window.read(|app| {
             view.read(app)
