@@ -857,6 +857,18 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
             });
         })
     });
+    // Alt+F4 is the OS's close chord: it must reach the platform, never the PTY.
+    window.simulate_keystrokes("alt-f4");
+    assert!(
+        !received.try_iter().any(|message| matches!(
+            message,
+            ClientMessage::Terminal {
+                command: TerminalCommand::Key { .. },
+                ..
+            }
+        )),
+        "Alt+F4 must not be sent to the terminal"
+    );
     let image = gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, vec![1, 2, 3]);
     for clipboard in [
         ClipboardItem::new_string("text".into()),

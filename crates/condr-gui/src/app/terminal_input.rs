@@ -245,6 +245,11 @@ impl Condr {
             // has no way to carry the modifier, so Cmd+Ctrl+C must not become ETX).
             return;
         }
+        if modifiers.alt && stroke.key == "f4" {
+            // Windows closes the window on Alt+F4 only if no element handled the key;
+            // GPUI hands it to the app first. No terminal program needs it.
+            return;
+        }
         let key_code = terminal_key_for(stroke);
         if let Some(key_code) = key_code {
             self.clear_selection(cx);
