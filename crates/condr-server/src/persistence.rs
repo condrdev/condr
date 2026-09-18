@@ -1,5 +1,3 @@
-mod config;
-
 use atomicwrites::{AllowOverwrite, AtomicFile};
 use condr_core::SessionSnapshot;
 use std::fs::{self, File, OpenOptions};
@@ -8,8 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-
-pub use config::{read_config_text, update_config_values};
 
 const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(250);
 const RETRY_DELAY: Duration = Duration::from_secs(1);

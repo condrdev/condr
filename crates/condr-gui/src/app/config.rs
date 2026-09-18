@@ -54,10 +54,6 @@ struct SavedWorkspaceEditor {
     editor: String,
 }
 
-pub(super) fn default_path() -> Option<PathBuf> {
-    condr_core::config_directory().map(|root| root.join("config.toml"))
-}
-
 pub(super) struct LoadedConfig {
     pub path: Option<PathBuf>,
     pub device_key: Option<StaticKey>,
@@ -228,7 +224,7 @@ pub(super) fn load_changes_sidebar(path: &Path) -> io::Result<bool> {
 /// A missing or malformed key keeps its default so the terminal always has a font.
 pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
     let mut font = TerminalFont::default();
-    if let Some(family) = read_value(path, &TERMINAL_TABLE, FONT_FAMILY_KEY)?
+    if let Some(family) = condr_core::read_config_value(path, &TERMINAL_TABLE, FONT_FAMILY_KEY)?
         .as_ref()
         .and_then(toml::Value::as_str)
         .map(str::trim)
@@ -236,11 +232,13 @@ pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
     {
         font.family = family.to_string().into();
     }
-    if let Some(size) = read_value(path, &TERMINAL_TABLE, FONT_SIZE_KEY)?.and_then(|value| {
-        value
-            .as_float()
-            .or_else(|| value.as_integer().map(|size| size as f64))
-    }) {
+    if let Some(size) = condr_core::read_config_value(path, &TERMINAL_TABLE, FONT_SIZE_KEY)?
+        .and_then(|value| {
+            value
+                .as_float()
+                .or_else(|| value.as_integer().map(|size| size as f64))
+        })
+    {
         font.size = TerminalFont::clamp_size(size as f32);
     }
     Ok(font)
@@ -248,11 +246,13 @@ pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
 
 /// Empty when unset; the caller resolves unknown names to the default palette.
 pub(super) fn load_terminal_color_scheme(path: &Path) -> io::Result<SharedString> {
-    Ok(read_value(path, &TERMINAL_TABLE, COLOR_SCHEME_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_str)
-        .map(|name| name.trim().to_string().into())
-        .unwrap_or_default())
+    Ok(
+        condr_core::read_config_value(path, &TERMINAL_TABLE, COLOR_SCHEME_KEY)?
+            .as_ref()
+            .and_then(toml::Value::as_str)
+            .map(|name| name.trim().to_string().into())
+            .unwrap_or_default(),
+    )
 }
 
 /// `None` when unset or blank; an unknown id is kept, since the editor may be installed later.
@@ -285,18 +285,7 @@ pub(super) fn load_workspace_editors(path: &Path) -> io::Result<BTreeMap<PathBuf
 }
 
 fn read_client_value(path: &Path, key: &str) -> io::Result<Option<toml::Value>> {
-    read_value(path, &["client"], key)
-}
-
-fn read_value(path: &Path, tables: &[&str], key: &str) -> io::Result<Option<toml::Value>> {
-    let root = read_root(path)?;
-    let mut table = Some(&root);
-    for name in tables {
-        table = table
-            .and_then(|table| table.get(*name))
-            .and_then(toml::Value::as_table);
-    }
-    Ok(table.and_then(|table| table.get(key)).cloned())
+    condr_core::read_config_value(path, &["client"], key)
 }
 
 fn decode_servers(value: toml::Value) -> io::Result<Vec<SavedServer>> {
@@ -484,20 +473,11 @@ fn write_values(
     tables: &[&str],
     entries: Vec<(&str, toml_edit::Item)>,
 ) -> io::Result<()> {
-    condr_server::update_config_values(
+    condr_core::update_config_values(
         path,
         tables,
         entries.into_iter().map(|(key, value)| (key, Some(value))),
     )
-}
-
-/// Reads for the typed load path. `toml` deserializes a hand-edited value into
-/// `SavedServer` and reports a useful error; `toml_edit` is only for writing back.
-fn read_root(path: &Path) -> io::Result<toml::Table> {
-    match condr_server::read_config_text(path)? {
-        Some(text) => toml::from_str(&text).map_err(invalid_data),
-        None => Ok(toml::Table::new()),
-    }
 }
 
 fn invalid_data(error: impl std::fmt::Display) -> io::Error {
@@ -507,14 +487,6 @@ fn invalid_data(error: impl std::fmt::Display) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_config_uses_the_platform_config_directory() {
-        assert_eq!(
-            default_path(),
-            condr_core::config_directory().map(|root| root.join("config.toml"))
-        );
-    }
 
     #[test]
     fn ssh_config_keeps_the_binary_path_and_needs_no_device_key() {
@@ -555,8 +527,13 @@ mod tests {
         )
         .unwrap();
 
-        let root = read_root(&path).unwrap();
-        assert_eq!(root["server"]["listen"].as_str(), Some("127.0.0.1:4242"));
+        assert_eq!(
+            condr_core::read_config_value(&path, &["server"], "listen")
+                .unwrap()
+                .as_ref()
+                .and_then(toml::Value::as_str),
+            Some("127.0.0.1:4242")
+        );
         let servers = load_servers(&path).unwrap();
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].name, "Linux");
@@ -591,8 +568,13 @@ mod tests {
 
         assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
         assert_eq!(load_servers(&path).unwrap().len(), 1);
-        let root = read_root(&path).unwrap();
-        assert_eq!(root["server"]["listen"].as_str(), Some("127.0.0.1:4242"));
+        assert_eq!(
+            condr_core::read_config_value(&path, &["server"], "listen")
+                .unwrap()
+                .as_ref()
+                .and_then(toml::Value::as_str),
+            Some("127.0.0.1:4242")
+        );
 
         write_client_value(&path, APPEARANCE_KEY, toml_edit::value("solarized")).unwrap();
         assert_eq!(load_appearance(&path).unwrap(), Appearance::System);

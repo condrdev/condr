@@ -26,7 +26,7 @@ impl ServerConfig {
 impl Default for ServerConfig {
     /// The host's Server: default socket, and the TCP address `config.toml` names, if any.
     fn default() -> Self {
-        let config_path = condr_core::config_directory().map(|root| root.join("config.toml"));
+        let config_path = condr_core::config_path();
         let socket_path = default_socket_path();
         Self {
             listen: load_listen(config_path.as_deref()),
@@ -42,77 +42,48 @@ impl Default for ServerConfig {
 /// `[server] listen` from `config.toml`: the TCP address the Server also answers on.
 /// Absent, blank or malformed means no TCP listener.
 pub fn load_listen(path: Option<&std::path::Path>) -> Option<std::net::SocketAddr> {
-    load_server_setting(path?, "listen")?.trim().parse().ok()
-}
-
-/// Persists `[server] listen`, or removes it for `None`.
-pub fn save_listen(path: &std::path::Path, listen: Option<std::net::SocketAddr>) -> io::Result<()> {
-    save_server_setting(
-        path,
-        "listen",
-        listen.map(|address| toml_edit::value(address.to_string())),
-    )
-}
-
-fn load_server_setting(path: &std::path::Path, key: &str) -> Option<String> {
-    crate::persistence::read_config_text(path)
+    condr_core::read_config_value(path?, &["server"], "listen")
         .ok()??
-        .parse::<toml::Table>()
-        .ok()?
-        .get("server")?
-        .get(key)?
-        .as_str()
-        .map(str::to_owned)
+        .as_str()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Persists `[server] listen`, or removes it for `None`, leaving every other key,
+/// comment and line as written.
+pub fn save_listen(path: &std::path::Path, listen: Option<std::net::SocketAddr>) -> io::Result<()> {
+    condr_core::update_config_values(
+        path,
+        &["server"],
+        [(
+            "listen",
+            listen.map(|address| toml_edit::value(address.to_string())),
+        )],
+    )
 }
 
 /// `[server.terminal] shell` from the Server's `config.toml`, blank when unset or the
 /// file is missing or malformed. Read once at startup; hand edits need a restart.
 pub(super) fn load_shell(path: Option<&std::path::Path>) -> String {
-    let Some(path) = path else {
-        return String::new();
-    };
-    crate::persistence::read_config_text(path)
-        .ok()
-        .flatten()
-        .and_then(|text| text.parse::<toml::Table>().ok())
-        .and_then(|root| {
-            root.get("server")?
-                .get("terminal")?
-                .get("shell")?
-                .as_str()
-                .map(|shell| shell.trim().to_owned())
-        })
-        .unwrap_or_default()
+    path.and_then(|path| {
+        condr_core::read_config_value(path, &["server", "terminal"], "shell")
+            .ok()?
+            .as_ref()?
+            .as_str()
+            .map(|shell| shell.trim().to_owned())
+    })
+    .unwrap_or_default()
 }
 
 /// Writes `[server.terminal] shell` back, keeping the rest of the hand-editable file
 /// (other keys, comments, formatting) as it was.
 pub(super) fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {
-    save_setting(
+    condr_core::update_config_values(
         path,
         &["server", "terminal"],
-        "shell",
-        Some(toml_edit::value(shell)),
+        [("shell", Some(toml_edit::value(shell)))],
     )
-}
-
-fn save_server_setting(
-    path: &std::path::Path,
-    key: &str,
-    value: Option<toml_edit::Item>,
-) -> io::Result<()> {
-    save_setting(path, &["server"], key, value)
-}
-
-/// Sets or, for `None`, removes one key under `tables` in `config.toml`, leaving every
-/// other key, comment and line as written.
-fn save_setting(
-    path: &std::path::Path,
-    tables: &[&str],
-    key: &str,
-    value: Option<toml_edit::Item>,
-) -> io::Result<()> {
-    crate::persistence::update_config_values(path, tables, [(key, value)])
 }
 
 impl ServerConfig {
@@ -123,7 +94,7 @@ impl ServerConfig {
             listen: None,
             snapshot_path: default_snapshot_path(&socket_path),
             socket_path,
-            config_path: condr_core::config_directory().map(|root| root.join("config.toml")),
+            config_path: condr_core::config_path(),
             identity: None,
             test_device: None,
         }

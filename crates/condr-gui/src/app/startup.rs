@@ -237,7 +237,7 @@ pub(crate) fn run() {
         }
     };
     let endpoint = ServerConfig::default().local_endpoint();
-    let config = config::LoadedConfig::read(config::default_path());
+    let config = config::LoadedConfig::read(condr_core::config_path());
     let app = gpui_kit::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {

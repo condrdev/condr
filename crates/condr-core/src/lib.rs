@@ -1,5 +1,6 @@
 mod agent;
 pub mod agent_discovery;
+mod config;
 mod files;
 mod git;
 mod paths;
@@ -14,6 +15,7 @@ pub use agent::{
     AgentResume, AgentSnapshot, AgentState, AgentTracker, ProcessInfo, ProcessProbeResult,
     hook as agent_hook, hooks as agent_hooks, identify_agent_among, identify_agent_process,
 };
+pub use config::{config_path, read_config_text, read_config_value, update_config_values};
 pub use files::{
     DirectoryEntry, DirectoryListing, FileContent, FileKind, MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES,
     list_directory, read_file, valid_directory_path,

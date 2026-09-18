@@ -1,4 +1,4 @@
-use condr_server::{read_config_text, update_config_values};
+use condr_core::{read_config_text, update_config_values};
 #[cfg(windows)]
 use std::fs::OpenOptions;
 use std::{

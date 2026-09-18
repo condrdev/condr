@@ -24,7 +24,6 @@ snow.workspace = true
 socket2.workspace = true
 getrandom.workspace = true
 curve25519-dalek.workspace = true
-toml.workspace = true
 toml_edit.workspace = true
 condr-core = { path = "../condr-core" }
 tokio.workspace = true
