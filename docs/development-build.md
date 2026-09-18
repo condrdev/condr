@@ -93,7 +93,7 @@ condr agent wait worker --until idle --until blocked --timeout 120000
 
 `condr-core::agent_discovery` 独立于 Pane 的进程/状态检测，按 Server 当前 PATH 查找 10 种已知 agent 的原生 CLI，返回类型和可执行文件的绝对路径；`AgentKind::executable()` 统一处理 `cursor-agent`、`agy` 等命令名。Unix 检查文件执行位，Windows 查找 `.exe` / `.cmd` / `.bat` / `.ps1`；保留 symlink/shim 路径。每次查询重新扫描，不运行 CLI、不调用 `--version`、不安装 hook，也不搜索 PATH 外的安装目录或 shell alias。通过 TCP 连接时探测的仍是目标 Server。找到文件不代表已登录或 hook 已配置。Pi、OMP、Antigravity CLI、官方 Grok Build、Cursor CLI、GitHub Copilot CLI 已有 hook 安装入口；Kimi 目前仅识别身份，hooks 显示 unavailable，原生事件无法区分主任务和子 agent 的完成。版本、配置与测试范围见 [新增 Agent hooks 调查](research/additional-agent-hooks.md)。
 
-`start` 只使用已有 Pane 的空闲 shell，保留 cwd 和环境，以探测到的绝对路径启动。支持 sh/bash/dash/zsh/ksh/mksh/fish 和 PowerShell；其它 shell 暂不支持自动启动。参数按实际 shell 引用，编码后的整条启动命令最多 4094 字节，拒绝控制字符；Windows batch shim 的参数另外拒绝 shell 元字符。命令和回车一次入队，不会拆成两次 client 请求。Shell 尚在初始化时 CLI 最多重试 2 秒，只重试 Server 确认未发送输入的请求。
+`start` 只使用已有 Pane 的空闲 shell，保留 cwd 和环境，以探测到的绝对路径启动。支持 sh/bash/dash/zsh/ksh/mksh/csh/tcsh/fish/elvish/xonsh/nu、PowerShell 和 cmd.exe；其它 shell 报 `agent_start_failed` 并点名该 shell，可用 `[server.terminal] shell` 换一个。参数只在含特殊字符时才加引号（POSIX 单引号或 PowerShell 单引号）；Windows 上 PowerShell Pane 用 `Start-Process` 保住 argv，cmd.exe Pane 把同一段脚本以 `powershell.exe -EncodedCommand` 提交。编码后的整条启动命令最多 4094 字节，拒绝控制字符；Windows batch shim 的参数另外拒绝 shell 元字符。命令和回车一次入队，不会拆成两次 client 请求。Shell 尚在初始化时 CLI 最多重试 2 秒，只重试 Server 确认未发送输入的请求。
 
 `start` / `prompt` 的文本与 Enter 共用一个有界输入队列任务。Writer 写完文本后，Unix 等待 300 ms、Windows 等待 1 秒再发 Enter，避免原生 CLI 把 Enter 吸收为粘贴内容；期间其它输入不能插入这次提交，停止 Terminal 会取消尚未发送的 Enter。普通键盘输入不增加等待。延迟提交思路参考 Herdr `9a2a7af5402f2bc67ab24c8b4c14c6dd20a43bb2` 的 `src/app/api/agents.rs`（Apache-2.0，文件无额外 notice）；Windows 的较长间隔来自 Condr 的原生 Codex 验证。
 

@@ -1,5 +1,26 @@
 use super::*;
 
+/// Interactive shells a Pane may run, by lower-cased file name without `.exe`: the
+/// ones that accept a command line typed at their prompt. Shared by launch (idle
+/// shell check) and process identification (a shell wrapping an agent).
+pub(crate) const KNOWN_SHELLS: &[&str] = &[
+    "sh",
+    "bash",
+    "dash",
+    "zsh",
+    "fish",
+    "ksh",
+    "mksh",
+    "csh",
+    "tcsh",
+    "elvish",
+    "xonsh",
+    "nu",
+    "pwsh",
+    "powershell",
+    "cmd",
+];
+
 #[cfg(any(windows, test))]
 const WINDOWS_POWERSHELL_CWD_HOOK: &str = r"if ($null -eq $global:__CondrOriginalPrompt) { $global:__CondrOriginalPrompt = $function:prompt; function global:prompt { $out = @(& $global:__CondrOriginalPrompt) -join ' '; $loc = $ExecutionContext.SessionState.Path.CurrentLocation; if ($loc.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}; $esc = [string][char]27; $out += $esc + ']9;9;' + $loc.ProviderPath + $esc + '\' }; $out } }";
 

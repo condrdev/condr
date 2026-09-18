@@ -33,7 +33,8 @@ impl TerminalRuntime {
 impl TerminalLaunchProbe {
     /// Whether the Pane has an idle supported shell ready for a command.
     pub fn is_idle(&self) -> bool {
-        self.idle_shell().is_some()
+        self.idle_shell()
+            .is_some_and(|shell| KNOWN_SHELLS.contains(&shell.as_str()))
     }
 
     /// OS inspection runs outside the Server lock. The caller validates the Terminal
@@ -49,6 +50,15 @@ impl TerminalLaunchProbe {
                 "Pane is busy or its shell is initializing",
             )
         })?;
+        if !KNOWN_SHELLS.contains(&shell.as_str()) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!(
+                    "unsupported shell '{shell}'; set [server.terminal] shell to one of {}",
+                    KNOWN_SHELLS.join(", ")
+                ),
+            ));
+        }
         let program = installation.executable.to_str().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -104,16 +114,21 @@ impl TerminalLaunchProbe {
         {
             return None;
         }
+        // The idle root process by lower-cased name, whatever it is; callers decide
+        // whether Condr knows how to type a command into it.
         let name = shell.name().to_str()?.to_ascii_lowercase();
-        let name = name.trim_start_matches('-').trim_end_matches(".exe");
-        matches!(
-            name,
-            "sh" | "bash" | "dash" | "zsh" | "ksh" | "mksh" | "fish" | "pwsh" | "powershell"
+        Some(
+            name.trim_start_matches('-')
+                .trim_end_matches(".exe")
+                .to_owned(),
         )
-        .then(|| name.to_owned())
     }
 }
 
+/// The launch as one line typed at the idle shell's prompt. Words are quoted only when
+/// they need it, in POSIX or PowerShell single quotes; on Windows the PowerShell forms
+/// go through `windows_command` and a cmd.exe Pane runs the same script through
+/// `powershell.exe -EncodedCommand`, which no cmd quoting can break.
 fn shell_command(shell: &str, program: &str, args: &[String]) -> io::Result<String> {
     if std::iter::once(program)
         .chain(args.iter().map(String::as_str))
@@ -125,17 +140,21 @@ fn shell_command(shell: &str, program: &str, args: &[String]) -> io::Result<Stri
         ));
     }
     let powershell = matches!(shell, "pwsh" | "powershell");
-    if powershell && cfg!(windows) {
-        return windows_command(program, args);
-    }
-    let quote = |value: &str| {
-        if powershell {
-            powershell_quote(value)
-        } else if shell == "fish" {
-            format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+    if cfg!(windows) && (powershell || shell == "cmd") {
+        let script = windows_command(program, args)?;
+        return Ok(if powershell {
+            script
         } else {
-            format!("'{}'", value.replace('\'', "'\\''"))
-        }
+            encoded_powershell_command(&script)
+        });
+    }
+    // ponytail: every non-PowerShell shell gets the POSIX form. It holds for bare words
+    // and for single-quoted words without an embedded `'` in fish, nu, elvish and xonsh
+    // too; only an argument containing `'` would need a per-shell escape there.
+    let quote = if powershell {
+        powershell_quote
+    } else {
+        posix_quote
     };
     Ok(format!(
         "{}{}",
@@ -148,8 +167,40 @@ fn shell_command(shell: &str, program: &str, args: &[String]) -> io::Result<Stri
     ))
 }
 
+fn is_bare_word(value: &str, extra: &[char]) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || extra.contains(&ch))
+}
+
+fn posix_quote(value: &str) -> String {
+    if is_bare_word(value, &['@', '%', '_', '+', '=', ':', ',', '.', '/', '-']) {
+        return value.to_owned();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// A leading `-` is quoted so a `.ps1` cannot bind it as one of its own parameters.
 fn powershell_quote(value: &str) -> String {
+    if !value.starts_with('-') && is_bare_word(value, &['_', '-', '.', '/', ':', '+', '=']) {
+        return value.to_owned();
+    }
     format!("'{}'", value.replace('\'', "''"))
+}
+
+/// `powershell.exe -EncodedCommand` takes the script as base64 of UTF-16LE, so cmd.exe
+/// never parses a character of it. Windows PowerShell 5.1 ships with every Windows.
+fn encoded_powershell_command(script: &str) -> String {
+    use base64::Engine as _;
+    let utf16 = script
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    format!(
+        "powershell.exe -NoLogo -NoProfile -EncodedCommand {}",
+        base64::engine::general_purpose::STANDARD.encode(utf16)
+    )
 }
 
 // Herdr's Start-Process approach preserves argv in Windows PowerShell's legacy
@@ -256,7 +307,58 @@ mod tests {
         assert!(windows_command("codex.cmd", &["%PATH%".into()]).is_err());
         assert_eq!(
             windows_command("codex.ps1", &["a'b".into()]).unwrap(),
-            "& 'codex.ps1' 'a''b'"
+            "& codex.ps1 'a''b'"
         );
+    }
+
+    #[test]
+    fn words_are_quoted_only_when_needed() {
+        let args: Vec<String> = ["", "two words", "a'b", "$HOME", "semi;colon", "@options"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            shell_command("bash", "pi", &args).unwrap(),
+            "pi '' 'two words' 'a'\\''b' '$HOME' 'semi;colon' @options"
+        );
+        assert_eq!(
+            shell_command("nu", "/opt/pi", &["--resume".into(), "abc-1".into()]).unwrap(),
+            "/opt/pi --resume abc-1"
+        );
+        if !cfg!(windows) {
+            assert_eq!(
+                shell_command("pwsh", "pi", &args).unwrap(),
+                "& pi '' 'two words' 'a''b' '$HOME' 'semi;colon' '@options'"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cmd_pane_runs_the_powershell_script_encoded() {
+        use base64::Engine as _;
+        let script = windows_command(r"C:\Tools\codex.exe", &["a b".into()]).unwrap();
+        assert_eq!(
+            script,
+            r#"Start-Process -FilePath 'C:\Tools\codex.exe' -ArgumentList '"a b"' -NoNewWindow -Wait"#
+        );
+        let encoded = encoded_powershell_command(&script);
+        let payload = encoded
+            .strip_prefix("powershell.exe -NoLogo -NoProfile -EncodedCommand ")
+            .unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .unwrap();
+        let units = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .collect::<Vec<_>>();
+        assert_eq!(String::from_utf16(&units).unwrap(), script);
+        if cfg!(windows) {
+            assert_eq!(
+                shell_command("cmd", r"C:\Tools\codex.exe", &["a b".into()]).unwrap(),
+                encoded
+            );
+        }
     }
 }

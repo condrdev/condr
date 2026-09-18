@@ -106,10 +106,7 @@ fn is_runtime_or_shell(name: &str) -> bool {
 
 /// A shell wrapping a command, as opposed to a runtime that *is* the agent's process.
 pub(crate) fn is_shell(name: &str) -> bool {
-    matches!(
-        normalized_lookup_name(path_basename(name)).as_str(),
-        "sh" | "bash" | "zsh" | "fish" | "cmd" | "powershell" | "pwsh"
-    )
+    crate::terminal::KNOWN_SHELLS.contains(&normalized_lookup_name(path_basename(name)).as_str())
 }
 
 pub(super) fn normalized_lookup_name(name: &str) -> String {
@@ -136,6 +133,8 @@ mod tests {
     fn shells_are_told_apart_from_runtimes() {
         assert!(is_shell("/bin/bash"));
         assert!(is_shell("pwsh.exe"));
+        assert!(is_shell("nu"));
+        assert!(is_shell(r"C:\Windows\System32\cmd.exe"));
         assert!(!is_shell("node"));
         assert!(!is_shell("claude"));
     }

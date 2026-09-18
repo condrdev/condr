@@ -90,6 +90,7 @@ pub use launch::TerminalLaunchProbe;
 pub use portable_pty::CommandBuilder;
 pub use probes::{TerminalAgentProbe, TerminalCwdProbe, TerminalNoticeBatch, TerminalNoticeProbe};
 pub use runtime::TerminalRuntime;
+pub(crate) use shell::KNOWN_SHELLS;
 pub use shell::{PaneEnvironment, default_shell_program};
 pub use view::{
     DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,

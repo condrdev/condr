@@ -1268,6 +1268,7 @@ name = "condr-core"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64",
  "bincode",
  "dirs 6.0.0",
  "filedescriptor",
