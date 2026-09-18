@@ -305,7 +305,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
         });
         assert!(window.update(|_, cx| cx.theme().is_dark()));
         assert!(
-            window.read(|app| view.read(app).app_error.is_none()),
+            window.read(|app| view.read(app).last_error.is_none()),
             "saving the appearance must not report a config error"
         );
         assert!(!config_path.exists());

@@ -304,17 +304,9 @@ fn decode_servers(value: toml::Value) -> io::Result<Vec<SavedServer>> {
 }
 
 impl Condr {
-    pub(super) fn server_list_writable(&mut self, cx: &mut Context<Self>) -> bool {
-        if let Some(error) = &self.servers_error {
-            self.app_error = Some(error.clone());
-            cx.notify();
-            return false;
-        }
-        true
-    }
-
     pub(super) fn save_servers(&mut self, cx: &mut Context<Self>) {
-        if !self.server_list_writable(cx) {
+        if let Some(error) = self.servers_error.clone() {
+            self.report_error(error, cx);
             return;
         }
         let preserve_tcp = self.device_key.is_none();
@@ -455,10 +447,7 @@ impl Condr {
         }));
         cx.spawn(async move |this, cx| {
             if let Ok(Err(error)) = result_rx.recv().await {
-                let _ = this.update(cx, |this, cx| {
-                    this.app_error = Some(error);
-                    cx.notify();
-                });
+                let _ = this.update(cx, |this, cx| this.report_error(error, cx));
             }
         })
         .detach();

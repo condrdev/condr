@@ -7,7 +7,7 @@ impl Condr {
             return;
         }
         self.keep_awake = enabled;
-        self.apply_keep_awake();
+        self.apply_keep_awake(cx);
         // A failed request turns the switch back off, so nothing is saved for it.
         if self.keep_awake == enabled {
             self.save_keep_awake(cx);
@@ -19,7 +19,7 @@ impl Condr {
     /// agents otherwise blanks, locks and eventually idles into sleep under them. When the
     /// request fails the switch goes back off, so the coffee cup and Settings never claim a
     /// hold that is not there; the saved key is left alone so the next start retries.
-    pub(super) fn apply_keep_awake(&mut self) {
+    pub(super) fn apply_keep_awake(&mut self, cx: &mut App) {
         if !self.keep_awake {
             self._keep_awake = None;
             return;
@@ -38,7 +38,7 @@ impl Condr {
             Ok(handle) => self._keep_awake = Some(handle),
             Err(error) => {
                 self.keep_awake = false;
-                self.app_error = Some(format!("Failed to keep the screen awake: {error}"));
+                self.report_error(format!("Failed to keep the screen awake: {error}"), cx);
             }
         }
     }

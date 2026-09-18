@@ -29,11 +29,8 @@ impl Condr {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
         let status = self.render_connection_status(connection, cx);
-        // The status line carries the connection error itself; the strip shows the rest.
-        let error = self
-            .app_error
-            .clone()
-            .or_else(|| status.is_none().then(|| connection.error.clone()).flatten());
+        // The status line carries the connection error itself; otherwise the strip does.
+        let error = status.is_none().then(|| connection.error.clone()).flatten();
         let can_mutate = connection.can_mutate()
             && self
                 .pending_workspace_selection_for(connection.key)

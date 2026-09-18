@@ -142,7 +142,7 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
                 "Local".into(),
                 |this, name, _, _| {
                     this.connection_mut(1).unwrap().label = name;
-                    true
+                    Ok(())
                 },
                 window,
                 cx,

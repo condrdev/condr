@@ -793,7 +793,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
                 "Local".into(),
                 |this, name, _, _| {
                     this.connection_mut(1).unwrap().label = name;
-                    true
+                    Ok(())
                 },
                 window,
                 cx,

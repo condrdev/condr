@@ -80,7 +80,8 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.server_list_writable(cx) {
+        if let Some(error) = self.servers_error.clone() {
+            self.report_error(error, cx);
             return;
         }
         self.prompt_text_input(
@@ -94,8 +95,7 @@ impl Condr {
                 if let Some(scheme) = expected_scheme
                     && !value.trim().to_ascii_lowercase().starts_with(scheme)
                 {
-                    this.app_error = Some(format!("Paste a {scheme} address"));
-                    return false;
+                    return Err(format!("Paste a {scheme} address"));
                 }
                 this.add_server_from_address(&value, cx)
             },
@@ -104,7 +104,11 @@ impl Condr {
         );
     }
 
-    fn add_server_from_address(&mut self, value: &str, cx: &mut Context<Self>) -> bool {
+    fn add_server_from_address(
+        &mut self,
+        value: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
         match Endpoint::parse(value, self.device_key.as_ref()) {
             Ok(endpoint) => {
                 if self
@@ -112,10 +116,8 @@ impl Condr {
                     .iter()
                     .any(|c| c.endpoint.to_string() == endpoint.to_string())
                 {
-                    self.app_error = Some("This device is already added".into());
-                    return false;
+                    return Err("This device is already added".into());
                 }
-                self.app_error = None;
                 let key = self.next_connection_key;
                 self.next_connection_key += 1;
                 let label = match &endpoint {
@@ -130,12 +132,9 @@ impl Condr {
                 self.active_connection = key;
                 self.target_pane = None;
                 _ = self.start_connect(key);
-                true
+                Ok(())
             }
-            Err(error) => {
-                self.app_error = Some(format!("Invalid address: {error}"));
-                false
-            }
+            Err(error) => Err(format!("Invalid address: {error}")),
         }
     }
 
@@ -282,14 +281,14 @@ impl Condr {
                         // A rejected value keeps the dialog and the typed text.
                         owner
                             .update(cx, |this, cx| {
-                                let accepted =
+                                let result =
                                     this.apply_server_edit(key, &name, &host, &port, window, cx);
                                 submit_error.update(cx, |error, cx| {
-                                    *error = (!accepted).then(|| this.app_error.clone()).flatten();
+                                    *error = result.as_ref().err().cloned();
                                     cx.notify();
                                 });
                                 cx.notify();
-                                accepted
+                                result.is_ok()
                             })
                             .unwrap_or(true)
                     })
@@ -311,15 +310,15 @@ impl Condr {
         port: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> bool {
-        if !self.server_list_writable(cx) {
-            return false;
+    ) -> Result<(), String> {
+        if let Some(error) = self.servers_error.clone() {
+            return Err(error);
         }
         let Some(connection) = self.connection(key) else {
-            return true;
+            return Ok(());
         };
         let endpoint = match &connection.endpoint {
-            Endpoint::Local(_) => return true,
+            Endpoint::Local(_) => return Ok(()),
             Endpoint::Tcp(tcp) => {
                 TcpEndpoint::split_authority(&format!("{host}:{port}")).map(|(host, port)| {
                     Endpoint::Tcp(TcpEndpoint {
@@ -333,29 +332,23 @@ impl Condr {
         };
         let endpoint = match endpoint {
             Ok(endpoint) => endpoint,
-            Err(error) => {
-                self.app_error = Some(format!("Invalid address: {error}"));
-                return false;
-            }
+            Err(error) => return Err(format!("Invalid address: {error}")),
         };
         if name.is_empty() {
-            self.app_error = Some("The device needs a name".into());
-            return false;
+            return Err("The device needs a name".into());
         }
         if self.connections.iter().any(|connection| {
             connection.key != key && connection.endpoint.to_string() == endpoint.to_string()
         }) {
-            self.app_error = Some("Another device already uses this address".into());
-            return false;
+            return Err("Another device already uses this address".into());
         }
         let Some(connection) = self.connection_mut(key) else {
-            return true;
+            return Ok(());
         };
         connection.label = name.to_owned();
         let moved = connection.endpoint != endpoint;
         connection.endpoint = endpoint;
         let was_up = connection.status != ConnectionStatus::Disconnected;
-        self.app_error = None;
         self.save_servers(cx);
         if moved && was_up {
             self.disconnect_server(key);
@@ -364,7 +357,7 @@ impl Condr {
                 self.rebuild_dock(window, cx);
             }
         }
-        true
+        Ok(())
     }
 
     pub(in crate::app) fn confirm_delete_server_on(

@@ -642,7 +642,7 @@ fn the_sidebar_coffee_button_toggles_keep_awake() {
         assert!(
             this.keep_awake
                 || this
-                    .app_error
+                    .last_error
                     .as_deref()
                     .is_some_and(|e| e.contains("awake"))
         );

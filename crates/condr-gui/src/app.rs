@@ -62,6 +62,7 @@ use gpui_kit::component::dock::{
 };
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::setting::{
@@ -314,7 +315,8 @@ pub(crate) struct Condr {
     drop_target: Option<sidebar::DropTarget>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
-    app_error: Option<String>,
+    /// The most recent failure given to `report_error`, kept so tests can check it.
+    pub(super) last_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
 }
@@ -457,14 +459,17 @@ impl Condr {
             _font_save: None,
             drop_target: None,
             _quit_subscription: quit_subscription,
-            app_error: config_error,
+            last_error: None,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
         };
         this.sync_sidebar_workspace_open(cx);
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);
-        this.apply_keep_awake();
+        if let Some(error) = config_error {
+            this.report_error(error, cx);
+        }
+        this.apply_keep_awake(cx);
         this.scan_open_targets(cx);
 
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {

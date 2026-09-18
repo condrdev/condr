@@ -278,7 +278,8 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.server_list_writable(cx) {
+        if let Some(error) = self.servers_error.clone() {
+            self.report_error(error, cx);
             return;
         }
         let released_presentation = self.disconnect_server(key);

@@ -106,7 +106,7 @@ impl Condr {
                         }
                     }));
                 }
-                Err(error) => this.app_error = Some(format!("Failed to open Settings: {error}")),
+                Err(error) => this.report_error(format!("Failed to open Settings: {error}"), cx),
             });
         });
     }

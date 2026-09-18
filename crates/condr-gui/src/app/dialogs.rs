@@ -16,12 +16,39 @@ pub(super) fn port_text_is_plausible(text: &str) -> bool {
 }
 
 impl Condr {
+    /// Shows a failure the user did not cause inside a dialog: a red toast on the main
+    /// window that stays until dismissed, with a Copy button so the text can be pasted
+    /// into an issue. Deferred because the Window is unreachable during its own update.
+    pub(super) fn report_error(&mut self, message: impl Into<String>, cx: &mut App) {
+        let message = message.into();
+        self.last_error = Some(message.clone());
+        let message: SharedString = message.into();
+        let handle = self.window_handle;
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let copied = message.clone();
+                let note = Notification::error(message.clone()).action(move |_, _, _| {
+                    let text = copied.clone();
+                    Button::new("copy-error")
+                        .label("Copy")
+                        .small()
+                        .ghost()
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                        })
+                });
+                window.push_notification(note, cx);
+            });
+        });
+    }
+
     pub(super) fn prompt_text(
         &mut self,
         title: &'static str,
         ok_text: &'static str,
         initial: String,
-        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> bool + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
+        + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -42,7 +69,8 @@ impl Condr {
         &mut self,
         title: String,
         ok_text: &'static str,
-        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> bool + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
+        + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -80,7 +108,7 @@ impl Condr {
                 ok_text,
                 move |this, path, window, cx| {
                     apply(this, PathBuf::from(path), window, cx);
-                    true
+                    Ok(())
                 },
                 window,
                 cx,
@@ -114,14 +142,13 @@ impl Condr {
                         Ok(None) => {}
                         Err(error) => {
                             // Say why, and take the path as text so work can go on.
-                            this.app_error = Some(error);
-                            cx.notify();
+                            this.report_error(error, cx);
                             this.prompt_server_path(
                                 title,
                                 ok_text,
                                 move |this, path, window, cx| {
                                     apply(this, PathBuf::from(path), window, cx);
-                                    true
+                                    Ok(())
                                 },
                                 window,
                                 cx,
@@ -143,7 +170,8 @@ impl Condr {
         field_label: Option<SharedString>,
         placeholder: Option<SharedString>,
         trim_value: bool,
-        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> bool + 'static,
+        apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
+        + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -220,13 +248,13 @@ impl Condr {
                         // A rejected value keeps the dialog and the typed text.
                         owner
                             .update(cx, |this, cx| {
-                                let accepted = apply(this, value, window, cx);
+                                let result = apply(this, value, window, cx);
                                 submit_error.update(cx, |error, cx| {
-                                    *error = (!accepted).then(|| this.app_error.clone()).flatten();
+                                    *error = result.as_ref().err().cloned();
                                     cx.notify();
                                 });
                                 cx.notify();
-                                accepted
+                                result.is_ok()
                             })
                             .unwrap_or(true)
                     })
@@ -268,7 +296,7 @@ impl Condr {
             name,
             move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameWorkspace { workspace_id, name });
-                true
+                Ok(())
             },
             window,
             cx,
@@ -297,7 +325,7 @@ impl Condr {
                     window,
                     cx,
                 );
-                true
+                Ok(())
             },
             window,
             cx,
@@ -400,7 +428,7 @@ impl Condr {
             name,
             move |this, name, _, _| {
                 this.send_layout_to(key, LayoutCommand::RenameTab { tab_id, name });
-                true
+                Ok(())
             },
             window,
             cx,

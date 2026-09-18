@@ -718,7 +718,7 @@ fn invalid_saved_server_protects_the_list_but_allows_preferences() {
             this.prompt_add_server(window, cx);
             assert!(!window.has_active_dialog(cx));
             assert!(
-                this.app_error
+                this.last_error
                     .as_ref()
                     .unwrap()
                     .contains("fix the file and restart")
@@ -729,7 +729,10 @@ fn invalid_saved_server_protects_the_list_but_allows_preferences() {
                 "Unsaved".into(),
                 Endpoint::parse("ssh://new-box", None).unwrap(),
             ));
-            assert!(!this.apply_server_edit(2, "Edited", "ssh://edited", "", window, cx));
+            assert!(
+                this.apply_server_edit(2, "Edited", "ssh://edited", "", window, cx)
+                    .is_err()
+            );
             this.remove_server(2, window, cx);
             assert_eq!(this.connection(2).unwrap().label, "Unsaved");
             this.save_servers(cx);
@@ -894,7 +897,7 @@ fn text_dialog_actions_are_compact_and_submit() {
                 "Local".into(),
                 |this, name, _, _| {
                     this.connection_mut(1).unwrap().label = name;
-                    true
+                    Ok(())
                 },
                 window,
                 cx,
@@ -920,7 +923,10 @@ fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
         view.update(cx, |this, cx| {
             this.connections
                 .push(ServerConnection::new(2, "lab".into(), tcp("10.0.0.5:4242")));
-            assert!(this.apply_server_edit(2, "Lab box", "lab.local", "5555", window, cx));
+            assert!(
+                this.apply_server_edit(2, "Lab box", "lab.local", "5555", window, cx)
+                    .is_ok()
+            );
             let connection = this.connection(2).unwrap();
             assert_eq!(connection.label, "Lab box");
             assert_eq!(
@@ -928,15 +934,15 @@ fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
                 Some(("lab.local", 5555))
             );
             assert!(
-                !this.apply_server_edit(2, "", "lab.local", "5555", window, cx),
+                this.apply_server_edit(2, "", "lab.local", "5555", window, cx)
+                    .is_err(),
                 "a blank name is refused"
             );
             assert!(
-                !this.apply_server_edit(2, "Lab box", "lab.local", "0", window, cx),
+                this.apply_server_edit(2, "Lab box", "lab.local", "0", window, cx)
+                    .is_err(),
                 "port 0 is refused"
             );
-            assert!(this.app_error.is_some());
-
             // The Local Server has no edit dialog at all.
             this.prompt_edit_server_on(1, window, cx);
         });
@@ -971,14 +977,17 @@ fn ssh_addresses_add_edit_and_use_remote_paths() {
             };
             assert_eq!(ssh.binary(), "/opt/a b/condr");
             this.disconnect_server(key);
-            assert!(this.apply_server_edit(
-                key,
-                "Build",
-                "ssh://builder@127.0.0.1:1?bin=/opt/condr",
-                "",
-                window,
-                cx
-            ));
+            assert!(
+                this.apply_server_edit(
+                    key,
+                    "Build",
+                    "ssh://builder@127.0.0.1:1?bin=/opt/condr",
+                    "",
+                    window,
+                    cx
+                )
+                .is_ok()
+            );
             assert_eq!(
                 this.connection(key).unwrap().endpoint.to_string(),
                 "ssh://builder@127.0.0.1:1?bin=/opt/condr"
