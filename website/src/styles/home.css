@@ -46,7 +46,7 @@ a { color: inherit; text-decoration: none; }
 .site-footer { display: flex; align-items: center; justify-content: space-between; padding: 24px 0 32px; border-top: 1px solid var(--line); color: #657388; font-size: 10px; }.site-footer .brand { font-size: 14px; color: #b4c2d7; }.site-footer .brand img { width: 19px; height: 19px; }.site-footer div { display: flex; gap: 20px; }.site-footer a { color: #879ab9; }
 @media (max-width: 760px) {
   .shell { width: min(100% - 32px, 560px); }
-  .site-header { height: 56px; padding-inline: 16px; }
+  .site-header { width: 100%; height: 56px; padding-inline: 16px; }
   .site-header nav { display: none; }
   .header-github { display: none; }
   .header-button { margin-left: auto; padding: 8px 11px; }
