@@ -77,7 +77,7 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
     let workspace_id = session
         .create_workspace(root.clone())
         .expect("Workspace capacity");
-    let tab = session.active_workspace().unwrap().active_tab();
+    let tab = &session.workspaces()[0].tabs()[0];
     let tab_id = tab.id();
     let pane_id = tab.focused_pane().unwrap().id();
     bincode::serialize(&(
@@ -97,9 +97,7 @@ fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
                     layout: (u32::MAX, vec![(0u32, pane_id)]),
                 },
             )],
-            tab_id,
         )],
-        Some(workspace_id),
     ))
     .unwrap()
 }

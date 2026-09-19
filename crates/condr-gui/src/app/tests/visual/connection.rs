@@ -18,10 +18,7 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
             let original = connection.snapshot.clone();
             let mut session = Session::restore(original.clone()).unwrap();
             session.create_workspace(std::env::temp_dir()).unwrap();
-            let pane_id = session
-                .active_workspace()
-                .unwrap()
-                .active_tab()
+            let pane_id = session.workspaces()[0].tabs()[0]
                 .focused_pane()
                 .unwrap()
                 .id();
@@ -215,10 +212,10 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
             // The test Server starts empty; the event may announce a Workspace the GUI
             // has never seen, exactly like a `condr workspace create` from a Pane.
             let mut session = Session::restore(connection.snapshot.clone()).unwrap();
-            if session.active_workspace().is_none() {
+            if session.workspaces().is_empty() {
                 session.create_workspace(std::env::temp_dir()).unwrap();
             }
-            let tab_id = session.active_workspace().unwrap().active_tab().id();
+            let tab_id = session.workspaces()[0].tabs()[0].id();
             assert!(session.rename_tab(tab_id, "renamed by event"));
             let snapshot = session.snapshot();
             assert!(connection.can_mutate());
@@ -345,7 +342,6 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: workspace_root.0.clone(),
             });
         });
@@ -355,7 +351,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
         active_surface = window.read(|app| {
             let condr = view.read(app);
             let session = condr.active_session()?;
-            let tab = session.active_workspace()?.active_tab();
+            let tab = session.workspaces().first()?.tabs().first().unwrap();
             let surface_key = DockSurfaceKey {
                 connection_key: 1,
                 tab_id: tab.id(),
@@ -515,7 +511,6 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
         view.update(cx, |this, cx| this.remove_server(1, window, cx));
     });
     assert!(window.read(|app| view.read(app).connections.is_empty()));
-    window.quit();
 }
 
 #[test]
@@ -538,7 +533,6 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: workspace_root.clone(),
             });
         });
@@ -547,7 +541,8 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
                 session
-                    .active_workspace()
+                    .workspaces()
+                    .first()
                     .is_some_and(|workspace| workspace.root_directory() == workspace_root.as_path())
             })
         })
@@ -556,12 +551,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
     let (server_id, runtime_epoch, expected_snapshot, pane_id) = window.read(|app| {
         let condr = view.read(app);
         let connection = condr.connection(1).unwrap();
-        let pane_id = condr
-            .active_session()
-            .unwrap()
-            .active_workspace()
-            .unwrap()
-            .active_tab()
+        let pane_id = condr.active_session().unwrap().workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id();
@@ -655,7 +645,8 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
             condr
                 .active_session()
                 .unwrap()
-                .active_workspace()
+                .workspaces()
+                .first()
                 .unwrap()
                 .root_directory(),
             workspace_root.as_path()
@@ -682,7 +673,6 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         })
     }));
     replacement.stop();
-    window.quit();
 }
 
 #[test]
@@ -749,7 +739,6 @@ fn invalid_saved_server_protects_the_list_but_allows_preferences() {
     assert!(saved.contains("address = '127.0.0.1:4242'"));
     assert!(saved.contains("address = 'ssh://build-box'"));
     assert!(!saved.contains("new-box"));
-    window.quit();
 }
 
 #[test]
@@ -770,7 +759,6 @@ fn disconnect_and_drop_cancel_pending_connection_attempts() {
         drop(connection);
         assert!(matches!(ClientConnection::connect_cancellable(&endpoint, "dropped", cancellation), Err(error) if error.kind() == std::io::ErrorKind::Interrupted));
     }));
-    window.quit();
 }
 
 #[test]
@@ -879,7 +867,6 @@ fn corrupt_snapshot_connects_to_an_operable_start_page() {
     window.simulate_click(new_workspace.center(), Modifiers::default());
     assert!(window.did_prompt_for_paths());
     window.simulate_path_prompt_response(|_| None);
-    window.quit();
 }
 
 #[test]
@@ -1016,7 +1003,6 @@ fn ssh_addresses_add_edit_and_use_remote_paths() {
     window.run_until_parked();
     assert!(!window.did_prompt_for_paths());
     assert!(window.update(|window, cx| window.has_active_dialog(cx)));
-    window.quit();
 }
 
 #[test]
@@ -1030,7 +1016,6 @@ fn server_events_wake_gui_without_polling_clock() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -1041,7 +1026,7 @@ fn server_events_wake_gui_without_polling_clock() {
             window.read(|app| {
                 view.read(app)
                     .active_session()
-                    .is_some_and(|session| session.active_workspace().is_some())
+                    .is_some_and(|session| !session.workspaces().is_empty())
             })
         }),
         "server events should wake GPUI without a timer tick"
@@ -1064,10 +1049,7 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
             let sequence = connection.sequence;
             let mut session = Session::restore(connection.snapshot.clone()).unwrap();
             session.create_workspace(std::env::temp_dir()).unwrap();
-            let pane_id = session
-                .active_workspace()
-                .unwrap()
-                .active_tab()
+            let pane_id = session.workspaces()[0].tabs()[0]
                 .focused_pane()
                 .unwrap()
                 .id();

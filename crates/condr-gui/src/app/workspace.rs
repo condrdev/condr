@@ -34,11 +34,8 @@ impl Condr {
             .control_denied
             .as_deref()
             .map(|reason| viewing_only_text(reason).to_owned());
-        let can_mutate = connection.can_mutate()
-            && self
-                .pending_workspace_selection_for(connection.key)
-                .is_none()
-            && !self.has_pending_projection_for(connection.key);
+        let can_mutate =
+            connection.can_mutate() && !self.has_pending_projection_for(connection.key);
         let Ok(session) = Session::restore(connection.snapshot.clone()) else {
             return WorkspaceChrome::body(
                 div()

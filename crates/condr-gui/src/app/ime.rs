@@ -297,10 +297,7 @@ mod ime_tests {
     fn pane_ids() -> (PaneId, PaneId) {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();
-        let first = session
-            .active_workspace()
-            .unwrap()
-            .active_tab()
+        let first = session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id();

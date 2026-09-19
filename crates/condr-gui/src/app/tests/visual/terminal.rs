@@ -21,7 +21,6 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -32,8 +31,17 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -94,7 +102,6 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -105,8 +112,17 @@ fn terminal_pageup_reaches_the_pty_while_shift_pageup_scrolls_history() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -164,7 +180,6 @@ fn terminal_drag_selection_updates_locally() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -175,8 +190,17 @@ fn terminal_drag_selection_updates_locally() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -299,7 +323,6 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -310,8 +333,17 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         pane_id.is_some_and(|pane_id| {
             window.read(|app| {
@@ -407,7 +439,6 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -418,8 +449,17 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -545,7 +585,6 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -556,8 +595,17 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -652,7 +700,12 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
             connection.bootstrap_resync_session_id = connection.session_id;
         });
     });
-    window.simulate_keystrokes("ctrl-shift-c");
+    let copy_shortcut = if cfg!(target_os = "macos") {
+        "cmd-c"
+    } else {
+        "ctrl-shift-c"
+    };
+    window.simulate_keystrokes(copy_shortcut);
     assert!(
         window.read(|app| view.read(app).selection_for(1, pane_id).is_some()),
         "a rejected Copy must preserve the selection"
@@ -664,7 +717,7 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
             connection.bootstrap_resync_session_id = None;
         });
     });
-    window.simulate_keystrokes("ctrl-shift-c");
+    window.simulate_keystrokes(copy_shortcut);
     assert!(window.read(|app| view.read(app).selection_for(1, pane_id).is_some()));
     assert!(wait_until_event_driven(window, |window| {
         window
@@ -686,7 +739,6 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -697,8 +749,17 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -822,7 +883,6 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         })
@@ -963,7 +1023,6 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -974,8 +1033,17 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         pane_id.is_some_and(|pane_id| {
             // The terminal view arrives with its first frame, after the structure.
@@ -1173,7 +1241,6 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -1184,8 +1251,17 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         pane_id = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         let Some(pane_id) = pane_id else {
             return false;
@@ -1445,7 +1521,6 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: workspace_root.0.clone(),
             });
         });
@@ -1456,8 +1531,11 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
             let session = view.read(app).active_session()?;
             Some(
                 session
-                    .active_workspace()?
-                    .active_tab()
+                    .workspaces()
+                    .first()?
+                    .tabs()
+                    .first()
+                    .unwrap()
                     .focused_pane()
                     .unwrap()
                     .id(),

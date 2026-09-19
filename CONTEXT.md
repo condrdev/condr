@@ -19,7 +19,7 @@ The GUI or CLI connecting to a Server to inspect or change its Sessions. The nat
 _Avoid_: Server, runtime owner
 
 **Session**:
-A Server-owned working arrangement containing zero or more Workspaces and the current selection. It is not an agent conversation.
+A Server-owned working arrangement containing zero or more Workspaces, their Tabs and Pane layouts, including Pane focus. Each Client owns its View (ADR 0021). It is not an agent conversation.
 _Avoid_: Agent session, conversation
 
 **Start Page**:
@@ -45,6 +45,10 @@ _Avoid_: Project, space
 **Root Directory**:
 An absolute directory on the owning Server, selected when a Workspace is created or opened. It is the fallback cwd for new terminals and remains stable when a shell changes directory. A local Client can choose it with the native directory picker; a Client connected through TCP or SSH enters the path in the Server's filesystem namespace.
 _Avoid_: Current directory, identity cwd
+
+**View**:
+Which Workspace and which Tab one Client shows. It is that Client's own state, never part of the Session or its Snapshot (ADR 0021): two Clients on one Server look at different things, and selecting a Workspace or Tab in the GUI sends nothing. `ActivateWorkspace` and `ActivateTab` are requests to every Client to show a target, arriving as the `Activated` event; the CLI's `focus` commands and `--focus` flags send them.
+_Avoid_: Active Workspace, active Tab, selection
 
 **Tab**:
 A Workspace's view, optionally named by the user: either a terminal layout that owns an arrangement of Panes and its current focus, or a viewer with no Panes at all (the Diff Tab, ADR 0017, and the Preview Tab, ADR 0018; at most one of each per Workspace). The GUI numbers open Tabs from 1 in their current Workspace order, recalculating after reordering or closing. An unnamed Tab displays only its centered number; a named Tab displays the number followed by its user-provided name. The number is derived presentation, not a stable identity or a persisted name.

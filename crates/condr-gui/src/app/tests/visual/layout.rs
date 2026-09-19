@@ -38,7 +38,6 @@ fn default_window_options_create_1280_by_720_window() {
     let bounds = window.update(|window, _| window.bounds());
 
     assert_eq!(bounds.size, DEFAULT_WINDOW_SIZE);
-    window.quit();
 }
 
 #[test]
@@ -51,8 +50,14 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
         .create_workspace(workspace_root.0.clone())
         .expect("test Workspace capacity");
     let workspace = session.workspace(workspace_id).unwrap();
-    let tab_id = workspace.active_tab().id();
-    let first_pane = workspace.active_tab().focused_pane().unwrap().id();
+    let tab_id = workspace.tabs().first().unwrap().id();
+    let first_pane = workspace
+        .tabs()
+        .first()
+        .unwrap()
+        .focused_pane()
+        .unwrap()
+        .id();
     let second_pane = session
         .split_pane(first_pane, SplitDirection::Horizontal, 0.3)
         .expect("test Pane capacity");
@@ -120,7 +125,6 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: workspace_root.0.clone(),
             });
         });
@@ -130,7 +134,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
         initial = window.read(|app| {
             let condr = view.read(app);
             let session = condr.active_session()?;
-            let tab = session.active_workspace()?.active_tab();
+            let tab = session.workspaces().first()?.tabs().first().unwrap();
             let surface_key = DockSurfaceKey {
                 connection_key: 1,
                 tab_id: tab.id(),
@@ -264,7 +268,6 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -274,10 +277,16 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
     assert!(wait_until(window, |window| {
         tree_ids = window.read(|app| {
             let session = view.read(app).active_session()?;
-            let workspace = session.active_workspace()?;
+            let workspace = session.workspaces().first()?;
             Some((
                 workspace.id(),
-                workspace.active_tab().focused_pane().unwrap().id(),
+                workspace
+                    .tabs()
+                    .first()
+                    .unwrap()
+                    .focused_pane()
+                    .unwrap()
+                    .id(),
             ))
         });
         tree_ids.is_some()
@@ -356,8 +365,8 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
         (
             condr.active_connection,
             condr
-                .active_session()
-                .and_then(|session| session.active_workspace_id()),
+                .presented()
+                .map(|(_, _, workspace_id, _)| workspace_id),
             condr.target_pane,
         )
     });
@@ -375,8 +384,8 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             (
                 condr.active_connection,
                 condr
-                    .active_session()
-                    .and_then(|session| session.active_workspace_id()),
+                    .presented()
+                    .map(|(_, _, workspace_id, _)| workspace_id),
                 condr.target_pane,
             )
         }),
@@ -488,9 +497,9 @@ fn server_workspace_button_and_only_tab_close_round_trip() {
     assert!(
         wait_until(window, |window| {
             tab_id = window.read(|app| {
-                view.read(app)
-                    .active_session()
-                    .and_then(|session| Some(session.active_workspace()?.active_tab().id()))
+                view.read(app).active_session().and_then(|session| {
+                    Some(session.workspaces().first()?.tabs().first().unwrap().id())
+                })
             });
             tab_id.is_some()
         }),
@@ -684,7 +693,7 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
         window.read(|app| {
             view.read(app)
                 .active_session()
-                .is_some_and(|session| session.active_workspace().is_some())
+                .is_some_and(|session| !session.workspaces().is_empty())
         })
     }));
 

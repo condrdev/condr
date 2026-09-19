@@ -309,10 +309,7 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();

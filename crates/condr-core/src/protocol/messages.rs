@@ -269,11 +269,14 @@ pub struct AgentError {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Structural changes to the shared Session. None of them says which Workspace or Tab a
+/// client shows: that is each client's own view (ADR 0021). `ActivateWorkspace` and
+/// `ActivateTab` are the one exception, and they change no Session state either: they ask
+/// every viewer to show the target, and arrive as [`SessionEvent::Activated`].
 pub enum LayoutCommand {
     CreateWorkspace {
         root_directory: PathBuf,
         name: Option<String>,
-        focus: bool,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -286,10 +289,12 @@ pub enum LayoutCommand {
     RemoveWorktree {
         workspace_id: WorkspaceId,
     },
+    /// The new Tab's shell starts in `cwd_from`'s directory when that Pane belongs to the
+    /// Workspace (the caller's Pane, or the one the client shows), else in the root.
     CreateTab {
         workspace_id: WorkspaceId,
         name: Option<String>,
-        focus: bool,
+        cwd_from: Option<PaneId>,
     },
     RenameWorkspace {
         workspace_id: WorkspaceId,
@@ -299,9 +304,11 @@ pub enum LayoutCommand {
         tab_id: TabId,
         name: String,
     },
+    /// Ask every viewer to show this Workspace; the Session does not change.
     ActivateWorkspace {
         workspace_id: WorkspaceId,
     },
+    /// Ask every viewer to show this Tab and its Workspace; the Session does not change.
     ActivateTab {
         tab_id: TabId,
     },
@@ -357,7 +364,8 @@ pub enum LayoutCommand {
         workspace_id: WorkspaceId,
     },
     /// Shows `path`'s working-tree diff in the Workspace's single Diff Tab, creating the
-    /// Tab the first time and retargeting it afterwards, and activates it (ADR 0017).
+    /// Tab the first time and retargeting it afterwards (ADR 0017). The requester learns
+    /// the Tab from `DiffShown` and shows it; other viewers are left where they are.
     ShowDiff {
         workspace_id: WorkspaceId,
         /// Relative to the Workspace root.
@@ -387,6 +395,10 @@ pub enum LayoutResult {
     },
     PaneCreated {
         pane_id: PaneId,
+    },
+    /// `OpenWorktree` found the worktree already open as this Workspace.
+    WorkspaceOpened {
+        workspace_id: WorkspaceId,
     },
     DiffShown {
         tab_id: TabId,
@@ -584,6 +596,12 @@ pub enum SessionEvent {
     },
     ServerSettingsChanged {
         settings: ServerSettings,
+    },
+    /// A client asked every viewer to show this Workspace, and this Tab of it when given
+    /// (ADR 0021). Nothing in the Session changed; a viewer switches its own view.
+    Activated {
+        workspace_id: WorkspaceId,
+        tab_id: Option<TabId>,
     },
 }
 

@@ -17,11 +17,11 @@ All commands below start with `condr`.
 
 | Command | Purpose |
 | --- | --- |
-| `workspace`, `tab` | `list`/`get` inspect; `create` opens a shell; `focus` selects; `rename` changes the label; `close` stops all contained terminals. |
+| `workspace`, `tab` | `list`/`get` inspect; `create` opens a shell; `focus` asks every GUI to show it; `rename` changes the label; `close` stops all contained terminals. |
 | `pane list`, `pane get`, `pane current` | Inspect Panes or identify the caller. |
 | `pane layout` | Inspect splits, dimensions, and neighbors. |
 | `pane split` | Open a sibling shell right or down, inheriting cwd. |
-| `pane focus`, `pane resize`, `pane swap`, `pane zoom` | Select, resize, exchange neighbors, or toggle full-Tab view. |
+| `pane focus`, `pane resize`, `pane swap`, `pane zoom` | Focus (by id also shows its Tab in every GUI), resize, exchange neighbors, or toggle full-Tab view. |
 | `pane move` | Detach a Pane and reattach it beside another Pane (`--to <id> --side left\|right\|up\|down`); this is how the split tree is reshaped. |
 | `pane close` | Stop and remove a Pane; the last Pane also closes its Tab. |
 | `pane read` | Read recent terminal rows, including scrollback. |
@@ -39,7 +39,7 @@ All commands below start with `condr`.
 ## Targets and Results
 
 - Inside Condr (`CONDR_ENV=1`), `CONDR_SOCKET_PATH` selects the Server; `CONDR_PANE_ID` identifies the caller. The command sandbox must permit access to this socket. Omitted optional Pane targets mean the caller; use explicit IDs for other Panes.
-- Read IDs from responses: creation returns `.workspace`, `.tab`, and/or `.root_pane`; splitting returns `.pane.pane_id`. Create/split preserve GUI focus unless `--focus` is requested.
+- Read IDs from responses: creation returns `.workspace`, `.tab`, and/or `.root_pane`; splitting returns `.pane.pane_id`. Each GUI shows what it chose; create/split leave every GUI where it is unless `--focus` is requested, which asks all of them to show the result. `tab create` without `--workspace` needs to run inside a Pane.
 - Resume requires installed hooks and the native transcript on the Server. Hook reports save resume IDs; any observed process exit clears its ID. Server shutdown saves the existing IDs without an extra process check. Resume reopens the conversation without sending a prompt. Resume submits once; read any failure in the Pane and retry with the native resume command. OpenCode uses a TUI plugin installed with `agent hooks install opencode`; remove an old development `plugins/condr.js` before installing it.
 - Agent targets are names assigned by `start` or numeric Pane IDs. Names match `[a-z][a-z0-9_-]{0,31}`, are unique, and last until exit or Server restart.
 - Workspace/Tab/Pane/Agent commands return JSON, except `pane read` returns text. Their failures emit `.error.code` and `.error.message` JSON to stderr, exiting 1; usage errors exit 2. Server administration uses text.

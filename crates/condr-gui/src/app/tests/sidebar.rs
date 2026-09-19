@@ -4,9 +4,9 @@ use super::*;
 fn tab_labels_follow_workspace_order_and_only_include_user_names() {
     let mut session = Session::new();
     let first_workspace = session.create_workspace("projects/first".into()).unwrap();
-    let first_tab = session.active_workspace().unwrap().active_tab().id();
-    let second_tab = session.create_tab(first_workspace).unwrap();
-    let third_tab = session.create_tab(first_workspace).unwrap();
+    let first_tab = session.workspaces()[0].tabs()[0].id();
+    let second_tab = session.create_tab(first_workspace, None).unwrap();
+    let third_tab = session.create_tab(first_workspace, None).unwrap();
     let second_workspace = session.create_workspace("projects/second".into()).unwrap();
     let labels = |session: &Session, workspace_id| {
         session
@@ -34,7 +34,7 @@ fn tab_labels_follow_workspace_order_and_only_include_user_names() {
     let mut restored = Session::restore(session.snapshot()).unwrap();
     assert_eq!(labels(&restored, first_workspace), ["1", "2  Tab 2"]);
     assert_eq!(labels(&restored, second_workspace), ["1"]);
-    restored.create_tab(first_workspace).unwrap();
+    restored.create_tab(first_workspace, None).unwrap();
     assert_eq!(labels(&restored, first_workspace), ["1", "2  Tab 2", "3"]);
 }
 

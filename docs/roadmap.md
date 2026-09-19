@@ -24,7 +24,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 | 领域 | 现状 |
 | --- | --- |
-| 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY/Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话 |
+| 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY/Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；当前 Workspace/Tab 是每个客户端自己的视图，`ActivateWorkspace/ActivateTab` 只是「请大家看这里」的广播（ADR 0021） |
 | 终端 | `alacritty_terminal` + 自绘 GPUI 元素；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
 | Agent | 10 种 CLI 的 hook 安装（Kimi 上游不可用）；状态只来自 hooks，经 OSC 777 回写（ADR 0014）；完成/需输入时 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排 |
@@ -37,7 +37,6 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 - 可观测性：burst 合并、最终帧不丢、未变 cell 不重 shaping 各有一个单元测试，但没有带负载的可重复基准；AGENTS.md 要求的性能验收仍靠手工观察。
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、首连指纹确认、密钥进 Keychain。
-- 多客户端各看各的：当前 Workspace/Tab 的选择是 Session 全局状态，两台机器同时连同一 Server 会互相抢视图。
 - 代码签名、自动更新、Quickstart 文档、支持矩阵和协议兼容策略。
 - 终端内搜索、命令面板、Diff 对 base 分支比较（`GitDiff.against` 已预留）。
 
@@ -67,11 +66,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 2. 多客户端各看各的
 
-**为什么**：开发环境本身就是 Windows GUI + Linux Server 两台机器；Herdr 0.9 已经把"每个客户端独立视图"做成默认，这是日常能碰到的摩擦。
-
-**做到哪**：把"当前 Workspace/Tab"从 Session 全局状态改成每个订阅者自己的视图状态；布局树、Pane 焦点历史、Snapshot 仍归 Server。需要一份 ADR 说明 `ActivateWorkspace`/`ActivateTab`、Bootstrap 和 CLI `focus` 的新语义。
-
-**停在哪**：不做协作编辑、不做多 controller 同时输入。
+已完成（ADR 0021，2026-09-18）：当前 Workspace/Tab 从 Session 移到每个客户端本地；`ActivateWorkspace`/`ActivateTab` 变为广播事件 `Activated`，CLI 的 `focus` 与 `--focus` 用它；`CreateTab` 以 `cwd_from` 指明继承哪个 Pane 的目录。GUI 重启后从第一个 Workspace 打开，记住上次视图留到有摩擦再做。
 
 ### 3. Blocked 说清在等什么
 

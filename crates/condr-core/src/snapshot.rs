@@ -25,7 +25,6 @@ pub struct SessionSnapshot {
     pub(crate) version: u32,
     #[serde(deserialize_with = "deserialize_workspaces")]
     pub(crate) workspaces: Vec<WorkspaceSnapshot>,
-    pub(crate) active_workspace: Option<WorkspaceId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,7 +35,6 @@ pub(crate) struct WorkspaceSnapshot {
     pub(crate) worktree: Option<WorktreeAssociation>,
     #[serde(deserialize_with = "deserialize_tabs")]
     pub(crate) tabs: Vec<TabSnapshot>,
-    pub(crate) active_tab: TabId,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

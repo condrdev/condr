@@ -143,15 +143,7 @@ impl Condr {
     }
 
     pub(super) fn active_session(&self) -> Option<Session> {
-        let connection = self.active_connection()?;
-        let mut session = Session::restore(connection.snapshot.clone()).ok()?;
-        if let Some(surface) = self
-            .active_dock_surface
-            .filter(|surface| surface.connection_key == connection.key)
-        {
-            session.activate_tab(surface.tab_id);
-        }
-        Some(session)
+        self.active_connection()?.session()
     }
 
     pub(crate) fn terminal(
@@ -218,11 +210,7 @@ impl Condr {
     }
 
     pub(super) fn start_connect(&mut self, key: ConnectionKey) -> bool {
-        let was_holding = self.should_hold_active_surface();
-        self.clear_pending_workspace_selection_for(key);
-        let active_projection_cleared = self.clear_pending_projections_for(key);
-        let needs_active_rebuild =
-            active_projection_cleared || (was_holding && !self.should_hold_active_surface());
+        let needs_active_rebuild = self.clear_pending_projections_for(key);
         let Some(connection) = self.connection_mut(key) else {
             return needs_active_rebuild;
         };
@@ -256,7 +244,6 @@ impl Condr {
     }
 
     pub(super) fn disconnect_server(&mut self, key: ConnectionKey) -> bool {
-        let was_holding = self.should_hold_active_surface();
         let active_projection_cleared = self.clear_pending_projections_for(key);
         let Some(connection) = self.connection_mut(key) else {
             return active_projection_cleared;
@@ -272,9 +259,8 @@ impl Condr {
         // The user chose this: no timer is running to reach the deadline, so an old
         // restart or reconnect must not keep reporting itself.
         connection.reconnect_deadline = None;
-        self.clear_pending_workspace_selection_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
-        active_projection_cleared || (was_holding && !self.should_hold_active_surface())
+        active_projection_cleared
     }
 
     pub(super) fn remove_server(
@@ -300,7 +286,6 @@ impl Condr {
         self.save_servers(cx);
         self.clear_connection_gui_state(key);
         self.sync_sidebar_workspace_open(cx);
-        self.clear_pending_workspace_selection_for(key);
         if was_active {
             self.active_connection = self
                 .connections
@@ -366,7 +351,6 @@ impl Condr {
             self.schedule_reconnect(key, cx);
         }
         if let Some(application) = application {
-            let presentation_before = self.pending_presentation_request;
             _ = self.clear_pending_projections_for(key);
             clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
             if application.authority_changed {
@@ -375,14 +359,9 @@ impl Condr {
                 self.prune_dock_cache(key);
             }
             self.sync_sidebar_workspace_open(cx);
-            if application.reacquire_control {
-                self.clear_pending_workspace_selection_for(key);
-            }
             self.acquire_and_subscribe(key);
             self.refresh_target_pane(key);
-            let released_presentation = presentation_before.is_some()
-                && self.pending_presentation_request != presentation_before;
-            if key == self.active_connection || released_presentation {
+            if key == self.active_connection {
                 self.rebuild_dock(window, cx);
             }
         }
@@ -403,14 +382,9 @@ impl Condr {
         connection.io = None;
         let active_projection_cleared = self.clear_pending_projections_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
-        let released_presentation = self
-            .pending_presentation_request
-            .is_some_and(|(pending_key, _)| pending_key == key);
-        let pending_cleared = self.clear_pending_workspace_selection_for(key);
         IncomingEffect {
-            rebuild: self.active_connection == key
-                && (pending_cleared || active_projection_cleared),
-            rebuild_active: released_presentation,
+            rebuild: self.active_connection == key && active_projection_cleared,
+            rebuild_active: false,
             notify: true,
         }
     }

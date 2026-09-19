@@ -2,6 +2,9 @@ use super::*;
 
 pub(super) struct LayoutEffect {
     pub(super) result: LayoutResult,
+    /// What every subscriber learns: the new structure, or, for `ActivateWorkspace` and
+    /// `ActivateTab`, which change nothing, the request to show a target (ADR 0021).
+    pub(super) event: SessionEvent,
     pub(super) started_terminals: Vec<StartedTerminal>,
     pub(super) removed_terminals: Vec<TerminalRuntime>,
 }
@@ -10,7 +13,6 @@ pub(super) enum ExternalLayoutPlan {
     CreateWorkspace {
         root: PathBuf,
         name: Option<String>,
-        focus: bool,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -41,7 +43,6 @@ pub(super) enum PreparedExternalLayout {
         root: PathBuf,
         git: Option<GitRepository>,
         name: Option<String>,
-        focus: bool,
     },
     CreateWorktree {
         parent_workspace_id: WorkspaceId,
@@ -74,11 +75,9 @@ pub(super) fn external_layout_plan(
         LayoutCommand::CreateWorkspace {
             root_directory,
             name,
-            focus,
         } => ExternalLayoutPlan::CreateWorkspace {
             root: root_directory.clone(),
             name: name.clone(),
-            focus: *focus,
         },
         LayoutCommand::CreateWorktree {
             parent_workspace_id,
@@ -140,13 +139,12 @@ pub(super) fn prepare_external_layout(
     plan: ExternalLayoutPlan,
 ) -> Result<PreparedExternalLayout, String> {
     match plan {
-        ExternalLayoutPlan::CreateWorkspace { root, name, focus } => {
+        ExternalLayoutPlan::CreateWorkspace { root, name } => {
             validate_root_directory(&root)?;
             Ok(PreparedExternalLayout::CreateWorkspace {
                 git: discover_repository(&root).ok().flatten(),
                 root,
                 name,
-                focus,
             })
         }
         ExternalLayoutPlan::CreateWorktree {
@@ -428,13 +426,12 @@ pub(super) fn apply_layout_command(
     let mut new_pane = None;
     let mut closed = None;
     let mut result = LayoutResult::Changed;
-    let mut preserve_selection = false;
+    let mut preserve_focus = false;
 
     match command {
         LayoutCommand::CreateWorkspace {
             root_directory,
             name,
-            focus,
         } => {
             let workspace_id = candidate
                 .create_workspace(root_directory)
@@ -444,10 +441,10 @@ pub(super) fn apply_layout_command(
             {
                 return Err("empty Workspace name".into());
             }
-            let tab = candidate
+            let tab = &candidate
                 .workspace(workspace_id)
                 .expect("new Workspace exists")
-                .active_tab();
+                .tabs()[0];
             let pane_id = tab
                 .focused_pane()
                 .expect("a new Workspace opens on a terminal Tab")
@@ -458,7 +455,6 @@ pub(super) fn apply_layout_command(
                 pane_id,
             };
             new_pane = Some(pane_id);
-            preserve_selection = !focus;
         }
         LayoutCommand::CreateWorktree { .. }
         | LayoutCommand::OpenWorktree { .. }
@@ -468,10 +464,10 @@ pub(super) fn apply_layout_command(
         LayoutCommand::CreateTab {
             workspace_id,
             name,
-            focus,
+            cwd_from,
         } => {
             let tab_id = candidate
-                .create_tab(workspace_id)
+                .create_tab(workspace_id, cwd_from)
                 .ok_or_else(|| "unknown Workspace or Session Tab limit reached".to_string())?;
             new_pane = Some(
                 candidate
@@ -490,7 +486,6 @@ pub(super) fn apply_layout_command(
                 tab_id,
                 pane_id: new_pane.unwrap(),
             };
-            preserve_selection = !focus;
         }
         LayoutCommand::RenameWorkspace { workspace_id, name } => {
             if !candidate.rename_workspace(workspace_id, name) {
@@ -502,15 +497,23 @@ pub(super) fn apply_layout_command(
                 return Err("unknown Tab or empty name".into());
             }
         }
+        // Activation changes no Session state: it is a request every viewer receives and
+        // acts on for itself (ADR 0021).
         LayoutCommand::ActivateWorkspace { workspace_id } => {
-            if !candidate.activate_workspace(workspace_id) {
+            if candidate.workspace(workspace_id).is_none() {
                 return Err("unknown Workspace".into());
             }
+            return Ok(LayoutEffect::activated(workspace_id, None));
         }
         LayoutCommand::ActivateTab { tab_id } => {
-            if !candidate.activate_tab(tab_id) {
+            let Some(workspace) = candidate
+                .workspaces()
+                .iter()
+                .find(|workspace| workspace.tab(tab_id).is_some())
+            else {
                 return Err("unknown Tab".into());
-            }
+            };
+            return Ok(LayoutEffect::activated(workspace.id(), Some(tab_id)));
         }
         LayoutCommand::MoveWorkspace {
             workspace_id,
@@ -555,7 +558,7 @@ pub(super) fn apply_layout_command(
             result = LayoutResult::PaneCreated {
                 pane_id: new_pane.unwrap(),
             };
-            preserve_selection = !focus;
+            preserve_focus = !focus;
         }
         LayoutCommand::FocusPane { pane_id } => {
             if !candidate.focus_pane(pane_id) {
@@ -657,8 +660,8 @@ pub(super) fn apply_layout_command(
         }
     }
 
-    if preserve_selection {
-        candidate.preserve_selection_from(&state.session);
+    if preserve_focus {
+        candidate.preserve_focus_from(&state.session);
     }
     let started = if let Some(pane_id) = new_pane {
         let cwd = candidate
@@ -737,9 +740,24 @@ pub(super) fn commit_layout_candidate(
     }
     Ok(LayoutEffect {
         result: LayoutResult::Changed,
+        event: state.layout_changed_event(),
         started_terminals: started_terminals.into_iter().collect(),
         removed_terminals,
     })
+}
+
+impl LayoutEffect {
+    fn activated(workspace_id: WorkspaceId, tab_id: Option<condr_core::TabId>) -> Self {
+        Self {
+            result: LayoutResult::Changed,
+            event: SessionEvent::Activated {
+                workspace_id,
+                tab_id,
+            },
+            started_terminals: Vec::new(),
+            removed_terminals: Vec::new(),
+        }
+    }
 }
 
 pub(super) fn apply_prepared_external_layout(
@@ -747,18 +765,12 @@ pub(super) fn apply_prepared_external_layout(
     prepared: PreparedExternalLayout,
 ) -> Result<LayoutEffect, String> {
     match prepared {
-        PreparedExternalLayout::CreateWorkspace {
-            root,
-            git,
-            name,
-            focus,
-        } => {
+        PreparedExternalLayout::CreateWorkspace { root, git, name } => {
             let effect = apply_layout_command(
                 state,
                 LayoutCommand::CreateWorkspace {
                     root_directory: root,
                     name,
-                    focus,
                 },
             )?;
             let LayoutResult::WorkspaceCreated { workspace_id, .. } = effect.result else {
@@ -798,10 +810,14 @@ pub(super) fn apply_prepared_external_layout(
                     "failed to associate the created worktree".into(),
                 ));
             }
-            let pane_id = candidate
+            let tab_id = candidate
                 .workspace(workspace_id)
                 .expect("created Workspace exists")
-                .active_tab()
+                .tabs()[0]
+                .id();
+            let pane_id = candidate
+                .tab(tab_id)
+                .expect("created Tab exists")
                 .focused_pane()
                 .expect("a new Workspace opens on a terminal Tab")
                 .id();
@@ -828,7 +844,7 @@ pub(super) fn apply_prepared_external_layout(
             let updates = runtime
                 .take_updates()
                 .expect("new Terminal update receiver exists");
-            let effect = match commit_layout_candidate(
+            let mut effect = match commit_layout_candidate(
                 state,
                 candidate,
                 None,
@@ -838,6 +854,11 @@ pub(super) fn apply_prepared_external_layout(
                 Err(error) => {
                     return Err(prepared_worktree_failure(&parent, &child, error));
                 }
+            };
+            effect.result = LayoutResult::WorkspaceCreated {
+                workspace_id,
+                tab_id,
+                pane_id,
             };
             set_workspace_git(state, workspace_id, Some(child));
             Ok(effect)
@@ -854,7 +875,7 @@ pub(super) fn apply_prepared_external_layout(
             {
                 return Err("parent Workspace changed while opening its worktree".into());
             }
-            let (workspace_id, started) = if let Some(workspace_id) = candidate
+            let (workspace_id, started, result) = if let Some(workspace_id) = candidate
                 .workspace_by_root(child.root())
                 .map(|workspace| workspace.id())
             {
@@ -869,17 +890,24 @@ pub(super) fn apply_prepared_external_layout(
                         false,
                     );
                 }
-                candidate.activate_workspace(workspace_id);
-                (workspace_id, None)
+                (
+                    workspace_id,
+                    None,
+                    LayoutResult::WorkspaceOpened { workspace_id },
+                )
             } else {
                 let workspace_id = candidate
                     .create_workspace(child.root().to_path_buf())
                     .ok_or_else(|| "Session Workspace limit reached".to_string())?;
                 candidate.associate_worktree(workspace_id, parent_workspace_id, parent_root, false);
-                let pane_id = candidate
+                let tab_id = candidate
                     .workspace(workspace_id)
                     .expect("created Workspace exists")
-                    .active_tab()
+                    .tabs()[0]
+                    .id();
+                let pane_id = candidate
+                    .tab(tab_id)
+                    .expect("created Tab exists")
                     .focused_pane()
                     .expect("a new Workspace opens on a terminal Tab")
                     .id();
@@ -894,9 +922,18 @@ pub(super) fn apply_prepared_external_layout(
                 let updates = runtime
                     .take_updates()
                     .expect("new Terminal update receiver exists");
-                (workspace_id, Some((pane_id, runtime, updates)))
+                (
+                    workspace_id,
+                    Some((pane_id, runtime, updates)),
+                    LayoutResult::WorkspaceCreated {
+                        workspace_id,
+                        tab_id,
+                        pane_id,
+                    },
+                )
             };
-            let effect = commit_layout_candidate(state, candidate, None, started)?;
+            let mut effect = commit_layout_candidate(state, candidate, None, started)?;
+            effect.result = result;
             set_workspace_git(state, workspace_id, Some(child));
             Ok(effect)
         }

@@ -100,9 +100,10 @@ pub enum PaneLayout {
 }
 
 #[derive(Clone, Debug, Default)]
+/// The Session structure every client shares. Which Workspace and Tab a client shows is
+/// that client's own view state and lives outside the Session (ADR 0021).
 pub struct Session {
     workspaces: Vec<Workspace>,
-    active_workspace: Option<WorkspaceId>,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +113,6 @@ pub struct Workspace {
     root_directory: PathBuf,
     worktree: Option<WorktreeAssociation>,
     tabs: Vec<Tab>,
-    active_tab: TabId,
 }
 
 #[derive(Clone, Debug)]
@@ -201,15 +201,6 @@ impl Session {
 
     pub fn workspaces(&self) -> &[Workspace] {
         &self.workspaces
-    }
-
-    pub fn active_workspace_id(&self) -> Option<WorkspaceId> {
-        self.active_workspace
-    }
-
-    pub fn active_workspace(&self) -> Option<&Workspace> {
-        let id = self.active_workspace?;
-        self.workspaces.iter().find(|workspace| workspace.id == id)
     }
 
     pub fn workspace(&self, workspace_id: WorkspaceId) -> Option<&Workspace> {
@@ -335,11 +326,8 @@ impl Workspace {
         &self.tabs
     }
 
-    pub fn active_tab(&self) -> &Tab {
-        self.tabs
-            .iter()
-            .find(|tab| tab.id == self.active_tab)
-            .expect("active tab belongs to workspace")
+    pub fn tab(&self, tab_id: TabId) -> Option<&Tab> {
+        self.tabs.iter().find(|tab| tab.id == tab_id)
     }
 }
 

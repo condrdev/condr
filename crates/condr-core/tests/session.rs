@@ -17,16 +17,15 @@ fn creating_workspace_commits_a_complete_initial_tree() {
         .expect("Workspace capacity");
 
     assert!(!session.is_empty());
-    assert_eq!(session.active_workspace_id(), Some(workspace_id));
     assert_eq!(session.workspaces().len(), 1);
 
-    let workspace = session.active_workspace().expect("workspace is active");
+    let workspace = session.workspaces().first().expect("workspace is active");
     assert_eq!(workspace.id(), workspace_id);
     assert_eq!(workspace.name(), "condr");
     assert_eq!(workspace.root_directory(), root_directory.as_path());
     assert_eq!(workspace.tabs().len(), 1);
 
-    let tab = workspace.active_tab();
+    let tab = workspace.tabs().first().unwrap();
     assert_eq!(tab.name(), "");
     assert_eq!(tab.panes().len(), 1);
 
@@ -41,24 +40,23 @@ fn new_tab_follows_focused_pane_cwd_without_changing_workspace_root() {
     let workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
-    let first_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+    let first_pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
     let pane_cwd = PathBuf::from("projects/condr/crates/condr-core");
 
     assert!(session.set_pane_cwd(first_pane_id, Some(pane_cwd.clone())));
-    let tab_id = session.create_tab(workspace_id).expect("workspace exists");
+    let tab_id = session
+        .create_tab(workspace_id, Some(first_pane_id))
+        .expect("workspace exists");
 
-    let workspace = session.active_workspace().expect("workspace is active");
+    let workspace = session.workspaces().first().expect("workspace exists");
     assert_eq!(workspace.root_directory(), root_directory.as_path());
-    assert_eq!(workspace.active_tab().id(), tab_id);
-    assert_eq!(workspace.active_tab().name(), "");
+    assert_eq!(workspace.tabs()[1].id(), tab_id);
+    assert_eq!(workspace.tabs()[1].name(), "");
     assert_eq!(
-        workspace.active_tab().focused_pane().unwrap().cwd(),
+        workspace.tab(tab_id).unwrap().focused_pane().unwrap().cwd(),
         Some(pane_cwd.as_path())
     );
 }
@@ -69,10 +67,7 @@ fn splitting_a_pane_records_layout_cwd_and_focus_history() {
     session
         .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
-    let first_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+    let first_pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -83,10 +78,7 @@ fn splitting_a_pane_records_layout_cwd_and_focus_history() {
         .split_pane(first_pane_id, SplitDirection::Horizontal, 0.75)
         .expect("pane exists");
 
-    let tab = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab();
+    let tab = &session.workspaces()[0].tabs()[0];
     assert_eq!(tab.panes().len(), 2);
     assert_eq!(tab.focused_pane().unwrap().id(), second_pane_id);
     assert_eq!(tab.focus_history(), &[first_pane_id]);
@@ -113,15 +105,8 @@ fn closing_panes_uses_focus_history_and_cascades_to_an_empty_session() {
     let workspace_id = session
         .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
-    let tab_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .id();
-    let first_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+    let tab_id = session.workspaces()[0].tabs()[0].id();
+    let first_pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -138,10 +123,7 @@ fn closing_panes_uses_focus_history_and_cascades_to_an_empty_session() {
     assert!(closed.tabs().is_empty());
     assert!(closed.workspaces().is_empty());
     assert_eq!(
-        session
-            .active_workspace()
-            .expect("workspace remains")
-            .active_tab()
+        session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id(),
@@ -150,10 +132,7 @@ fn closing_panes_uses_focus_history_and_cascades_to_an_empty_session() {
 
     session.close_pane(first_pane_id).expect("pane exists");
     assert_eq!(
-        session
-            .active_workspace()
-            .expect("workspace remains")
-            .active_tab()
+        session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id(),
@@ -165,11 +144,10 @@ fn closing_panes_uses_focus_history_and_cascades_to_an_empty_session() {
     assert_eq!(closed.tabs(), &[tab_id]);
     assert_eq!(closed.workspaces(), &[workspace_id]);
     assert!(session.is_empty());
-    assert_eq!(session.active_workspace_id(), None);
 }
 
 #[test]
-fn reordering_workspaces_and_tabs_preserves_active_identity() {
+fn reordering_workspaces_and_tabs_keeps_their_identities() {
     let mut session = Session::new();
     let first_workspace_id = session
         .create_workspace(PathBuf::from("projects/first"))
@@ -177,13 +155,9 @@ fn reordering_workspaces_and_tabs_preserves_active_identity() {
     let second_workspace_id = session
         .create_workspace(PathBuf::from("projects/second"))
         .expect("Workspace capacity");
-    let first_tab_id = session
-        .active_workspace()
-        .expect("second workspace is active")
-        .active_tab()
-        .id();
+    let first_tab_id = session.workspace(second_workspace_id).unwrap().tabs()[0].id();
     let second_tab_id = session
-        .create_tab(second_workspace_id)
+        .create_tab(second_workspace_id, None)
         .expect("workspace exists");
 
     assert!(session.move_workspace(second_workspace_id, 0));
@@ -197,10 +171,7 @@ fn reordering_workspaces_and_tabs_preserves_active_identity() {
             .collect::<Vec<_>>(),
         [second_workspace_id, first_workspace_id]
     );
-    assert_eq!(session.active_workspace_id(), Some(second_workspace_id));
-    let workspace = session
-        .active_workspace()
-        .expect("workspace remains active");
+    let workspace = session.workspaces().first().expect("workspace remains");
     assert_eq!(
         workspace
             .tabs()
@@ -209,7 +180,6 @@ fn reordering_workspaces_and_tabs_preserves_active_identity() {
             .collect::<Vec<_>>(),
         [second_tab_id, first_tab_id]
     );
-    assert_eq!(workspace.active_tab().id(), second_tab_id);
 }
 
 #[test]
@@ -219,22 +189,17 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
     let first_workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
-    let first_tab_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .id();
+    let first_tab_id = session.workspaces()[0].tabs()[0].id();
     let second_tab_id = session
-        .create_tab(first_workspace_id)
+        .create_tab(first_workspace_id, None)
         .expect("workspace exists");
     assert!(session.rename_workspace(first_workspace_id, "Condr Core"));
     assert!(session.rename_tab(first_tab_id, "Overview"));
     assert!(session.rename_tab(second_tab_id, "Runtime"));
     assert!(session.move_tab(second_tab_id, 0));
     let second_tab_root = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+        .tab(second_tab_id)
+        .unwrap()
         .focused_pane()
         .unwrap()
         .id();
@@ -262,8 +227,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
     let decoded = SessionSnapshot::from_bytes(&bytes).expect("snapshot decodes");
     let restored = Session::restore(decoded).expect("snapshot is valid");
 
-    assert_eq!(restored.active_workspace_id(), Some(second_workspace_id));
-    assert_eq!(restored.active_workspace().unwrap().active_tab().name(), "");
+    assert_eq!(restored.workspaces()[0].tabs()[0].name(), "");
     assert_eq!(
         restored
             .workspaces()
@@ -286,7 +250,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
             .collect::<Vec<_>>(),
         [second_tab_id, first_tab_id]
     );
-    let tab = workspace.active_tab();
+    let tab = workspace.tabs().first().unwrap();
     assert_eq!(tab.id(), second_tab_id);
     assert_eq!(tab.name(), "Runtime");
     assert_eq!(tab.focused_pane().unwrap().id(), second_tab_root);
@@ -317,53 +281,46 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
 }
 
 #[test]
-fn activating_a_tab_or_pane_activates_its_owners() {
+fn focusing_a_pane_moves_only_its_tabs_focus() {
     let mut session = Session::new();
     let first_workspace_id = session
         .create_workspace(PathBuf::from("projects/first"))
         .expect("Workspace capacity");
-    let first_tab_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .id();
-    let first_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+    let first_tab_id = session.workspaces()[0].tabs()[0].id();
+    let first_pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
+    let second_pane_id = session
+        .split_pane(first_pane_id, SplitDirection::Horizontal, 0.5)
+        .expect("pane exists");
     let second_tab_id = session
-        .create_tab(first_workspace_id)
+        .create_tab(first_workspace_id, None)
         .expect("workspace exists");
-    let second_workspace_id = session
-        .create_workspace(PathBuf::from("projects/second"))
-        .expect("Workspace capacity");
-    assert_eq!(session.active_workspace_id(), Some(second_workspace_id));
+    let before = session.snapshot();
 
-    assert!(session.activate_tab(second_tab_id));
-    assert_eq!(session.active_workspace_id(), Some(first_workspace_id));
-    assert_eq!(
-        session
-            .active_workspace()
-            .expect("first workspace is active")
-            .active_tab()
-            .id(),
-        second_tab_id
-    );
-
-    assert!(session.activate_workspace(second_workspace_id));
     assert!(session.focus_pane(first_pane_id));
-    assert_eq!(session.active_workspace_id(), Some(first_workspace_id));
     assert_eq!(
         session
-            .active_workspace()
-            .expect("first workspace is active")
-            .active_tab()
+            .tab(first_tab_id)
+            .unwrap()
+            .focused_pane()
+            .unwrap()
             .id(),
-        first_tab_id
+        first_pane_id
     );
+    assert_ne!(session.snapshot(), before, "focus is Session structure");
+    assert_eq!(
+        session
+            .tab(second_tab_id)
+            .unwrap()
+            .focused_pane()
+            .unwrap()
+            .id(),
+        session.tab(second_tab_id).unwrap().panes()[0].id(),
+        "another Tab's focus is untouched"
+    );
+    assert!(!session.focus_pane(condr_core::PaneId::from_u64(second_pane_id.as_u64() + 1000)));
 }
 
 #[test]
@@ -372,33 +329,23 @@ fn closing_tabs_and_workspaces_reports_every_removed_domain_object() {
     let first_workspace_id = session
         .create_workspace(PathBuf::from("projects/first"))
         .expect("Workspace capacity");
-    let first_tab_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .id();
+    let first_tab_id = session.workspaces()[0].tabs()[0].id();
     let second_tab_id = session
-        .create_tab(first_workspace_id)
+        .create_tab(first_workspace_id, None)
         .expect("workspace exists");
     let second_tab_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+        .tab(second_tab_id)
+        .unwrap()
         .focused_pane()
         .unwrap()
         .id();
     let second_workspace_id = session
         .create_workspace(PathBuf::from("projects/second"))
         .expect("Workspace capacity");
-    let second_workspace_tab_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .id();
+    let second_workspace_tab_id = session.workspace(second_workspace_id).unwrap().tabs()[0].id();
     let second_workspace_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+        .tab(second_workspace_tab_id)
+        .unwrap()
         .focused_pane()
         .unwrap()
         .id();
@@ -411,7 +358,9 @@ fn closing_tabs_and_workspaces_reports_every_removed_domain_object() {
         session
             .workspace(first_workspace_id)
             .expect("workspace remains")
-            .active_tab()
+            .tabs()
+            .first()
+            .unwrap()
             .id(),
         first_tab_id
     );
@@ -422,44 +371,59 @@ fn closing_tabs_and_workspaces_reports_every_removed_domain_object() {
     assert_eq!(closed.panes(), &[second_workspace_pane_id]);
     assert_eq!(closed.tabs(), &[second_workspace_tab_id]);
     assert_eq!(closed.workspaces(), &[second_workspace_id]);
-    assert_eq!(session.active_workspace_id(), Some(first_workspace_id));
+    assert_eq!(session.workspaces().len(), 1);
 }
 
 #[test]
-fn creating_a_tab_activates_its_workspace() {
+fn creating_a_tab_inherits_the_named_panes_cwd_or_the_workspace_root() {
     let mut session = Session::new();
     let first_workspace_id = session
         .create_workspace(PathBuf::from("projects/first"))
         .expect("Workspace capacity");
-    session
+    let first_pane_id = session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id();
+    assert!(session.set_pane_cwd(first_pane_id, Some(PathBuf::from("projects/first/src"))));
+    let second_workspace_id = session
         .create_workspace(PathBuf::from("projects/second"))
         .expect("Workspace capacity");
 
-    let tab_id = session
-        .create_tab(first_workspace_id)
-        .expect("workspace exists");
-
-    assert_eq!(session.active_workspace_id(), Some(first_workspace_id));
-    assert_eq!(
+    let cwd_of = |session: &Session, tab_id| {
         session
-            .active_workspace()
-            .expect("first workspace is active")
-            .active_tab()
-            .id(),
-        tab_id
+            .tab(tab_id)
+            .unwrap()
+            .focused_pane()
+            .unwrap()
+            .cwd()
+            .unwrap()
+            .to_path_buf()
+    };
+    let from_pane = session
+        .create_tab(first_workspace_id, Some(first_pane_id))
+        .expect("workspace exists");
+    assert_eq!(
+        cwd_of(&session, from_pane),
+        PathBuf::from("projects/first/src")
     );
+    let from_root = session
+        .create_tab(first_workspace_id, None)
+        .expect("workspace exists");
+    assert_eq!(cwd_of(&session, from_root), PathBuf::from("projects/first"));
+    // A Pane of another Workspace is not a directory to inherit.
+    let foreign = session
+        .create_tab(second_workspace_id, Some(first_pane_id))
+        .expect("workspace exists");
+    assert_eq!(cwd_of(&session, foreign), PathBuf::from("projects/second"));
 }
 
 #[test]
-fn splitting_a_pane_activates_its_workspace_and_tab() {
+fn splitting_a_pane_focuses_the_new_pane() {
     let mut session = Session::new();
     let first_workspace_id = session
         .create_workspace(PathBuf::from("projects/first"))
         .expect("Workspace capacity");
-    let first_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+    let first_pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -471,12 +435,9 @@ fn splitting_a_pane_activates_its_workspace_and_tab() {
         .split_pane(first_pane_id, SplitDirection::Horizontal, 0.5)
         .expect("pane exists");
 
-    assert_eq!(session.active_workspace_id(), Some(first_workspace_id));
+    assert_eq!(session.workspaces()[0].id(), first_workspace_id);
     assert_eq!(
-        session
-            .active_workspace()
-            .expect("first workspace is active")
-            .active_tab()
+        session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id(),
@@ -491,31 +452,18 @@ fn unknown_pane_cwd_falls_back_to_the_stable_workspace_root() {
     let workspace_id = session
         .create_workspace(root_directory.clone())
         .expect("Workspace capacity");
-    let first_pane_id = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
+    let first_pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
     session.set_pane_cwd(first_pane_id, None);
 
-    session.create_tab(workspace_id).expect("workspace exists");
-    let tab_root = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .focused_pane()
-        .unwrap()
-        .id();
+    let tab_id = session
+        .create_tab(workspace_id, Some(first_pane_id))
+        .expect("workspace exists");
+    let tab_root = session.tab(tab_id).unwrap().focused_pane().unwrap().id();
     assert_eq!(
-        session
-            .active_workspace()
-            .expect("workspace is active")
-            .active_tab()
-            .focused_pane()
-            .unwrap()
-            .cwd(),
+        session.tab(tab_id).unwrap().focused_pane().unwrap().cwd(),
         Some(root_directory.as_path())
     );
 
@@ -523,14 +471,7 @@ fn unknown_pane_cwd_falls_back_to_the_stable_workspace_root() {
     let split_pane_id = session
         .split_pane(tab_root, SplitDirection::Horizontal, 0.5)
         .expect("pane exists");
-    let split_pane = session
-        .active_workspace()
-        .expect("workspace is active")
-        .active_tab()
-        .panes()
-        .iter()
-        .find(|pane| pane.id() == split_pane_id)
-        .expect("split Pane exists");
+    let split_pane = session.pane(split_pane_id).expect("split Pane exists");
     assert_eq!(split_pane.cwd(), Some(root_directory.as_path()));
 }
 
@@ -540,14 +481,11 @@ fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
     session
         .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
-    let first = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let first = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
-    let tab_id = session.active_workspace().unwrap().active_tab().id();
+    let tab_id = session.workspaces()[0].tabs()[0].id();
     let second = session
         .split_pane(first, SplitDirection::Horizontal, 0.5)
         .unwrap();
@@ -558,10 +496,7 @@ fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
     assert!(session.focus_pane(first));
     assert!(session.focus_pane_in_direction(first, PaneDirection::Right));
     assert_eq!(
-        session
-            .active_workspace()
-            .unwrap()
-            .active_tab()
+        session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id(),
@@ -613,30 +548,20 @@ fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
 
     assert!(session.swap_pane(second, PaneDirection::Down));
     assert_eq!(
-        session
-            .active_workspace()
-            .unwrap()
-            .active_tab()
+        session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id(),
         second
     );
     assert!(session.toggle_pane_zoom(third));
-    let tab = session.active_workspace().unwrap().active_tab();
+    let tab = &session.workspaces()[0].tabs()[0];
     assert_eq!(tab.focused_pane().unwrap().id(), third);
     assert_eq!(tab.zoomed_pane_id(), Some(third));
 
     assert!(session.set_tab_split_ratios(tab_id, &[0.7, 0.3]));
     let restored = Session::restore(session.snapshot()).unwrap();
-    assert_eq!(
-        restored
-            .active_workspace()
-            .unwrap()
-            .active_tab()
-            .zoomed_pane_id(),
-        None
-    );
+    assert_eq!(restored.workspaces()[0].tabs()[0].zoomed_pane_id(), None);
 }
 
 #[test]
@@ -645,13 +570,11 @@ fn restore_rejects_an_unsupported_snapshot_version() {
     struct UnsupportedSnapshot {
         version: u32,
         workspaces: Vec<()>,
-        active_workspace: Option<WorkspaceId>,
     }
 
     let bytes = bincode::serialize(&UnsupportedSnapshot {
         version: 3,
         workspaces: Vec::new(),
-        active_workspace: None,
     })
     .expect("test snapshot encodes");
     let snapshot = SessionSnapshot::from_bytes(&bytes).expect("schema decodes");
@@ -680,10 +603,7 @@ fn snapshot_codec_enforces_the_eight_mebibyte_limit_in_both_directions() {
     session
         .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -744,11 +664,11 @@ fn live_mutations_enforce_workspace_and_tab_limits() {
         .create_workspace(PathBuf::from("projects/tabs"))
         .expect("Workspace capacity");
     for _ in 1..256 {
-        tabs.create_tab(workspace_id)
+        tabs.create_tab(workspace_id, None)
             .expect("the first 256 Tabs fit");
     }
     let before = tabs.snapshot();
-    assert_eq!(tabs.create_tab(workspace_id), None);
+    assert_eq!(tabs.create_tab(workspace_id, None), None);
     assert_eq!(
         tabs.create_workspace(PathBuf::from("projects/tab-overflow")),
         None
@@ -763,10 +683,7 @@ fn live_mutations_enforce_the_total_pane_limit() {
     session
         .create_workspace(PathBuf::from("projects/panes"))
         .expect("Workspace capacity");
-    let first_pane = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let first_pane = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -788,10 +705,7 @@ fn live_mutations_enforce_the_total_pane_limit() {
         session.split_pane(first_pane, SplitDirection::Horizontal, 0.5),
         None
     );
-    assert_eq!(
-        session.create_tab(session.active_workspace_id().unwrap()),
-        None
-    );
+    assert_eq!(session.create_tab(session.workspaces()[0].id(), None), None);
     assert_eq!(
         session.create_workspace(PathBuf::from("projects/pane-overflow")),
         None
@@ -806,10 +720,7 @@ fn live_split_refuses_to_exceed_the_restore_depth() {
     session
         .create_workspace(PathBuf::from("projects/depth"))
         .expect("Workspace capacity");
-    let mut deepest = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let mut deepest = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1005,11 +916,9 @@ fn restore_enforces_a_64_level_layout_depth_limit() {
 }
 
 fn encode_session(workspaces: Vec<EncodedWorkspace>) -> Vec<u8> {
-    let active_workspace = workspaces.first().map(|workspace| workspace.id);
     bincode::serialize(&EncodedSession {
         version: 1,
         workspaces,
-        active_workspace,
     })
     .unwrap()
 }
@@ -1020,7 +929,6 @@ fn encoded_workspace(id: u64, tabs: Vec<EncodedTab>) -> EncodedWorkspace {
         name: format!("Workspace {id}"),
         root_directory: PathBuf::from(format!("projects/{id}")),
         worktree: None,
-        active_tab: tabs.first().expect("test Workspace has a Tab").id,
         tabs,
     }
 }
@@ -1071,7 +979,6 @@ fn encoded_chain_layout(depth: usize, first_pane_id: u64) -> (Vec<u64>, EncodedL
 struct EncodedSession {
     version: u32,
     workspaces: Vec<EncodedWorkspace>,
-    active_workspace: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
@@ -1081,7 +988,6 @@ struct EncodedWorkspace {
     root_directory: PathBuf,
     worktree: Option<EncodedWorktree>,
     tabs: Vec<EncodedTab>,
-    active_tab: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -1157,13 +1063,7 @@ impl EncodedLayoutNode {
 }
 
 fn only_split_ratio(session: &Session) -> f32 {
-    match session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
-        .layout()
-        .unwrap()
-    {
+    match session.workspaces()[0].tabs()[0].layout().unwrap() {
         PaneLayout::Split { ratio, .. } => *ratio,
         PaneLayout::Pane(_) => panic!("the tab should hold one split"),
     }
@@ -1175,10 +1075,7 @@ fn resizing_moves_the_divider_in_the_key_direction_from_either_side() {
     session
         .create_workspace(PathBuf::from("projects/condr"))
         .unwrap();
-    let left = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let left = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1204,10 +1101,7 @@ fn resizing_moves_the_divider_in_the_key_direction_from_either_side() {
     session
         .create_workspace(PathBuf::from("projects/condr"))
         .unwrap();
-    let top = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let top = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1225,7 +1119,7 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
     let mut session = Session::new();
     let root = PathBuf::from("projects/diff");
     let workspace_id = session.create_workspace(root).unwrap();
-    let terminal_tab = session.active_workspace().unwrap().active_tab().id();
+    let terminal_tab = session.workspaces()[0].tabs()[0].id();
 
     assert_eq!(
         session.show_diff(workspace_id, RelativePathBuf::from("../escape.rs")),
@@ -1241,26 +1135,19 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
         .show_diff(workspace_id, RelativePathBuf::from("src/lib.rs"))
         .unwrap();
     assert_ne!(diff_tab, terminal_tab);
-    let workspace = session.active_workspace().unwrap();
-    assert_eq!(workspace.active_tab().id(), diff_tab);
-    assert_eq!(workspace.active_tab().name(), condr_core::DIFF_TAB_NAME);
-    assert!(workspace.active_tab().panes().is_empty());
-    assert!(workspace.active_tab().focused_pane().is_none());
-    assert!(workspace.active_tab().layout().is_none());
-    assert_eq!(
-        workspace.active_tab().diff().unwrap().path(),
-        RelativePath::new("src/lib.rs")
-    );
+    let tab = session.tab(diff_tab).unwrap();
+    assert_eq!(tab.name(), condr_core::DIFF_TAB_NAME);
+    assert!(tab.panes().is_empty());
+    assert!(tab.focused_pane().is_none());
+    assert!(tab.layout().is_none());
+    assert_eq!(tab.diff().unwrap().path(), RelativePath::new("src/lib.rs"));
 
     // A second file retargets the same Tab; nothing accumulates.
-    assert!(session.activate_tab(terminal_tab));
     assert_eq!(
         session.show_diff(workspace_id, RelativePathBuf::from("README.md")),
         Some(diff_tab)
     );
-    let workspace = session.active_workspace().unwrap();
-    assert_eq!(workspace.tabs().len(), 2);
-    assert_eq!(workspace.active_tab().id(), diff_tab);
+    assert_eq!(session.workspaces()[0].tabs().len(), 2);
     assert_eq!(
         session
             .diff_tab(workspace_id)
@@ -1272,7 +1159,7 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
     );
 
     // A Tab created beside it inherits the Workspace root rather than a Pane cwd.
-    let new_tab = session.create_tab(workspace_id).unwrap();
+    let new_tab = session.create_tab(workspace_id, None).unwrap();
     assert_eq!(
         session.tab(new_tab).unwrap().focused_pane().unwrap().cwd(),
         Some(Path::new("projects/diff"))
@@ -1287,7 +1174,7 @@ fn show_diff_keeps_one_diff_tab_per_workspace_and_survives_a_snapshot() {
     let outcome = session.close_tab(diff_tab).unwrap();
     assert!(outcome.panes().is_empty());
     assert_eq!(outcome.tabs(), &[diff_tab]);
-    assert_eq!(session.active_workspace().unwrap().tabs().len(), 2);
+    assert_eq!(session.workspaces().first().unwrap().tabs().len(), 2);
     assert!(session.diff_tab(workspace_id).is_none());
 }
 
@@ -1297,7 +1184,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
     let workspace_id = session
         .create_workspace(PathBuf::from("projects/files"))
         .unwrap();
-    let terminal_tab = session.active_workspace().unwrap().active_tab().id();
+    let terminal_tab = session.workspaces()[0].tabs()[0].id();
 
     assert_eq!(
         session.show_file(workspace_id, RelativePathBuf::from("../escape.rs")),
@@ -1316,23 +1203,18 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
         .unwrap();
     assert_ne!(file_tab, diff_tab, "the Preview Tab is its own viewer kind");
     assert_ne!(file_tab, terminal_tab);
-    let workspace = session.active_workspace().unwrap();
-    assert_eq!(workspace.active_tab().id(), file_tab);
-    assert_eq!(workspace.active_tab().name(), condr_core::FILE_TAB_NAME);
-    assert!(workspace.active_tab().panes().is_empty());
-    assert!(workspace.active_tab().diff().is_none());
-    assert_eq!(
-        workspace.active_tab().file().unwrap().path(),
-        RelativePath::new("src/main.rs")
-    );
+    let tab = session.tab(file_tab).unwrap();
+    assert_eq!(tab.name(), condr_core::FILE_TAB_NAME);
+    assert!(tab.panes().is_empty());
+    assert!(tab.diff().is_none());
+    assert_eq!(tab.file().unwrap().path(), RelativePath::new("src/main.rs"));
 
     // A second file retargets the Preview Tab and leaves the Diff Tab alone.
     assert_eq!(
         session.show_file(workspace_id, RelativePathBuf::from("README.md")),
         Some(file_tab)
     );
-    let workspace = session.active_workspace().unwrap();
-    assert_eq!(workspace.tabs().len(), 3);
+    assert_eq!(session.workspaces()[0].tabs().len(), 3);
     assert_eq!(
         session
             .file_tab(workspace_id)
@@ -1389,9 +1271,7 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
                     },
                 },
             ],
-            active_tab: 2,
         }],
-        active_workspace: Some(1),
     })
     .unwrap();
     let restored = Session::restore(SessionSnapshot::from_bytes(&one_diff).unwrap()).unwrap();
@@ -1436,9 +1316,7 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
                     },
                 },
             ],
-            active_tab: 2,
         }],
-        active_workspace: Some(1),
     })
     .unwrap();
     assert!(Session::restore(SessionSnapshot::from_bytes(&two_diffs).unwrap()).is_err());
@@ -1467,9 +1345,7 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
                     },
                 },
             ],
-            active_tab: 4,
         }],
-        active_workspace: Some(1),
     })
     .unwrap();
     assert!(Session::restore(SessionSnapshot::from_bytes(&escaping).unwrap()).is_err());

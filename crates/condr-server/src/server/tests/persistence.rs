@@ -116,10 +116,7 @@ fn restart_falls_back_from_a_missing_pane_cwd_and_persists_the_repair() {
     session
         .create_workspace(workspace_root.clone())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -197,12 +194,9 @@ fn restart_prunes_only_failed_panes_and_persists_the_repair() {
         .create_workspace(workspace_root)
         .expect("Workspace capacity");
     assert!(session.rename_workspace(workspace_id, "Recovered Workspace"));
-    let tab_id = session.active_workspace().unwrap().active_tab().id();
+    let tab_id = session.workspaces()[0].tabs()[0].id();
     assert!(session.rename_tab(tab_id, "Recovered Tab"));
-    let surviving_pane = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let surviving_pane = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -230,24 +224,36 @@ fn restart_prunes_only_failed_panes_and_persists_the_repair() {
     assert_eq!(bootstrap.terminals[0].pane_id, surviving_pane);
     assert!(bootstrap.agents.is_empty());
     let restored = Session::restore(bootstrap.snapshot.clone()).unwrap();
-    assert_eq!(restored.active_workspace_id(), Some(workspace_id));
     assert_eq!(restored.workspaces().len(), 1);
-    let workspace = restored.active_workspace().unwrap();
+    let workspace = restored.workspaces().first().unwrap();
+    assert_eq!(workspace.id(), workspace_id);
     assert_eq!(workspace.name(), "Recovered Workspace");
     assert_eq!(workspace.tabs().len(), 1);
-    assert_eq!(workspace.active_tab().id(), tab_id);
-    assert_eq!(workspace.active_tab().name(), "Recovered Tab");
-    assert_eq!(workspace.active_tab().panes().len(), 1);
+    assert_eq!(workspace.tabs().first().unwrap().id(), tab_id);
+    assert_eq!(workspace.tabs().first().unwrap().name(), "Recovered Tab");
+    assert_eq!(workspace.tabs().first().unwrap().panes().len(), 1);
     assert_eq!(
-        workspace.active_tab().focused_pane().unwrap().id(),
+        workspace
+            .tabs()
+            .first()
+            .unwrap()
+            .focused_pane()
+            .unwrap()
+            .id(),
         surviving_pane
     );
     assert_eq!(
-        workspace.active_tab().layout().unwrap(),
+        workspace.tabs().first().unwrap().layout().unwrap(),
         &condr_core::PaneLayout::Pane(surviving_pane)
     );
     assert_eq!(
-        workspace.active_tab().focused_pane().unwrap().cwd(),
+        workspace
+            .tabs()
+            .first()
+            .unwrap()
+            .focused_pane()
+            .unwrap()
+            .cwd(),
         Some(valid_cwd.as_path())
     );
     let repaired_snapshot = bootstrap.snapshot.clone();
@@ -377,16 +383,21 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
         };
         mutate(LayoutCommand::CreateWorkspace {
             name: None,
-            focus: true,
             root_directory: workspace_root.clone(),
         });
         let (workspace_id, tab_id, first_pane) = {
             let state = first_handle.state.lock().unwrap();
-            let workspace = state.session.active_workspace().unwrap();
+            let workspace = state.session.workspaces().first().unwrap();
             (
                 workspace.id(),
-                workspace.active_tab().id(),
-                workspace.active_tab().focused_pane().unwrap().id(),
+                workspace.tabs().first().unwrap().id(),
+                workspace
+                    .tabs()
+                    .first()
+                    .unwrap()
+                    .focused_pane()
+                    .unwrap()
+                    .id(),
             )
         };
         mutate(LayoutCommand::RenameWorkspace {
@@ -658,10 +669,7 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
     session
         .create_workspace(workspace_root)
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();

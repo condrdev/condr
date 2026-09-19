@@ -12,13 +12,13 @@ pub(crate) enum WorkspaceCommand {
         /// Name shown in the sidebar; defaults to the directory name
         #[arg(long, value_name = "TEXT")]
         label: Option<String>,
-        /// Switch the GUI to the new Workspace instead of leaving it in the background
+        /// Ask every connected GUI to show the new Workspace
         #[arg(long)]
         focus: bool,
     },
     /// Show one Workspace
     Get { workspace_id: u64 },
-    /// Make a Workspace the active one
+    /// Ask every connected GUI to show a Workspace
     Focus { workspace_id: u64 },
     /// Rename a Workspace
     Rename { workspace_id: u64, label: String },
@@ -33,20 +33,20 @@ pub(crate) enum TabCommand {
         #[arg(long, value_name = "ID")]
         workspace: Option<u64>,
     },
-    /// Create a Tab; defaults to the calling Pane's Workspace, else the active one
+    /// Create a Tab in a Workspace; defaults to the calling Pane's Workspace
     Create {
         #[arg(long, value_name = "ID")]
         workspace: Option<u64>,
         /// Optional Tab name; unnamed Tabs show only their Workspace position in the GUI
         #[arg(long, value_name = "TEXT")]
         label: Option<String>,
-        /// Switch the GUI to the new Tab instead of leaving it in the background
+        /// Ask every connected GUI to show the new Tab
         #[arg(long)]
         focus: bool,
     },
     /// Show one Tab
     Get { tab_id: u64 },
-    /// Make a Tab the active one in its Workspace
+    /// Ask every connected GUI to show a Tab
     Focus { tab_id: u64 },
     /// Rename a Tab
     Rename { tab_id: u64, label: String },
@@ -59,10 +59,8 @@ pub(super) struct WorkspaceInfo {
     pub(super) workspace_id: u64,
     pub(super) name: String,
     pub(super) root_directory: PathBuf,
-    pub(super) focused: bool,
     pub(super) tab_count: usize,
     pub(super) pane_count: usize,
-    pub(super) active_tab_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     worktree: Option<WorktreeInfo>,
 }
@@ -79,22 +77,18 @@ pub(super) struct TabInfo {
     pub(super) tab_id: u64,
     pub(super) workspace_id: u64,
     pub(super) name: String,
-    /// The active Tab of its Workspace.
-    pub(super) focused: bool,
     pub(super) pane_count: usize,
     /// `None` for a viewer Tab, which has no Panes (ADR 0017).
     pub(super) focused_pane_id: Option<u64>,
 }
 
-pub(super) fn workspace_info(session: &Session, workspace: &Workspace) -> WorkspaceInfo {
+pub(super) fn workspace_info(workspace: &Workspace) -> WorkspaceInfo {
     WorkspaceInfo {
         workspace_id: workspace.id().as_u64(),
         name: workspace.name().to_owned(),
         root_directory: workspace.root_directory().to_path_buf(),
-        focused: session.active_workspace_id() == Some(workspace.id()),
         tab_count: workspace.tabs().len(),
         pane_count: workspace.tabs().iter().map(|tab| tab.panes().len()).sum(),
-        active_tab_id: workspace.active_tab().id().as_u64(),
         worktree: workspace.worktree().map(|worktree| WorktreeInfo {
             parent_workspace_id: worktree.parent_workspace_id().as_u64(),
             parent_root_directory: worktree.parent_root_directory().to_path_buf(),
@@ -108,7 +102,6 @@ pub(super) fn tab_info(workspace: &Workspace, tab: &Tab) -> TabInfo {
         tab_id: tab.id().as_u64(),
         workspace_id: workspace.id().as_u64(),
         name: tab.name().to_owned(),
-        focused: workspace.active_tab().id() == tab.id(),
         pane_count: tab.panes().len(),
         focused_pane_id: tab.focused_pane().map(|pane| pane.id().as_u64()),
     }
@@ -135,11 +128,17 @@ pub(super) fn find_tab(session: &Session, id: u64) -> Result<(&Workspace, &Tab),
         .ok_or_else(|| CliError::new("tab_not_found", format!("tab {id} not found")))
 }
 
+/// The Pane this process runs in, when `CONDR_PANE_ID` says so and the Session has it.
+pub(super) fn caller_pane_in(session: &Session) -> Option<PaneId> {
+    let pane_id = std::env::var(PaneEnvironment::PANE_ID).ok()?.parse().ok()?;
+    let pane_id = PaneId::from_u64(pane_id);
+    session.pane(pane_id).map(|_| pane_id)
+}
+
 /// The Workspace of the Pane this process runs in, when `CONDR_PANE_ID` says so.
 pub(super) fn caller_workspace(session: &Session) -> Option<WorkspaceId> {
-    let pane_id = std::env::var(PaneEnvironment::PANE_ID).ok()?.parse().ok()?;
     session
-        .workspace_for_pane(PaneId::from_u64(pane_id))
+        .workspace_for_pane(caller_pane_in(session)?)
         .map(Workspace::id)
 }
 
@@ -155,11 +154,7 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
     match command {
         WorkspaceCommand::List => {
             let session = client.session()?;
-            let workspaces: Vec<_> = session
-                .workspaces()
-                .iter()
-                .map(|workspace| workspace_info(&session, workspace))
-                .collect();
+            let workspaces: Vec<_> = session.workspaces().iter().map(workspace_info).collect();
             Ok(json!({ "workspaces": workspaces }))
         }
         WorkspaceCommand::Create { cwd, label, focus } => {
@@ -167,12 +162,15 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
                 Some(cwd) => cwd,
                 None => std::env::current_dir()?,
             })?;
-            let LayoutResult::WorkspaceCreated { workspace_id, .. } = apply(
+            let LayoutResult::WorkspaceCreated {
+                workspace_id,
+                tab_id,
+                ..
+            } = apply(
                 client,
                 LayoutCommand::CreateWorkspace {
                     root_directory,
                     name: label,
-                    focus,
                 },
             )?
             else {
@@ -181,11 +179,16 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
                     "the Server returned no created Workspace ID",
                 ));
             };
+            if focus {
+                apply(client, LayoutCommand::ActivateWorkspace { workspace_id })?;
+            }
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id.as_u64())?;
-            let tab = workspace.active_tab();
+            let tab = workspace
+                .tab(tab_id)
+                .ok_or_else(|| CliError::new("tab_not_found", "the created Tab vanished"))?;
             Ok(json!({
-                "workspace": workspace_info(&session, workspace),
+                "workspace": workspace_info(workspace),
                 "tab": tab_info(workspace, tab),
                 "root_pane": tab
                     .focused_pane()
@@ -195,7 +198,7 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
         WorkspaceCommand::Get { workspace_id } => {
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id)?;
-            Ok(json!({ "workspace": workspace_info(&session, workspace) }))
+            Ok(json!({ "workspace": workspace_info(workspace) }))
         }
         WorkspaceCommand::Focus { workspace_id } => {
             find_workspace(&client.session()?, workspace_id)?;
@@ -207,7 +210,7 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
             )?;
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id)?;
-            Ok(json!({ "workspace": workspace_info(&session, workspace) }))
+            Ok(json!({ "workspace": workspace_info(workspace) }))
         }
         WorkspaceCommand::Rename {
             workspace_id,
@@ -223,7 +226,7 @@ fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result
             )?;
             let session = client.session()?;
             let workspace = find_workspace(&session, workspace_id)?;
-            Ok(json!({ "workspace": workspace_info(&session, workspace) }))
+            Ok(json!({ "workspace": workspace_info(workspace) }))
         }
         WorkspaceCommand::Close { workspace_id } => {
             find_workspace(&client.session()?, workspace_id)?;
@@ -265,16 +268,25 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
             let before = client.session()?;
             let workspace_id = match workspace {
                 Some(id) => find_workspace(&before, id)?.id(),
-                None => caller_workspace(&before)
-                    .or(before.active_workspace_id())
-                    .ok_or_else(|| CliError::new("workspace_not_found", "no active workspace"))?,
+                None => caller_workspace(&before).ok_or_else(|| {
+                    CliError::new(
+                        "workspace_not_found",
+                        "not running in a Condr Pane; pass --workspace",
+                    )
+                })?,
             };
+            // The new shell starts where the caller is, when the caller is in that Workspace.
+            let cwd_from = caller_pane_in(&before).filter(|pane_id| {
+                before
+                    .workspace_for_pane(*pane_id)
+                    .is_some_and(|workspace| workspace.id() == workspace_id)
+            });
             let LayoutResult::TabCreated { tab_id, .. } = apply(
                 client,
                 LayoutCommand::CreateTab {
                     workspace_id,
                     name: label,
-                    focus,
+                    cwd_from,
                 },
             )?
             else {
@@ -283,6 +295,9 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
                     "the Server returned no created Tab ID",
                 ));
             };
+            if focus {
+                apply(client, LayoutCommand::ActivateTab { tab_id })?;
+            }
             let session = client.session()?;
             let (workspace, tab) = find_tab(&session, tab_id.as_u64())?;
             Ok(json!({

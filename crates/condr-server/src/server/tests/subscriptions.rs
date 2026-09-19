@@ -325,7 +325,6 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -436,7 +435,6 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
                 request_id,
                 command: LayoutCommand::CreateWorkspace {
                     name: None,
-                    focus: true,
                     root_directory: std::env::temp_dir(),
                 },
             },

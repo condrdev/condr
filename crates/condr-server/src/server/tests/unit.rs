@@ -7,11 +7,7 @@ fn an_observed_terminal_exit_cannot_be_undone_by_its_final_hook_drain() {
         .session
         .create_workspace(std::env::temp_dir())
         .unwrap();
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -83,11 +79,8 @@ fn only_cwd_inheriting_layout_commands_require_process_observation() {
     let workspace_id = session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let tab_id = session.active_workspace().unwrap().active_tab().id();
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let tab_id = session.workspaces()[0].tabs()[0].id();
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -96,7 +89,7 @@ fn only_cwd_inheriting_layout_commands_require_process_observation() {
         &LayoutCommand::CreateTab {
             workspace_id,
             name: None,
-            focus: true
+            cwd_from: Some(pane_id),
         }
     ));
     assert!(layout_command_needs_cwd_observation(
@@ -192,11 +185,7 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -231,11 +220,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -444,10 +429,7 @@ fn client_terminal_baseline_advances_only_for_an_accepted_render() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -500,10 +482,7 @@ fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -562,10 +541,7 @@ fn retained_terminal_hyperlinks_stay_bounded_across_deltas() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -665,11 +641,7 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -731,11 +703,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -802,11 +770,7 @@ fn successful_resubscribe_preserves_the_committed_terminal_baseline() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -842,11 +806,7 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -918,10 +878,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -979,10 +936,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1036,10 +990,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let first_pane = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let first_pane = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1086,7 +1037,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
         ],
         agents: Vec::new(),
         workspace_git: vec![WorkspaceGitSnapshot {
-            workspace_id: session.active_workspace_id().unwrap(),
+            workspace_id: session.workspaces()[0].id(),
             branch: Some("b".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024)),
             linked_worktree: false,
             upstream: None,
@@ -1125,11 +1076,7 @@ fn untransportable_durable_mutations_leave_the_session_unchanged() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1166,11 +1113,7 @@ fn non_utf8_terminal_cwd_does_not_poison_the_durable_snapshot() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1194,11 +1137,7 @@ fn invalid_terminal_cwd_does_not_discard_valid_sibling_observations() {
         .session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    let first_pane = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let first_pane = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -1249,11 +1188,7 @@ fn stale_cwd_observation_cannot_update_a_replaced_terminal() {
         .session
         .create_workspace(initial.clone())
         .expect("Workspace capacity");
-    let pane_id = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();

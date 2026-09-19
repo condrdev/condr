@@ -7,8 +7,8 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
     let mut session = Session::new();
     session.create_workspace(std::env::temp_dir()).unwrap();
     let workspace_id = session.create_workspace(directory.0.clone()).unwrap();
-    let first_tab = session.active_workspace().unwrap().active_tab().id();
-    let second_tab = session.create_tab(workspace_id).unwrap();
+    let first_tab = session.workspace(workspace_id).unwrap().tabs()[0].id();
+    let second_tab = session.create_tab(workspace_id, None).unwrap();
     assert!(session.rename_tab(first_tab, "Named Tab"));
     let snapshot_path = directory.0.join("session.snapshot");
     std::fs::write(&snapshot_path, session.snapshot().to_bytes().unwrap()).unwrap();
@@ -34,28 +34,31 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
             condr
                 .active_dock_surface
                 .is_some_and(|surface| surface.tab_id == tab_id)
-                && condr.active_session().is_some_and(|session| {
-                    session.active_workspace().is_some_and(|workspace| {
-                        workspace.id() == workspace_id && workspace.active_tab().id() == tab_id
+                && condr
+                    .presented()
+                    .is_some_and(|(_, _, presented_workspace, presented_tab)| {
+                        presented_workspace == workspace_id && presented_tab == tab_id
                     })
-                })
         })
     };
-    assert!(wait_until(window, |window| selected(window, second_tab)));
+    // The view is this Client's own (ADR 0021): it opens on the first Workspace and Tab.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.select_workspace(1, workspace_id, window, cx)
+        });
+    });
+    assert!(wait_until(window, |window| selected(window, first_tab)));
+    let structure = server.handle.snapshot();
 
-    for (number, tab_id) in [(1, first_tab), (2, second_tab)] {
+    for (number, tab_id) in [(2, second_tab), (1, first_tab)] {
         window.simulate_keystrokes(&format!("{modifier}-{number}"));
         assert!(wait_until(window, |window| selected(window, tab_id)));
-        assert_eq!(
-            Session::restore(server.handle.snapshot())
-                .unwrap()
-                .active_workspace()
-                .unwrap()
-                .active_tab()
-                .id(),
-            tab_id
-        );
     }
+    assert_eq!(
+        server.handle.snapshot(),
+        structure,
+        "switching Tabs changes nothing on the Server"
+    );
 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
@@ -116,14 +119,11 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
 
     window.simulate_keystrokes(&format!("{modifier}-2"));
     window.run_until_parked();
+    assert!(selected(window, first_tab));
     let messages = received.try_iter().collect::<Vec<_>>();
     assert!(
-        matches!(
-            messages.as_slice(),
-            [ClientMessage::Layout { command: LayoutCommand::ActivateTab { tab_id }, .. }]
-                if *tab_id == first_tab
-        ),
-        "the shortcut must emit one layout command and no terminal input: {messages:?}"
+        messages.is_empty(),
+        "the shortcut switches the view locally and sends nothing: {messages:?}"
     );
 }
 
@@ -159,7 +159,6 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -168,16 +167,16 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
         window
             .read(|app| {
                 let session = view.read(app).active_session()?;
-                let workspace = session.active_workspace()?;
-                Some((workspace.id(), workspace.active_tab().id()))
+                let workspace = session.workspaces().first()?;
+                Some((workspace.id(), workspace.tabs().first().unwrap().id()))
             })
             .is_some()
     }));
     let (workspace_id, tab_id) = window
         .read(|app| {
             let session = view.read(app).active_session()?;
-            let workspace = session.active_workspace()?;
-            Some((workspace.id(), workspace.active_tab().id()))
+            let workspace = session.workspaces().first()?;
+            Some((workspace.id(), workspace.tabs().first().unwrap().id()))
         })
         .unwrap();
 
@@ -256,7 +255,6 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: repository.clone(),
             });
         });
@@ -266,8 +264,8 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
         window.read(|app| {
             let condr = view.read(app);
             parent_workspace_id = condr
-                .active_session()
-                .and_then(|session| session.active_workspace_id());
+                .presented()
+                .map(|(_, _, workspace_id, _)| workspace_id);
             parent_workspace_id.is_some()
                 && condr
                     .connection(1)
@@ -458,7 +456,6 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             });
         });
@@ -468,8 +465,17 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         agent_pane = window.read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         });
         agent_pane.is_some()
     }));
@@ -487,7 +493,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
     assert!(wait_until(window, |window| {
         other_pane = window.read(|app| {
             let session = view.read(app).active_session()?;
-            let tab = session.active_workspace()?.active_tab();
+            let tab = session.workspaces().first()?.tabs().first().unwrap();
             (tab.panes().len() == 2).then(|| tab.focused_pane().unwrap().id())
         });
         other_pane.is_some_and(|pane_id| pane_id != agent_pane)
@@ -559,8 +565,15 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
     assert!(wait_until(window, |window| {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
-                session.active_workspace().is_some_and(|workspace| {
-                    workspace.active_tab().focused_pane().unwrap().id() == agent_pane
+                session.workspaces().first().is_some_and(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                        == agent_pane
                 })
             })
         })
@@ -633,8 +646,8 @@ fn tcp_paths_use_server_side_text_dialogs() {
         window.read(|app| {
             let condr = view.read(app);
             parent_workspace_id = condr
-                .active_session()
-                .and_then(|session| session.active_workspace_id());
+                .presented()
+                .map(|(_, _, workspace_id, _)| workspace_id);
             parent_workspace_id.is_some()
                 && condr
                     .connection(1)
@@ -688,7 +701,6 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: first_root.0.clone(),
             });
         });
@@ -707,7 +719,6 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: second_root.0.clone(),
             });
         });
@@ -721,17 +732,20 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     }));
     let second_workspace = window.read(|app| {
         view.read(app)
-            .active_session()
-            .unwrap()
-            .active_workspace_id()
+            .presented()
+            .map(|(_, _, workspace_id, _)| workspace_id)
             .unwrap()
     });
+    assert_ne!(
+        second_workspace, first_workspace,
+        "the created Workspace is shown"
+    );
 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.send_layout(LayoutCommand::CreateTab {
                 name: None,
-                focus: true,
+                cwd_from: None,
                 workspace_id: second_workspace,
             });
         });
@@ -744,8 +758,8 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
             (workspace.tabs().len() == 2).then(|| {
                 (
                     workspace.tabs()[0].id(),
-                    workspace.active_tab().id(),
-                    workspace.active_tab().focused_pane().unwrap().id(),
+                    workspace.tabs()[1].id(),
+                    workspace.tabs()[1].focused_pane().unwrap().id(),
                 )
             })
         });
@@ -810,15 +824,27 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
     }));
 
     let assert_identity = |session: &Session| {
-        assert_eq!(session.active_workspace_id(), Some(second_workspace));
-        let workspace = session.workspace(second_workspace).unwrap();
-        assert_eq!(workspace.active_tab().id(), active_tab);
         assert_eq!(
-            workspace.active_tab().focused_pane().unwrap().id(),
+            session
+                .tab(active_tab)
+                .unwrap()
+                .focused_pane()
+                .unwrap()
+                .id(),
             focused_pane
         );
     };
-    window.read(|app| assert_identity(&view.read(app).active_session().unwrap()));
+    window.read(|app| {
+        let condr = view.read(app);
+        assert_eq!(
+            condr
+                .presented()
+                .map(|(_, _, workspace_id, tab_id)| (workspace_id, tab_id)),
+            Some((second_workspace, active_tab)),
+            "reordering leaves the view where it was"
+        );
+        assert_identity(&condr.active_session().unwrap());
+    });
     let authoritative = Session::restore(server.handle.snapshot()).unwrap();
     assert_eq!(authoritative.workspaces()[0].id(), second_workspace);
     assert_eq!(authoritative.workspaces()[1].id(), first_workspace);
@@ -852,7 +878,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         window.read(|app| {
             view.read(app)
                 .active_session()
-                .is_some_and(|session| session.active_workspace().is_some())
+                .is_some_and(|session| !session.workspaces().is_empty())
         })
     });
     assert!(
@@ -876,7 +902,8 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             view.read(app)
                 .active_session()
                 .unwrap()
-                .active_workspace()
+                .workspaces()
+                .first()
                 .unwrap()
                 .root_directory()
                 .to_path_buf()
@@ -892,7 +919,8 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         window.read(|app| {
             view.read(app).active_session().is_some_and(|session| {
                 session
-                    .active_workspace()
+                    .workspaces()
+                    .first()
                     .is_some_and(|workspace| workspace.tabs().len() == 2)
             })
         })
@@ -902,12 +930,13 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         "GUI did not render the tab created by the real server"
     );
 
+    // The Client that created the Tab shows it (ADR 0021).
     let new_pane = window
         .read(|app| {
-            view.read(app)
-                .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+            let (_, session, _, tab_id) = view.read(app).presented()?;
+            let workspace = session.workspaces().first()?;
+            assert_eq!(tab_id, workspace.tabs()[1].id(), "the new Tab is shown");
+            Some(session.tab(tab_id)?.focused_pane()?.id())
         })
         .unwrap();
     let new_tab_focused = wait_until(window, |window| {
@@ -959,12 +988,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     );
 
     let active_tab = window
-        .read(|app| {
-            view.read(app)
-                .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().id())
-        })
+        .read(|app| view.read(app).presented().map(|(_, _, _, tab_id)| tab_id))
         .unwrap();
     let tab = window
         .debug_bounds(tab_selector(active_tab))
@@ -985,10 +1009,8 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
 
     let initial_pane = window
         .read(|app| {
-            view.read(app)
-                .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+            let (_, session, _, tab_id) = view.read(app).presented()?;
+            Some(session.tab(tab_id)?.focused_pane()?.id())
         })
         .unwrap();
     let initial_terminal = terminal_selector(initial_pane);
@@ -1036,11 +1058,11 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     window.simulate_keystrokes("down enter");
     let split_right = wait_until(window, |window| {
         window.read(|app| {
-            view.read(app).active_session().is_some_and(|session| {
-                session
-                    .active_workspace()
-                    .is_some_and(|workspace| workspace.active_tab().panes().len() == 2)
-            })
+            view.read(app)
+                .presented()
+                .is_some_and(|(_, session, _, tab_id)| {
+                    session.tab(tab_id).unwrap().panes().len() == 2
+                })
         })
     });
     assert!(split_right, "Pane actions menu did not split right");
@@ -1057,8 +1079,8 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
 
     let (pane_to_focus, rebuilds_before_focus) = window.read(|app| {
         let condr = view.read(app);
-        let workspace = condr.active_session().unwrap();
-        let tab = workspace.active_workspace().unwrap().active_tab();
+        let (_, session, _, tab_id) = condr.presented().unwrap();
+        let tab = session.tab(tab_id).unwrap();
         let focused = tab.focused_pane().unwrap().id();
         let other = tab
             .panes()
@@ -1074,11 +1096,11 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     window.simulate_click(other_terminal.center(), Modifiers::default());
     let pane_focused = wait_until(window, |window| {
         window.read(|app| {
-            view.read(app).active_session().is_some_and(|session| {
-                session.active_workspace().is_some_and(|workspace| {
-                    workspace.active_tab().focused_pane().unwrap().id() == pane_to_focus
+            view.read(app)
+                .presented()
+                .is_some_and(|(_, session, _, tab_id)| {
+                    session.tab(tab_id).unwrap().focused_pane().unwrap().id() == pane_to_focus
                 })
-            })
         })
     });
     assert!(pane_focused, "clicking a Pane did not focus it");
@@ -1088,14 +1110,19 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         "focus-only updates must not rebuild Dock"
     );
 
-    window.simulate_keystrokes("alt-shift--");
+    let split_down_shortcut = if cfg!(target_os = "macos") {
+        "cmd-shift-d"
+    } else {
+        "alt-shift--"
+    };
+    window.simulate_keystrokes(split_down_shortcut);
     let split_down = wait_until(window, |window| {
         window.read(|app| {
-            view.read(app).active_session().is_some_and(|session| {
-                session
-                    .active_workspace()
-                    .is_some_and(|workspace| workspace.active_tab().panes().len() == 3)
-            })
+            view.read(app)
+                .presented()
+                .is_some_and(|(_, session, _, tab_id)| {
+                    session.tab(tab_id).unwrap().panes().len() == 3
+                })
         })
     });
     assert!(split_down, "Alt+Shift+- did not split down");
@@ -1107,8 +1134,17 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         .read(|app| {
             view.read(app)
                 .active_session()?
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().focused_pane().unwrap().id())
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
         })
         .unwrap();
     let prompt_ready = wait_until(window, |window| {
@@ -1150,22 +1186,11 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         "GUI did not receive output from the server PTY"
     );
 
-    let active_tab = window.read(|app| {
-        view.read(app).active_session().and_then(|session| {
-            session
-                .active_workspace()
-                .map(|workspace| workspace.active_tab().id())
-        })
-    });
+    let active_tab = window.read(|app| view.read(app).presented().map(|(_, _, _, tab_id)| tab_id));
     window.simulate_keystrokes("ctrl-tab");
     let tab_switched = wait_until(window, |window| {
-        let next_tab = window.read(|app| {
-            view.read(app).active_session().and_then(|session| {
-                session
-                    .active_workspace()
-                    .map(|workspace| workspace.active_tab().id())
-            })
-        });
+        let next_tab =
+            window.read(|app| view.read(app).presented().map(|(_, _, _, tab_id)| tab_id));
         next_tab.is_some() && next_tab != active_tab
     });
     assert!(
@@ -1186,5 +1211,4 @@ fn visual_context_can_resize_condr_window() {
         .expect("sidebar should remain rendered");
     assert!(bounds.size.width > px(0.));
     assert!(bounds.size.height > px(0.));
-    window.quit();
 }

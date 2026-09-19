@@ -24,9 +24,9 @@ impl RuntimeState {
         origin_client_id: u64,
         origin: &ClientWriter,
         request_id: u64,
-        result: LayoutResult,
+        effect: LayoutEffect,
     ) -> bool {
-        let event = self.layout_changed_event();
+        let LayoutEffect { result, event, .. } = effect;
         if self.publish_event(event, Some((origin_client_id, origin))) {
             return true;
         }

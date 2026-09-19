@@ -40,19 +40,14 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
             &mut updates,
             LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: root.clone(),
             },
         ),
         0
     );
-    let workspace_id = state.session.active_workspace_id().unwrap();
-    let tab_one = state.session.active_workspace().unwrap().active_tab().id();
-    let pane_one = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let workspace_id = state.session.workspaces()[0].id();
+    let tab_one = state.session.workspaces()[0].tabs()[0].id();
+    let pane_one = state.session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -63,18 +58,16 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         LayoutCommand::CreateTab {
             workspace_id,
             name: None,
-            focus: true,
+            cwd_from: None,
         },
     );
-    let tab_two = state.session.active_workspace().unwrap().active_tab().id();
-    let pane_two = state
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let tab_two = state.session.workspaces()[0].tabs()[1].id();
+    let pane_two = state.session.workspaces()[0].tabs()[1]
         .focused_pane()
         .unwrap()
         .id();
+    assert_ne!(tab_one, tab_two);
+    assert_ne!(pane_one, pane_two);
     apply_for_test(
         &mut state,
         &mut updates,
@@ -211,11 +204,10 @@ fn layout_commands_keep_structure_zoom_and_terminals_in_sync() {
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            focus: true,
             root_directory: root,
         },
     );
-    let workspace_two = state.session.active_workspace_id().unwrap();
+    let workspace_two = state.session.workspaces()[1].id();
     apply_for_test(
         &mut state,
         &mut updates,
@@ -315,11 +307,10 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            focus: true,
             root_directory: repository.clone(),
         },
     );
-    let parent_workspace_id = state.session.active_workspace_id().unwrap();
+    let parent_workspace_id = state.session.workspaces()[0].id();
     apply_for_test(
         &mut state,
         &mut updates,
@@ -329,7 +320,7 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
         },
     );
 
-    let child_workspace_id = state.session.active_workspace_id().unwrap();
+    let child_workspace_id = state.session.workspaces()[1].id();
     let child = state.session.workspace(child_workspace_id).unwrap();
     let child_root = child.root_directory().to_path_buf();
     assert!(child.worktree().unwrap().is_managed());
@@ -396,11 +387,10 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            focus: true,
             root_directory: repository.clone(),
         },
     );
-    let parent_workspace_id = state.session.active_workspace_id().unwrap();
+    let parent_workspace_id = state.session.workspaces()[0].id();
     apply_for_test(
         &mut state,
         &mut updates,
@@ -409,10 +399,10 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
             branch: "feature/removal-recovery".into(),
         },
     );
-    let child_workspace_id = state.session.active_workspace_id().unwrap();
+    let child_workspace_id = state.session.workspaces()[1].id();
     let child = state.session.workspace(child_workspace_id).unwrap();
     let child_root = child.root_directory().to_path_buf();
-    let pane_id = child.active_tab().focused_pane().unwrap().id();
+    let pane_id = child.tabs().first().unwrap().focused_pane().unwrap().id();
     let previous_instance = state.terminal_instances[&pane_id];
 
     let command = LayoutCommand::RemoveWorktree {
@@ -561,7 +551,9 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
         .session
         .workspace(workspace_id)
         .unwrap()
-        .active_tab()
+        .tabs()
+        .first()
+        .unwrap()
         .focused_pane()
         .unwrap()
         .id();
@@ -698,7 +690,6 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -717,14 +708,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         unreachable!("predicate only accepts LayoutChanged events");
     };
     assert_layout_applied(&mut first, server_id, session_id, 1, sequence);
-    let pane_id = handle
-        .state
-        .lock()
-        .unwrap()
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = handle.state.lock().unwrap().session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -907,12 +891,11 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            focus: true,
             root_directory: std::env::temp_dir(),
         },
     );
-    let workspace_id = state.session.active_workspace_id().unwrap();
-    let terminal_tab = state.session.active_workspace().unwrap().active_tab().id();
+    let workspace_id = state.session.workspaces()[0].id();
+    let terminal_tab = state.session.workspaces()[0].tabs()[0].id();
     let terminals_before = state.terminals.len();
 
     let effect = apply_layout_command(
@@ -928,11 +911,11 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
     };
     assert!(effect.started_terminals.is_empty());
     assert_eq!(state.terminals.len(), terminals_before);
-    let workspace = state.session.active_workspace().unwrap();
-    assert_eq!(workspace.active_tab().id(), tab_id);
+    let workspace = state.session.workspaces().first().unwrap();
+    let diff_tab = workspace.tab(tab_id).unwrap();
     assert_ne!(tab_id, terminal_tab);
     assert_eq!(
-        workspace.active_tab().diff().unwrap().path(),
+        diff_tab.diff().unwrap().path(),
         RelativePath::new("src/lib.rs")
     );
 
@@ -945,7 +928,7 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
     )
     .unwrap();
     assert_eq!(again.result, LayoutResult::DiffShown { tab_id });
-    assert_eq!(state.session.active_workspace().unwrap().tabs().len(), 2);
+    assert_eq!(state.session.workspaces().first().unwrap().tabs().len(), 2);
 
     assert!(
         apply_layout_command(
@@ -969,13 +952,10 @@ fn show_diff_keeps_one_viewer_tab_and_starts_no_terminal() {
         "a viewer Tab has no split to size"
     );
 
-    // Closing the viewer Tab removes no terminal and re-activates the terminal Tab.
+    // Closing the viewer Tab leaves the terminal Tab and its runtime intact.
     let closed = apply_layout_command(&mut state, LayoutCommand::CloseTab { tab_id }).unwrap();
     assert!(closed.removed_terminals.is_empty());
-    assert_eq!(
-        state.session.active_workspace().unwrap().active_tab().id(),
-        terminal_tab
-    );
+    assert_eq!(state.session.workspaces()[0].tabs()[0].id(), terminal_tab);
 }
 
 #[test]
@@ -987,11 +967,10 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
         &mut updates,
         LayoutCommand::CreateWorkspace {
             name: None,
-            focus: true,
             root_directory: std::env::temp_dir(),
         },
     );
-    let workspace_id = state.session.active_workspace_id().unwrap();
+    let workspace_id = state.session.workspaces()[0].id();
     let terminals_before = state.terminals.len();
     let diff = apply_layout_command(
         &mut state,
@@ -1016,11 +995,11 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
     assert_ne!(diff.result, LayoutResult::DiffShown { tab_id });
     assert!(effect.started_terminals.is_empty());
     assert_eq!(state.terminals.len(), terminals_before);
-    let workspace = state.session.active_workspace().unwrap();
-    assert_eq!(workspace.active_tab().id(), tab_id);
+    let workspace = state.session.workspaces().first().unwrap();
+    let file_tab = workspace.tab(tab_id).unwrap();
     assert_eq!(workspace.tabs().len(), 3);
     assert_eq!(
-        workspace.active_tab().file().unwrap().path(),
+        file_tab.file().unwrap().path(),
         RelativePath::new("src/main.rs")
     );
 
@@ -1033,7 +1012,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab() {
     )
     .unwrap();
     assert_eq!(again.result, LayoutResult::FileShown { tab_id });
-    assert_eq!(state.session.active_workspace().unwrap().tabs().len(), 3);
+    assert_eq!(state.session.workspaces().first().unwrap().tabs().len(), 3);
     assert!(
         apply_layout_command(
             &mut state,

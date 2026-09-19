@@ -67,7 +67,6 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -86,14 +85,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
         unreachable!("predicate only accepts LayoutChanged events");
     };
     assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
-    let pane_id = handle
-        .state
-        .lock()
-        .unwrap()
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = handle.state.lock().unwrap().session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -206,7 +198,6 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: repository.clone(),
             },
         },
@@ -227,13 +218,7 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         unreachable!("predicate only accepts LayoutChanged events");
     };
     assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
-    let parent_workspace_id = handle
-        .state
-        .lock()
-        .unwrap()
-        .session
-        .active_workspace_id()
-        .unwrap();
+    let parent_workspace_id = handle.state.lock().unwrap().session.workspaces()[0].id();
     condr_core::protocol::write_message(
         &mut controller,
         &ClientMessage::Layout {

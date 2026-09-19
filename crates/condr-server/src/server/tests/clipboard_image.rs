@@ -17,7 +17,6 @@ fn workspace_pane(
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -32,14 +31,7 @@ fn workspace_pane(
             }
         )
     });
-    let pane_id = handle
-        .state
-        .lock()
-        .unwrap()
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = handle.state.lock().unwrap().session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();

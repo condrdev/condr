@@ -35,8 +35,6 @@ impl Session {
         }
         let (workspace_ix, tab_ix, pane_ix) = self.find_pane(pane_id)?;
         let workspace = &mut self.workspaces[workspace_ix];
-        let workspace_id = workspace.id;
-        let tab_id = workspace.tabs[tab_ix].id;
         let root_directory = workspace.root_directory.clone();
         let tab = workspace.tabs[tab_ix]
             .terminals_mut()
@@ -70,8 +68,6 @@ impl Session {
             cwd: Some(cwd),
             agent_resume: None,
         });
-        self.workspaces[workspace_ix].active_tab = tab_id;
-        self.active_workspace = Some(workspace_id);
         Some(new_pane_id)
     }
 
@@ -91,10 +87,6 @@ impl Session {
         let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
             return false;
         };
-        let workspace_id = self.workspaces[workspace_ix].id;
-        let tab_id = self.workspaces[workspace_ix].tabs[tab_ix].id;
-        self.active_workspace = Some(workspace_id);
-        self.workspaces[workspace_ix].active_tab = tab_id;
         let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
         let previous_focus = tab.focused_pane;
         if previous_focus != pane_id {
@@ -138,26 +130,11 @@ impl Session {
         workspace.tabs.remove(tab_ix);
         outcome.tabs.push(tab_id);
         if !workspace.tabs.is_empty() {
-            if workspace.active_tab == tab_id {
-                workspace.active_tab = workspace
-                    .tabs
-                    .get(tab_ix)
-                    .or_else(|| workspace.tabs.last())
-                    .expect("workspace has a remaining tab")
-                    .id;
-            }
             return Some(outcome);
         }
 
         self.workspaces.remove(workspace_ix);
         outcome.workspaces.push(workspace_id);
-        if self.active_workspace == Some(workspace_id) {
-            self.active_workspace = self
-                .workspaces
-                .get(workspace_ix)
-                .or_else(|| self.workspaces.last())
-                .map(|workspace| workspace.id);
-        }
         Some(outcome)
     }
 

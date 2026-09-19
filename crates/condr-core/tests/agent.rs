@@ -465,10 +465,7 @@ fn a_conversation_reference_round_trips_without_copying_it_to_new_panes() {
     ] {
         let mut session = Session::new();
         session.create_workspace(std::env::temp_dir()).unwrap();
-        let pane = session
-            .active_workspace()
-            .unwrap()
-            .active_tab()
+        let pane = session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id();

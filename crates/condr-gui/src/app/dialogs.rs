@@ -267,14 +267,14 @@ impl Condr {
     }
 
     pub(super) fn prompt_rename_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = self.active_session() else {
+        let Some((key, session, workspace_id, _)) = self.presented() else {
             return;
         };
-        let Some(workspace) = session.active_workspace() else {
+        let Some(workspace) = session.workspace(workspace_id) else {
             return;
         };
         self.prompt_rename_workspace_on(
-            self.active_connection,
+            key,
             workspace.id(),
             workspace.name().to_owned(),
             window,
@@ -398,20 +398,13 @@ impl Condr {
     }
 
     pub(super) fn prompt_rename_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = self.active_session() else {
+        let Some((key, session, _, tab_id)) = self.presented() else {
             return;
         };
-        let Some(workspace) = session.active_workspace() else {
+        let Some(tab) = session.tab(tab_id) else {
             return;
         };
-        let tab = workspace.active_tab();
-        self.prompt_rename_tab_on(
-            self.active_connection,
-            tab.id(),
-            tab.name().to_owned(),
-            window,
-            cx,
-        );
+        self.prompt_rename_tab_on(key, tab.id(), tab.name().to_owned(), window, cx);
     }
 
     pub(super) fn prompt_rename_tab_on(

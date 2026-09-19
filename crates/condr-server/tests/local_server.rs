@@ -115,7 +115,6 @@ fn local_server_helper() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: workspace_root.clone(),
             },
         },
@@ -427,7 +426,6 @@ fn lifecycle_commands_manage_a_detached_server() {
         .layout(LayoutCommand::CreateWorkspace {
             root_directory: data_directory.clone(),
             name: Some("restart-test".into()),
-            focus: false,
         })
         .unwrap()
         .unwrap();

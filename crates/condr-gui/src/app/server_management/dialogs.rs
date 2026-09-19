@@ -128,7 +128,6 @@ impl Condr {
                 self.connections
                     .push(ServerConnection::new(key, label, endpoint));
                 self.save_servers(cx);
-                self.pending_presentation_request = None;
                 self.active_connection = key;
                 self.target_pane = None;
                 _ = self.start_connect(key);

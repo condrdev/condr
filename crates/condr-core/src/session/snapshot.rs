@@ -43,10 +43,8 @@ impl Session {
                             },
                         })
                         .collect(),
-                    active_tab: workspace.active_tab,
                 })
                 .collect(),
-            active_workspace: self.active_workspace,
         }
     }
 
@@ -95,13 +93,9 @@ impl Session {
                 root_directory: workspace.root_directory,
                 worktree: workspace.worktree,
                 tabs,
-                active_tab: workspace.active_tab,
             });
         }
-        let session = Self {
-            workspaces,
-            active_workspace: snapshot.active_workspace,
-        };
+        let session = Self { workspaces };
         let max_id = session.validate()?;
         let next_id = max_id
             .checked_add(1)
@@ -111,18 +105,6 @@ impl Session {
     }
 
     fn validate(&self) -> Result<u64, SnapshotError> {
-        if self.workspaces.is_empty() != self.active_workspace.is_none() {
-            return Err(SnapshotError::Invalid("invalid active Workspace"));
-        }
-        if self.active_workspace.is_some_and(|active| {
-            !self
-                .workspaces
-                .iter()
-                .any(|workspace| workspace.id == active)
-        }) {
-            return Err(SnapshotError::Invalid("active Workspace is missing"));
-        }
-
         let mut workspace_ids = HashSet::new();
         let mut tab_ids = HashSet::new();
         let mut pane_ids = HashSet::new();
@@ -142,13 +124,6 @@ impl Session {
                 {
                     return Err(SnapshotError::Invalid("invalid Worktree association"));
                 }
-            }
-            if !workspace
-                .tabs
-                .iter()
-                .any(|tab| tab.id == workspace.active_tab)
-            {
-                return Err(SnapshotError::Invalid("active Tab is missing"));
             }
             let (mut diff_tabs, mut file_tabs) = (0, 0);
             for tab in &workspace.tabs {

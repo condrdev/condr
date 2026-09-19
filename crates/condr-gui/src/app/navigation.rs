@@ -117,18 +117,12 @@ impl Condr {
             .is_some_and(|connection| connection.attention.remove(&pane_id))
     }
 
+    /// The focused Pane of the Tab connection `key` shows.
     pub(super) fn connection_focused_pane(&self, key: ConnectionKey) -> Option<PaneId> {
-        self.connection(key)
-            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
-            .and_then(|session| {
-                Some(
-                    session
-                        .active_workspace()?
-                        .active_tab()
-                        .focused_pane()?
-                        .id(),
-                )
-            })
+        let connection = self.connection(key)?;
+        let session = connection.session()?;
+        let (_, tab_id) = connection.viewed(&session)?;
+        Some(session.tab(tab_id)?.focused_pane()?.id())
     }
 
     pub(super) fn select_server(
@@ -137,34 +131,17 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self
-            .connection(key)
-            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
-        else {
-            return;
-        };
-        if self.pending_workspace_selection_for(key).is_some() {
-            let workspace_id = self
-                .active_dock_surface
-                .filter(|surface| surface.connection_key == key)
-                .and_then(|surface| Self::workspace_id_for_surface(&session, surface))
-                .or_else(|| session.active_workspace_id());
-            if let Some(workspace_id) = workspace_id {
-                self.select_workspace(key, workspace_id, window, cx);
-                return;
-            }
-        }
-        if self.active_connection == key {
-            self.cancel_pending_presentation(window, cx);
+        if self.connection(key).is_none() || self.active_connection == key {
             return;
         }
-        self.pending_presentation_request = None;
         self.active_connection = key;
         self.refresh_target_pane(key);
         self.rebuild_dock(window, cx);
         cx.notify();
     }
 
+    /// Shows a Workspace. The view is this Client's own (ADR 0021): nothing goes to the
+    /// Server, and a viewing-only connection can browse too.
     pub(super) fn select_workspace(
         &mut self,
         key: ConnectionKey,
@@ -172,84 +149,14 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let active_surface = self.active_dock_surface;
-        let Some((
-            active_workspace_id,
-            displayed_workspace_id,
-            workspace_exists,
-            can_mutate,
-            mut pending,
-        )) = self.connection(key).and_then(|connection| {
-            let session = Session::restore(connection.snapshot.clone()).ok()?;
-            let (Some(server_id), Some(runtime_epoch), Some(session_id)) = (
-                connection.server_id,
-                connection.runtime_epoch,
-                connection.session_id,
-            ) else {
-                return None;
-            };
-            Some((
-                session.active_workspace_id(),
-                active_surface
-                    .filter(|surface| surface.connection_key == key)
-                    .and_then(|surface| Self::workspace_id_for_surface(&session, surface)),
-                session.workspace(workspace_id).is_some(),
-                connection.can_mutate(),
-                PendingWorkspaceSelection {
-                    connection_key: key,
-                    workspace_id,
-                    pane_id: None,
-                    connect_generation: connection.connect_generation,
-                    server_id,
-                    runtime_epoch,
-                    session_id,
-                    request_id: 0,
-                    applied_sequence: None,
-                },
-            ))
-        })
-        else {
-            return;
-        };
-        if !workspace_exists || !can_mutate {
-            return;
-        }
-        if let Some(existing) = self
-            .pending_workspace_selection_for(key)
-            .filter(|existing| existing.workspace_id == workspace_id && existing.pane_id.is_none())
-        {
-            self.pending_presentation_request = Some((key, existing.request_id));
-            return;
-        }
-        if self.active_connection == key
-            && displayed_workspace_id == Some(workspace_id)
-            && active_workspace_id == Some(workspace_id)
-            && self.pending_workspace_selection_for(key).is_none()
-        {
-            self.cancel_pending_presentation(window, cx);
-            return;
-        }
-        if active_workspace_id == Some(workspace_id)
-            && self.pending_workspace_selection_for(key).is_none()
-        {
-            self.pending_presentation_request = None;
-            self.active_connection = key;
-            self.refresh_target_pane(key);
+        if self.show_view(key, workspace_id, None) {
             self.rebuild_dock(window, cx);
-            cx.notify();
-            return;
         }
-
-        let Some(request_id) =
-            self.send_layout_to(key, LayoutCommand::ActivateWorkspace { workspace_id })
-        else {
-            return;
-        };
-        pending.request_id = request_id;
-        self.pending_workspace_selections.insert(key, pending);
-        self.pending_presentation_request = Some((key, request_id));
+        cx.notify();
     }
 
+    /// Shows a Pane's Tab and targets the Pane. Pane focus inside a Tab is Session
+    /// structure, so a connection that may mutate also tells the Server.
     pub(crate) fn select_pane(
         &mut self,
         key: ConnectionKey,
@@ -257,102 +164,40 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((workspace_id, tab_id, authoritative_target, can_mutate, mut pending)) =
+        let Some((workspace_id, tab_id, server_focused, can_mutate)) =
             self.connection(key).and_then(|connection| {
-                let session = Session::restore(connection.snapshot.clone()).ok()?;
-                let (workspace_id, tab_id) = session.workspaces().iter().find_map(|workspace| {
-                    workspace.tabs().iter().find_map(|tab| {
-                        tab.panes()
-                            .iter()
-                            .any(|pane| pane.id() == pane_id)
-                            .then_some((workspace.id(), tab.id()))
-                    })
-                })?;
-                let authoritative_target = session.active_workspace().is_some_and(|workspace| {
-                    workspace.id() == workspace_id
-                        && workspace.active_tab().id() == tab_id
-                        && workspace
-                            .active_tab()
-                            .focused_pane()
-                            .is_some_and(|pane| pane.id() == pane_id)
-                });
-                let (Some(server_id), Some(runtime_epoch), Some(session_id)) = (
-                    connection.server_id,
-                    connection.runtime_epoch,
-                    connection.session_id,
-                ) else {
-                    return None;
-                };
+                let session = connection.session()?;
+                let workspace = session.workspace_for_pane(pane_id)?;
+                let tab = workspace
+                    .tabs()
+                    .iter()
+                    .find(|tab| tab.panes().iter().any(|pane| pane.id() == pane_id))?;
                 Some((
-                    workspace_id,
-                    tab_id,
-                    authoritative_target,
+                    workspace.id(),
+                    tab.id(),
+                    tab.focused_pane().is_some_and(|pane| pane.id() == pane_id),
                     connection.can_mutate(),
-                    PendingWorkspaceSelection {
-                        connection_key: key,
-                        workspace_id,
-                        pane_id: Some(pane_id),
-                        connect_generation: connection.connect_generation,
-                        server_id,
-                        runtime_epoch,
-                        session_id,
-                        request_id: 0,
-                        applied_sequence: None,
-                    },
                 ))
             })
         else {
             return false;
         };
-        let target_surface = DockSurfaceKey {
-            connection_key: key,
-            tab_id,
-        };
-        let target_is_displayed =
-            self.active_connection == key && self.active_dock_surface == Some(target_surface);
-        if !can_mutate {
-            if target_is_displayed {
-                self.target_pane = Some((key, pane_id));
-                self.mark_pane_seen(key, pane_id);
-                self.focus_pane_panel(target_surface, pane_id, window, cx);
-                cx.notify();
-                return true;
-            }
-            return false;
-        }
-        if let Some(selection) = self
-            .pending_workspace_selection_for(key)
-            .filter(|selection| {
-                selection.workspace_id == workspace_id && selection.pane_id == Some(pane_id)
-            })
-        {
-            self.pending_presentation_request = Some((key, selection.request_id));
-            return true;
-        }
-
-        let supersedes_same_connection = self.pending_workspace_selection_for(key).is_some();
-        if authoritative_target && !supersedes_same_connection {
-            self.pending_presentation_request = None;
-            self.active_connection = key;
-            self.target_pane = Some((key, pane_id));
-            self.mark_pane_seen(key, pane_id);
-            self.rebuild_dock(window, cx);
-            cx.notify();
-            return true;
-        }
-
-        let Some(request_id) = self.send_layout_to(key, LayoutCommand::FocusPane { pane_id })
-        else {
-            return false;
-        };
-        pending.request_id = request_id;
-        self.pending_workspace_selections.insert(key, pending);
-        self.pending_presentation_request = Some((key, request_id));
+        self.show_view(key, workspace_id, Some(tab_id));
+        self.target_pane = Some((key, pane_id));
         self.mark_pane_seen(key, pane_id);
-        if target_is_displayed {
-            self.target_pane = Some((key, pane_id));
-            self.focus_pane_panel(target_surface, pane_id, window, cx);
+        if can_mutate && !server_focused {
+            self.send_layout_to(key, LayoutCommand::FocusPane { pane_id });
         }
+        self.rebuild_dock(window, cx);
+        self.focus_pane_panel(
+            DockSurfaceKey {
+                connection_key: key,
+                tab_id,
+            },
+            pane_id,
+            window,
+            cx,
+        );
         cx.notify();
         true
     }
@@ -363,9 +208,6 @@ impl Condr {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<bool> {
-        if self.pending_workspace_selection_for(key).is_some() {
-            return None;
-        }
         if !self
             .connection(key)
             .is_some_and(ServerConnection::can_mutate)
@@ -386,6 +228,7 @@ impl Condr {
         self.send_layout_to(self.active_connection, command);
     }
 
+    /// Shows a Tab; local, like `select_workspace`.
     pub(super) fn activate_tab_on(
         &mut self,
         key: ConnectionKey,
@@ -393,14 +236,27 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .send_layout_to(key, LayoutCommand::ActivateTab { tab_id })
-            .is_some()
-        {
-            self.cancel_pending_presentation(window, cx);
+        let Some(workspace_id) = self
+            .connection(key)
+            .and_then(ServerConnection::session)
+            .and_then(|session| {
+                session
+                    .workspaces()
+                    .iter()
+                    .find(|workspace| workspace.tab(tab_id).is_some())
+                    .map(Workspace::id)
+            })
+        else {
+            return;
+        };
+        if self.show_view(key, workspace_id, Some(tab_id)) {
+            self.rebuild_dock(window, cx);
         }
+        cx.notify();
     }
 
+    /// Sends a command whose result this Client will show: the created Workspace or Tab,
+    /// the shown diff or file. The view moves when `LayoutApplied` names it.
     pub(super) fn send_presenting_layout_to(
         &mut self,
         key: ConnectionKey,
@@ -409,10 +265,11 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> Option<u64> {
         let request_id = self.send_layout_to(key, command)?;
-        self.pending_presentation_request = None;
-        self.active_connection = key;
-        self.target_pane = None;
-        self.rebuild_dock(window, cx);
+        if self.active_connection != key {
+            self.active_connection = key;
+            self.refresh_target_pane(key);
+            self.rebuild_dock(window, cx);
+        }
         cx.notify();
         Some(request_id)
     }
@@ -422,13 +279,10 @@ impl Condr {
         key: ConnectionKey,
         command: LayoutCommand,
     ) -> Option<u64> {
-        if (self.has_pending_projection_for(key)
-            || self.pending_workspace_selection_for(key).is_some())
+        if self.has_pending_projection_for(key)
             && !matches!(
                 &command,
-                LayoutCommand::ActivateWorkspace { .. }
-                    | LayoutCommand::FocusPane { .. }
-                    | LayoutCommand::SetSplitRatios { .. }
+                LayoutCommand::FocusPane { .. } | LayoutCommand::SetSplitRatios { .. }
             )
         {
             return None;
@@ -505,7 +359,6 @@ impl Condr {
             LayoutCommand::CreateWorkspace {
                 root_directory,
                 name: None,
-                focus: true,
             },
             window,
             cx,
@@ -535,15 +388,13 @@ impl Condr {
     }
 
     pub(super) fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(workspace_id) = self
-            .active_session()
-            .and_then(|session| session.active_workspace_id())
-        else {
+        let Some((key, _, workspace_id, _)) = self.presented() else {
             return;
         };
-        self.new_tab_on(self.active_connection, workspace_id, window, cx);
+        self.new_tab_on(key, workspace_id, window, cx);
     }
 
+    /// The new Tab's shell starts where the Pane this Client shows in that Workspace is.
     pub(super) fn new_tab_on(
         &mut self,
         key: ConnectionKey,
@@ -551,12 +402,17 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let cwd_from = self.connection(key).and_then(|connection| {
+            let session = connection.session()?;
+            let tab_id = connection.viewed_tab_id(&session, workspace_id)?;
+            Some(session.tab(tab_id)?.focused_pane()?.id())
+        });
         self.send_presenting_layout_to(
             key,
             LayoutCommand::CreateTab {
                 workspace_id,
                 name: None,
-                focus: true,
+                cwd_from,
             },
             window,
             cx,
@@ -569,37 +425,31 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self.active_session() else {
+        let Some((key, session, workspace_id, _)) = self.presented() else {
             return;
         };
-        let key = self.active_connection;
-        let Some(workspace) = self
-            .presented_workspace_id(key, &session)
-            .and_then(|id| session.workspace(id))
+        let Some(tab) = session
+            .workspace(workspace_id)
+            .and_then(|workspace| workspace.tabs().get(index))
         else {
             return;
         };
-        if let Some(tab) = workspace.tabs().get(index) {
-            self.activate_tab_on(key, tab.id(), window, cx);
-        }
+        self.activate_tab_on(key, tab.id(), window, cx);
     }
 
     pub(super) fn cycle_tab(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = self.active_session() else {
+        let Some((key, session, workspace_id, tab_id)) = self.presented() else {
             return;
         };
-        let Some(workspace) = session.active_workspace() else {
+        let Some(workspace) = session.workspace(workspace_id) else {
             return;
         };
         let tabs = workspace.tabs();
-        let Some(active_ix) = tabs
-            .iter()
-            .position(|tab| tab.id() == workspace.active_tab().id())
-        else {
+        let Some(active_ix) = tabs.iter().position(|tab| tab.id() == tab_id) else {
             return;
         };
         let target_ix = (active_ix as isize + step).rem_euclid(tabs.len() as isize) as usize;
-        self.activate_tab_on(self.active_connection, tabs[target_ix].id(), window, cx);
+        self.activate_tab_on(key, tabs[target_ix].id(), window, cx);
     }
 
     pub(super) fn split(&mut self, direction: SplitDirection) {
@@ -661,19 +511,13 @@ impl Condr {
     }
 
     pub(super) fn close_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = self.active_session() else {
+        let Some((key, session, workspace_id, tab_id)) = self.presented() else {
             return;
         };
-        let Some(workspace) = session.active_workspace() else {
+        let Some(workspace) = session.workspace(workspace_id) else {
             return;
         };
-        self.close_tab_id(
-            self.active_connection,
-            workspace.active_tab().id(),
-            workspace.tabs().len() == 1,
-            window,
-            cx,
-        );
+        self.close_tab_id(key, tab_id, workspace.tabs().len() == 1, window, cx);
     }
 
     pub(super) fn close_tab_id(
@@ -694,13 +538,10 @@ impl Condr {
     }
 
     pub(super) fn close_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(workspace_id) = self
-            .active_session()
-            .and_then(|session| session.active_workspace_id())
-        else {
+        let Some((key, _, workspace_id, _)) = self.presented() else {
             return;
         };
-        self.close_workspace_id(self.active_connection, workspace_id, window, cx);
+        self.close_workspace_id(key, workspace_id, window, cx);
     }
 
     pub(super) fn close_workspace_id(

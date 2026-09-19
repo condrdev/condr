@@ -41,7 +41,6 @@ fn lightweight_queries_and_admin_never_capture_terminal_views() {
         .layout(LayoutCommand::CreateWorkspace {
             root_directory: std::env::temp_dir(),
             name: None,
-            focus: true,
         })
         .unwrap()
         .unwrap()
@@ -154,7 +153,6 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -176,8 +174,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
 
     let (snapshot_before, sequence_before, focus_before, terminal_instances_before) = {
         let state = handle.state.lock().unwrap();
-        let workspace = state.session.active_workspace().unwrap();
-        let tab = workspace.active_tab();
+        let workspace = state.session.workspaces().first().unwrap();
+        let tab = workspace.tabs().first().unwrap();
         (
             state.session.snapshot(),
             state.sequence,
@@ -204,7 +202,6 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             42,
             LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: missing_root,
             },
             "cannot access root directory",
@@ -213,7 +210,6 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             43,
             LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: PathBuf::from("relative-workspace-root"),
             },
             "must be an absolute path",
@@ -222,7 +218,6 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
             44,
             LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: regular_file.clone(),
             },
             "is not a directory",
@@ -276,8 +271,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
         );
 
         let state = handle.state.lock().unwrap();
-        let workspace = state.session.active_workspace().unwrap();
-        let tab = workspace.active_tab();
+        let workspace = state.session.workspaces().first().unwrap();
+        let tab = workspace.tabs().first().unwrap();
         assert_eq!(state.session.snapshot(), snapshot_before);
         assert!(
             state
@@ -352,7 +347,6 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: repository.clone(),
             },
         },
@@ -373,10 +367,16 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     assert_layout_applied(&mut stream, server_id, session_id, 1, sequence);
     let (workspace_id, pane_id) = {
         let state = handle.state.lock().unwrap();
-        let workspace = state.session.active_workspace().unwrap();
+        let workspace = state.session.workspaces().first().unwrap();
         (
             workspace.id(),
-            workspace.active_tab().focused_pane().unwrap().id(),
+            workspace
+                .tabs()
+                .first()
+                .unwrap()
+                .focused_pane()
+                .unwrap()
+                .id(),
         )
     };
     send_terminal(

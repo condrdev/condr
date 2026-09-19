@@ -7,39 +7,11 @@ pub const DIFF_TAB_NAME: &str = "Diff";
 pub const FILE_TAB_NAME: &str = "Preview";
 
 impl Session {
-    pub fn activate_workspace(&mut self, workspace_id: WorkspaceId) -> bool {
-        if self
-            .workspaces
-            .iter()
-            .any(|workspace| workspace.id == workspace_id)
-        {
-            self.active_workspace = Some(workspace_id);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn activate_tab(&mut self, tab_id: TabId) -> bool {
-        for workspace in &mut self.workspaces {
-            if workspace.tabs.iter().any(|tab| tab.id == tab_id) {
-                workspace.active_tab = tab_id;
-                self.active_workspace = Some(workspace.id);
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Keeps existing selection and focus history when a staged creation does not request
-    /// focus. Newly created Workspaces/Tabs retain their valid initial selection.
-    pub fn preserve_selection_from(&mut self, previous: &Session) {
-        if let Some(active) = previous.active_workspace {
-            self.active_workspace = Some(active);
-        }
+    /// Keeps every existing Tab's Pane focus, history and zoom when a split does not
+    /// request focus; the new Pane still exists, it just does not take the focus.
+    pub fn preserve_focus_from(&mut self, previous: &Session) {
         for workspace in &mut self.workspaces {
             if let Some(old) = previous.workspace(workspace.id) {
-                workspace.active_tab = old.active_tab;
                 for tab in &mut workspace.tabs {
                     let old = old.tabs.iter().find(|old| old.id == tab.id);
                     if let (Some(terminals), Some(old)) =
@@ -79,15 +51,21 @@ impl Session {
                     agent_resume: None,
                 })),
             }],
-            active_tab: tab_id,
         };
 
         self.workspaces.push(workspace);
-        self.active_workspace = Some(workspace_id);
         Some(workspace_id)
     }
 
-    pub fn create_tab(&mut self, workspace_id: WorkspaceId) -> Option<TabId> {
+    /// The new Tab's shell starts where `cwd_from` is, when that Pane belongs to the
+    /// Workspace (the caller's own Pane, or the one it is looking at); otherwise in the
+    /// Workspace root. Which Pane that is cannot be read off the Session, since each
+    /// client shows its own Tab (ADR 0021).
+    pub fn create_tab(
+        &mut self,
+        workspace_id: WorkspaceId,
+        cwd_from: Option<PaneId>,
+    ) -> Option<TabId> {
         if self.tab_count() >= MAX_SNAPSHOT_TABS || self.pane_count() >= MAX_SNAPSHOT_PANES {
             return None;
         }
@@ -96,10 +74,14 @@ impl Session {
             .iter()
             .position(|workspace| workspace.id == workspace_id)?;
         let workspace = &mut self.workspaces[workspace_ix];
-        // A viewer Tab has no Pane to inherit from, so the Workspace root serves.
-        let cwd = workspace
-            .active_tab()
-            .focused_pane()
+        let cwd = cwd_from
+            .and_then(|pane_id| {
+                workspace
+                    .tabs
+                    .iter()
+                    .flat_map(Tab::panes)
+                    .find(|pane| pane.id == pane_id)
+            })
             .and_then(|pane| pane.cwd.clone())
             .unwrap_or_else(|| workspace.root_directory.clone());
         let first_id = reserve_ids(2)?;
@@ -114,14 +96,12 @@ impl Session {
                 agent_resume: None,
             })),
         });
-        workspace.active_tab = tab_id;
-        self.active_workspace = Some(workspace_id);
         Some(tab_id)
     }
 
     /// Shows `path`'s diff in the Workspace's Diff Tab, creating the Tab the first time and
-    /// retargeting it afterwards, and activates it (ADR 0017). `None` for an unknown
-    /// Workspace, an invalid path, or when the Tab limit is reached.
+    /// retargeting it afterwards (ADR 0017). `None` for an unknown Workspace, an invalid
+    /// path, or when the Tab limit is reached.
     pub fn show_diff(&mut self, workspace_id: WorkspaceId, path: RelativePathBuf) -> Option<TabId> {
         self.show_viewer(
             workspace_id,
@@ -181,9 +161,6 @@ impl Session {
                 tab_id
             }
         };
-        let workspace = &mut self.workspaces[workspace_ix];
-        workspace.active_tab = tab_id;
-        self.active_workspace = Some(workspace_id);
         Some(tab_id)
     }
 
@@ -237,21 +214,11 @@ impl Session {
             }
 
             let tab = self.workspaces[workspace_ix].tabs.remove(tab_ix);
-            let outcome = CloseOutcome {
+            return Some(CloseOutcome {
                 panes: tab.panes().iter().map(|pane| pane.id).collect(),
                 tabs: vec![tab_id],
                 workspaces: Vec::new(),
-            };
-            let workspace = &mut self.workspaces[workspace_ix];
-            if workspace.active_tab == tab_id {
-                workspace.active_tab = workspace
-                    .tabs
-                    .get(tab_ix)
-                    .or_else(|| workspace.tabs.last())
-                    .expect("workspace has a remaining tab")
-                    .id;
-            }
-            return Some(outcome);
+            });
         }
         None
     }
@@ -267,13 +234,6 @@ impl Session {
         for tab in workspace.tabs {
             tabs.push(tab.id);
             panes.extend(tab.panes().iter().map(|pane| pane.id));
-        }
-        if self.active_workspace == Some(workspace_id) {
-            self.active_workspace = self
-                .workspaces
-                .get(workspace_ix)
-                .or_else(|| self.workspaces.last())
-                .map(|workspace| workspace.id);
         }
         Some(CloseOutcome {
             panes,

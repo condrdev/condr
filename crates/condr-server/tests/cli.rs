@@ -139,14 +139,20 @@ fn workspace_and_tab_commands_drive_a_live_server() {
     let workspace_id = created["workspace"]["workspace_id"].as_u64().unwrap();
     assert_eq!(created["workspace"]["name"], "demo");
     assert_eq!(created["workspace"]["tab_count"], 1);
-    // The first Workspace stays active: there was nothing to go back to.
-    assert_eq!(created["workspace"]["focused"], true);
+    // Which Workspace or Tab a client shows is that client's own (ADR 0021): no such
+    // fact is reported here.
+    assert!(created["workspace"].get("focused").is_none());
     let first_tab = created["tab"]["tab_id"].as_u64().unwrap();
-    assert_eq!(created["tab"]["focused"], true);
+    assert!(created["tab"].get("focused").is_none());
     assert!(created["root_pane"]["pane_id"].is_u64());
     let workspace_arg = workspace_id.to_string();
 
-    // A background Tab: created, named, but the active Tab does not change.
+    // A Tab created from outside a Pane names its Workspace; the calling Pane would
+    // otherwise supply it.
+    assert_eq!(
+        err(&endpoint_path, &["tab", "create"])["code"],
+        "workspace_not_found"
+    );
     let tab = ok(
         &endpoint_path,
         &[
@@ -160,10 +166,9 @@ fn workspace_and_tab_commands_drive_a_live_server() {
     );
     let tab_id = tab["tab"]["tab_id"].as_u64().unwrap();
     assert_eq!(tab["tab"]["name"], "logs");
-    assert_eq!(tab["tab"]["focused"], false);
     assert_eq!(
-        ok(&endpoint_path, &["tab", "get", &first_tab.to_string()])["tab"]["focused"],
-        true
+        ok(&endpoint_path, &["tab", "get", &first_tab.to_string()])["tab"]["tab_id"],
+        first_tab
     );
     assert_eq!(
         ok(
@@ -177,9 +182,10 @@ fn workspace_and_tab_commands_drive_a_live_server() {
     );
 
     let tab_arg = tab_id.to_string();
+    // `focus` asks every GUI to show the Tab and changes nothing on the Server.
     assert_eq!(
-        ok(&endpoint_path, &["tab", "focus", &tab_arg])["tab"]["focused"],
-        true
+        ok(&endpoint_path, &["tab", "focus", &tab_arg])["tab"]["tab_id"],
+        tab_id
     );
     assert_eq!(
         ok(&endpoint_path, &["tab", "rename", &tab_arg, "build"])["tab"]["name"],

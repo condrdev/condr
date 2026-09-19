@@ -30,7 +30,6 @@ fn layout_command_round_trip_preserves_creation_options() {
         request_id: 9,
         command: LayoutCommand::CreateWorkspace {
             name: Some("worker".into()),
-            focus: false,
             root_directory: PathBuf::from("projects/condr"),
         },
     };
@@ -138,10 +137,7 @@ fn bootstrap_header_round_trip_uses_the_flat_snapshot_schema() {
     session
         .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .expect("Workspace is active")
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -442,10 +438,7 @@ fn bootstrap_header(batch_count: u32) -> (BootstrapHeader, PaneId, WorkspaceId) 
     let workspace_id = session
         .create_workspace(PathBuf::from("projects/condr"))
         .expect("Workspace capacity");
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();

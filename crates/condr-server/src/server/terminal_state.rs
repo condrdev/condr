@@ -166,10 +166,15 @@ impl RuntimeState {
             return Vec::new();
         }
         let pane_id = match command {
-            LayoutCommand::CreateTab { workspace_id, .. } => self
-                .session
-                .workspace(*workspace_id)
-                .and_then(|workspace| Some(workspace.active_tab().focused_pane()?.id())),
+            LayoutCommand::CreateTab {
+                workspace_id,
+                cwd_from,
+                ..
+            } => cwd_from.filter(|pane_id| {
+                self.session
+                    .workspace_for_pane(*pane_id)
+                    .is_some_and(|workspace| workspace.id() == *workspace_id)
+            }),
             LayoutCommand::SplitPane { pane_id, .. } => Some(*pane_id),
             _ => None,
         };

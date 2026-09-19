@@ -29,7 +29,8 @@ pub(crate) enum PaneCommand {
         #[arg(long)]
         focus: bool,
     },
-    /// Focus a Pane by id, or the neighbor of a Pane with --direction
+    /// Focus a Pane by id and ask every GUI to show its Tab, or focus the neighbor of a
+    /// Pane with --direction
     Focus {
         /// Defaults to the calling Pane when --direction is given
         pane_id: Option<u64>,
@@ -360,8 +361,12 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             direction: None,
         } => {
             let pane_id = target_pane(pane_id)?;
-            find_pane(&client.session()?, pane_id.as_u64())?;
+            let before = client.session()?;
+            let tab_id = find_pane(&before, pane_id.as_u64())?.1.id();
             apply(client, LayoutCommand::FocusPane { pane_id })?;
+            // Pane focus is Session structure; showing the Tab is each viewer's own choice,
+            // so ask them (ADR 0021).
+            apply(client, LayoutCommand::ActivateTab { tab_id })?;
             let session = client.session()?;
             let (workspace, tab) = find_pane(&session, pane_id.as_u64())?;
             Ok(json!({ "pane": pane_info(client, workspace, tab, pane_id) }))

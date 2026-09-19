@@ -32,19 +32,20 @@ use changes::*;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
     AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
-    MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
-    TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, decode_pane_terminal_frame,
-    relative_age, uptime_text,
+    LayoutResult, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame,
+    PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
+    ServerId, ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
+    SessionId, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot,
+    decode_pane_terminal_frame, relative_age, uptime_text,
 };
 use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, DirectoryListing,
     FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot,
-    SplitDirection, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
+    SplitDirection, Tab, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
     TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
-    TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, WorkspaceId,
+    TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, Workspace,
+    WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, Endpoint, ServerConfig, StaticKey, TcpEndpoint,
@@ -80,7 +81,6 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use ime::TerminalComposition;
-use presentation::*;
 use relative_path::{RelativePath, RelativePathBuf};
 use server_connection::*;
 use settings::{
@@ -243,8 +243,6 @@ pub(crate) struct Condr {
     dock_rebuild_count: usize,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
     target_pane: Option<(ConnectionKey, PaneId)>,
-    pending_workspace_selections: HashMap<ConnectionKey, PendingWorkspaceSelection>,
-    pending_presentation_request: Option<(ConnectionKey, u64)>,
     workspace_size: Size<Pixels>,
     focus_handle: FocusHandle,
     terminal_selection: Option<LocalTerminalSelection>,
@@ -411,8 +409,6 @@ impl Condr {
             dock_rebuild_count: 0,
             panels: HashMap::new(),
             target_pane: None,
-            pending_workspace_selections: HashMap::new(),
-            pending_presentation_request: None,
             workspace_size: size(
                 (window.viewport_size().width - INITIAL_SIDEBAR_WIDTH).max(px(0.)),
                 (window.viewport_size().height - WORKSPACE_TITLE_BAR_HEIGHT).max(px(0.)),

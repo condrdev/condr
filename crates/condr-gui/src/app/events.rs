@@ -20,7 +20,6 @@ impl Condr {
         }
         let message = match incoming {
             Incoming::Bootstrap(bootstrap) => {
-                let presentation_before = self.pending_presentation_request;
                 let application = self.connections[index].apply_bootstrap(bootstrap);
                 if self
                     .hovered_link
@@ -49,42 +48,27 @@ impl Condr {
                 if application.reacquire_control {
                     // Layout responses may have been lost to writer lag; this Bootstrap is
                     // the authoritative layout, so nothing stays pending against it.
-                    self.clear_pending_workspace_selection_for(key);
                     _ = self.clear_pending_projections_for(key);
                 }
 
                 let bootstrap_sequence = self.connections[index].sequence;
                 let active_projection_resolved =
                     self.resolve_projections_at(key, bootstrap_sequence);
-                let (pending_workspace_ready, pending_workspace_failed) =
-                    self.resolve_pending_workspace_at(key, index, bootstrap_sequence);
-                let preserve_visible_workspace = self.active_connection == key
-                    && self.should_hold_active_surface()
-                    && self
-                        .active_dock_surface
-                        .is_some_and(|surface| surface.connection_key == key);
                 let target_before_refresh = self.target_pane;
                 if application.reacquire_control {
                     self.acquire_and_subscribe(key);
                 } else if application.resubscribe {
                     self.connections[index].subscribe();
                 }
-                if !preserve_visible_workspace {
-                    self.refresh_target_pane(key);
-                }
+                self.refresh_target_pane(key);
                 let target_changed =
                     self.active_connection == key && self.target_pane != target_before_refresh;
-                let released_presentation = presentation_before.is_some()
-                    && self.pending_presentation_request != presentation_before;
                 return IncomingEffect {
-                    rebuild: !preserve_visible_workspace
-                        && (application.rebuild
-                            || application.reacquire_control
-                            || pending_workspace_ready
-                            || pending_workspace_failed
-                            || active_projection_resolved
-                            || target_changed),
-                    rebuild_active: released_presentation && self.active_connection != key,
+                    rebuild: application.rebuild
+                        || application.reacquire_control
+                        || active_projection_resolved
+                        || target_changed,
+                    rebuild_active: false,
                     notify: true,
                 };
             }
@@ -170,7 +154,11 @@ impl Condr {
                         let connection = &mut self.connections[index];
                         let previous_layout = connection.dock_projection();
                         let previous_viewer = connection.presented_viewer();
+                        let before = connection.session();
                         connection.snapshot = snapshot;
+                        if let (Some(before), Some(after)) = (before, connection.session()) {
+                            connection.reconcile_view(&before, &after);
+                        }
                         connection.zoomed_panes = zoomed_panes.into_iter().collect();
                         // A viewer Tab retargeted to another file needs the rebuild too:
                         // that is where its Editor learns to ask for the new content.
@@ -198,7 +186,19 @@ impl Condr {
                         }
                         self.prune_dock_cache(key);
                         self.sync_sidebar_workspace_open(cx);
-                        return self.settle_layout(key, index, sequence, layout_changed);
+                        return self.settle_layout(key, sequence, layout_changed);
+                    }
+                    SessionEvent::Activated {
+                        workspace_id,
+                        tab_id,
+                    } => {
+                        // Someone (the CLI, an agent) asked every viewer to look here.
+                        let changed = self.show_view(key, workspace_id, tab_id);
+                        return IncomingEffect {
+                            rebuild: false,
+                            rebuild_active: changed,
+                            notify: true,
+                        };
                     }
                     SessionEvent::TerminalExited { pane_id } => {
                         if let Some(terminal) = self.connections[index].terminals.get_mut(&pane_id)
@@ -498,19 +498,37 @@ impl Condr {
                 session_id,
                 request_id,
                 sequence,
-                ..
+                result,
             } => {
                 if self.connections[index].server_id != Some(server_id)
                     || self.connections[index].session_id != Some(session_id)
                 {
                     return IncomingEffect::default();
                 }
-                if let Some(mut pending) = self.pending_workspace_selection_for(key)
-                    && pending.request_id == request_id
-                {
-                    pending.applied_sequence = Some(sequence);
-                    self.pending_workspace_selections.insert(key, pending);
-                }
+                // What this Client asked for, it shows (ADR 0021); the structure already
+                // arrived in the LayoutChanged event that precedes this reply.
+                let session = self.connections[index].session();
+                let shown = match result {
+                    LayoutResult::WorkspaceCreated {
+                        workspace_id,
+                        tab_id,
+                        ..
+                    } => Some((workspace_id, Some(tab_id))),
+                    LayoutResult::WorkspaceOpened { workspace_id } => Some((workspace_id, None)),
+                    LayoutResult::TabCreated { tab_id, .. }
+                    | LayoutResult::DiffShown { tab_id }
+                    | LayoutResult::FileShown { tab_id } => session.as_ref().and_then(|session| {
+                        session
+                            .workspaces()
+                            .iter()
+                            .find(|workspace| workspace.tab(tab_id).is_some())
+                            .map(|workspace| (workspace.id(), Some(tab_id)))
+                    }),
+                    LayoutResult::PaneCreated { .. } | LayoutResult::Changed => None,
+                };
+                let view_changed = shown.is_some_and(|(workspace_id, tab_id)| {
+                    self.show_view(key, workspace_id, tab_id)
+                });
                 for (surface_key, surface) in &mut self.dock_surfaces {
                     if surface_key.connection_key == key
                         && surface.pending_projection_request == Some(request_id)
@@ -523,9 +541,15 @@ impl Condr {
                 // for a Bootstrap that no longer comes.
                 let applied = self.connections[index].sequence;
                 if applied >= sequence {
-                    return self.settle_layout(key, index, applied, false);
+                    let mut effect = self.settle_layout(key, applied, false);
+                    effect.rebuild_active |= view_changed;
+                    return effect;
                 }
-                IncomingEffect::default()
+                IncomingEffect {
+                    rebuild_active: view_changed,
+                    notify: view_changed,
+                    ..IncomingEffect::default()
+                }
             }
             ServerMessage::LayoutRejected {
                 server_id,
@@ -540,17 +564,6 @@ impl Condr {
                 }
                 // One refused request, not a state of the connection: a toast.
                 self.report_error(reason, cx);
-                let workspace_rejected = self
-                    .pending_workspace_selection_for(key)
-                    .is_some_and(|pending| pending.request_id == request_id);
-                let presentation_rejected =
-                    self.pending_presentation_request == Some((key, request_id));
-                if workspace_rejected {
-                    self.pending_workspace_selections.remove(&key);
-                    if presentation_rejected {
-                        self.pending_presentation_request = None;
-                    }
-                }
                 let mut active_projection_rejected = false;
                 for (surface_key, surface) in &mut self.dock_surfaces {
                     if surface_key.connection_key == key
@@ -564,9 +577,8 @@ impl Condr {
                     }
                 }
                 IncomingEffect {
-                    rebuild: self.active_connection == key
-                        && (workspace_rejected || active_projection_rejected),
-                    rebuild_active: presentation_rejected,
+                    rebuild: self.active_connection == key && active_projection_rejected,
+                    rebuild_active: false,
                     notify: true,
                 }
             }

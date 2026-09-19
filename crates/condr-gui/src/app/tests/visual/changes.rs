@@ -45,7 +45,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         window.read(|app| {
             view.read(app)
                 .active_session()
-                .is_some_and(|session| session.active_workspace().is_some())
+                .is_some_and(|session| !session.workspaces().is_empty())
         })
     }));
     // A Workspace alone does not open the sidebar; the user does, and the column then
@@ -82,16 +82,16 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     assert!(
         wait_until(window, |window| {
             window.read(|app| {
-                view.read(app).active_session().is_some_and(|session| {
-                    session.active_workspace().is_some_and(|workspace| {
-                        workspace.active_tab().diff().is_some_and(|diff| {
+                view.read(app)
+                    .presented()
+                    .is_some_and(|(_, session, _, tab_id)| {
+                        session.tab(tab_id).unwrap().diff().is_some_and(|diff| {
                             diff.path() == relative_path::RelativePath::new("notes.txt")
                         })
                     })
-                })
             })
         }),
-        "the Diff Tab should become the active Tab"
+        "the Diff Tab should become the shown Tab"
     );
     assert!(
         wait_until(window, |window| {
@@ -104,7 +104,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         view.read(app)
             .active_session()
             .unwrap()
-            .active_workspace()
+            .workspaces()
+            .first()
             .unwrap()
             .id()
     });
@@ -112,7 +113,8 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         view.read(app)
             .active_session()
             .unwrap()
-            .active_workspace()
+            .workspaces()
+            .first()
             .unwrap()
             .tabs()
             .len()

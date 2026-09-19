@@ -42,29 +42,28 @@ fn connect_and_bootstrap(endpoint: &Endpoint) -> EndpointStream {
 }
 
 #[test]
-fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
+fn concurrent_creations_return_their_own_ids_and_keep_the_others_focus() {
     let (handle, endpoint, server_thread) = start();
     let mut owner = ClientConnection::connect_overview(&endpoint, "owner").unwrap();
-    let create = |name: &str, focus| LayoutCommand::CreateWorkspace {
+    let create = |name: &str| LayoutCommand::CreateWorkspace {
         root_directory: std::env::temp_dir(),
         name: Some(name.into()),
-        focus,
     };
     let LayoutResult::WorkspaceCreated {
         workspace_id: anchor,
         tab_id: anchor_tab,
         pane_id: anchor_pane,
-    } = owner.layout(create("anchor", true)).unwrap().unwrap()
+    } = owner.layout(create("anchor")).unwrap().unwrap()
     else {
         panic!("Workspace result")
     };
     let first = ClientConnection::connect_overview(&endpoint, "first").unwrap();
     let second = ClientConnection::connect_overview(&endpoint, "second").unwrap();
-    // The user's focus changes after both clients have read their initial structure.
+    // Another Workspace exists before both clients start creating.
     let LayoutResult::WorkspaceCreated {
-        workspace_id: selected,
+        workspace_id: other,
         ..
-    } = owner.layout(create("selected", true)).unwrap().unwrap()
+    } = owner.layout(create("other")).unwrap().unwrap()
     else {
         panic!("Workspace result")
     };
@@ -81,7 +80,6 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
                     .layout(LayoutCommand::CreateWorkspace {
                         root_directory: std::env::temp_dir(),
                         name: Some(name.clone()),
-                        focus: false,
                     })
                     .unwrap()
                     .unwrap();
@@ -103,7 +101,7 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
                     .layout(LayoutCommand::CreateTab {
                         workspace_id: anchor,
                         name: Some(name.clone()),
-                        focus: false,
+                        cwd_from: None,
                     })
                     .unwrap()
                     .unwrap()
@@ -155,9 +153,15 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
     assert_ne!(results[0].1, results[1].1);
     assert_ne!(results[0].2, results[1].2);
     let session = Session::restore(handle.snapshot()).unwrap();
-    assert_eq!(session.active_workspace_id(), Some(selected));
+    assert!(session.workspace(other).is_some());
     assert_eq!(
-        session.workspace(anchor).unwrap().active_tab().id(),
+        session
+            .workspace(anchor)
+            .unwrap()
+            .tabs()
+            .first()
+            .unwrap()
+            .id(),
         anchor_tab
     );
     assert_eq!(
@@ -170,7 +174,7 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_current_selection() {
         anchor_pane
     );
     let before = session.snapshot();
-    assert!(owner.layout(create(" ", false)).unwrap().is_err());
+    assert!(owner.layout(create(" ")).unwrap().is_err());
     assert_eq!(
         handle.snapshot(),
         before,

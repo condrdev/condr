@@ -24,6 +24,11 @@ pub(super) struct ServerConnection {
     pub(super) session_id: Option<SessionId>,
     pub(super) sequence: u64,
     pub(super) snapshot: SessionSnapshot,
+    /// This Client's own view of the Session (ADR 0021): the Workspace it shows and, per
+    /// Workspace, the Tab. Never sent to the Server. A choice that no longer exists falls
+    /// back to the first Workspace or Tab; `reconcile_view` moves it to a neighbour first.
+    pub(super) view_workspace: Option<WorkspaceId>,
+    pub(super) view_tabs: HashMap<WorkspaceId, TabId>,
     pub(super) terminals: HashMap<PaneId, ClientTerminal>,
     pub(super) terminal_titles: HashMap<PaneId, String>,
     pub(super) terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
@@ -120,6 +125,8 @@ impl ServerConnection {
             session_id: None,
             sequence: 0,
             snapshot: Session::new().snapshot(),
+            view_workspace: None,
+            view_tabs: HashMap::new(),
             terminals: HashMap::new(),
             terminal_titles: HashMap::new(),
             terminal_hyperlinks: HashMap::new(),
@@ -184,8 +191,91 @@ impl ServerConnection {
             && self.bootstrap_resync_session_id.is_none()
     }
 
+    pub(super) fn session(&self) -> Option<Session> {
+        Session::restore(self.snapshot.clone()).ok()
+    }
+
+    /// The Workspace this Client shows: its choice while that exists, else the first.
+    pub(super) fn viewed_workspace_id(&self, session: &Session) -> Option<WorkspaceId> {
+        self.view_workspace
+            .filter(|id| session.workspace(*id).is_some())
+            .or_else(|| session.workspaces().first().map(Workspace::id))
+    }
+
+    /// The Tab this Client shows in `workspace_id`: its choice while that exists, else the
+    /// first.
+    pub(super) fn viewed_tab_id(
+        &self,
+        session: &Session,
+        workspace_id: WorkspaceId,
+    ) -> Option<TabId> {
+        let workspace = session.workspace(workspace_id)?;
+        self.view_tabs
+            .get(&workspace_id)
+            .copied()
+            .filter(|id| workspace.tab(*id).is_some())
+            .or_else(|| workspace.tabs().first().map(Tab::id))
+    }
+
+    pub(super) fn viewed(&self, session: &Session) -> Option<(WorkspaceId, TabId)> {
+        let workspace_id = self.viewed_workspace_id(session)?;
+        Some((workspace_id, self.viewed_tab_id(session, workspace_id)?))
+    }
+
+    /// Shows `workspace_id`, and `tab_id` in it when given; an unknown id is ignored.
+    /// Returns whether the view changed.
+    pub(super) fn set_view(&mut self, workspace_id: WorkspaceId, tab_id: Option<TabId>) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        let before = self.viewed(&session);
+        if session.workspace(workspace_id).is_none() {
+            return false;
+        }
+        self.view_workspace = Some(workspace_id);
+        if let Some(tab_id) = tab_id
+            && session
+                .workspace(workspace_id)
+                .is_some_and(|workspace| workspace.tab(tab_id).is_some())
+        {
+            self.view_tabs.insert(workspace_id, tab_id);
+        }
+        self.viewed(&session) != before
+    }
+
+    /// The structure changed: a shown Workspace or Tab that closed gives way to the one
+    /// that took its place, else the last, as browser tabs do; other choices stay.
+    pub(super) fn reconcile_view(&mut self, before: &Session, after: &Session) {
+        if let Some(workspace_id) = self.view_workspace
+            && after.workspace(workspace_id).is_none()
+        {
+            self.view_workspace = before
+                .workspaces()
+                .iter()
+                .position(|workspace| workspace.id() == workspace_id)
+                .and_then(|ix| after.workspaces().get(ix).or(after.workspaces().last()))
+                .map(Workspace::id);
+        }
+        self.view_tabs
+            .retain(|workspace_id, _| after.workspace(*workspace_id).is_some());
+        for (workspace_id, tab_id) in &mut self.view_tabs {
+            let workspace = after.workspace(*workspace_id).expect("retained above");
+            if workspace.tab(*tab_id).is_some() {
+                continue;
+            }
+            if let Some(next) = before
+                .workspace(*workspace_id)
+                .and_then(|old| old.tabs().iter().position(|tab| tab.id() == *tab_id))
+                .and_then(|ix| workspace.tabs().get(ix).or(workspace.tabs().last()))
+            {
+                *tab_id = next.id();
+            }
+        }
+    }
+
     pub(super) fn apply_bootstrap(&mut self, bootstrap: SessionBootstrap) -> BootstrapApplication {
         let previous_layout = self.dock_projection();
+        let before = self.session();
         let authority_changed = self.server_id != Some(bootstrap.server_id)
             || self.runtime_epoch != Some(bootstrap.runtime_epoch)
             || self.session_id != Some(bootstrap.session_id);
@@ -205,6 +295,9 @@ impl ServerConnection {
         self.session_id = Some(bootstrap.session_id);
         self.sequence = bootstrap.sequence;
         self.snapshot = bootstrap.snapshot;
+        if let (Some(before), Some(after)) = (before, self.session()) {
+            self.reconcile_view(&before, &after);
+        }
         // Server-authoritative; the Bootstrap usually lands before ControlGranted, so keep it
         // regardless of `controlling` and let presentation gate on control instead.
         self.attention = bootstrap
@@ -261,11 +354,12 @@ impl ServerConnection {
         }
     }
 
-    /// The viewer Tab the Session presents, if the active Tab is one: its identity and
-    /// file. A retarget changes the file and nothing the Dock projection sees.
+    /// The viewer Tab this Client shows, if the shown Tab is one: its identity and file.
+    /// A retarget changes the file and nothing the Dock projection sees.
     pub(super) fn presented_viewer(&self) -> Option<(TabId, RelativePathBuf)> {
-        let session = Session::restore(self.snapshot.clone()).ok()?;
-        let tab = session.active_workspace()?.active_tab();
+        let session = self.session()?;
+        let (_, tab_id) = self.viewed(&session)?;
+        let tab = session.tab(tab_id)?;
         let path = tab
             .diff()
             .map(|diff| diff.path())
@@ -274,8 +368,9 @@ impl ServerConnection {
     }
 
     pub(super) fn dock_projection(&self) -> Option<PaneLayout> {
-        let session = Session::restore(self.snapshot.clone()).ok()?;
-        let tab = session.active_workspace()?.active_tab();
+        let session = self.session()?;
+        let (_, tab_id) = self.viewed(&session)?;
+        let tab = session.tab(tab_id)?;
         self.zoomed_panes
             .iter()
             .copied()

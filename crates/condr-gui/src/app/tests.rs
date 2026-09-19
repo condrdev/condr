@@ -108,10 +108,7 @@ fn pane_id() -> condr_core::PaneId {
     session
         .create_workspace(std::env::temp_dir())
         .expect("Workspace capacity");
-    session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id()

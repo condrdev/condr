@@ -31,18 +31,13 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
                     },
                 },
             }],
-            active_tab: MAX_STABLE_ID - 1,
         }],
-        active_workspace: Some(MAX_STABLE_ID - 2),
     })
     .expect("boundary Snapshot encodes");
     let snapshot = SessionSnapshot::from_bytes(&bytes).expect("boundary schema decodes");
     let mut session = Session::restore(snapshot).expect("maximum stable ID is valid");
-    let workspace_id = session.active_workspace_id().unwrap();
-    let pane_id = session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let workspace_id = session.workspaces()[0].id();
+    let pane_id = session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();
@@ -52,7 +47,7 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
         session.create_workspace(PathBuf::from("projects/overflow")),
         None
     );
-    assert_eq!(session.create_tab(workspace_id), None);
+    assert_eq!(session.create_tab(workspace_id, None), None);
     assert_eq!(
         session.split_pane(pane_id, SplitDirection::Horizontal, 0.5),
         None
@@ -64,7 +59,6 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
 struct EncodedSession {
     version: u32,
     workspaces: Vec<EncodedWorkspace>,
-    active_workspace: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -74,7 +68,6 @@ struct EncodedWorkspace {
     root_directory: PathBuf,
     worktree: Option<()>,
     tabs: Vec<EncodedTab>,
-    active_tab: u64,
 }
 
 #[derive(Serialize)]

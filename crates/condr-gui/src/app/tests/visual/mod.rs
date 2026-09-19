@@ -9,24 +9,24 @@ mod workflows;
 
 use super::super::{
     Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
-    DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection,
-    PendingWorkspaceSelection, ServerConnection, SettingsTab, TerminalFont, TerminalPalette,
-    color_scheme_is_dirty, default_window_options, reset_color_scheme, select_appearance,
-    select_server_shell, select_settings_server, select_settings_tab, select_terminal_font_family,
-    select_terminal_font_size, selected_appearance, server_listen, server_shell, set_server_listen,
-    step_terminal_font_size, terminal_font_family, terminal_font_size,
+    DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection, ServerConnection,
+    SettingsTab, TerminalFont, TerminalPalette, color_scheme_is_dirty, default_window_options,
+    reset_color_scheme, select_appearance, select_server_shell, select_settings_server,
+    select_settings_tab, select_terminal_font_family, select_terminal_font_size,
+    selected_appearance, server_listen, server_shell, set_server_listen, step_terminal_font_size,
+    terminal_font_family, terminal_font_size,
 };
 use crate::app::config;
 use crate::app::open_in::{OpenTarget, OpenTargetIcon};
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 use condr_core::SplitDirection;
 use condr_core::protocol::{
-    ClientMessage, LayoutCommand, PaneAgentSnapshot, PaneTerminalFrame, RuntimeEpoch, ServerId,
-    ServerMessage, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+    ClientMessage, LayoutCommand, PaneTerminalFrame, ServerMessage, SessionBootstrap, SessionEvent,
+    TerminalFrameBatch,
 };
 use condr_core::{
-    AgentKind, AgentSnapshot, AgentState, PaneId, PaneLayout, Session, TabId, TerminalCell,
-    TerminalColor, TerminalCommand, TerminalMousePosition, TerminalMouseTracking, TerminalPosition,
+    AgentKind, AgentSnapshot, AgentState, PaneId, Session, TabId, TerminalCell, TerminalColor,
+    TerminalCommand, TerminalMousePosition, TerminalMouseTracking, TerminalPosition,
     TerminalSelection, TerminalSide, TerminalSize, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig, ServerHandle};
@@ -127,6 +127,25 @@ fn connected_condr_with(
     server: TestServer,
     endpoint: Endpoint,
 ) -> (Entity<Condr>, &mut VisualTestContext, TestServer) {
+    let (view, window) = connected_condr_at(cx, endpoint);
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .is_some_and(ServerConnection::can_mutate)
+            })
+        }),
+        "GUI did not acquire control from the test server"
+    );
+    (view, window, server)
+}
+
+/// Attaches a separate GUI, including a viewing-only client of an occupied Server.
+fn connected_condr_at(
+    cx: &mut TestAppContext,
+    endpoint: Endpoint,
+) -> (Entity<Condr>, &mut VisualTestContext) {
     let mut initial = None;
     let deadline = Instant::now() + TEST_TIMEOUT;
     while Instant::now() < deadline {
@@ -159,16 +178,17 @@ fn connected_condr_with(
         .borrow_mut()
         .take()
         .expect("Condr view should be created with the Root");
-    if wait_until(window, |window| {
-        window.read(|app| {
-            view.read(app)
-                .connection(1)
-                .is_some_and(ServerConnection::can_mutate)
-        })
-    }) {
-        return (view, window, server);
-    }
-    panic!("GUI did not acquire control from the test server");
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .is_some_and(ServerConnection::is_synchronized)
+            })
+        }),
+        "GUI did not synchronize with the test server"
+    );
+    (view, window)
 }
 
 fn terminal_selector(pane_id: PaneId) -> &'static str {
@@ -196,44 +216,6 @@ fn terminal_contains(
                     .contains(expected)
             })
     })
-}
-
-fn bootstrap_for_session(connection: &ServerConnection, session: &Session) -> SessionBootstrap {
-    SessionBootstrap {
-        settings: Default::default(),
-        server_id: connection.server_id.expect("connected Server has an ID"),
-        runtime_epoch: connection
-            .runtime_epoch
-            .expect("connected Server has a runtime epoch"),
-        session_id: connection
-            .session_id
-            .expect("connected Server has a Session ID"),
-        sequence: connection.sequence,
-        snapshot: session.snapshot(),
-        terminals: connection
-            .terminals
-            .iter()
-            .map(
-                |(&pane_id, terminal)| condr_core::protocol::PaneTerminalSnapshot {
-                    pane_id,
-                    view: terminal.view.as_ref().clone(),
-                    exited: terminal.exited,
-                    title: connection.terminal_titles.get(&pane_id).cloned(),
-                    attention: false,
-                },
-            )
-            .collect(),
-        agents: connection
-            .agents
-            .iter()
-            .map(|(&pane_id, agent)| PaneAgentSnapshot {
-                pane_id,
-                agent: agent.clone(),
-            })
-            .collect(),
-        workspace_git: connection.workspace_git.values().cloned().collect(),
-        zoomed_panes: connection.zoomed_panes.iter().copied().collect(),
-    }
 }
 
 fn tab_selector(tab_id: TabId) -> &'static str {

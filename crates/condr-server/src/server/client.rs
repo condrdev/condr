@@ -663,16 +663,16 @@ pub(super) fn handle_client(
                                                 match apply_prepared_external_layout(
                                                     &mut state, prepared,
                                                 ) {
-                                                    Ok(effect) => {
-                                                        started_terminals
-                                                            .extend(effect.started_terminals);
-                                                        removed_terminals =
-                                                            effect.removed_terminals;
+                                                    Ok(mut effect) => {
+                                                        started_terminals.extend(std::mem::take(
+                                                            &mut effect.started_terminals,
+                                                        ));
+                                                        removed_terminals = std::mem::take(
+                                                            &mut effect.removed_terminals,
+                                                        );
                                                         state.publish_layout_change(
-                                                            client_id,
-                                                            &outbound,
-                                                            request_id,
-                                                            effect.result,
+                                                            client_id, &outbound, request_id,
+                                                            effect,
                                                         )
                                                     }
                                                     Err(reason) => queue_message(
@@ -725,14 +725,13 @@ pub(super) fn handle_client(
                             } else {
                                 state.record_terminal_cwd_observations(observations);
                                 match apply_layout_command(&mut state, command) {
-                                    Ok(effect) => {
-                                        started_terminals.extend(effect.started_terminals);
-                                        removed_terminals = effect.removed_terminals;
+                                    Ok(mut effect) => {
+                                        started_terminals
+                                            .extend(std::mem::take(&mut effect.started_terminals));
+                                        removed_terminals =
+                                            std::mem::take(&mut effect.removed_terminals);
                                         state.publish_layout_change(
-                                            client_id,
-                                            &outbound,
-                                            request_id,
-                                            effect.result,
+                                            client_id, &outbound, request_id, effect,
                                         )
                                     }
                                     Err(reason) => queue_message(

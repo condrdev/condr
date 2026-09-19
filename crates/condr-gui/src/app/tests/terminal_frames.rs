@@ -1,7 +1,10 @@
 use super::*;
 
 #[test]
-fn terminal_frame_chunks_survive_metadata_interleaving_until_complete() {
+fn terminal_frame_chunks_survive_metadata_and_activation_interleaving_until_complete() {
+    let mut session = Session::new();
+    let workspace_id = session.create_workspace(std::env::temp_dir()).unwrap();
+    let tab_id = session.workspace(workspace_id).unwrap().tabs()[0].id();
     let pane_id = pane_id();
     let expected = PaneTerminalFrame {
         pane_id,
@@ -22,6 +25,24 @@ fn terminal_frame_chunks_survive_metadata_interleaving_until_complete() {
             event: SessionEvent::TerminalTitleChanged {
                 pane_id,
                 title: Some("title between chunks".into()),
+            },
+        },
+        ServerMessage::Event {
+            server_id: ServerId(1),
+            session_id: SessionId(1),
+            sequence: 1,
+            event: SessionEvent::Activated {
+                workspace_id,
+                tab_id: Some(tab_id),
+            },
+        },
+        ServerMessage::Event {
+            server_id: ServerId(1),
+            session_id: SessionId(1),
+            sequence: 1,
+            event: SessionEvent::Activated {
+                workspace_id,
+                tab_id: None,
             },
         },
     ] {

@@ -15,11 +15,7 @@ fn controller_can_acknowledge_attention_while_terminal_is_closing() {
             .session
             .create_workspace(std::env::temp_dir())
             .expect("Workspace capacity");
-        let pane_id = state
-            .session
-            .active_workspace()
-            .unwrap()
-            .active_tab()
+        let pane_id = state.session.workspaces()[0].tabs()[0]
             .focused_pane()
             .unwrap()
             .id();
@@ -134,7 +130,6 @@ fn controller_is_exclusive_and_released_on_disconnect() {
             request_id: 73,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -186,7 +181,6 @@ fn releasing_control_releases_reported_mouse_before_focus() {
             request_id: 1,
             command: LayoutCommand::CreateWorkspace {
                 name: None,
-                focus: true,
                 root_directory: std::env::temp_dir(),
             },
         },
@@ -205,14 +199,7 @@ fn releasing_control_releases_reported_mouse_before_focus() {
         unreachable!("predicate only accepts LayoutChanged events");
     };
     assert_layout_applied(&mut stream, server_id, session_id, 1, sequence);
-    let pane_id = handle
-        .state
-        .lock()
-        .unwrap()
-        .session
-        .active_workspace()
-        .unwrap()
-        .active_tab()
+    let pane_id = handle.state.lock().unwrap().session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
         .id();

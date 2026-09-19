@@ -148,15 +148,7 @@ impl Condr {
         self.target_pane
             .filter(|(key, _)| *key == self.active_connection)
             .map(|(_, pane_id)| pane_id)
-            .or_else(|| {
-                Some(
-                    self.active_session()?
-                        .active_workspace()?
-                        .active_tab()
-                        .focused_pane()?
-                        .id(),
-                )
-            })
+            .or_else(|| self.connection_focused_pane(self.active_connection))
     }
 
     pub(super) fn focus_pane_panel(
@@ -205,22 +197,7 @@ impl Condr {
             return;
         };
         let key = connection.key;
-        let held_target = self
-            .active_dock_surface
-            .filter(|surface| surface.connection_key == key)
-            .and_then(|surface| {
-                Self::workspace_id_for_surface(&session, surface)
-                    .map(|workspace_id| (workspace_id, surface.tab_id))
-            });
-        let authoritative_target = session
-            .active_workspace()
-            .map(|workspace| (workspace.id(), workspace.active_tab().id()));
-        let Some((_workspace_id, tab_id)) = self
-            .should_hold_active_surface()
-            .then_some(held_target)
-            .flatten()
-            .or(authoritative_target)
-        else {
+        let Some((_workspace_id, tab_id)) = connection.viewed(&session) else {
             self.target_pane = None;
             self.active_dock_surface = None;
             return;
@@ -241,9 +218,11 @@ impl Condr {
             }
             return;
         };
+        // The Pane the user targeted, while it is in this Tab; else the Tab's own focus.
         let focused = self
-            .pending_workspace_selection_for(key)
-            .and_then(|pending| pending.pane_id)
+            .target_pane
+            .filter(|(target_key, _)| *target_key == key)
+            .map(|(_, pane_id)| pane_id)
             .filter(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
             .unwrap_or_else(|| {
                 tab.focused_pane()
