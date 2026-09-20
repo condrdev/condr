@@ -153,19 +153,33 @@ enum ServerCommand {
 }
 
 impl Cli {
-    /// `try_parse_from` plus the one rule clap cannot express next to a global
-    /// `--device`: `--skill` stands alone.
+    /// `try_parse_from` plus the rules clap cannot express next to a global `--device`:
+    /// `--skill` stands alone, and `server` manages this machine's Server only, so a
+    /// Device target (`--device` or `CONDR_DEVICE`) is refused instead of quietly
+    /// stopping or reporting the wrong machine.
     fn parse_checked_from<I, T>(args: I) -> Result<Self, clap::Error>
     where
         I: IntoIterator<Item = T>,
         T: Into<std::ffi::OsString> + Clone,
     {
         use clap::CommandFactory as _;
-        let cli = Self::try_parse_from(args)?;
+        let mut cli = Self::try_parse_from(args)?;
         if cli.skill && (cli.command.is_some() || cli.device.is_some()) {
             return Err(Self::command().error(
                 clap::error::ErrorKind::ArgumentConflict,
                 "the argument '--skill' cannot be used with a subcommand or '--device'",
+            ));
+        }
+        cli.device = cli
+            .device
+            .or_else(|| std::env::var("CONDR_DEVICE").ok())
+            .filter(|name| !name.is_empty());
+        if let (Some(device), Some(Command::Server(_))) = (&cli.device, &cli.command) {
+            return Err(Self::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!(
+                    "'server' manages this machine's Server and cannot target Device {device}; drop '--device' (or unset CONDR_DEVICE)"
+                ),
             ));
         }
         Ok(cli)
@@ -184,11 +198,7 @@ fn main() {
         let _ = Cli::command().print_help();
         std::process::exit(2);
     };
-    let device = cli
-        .device
-        .or_else(|| std::env::var("CONDR_DEVICE").ok())
-        .filter(|name| !name.is_empty());
-    let device = device.as_deref();
+    let device = cli.device.as_deref();
     std::process::exit(match command {
         Command::Server(command) => dispatch(command),
         Command::Workspace(command) => cli::run_workspace(device, command),
@@ -552,6 +562,17 @@ mod tests {
                 _ => panic!("expected a server command"),
             },
         )
+    }
+
+    #[test]
+    fn server_commands_refuse_a_device_target() {
+        let error = Cli::parse_checked_from(["condr", "--device", "lab", "server", "status"])
+            .err()
+            .expect("server with --device must be refused");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let cli =
+            Cli::parse_checked_from(["condr", "--device", "lab", "workspace", "list"]).unwrap();
+        assert_eq!(cli.device.as_deref(), Some("lab"));
     }
 
     #[test]

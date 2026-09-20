@@ -58,7 +58,18 @@ pub(crate) enum HooksAction {
 
 pub(crate) fn run_agent(device: Option<&str>, command: AgentCommand) -> i32 {
     if let AgentCommand::Hooks { action, agent } = command {
-        return match agent_hooks(action, &agent) {
+        // Refused rather than run here: `install` on the wrong machine edits this user's
+        // settings while the Device's agents stay `unknown`.
+        let result = match device {
+            Some(device) => Err(CliError::new(
+                "local_only",
+                format!(
+                    "agent hooks edits this machine's agent configuration and cannot target Device {device}; run it on that machine"
+                ),
+            )),
+            None => agent_hooks(action, &agent),
+        };
+        return match result {
             Ok(value) => {
                 println!("{value}");
                 0

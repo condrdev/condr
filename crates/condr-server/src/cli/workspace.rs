@@ -137,16 +137,18 @@ pub(super) fn find_tab(session: &Session, id: u64) -> Result<(&Workspace, &Tab),
 }
 
 /// The Pane this process runs in, when `CONDR_PANE_ID` says so and the Session has it.
-pub(super) fn caller_pane_in(session: &Session) -> Option<PaneId> {
+/// Never on a Device: its Pane ids are its own, see [`super::pane::caller_pane`].
+pub(super) fn caller_pane_in(session: &Session, device: Option<&str>) -> Option<PaneId> {
+    device.is_none().then_some(())?;
     let pane_id = std::env::var(PaneEnvironment::PANE_ID).ok()?.parse().ok()?;
     let pane_id = PaneId::from_u64(pane_id);
     session.pane(pane_id).map(|_| pane_id)
 }
 
 /// The Workspace of the Pane this process runs in, when `CONDR_PANE_ID` says so.
-pub(super) fn caller_workspace(session: &Session) -> Option<WorkspaceId> {
+pub(super) fn caller_workspace(session: &Session, device: Option<&str>) -> Option<WorkspaceId> {
     session
-        .workspace_for_pane(caller_pane_in(session)?)
+        .workspace_for_pane(caller_pane_in(session, device)?)
         .map(Workspace::id)
 }
 
@@ -174,7 +176,7 @@ pub(crate) fn run_workspace(device: Option<&str>, command: WorkspaceCommand) -> 
 }
 
 pub(crate) fn run_tab(device: Option<&str>, command: TabCommand) -> i32 {
-    run(device, |client| tab(client, command))
+    run(device, |client| tab(client, device, command))
 }
 
 fn workspace(
@@ -286,7 +288,11 @@ fn workspace(
     }
 }
 
-fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliError> {
+fn tab(
+    client: &mut ClientConnection,
+    device: Option<&str>,
+    command: TabCommand,
+) -> Result<Value, CliError> {
     match command {
         TabCommand::List { workspace } => {
             let session = client.session()?;
@@ -313,15 +319,20 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
             let before = client.session()?;
             let workspace_id = match workspace {
                 Some(id) => find_workspace(&before, id)?.id(),
-                None => caller_workspace(&before).ok_or_else(|| {
+                None => caller_workspace(&before, device).ok_or_else(|| {
                     CliError::new(
                         "workspace_not_found",
-                        "not running in a Condr Pane; pass --workspace",
+                        match device {
+                            Some(device) => format!(
+                                "the calling Pane is on this machine, not on Device {device}; pass --workspace"
+                            ),
+                            None => "not running in a Condr Pane; pass --workspace".to_owned(),
+                        },
                     )
                 })?,
             };
             // The new shell starts where the caller is, when the caller is in that Workspace.
-            let cwd_from = caller_pane_in(&before).filter(|pane_id| {
+            let cwd_from = caller_pane_in(&before, device).filter(|pane_id| {
                 before
                     .workspace_for_pane(*pane_id)
                     .is_some_and(|workspace| workspace.id() == workspace_id)

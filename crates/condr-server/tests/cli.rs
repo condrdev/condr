@@ -523,3 +523,15 @@ fn device_commands_reach_saved_devices_and_report_the_unreachable() {
     local_thread.join().unwrap().unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// `agent hooks` edits this machine's agent configuration, so a Device target is refused
+/// before any Device is looked up or any file is touched.
+#[test]
+fn agent_hooks_refuse_a_device_target() {
+    let missing = std::env::temp_dir().join("condr-cli-no-server.sock");
+    let error = err(
+        &missing,
+        &["--device", "Nope", "agent", "hooks", "status", "claude"],
+    );
+    assert_eq!(error["code"], "local_only");
+}

@@ -148,7 +148,7 @@ pub(crate) fn run_pane(device: Option<&str>, command: PaneCommand) -> i32 {
             }
         };
     }
-    run(device, |client| pane(client, command))
+    run(device, |client| pane(client, device, command))
 }
 
 #[derive(Serialize)]
@@ -227,8 +227,17 @@ pub(super) fn find_pane(session: &Session, id: u64) -> Result<(&Workspace, &Tab)
         .ok_or_else(|| CliError::new("pane_not_found", format!("pane {id} not found")))
 }
 
-/// The Pane this process runs in, or a usage-style error when there is none.
-pub(super) fn caller_pane() -> Result<u64, CliError> {
+/// The Pane this process runs in, or a usage-style error when there is none. With
+/// `--device` there never is one: `CONDR_PANE_ID` names a Pane of this machine's Server,
+/// and the Device numbers its own Panes from 1 too, so the id would silently hit a
+/// stranger.
+pub(super) fn caller_pane(device: Option<&str>) -> Result<u64, CliError> {
+    if let Some(device) = device {
+        return Err(CliError::new(
+            "no_current_pane",
+            format!("the calling Pane is on this machine, not on Device {device}; pass a pane id"),
+        ));
+    }
     std::env::var(PaneEnvironment::PANE_ID)
         .ok()
         .and_then(|value| value.trim().parse().ok())
@@ -296,7 +305,11 @@ fn parse_key(spec: &str) -> Result<TerminalCommand, CliError> {
     Ok(TerminalCommand::Key { key, modifiers })
 }
 
-fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, CliError> {
+fn pane(
+    client: &mut ClientConnection,
+    device: Option<&str>,
+    command: PaneCommand,
+) -> Result<Value, CliError> {
     match command {
         PaneCommand::List { workspace } => {
             let client = &*client;
@@ -318,7 +331,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             Ok(json!({ "panes": panes }))
         }
         PaneCommand::Current => {
-            let pane_id = caller_pane()?;
+            let pane_id = caller_pane(device)?;
             let session = client.session()?;
             let (workspace, tab) = find_pane(&session, pane_id)?;
             Ok(json!({ "pane": pane_info(client, workspace, tab, PaneId::from_u64(pane_id)) }))
@@ -335,7 +348,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
         } => {
             let pane_id = match pane_id {
                 Some(id) => id,
-                None => caller_pane()?,
+                None => caller_pane(device)?,
             };
             find_pane(&client.session()?, pane_id)?;
             let LayoutResult::PaneCreated { pane_id: new_pane } = apply(
@@ -360,7 +373,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             pane_id,
             direction: None,
         } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             let before = client.session()?;
             let tab_id = find_pane(&before, pane_id.as_u64())?.1.id();
             apply(client, LayoutCommand::FocusPane { pane_id })?;
@@ -375,7 +388,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             pane_id,
             direction: Some(direction),
         } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             let (changed, tab_id) = arrange(
                 client,
                 pane_id,
@@ -404,7 +417,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             direction,
             amount,
         } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             let (changed, _) = arrange(
                 client,
                 pane_id,
@@ -422,7 +435,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             }))
         }
         PaneCommand::Swap { pane_id, direction } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             let (changed, _) = arrange(
                 client,
                 pane_id,
@@ -439,7 +452,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             }))
         }
         PaneCommand::Move { pane_id, to, side } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             let (changed, _) = arrange(
                 client,
                 pane_id,
@@ -457,7 +470,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             }))
         }
         PaneCommand::Zoom { pane_id, on, off } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             find_pane(&client.session()?, pane_id.as_u64())?;
             let zoomed = client.overview().zoomed_panes.contains(&pane_id);
             // The protocol only toggles; --on and --off skip the toggle when already there.
@@ -473,7 +486,7 @@ fn pane(client: &mut ClientConnection, command: PaneCommand) -> Result<Value, Cl
             }))
         }
         PaneCommand::Layout { pane_id } => {
-            let pane_id = target_pane(pane_id)?;
+            let pane_id = target_pane(device, pane_id)?;
             let session = client.session()?;
             let (workspace, tab) = find_pane(&session, pane_id.as_u64())?;
             let rects = tab.pane_rects();
@@ -575,10 +588,10 @@ fn layout_tree(layout: &PaneLayout) -> Value {
 }
 
 /// An explicit Pane id, or the calling Pane.
-fn target_pane(pane_id: Option<u64>) -> Result<PaneId, CliError> {
+fn target_pane(device: Option<&str>, pane_id: Option<u64>) -> Result<PaneId, CliError> {
     Ok(PaneId::from_u64(match pane_id {
         Some(id) => id,
-        None => caller_pane()?,
+        None => caller_pane(device)?,
     }))
 }
 
@@ -624,6 +637,15 @@ pub(super) fn send(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_calling_pane_never_stands_in_for_a_pane_on_a_device() {
+        // Whatever CONDR_PANE_ID says, that id belongs to this machine's Server.
+        let error = caller_pane(Some("lab")).unwrap_err();
+        assert_eq!(error.code, "no_current_pane");
+        assert!(error.message.contains("Device lab"), "{}", error.message);
+    }
+
     #[test]
     fn function_keys_are_validated_within_the_terminal_encoders_range() {
         for number in 1..=20 {
