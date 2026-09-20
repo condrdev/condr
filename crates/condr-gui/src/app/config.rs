@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{AppContext as _, Context, SharedString};
 use serde::Deserialize;
 
-use condr_server::StaticKey;
+use condr_server::{SavedServer, StaticKey, load_saved_servers, save_saved_servers};
 
 use super::open_in::CustomEditor;
 use super::{Appearance, Condr, Endpoint, TerminalFont};
@@ -18,7 +18,6 @@ const NOTIFICATIONS_KEY: &str = "notifications";
 const KEEP_AWAKE_KEY: &str = "keep_awake";
 /// `[client] changes_sidebar`: whether the Changes sidebar was left open.
 const CHANGES_SIDEBAR_KEY: &str = "changes_sidebar";
-const SERVERS_KEY: &str = "servers";
 /// `[client] editor`: the "Open in" target used last, and so the default for a project
 /// without its own choice.
 const EDITOR_KEY: &str = "editor";
@@ -31,21 +30,6 @@ const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
-
-/// One `[[client.servers]]` entry. The Server's public key is what makes a saved TCP
-/// Server trustworthy; invites are one-time and never written here.
-#[derive(Deserialize)]
-pub(super) struct SavedServer {
-    pub name: String,
-    /// `tcp://<server key>@host:port` or `ssh://[user@]host[:port]`; never an invite.
-    pub address: String,
-}
-
-impl SavedServer {
-    pub(super) fn endpoint(&self, device_key: Option<&StaticKey>) -> io::Result<Endpoint> {
-        Endpoint::parse(&self.address, device_key)
-    }
-}
 
 /// One `[[client.workspace_editors]]` entry.
 #[derive(Deserialize)]
@@ -90,13 +74,11 @@ impl LoadedConfig {
         };
         let (servers, servers_error) = path
             .as_deref()
-            .map_or_else(|| Ok(Vec::new()), load_servers)
+            .map_or_else(|| Ok(Vec::new()), load_saved_servers)
             .and_then(|servers| {
                 servers
                     .into_iter()
-                    .filter(|server| {
-                        device_key.is_some() || !server.address.trim().starts_with("tcp://")
-                    })
+                    .filter(|server| device_key.is_some() || !server.is_tcp())
                     .map(|server| {
                         server
                             .endpoint(device_key.as_ref())
@@ -176,10 +158,6 @@ impl LoadedConfig {
             servers_error,
         }
     }
-}
-
-pub(super) fn load_servers(path: &Path) -> io::Result<Vec<SavedServer>> {
-    read_client_value(path, SERVERS_KEY)?.map_or_else(|| Ok(Vec::new()), decode_servers)
 }
 
 /// A missing or unreadable preference follows the system rather than failing the load.
@@ -288,10 +266,6 @@ fn read_client_value(path: &Path, key: &str) -> io::Result<Option<toml::Value>> 
     condr_core::read_config_value(path, &["client"], key)
 }
 
-fn decode_servers(value: toml::Value) -> io::Result<Vec<SavedServer>> {
-    value.try_into().map_err(invalid_data)
-}
-
 impl Condr {
     pub(super) fn save_servers(&mut self, cx: &mut Context<Self>) {
         if let Some(error) = self.servers_error.clone() {
@@ -303,15 +277,7 @@ impl Condr {
             .connections
             .iter()
             .filter_map(|connection| {
-                let address = match &connection.endpoint {
-                    Endpoint::Local(_) => return None,
-                    Endpoint::Tcp(tcp) => format!("tcp://{}@{}", tcp.server_key, tcp.authority()),
-                    Endpoint::Ssh(ssh) => ssh.to_string(),
-                };
-                Some(SavedServer {
-                    name: connection.label.clone(),
-                    address,
-                })
+                SavedServer::from_endpoint(connection.label.clone(), &connection.endpoint)
             })
             .collect::<Vec<_>>();
         self.save_config(cx, move |path| {
@@ -319,12 +285,12 @@ impl Condr {
             // the entries we could not load when saving SSH changes.
             if preserve_tcp {
                 servers.extend(
-                    load_servers(path)?
+                    load_saved_servers(path)?
                         .into_iter()
-                        .filter(|server| server.address.trim().starts_with("tcp://")),
+                        .filter(SavedServer::is_tcp),
                 );
             }
-            write_servers(path, servers)
+            save_saved_servers(path, servers)
         });
     }
 
@@ -443,17 +409,6 @@ impl Condr {
     }
 }
 
-fn write_servers(path: &Path, servers: impl IntoIterator<Item = SavedServer>) -> io::Result<()> {
-    let mut saved = toml_edit::ArrayOfTables::new();
-    for server in servers {
-        let mut table = toml_edit::Table::new();
-        table["name"] = toml_edit::value(server.name);
-        table["address"] = toml_edit::value(server.address);
-        saved.push(table);
-    }
-    write_client_value(path, SERVERS_KEY, toml_edit::Item::ArrayOfTables(saved))
-}
-
 /// Rewrites one `[client]` key. The file is shared with the Server and meant to be
 /// hand-editable, so this edits the parsed document in place and keeps every other
 /// key, its comments and its formatting.
@@ -489,62 +444,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ssh_config_keeps_the_binary_path_and_needs_no_device_key() {
-        let server: SavedServer = toml::from_str(
-            "name = 'Build'\naddress = 'ssh://alice@build:2222?bin=/opt/a%20b/condr'\n",
-        )
-        .unwrap();
-        let Endpoint::Ssh(ssh) = server.endpoint(None).unwrap() else {
-            panic!("expected SSH");
-        };
-        assert_eq!(ssh.binary(), "/opt/a b/condr");
-        let path = std::env::temp_dir().join(format!(
-            "condr-ssh-config-{}-{:?}.toml",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        write_servers(&path, [server]).unwrap();
-        let loaded = load_servers(&path).unwrap();
-        assert_eq!(loaded[0].endpoint(None).unwrap(), Endpoint::Ssh(ssh));
-        fs::remove_file(&path).unwrap();
-        let _ = fs::remove_file(path.with_extension("toml.lock"));
-    }
-
-    #[test]
-    fn saving_client_servers_preserves_server_config() {
-        let directory =
-            std::env::temp_dir().join(format!("condr-client-config-{}", std::process::id()));
-        let path = directory.join("config.toml");
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(&path, "[server]\nlisten = '127.0.0.1:4242'\n").unwrap();
-
-        write_servers(
-            &path,
-            [SavedServer {
-                name: "Linux".into(),
-                address: format!("tcp://{}@127.0.0.1:4242", "0".repeat(64)),
-            }],
-        )
-        .unwrap();
-
-        assert_eq!(
-            condr_core::read_config_value(&path, &["server"], "listen")
-                .unwrap()
-                .as_ref()
-                .and_then(toml::Value::as_str),
-            Some("127.0.0.1:4242")
-        );
-        let servers = load_servers(&path).unwrap();
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].name, "Linux");
-        assert_eq!(
-            servers[0].address,
-            format!("tcp://{}@127.0.0.1:4242", "0".repeat(64))
-        );
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
     fn saving_the_appearance_preserves_the_other_config_keys() {
         let directory = std::env::temp_dir().join(format!(
             "condr-client-appearance-{}-{:?}",
@@ -554,7 +453,7 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
         fs::write(&path, "[server]\nlisten = '127.0.0.1:4242'\n").unwrap();
-        write_servers(
+        save_saved_servers(
             &path,
             [SavedServer {
                 name: "Linux".into(),
@@ -567,7 +466,7 @@ mod tests {
         write_client_value(&path, APPEARANCE_KEY, Appearance::Dark.as_str().into()).unwrap();
 
         assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
-        assert_eq!(load_servers(&path).unwrap().len(), 1);
+        assert_eq!(load_saved_servers(&path).unwrap().len(), 1);
         assert_eq!(
             condr_core::read_config_value(&path, &["server"], "listen")
                 .unwrap()
@@ -804,11 +703,11 @@ address = 'tcp://000000000000000000000000000000000000000000000000000000000000000
             "a trailing comment on the rewritten key must survive:\n{saved}"
         );
         assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
-        assert_eq!(load_servers(&path).unwrap().len(), 1);
+        assert_eq!(load_saved_servers(&path).unwrap().len(), 1);
 
         // Rewriting the server list regenerates it from the live connections, so its own
         // entries are reformatted, but nothing around them may be disturbed.
-        write_servers(
+        save_saved_servers(
             &path,
             [SavedServer {
                 name: "Linux".into(),
@@ -826,7 +725,7 @@ address = 'tcp://000000000000000000000000000000000000000000000000000000000000000
             "rewriting the server list must not disturb the other client keys:\n{saved}"
         );
         assert!(saved.contains("# was system"), "{saved}");
-        assert_eq!(load_servers(&path).unwrap().len(), 1);
+        assert_eq!(load_saved_servers(&path).unwrap().len(), 1);
         fs::remove_dir_all(directory).unwrap();
     }
 }

@@ -1,4 +1,5 @@
 mod local;
+mod saved;
 mod stream;
 
 use crate::noise::{NoiseStream, PublicKey, Secret, ServerIdentity, StaticKey};
@@ -19,6 +20,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) use local::acquire_local_bind_lock;
 pub use local::{EndpointListener, default_socket_path};
+pub use saved::{SavedServer, load_saved_servers, save_saved_servers};
 pub use stream::{ConnectionCancellation, EndpointStream};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -14,7 +14,8 @@ pub(crate) mod test_support;
 
 pub use client::ClientConnection;
 pub use endpoint::{
-    ConnectionCancellation, Endpoint, EndpointStream, TcpEndpoint, default_socket_path,
+    ConnectionCancellation, Endpoint, EndpointStream, SavedServer, TcpEndpoint,
+    default_socket_path, load_saved_servers, save_saved_servers,
 };
 pub use noise::{PublicKey, Secret, ServerIdentity, StaticKey};
 pub use server::{
