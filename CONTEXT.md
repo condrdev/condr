@@ -15,7 +15,7 @@ A one-time secret that `condr server invite` creates for ten minutes. Pasted int
 _Avoid_: Local backend, GUI runtime
 
 **Client**:
-The GUI or CLI connecting to a Server to inspect or change its Sessions. The native GUI can present several Servers; neither Client owns Terminal processes.
+The GUI or CLI connecting to a Server to inspect or change its Sessions. The native GUI can present several Servers; the CLI reaches one per call, its own Pane's Server by default or a saved Device named with `--device` (ADR 0022); neither Client owns Terminal processes.
 _Avoid_: Server, runtime owner
 
 **Session**:

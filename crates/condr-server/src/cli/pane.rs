@@ -129,10 +129,10 @@ impl From<Side> for PaneDirection {
     }
 }
 
-pub(crate) fn run_pane(command: PaneCommand) -> i32 {
+pub(crate) fn run_pane(device: Option<&str>, command: PaneCommand) -> i32 {
     // `read` prints the text itself so agents can consume it without a JSON step.
     if let PaneCommand::Read { pane_id, lines } = command {
-        return match connect().and_then(|mut client| {
+        return match connect(device).and_then(|mut client| {
             find_pane(&client.session()?, pane_id)?;
             Ok(client.read_pane(PaneId::from_u64(pane_id), lines)?)
         }) {
@@ -148,7 +148,7 @@ pub(crate) fn run_pane(command: PaneCommand) -> i32 {
             }
         };
     }
-    run(|client| pane(client, command))
+    run(device, |client| pane(client, command))
 }
 
 #[derive(Serialize)]

@@ -1,6 +1,6 @@
 # Condr Roadmap
 
-> 最近核对：2026-09-17。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
+> 最近核对：2026-09-19。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
 
 ## 定位
 
@@ -16,7 +16,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 三问都过才排进近期；只过第一问的放到摩擦记录里等证据。
 
-## 现状（2026-09-17）
+## 现状（2026-09-19）
 
 单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭；此后两周补齐了发布和日常体验。仓库 2026-09-16 转为公开，尚无外部用户，Issue tracker 当前为空。
 
@@ -27,7 +27,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY/Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；当前 Workspace/Tab 是每个客户端自己的视图，`ActivateWorkspace/ActivateTab` 只是「请大家看这里」的广播（ADR 0021） |
 | 终端 | `alacritty_terminal` + 自绘 GPUI 元素；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
 | Agent | 10 种 CLI 的 hook 安装（Kimi 上游不可用）；状态只来自 hooks，经 OSC 777 回写（ADR 0014）；完成/需输入时 OS 通知 |
-| Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排 |
+| Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` / `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes/Files、Diff Tab（对 HEAD）、Preview Tab（ADR 0017/0018） |
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；Settings 可签 invite、撤销设备 |
 | 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、Workspace/Tab/Pane/Agent 计数、订阅客户端数、最近 warn/error |
@@ -105,19 +105,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 6. 本机作为编排端驾驭远程 Device
 
-**为什么**：GUI 已能同时连多台 Device，但 `condr` CLI 只认 `CONDR_SOCKET_PATH` 指向的 Server 或本机默认 Server。跑在本机的编排 Agent 看不到远端 Workspace，`agent start|prompt|wait` 跨不了机器；多机的价值停在"看"，没到"编排"。
-
-**做到哪**（按顺序，第 1 步先做）：
-
-1. 配置解析按归属分三层，先于任何 CLI 改动：通用的 TOML 读写底座（按路径读一个键、用 `toml_edit` 原地改一个键）下沉到 `condr-core`，替换掉 GUI `config.rs` 与 Server `load_listen/save_listen` 里的两份重复；`[[client.servers]]` 的 `SavedServer` 解码与写回从 GUI 挪到 `condr-server` 的 `Endpoint` 旁边，CLI 与 GUI 共用；appearance、终端字体、editors 等 GUI 专属键留在 GUI。不把 `Endpoint`、`StaticKey` 或 SSH 目标类型拖进 core。
-2. `condr` 子命令加 `--device <name>`（及 `CONDR_DEVICE` 环境变量），按名字取 `[[client.servers]]` 里的 Endpoint 直连目标 Server；每次调用独立建连，和今天连本机 socket 一样。`workspace|tab|pane|agent` 的命令与 JSON 输出不变，只多一个 Device 维度。
-3. `condr device list` 列出已配置的 Device 与连通状态；`workspace list --all-devices` 汇总。
-4. 内嵌 Skill 补上跨 Device 用法，让本机 Agent 能把任务派给远端 Workspace 并 `wait`。
-5. SSH Device 的重复调用靠 OpenSSH `ControlMaster`/`ControlPersist` 复用连接（先尊重用户 `~/.ssh/config`，不够再由 Condr 传 `-o ControlPath=<数据目录>/…`），不引入常驻代理进程。Windows OpenSSH 不支持 ControlMaster，先只在 Unix 客户端生效。
-
-Device 名字在 GUI 与 CLI 里一致。
-
-**停在哪**：不做 Server 联邦（本机 Server 不代理别的 Server、不持有别机的连接与凭据，ADR 0013 的边界不动）、不做跨 Device 的 Workspace 迁移、不做任务队列或调度器。
+已完成（ADR 0022，2026-09-19）：配置读写底座在 `condr-core`，`[[client.servers]]` 的 `SavedServer` 在 `condr-server` 的 `Endpoint` 旁边，CLI 与 GUI 共用；`condr --device <name>`（或 `CONDR_DEVICE`）把 `workspace|tab|pane|agent` 命令直连到保存的 Device，每次调用独立建连；`condr device list` 报可达性与 Workspace 数，`workspace list --all-devices` 汇总并列出 `unreachable`；内嵌 Skill 写明跨 Device 用法；SSH Device 在 Unix 上用 OpenSSH `ControlMaster/ControlPersist` 复用连接，尊重用户已配置的 `ControlPath`。没有做 Server 联邦、跨 Device 迁移或任务队列。
 
 ### 7. 探测 Workspace 里的端口并转发到本机
 

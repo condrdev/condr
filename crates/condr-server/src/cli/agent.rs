@@ -56,7 +56,7 @@ pub(crate) enum HooksAction {
     Status,
 }
 
-pub(crate) fn run_agent(command: AgentCommand) -> i32 {
+pub(crate) fn run_agent(device: Option<&str>, command: AgentCommand) -> i32 {
     if let AgentCommand::Hooks { action, agent } = command {
         return match agent_hooks(action, &agent) {
             Ok(value) => {
@@ -69,7 +69,7 @@ pub(crate) fn run_agent(command: AgentCommand) -> i32 {
             }
         };
     }
-    run(|client| agent(client, command))
+    run(device, |client| agent(client, command))
 }
 
 /// Local only: the hooks live in the agent's configuration on this machine, and the

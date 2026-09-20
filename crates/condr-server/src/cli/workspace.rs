@@ -3,7 +3,11 @@ use super::*;
 #[derive(Subcommand)]
 pub(crate) enum WorkspaceCommand {
     /// List every Workspace
-    List,
+    List {
+        /// Also list the Workspaces of every saved Device; each entry names its `device`
+        #[arg(long)]
+        all_devices: bool,
+    },
     /// Create a Workspace; its first Tab opens a shell in the root directory
     Create {
         /// Root directory; defaults to the current directory
@@ -56,6 +60,9 @@ pub(crate) enum TabCommand {
 
 #[derive(Serialize)]
 pub(super) struct WorkspaceInfo {
+    /// The saved Device this Workspace lives on; absent for the command's own target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<String>,
     pub(super) workspace_id: u64,
     pub(super) name: String,
     pub(super) root_directory: PathBuf,
@@ -84,6 +91,7 @@ pub(super) struct TabInfo {
 
 pub(super) fn workspace_info(workspace: &Workspace) -> WorkspaceInfo {
     WorkspaceInfo {
+        device: None,
         workspace_id: workspace.id().as_u64(),
         name: workspace.name().to_owned(),
         root_directory: workspace.root_directory().to_path_buf(),
@@ -142,20 +150,41 @@ pub(super) fn caller_workspace(session: &Session) -> Option<WorkspaceId> {
         .map(Workspace::id)
 }
 
-pub(crate) fn run_workspace(command: WorkspaceCommand) -> i32 {
-    run(|client| workspace(client, command))
+pub(crate) fn run_workspace(device: Option<&str>, command: WorkspaceCommand) -> i32 {
+    run(device, |client| workspace(client, device, command))
 }
 
-pub(crate) fn run_tab(command: TabCommand) -> i32 {
-    run(|client| tab(client, command))
+pub(crate) fn run_tab(device: Option<&str>, command: TabCommand) -> i32 {
+    run(device, |client| tab(client, command))
 }
 
-fn workspace(client: &mut ClientConnection, command: WorkspaceCommand) -> Result<Value, CliError> {
+fn workspace(
+    client: &mut ClientConnection,
+    device: Option<&str>,
+    command: WorkspaceCommand,
+) -> Result<Value, CliError> {
     match command {
-        WorkspaceCommand::List => {
+        WorkspaceCommand::List { all_devices } => {
             let session = client.session()?;
-            let workspaces: Vec<_> = session.workspaces().iter().map(workspace_info).collect();
-            Ok(json!({ "workspaces": workspaces }))
+            let mut workspaces: Vec<_> = session.workspaces().iter().map(workspace_info).collect();
+            if !all_devices {
+                return Ok(json!({ "workspaces": workspaces }));
+            }
+            // Unreachable Devices are reported next to the list, never silently left out:
+            // an orchestrator must know which machines it did not see.
+            let mut unreachable = Vec::new();
+            for (name, result) in super::device::list_workspaces_everywhere(device)? {
+                match result {
+                    Ok(remote) => workspaces.extend(remote.into_iter().map(|mut info| {
+                        info.device = Some(name.clone());
+                        info
+                    })),
+                    Err(error) => {
+                        unreachable.push(json!({ "device": name, "error": error.message }))
+                    }
+                }
+            }
+            Ok(json!({ "workspaces": workspaces, "unreachable": unreachable }))
         }
         WorkspaceCommand::Create { cwd, label, focus } => {
             let root_directory = std::path::absolute(match cwd {

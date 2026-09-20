@@ -375,3 +375,151 @@ fn a_missing_server_is_a_json_error() {
         "server_not_running"
     );
 }
+
+/// `--device` reaches a saved TCP Device with this machine's device key; `device list`
+/// and `workspace list --all-devices` report the ones that do not answer instead of
+/// hiding them.
+#[test]
+fn device_commands_reach_saved_devices_and_report_the_unreachable() {
+    use condr_server::noise::ServerIdentity;
+
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("condr-dev-{}-{suffix}", std::process::id()));
+    let config_dir = root.join("config");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let local_socket = std::env::temp_dir().join(format!("condr-dev-l-{suffix}.sock"));
+    let remote_socket = std::env::temp_dir().join(format!("condr-dev-r-{suffix}.sock"));
+
+    // The CLI speaks TCP with the device key under CONDR_CONFIG_DIR, so the remote
+    // Server must authorize that key.
+    let device_key = condr_server::noise::load_device_key(&config_dir).unwrap();
+    let identity = ServerIdentity::ephemeral()
+        .unwrap()
+        .with_authorized(device_key.public());
+    let server_key = identity.public_key();
+    let remote = BoundServer::bind(
+        ServerConfig::ephemeral(&remote_socket)
+            .with_listen("127.0.0.1:0".parse().unwrap())
+            .with_identity(identity),
+    )
+    .unwrap();
+    let address = remote.local_addr().unwrap().unwrap();
+    let remote_handle = remote.handle();
+    let remote_thread = thread::spawn(move || remote.run());
+    let local = BoundServer::bind(ServerConfig::ephemeral(&local_socket)).unwrap();
+    let local_handle = local.handle();
+    let local_thread = thread::spawn(move || local.run());
+
+    std::fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "[[client.servers]]\nname = 'Lab'\naddress = 'tcp://{server_key}@{address}'\n\n\
+             [[client.servers]]\nname = 'Gone'\naddress = 'tcp://{}@127.0.0.1:1'\n",
+            "0".repeat(64)
+        ),
+    )
+    .unwrap();
+
+    let run = |args: &[&str], device_env: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_condr"));
+        command
+            .args(args)
+            .env("CONDR_SOCKET_PATH", &local_socket)
+            .env("CONDR_CONFIG_DIR", &config_dir)
+            .env_remove("CONDR_PANE_ID")
+            .env_remove("CONDR_DEVICE");
+        if let Some(device) = device_env {
+            command.env("CONDR_DEVICE", device);
+        }
+        command.output().unwrap()
+    };
+    let ok = |args: &[&str], device_env: Option<&str>| {
+        let output = run(args, device_env);
+        assert!(
+            output.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+
+    let cwd = root.to_str().unwrap();
+    let created = ok(
+        &[
+            "--device",
+            "Lab",
+            "workspace",
+            "create",
+            "--cwd",
+            cwd,
+            "--label",
+            "remote",
+        ],
+        None,
+    );
+    assert_eq!(created["workspace"]["name"], "remote");
+    assert!(created["workspace"].get("device").is_none());
+
+    // The local Server is untouched; the remote one holds the Workspace.
+    assert_eq!(
+        ok(&["workspace", "list"], None)["workspaces"],
+        Value::Array(vec![])
+    );
+    let remote_list = ok(&["workspace", "list"], Some("Lab"))["workspaces"].clone();
+    assert_eq!(remote_list.as_array().unwrap().len(), 1);
+    assert!(remote_list[0].get("device").is_none());
+
+    let everywhere = ok(&["workspace", "list", "--all-devices"], None);
+    let workspaces = everywhere["workspaces"].as_array().unwrap();
+    assert_eq!(workspaces.len(), 1, "{everywhere}");
+    assert_eq!(workspaces[0]["device"], "Lab");
+    assert_eq!(workspaces[0]["name"], "remote");
+    assert_eq!(everywhere["unreachable"][0]["device"], "Gone");
+    assert!(everywhere["unreachable"][0]["error"].is_string());
+
+    // Listing from Lab's point of view skips Lab itself.
+    let from_lab = ok(&["workspace", "list", "--all-devices"], Some("Lab"));
+    assert_eq!(from_lab["workspaces"].as_array().unwrap().len(), 1);
+    assert!(from_lab["workspaces"][0].get("device").is_none());
+
+    let devices = ok(&["device", "list"], None)["devices"].clone();
+    let lab = devices
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|device| device["name"] == "Lab")
+        .unwrap();
+    assert_eq!(lab["reachable"], true, "{devices}");
+    assert_eq!(lab["workspace_count"], 1);
+    assert_eq!(
+        lab["address"],
+        format!("tcp://{address}"),
+        "no key material"
+    );
+    let gone = devices
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|device| device["name"] == "Gone")
+        .unwrap();
+    assert_eq!(gone["reachable"], false);
+    assert!(gone["error"].is_string());
+
+    let missing = run(&["--device", "Nope", "workspace", "list"], None);
+    assert_eq!(missing.status.code(), Some(1));
+    let error: Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "device_not_found");
+    assert!(
+        error["error"]["message"].as_str().unwrap().contains("Lab"),
+        "{error}"
+    );
+
+    remote_handle.stop();
+    local_handle.stop();
+    remote_thread.join().unwrap().unwrap();
+    local_thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(root);
+}

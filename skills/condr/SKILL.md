@@ -35,10 +35,13 @@ All commands below start with `condr`.
 | `server start`, `server status`, `server run` | Start a background Server, check it (`status --json`: uptime, Workspace/Tab/Pane/Agent counts, clients, recent errors), or run it in the foreground. |
 | `server stop`, `server restart` | Stop all terminals; restart restores layout/cwd and resumes saved native conversations in fresh shells. Run restart from outside Condr. |
 | `server invite`, `server clients`, `server revoke` | Pair remote devices, list paired devices, or revoke access. |
+| `device list` | List the remote Devices saved on this machine, whether each answers, and its Workspace count. |
+| `--device <name>` (before any group) | Run the command on a saved Device instead of the local Server; `CONDR_DEVICE` sets the default. `workspace list --all-devices` lists every Device's Workspaces, each tagged `device`, plus `unreachable` Devices. |
 
 ## Targets and Results
 
 - Inside Condr (`CONDR_ENV=1`), `CONDR_SOCKET_PATH` selects the Server; `CONDR_PANE_ID` identifies the caller. The command sandbox must permit access to this socket. Omitted optional Pane targets mean the caller; use explicit IDs for other Panes.
+- Devices are the machines the GUI connected to and saved; names match the GUI sidebar. `--device` connects to that machine's Server for one command, so IDs and names in the result belong to that Device: pass the same `--device` to every follow-up (`workspace create`, `agent start`, `agent prompt`, `agent wait`, `pane read`). Without `--device`, results with no `device` field are local. Caller defaults (`CONDR_PANE_ID`) do not apply on another Device; give explicit targets.
 - Read IDs from responses: creation returns `.workspace`, `.tab`, and/or `.root_pane`; splitting returns `.pane.pane_id`. Each GUI shows what it chose; create/split leave every GUI where it is unless `--focus` is requested, which asks all of them to show the result. `tab create` without `--workspace` needs to run inside a Pane.
 - Resume requires installed hooks and the native transcript on the Server. Hook reports save resume IDs; any observed process exit clears its ID. Server shutdown saves the existing IDs without an extra process check. Resume reopens the conversation without sending a prompt. Resume submits once; read any failure in the Pane and retry with the native resume command. OpenCode uses a TUI plugin installed with `agent hooks install opencode`; remove an old development `plugins/condr.js` before installing it.
 - Agent targets are names assigned by `start` or numeric Pane IDs. Names match `[a-z][a-z0-9_-]{0,31}`, are unique, and last until exit or Server restart.

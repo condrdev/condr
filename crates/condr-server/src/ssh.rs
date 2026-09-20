@@ -119,8 +119,67 @@ impl SshEndpoint {
 
     fn command(&self) -> Command {
         let mut command = Command::new("ssh");
+        #[cfg(unix)]
+        command.args(self.multiplexing_options(&[]));
         self.configure(&mut command);
         command
+    }
+
+    /// The `ssh://` destination as OpenSSH takes it on the command line.
+    fn uri(&self) -> String {
+        format!(
+            "ssh://{}{}",
+            self.destination,
+            self.port.map(|port| format!(":{port}")).unwrap_or_default()
+        )
+    }
+
+    /// Every `condr --device` call and every GUI connection is its own `ssh` process;
+    /// OpenSSH connection sharing lets them ride one authenticated connection instead of
+    /// paying a handshake (and possibly a second factor) each time. A user who already
+    /// configured `ControlPath` for this host keeps their own master, so Condr can also
+    /// reuse a session they opened interactively; otherwise Condr keeps a master of its
+    /// own under the runtime directory for a minute after the last use. Windows OpenSSH
+    /// has no multiplexing, so this is Unix only. `extra` lets tests point `-G` at a
+    /// config file.
+    #[cfg(unix)]
+    fn multiplexing_options(&self, extra: &[&str]) -> Vec<String> {
+        let effective = Command::new("ssh")
+            .arg("-G")
+            .args(extra)
+            .arg(self.uri())
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        let user_has_control_path = match effective {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+                    line.strip_prefix("controlpath ")
+                        .is_some_and(|path| path != "none")
+                })
+            }
+            // `ssh -G` failing means the connection fails too, with its own message.
+            _ => return Vec::new(),
+        };
+        if user_has_control_path {
+            return Vec::new();
+        }
+        let Some(directory) = condr_core::runtime_directory() else {
+            return Vec::new();
+        };
+        if std::fs::create_dir_all(&directory).is_err() {
+            return Vec::new();
+        }
+        // `%C` hashes host, port and user into one short name, keeping the socket path
+        // well under the `sun_path` limit.
+        vec![
+            "-o".into(),
+            "ControlMaster=auto".into(),
+            "-o".into(),
+            format!("ControlPath={}", directory.join("ssh-%C").display()),
+            "-o".into(),
+            "ControlPersist=60".into(),
+        ]
     }
 
     fn configure(&self, command: &mut Command) {
@@ -146,11 +205,7 @@ impl SshEndpoint {
                 "-o",
                 "ServerAliveCountMax=3",
             ])
-            .arg(format!(
-                "ssh://{}{}",
-                self.destination,
-                self.port.map(|port| format!(":{port}")).unwrap_or_default()
-            ))
+            .arg(self.uri())
             .arg(self.remote_command());
     }
 
@@ -251,6 +306,30 @@ mod tests {
             format!("{}\nserver\nbridge\n", binary.display())
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn multiplexing_defers_to_a_configured_control_path_and_otherwise_adds_its_own() {
+        let path = std::env::temp_dir().join(format!("condr-ssh-mux-{}", uuid::Uuid::new_v4()));
+        let endpoint = SshEndpoint::parse("ssh://mux-target").unwrap();
+
+        std::fs::write(
+            &path,
+            "Host mux-target\n ControlMaster auto\n ControlPath ~/.ssh/cm-%C\n",
+        )
+        .unwrap();
+        let config = path.to_str().unwrap();
+        assert!(endpoint.multiplexing_options(&["-F", config]).is_empty());
+
+        std::fs::write(&path, "Host mux-target\n User someone\n").unwrap();
+        let options = endpoint.multiplexing_options(&["-F", config]);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(options.len(), 6, "{options:?}");
+        assert_eq!(options[1], "ControlMaster=auto");
+        assert!(options[3].starts_with("ControlPath="), "{options:?}");
+        assert!(options[3].ends_with("ssh-%C"), "{options:?}");
+        assert_eq!(options[5], "ControlPersist=60");
     }
 
     #[cfg(unix)]

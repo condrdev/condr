@@ -20,13 +20,16 @@ mod cli;
     name = "condr",
     bin_name = "condr",
     version,
-    arg_required_else_help = true,
-    args_conflicts_with_subcommands = true
+    arg_required_else_help = true
 )]
 struct Cli {
     /// Print the bundled agent skill without connecting to a Server
     #[arg(long)]
     skill: bool,
+    /// Talk to a saved remote Device (a `[[client.servers]]` name) instead of this
+    /// Pane's or this machine's Server; `CONDR_DEVICE` sets the default
+    #[arg(long, global = true, value_name = "NAME")]
+    device: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -48,6 +51,9 @@ enum Command {
     /// Agents detected in Panes and their prompt lifecycle
     #[command(subcommand)]
     Agent(cli::AgentCommand),
+    /// Remote Devices saved in config.toml, the targets of `--device`
+    #[command(subcommand)]
+    Device(cli::DeviceCommand),
     /// Installed into an agent CLI's hooks: reports one lifecycle event to the Pane's
     /// Server (ADR 0014). Inert outside a Condr Pane; always exits 0.
     #[command(hide = true)]
@@ -146,25 +152,55 @@ enum ServerCommand {
     },
 }
 
+impl Cli {
+    /// `try_parse_from` plus the one rule clap cannot express next to a global
+    /// `--device`: `--skill` stands alone.
+    fn parse_checked_from<I, T>(args: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        use clap::CommandFactory as _;
+        let cli = Self::try_parse_from(args)?;
+        if cli.skill && (cli.command.is_some() || cli.device.is_some()) {
+            return Err(Self::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "the argument '--skill' cannot be used with a subcommand or '--device'",
+            ));
+        }
+        Ok(cli)
+    }
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let cli = Cli::parse_checked_from(std::env::args_os()).unwrap_or_else(|error| error.exit());
     if cli.skill {
         print!("{}", include_str!("../../../skills/condr/SKILL.md"));
         return;
     }
-    std::process::exit(
-        match cli.command.expect("subcommand required without --skill") {
-            Command::Server(command) => dispatch(command),
-            Command::Workspace(command) => cli::run_workspace(command),
-            Command::Tab(command) => cli::run_tab(command),
-            Command::Pane(command) => cli::run_pane(command),
-            Command::Agent(command) => cli::run_agent(command),
-            Command::AgentHook { agent, event } => {
-                condr_core::agent_hook::run(&agent, &event);
-                0
-            }
-        },
-    );
+    let Some(command) = cli.command else {
+        // `condr --device x` alone: the usage error clap would give for no arguments.
+        use clap::CommandFactory as _;
+        let _ = Cli::command().print_help();
+        std::process::exit(2);
+    };
+    let device = cli
+        .device
+        .or_else(|| std::env::var("CONDR_DEVICE").ok())
+        .filter(|name| !name.is_empty());
+    let device = device.as_deref();
+    std::process::exit(match command {
+        Command::Server(command) => dispatch(command),
+        Command::Workspace(command) => cli::run_workspace(device, command),
+        Command::Tab(command) => cli::run_tab(device, command),
+        Command::Pane(command) => cli::run_pane(device, command),
+        Command::Agent(command) => cli::run_agent(device, command),
+        Command::Device(command) => cli::run_device(device, command),
+        Command::AgentHook { agent, event } => {
+            condr_core::agent_hook::run(&agent, &event);
+            0
+        }
+    });
 }
 
 /// Every failure prints as a headline followed by indented detail lines:
@@ -624,7 +660,10 @@ mod tests {
         assert!(parse(&["revoke"]).is_err());
         assert!(parse(&["install", "--start", "--restart"]).is_err());
         assert!(parse(&["uninstall", "--start"]).is_err());
-        assert!(Cli::try_parse_from(["condr", "--skill", "server", "stop"]).is_err());
-        assert!(Cli::try_parse_from(["condr", "server", "stop", "--skill"]).is_err());
+        assert!(Cli::parse_checked_from(["condr", "--skill", "server", "stop"]).is_err());
+        assert!(Cli::parse_checked_from(["condr", "server", "stop", "--skill"]).is_err());
+        assert!(Cli::parse_checked_from(["condr", "--skill", "--device", "lab"]).is_err());
+        assert!(Cli::parse_checked_from(["condr", "--device", "lab", "workspace", "list"]).is_ok());
+        assert!(Cli::parse_checked_from(["condr", "workspace", "list", "--device", "lab"]).is_ok());
     }
 }

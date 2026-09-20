@@ -221,7 +221,7 @@ name = "TCP Server"
 address = "tcp://<server-public-key>@host:4242"
 ```
 
-TCP 地址只保存公钥，不保存 invite。开发版不迁移旧的 `address = "host:port"` + `server_key` 配置；将其改成上面的单个 `tcp://<server-public-key>@host:port` 地址即可。
+TCP 地址只保存公钥，不保存 invite。`condr` CLI 读同一份列表：`condr --device <name> …`（或 `CONDR_DEVICE=<name>`）把任一 `workspace|tab|pane|agent` 命令发到该 Device 的 Server，`condr device list` 列出各 Device 是否可达，`condr workspace list --all-devices` 汇总所有 Device 的 Workspace。每次调用独立建连；SSH Device 在 Unix 上通过 OpenSSH `ControlMaster`/`ControlPersist=60` 复用连接，已在 `~/.ssh/config` 里为该主机配置 `ControlPath` 的沿用用户自己的 master，否则 Condr 在运行时目录下维护自己的。开发版不迁移旧的 `address = "host:port"` + `server_key` 配置；将其改成上面的单个 `tcp://<server-public-key>@host:port` 地址即可。
 
 Server 列表加载失败时会保留原文件，并禁止添加、编辑、删除或写回列表；先修正错误再重启 GUI。其他外观和终端偏好仍可保存。
 
