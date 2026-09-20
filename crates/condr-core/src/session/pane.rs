@@ -198,6 +198,22 @@ impl Session {
         true
     }
 
+    /// Exchanges two Panes' places in their Tab; every split keeps its direction and ratio.
+    pub fn swap_panes(&mut self, pane_id: PaneId, other: PaneId) -> bool {
+        if pane_id == other {
+            return false;
+        }
+        let Some((workspace_ix, tab_ix, _)) = self.find_pane(pane_id) else {
+            return false;
+        };
+        let tab = self.terminal_layout_mut(workspace_ix, tab_ix);
+        if !tab.panes.iter().any(|pane| pane.id == other) {
+            return false;
+        }
+        swap_layout_panes(&mut tab.layout, pane_id, other);
+        true
+    }
+
     /// Detaches `pane_id` from its Tab layout and reattaches it beside `target` on `side`,
     /// like tmux `join-pane`. Both Panes must share a Tab; a Tab's only Pane cannot move.
     pub fn move_pane(&mut self, pane_id: PaneId, target: PaneId, side: PaneDirection) -> bool {

@@ -345,6 +345,11 @@ pub enum LayoutCommand {
         pane_id: PaneId,
         direction: PaneDirection,
     },
+    /// Exchange two Panes' places in the same Tab; the splits stay as they are.
+    SwapPanes {
+        pane_id: PaneId,
+        other: PaneId,
+    },
     /// Detach a Pane and reattach it beside `target_pane_id` on `side`, in the same Tab.
     MovePane {
         pane_id: PaneId,

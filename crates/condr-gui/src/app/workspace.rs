@@ -636,6 +636,10 @@ impl Render for Condr {
             .then(|| self.render_right_sidebar(cx));
         let workspace = div()
             .size_full()
+            // A flex item's minimum defaults to its content: without this a Pane whose
+            // header text is wider than its slot pushes the whole column past the
+            // window, and the Dock's stack adopts that width as its container.
+            .min_w(px(0.))
             .on_prepaint(move |bounds, _, cx| {
                 let _ = workspace_owner.update(cx, |this, _| {
                     this.workspace_size = bounds.size;

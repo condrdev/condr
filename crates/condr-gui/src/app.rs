@@ -58,8 +58,9 @@ use files::*;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
 use gpui_kit::component::dock::{
-    BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, PanelEvent, PanelInfo,
-    PanelState, TabGroupRenderer, TilesRenderer,
+    AnyDrag, BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, DockPlacement,
+    DropTarget as DockDropTarget, PaneRef, PanelEvent, PanelId, PanelInfo, PanelState,
+    TabGroupRenderer, TilesRenderer,
 };
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};

@@ -1,4 +1,6 @@
 use super::*;
+use condr_core::PaneLayout;
+use gpui_kit::{Pixels, Point};
 
 /// Where the window looks: connection, Workspace, Tab.
 fn presented(
@@ -445,5 +447,319 @@ fn the_view_is_local_follows_activation_and_survives_a_closed_tab() {
     assert_eq!(
         presented(window, &view),
         Some((1, second_workspace, second_tab))
+    );
+}
+
+/// Dragging a Pane header onto another Pane rearranges the Tab through the Server: an
+/// edge splits the target and puts the dragged Pane on that side, the centre swaps them.
+#[test]
+fn dragging_a_pane_header_moves_it_beside_or_swaps_it_with_the_target() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("pane-drag");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (_, tab_id, first) = create_workspace(window, &view, &root);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
+                pane_id: first,
+                direction: SplitDirection::Horizontal,
+            });
+        });
+    });
+    let layout = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .and_then(|session| session.tab(tab_id)?.layout().cloned())
+        })
+    };
+    let mut second = None;
+    assert!(wait_until(window, |window| {
+        second = match layout(window) {
+            Some(PaneLayout::Split { second, .. }) => match *second {
+                PaneLayout::Pane(id) if id != first => Some(id),
+                _ => None,
+            },
+            _ => None,
+        };
+        second.is_some()
+    }));
+    let second = second.unwrap();
+    // H(first, second): the first Pane on the left, the new one on the right.
+    let drag = |window: &mut VisualTestContext, pane: PaneId, to: Point<Pixels>| {
+        window.update(|window, cx| _ = window.draw(cx));
+        let header = window
+            .debug_bounds(leaked_selector(format!(
+                "terminal-pane-header-{}",
+                pane.as_u64()
+            )))
+            .expect("the Pane header renders");
+        window.simulate_mouse_down(header.center(), MouseButton::Left, Modifiers::default());
+        window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+        window.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        window.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    };
+    let body = |window: &mut VisualTestContext, pane: PaneId| {
+        window
+            .debug_bounds(leaked_selector(format!("terminal-pane-{}", pane.as_u64())))
+            .expect("the Pane body renders")
+    };
+
+    // The first Pane dropped below the second: V(second, first) replaces the split.
+    // While it hovers there, the Kit's placeholder covers the target's lower half.
+    let target = body(window, second);
+    let below = point(target.center().x, target.bottom() - px(10.));
+    let header = window
+        .debug_bounds(leaked_selector(format!(
+            "terminal-pane-header-{}",
+            first.as_u64()
+        )))
+        .unwrap();
+    window.simulate_mouse_down(header.center(), MouseButton::Left, Modifiers::default());
+    // The first move starts the drag; the next one reaches the target.
+    window.simulate_mouse_move(below, MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_move(below, MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    let placeholder = window
+        .debug_bounds("condr-drop-placeholder")
+        .expect("hovering a drop zone shows the placeholder");
+    // The group frame also holds the header and border, so compare loosely: the block
+    // starts around the Pane's middle and reaches its bottom edge.
+    assert!(
+        placeholder.top() > target.top()
+            && placeholder.top() < target.center().y
+            && placeholder.bottom() >= target.bottom() - px(4.),
+        "the placeholder covers the hovered Pane's lower half: {placeholder:?} vs {target:?}"
+    );
+    window.simulate_mouse_move(below, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(below, MouseButton::Left, Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            layout(window)
+                == Some(PaneLayout::Split {
+                    direction: SplitDirection::Vertical,
+                    ratio: 0.5,
+                    first: Box::new(PaneLayout::Pane(second)),
+                    second: Box::new(PaneLayout::Pane(first)),
+                })
+        }),
+        "an edge drop moves the Pane to that side: {:?}",
+        layout(window)
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).target_pane),
+        Some((1, second)),
+        "dragging a Pane away does not target it"
+    );
+
+    // Dropped on the centre, the two Panes trade places and the split stays.
+    let target = body(window, second);
+    drag(window, first, target.center());
+    assert!(
+        wait_until(window, |window| {
+            layout(window)
+                == Some(PaneLayout::Split {
+                    direction: SplitDirection::Vertical,
+                    ratio: 0.5,
+                    first: Box::new(PaneLayout::Pane(first)),
+                    second: Box::new(PaneLayout::Pane(second)),
+                })
+        }),
+        "a centre drop swaps the Panes: {:?}",
+        layout(window)
+    );
+
+    // Dropping a Pane on itself is not a rearrangement.
+    let before = layout(window);
+    let requests = window.read(|app| view.read(app).connection(1).unwrap().next_layout_request_id);
+    let target = body(window, first);
+    drag(
+        window,
+        first,
+        point(target.left() + px(10.), target.center().y),
+    );
+    window.run_until_parked();
+    assert_eq!(layout(window), before);
+    assert_eq!(
+        window.read(|app| view.read(app).connection(1).unwrap().next_layout_request_id),
+        requests,
+        "no Layout command leaves for a self drop"
+    );
+}
+
+/// Clicking a Pane's header targets that Pane, as clicking its terminal does.
+#[test]
+fn clicking_a_pane_header_targets_the_pane() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("pane-header-click");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (_, tab_id, first) = create_workspace(window, &view, &root);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
+                pane_id: first,
+                direction: SplitDirection::Horizontal,
+            });
+        });
+    });
+    let mut second = None;
+    assert!(wait_until(window, |window| {
+        second = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            let tab = session.tab(tab_id)?;
+            (tab.panes().len() == 2).then(|| tab.focused_pane().unwrap().id())
+        });
+        second.is_some()
+    }));
+    let second = second.unwrap();
+    assert!(wait_until(window, |window| {
+        window.read(|app| view.read(app).target_pane) == Some((1, second))
+    }));
+
+    window.update(|window, cx| _ = window.draw(cx));
+    let header = window
+        .debug_bounds(leaked_selector(format!(
+            "terminal-pane-header-{}",
+            first.as_u64()
+        )))
+        .unwrap();
+    window.simulate_click(header.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| view.read(app).target_pane) == Some((1, first))
+        }),
+        "a header click targets its Pane"
+    );
+}
+
+/// H(V(a, b), c) with b dropped left of c becomes H(a, H(b, c)); every Pane stays inside
+/// the Dock and the Server's ratios stay where the move put them.
+#[test]
+fn moving_a_pane_into_a_nested_split_keeps_every_pane_on_screen() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("pane-move-nested");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (_, tab_id, a) = create_workspace(window, &view, &root);
+    let layout = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .and_then(|session| session.tab(tab_id)?.layout().cloned())
+        })
+    };
+    let split = |window: &mut VisualTestContext, pane: PaneId, direction: SplitDirection| {
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                this.send_layout(LayoutCommand::SplitPane {
+                    focus: true,
+                    pane_id: pane,
+                    direction,
+                });
+            });
+        });
+        let known: Vec<PaneId> = window.read(|app| {
+            let session = view.read(app).active_session().unwrap();
+            let tab = session.tab(tab_id).unwrap();
+            tab.panes().iter().map(|pane| pane.id()).collect()
+        });
+        let mut created = None;
+        assert!(wait_until(window, |window| {
+            created = window.read(|app| {
+                let session = view.read(app).active_session()?;
+                let tab = session.tab(tab_id)?;
+                tab.panes()
+                    .iter()
+                    .map(|pane| pane.id())
+                    .find(|id| !known.contains(id))
+            });
+            created.is_some()
+        }));
+        created.unwrap()
+    };
+    let c = split(window, a, SplitDirection::Horizontal);
+    let b = split(window, a, SplitDirection::Vertical);
+    assert_eq!(
+        layout(window),
+        Some(PaneLayout::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(PaneLayout::Pane(a)),
+                second: Box::new(PaneLayout::Pane(b)),
+            }),
+            second: Box::new(PaneLayout::Pane(c)),
+        })
+    );
+
+    window.update(|window, cx| _ = window.draw(cx));
+    let bounds = |window: &mut VisualTestContext, selector: String| {
+        window.debug_bounds(leaked_selector(selector)).unwrap()
+    };
+    let header = bounds(window, format!("terminal-pane-header-{}", b.as_u64()));
+    let target = bounds(window, format!("terminal-pane-{}", c.as_u64()));
+    let left = point(target.left() + px(10.), target.center().y);
+    window.simulate_mouse_down(header.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(left, MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_mouse_move(left, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(left, MouseButton::Left, Modifiers::default());
+    let expected = PaneLayout::Split {
+        direction: SplitDirection::Horizontal,
+        ratio: 0.5,
+        first: Box::new(PaneLayout::Pane(a)),
+        second: Box::new(PaneLayout::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneLayout::Pane(b)),
+            second: Box::new(PaneLayout::Pane(c)),
+        }),
+    };
+    assert!(
+        wait_until(window, |window| layout(window) == Some(expected.clone())),
+        "{:?}",
+        layout(window)
+    );
+    // Let any Dock feedback settle, then check nothing rewrote the ratios.
+    for _ in 0..5 {
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    }
+    assert_eq!(
+        layout(window),
+        Some(expected),
+        "the Dock must not feed ratios back"
+    );
+
+    let viewport = window.update(|window, _| window.viewport_size());
+    for pane in [a, b, c] {
+        let body = bounds(window, format!("terminal-pane-{}", pane.as_u64()));
+        assert!(
+            body.right() <= viewport.width + px(1.) && body.size.width > px(50.),
+            "Pane {} at {body:?} must stay inside the window {viewport:?}",
+            pane.as_u64()
+        );
+    }
+    let a_bounds = bounds(window, format!("terminal-pane-{}", a.as_u64()));
+    let b_bounds = bounds(window, format!("terminal-pane-{}", b.as_u64()));
+    assert!(
+        (a_bounds.size.width - b_bounds.size.width * 2.).abs() < px(12.),
+        "a takes half, b a quarter: {a_bounds:?} vs {b_bounds:?}"
     );
 }

@@ -20,6 +20,14 @@ pub(super) struct DockSurface {
 
 impl Condr {}
 
+/// A Pane header under drag (ADR 0005 layout, mouse form): the Kit Dock carries it as
+/// an opaque `AnyDrag`, resolves the drop zone and paints the placeholder, and reports
+/// the landing group and edge; only Condr turns that into a Layout command.
+pub(super) struct DraggedPane {
+    pub(super) key: ConnectionKey,
+    pub(super) pane_id: PaneId,
+}
+
 pub(super) struct CondrDockRenderer;
 
 impl DockAreaRenderer for CondrDockRenderer {
@@ -38,6 +46,7 @@ impl DockAreaRenderer for CondrDockRenderer {
             .flex()
             .flex_1()
             .flex_col()
+            .min_w(px(0.))
             .overflow_hidden()
     }
 
@@ -48,10 +57,14 @@ impl DockAreaRenderer for CondrDockRenderer {
         _: &mut Window,
         _: &mut App,
     ) -> Stateful<Div> {
+        // `min_w` and `min_h` at zero: a flex item's minimum defaults to its content, and
+        // a Pane whose terminal still has last frame's columns would widen the split past
+        // its slot, which the Kit's stack then records as its container size.
         div()
             .id(("condr-dock-split", node.as_u64()))
             .size_full()
             .flex_1()
+            .min_w(px(0.))
             .min_h(px(0.))
             .overflow_hidden()
     }
@@ -99,6 +112,8 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
             .size_full()
             .flex()
             .flex_col()
+            .min_w(px(0.))
+            .min_h(px(0.))
             .overflow_hidden()
     }
 
@@ -112,8 +127,41 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
             .id("condr-tab-content")
             .size_full()
             .flex_1()
+            .min_w(px(0.))
             .min_h(px(0.))
+            // The drop placeholder below is positioned inside this frame.
+            .relative()
             .overflow_hidden()
+    }
+
+    /// The placeholder while a Pane header hovers this group: base picks the half it
+    /// covers (or the whole group for a swap), springs carry it from one zone to the
+    /// next. Base draws nothing itself and the Kit skin is crate-private, so this is
+    /// the Kit's look, redrawn.
+    fn render_drop_indicator(
+        &self,
+        indicator: gpui_kit::component::dock::DropIndicator,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let to = indicator.to();
+        let id = "condr-drop-placeholder";
+        let motion = cx.theme().motion_tokens().spring_move.with_epsilon(0.5);
+        let left = gpui_kit::base::spring((id, "left"), to.origin().x, motion, window, cx);
+        let top = gpui_kit::base::spring((id, "top"), to.origin().y, motion, window, cx);
+        let width = gpui_kit::base::spring((id, "width"), to.size().width, motion, window, cx);
+        let height = gpui_kit::base::spring((id, "height"), to.size().height, motion, window, cx);
+        Some(
+            div()
+                .debug_selector(|| id.into())
+                .absolute()
+                .left(left)
+                .top(top)
+                .w(width)
+                .h(height)
+                .bg(cx.theme().tokens.drop_target)
+                .into_any_element(),
+        )
     }
 
     fn render_tab_bar(
@@ -197,6 +245,7 @@ impl Condr {
             return;
         };
         let key = connection.key;
+        let controlling = connection.can_mutate();
         let Some((_workspace_id, tab_id)) = connection.viewed(&session) else {
             self.target_pane = None;
             self.active_dock_surface = None;
@@ -290,9 +339,12 @@ impl Condr {
             let subscription = cx.subscribe_in(
                 &area,
                 window,
-                move |this, dock, event: &DockEvent, window, cx| {
-                    if matches!(event, DockEvent::LayoutChanged) {
+                move |this, dock, event: &DockEvent, window, cx| match event {
+                    DockEvent::LayoutChanged => {
                         this.on_dock_layout_changed(surface_key, dock, window, cx);
+                    }
+                    DockEvent::DragDrop { item, target } => {
+                        this.on_dock_drag_drop(surface_key, dock, item, target, cx);
                     }
                 },
             );
@@ -338,7 +390,9 @@ impl Condr {
                 surface.area.clone()
             };
             area.update(cx, |dock, cx| {
-                dock.set_locked(true, window, cx);
+                // Locked, the Kit installs no drop handling, so a viewer sees no drop zones;
+                // Condr renders no tab bar, so unlocked adds no Kit-driven rearranging.
+                dock.set_locked(!controlling, window, cx);
                 dock.set_center(dock_layout, window, cx);
             });
             let surface = self
@@ -408,6 +462,78 @@ impl Condr {
                     .child(second, Some(second_extent))
             }
         }
+    }
+
+    /// A Pane header dropped on another Pane: an edge splits that Pane and puts the
+    /// dragged one on that side, the centre swaps the two. The Server owns the result;
+    /// the Dock is rebuilt when it confirms, as after any Layout command.
+    fn on_dock_drag_drop(
+        &mut self,
+        surface_key: DockSurfaceKey,
+        dock: &Entity<DockArea>,
+        item: &AnyDrag,
+        target: &DockDropTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dragged) = item.value().downcast_ref::<DraggedPane>() else {
+            return;
+        };
+        let DockDropTarget::Group { node, placement } = target else {
+            return;
+        };
+        let key = surface_key.connection_key;
+        if dragged.key != key {
+            return;
+        }
+        let Some(target_pane) = self.dock_group_pane(key, dock, *node, cx) else {
+            return;
+        };
+        let pane_id = dragged.pane_id;
+        let same_tab = self.dock_surfaces.get(&surface_key).is_some_and(|surface| {
+            surface.pane_ids.contains(&pane_id) && surface.pane_ids.contains(&target_pane)
+        });
+        if target_pane == pane_id || !same_tab {
+            return;
+        }
+        let command = match placement {
+            None => LayoutCommand::SwapPanes {
+                pane_id,
+                other: target_pane,
+            },
+            Some(placement) => LayoutCommand::MovePane {
+                pane_id,
+                target_pane_id: target_pane,
+                side: match placement {
+                    gpui_kit::base::Placement::Left => PaneDirection::Left,
+                    gpui_kit::base::Placement::Right => PaneDirection::Right,
+                    gpui_kit::base::Placement::Top => PaneDirection::Up,
+                    gpui_kit::base::Placement::Bottom => PaneDirection::Down,
+                },
+            },
+        };
+        self.send_layout_to(key, command);
+    }
+
+    /// The Pane a Dock tab group shows: every group here holds exactly one Panel.
+    fn dock_group_pane(
+        &self,
+        key: ConnectionKey,
+        dock: &Entity<DockArea>,
+        node: gpui_kit::component::dock::NodeId,
+        cx: &App,
+    ) -> Option<PaneId> {
+        let dock = dock.read(cx);
+        let node = dock.layout(DockPlacement::Center)?.find_node(node)?;
+        let PaneRef::Tabs { panels, .. } = node.kind() else {
+            return None;
+        };
+        let panel = *panels.first()?;
+        self.panels
+            .iter()
+            .find(|((panel_key, _), entity)| {
+                *panel_key == key && PanelId::from(entity.entity_id()) == panel
+            })
+            .map(|((_, pane_id), _)| *pane_id)
     }
 
     pub(super) fn on_dock_layout_changed(

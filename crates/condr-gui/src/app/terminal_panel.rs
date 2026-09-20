@@ -338,6 +338,8 @@ impl Render for TerminalPanel {
             })
             .child(
                 h_flex()
+                    .id(format!("terminal-pane-header-{key}-{}", pane_id.as_u64()))
+                    .debug_selector(move || format!("terminal-pane-header-{}", pane_id.as_u64()))
                     .h(px(28.))
                     .w_full()
                     .flex_shrink_0()
@@ -348,6 +350,35 @@ impl Render for TerminalPanel {
                     .border_color(cx.theme().border)
                     .bg(cx.theme().background)
                     .occlude()
+                    // The header has its own hitbox now that it can start a drag, so the
+                    // tab group's focus-on-press no longer reaches through it. A click
+                    // targets the Pane; a press that turns into a drag never counts as a
+                    // click, so dragging a Pane away leaves the focus where it was.
+                    .on_click({
+                        let owner = self.owner.clone();
+                        let focus = self.focus_handle.clone();
+                        move |_, window, cx| {
+                            let accepted = owner
+                                .update(cx, |app, cx| app.select_pane(key, pane_id, window, cx))
+                                .unwrap_or(false);
+                            if accepted {
+                                focus.focus(window, cx);
+                            }
+                        }
+                    })
+                    // Dragging the header rearranges the Tab (see `DraggedPane`). A zoomed
+                    // Pane has nothing beside it to land on.
+                    .when(controlling && !zoomed, |this| {
+                        let name = pane_title.clone();
+                        this.on_drag(
+                            AnyDrag::new(super::dock::DraggedPane { key, pane_id }),
+                            move |_, _, _, cx| {
+                                cx.stop_propagation();
+                                let name = name.clone();
+                                cx.new(|_| super::sidebar::DragPreview { icon: None, name })
+                            },
+                        )
+                    })
                     .child(
                         div()
                             .flex_1()

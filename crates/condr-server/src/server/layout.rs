@@ -605,6 +605,14 @@ pub(super) fn apply_layout_command(
             }
             candidate.swap_pane(pane_id, direction);
         }
+        LayoutCommand::SwapPanes { pane_id, other } => {
+            if candidate.pane(pane_id).is_none() || candidate.pane(other).is_none() {
+                return Err("unknown Pane".into());
+            }
+            if !candidate.swap_panes(pane_id, other) {
+                return Err("Panes must differ and share a Tab".into());
+            }
+        }
         LayoutCommand::MovePane {
             pane_id,
             target_pane_id,

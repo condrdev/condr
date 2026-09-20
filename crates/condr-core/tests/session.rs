@@ -554,6 +554,14 @@ fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
             .id(),
         second
     );
+    // Swapping two arbitrary Panes exchanges their leaves and leaves the splits alone.
+    let before = session.tab(tab_id).unwrap().layout().unwrap().clone();
+    assert!(!session.swap_panes(first, first));
+    assert!(session.swap_panes(first, third));
+    assert_ne!(*session.tab(tab_id).unwrap().layout().unwrap(), before);
+    assert!(session.swap_panes(third, first));
+    assert_eq!(*session.tab(tab_id).unwrap().layout().unwrap(), before);
+
     assert!(session.toggle_pane_zoom(third));
     let tab = &session.workspaces()[0].tabs()[0];
     assert_eq!(tab.focused_pane().unwrap().id(), third);
