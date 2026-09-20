@@ -61,11 +61,15 @@ cat >"$app/Contents/Info.plist" <<EOF
 EOF
 ln -s /Applications "$stage/dmg/Applications"
 dmg="$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"
+# hdiutil sizes an auto-sized image from the source's allocated blocks, which APFS
+# clones and sparse files make too small ("No space left on device" while the disk
+# is nearly empty), so size it from the apparent content plus a fixed margin.
+size_mb=$(( $(find "$stage/dmg" -type f -exec stat -f %z {} + | awk '{ s += $1 } END { print int(s / 1048576) }') + 64 ))
 # GitHub's macOS runners occasionally fail `hdiutil create` with "Resource busy";
 # retry a few times, and keep its stderr visible so the failure is diagnosable.
 for attempt in 1 2 3; do
     rm -f "$dmg"
-    if hdiutil create -volname Condr -srcfolder "$stage/dmg" -format UDZO "$dmg"; then
+    if hdiutil create -volname Condr -srcfolder "$stage/dmg" -size "${size_mb}m" -format UDZO "$dmg"; then
         break
     fi
     [ "$attempt" = 3 ] && exit 1

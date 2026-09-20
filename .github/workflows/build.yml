@@ -132,14 +132,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The macos-15-intel image ships nine Xcode versions and is nearly full; a Rust
-      # build needs only the Command Line Tools, so drop every Xcode but the default.
-      - name: Free disk space
-        if: matrix.arch == 'x86_64'
-        run: |
-          df -h /
-          sudo rm -rf /Applications/Xcode_26*.app /Applications/Xcode_16.[0-3]*.app
-          df -h /
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
