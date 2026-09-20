@@ -69,7 +69,7 @@ The one viewer Tab a Workspace may have for a file's content as it is on disk, r
 One of the two views of the right sidebar: the presented Workspace's working-tree changes against `HEAD`, index and worktree folded into one status per path, read-only (ADR 0017). The default view for a Workspace inside a repository.
 
 **Files**:
-The other view of the right sidebar: the presented Workspace's directory tree under its Root Directory, one level per Server answer, unfolded by the user, read-only (ADR 0018). `.git` is hidden, dotfiles are shown, ignored entries are dimmed but listed, rows carry Material Icon Theme file-type icons, a changed file's name takes its status colour, and a directory holding a change carries a dot. The default view for a Workspace outside a repository. The Server's watcher refreshes it through `WorkspaceFilesChanged`. A file row's context menu copies its path, opens it in the "Open in" editor, or inserts its path into the Workspace's terminal.
+The other view of the right sidebar: the presented Workspace's directory tree under its Root Directory, one level per Server answer, unfolded by the user, read-only (ADR 0018). `.git` is hidden, dotfiles are shown, ignored entries are dimmed but listed, rows carry JetBrains file-type icons, a changed file's name takes its status colour, and a directory holding a change carries a dot. The default view for a Workspace outside a repository. The Server's watcher refreshes it through `WorkspaceFilesChanged`. A file row's context menu copies its path, opens it in the "Open in" editor, or inserts its path into the Workspace's terminal.
 
 **Terminal**:
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent.

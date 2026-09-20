@@ -70,10 +70,7 @@ fn absolute_path(root: &Path, relative: &RelativePath) -> PathBuf {
     }
 }
 
-/// A file-type icon at row size, dimmed when ignored. The Material set is drawn for
-/// VS Code's brighter chrome and glared on Condr's dark panels; the fix is the theme's own
-/// "saturation" setting, baked into the SVGs by `script/generate-file-icons.mjs`. Lowering
-/// opacity as well was tried and made the icons look washed out.
+/// A JetBrains file-type icon at row size, using its native palette, dimmed when ignored.
 fn type_icon(path: String, ignored: bool) -> impl IntoElement {
     img(path)
         .size_4()
@@ -287,7 +284,7 @@ impl Condr {
                     .text_color(theme.muted_foreground)
                     .when(expanded, |icon| icon.rotate(percentage(90. / 360.))),
             )
-            .child(type_icon(file_icons::folder_icon(name), ignored))
+            .child(type_icon(file_icons::folder_icon(theme.is_dark()), ignored))
             .child(
                 div()
                     .min_w_0()
@@ -365,7 +362,10 @@ impl Condr {
                 });
             })
             .context_menu(menu)
-            .child(type_icon(file_icons::file_icon(name), ignored))
+            .child(type_icon(
+                file_icons::file_icon(name, theme.is_dark()),
+                ignored,
+            ))
             // The type icon keeps the slot; a change shows in the name's colour, as
             // VS Code paints it, and in the Changes view's glyph.
             .child(
@@ -620,7 +620,7 @@ impl Condr {
             .border_b_1()
             .border_color(theme.border)
             .child(type_icon(
-                file_icons::file_icon_for_path(Path::new(path.as_str())),
+                file_icons::file_icon_for_path(Path::new(path.as_str()), theme.is_dark()),
                 false,
             ))
             .child(

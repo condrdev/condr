@@ -42,7 +42,11 @@ trap 'rm -f "$TMP" "$ABOUT"' EXIT
     echo
     echo "Agent marks:"
     echo
-    cat crates/condr-gui/assets/icons/NOTICE-AGENT-ICONS
+    cat assets/agents/NOTICE
+    echo
+    echo "File and folder icons:"
+    echo
+    cat crates/condr-gui/assets/icons/NOTICE-FILE-ICONS
     echo
     echo "## Rust crates"
     echo

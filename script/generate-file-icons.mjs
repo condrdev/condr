@@ -1,156 +1,159 @@
 #!/usr/bin/env node
-// Regenerates the Files sidebar's file-type icons from a checkout of
-// material-icon-theme (https://github.com/material-extensions/vscode-material-icon-theme,
-// MIT): copies the SVGs the mappings refer to into crates/condr-gui/assets/icons/material
-// and writes the lookup tables to crates/condr-gui/src/app/file_icons/generated.rs.
-//
-//   node script/generate-file-icons.mjs /path/to/vscode-material-icon-theme
-//
-// What is taken: the `specific` folder theme and every file icon without an `enabledFor`
-// icon pack (those belong to framework packs the user picks in VS Code). Light-theme
-// variants are left out; the dark icons are drawn in both modes. Folder "open" variants
-// are not generated: the chevron already says a directory is unfolded.
+// Vendor JetBrains icons and filename associations at a fixed upstream revision.
+// Run: node script/generate-file-icons.mjs
+// Native file types override bundled TextMate associations. PSI, content detection
+// and project-root markers require an IDE project model; Condr has filesystem data.
 
-import { execSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import vm from "node:vm";
 
-const source = process.argv[2];
-if (!source) {
-  console.error("usage: generate-file-icons.mjs <material-icon-theme checkout>");
-  process.exit(2);
-}
+const revision = "50461b71767a52e286026538af67b05552d75f6e";
+const upstream = `https://raw.githubusercontent.com/JetBrains/intellij-community/${revision}/`;
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const assetsDir = join(repo, "crates/condr-gui/assets/icons/material");
+const assetsDir = join(repo, "crates/condr-gui/assets/icons/jetbrains");
 const generated = join(repo, "crates/condr-gui/src/app/file_icons/generated.rs");
-
-// The TS mapping files are object literals plus a few imports; strip the imports and the
-// type annotations, then evaluate them with stubs for what they import.
-function evaluate(file, exportName) {
-  let code = readFileSync(join(source, "src/core/icons", file), "utf8");
-  code = code.replace(/^import[^;]*;$/gm, "");
-  code = code.replace(new RegExp(`export const ${exportName}: [^=]+=`), `globalThis.${exportName} =`);
-  const patterns = {
-    ecmascript: (name) => ["js", "mjs", "cjs", "ts", "mts", "cts"].map((ext) => `${name}.${ext}`),
-    configuration: (name) => ["json", "jsonc", "json5", "yaml", "yml", "toml"].map((ext) => `${name}.${ext}`),
-    nodeEcosystem: (name) => [...patterns.ecmascript(name), ...patterns.configuration(name)],
-    cosmiconfig: (name) => [
-      `.${name}rc`,
-      ...patterns.nodeEcosystem(`.${name}rc`),
-      ...patterns.nodeEcosystem(`${name}.config`),
-    ],
-    yaml: (name) => [`${name}.yaml`, `${name}.yml`],
-    dotfile: (name) => [`.${name}`, name],
-  };
-  const context = {
-    globalThis: {},
-    IconPack: new Proxy({}, { get: (_, key) => String(key) }),
-    FileNamePattern: {
-      Ecmascript: "ecmascript",
-      Configuration: "configuration",
-      NodeEcosystem: "nodeEcosystem",
-      Cosmiconfig: "cosmiconfig",
-      Yaml: "yaml",
-      Dotfile: "dotfile",
-    },
-    parseByPattern: (icons) =>
-      icons.map((icon) => {
-        if (!icon.patterns) return icon;
-        const names = Object.entries(icon.patterns).flatMap(([name, pattern]) => patterns[pattern](name));
-        return { ...icon, fileNames: [...(icon.fileNames ?? []), ...names] };
-      }),
-  };
-  context.globalThis = context;
-  vm.runInNewContext(code, context, { filename: file });
-  return context[exportName];
+const requests = new Map();
+function source(path, optional = false) {
+  if (!requests.has(path)) {
+    requests.set(path, fetch(upstream + path).then(async (response) => {
+      if (optional && response.status === 404) return null;
+      if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+      return response.text();
+    }));
+  }
+  return requests.get(path);
 }
 
-const fileIcons = evaluate("fileIcons.ts", "fileIcons");
-const folderTheme = evaluate("folderIcons.ts", "folderIcons").find((theme) => theme.name === "specific");
-
-// Drawn by this script rather than copied; see below.
-const synthesized = new Set(["file", "folder"]);
-const available = new Set(readdirSync(join(source, "icons")).map((name) => name.replace(/\.svg$/, "")));
-const used = new Set([fileIcons.defaultIcon.name, folderTheme.defaultIcon.name]);
-// First definition wins, as VS Code resolves them.
-const insert = (map, key, icon) => {
-  key = key.toLowerCase();
-  if (key.includes("/") || map.has(key) || !(available.has(icon) || synthesized.has(icon))) return;
-  map.set(key, icon);
-  used.add(icon);
+// Use the New UI resource (expui) wherever provided by the platform or plugin.
+const icons = {
+  unknown: "platform/icons/src/expui/fileTypes/unknown",
+  folder: "platform/icons/src/expui/nodes/folder",
+  text: "platform/icons/src/expui/fileTypes/text",
+  archive: "platform/icons/src/expui/fileTypes/archive",
+  image: "platform/icons/src/expui/fileTypes/image",
+  java: "platform/icons/src/expui/fileTypes/java",
+  javaClass: "platform/icons/src/expui/fileTypes/javaClass",
+  c: "platform/icons/src/expui/fileTypes/c",
+  cpp: "platform/icons/src/expui/fileTypes/cpp",
+  csharp: "platform/icons/src/expui/fileTypes/Csharp",
+  css: "platform/icons/src/expui/fileTypes/css",
+  dockerfile: "platform/icons/src/expui/fileTypes/docker",
+  gitignore: "platform/icons/src/expui/fileTypes/gitignore",
+  editorconfig: "platform/icons/src/expui/fileTypes/editorConfig",
+  html: "platform/icons/src/expui/fileTypes/html",
+  xhtml: "platform/icons/src/expui/fileTypes/xhtml",
+  javascript: "platform/icons/src/expui/fileTypes/javaScript",
+  typescript: "platform/icons/src/expui/fileTypes/typeScript",
+  json: "platform/icons/src/expui/fileTypes/json",
+  markdown: "platform/icons/src/expui/fileTypes/markdown",
+  properties: "platform/icons/src/expui/fileTypes/properties",
+  shellscript: "platform/icons/src/expui/fileTypes/text", // ShFileType: AllIcons.Nodes.Console
+  sql: "platform/icons/src/expui/fileTypes/sql",
+  swift: "platform/icons/src/expui/fileTypes/swiftLang",
+  toml: "platform/icons/src/expui/fileTypes/toml",
+  xml: "platform/icons/src/expui/fileTypes/xml",
+  yaml: "platform/icons/src/expui/fileTypes/yaml",
+  diff: "platform/icons/src/expui/fileTypes/patch",
+  bat: "platform/icons/src/expui/fileTypes/microsoftWindows",
+  groovy: "platform/icons/src/expui/fileTypes/groovy",
+  perl: "platform/icons/src/expui/fileTypes/perl",
+  restructuredtext: "platform/icons/src/expui/fileTypes/rst",
+  go: "platform/icons/src/language/go",
+  rust: "platform/icons/src/language/rust",
+  ruby: "platform/icons/src/language/ruby",
+  php: "platform/icons/src/expui/language/php",
+  kotlin: "plugins/kotlin/base/resources/resources/org/jetbrains/kotlin/idea/icons/expui/kotlin",
+  python: "python/python-parser/resources/icons/com/jetbrains/python/parser/expui/python",
 };
-const fileNames = new Map();
-const fileExtensions = new Map();
-const folderNames = new Map();
-for (const icon of fileIcons.icons) {
-  if (icon.enabledFor) continue;
-  for (const name of icon.fileNames ?? []) insert(fileNames, name, icon.name);
-  for (const ext of icon.fileExtensions ?? []) insert(fileExtensions, ext, icon.name);
-}
-for (const icon of folderTheme.icons) {
-  if (icon.enabledFor) continue;
-  for (const name of icon.folderNames ?? []) insert(folderNames, name, icon.name);
+
+const names = new Map();
+const namesInsensitive = new Map();
+const extensions = new Map();
+const patterns = new Map();
+const aliases = { javascriptreact: "javascript", typescriptreact: "typescript", jsonc: "json", jsonl: "json", "c++": "cpp" };
+const bundles = ["bat", "cpp", "csharp", "css", "diff", "docker", "go", "groovy", "html", "java", "javascript", "json", "kotlin", "markdown-basics", "perl", "php", "python", "restructuredtext", "ruby", "rust", "shellscript", "sql", "swift", "typescript-basics", "xml", "yaml"];
+for (const bundle of bundles) {
+  const data = JSON.parse(await source(`plugins/textmate/lib/bundles/${bundle}/package.json`));
+  for (const language of data.contributes.languages ?? []) {
+    const icon = aliases[language.id] ?? language.id;
+    if (!icons[icon]) continue;
+    for (const ext of language.extensions ?? []) extensions.set(ext.slice(1).toLowerCase(), icon);
+    // TextMateServiceImpl normalizes bundle names to lowercase before lookup.
+    for (const name of language.filenames ?? []) namesInsensitive.set(name.toLowerCase(), icon);
+    // Path-qualified grammar associations need more than a directory entry's name.
+    for (const pattern of language.filenamePatterns ?? []) {
+      if (!pattern.includes("/")) patterns.set(pattern, icon);
+    }
+  }
 }
 
-rmSync(assetsDir, { recursive: true, force: true });
+// Import native associations rather than maintaining another copy of their names.
+const registrations = [
+  ["platform/platform-impl/resources/intellij.platform.ide.impl.xml", { ARCHIVE: "archive", PLAIN_TEXT: "text" }],
+  ["platform/vcs-impl/resources/META-INF/VcsExtensions.xml", { PATCH: "diff" }],
+  ["json/resources/intellij.json.xml", { JSON: "json", JSON5: "json", "JSON-lines": "json" }],
+  ["xml/xml-psi-impl/resources/intellij.xml.psi.impl.xml", { HTML: "html", XHTML: "xhtml", XML: "xml", DTD: "xml" }],
+  ["python/python-parser/resources/intellij.python.parser.xml", { Python: "python", PythonStub: "python" }],
+  ["plugins/toml/core/src/main/resources/intellij.toml.core.xml", { TOML: "toml" }],
+  ["plugins/markdown/core/resources/META-INF/plugin.xml", { Markdown: "markdown" }],
+  ["plugins/sh/core/resources/intellij.sh.core.xml", { "Shell Script": "shellscript" }],
+  ["plugins/yaml/resources/intellij.yaml.xml", { YAML: "yaml" }],
+  ["plugins/properties/properties-common/resources/intellij.properties.xml", { Properties: "properties" }],
+  ["plugins/editorconfig/common/resources/intellij.editorconfig.common.xml", { EditorConfig: "editorconfig" }],
+  ["plugins/git4idea/backend/resources/intellij.vcs.git.backend.xml", { "GitIgnore file": "gitignore" }],
+];
+for (const [path, types] of registrations) {
+  const xml = await source(path);
+  for (const [, declaration] of xml.matchAll(/<fileType\s+([^>]+)>/g)) {
+    const attributes = Object.fromEntries([...declaration.matchAll(/(\w+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
+    const icon = types[attributes.name];
+    if (!icon) continue;
+    for (const [attribute, table, insensitive] of [
+      ["extensions", extensions, true], ["fileNames", names, false],
+      ["fileNamesCaseInsensitive", namesInsensitive, true], ["patterns", patterns, false],
+    ]) {
+      for (const value of attributes[attribute]?.split(";") ?? []) table.set(insensitive ? value.toLowerCase() : value, icon);
+    }
+  }
+}
+
+extensions.set("class", "javaClass");
+for (const ext of ["png", "bmp", "gif", "ico", "jpg", "jpeg", "tif", "tiff", "webp", "svg"]) extensions.set(ext, "image");
+// These upstream patterns need at most one '*'; fail if that assumption changes.
+for (const pattern of patterns.keys()) {
+  if (pattern.includes("?") || pattern.split("*").length !== 2) throw new Error(`Unsupported filename pattern: ${pattern}`);
+}
+
+// Finish all downloads before replacing the committed assets.
+const assets = new Map();
+for (const [icon, path] of Object.entries(icons)) {
+  const light = await source(`${path}.svg`);
+  const dark = await source(`${path}_dark.svg`, true);
+  assets.set(icon, light);
+  assets.set(`${icon}_dark`, dark ?? light);
+}
 mkdirSync(assetsDir, { recursive: true });
-// The theme draws for VS Code's brighter chrome and glares on Condr's dark panels; this
-// is the theme's own "saturation" setting, applied the way its build applies it: a
-// saturate filter on the root element (src/core/generator/iconSaturation.ts). Opacity is
-// applied at draw time instead, since it depends on the theme mode.
-const SATURATION = 0.75;
-const desaturate = (svg) =>
-  svg
-    .replace(/^(\s*<svg)(?![^>]*\sfilter=)/, `$1 filter="url(#saturation)"`)
-    .replace(/<\/svg>\s*$/, `<filter id="saturation"><feColorMatrix type="saturate" values="${SATURATION}"/></filter></svg>\n`);
-
-const icons = [...used].sort();
-for (const icon of icons.filter((icon) => available.has(icon))) {
-  const svg = readFileSync(join(source, "icons", `${icon}.svg`), "utf8");
-  writeFileSync(join(assetsDir, `${icon}.svg`), desaturate(svg));
+for (const name of readdirSync(assetsDir)) {
+  if (name.endsWith(".svg")) rmSync(join(assetsDir, name));
 }
+for (const [icon, svg] of assets) writeFileSync(join(assetsDir, `${icon}.svg`), svg);
 
-// The default file and folder icons are not in the repository's icons directory: the
-// extension draws them at build time from these paths (src/core/generator/fileGenerator.ts
-// and folderGenerator.ts) in its default blue-grey, and so does this script.
-const defaultColor = "#90a4ae";
-const defaultPaths = {
-  file: "m8.668 6h3.6641l-3.6641-3.668v3.668m-4.668-4.668h5.332l4 4v8c0 0.73828-0.59375 1.3359-1.332 1.3359h-8c-0.73828 0-1.332-0.59766-1.332-1.3359v-10.664c0-0.74219 0.59375-1.3359 1.332-1.3359m3.332 1.3359h-3.332v10.664h8v-6h-4.668z",
-  folder: "m6.922 3.768-.644-.536A1 1 0 0 0 5.638 3H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.562a1 1 0 0 1-.64-.232",
-};
-for (const [name, path] of Object.entries(defaultPaths)) {
-  if (available.has(name)) continue;
-  writeFileSync(
-    join(assetsDir, `${name}.svg`),
-    desaturate(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="${defaultColor}" d="${path}"/></svg>\n`),
-  );
-  if (!icons.includes(name)) icons.push(name);
-}
-icons.sort();
+const table = (name, entries) => `pub(super) static ${name}: &[(&str, &str)] = &[\n${entries.map(([key, icon]) => `    (${JSON.stringify(key)}, ${JSON.stringify(icon)}),`).join("\n")}\n];\n`;
+const sorted = (map) => [...map].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+const rust = `// Generated by script/generate-file-icons.mjs from JetBrains/intellij-community
+// ${revision}; do not edit by hand.
+// Upstream Apache-2.0 and MIT notices: assets/icons/NOTICE-FILE-ICONS.
 
-const commit = execSync("git rev-parse --short HEAD", { cwd: source }).toString().trim();
-const version = JSON.parse(readFileSync(join(source, "package.json"), "utf8")).version;
-const table = (name, map) =>
-  `pub(super) static ${name}: &[(&str, &str)] = &[\n${[...map]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, icon]) => `    (${JSON.stringify(key)}, ${JSON.stringify(icon)}),`)
-    .join("\n")}\n];\n`;
-const rust = `// Generated by script/generate-file-icons.mjs from material-icon-theme ${version}
-// (${commit}); do not edit by hand. Keys are lowercase and sorted for binary search.
-
-${table("FILE_NAMES", fileNames)}
-${table("FILE_EXTENSIONS", fileExtensions)}
-${table("FOLDER_NAMES", folderNames)}
+${table("FILE_NAMES", sorted(names))}
+${table("FILE_NAMES_INSENSITIVE", sorted(namesInsensitive))}
+${table("FILE_EXTENSIONS", sorted(extensions))}
+${table("FILE_PATTERNS", [...patterns].sort(([a], [b]) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0)))}
 pub(super) static ICONS: &[(&str, &[u8])] = &[
-${icons
-  .map((icon) => `    (${JSON.stringify(icon)}, include_bytes!("../../../assets/icons/material/${icon}.svg")),`)
-  .join("\n")}
+${sorted(assets).map(([icon]) => `    (${JSON.stringify(icon)}, include_bytes!("../../../assets/icons/jetbrains/${icon}.svg")),`).join("\n")}
 ];
 `;
-mkdirSync(dirname(generated), { recursive: true });
 writeFileSync(generated, rust);
-console.log(
-  `${icons.length} icons, ${fileNames.size} file names, ${fileExtensions.size} extensions, ${folderNames.size} folder names (material-icon-theme ${version} ${commit})`,
-);
+execFileSync("rustfmt", ["--edition", "2024", generated]);
+console.log(`${assets.size} SVGs, ${names.size + namesInsensitive.size} names, ${extensions.size} extensions, ${patterns.size} patterns (${revision})`);

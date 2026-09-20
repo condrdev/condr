@@ -342,6 +342,59 @@ Mario Zechner), assets/icon.svg:
   omp.svg          Oh My Pi; the plug's two dark prongs and the two accent dots
                    are dropped, which a single flat colour cannot show
 
+File and folder icons:
+
+The file and folder SVGs under jetbrains/ are copied byte-for-byte from
+JetBrains/intellij-community, preferring its New UI (expui) resources:
+https://github.com/JetBrains/intellij-community
+Revision: 50461b71767a52e286026538af67b05552d75f6e
+
+Source paths and the imported filename registrations are recorded in
+script/generate-file-icons.mjs. Run it with Node.js to regenerate the assets and
+crates/condr-gui/src/app/file_icons/generated.rs. A missing dark variant uses
+an unchanged copy of the light SVG. No colours, paths or opacity are altered.
+
+The icons and native file-type registrations are licensed under Apache-2.0.
+The complete Apache License 2.0 is in the repository's LICENSE and the bundled
+Settings > Licenses text. Original copyright notices in the SVGs are retained.
+Upstream NOTICE:
+
+This software includes code from IntelliJ IDEA
+Copyright (C) JetBrains s.r.o.
+https://www.jetbrains.com/idea/
+
+The tables adapt filename associations from native file-type declarations and
+JetBrains' bundled language definitions. They do not run IDE project import,
+PSI/content detection or plugin-specific icon providers. Unmarked directories
+use JetBrains' folder icon; names and Git ignore status do not establish source,
+test or excluded roots. Language/tool marks identify file types, not Condr's brand.
+
+Filename metadata from the bundled TextMate definitions, except Kotlin
+(Apache-2.0), originates from Visual Studio Code (MIT):
+https://github.com/microsoft/vscode/tree/main/extensions
+
+MIT License
+
+Copyright (c) 2015 - present Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## Rust crates
 
 ## Overview of licenses

@@ -22,7 +22,7 @@ pub(crate) fn window_options() -> gpui_kit::WindowOptions {
 /// Condr's own icons: status glyphs, the marks of the agent CLIs, kept for every agent
 /// Condr may come to name (shared with the website from the repository's assets/agents/,
 /// see its NOTICE), then the marks of the editors "Open in" launches
-/// (assets/icons/NOTICE-EDITOR-ICONS). The file-type icons under `icons/material/` are
+/// (assets/icons/NOTICE-EDITOR-ICONS). The file-type icons under `icons/jetbrains/` are
 /// served from `app::file_icons` instead (assets/icons/NOTICE-FILE-ICONS).
 const CONDR_ICON_PATHS: [&str; 28] = [
     "icons/circle.svg",
