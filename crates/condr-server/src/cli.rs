@@ -29,7 +29,7 @@ pub(crate) use pane::{PaneCommand, run_pane};
 pub(crate) use workspace::{TabCommand, WorkspaceCommand, run_tab, run_workspace};
 
 /// What stderr gets: `{"error":{"code":…,"message":…}}`.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct CliError {
     code: String,
     message: String,

@@ -150,6 +150,25 @@ pub(super) fn caller_workspace(session: &Session) -> Option<WorkspaceId> {
         .map(Workspace::id)
 }
 
+/// Resolve `workspace create --cwd` into the root the Server is asked to open.
+///
+/// A Device's paths belong to that machine, so completing one here would mangle it: on
+/// Windows `std::path::absolute` turns the POSIX root `/data/ws` into `C:\data\ws`, and a
+/// relative path would be joined to this process's directory, which the Device does not
+/// share. A remote root is therefore passed through untouched and the Server, the only
+/// side that knows the rules, checks that it is absolute.
+fn workspace_root(cwd: Option<PathBuf>, device: Option<&str>) -> Result<PathBuf, CliError> {
+    match cwd {
+        Some(cwd) if device.is_some() => Ok(cwd),
+        Some(cwd) => Ok(std::path::absolute(cwd)?),
+        None if device.is_some() => Err(CliError::new(
+            "cwd_required",
+            "--cwd is required with --device: the current directory is a path on this machine, not on the Device",
+        )),
+        None => Ok(std::path::absolute(std::env::current_dir()?)?),
+    }
+}
+
 pub(crate) fn run_workspace(device: Option<&str>, command: WorkspaceCommand) -> i32 {
     run(device, |client| workspace(client, device, command))
 }
@@ -187,10 +206,7 @@ fn workspace(
             Ok(json!({ "workspaces": workspaces, "unreachable": unreachable }))
         }
         WorkspaceCommand::Create { cwd, label, focus } => {
-            let root_directory = std::path::absolute(match cwd {
-                Some(cwd) => cwd,
-                None => std::env::current_dir()?,
-            })?;
+            let root_directory = workspace_root(cwd, device)?;
             let LayoutResult::WorkspaceCreated {
                 workspace_id,
                 tab_id,
@@ -376,5 +392,34 @@ fn tab(client: &mut ClientConnection, command: TabCommand) -> Result<Value, CliE
             )?;
             Ok(json!({ "ok": true }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_devices_root_is_passed_through_and_a_local_one_is_completed() {
+        // The Device's own separator and root survive, whatever this machine uses.
+        let remote = PathBuf::from("/data/workspace/condr");
+        assert_eq!(
+            workspace_root(Some(remote.clone()), Some("jpdev")).unwrap(),
+            remote
+        );
+        assert_eq!(
+            workspace_root(Some(PathBuf::from(r"C:\ws")), Some("jpdev")).unwrap(),
+            PathBuf::from(r"C:\ws")
+        );
+
+        let local = workspace_root(Some(PathBuf::from("child")), None).unwrap();
+        assert!(local.is_absolute());
+        assert_eq!(local, std::env::current_dir().unwrap().join("child"));
+
+        assert!(workspace_root(None, None).unwrap().is_absolute());
+        assert_eq!(
+            workspace_root(None, Some("jpdev")).unwrap_err().code,
+            "cwd_required"
+        );
     }
 }
