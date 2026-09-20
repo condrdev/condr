@@ -107,5 +107,7 @@ begin
   StringChangeEx(UserPath, InstallPath + ';', '', True);
   if CompareText(UserPath, InstallPath) = 0 then
     UserPath := '';
-  RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', UserPath);
+  // Path is REG_EXPAND_SZ; RegWriteStringValue would downgrade it to REG_SZ and
+  // stop %USERPROFILE%-style entries (rustup, for one) from expanding.
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', UserPath);
 end;
