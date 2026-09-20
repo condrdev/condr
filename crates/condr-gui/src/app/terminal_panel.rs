@@ -314,7 +314,7 @@ impl Render for TerminalPanel {
             .xsmall()
             .ghost()
             .tab_stop(false)
-            .tooltip(zoom_label)
+            .tooltip_with_action(zoom_label, &ToggleZoom, Some(SHORTCUT_CONTEXT))
             .accessibility_label(zoom_label)
             .debug_selector(move || format!("terminal-pane-zoom-{}", pane_id.as_u64()))
             .disabled(!controlling)

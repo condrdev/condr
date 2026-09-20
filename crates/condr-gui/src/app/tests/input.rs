@@ -27,6 +27,12 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
                 .as_any()
                 .is::<ToggleZoom>()
         );
+        assert!(action("cmd-b").unwrap().as_any().is::<ToggleSidebar>());
+        assert!(action("cmd-alt-b").unwrap().as_any().is::<ToggleChanges>());
+        assert!(
+            action("ctrl-shift-b").is_none(),
+            "Ctrl+Shift+B reaches the PTY"
+        );
         assert!(action("alt-left").is_none(), "Option+Left moves by word");
         assert!(action("alt-shift-=").is_none(), "Option+Shift+= types ±");
         assert!(
@@ -47,8 +53,28 @@ fn terminal_shortcut_fallback_maps_only_fixed_chords() {
                 .as_any()
                 .is::<ToggleZoom>()
         );
+        assert!(
+            action("ctrl-shift-b")
+                .unwrap()
+                .as_any()
+                .is::<ToggleSidebar>()
+        );
+        assert!(action("ctrl-alt-b").unwrap().as_any().is::<ToggleChanges>());
+        assert!(action("ctrl-b").is_none(), "Ctrl+B is the tmux prefix");
         assert!(action("cmd-t").is_none());
     }
+    assert!(
+        action("secondary-shift-up")
+            .unwrap()
+            .as_any()
+            .is::<PreviousWorkspace>()
+    );
+    assert!(
+        action("secondary-shift-down")
+            .unwrap()
+            .as_any()
+            .is::<NextWorkspace>()
+    );
     assert!(action("alt-enter").is_none());
     // Settings must open even while a terminal owns the keystroke, on the platform's
     // own chord: Cmd+, on macOS, Ctrl+, elsewhere.

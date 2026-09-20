@@ -452,6 +452,47 @@ impl Condr {
         self.activate_tab_on(key, tabs[target_ix].id(), window, cx);
     }
 
+    /// Walks every Server's Workspaces in sidebar order, wrapping at both ends; a
+    /// Server boundary is just another step. With nothing presented, Down starts at the
+    /// first Workspace and Up at the last.
+    pub(super) fn cycle_workspace(
+        &mut self,
+        step: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sessions = self.restored_sessions();
+        let all: Vec<(ConnectionKey, WorkspaceId)> = self
+            .connections
+            .iter()
+            .filter_map(|connection| sessions.get(&connection.key).map(|s| (connection.key, s)))
+            .flat_map(|(key, session)| {
+                session
+                    .workspaces()
+                    .iter()
+                    .map(move |workspace| (key, workspace.id()))
+            })
+            .collect();
+        if all.is_empty() {
+            return;
+        }
+        let current = self
+            .presented()
+            .map(|(key, _, workspace_id, _)| (key, workspace_id));
+        let target_ix = match current.and_then(|current| all.iter().position(|w| *w == current)) {
+            Some(ix) => (ix as isize + step).rem_euclid(all.len() as isize) as usize,
+            None if step > 0 => 0,
+            None => all.len() - 1,
+        };
+        let (key, workspace_id) = all[target_ix];
+        self.select_workspace(key, workspace_id, window, cx);
+    }
+
+    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
+    }
+
     pub(super) fn split(&mut self, direction: SplitDirection) {
         if let Some(pane_id) = self.focused_pane() {
             self.send_layout(LayoutCommand::SplitPane {

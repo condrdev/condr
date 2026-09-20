@@ -10,6 +10,7 @@ use shortcuts::shortcuts_page;
 
 pub(super) use appearance::*;
 pub(super) use server::*;
+pub(super) use shortcuts::SHORTCUT_CONTEXT;
 pub(super) use text_field::*;
 
 // Sized in rems so the window zooms with the base font, resolved against the main

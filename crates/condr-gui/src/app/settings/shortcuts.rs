@@ -6,7 +6,21 @@ pub(super) type Shortcut = (&'static str, &'static dyn Action);
 /// The fixed shortcuts, grouped as the page shows them. The keys themselves are read
 /// from the keymap at render time, so this list can never disagree with `bind_keys`.
 pub(in crate::app) const SHORTCUTS: &[(&str, &[Shortcut])] = &[
-    ("Application", &[("Open Settings", &OpenSettings)]),
+    (
+        "Application",
+        &[
+            ("Open Settings", &OpenSettings),
+            ("Toggle sidebar", &ToggleSidebar),
+            ("Toggle Changes & Files", &ToggleChanges),
+        ],
+    ),
+    (
+        "Workspaces",
+        &[
+            ("Next workspace", &NextWorkspace),
+            ("Previous workspace", &PreviousWorkspace),
+        ],
+    ),
     (
         "Tabs",
         &[

@@ -54,6 +54,9 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("secondary-,", OpenSettings, Some("Condr")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
+        // Workspaces stack vertically in the sidebar, so Up/Down walk them.
+        KeyBinding::new("secondary-shift-up", PreviousWorkspace, Some("Condr")),
+        KeyBinding::new("secondary-shift-down", NextWorkspace, Some("Condr")),
     ];
     let tab_modifier = if cfg!(target_os = "macos") {
         "cmd"
@@ -84,6 +87,9 @@ fn fixed_bindings() -> Vec<KeyBinding> {
             KeyBinding::new("cmd-ctrl-up", ResizeUp, Some("Condr")),
             KeyBinding::new("cmd-ctrl-down", ResizeDown, Some("Condr")),
             KeyBinding::new("cmd-shift-enter", ToggleZoom, Some("Condr")),
+            // VS Code's primary / secondary sidebar chords.
+            KeyBinding::new("cmd-b", ToggleSidebar, Some("Condr")),
+            KeyBinding::new("cmd-alt-b", ToggleChanges, Some("Condr")),
             // The system chords every macOS app answers; the app menu shows them too.
             KeyBinding::new("cmd-q", QuitApp, Some("Condr")),
             KeyBinding::new("cmd-h", HideApp, Some("Condr")),
@@ -105,6 +111,9 @@ fn fixed_bindings() -> Vec<KeyBinding> {
             KeyBinding::new("alt-shift-up", ResizeUp, Some("Condr")),
             KeyBinding::new("alt-shift-down", ResizeDown, Some("Condr")),
             KeyBinding::new("alt-shift-enter", ToggleZoom, Some("Condr")),
+            // Ctrl+B is the tmux prefix and readline's backward-char, so Shift joins it.
+            KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("Condr")),
+            KeyBinding::new("ctrl-alt-b", ToggleChanges, Some("Condr")),
         ]);
     }
     bindings

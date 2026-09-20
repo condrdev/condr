@@ -184,7 +184,11 @@ impl Condr {
                         .max_w(rems(8.))
                         .selected(tab_id == active_tab)
                         .label(tab_label.clone())
-                        .tooltip(tab_label)
+                        .tooltip_with_action(
+                            tab_label,
+                            &ActivateTab { index: tab_index },
+                            Some(SHORTCUT_CONTEXT),
+                        )
                         .disabled(!can_mutate)
                         .on_click(move |_, window, cx| {
                             let _ = activate_owner.update(cx, |this, cx| {
@@ -290,7 +294,7 @@ impl Condr {
                     .ghost()
                     .small()
                     .icon(IconName::Plus)
-                    .tooltip("New Tab")
+                    .tooltip_with_action("New Tab", &NewTab, Some(SHORTCUT_CONTEXT))
                     .disabled(!can_mutate)
                     // Like the Tab rows: inside the title bar an unclaimed press starts a
                     // window move on Windows, and the move swallows the click.
@@ -575,16 +579,18 @@ fn workspace_title_bar(
                                 .ghost()
                                 .small()
                                 .icon(Icon::new(toggle_icon))
-                                .tooltip(toggle_label)
+                                .tooltip_with_action(
+                                    toggle_label,
+                                    &ToggleSidebar,
+                                    Some(SHORTCUT_CONTEXT),
+                                )
                                 .accessibility_label(toggle_label)
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                     cx.stop_propagation();
                                 })
                                 .on_click(move |_, _, cx| {
-                                    let _ = toggle_owner.update(cx, |this, cx| {
-                                        this.sidebar_collapsed = !this.sidebar_collapsed;
-                                        cx.notify();
-                                    });
+                                    let _ =
+                                        toggle_owner.update(cx, |this, cx| this.toggle_sidebar(cx));
                                 }),
                         ),
                 )
@@ -623,10 +629,11 @@ impl Render for Condr {
             open_in,
             body,
         } = self.render_workspace(cx);
-        let has_workspace = self.presents_a_workspace();
+        let has_workspace = self.presented_workspace().is_some();
         let changes_toggle = has_workspace.then(|| self.render_changes_toggle(cx));
-        let changes_column =
-            (self.changes_open && has_workspace).then(|| self.render_right_sidebar(cx));
+        let changes_column = self
+            .changes_sidebar_open()
+            .then(|| self.render_right_sidebar(cx));
         let workspace = div()
             .size_full()
             .on_prepaint(move |bounds, _, cx| {
@@ -673,6 +680,10 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_swap_up))
             .on_action(cx.listener(Self::action_swap_down))
             .on_action(cx.listener(Self::action_toggle_zoom))
+            .on_action(cx.listener(Self::action_toggle_sidebar))
+            .on_action(cx.listener(Self::action_toggle_changes))
+            .on_action(cx.listener(Self::action_next_workspace))
+            .on_action(cx.listener(Self::action_previous_workspace))
             .size_full()
             .flex()
             .flex_col()

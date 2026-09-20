@@ -230,22 +230,30 @@ pub(super) enum DiffContent {
 }
 
 impl Condr {
+    /// Each Workspace keeps its own right sidebar: opening it here leaves the others
+    /// closed, and coming back finds it the way it was left.
     pub(super) fn toggle_changes_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.changes_open = !self.changes_open;
-        self.save_changes_sidebar(cx);
+        let Some(workspace) = self.presented_workspace() else {
+            return;
+        };
+        if !self.changes_open.remove(&workspace) {
+            self.changes_open.insert(workspace);
+        }
         cx.notify();
     }
 
-    /// Whether some Workspace is presented for the sidebar to review. Without one the
-    /// column stays hidden and its toggle disabled; the preference itself is kept, so
-    /// opening a Workspace brings the sidebar back the way the user left it.
-    pub(super) fn presents_a_workspace(&self) -> bool {
-        self.active_connection().is_some_and(|connection| {
-            Session::restore(connection.snapshot.clone()).is_ok_and(|session| {
-                self.presented_workspace_id(connection.key, &session)
-                    .is_some()
-            })
-        })
+    pub(super) fn changes_sidebar_open(&self) -> bool {
+        self.presented_workspace()
+            .is_some_and(|workspace| self.changes_open.contains(&workspace))
+    }
+
+    /// The Workspace presented for the sidebar to review. Without one the column stays
+    /// hidden and its toggle disabled.
+    pub(super) fn presented_workspace(&self) -> Option<(ConnectionKey, WorkspaceId)> {
+        let connection = self.active_connection()?;
+        let session = Session::restore(connection.snapshot.clone()).ok()?;
+        let workspace_id = self.presented_workspace_id(connection.key, &session)?;
+        Some((connection.key, workspace_id))
     }
 
     fn toggle_changes_section(&mut self, section: ChangesSection, cx: &mut Context<Self>) {
@@ -277,12 +285,12 @@ impl Condr {
     /// has anything to show, so the welcome page renders none.
     pub(super) fn render_changes_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
-        let label = if self.changes_open {
+        let label = if self.changes_sidebar_open() {
             "Hide Changes & Files"
         } else {
             "Show Changes & Files"
         };
-        let icon = if self.changes_open {
+        let icon = if self.changes_sidebar_open() {
             IconName::PanelRightClose
         } else {
             IconName::PanelRightOpen
@@ -302,7 +310,7 @@ impl Condr {
                     .ghost()
                     .small()
                     .icon(Icon::new(icon))
-                    .tooltip(label)
+                    .tooltip_with_action(label, &ToggleChanges, Some(SHORTCUT_CONTEXT))
                     .accessibility_label(label)
                     .on_click(move |_, _, cx| {
                         let _ = owner.update(cx, |this, cx| this.toggle_changes_sidebar(cx));

@@ -84,8 +84,8 @@ use ime::TerminalComposition;
 use relative_path::{RelativePath, RelativePathBuf};
 use server_connection::*;
 use settings::{
-    Appearance, SettingsWindow, TerminalFont, apply_appearance, apply_terminal_color_scheme,
-    apply_terminal_font, sync_theme_with_system,
+    Appearance, SHORTCUT_CONTEXT, SettingsWindow, TerminalFont, apply_appearance,
+    apply_terminal_color_scheme, apply_terminal_font, sync_theme_with_system,
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
@@ -149,6 +149,10 @@ actions!(
         SwapUp,
         SwapDown,
         ToggleZoom,
+        ToggleSidebar,
+        ToggleChanges,
+        NextWorkspace,
+        PreviousWorkspace,
         TerminalTab,
         TerminalBackTab,
         QuitApp,
@@ -270,8 +274,9 @@ pub(crate) struct Condr {
     /// only dragging the handle does.
     sidebar_width: Pixels,
     sidebar_collapsed: bool,
-    /// The Changes sidebar on the right (ADR 0017): shown, and how wide.
-    changes_open: bool,
+    /// The Changes sidebar on the right (ADR 0017): the Workspaces showing it, and how
+    /// wide. Per Workspace like `sidebar_workspace_open`, and like it not persisted.
+    changes_open: HashSet<(ConnectionKey, WorkspaceId)>,
     changes_width: Pixels,
     collapsed_changes_sections: HashSet<ChangesSection>,
     /// Directories folded shut in the Changes tree, by connection, Workspace and
@@ -353,7 +358,6 @@ impl Condr {
             fps_monitor,
             notifications,
             keep_awake,
-            changes_sidebar,
             terminal_font,
             terminal_color_scheme,
             default_editor,
@@ -432,7 +436,7 @@ impl Condr {
             _keep_awake: None,
             sidebar_width: INITIAL_SIDEBAR_WIDTH,
             sidebar_collapsed: false,
-            changes_open: changes_sidebar,
+            changes_open: HashSet::new(),
             changes_width: INITIAL_CHANGES_WIDTH,
             collapsed_changes_sections: HashSet::new(),
             collapsed_change_dirs: HashSet::new(),

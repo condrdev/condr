@@ -612,7 +612,7 @@ impl Condr {
                             .ghost()
                             .small()
                             .icon(IconName::Settings)
-                            .tooltip("Settings")
+                            .tooltip_with_action("Settings", &OpenSettings, Some(SHORTCUT_CONTEXT))
                             .accessibility_label("Settings")
                             .on_click(move |_, window, cx| {
                                 let _ = settings_owner
