@@ -47,7 +47,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 调查日期 2026-09-17，来源见文末。
 
 - **赛道拥挤，基础功能已成标配。** 公开的 agent orchestrator 列表已超过百个；"并行会话、worktree 隔离、审查改动"是入场券，Condr 三者都有基本形态，靠它们不再能区分自己。
-- **厂商自己在做远程和移动端。** Claude Code 的 Remote Control（网页/iOS/Android）和 Codex 的 app-server + relay 都在解决"离开电脑继续控制自己的 Agent"。Condr 近期不在这条线上和厂商竞争；它的远程价值在于跨 Agent、跨机器的一个窗口，现阶段 SSH/TCP 够用，Relay 和 Mobile 放到远期，Web 端不做。
+- **厂商自己在做远程和移动端。** Claude Code 的 Remote Control（网页/iOS/Android）和 Codex 的 app-server + relay 都在解决"离开电脑继续控制自己的 Agent"。Condr 近期不在这条线上和厂商竞争；它的远程价值在于跨 Agent、跨机器的一个窗口。SSH/TCP 覆盖有固定地址或已配好 SSH 的机器；两台都在 NAT 后今天没有答案，所以 Peer-to-peer 已排进近期方向（方向 8）。Mobile 仍放远期，Web 端不做。
 - **直接对手是 Herdr。** 同一设计谱系（Condr 的 Agent 检测和布局语义源自 herdr 研究），0.9.x 已有多机统一视图、每客户端独立视图、Windows 作 SSH 主机、Apache-2.0。Condr 相对它的差异是：原生 GUI 而非 TUI、Windows 一等公民、Server 自带加密配对而非只靠 SSH、Git 侧栏与 Diff。这些差异要守住，不能被"功能数量"带偏。
 - **Agent CLI 的 hooks 越来越能说清"在等什么"。** Claude Code 近期给更多 hook 事件加了 `session_id`，`PermissionRequest` 可 allow/deny，`Notification(permission_prompt)` 带工具名；Pi/OMP 有 `ui_prompt_*`。Condr 已经把这些映射成 `Blocked`，但丢掉了细节。跨 Agent 的"待处理清单"是 Condr 这一层能做、单个厂商不会做的事。
 - **外部审批 API 还不存在。** Claude Code 的远程审批仍是 open feature request；Codex 审批只在自己的 app-server 客户端里。Condr 先做"看见并跳转"；"替用户点批准"等厂商开放接口后再接。
@@ -112,6 +112,17 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **停在哪**：不做反向转发、不做 UDP、不自动转发所有探测到的端口（默认只列出，点了才转）、不解析进程输出里的 URL。
 
+### 8. Peer-to-peer 连接（NAT 后两台机器直连）
+
+**为什么**：TCP 要固定地址，SSH 要用户已经配好登录，两台都在 NAT 后的机器今天没有答案——这是 remote 价值里唯一被 SSH/TCP 落下的场景。它不以方向 4 的 capability 为前置：relay 只转发密文、不参与授权，Peer-to-peer 的授权模型与 TCP 完全相同（同一套 Invite / `authorized-clients` / revoke）。
+
+**做到哪**：
+
+- 已完成（ADR 0025、0026）：一台机器一把 device-key；`p2p://<id>` 作为第三种 Endpoint 与 `tcp://`、`ssh://` 并列；Server 是机器唯一的 Peer-to-peer 端点，GUI/CLI 经本地 socket 的 `Tunnel` 帧隧道出去；`[server.p2p] enabled` 与 `--p2p` 是 opt-in 的接受端；进程内配对/撤销测试通过。
+- 待做：自建 relay（`relay.condr.dev`）与 DNS/pkarr（`dns.condr.dev`）部署上线，实测国内 UDP/WebSocket 出境；Windows 上 UDP 防火墙提示与真实 NAT 打洞验收；GUI 里 Peer-to-peer 设备的重命名与接受状态展示；SECURITY.md 与网站的诚实项。
+
+**停在哪**：不用 n0 的任何基础设施，连兜底也不接；不做用户自建 relay/DNS（现阶段没有配置键）；不做 mDNS 局域网发现；relay 不落盘、无账号。
+
 ## 按摩擦记录再做
 
 这些都通过了第一问，但还没有足够的使用证据；出现两次以上真实摩擦再排：
@@ -129,14 +140,13 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | 事项 | 启动条件 | 前置 |
 | --- | --- | --- |
 | 自动更新（GUI 提示新版本 → 下载校验 → 同时替换 Client 与 Server） | 有外部用户；Client/Server 必须同版本这一点已在手动更新中造成抱怨 | 代码签名（方向 5）；`condr server install` 已能原地替换运行中的二进制（ADR 0016） |
-| Relay（rendezvous + 加密转发，不落盘终端内容） | 远程用户经常因 NAT/防火墙无法直连，且明确不愿配 SSH/Tailscale | 方向 4 的 capability 模型；Relay 只转发 opaque stream，不能绕过 Server 授权 |
 | 遥测（opt-in） | 有外部用户，且方向 1 的本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
 | Mobile Companion（done/blocked 通知、查看、少量动作） | 厂商 Remote Control 覆盖不了的跨 Agent 场景被反复提出 | 方向 4；一个不依赖 GPUI 的语义 API 适配层；Push 只作提醒，打开后重新拉取 Server 权威状态 |
 | 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | 方向 3 之后 Agent Profile 先从代码内置抽成 manifest |
 | 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | 方向 4 的 capability 扩展为多用户；审计日志 |
 | 编辑器、内置浏览器、任务看板等 IDE 化能力 | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
 
-不做的两件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Relay 和 Mobile Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它）。
+不做的两件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Peer-to-peer 和 Mobile Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它）。
 
 ## 节奏
 

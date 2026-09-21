@@ -8,11 +8,19 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015). Server is an engineering term: the interface never shows it, and presents a Server together with the machine it runs on as one Device.
 
 **Device**:
-A machine running Condr, identified by its one persistent key stored beside its `config.toml` (ADR 0025). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. Device is the interface's name for a whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. A Device reaching a Server over TCP is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no TCP pairing.
+A machine running Condr, identified by its one persistent key stored beside its `config.toml` (ADR 0025). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. Device is the interface's name for a whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. The Device key is also this machine's Peer-to-peer endpoint, so one pairing is honored over TCP and Peer-to-peer alike (ADR 0026). A Device reaching a Server over TCP or Peer-to-peer is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no pairing.
 
 **Invite**:
-A one-time secret that `condr server invite` creates for ten minutes. Pasted into Connect Remote Device together with the Server's Device key, as `tcp://<id>.<invite>@host:port`, it lets one unknown Device complete the handshake and become authorized; it is never stored by the Client.
+A one-time secret that `condr server invite` creates for ten minutes, independent of connection method. Pasted into Connect Remote Device with the Server's Device key, as `tcp://<id>.<invite>@host:port` or a `p2p://<id>.<invite>` link, it lets one unknown Device complete the handshake and become authorized over either transport; it is never stored by the Client.
 _Avoid_: Local backend, GUI runtime
+
+**Peer-to-peer**:
+A connection method (ADR 0026). Two Devices both behind NAT connect directly after Condr's Relay helps them hole-punch, and fall back to relayed ciphertext when the direct path cannot open. It needs only the other Device's id, with no port to open and no VPN to install. The address is `p2p://<id>`; authorization is the same `authorized-clients` model as TCP.
+_Avoid_: iroh, Relay (as the name of the method)
+
+**Relay**:
+A Condr-hosted service that helps Peer-to-peer connections hole-punch and forwards end-to-end-encrypted bytes when a direct path fails. It never sees terminal contents and keeps nothing on disk; its outage affects only Peer-to-peer, never TCP or SSH.
+_Avoid_: proxy, gateway
 
 **Client**:
 The GUI or CLI connecting to a Server to inspect or change its Sessions. The native GUI can present several Servers; the CLI reaches one per call, its own Pane's Server by default or a saved Device named with `--device` (ADR 0022); neither Client owns Terminal processes.

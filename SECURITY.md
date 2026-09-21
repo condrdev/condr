@@ -20,6 +20,15 @@ Anything that lets a party do more than the local user intended, for example:
 
 Bugs in the embedded agent CLIs themselves (Claude Code, Codex, OpenCode, …) belong to their own vendors.
 
+## Peer-to-peer and the Condr relay
+
+Peer-to-peer is Condr's first hosted online service, and it is optional. It runs only when a Server sets `[server.p2p] enabled`; a Device that never uses Peer-to-peer contacts nothing of ours. When it is on, be aware of what the Condr relay (`relay.condr.dev`) and DNS (`dns.condr.dev`) can and cannot see:
+
+- **The relay never sees your terminals.** Peer-to-peer traffic is end-to-end encrypted between the two Devices; the relay only helps them hole-punch and, when a direct path fails, forwards opaque encrypted bytes. It leaves the data path once a direct connection succeeds.
+- **The relay does see connection metadata.** While it is in the path it observes which Device connects to which, when, and from which IP address. It keeps nothing on disk and runs no accounts.
+- **DNS reveals which relay an enabled Server uses, not its address.** A Server with Peer-to-peer enabled publishes its relay URL under its Device id so peers can reach it; it does not publish any IP address. Anyone holding the id can learn which relay it is on.
+- **An outage affects only Peer-to-peer.** If the relay or DNS is down, Peer-to-peer connections cannot be established; TCP and SSH are unaffected.
+
 ## Supported versions
 
 Condr is pre-release. Only the latest `main` and the current development build are supported.
