@@ -54,7 +54,7 @@ use condr_core::{
     WorkspaceId,
 };
 use condr_server::{
-    ClientConnection, ConnectionCancellation, Endpoint, ServerConfig, StaticKey, TcpEndpoint,
+    ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
 };
 use connection::*;
 #[cfg(test)]
@@ -240,10 +240,10 @@ fn default_window_options(state: Option<gui_state::WindowState>, cx: &App) -> Wi
 pub(crate) struct Condr {
     client_config_path: Option<PathBuf>,
     config_save: Option<Task<()>>,
-    /// This device's static key for TCP Servers, kept beside `config.toml`. `None` when
+    /// This machine's Device key for TCP Servers, kept beside `config.toml`. `None` when
     /// it could not be loaded or created; TCP Servers are then unavailable rather than
     /// reached with a key an attacker could predict.
-    device_key: Option<StaticKey>,
+    device_key: Option<DeviceKey>,
     /// A failed load must never turn the missing saved list into an empty writeback.
     servers_error: Option<String>,
     connections: Vec<ServerConnection>,

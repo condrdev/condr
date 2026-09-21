@@ -12,7 +12,7 @@ pub struct ServerConfig {
     /// The key the TCP listener answers with; `None` loads the host identity at bind time.
     pub(super) identity: Option<Arc<ServerIdentity>>,
     /// The device key `ephemeral_tcp` authorized, so tests can connect over TCP.
-    pub(super) test_device: Option<StaticKey>,
+    pub(super) test_device: Option<DeviceKey>,
 }
 
 impl ServerConfig {
@@ -125,7 +125,7 @@ impl ServerConfig {
     /// An ephemeral Server that also listens on `address` with a fresh identity accepting
     /// exactly one fresh device key. [`BoundServer::endpoint`] then connects as that device.
     pub fn ephemeral_tcp(address: std::net::SocketAddr) -> io::Result<Self> {
-        let client_key = StaticKey::generate()?;
+        let client_key = DeviceKey::generate()?;
         let identity = ServerIdentity::ephemeral()?.with_authorized(client_key.public());
         // The low 64 bits carry the clock; the full epoch would push the path past the
         // 104-byte `sun_path` limit under the macOS temporary directory.

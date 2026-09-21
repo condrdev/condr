@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::tests::tcp;
-use condr_server::StaticKey;
+use condr_server::DeviceKey;
 
 #[test]
 fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
@@ -799,7 +799,7 @@ fn added_server_survives_gui_restart() {
             window,
             &format!(
                 "tcp://{}@127.0.0.1:4242",
-                StaticKey::from_private([7; 32]).public()
+                DeviceKey::from_seed([7; 32]).public()
             ),
         );
         assert!(window.read(|app| {

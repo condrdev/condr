@@ -54,7 +54,7 @@ fn addresses_round_trip_and_reject_options_commands_and_invalid_paths() {
     ] {
         assert!(SshEndpoint::parse(address).is_err(), "{address}");
     }
-    let key = condr_server::StaticKey::from_private([7; 32]);
+    let key = condr_server::DeviceKey::from_seed([7; 32]);
     let tcp = format!("tcp://{}@localhost:4242", key.public());
     assert!(condr_server::Endpoint::parse(&tcp, None).is_err());
     assert!(matches!(

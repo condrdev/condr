@@ -52,7 +52,7 @@ fn lightweight_queries_and_admin_never_capture_terminal_views() {
     probe_server(&endpoint).unwrap();
     assert!(connected_devices(&endpoint).unwrap().is_empty());
     assert_eq!(
-        revoke_devices(&endpoint, &StaticKey::generate().unwrap().public()).unwrap(),
+        revoke_devices(&endpoint, &DeviceKey::generate().unwrap().public()).unwrap(),
         0
     );
     let inspector = ClientConnection::connect_overview(&endpoint, "second inspect").unwrap();
@@ -559,7 +559,7 @@ fn server_settings_are_stored_published_and_reloaded() {
 
 #[test]
 fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
-    use crate::noise::{self, ServerIdentity, StaticKey};
+    use crate::noise::{self, DeviceKey, ServerIdentity};
 
     let directory = std::env::temp_dir().join(format!(
         "condr-server-revoke-{}-{}",
@@ -581,7 +581,7 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     let thread = thread::spawn(move || server.run());
 
     // A new device pairs with the invite, then reconnects on its key alone.
-    let device_key = StaticKey::generate().unwrap();
+    let device_key = DeviceKey::generate().unwrap();
     let device = |invite| {
         let mut tcp = TcpEndpoint::at(address, server_key, device_key.clone());
         tcp.invite = invite;

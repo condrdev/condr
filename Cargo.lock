@@ -1328,6 +1328,7 @@ dependencies = [
  "relative-path",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "snow",
  "socket2",
  "tokio",

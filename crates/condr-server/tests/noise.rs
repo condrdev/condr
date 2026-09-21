@@ -1,4 +1,4 @@
-use condr_server::noise::{NoiseStream, Secret, ServerIdentity, StaticKey};
+use condr_server::noise::{DeviceKey, NoiseStream, Secret, ServerIdentity};
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -6,7 +6,7 @@ use std::thread;
 
 fn pair(
     identity: &Arc<ServerIdentity>,
-    client: &StaticKey,
+    client: &DeviceKey,
     invite: Option<&Secret>,
 ) -> (NoiseStream, thread::JoinHandle<io::Result<NoiseStream>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -21,8 +21,8 @@ fn pair(
     (client, server)
 }
 
-fn identity() -> (Arc<ServerIdentity>, StaticKey) {
-    let client = StaticKey::generate().unwrap();
+fn identity() -> (Arc<ServerIdentity>, DeviceKey) {
+    let client = DeviceKey::generate().unwrap();
     let identity = ServerIdentity::ephemeral()
         .unwrap()
         .with_authorized(client.public());
@@ -40,7 +40,7 @@ fn serve<T: Send + 'static>(
 #[test]
 fn unknown_peer_without_an_invite_is_refused_before_any_payload() {
     let (identity, _) = identity();
-    let stranger = StaticKey::generate().unwrap();
+    let stranger = DeviceKey::generate().unwrap();
     let (mut client, server) = pair(&identity, &stranger, None);
     // The handshake runs on first use, so the Server side reads on its own thread.
     let server = serve(server, |server| server.read(&mut [0; 16]).map(drop));
@@ -63,7 +63,7 @@ fn wrong_server_key_fails_the_client_handshake() {
         let mut server = NoiseStream::responder(socket, identity).unwrap();
         server.read(&mut [0; 16])
     });
-    let impostor = StaticKey::generate().unwrap();
+    let impostor = DeviceKey::generate().unwrap();
     let mut stream = NoiseStream::initiator(
         TcpStream::connect(address).unwrap(),
         &impostor.public(),

@@ -391,7 +391,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         locator.ends_with(&format!(":{}", address.port())),
         "the invite names the configured port: {locator}"
     );
-    let device_key = condr_server::StaticKey::generate().unwrap();
+    let device_key = condr_server::DeviceKey::generate().unwrap();
     let paired =
         Endpoint::tcp(condr_server::TcpEndpoint::parse(&locator, device_key.clone()).unwrap());
     drop(ClientConnection::connect(&paired, "laptop").unwrap());

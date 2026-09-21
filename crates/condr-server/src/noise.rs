@@ -1,9 +1,11 @@
 //! Authentication and encryption for TCP endpoints, modelled on WireGuard.
 //!
-//! Both sides hold a persistent X25519 static key. A connection is one
+//! Each Device holds one persistent Ed25519 key (ADR 0025); the X25519 static key Noise
+//! speaks with is derived from it. A connection is one
 //! `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s` handshake: the Client already knows the Server's
-//! public key, sends its own static key encrypted in the first message, and the Server only
-//! answers peers it recognises. An authorized peer uses the all-zero pre-shared key, as an
+//! key, sends its own static key encrypted in the first message together with the Ed25519
+//! key it derives from, and the Server only answers peers it recognises by that Ed25519 key
+//! after checking the two agree. An authorized peer uses the all-zero pre-shared key, as an
 //! unconfigured WireGuard peer does. Pairing a new device uses a one-time, short-lived invite
 //! secret as that pre-shared key instead; the Server records the device's public key once the
 //! first transport message proves the Client held the secret.
@@ -30,14 +32,19 @@ pub use identity::{
 };
 pub use stream::NoiseStream;
 
-/// An X25519 public key; its hex form is the fingerprint shown to people.
+/// A Device's Ed25519 public key; its hex form is the fingerprint shown to people, and
+/// the same 32 bytes are the Device's Peer-to-peer endpoint id (ADR 0025).
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct PublicKey([u8; 32]);
 
-/// An X25519 static key pair. Debug output never shows the private half.
+/// A Device's one key: an Ed25519 seed, from which both the Ed25519 public key and the
+/// X25519 key Noise speaks with are derived. Debug output never shows the seed.
 #[derive(Clone, Eq, PartialEq)]
-pub struct StaticKey {
-    private: [u8; 32],
+pub struct DeviceKey {
+    seed: [u8; 32],
+    /// The clamped SHA-512 prefix of the seed: Ed25519's own scalar, and the X25519
+    /// private key libsodium's `crypto_sign_ed25519_sk_to_curve25519` returns.
+    noise_private: [u8; 32],
     public: PublicKey,
 }
 
@@ -52,6 +59,22 @@ impl PublicKey {
 
     pub fn to_hex(&self) -> String {
         hex_encode(&self.0)
+    }
+
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// The X25519 public key this Ed25519 key corresponds to, which is what a Noise peer
+    /// presents; `None` when the bytes are not a valid Edwards point.
+    pub fn montgomery(&self) -> Option<[u8; 32]> {
+        curve25519_dalek::edwards::CompressedEdwardsY(self.0)
+            .decompress()
+            .map(|point| point.to_montgomery().to_bytes())
     }
 
     /// True when `prefix` is a hex prefix of this key, so people can name a key by its
@@ -73,15 +96,25 @@ impl fmt::Display for PublicKey {
     }
 }
 
-impl StaticKey {
+impl DeviceKey {
     pub fn generate() -> io::Result<Self> {
-        random().map(Self::from_private)
+        random().map(Self::from_seed)
     }
 
-    pub fn from_private(private: [u8; 32]) -> Self {
-        let public = curve25519_dalek::MontgomeryPoint::mul_base_clamped(private).to_bytes();
+    pub fn from_seed(seed: [u8; 32]) -> Self {
+        use sha2::Digest as _;
+        let hash = sha2::Sha512::digest(seed);
+        let mut noise_private = [0; 32];
+        noise_private.copy_from_slice(&hash[..32]);
+        noise_private[0] &= 248;
+        noise_private[31] &= 127;
+        noise_private[31] |= 64;
+        let public = curve25519_dalek::EdwardsPoint::mul_base_clamped(noise_private)
+            .compress()
+            .to_bytes();
         Self {
-            private,
+            seed,
+            noise_private,
             public: PublicKey(public),
         }
     }
@@ -90,27 +123,32 @@ impl StaticKey {
         self.public
     }
 
-    /// Reads the hex private key at `path`, or generates one and stores it owner-only.
+    /// The X25519 private key Noise uses; its public half is `self.public().montgomery()`.
+    pub(crate) fn noise_private(&self) -> &[u8; 32] {
+        &self.noise_private
+    }
+
+    /// Reads the hex seed at `path`, or generates one and stores it owner-only.
     /// Two processes creating the same key at once both end up with the one that won.
     pub fn load_or_create(path: &Path) -> io::Result<Self> {
         if let Some(text) = read_secret_file(path)? {
-            return hex_decode(text.trim()).map(Self::from_private);
+            return hex_decode(text.trim()).map(Self::from_seed);
         }
         let key = Self::generate()?;
-        match write_secret_file(path, &hex_encode(&key.private)) {
+        match write_secret_file(path, &hex_encode(&key.seed)) {
             Ok(()) => Ok(key),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 let text = read_secret_file(path)?.ok_or(error)?;
-                hex_decode(text.trim()).map(Self::from_private)
+                hex_decode(text.trim()).map(Self::from_seed)
             }
             Err(error) => Err(error),
         }
     }
 }
 
-impl fmt::Debug for StaticKey {
+impl fmt::Debug for DeviceKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "StaticKey({}, private redacted)", self.public)
+        write!(f, "DeviceKey({}, seed redacted)", self.public)
     }
 }
 
@@ -167,7 +205,7 @@ mod tests {
     use super::*;
     #[test]
     fn keys_and_secrets_round_trip_through_hex_and_files() {
-        let key = StaticKey::generate().unwrap();
+        let key = DeviceKey::generate().unwrap();
         assert_eq!(
             PublicKey::parse(&key.public().to_hex()).unwrap(),
             key.public()
@@ -178,9 +216,25 @@ mod tests {
 
         let path =
             std::env::temp_dir().join(format!("condr-noise-key-{}-{}", std::process::id(), now()));
-        let stored = StaticKey::load_or_create(&path).unwrap();
-        assert_eq!(StaticKey::load_or_create(&path).unwrap(), stored);
-        assert!(!format!("{stored:?}").contains(&hex_encode(&stored.private)));
+        let stored = DeviceKey::load_or_create(&path).unwrap();
+        assert_eq!(DeviceKey::load_or_create(&path).unwrap(), stored);
+        assert!(!format!("{stored:?}").contains(&hex_encode(&stored.seed)));
         let _ = fs::remove_file(path);
+    }
+
+    /// RFC 8032 test vector 1: the public key iroh will derive from the same seed, and the
+    /// X25519 key a Noise peer sees must be that key's Montgomery form.
+    #[test]
+    fn device_key_derives_the_ed25519_public_key_and_its_x25519_form() {
+        let seed =
+            hex_decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60").unwrap();
+        let key = DeviceKey::from_seed(seed);
+        assert_eq!(
+            key.public().to_hex(),
+            "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+        );
+        let noise_public =
+            curve25519_dalek::MontgomeryPoint::mul_base_clamped(*key.noise_private()).to_bytes();
+        assert_eq!(key.public().montgomery(), Some(noise_public));
     }
 }

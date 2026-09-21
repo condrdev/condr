@@ -114,7 +114,7 @@ impl EndpointStream {
         }
     }
 
-    /// The static key of a TCP peer; `None` for local connections.
+    /// The Device key of a TCP peer; `None` for local connections.
     pub fn peer_key(&self) -> Option<PublicKey> {
         match self {
             Self::Local(_) | Self::Ssh(_) => None,

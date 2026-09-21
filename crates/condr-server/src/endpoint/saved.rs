@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use super::Endpoint;
-use crate::noise::StaticKey;
+use crate::noise::DeviceKey;
 
 const CLIENT_TABLE: [&str; 1] = ["client"];
 const SERVERS_KEY: &str = "servers";
@@ -35,7 +35,7 @@ impl SavedServer {
         })
     }
 
-    pub fn endpoint(&self, device_key: Option<&StaticKey>) -> io::Result<Endpoint> {
+    pub fn endpoint(&self, device_key: Option<&DeviceKey>) -> io::Result<Endpoint> {
         Endpoint::parse(&self.address, device_key)
     }
 

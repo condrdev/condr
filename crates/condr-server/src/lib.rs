@@ -17,7 +17,7 @@ pub use endpoint::{
     ConnectionCancellation, Endpoint, EndpointStream, SavedServer, TcpEndpoint,
     default_socket_path, load_saved_servers, save_saved_servers,
 };
-pub use noise::{PublicKey, Secret, ServerIdentity, StaticKey};
+pub use noise::{DeviceKey, PublicKey, Secret, ServerIdentity};
 pub use server::{
     BoundServer, ServerConfig, ServerHandle, connected_devices, ensure_local_server, ensure_server,
     ensure_server_from, load_listen, probe_server, restart_server, restart_server_from,

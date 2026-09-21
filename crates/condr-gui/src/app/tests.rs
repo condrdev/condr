@@ -36,7 +36,7 @@ use condr_core::{
     TerminalHyperlinkBudget, TerminalMouseTracking, TerminalSize, TerminalView, TerminalViewDelta,
     TerminalViewFrame,
 };
-use condr_server::{Endpoint, StaticKey, TcpEndpoint};
+use condr_server::{DeviceKey, Endpoint, TcpEndpoint};
 use gpui_kit::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
 fn terminal_cell(text: &str) -> TerminalCell {
@@ -67,8 +67,8 @@ fn terminal_hyperlink_budgets(
 pub(super) fn tcp(address: &str) -> Endpoint {
     Endpoint::tcp(TcpEndpoint::at(
         address.parse().unwrap(),
-        StaticKey::from_private([7; 32]).public(),
-        StaticKey::from_private([9; 32]),
+        DeviceKey::from_seed([7; 32]).public(),
+        DeviceKey::from_seed([9; 32]),
     ))
 }
 

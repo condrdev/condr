@@ -30,6 +30,9 @@ enum Noise {
     Initiator {
         handshake: Box<HandshakeState>,
         server_key: PublicKey,
+        /// This Device's Ed25519 key, sent in the first message so the Server can record
+        /// it; the Server checks it is the key the static key derives from.
+        claim: PublicKey,
     },
     Responder {
         handshake: Box<HandshakeState>,
@@ -37,7 +40,7 @@ enum Noise {
     },
     Transport {
         transport: Box<TransportState>,
-        /// The peer's static key: the Server's on the Client side, the device's on the
+        /// The peer's Device key: the Server's on the Client side, the device's on the
         /// Server side.
         remote: PublicKey,
         /// Set on the Server side, so a connection knows whether its peer is the host.
@@ -51,18 +54,21 @@ enum Noise {
 }
 
 impl NoiseStream {
-    /// The Client side: `client_key` connects to the Server whose static key is
+    /// The Client side: `client_key` connects to the Server whose Device key is
     /// `server_key`, presenting `invite` when this device is not paired yet.
     pub fn initiator(
         socket: TcpStream,
         server_key: &PublicKey,
-        client_key: &StaticKey,
+        client_key: &DeviceKey,
         invite: Option<&Secret>,
     ) -> io::Result<Self> {
         let psk = invite.map_or([0; 32], |invite| invite.0);
+        let server_static = server_key
+            .montgomery()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Server key"))?;
         let handshake = builder()?
-            .local_private_key(&client_key.private)
-            .and_then(|builder| builder.remote_public_key(&server_key.0))
+            .local_private_key(client_key.noise_private())
+            .and_then(|builder| builder.remote_public_key(&server_static))
             .and_then(|builder| builder.psk(PSK_LOCATION as u8, &psk))
             .and_then(|builder| builder.build_initiator())
             .map_err(noise_error)?;
@@ -71,6 +77,7 @@ impl NoiseStream {
             Noise::Initiator {
                 handshake: Box::new(handshake),
                 server_key: *server_key,
+                claim: client_key.public(),
             },
         ))
     }
@@ -78,7 +85,7 @@ impl NoiseStream {
     /// The Server side; the handshake runs on first use, not on accept.
     pub fn responder(socket: TcpStream, identity: Arc<ServerIdentity>) -> io::Result<Self> {
         let handshake = builder()?
-            .local_private_key(&identity.key.private)
+            .local_private_key(identity.key.noise_private())
             .and_then(|builder| builder.build_responder())
             .map_err(noise_error)?;
         Ok(Self::new(
@@ -176,7 +183,7 @@ impl NoiseStream {
         self.ensure_transport()
     }
 
-    /// The peer's static key once the handshake has run.
+    /// The peer's Device key once the handshake has run.
     pub fn remote_public_key(&self) -> Option<PublicKey> {
         match &*lock(&self.noise) {
             Noise::Transport { remote, .. } => Some(*remote),
@@ -203,9 +210,10 @@ impl NoiseStream {
             Noise::Initiator {
                 mut handshake,
                 server_key,
+                claim,
             } => {
-                write_handshake(&mut self.socket, &mut handshake, &mut buffer)?;
-                if !read_handshake(&mut self.socket, &mut handshake, &mut buffer)? {
+                write_handshake(&mut self.socket, &mut handshake, &claim.0, &mut buffer)?;
+                if read_handshake(&mut self.socket, &mut handshake, &mut buffer)?.is_none() {
                     return Err(rejected(
                         "the Server closed the handshake: this device is not authorized \
                          (pair it with `condr server invite`) or the Server key differs",
@@ -225,21 +233,32 @@ impl NoiseStream {
                 mut handshake,
                 identity,
             } => {
-                if !read_handshake(&mut self.socket, &mut handshake, &mut buffer)? {
+                let Some(payload) = read_handshake(&mut self.socket, &mut handshake, &mut buffer)?
+                else {
                     return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
-                }
-                let remote = handshake
+                };
+                let remote_static = handshake
                     .get_remote_static()
                     .and_then(|key| <[u8; 32]>::try_from(key).ok())
-                    .map(PublicKey)
                     .ok_or_else(|| rejected("peer sent no static key"))?;
+                // The peer names its Ed25519 key; the static key it just proved it holds
+                // must be the one that key derives from, else it could pair a key it
+                // does not own.
+                let remote = <[u8; 32]>::try_from(payload)
+                    .map(PublicKey)
+                    .map_err(|_| rejected("peer sent no device key"))?;
+                if remote.montgomery() != Some(remote_static) {
+                    return Err(rejected(format!(
+                        "device key {remote} does not match the static key the peer used"
+                    )));
+                }
                 let Some((psk, pairing)) = identity.psk_for(&remote)? else {
                     return Err(rejected(format!("unknown device {remote}")));
                 };
                 handshake
                     .set_psk(PSK_LOCATION, &psk.0)
                     .map_err(noise_error)?;
-                write_handshake(&mut self.socket, &mut handshake, &mut buffer)?;
+                write_handshake(&mut self.socket, &mut handshake, &[], &mut buffer)?;
                 handshake
                     .into_transport_mode()
                     .map(|transport| Noise::Transport {
@@ -367,30 +386,32 @@ fn builder() -> io::Result<snow::Builder<'static>> {
 fn write_handshake(
     socket: &mut TcpStream,
     handshake: &mut HandshakeState,
+    payload: &[u8],
     buffer: &mut [u8],
 ) -> io::Result<()> {
     let length = handshake
-        .write_message(&[], &mut buffer[2..])
+        .write_message(payload, &mut buffer[2..])
         .map_err(noise_error)?;
     buffer[..2].copy_from_slice(&(length as u16).to_be_bytes());
     socket.write_all(&buffer[..2 + length])?;
     socket.flush()
 }
 
-/// False when the peer closed the connection instead of continuing the handshake.
-fn read_handshake(
+/// The message's payload, or `None` when the peer closed the connection instead of
+/// continuing the handshake.
+fn read_handshake<'b>(
     socket: &mut TcpStream,
     handshake: &mut HandshakeState,
-    buffer: &mut [u8],
-) -> io::Result<bool> {
+    buffer: &'b mut [u8],
+) -> io::Result<Option<&'b [u8]>> {
     let mut record = Vec::new();
     if !read_record(socket, &mut record)? {
-        return Ok(false);
+        return Ok(None);
     }
-    handshake
+    let length = handshake
         .read_message(&record, buffer)
         .map_err(|error| rejected(format!("handshake rejected: {error}")))?;
-    Ok(true)
+    Ok(Some(&buffer[..length]))
 }
 
 /// Reads one record into `record`; false on a clean end of stream before any byte.
@@ -422,7 +443,7 @@ mod tests {
     use std::{net::TcpListener, thread};
     fn pair(
         identity: &Arc<ServerIdentity>,
-        client: &StaticKey,
+        client: &DeviceKey,
         invite: Option<&Secret>,
     ) -> (NoiseStream, thread::JoinHandle<io::Result<NoiseStream>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -437,13 +458,34 @@ mod tests {
             NoiseStream::initiator(socket, &identity.public_key(), client, invite).unwrap();
         (client, server)
     }
-    fn identity() -> (Arc<ServerIdentity>, StaticKey) {
-        let client = StaticKey::generate().unwrap();
+    fn identity() -> (Arc<ServerIdentity>, DeviceKey) {
+        let client = DeviceKey::generate().unwrap();
         let identity = ServerIdentity::ephemeral()
             .unwrap()
             .with_authorized(client.public());
         (Arc::new(identity), client)
     }
+    /// The static key proves what the peer holds; the Ed25519 key it names must derive
+    /// to it, else an authorized Device's key could be claimed by anyone.
+    #[test]
+    fn a_peer_claiming_another_device_key_is_refused() {
+        let (identity, authorized) = identity();
+        let impostor = DeviceKey::generate().unwrap();
+        let (mut client, server) = pair(&identity, &impostor, None);
+        if let Noise::Initiator { claim, .. } = &mut *lock(&client.noise) {
+            *claim = authorized.public();
+        }
+        let server = thread::spawn(move || server.join().unwrap()?.read(&mut [0; 16]));
+        let error = client
+            .write_all(b"hello")
+            .and_then(|()| client.flush())
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
     #[test]
     fn authorized_peer_round_trips_records_larger_than_one_noise_message() {
         let (identity, client) = identity();

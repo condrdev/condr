@@ -2,7 +2,7 @@ mod local;
 mod saved;
 mod stream;
 
-use crate::noise::{NoiseStream, PublicKey, Secret, ServerIdentity, StaticKey};
+use crate::noise::{DeviceKey, NoiseStream, PublicKey, Secret, ServerIdentity};
 use crate::ssh::{SshEndpoint, SshStream};
 #[cfg(windows)]
 use atomicwrites::{AtomicFile, DisallowOverwrite};
@@ -30,7 +30,7 @@ pub enum Endpoint {
     Ssh(SshEndpoint),
 }
 
-/// Everything a Client needs to reach one TCP Server: where it listens, whose static key
+/// Everything a Client needs to reach one TCP Server: where it listens, whose Device key
 /// it must present, which device key to speak with, and the invite that pairs a device
 /// the Server does not know yet. The Server binds with the same value, so its own
 /// `server_key` and `client_key` are the host identity.
@@ -40,13 +40,13 @@ pub struct TcpEndpoint {
     pub host: String,
     pub port: u16,
     pub server_key: PublicKey,
-    pub client_key: StaticKey,
+    pub client_key: DeviceKey,
     pub invite: Option<Secret>,
 }
 
 impl TcpEndpoint {
     /// Parses `tcp://<server key>[.<invite>]@host:port`, as printed by an invite.
-    pub fn parse(text: &str, client_key: StaticKey) -> io::Result<Self> {
+    pub fn parse(text: &str, client_key: DeviceKey) -> io::Result<Self> {
         let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
         let (credentials, authority) = text
             .trim()
@@ -89,7 +89,7 @@ impl TcpEndpoint {
     }
 
     /// A Server bound at `address`, as its own tests connect to it.
-    pub fn at(address: SocketAddr, server_key: PublicKey, client_key: StaticKey) -> Self {
+    pub fn at(address: SocketAddr, server_key: PublicKey, client_key: DeviceKey) -> Self {
         Self {
             host: address.ip().to_string(),
             port: address.port(),
@@ -116,7 +116,7 @@ impl TcpEndpoint {
 
 impl Endpoint {
     /// Parse a remote address without requiring a TCP device key for SSH.
-    pub fn parse(text: &str, client_key: Option<&StaticKey>) -> io::Result<Self> {
+    pub fn parse(text: &str, client_key: Option<&DeviceKey>) -> io::Result<Self> {
         let text = text.trim();
         if text.starts_with("ssh://") {
             return SshEndpoint::parse(text).map(Self::Ssh);

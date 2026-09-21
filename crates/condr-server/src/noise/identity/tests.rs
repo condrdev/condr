@@ -4,7 +4,7 @@ use std::thread;
 
 fn pair(
     identity: &Arc<ServerIdentity>,
-    client: &StaticKey,
+    client: &DeviceKey,
     invite: Option<&Secret>,
 ) -> (NoiseStream, thread::JoinHandle<io::Result<NoiseStream>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -68,7 +68,7 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
         now()
     ));
     let identity = Arc::new(ServerIdentity::load_or_create(&directory).unwrap());
-    let device = StaticKey::generate().unwrap();
+    let device = DeviceKey::generate().unwrap();
 
     let invite = create_invite(&directory).unwrap();
     let wrong = Secret::generate().unwrap();
@@ -111,8 +111,8 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
     // A second device that finished its handshake with the same invite loses the
     // race: the invite is gone by the time it proves itself.
     let invite = create_invite(&directory).unwrap();
-    let first = StaticKey::generate().unwrap();
-    let second = StaticKey::generate().unwrap();
+    let first = DeviceKey::generate().unwrap();
+    let second = DeviceKey::generate().unwrap();
     let (mut first_client, first_server) = pair(&identity, &first, Some(&invite.secret));
     let (mut second_client, second_server) = pair(&identity, &second, Some(&invite.secret));
     let first_server = serve(first_server, |server| {
@@ -143,7 +143,7 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
     // A handshake made with an older invite cannot pair after a newer invite replaced
     // it, and does not consume the newer one.
     let stale = create_invite(&directory).unwrap();
-    let late = StaticKey::generate().unwrap();
+    let late = DeviceKey::generate().unwrap();
     let (mut late_client, late_server) = pair(&identity, &late, Some(&stale.secret));
     let late_server = serve(late_server, |server| {
         server.read_exact(&mut [0; 2])?;
@@ -192,8 +192,12 @@ fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
     let directory =
         std::env::temp_dir().join(format!("condr-noise-seen-{}-{}", std::process::id(), now()));
     fs::create_dir_all(&directory).unwrap();
-    let old = StaticKey::generate().unwrap().public();
-    let new = StaticKey::generate().unwrap().public();
+    // Creating the key discards any authorized list left from before it existed.
+    fs::write(directory.join(AUTHORIZED_FILE), "stale\n").unwrap();
+    let identity = ServerIdentity::load_or_create(&directory).unwrap();
+    assert!(read_authorized(&directory).unwrap().is_empty());
+    let old = DeviceKey::generate().unwrap().public();
+    let new = DeviceKey::generate().unwrap().public();
     fs::write(
         directory.join(AUTHORIZED_FILE),
         format!("{old} 100 old laptop\n"),
@@ -212,7 +216,6 @@ fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
     assert_eq!((clients[1].paired_at, clients[1].last_seen), (200, 300));
     assert_eq!(clients[1].name, "new laptop");
 
-    let identity = ServerIdentity::load_or_create(&directory).unwrap();
     identity.record_seen(&old).unwrap();
     let clients = read_authorized(&directory).unwrap();
     assert!(clients[0].last_seen >= now() - 5);

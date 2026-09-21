@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{AppContext as _, Context, SharedString};
 use serde::Deserialize;
 
-use condr_server::{SavedServer, StaticKey, load_saved_servers, save_saved_servers};
+use condr_server::{DeviceKey, SavedServer, load_saved_servers, save_saved_servers};
 
 use super::open_in::CustomEditor;
 use super::{Appearance, Condr, Endpoint, TerminalFont};
@@ -38,7 +38,7 @@ struct SavedWorkspaceEditor {
 
 pub(super) struct LoadedConfig {
     pub path: Option<PathBuf>,
-    pub device_key: Option<StaticKey>,
+    pub device_key: Option<DeviceKey>,
     pub servers: Vec<(String, Endpoint)>,
     pub servers_error: Option<String>,
     pub error: Option<String>,
@@ -59,7 +59,7 @@ impl LoadedConfig {
         let (device_key, key_error) = match path
             .as_deref()
             .and_then(Path::parent)
-            .map_or_else(StaticKey::generate, condr_server::noise::load_device_key)
+            .map_or_else(DeviceKey::generate, condr_server::noise::load_device_key)
         {
             Ok(key) => (Some(key), None),
             Err(error) => (

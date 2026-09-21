@@ -34,6 +34,8 @@ smol_str = { version = "0.3.6", features = ["serde"] }
 snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom"] }
 getrandom = "0.3"
 curve25519-dalek = { version = "4.1", default-features = false }
+# Ed25519 seed -> X25519 Noise key (ADR 0025); the hash Ed25519 itself uses.
+sha2 = { version = "0.10", default-features = false }
 regex = "1"
 # Protocol relative paths: `/`-separated whatever platform the client or Server runs on.
 relative-path = { version = "2.0", features = ["serde"] }

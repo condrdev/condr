@@ -17,7 +17,7 @@ use crate::client_writer::{ClientWriteItem, ClientWriter, ReliableSendError};
 use crate::endpoint::{
     Endpoint, EndpointListener, EndpointStream, TcpEndpoint, default_socket_path,
 };
-use crate::noise::{ServerIdentity, StaticKey};
+use crate::noise::{DeviceKey, ServerIdentity};
 use crate::persistence::{SnapshotLoad, SnapshotPersistence};
 use agents::AgentControl;
 use bootstrap::*;

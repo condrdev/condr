@@ -5,9 +5,7 @@ use super::*;
 /// How long an invite stays redeemable.
 pub const INVITE_TTL: Duration = Duration::from_secs(10 * 60);
 
-const SERVER_KEY_FILE: &str = "server-key";
-
-const CLIENT_KEY_FILE: &str = "client-key";
+const DEVICE_KEY_FILE: &str = "device-key";
 
 const AUTHORIZED_FILE: &str = "authorized-clients";
 
@@ -15,13 +13,13 @@ const INVITE_FILE: &str = "pending-invite";
 
 const LOCK_FILE: &str = "identity.lock";
 
-/// The Server host's static key plus the devices it accepts.
+/// The Server host's Device key plus the devices it accepts.
 ///
 /// With a store directory the authorized list and the pending invite live in files that
 /// `condr server invite|clients|revoke` edit on the same host; without one only
 /// `always_authorized` peers can connect.
 pub struct ServerIdentity {
-    pub(super) key: StaticKey,
+    pub(super) key: DeviceKey,
     store: Option<PathBuf>,
     always_authorized: Vec<PublicKey>,
 }
@@ -44,12 +42,27 @@ pub struct Invite {
 }
 
 impl ServerIdentity {
-    /// The identity stored in `directory`: `server-key`, plus the paired devices and the
-    /// pending invite kept beside it. Processes on the host itself use the local socket,
-    /// so no device is authorized by default.
+    /// The identity stored in `directory`: `device-key`, the one key this machine also
+    /// connects out with, plus the paired devices and the pending invite kept beside it.
+    /// Processes on the host itself use the local socket, so no device is authorized by
+    /// default. A machine whose key is created now has no paired devices either: an
+    /// `authorized-clients` left from before the key existed can never match, so it goes.
     pub fn load_or_create(directory: &Path) -> io::Result<Self> {
+        let key = with_store_lock(directory, || {
+            let path = directory.join(DEVICE_KEY_FILE);
+            if !path.exists() {
+                match fs::remove_file(directory.join(AUTHORIZED_FILE)) {
+                    Ok(()) => {
+                        tracing::warn!("device-key created; discarded the old authorized-clients")
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            DeviceKey::load_or_create(&path)
+        })?;
         Ok(Self {
-            key: StaticKey::load_or_create(&directory.join(SERVER_KEY_FILE))?,
+            key,
             store: Some(directory.to_path_buf()),
             always_authorized: Vec::new(),
         })
@@ -58,7 +71,7 @@ impl ServerIdentity {
     /// A fresh key with no store, for tests and short-lived Servers.
     pub fn ephemeral() -> io::Result<Self> {
         Ok(Self {
-            key: StaticKey::generate()?,
+            key: DeviceKey::generate()?,
             store: None,
             always_authorized: Vec::new(),
         })
@@ -164,7 +177,7 @@ impl fmt::Debug for ServerIdentity {
     }
 }
 
-/// Where this host keeps `server-key`, `client-key`, the authorized list and the invite.
+/// Where this host keeps `device-key`, the authorized list and the invite.
 pub fn identity_directory() -> io::Result<PathBuf> {
     condr_core::config_directory().ok_or_else(|| {
         io::Error::new(
@@ -188,9 +201,10 @@ pub fn device_name() -> String {
         .unwrap_or_else(|| "condr".to_owned())
 }
 
-/// The device key a GUI keeps beside its `config.toml` and presents to TCP Servers.
-pub fn load_device_key(directory: &Path) -> io::Result<StaticKey> {
-    StaticKey::load_or_create(&directory.join(CLIENT_KEY_FILE))
+/// This machine's one key, which its GUI and CLI present to TCP Servers and its own
+/// Server answers with; `ServerIdentity::load_or_create` reads the same file.
+pub fn load_device_key(directory: &Path) -> io::Result<DeviceKey> {
+    DeviceKey::load_or_create(&directory.join(DEVICE_KEY_FILE))
 }
 
 /// Replaces the pending invite with a fresh one valid for [`INVITE_TTL`].

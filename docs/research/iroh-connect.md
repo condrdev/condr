@@ -132,7 +132,7 @@ CONTEXT.md 在落地时改四个词条（按项目惯例随实现一起改，不
 
 ### Review 后补充的决定（2026-09-21）
 
-- **TCP 配对要拿到 Ed25519 key**：Noise IK 应答方只学到对端 X25519，Montgomery 形式丢了符号位，反推不出 Ed25519。所以 Client 在 `Hello` 里带自己的 Ed25519 公钥，Server 仅当其 `to_montgomery` 等于握手认证的静态 key 时接受并写入 `authorized-clients`。匹配或验证之后，连接的远端身份就是 Ed25519 key，`last-seen`、活跃 peer 表、`RevokeDevice` 全在一个 key 空间比较。无法解压成合法点的授权行视为不匹配，不当错误。
+- **TCP 配对要拿到 Ed25519 key**：Noise IK 应答方只学到对端 X25519，Montgomery 形式丢了符号位，反推不出 Ed25519。所以 Client 把自己的 Ed25519 公钥放在 Noise 第一条握手消息的 payload 里（与静态 key 一样加密），Server 仅当其 `to_montgomery` 等于握手认证的静态 key 时接受；之后查表与写入都直接用 Ed25519 key，存储侧不需要任何 Montgomery 换算，框架协议（`Hello`）不变。连接的远端身份从握手起就是 Ed25519 key，`last-seen`、活跃 peer 表、`RevokeDevice` 全在一个 key 空间比较。（实现时发现比改 `Hello` 更省：不动协议，且验证发生在任何帧之前。）
 - **旧存储**：Server 首次创建 `device-key` 时丢弃 `authorized-clients`（旧行永不可能匹配）；`[[client.servers]]` 里的 `tcp://<旧 key>@…` 需要重新添加。文件名与行格式不变。
 - **`Tunnel` 细节**：只接受来自本地连接的 `Tunnel`，其他 peer 发送得到错误；每个 `Tunnel` 一条 QUIC 连接；本机 Server 负责向远端发 `Credential` 帧；拨号失败回一帧 `Error` 后关闭，成功则 Client 读到的下一帧是远端 `Welcome`；Client 等 `Welcome` 用 SSH 那档不活动超时；CLI 在 Pane 内时把 `Tunnel` 发给自己 Pane 的 Server，否则 `ensure_local_server`。
 - **生命周期修正**：`enabled = true` 时 iroh endpoint 常驻并发布 DNS；`enabled = false` 时仅按 `Tunnel` 需要绑定、最后一条连接关闭 60 秒后释放、**不发布任何 DNS 记录**。
