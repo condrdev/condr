@@ -7,7 +7,8 @@ impl Condr {
         owner: WeakEntity<Condr>,
     ) -> PopupMenu {
         let ssh_owner = owner.clone();
-        let tcp_owner = owner;
+        let tcp_owner = owner.clone();
+        let p2p_owner = owner;
         menu = menu.item(
             PopupMenuItem::new("SSH address")
                 .icon(IconName::SquareTerminal)
@@ -15,13 +16,35 @@ impl Condr {
                     let _ = ssh_owner.update(cx, |this, cx| this.prompt_add_server_ssh(window, cx));
                 }),
         );
-        menu.item(
+        menu = menu.item(
             PopupMenuItem::new("TCP pairing link")
                 .icon(IconName::Network)
                 .on_click(move |_, window, cx| {
                     let _ = tcp_owner.update(cx, |this, cx| this.prompt_add_server_tcp(window, cx));
                 }),
+        );
+        menu.item(
+            PopupMenuItem::new("Peer-to-peer link")
+                .icon(IconName::Network)
+                .on_click(move |_, window, cx| {
+                    let _ = p2p_owner.update(cx, |this, cx| this.prompt_add_server_p2p(window, cx));
+                }),
         )
+    }
+
+    pub(in crate::app) fn prompt_add_server_p2p(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_add_server_input(
+            "Pair a Peer-to-peer Device",
+            "Pairing link",
+            "Paste p2p://… invite link",
+            Some("p2p://"),
+            window,
+            cx,
+        );
     }
 
     pub(in crate::app) fn prompt_add_server_ssh(
@@ -60,11 +83,11 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         // Kept as the direct address prompt for the start page and keyboard workflow.
-        // The sidebar exposes the two explicit modes through its PopupMenu.
+        // The sidebar exposes the three explicit modes through its PopupMenu.
         self.prompt_add_server_input(
             "Connect Remote Device",
             "Address",
-            "tcp://server-key.invite@host:port or ssh://user@host",
+            "ssh://user@host, tcp://… or p2p://… link",
             None,
             window,
             cx,
