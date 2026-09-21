@@ -28,7 +28,9 @@ pub const PKARR_URL: &str = "https://dns.condr.dev/pkarr";
 const ALPN: &[u8] = b"condr/1";
 /// A bound endpoint that accepts nothing is released this long after its last connection.
 const IDLE_RELEASE: Duration = Duration::from_secs(60);
-const DIAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Shorter than the 15 seconds a tunnelled Client waits for `Welcome`, so a failed dial
+/// still reaches it as one `Error` frame (ADR 0025).
+const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Where an endpoint finds the relay and other Devices.
 #[derive(Clone, Debug)]
@@ -149,7 +151,7 @@ impl P2pNode {
                     let Some(node) = node.upgrade() else { return };
                     tokio::spawn(async move {
                         if let Err(error) = node.accept_connection(incoming).await {
-                            tracing::debug!("p2p connection not accepted: {error}");
+                            tracing::warn!("p2p connection not accepted: {error}");
                         }
                     });
                 }
@@ -186,7 +188,11 @@ impl P2pNode {
     }
 
     /// Dials `device` and presents `invite` when this machine is not paired with it yet.
-    pub fn dial(self: &Arc<Self>, device: PublicKey, invite: Option<&Secret>) -> io::Result<P2pStream> {
+    pub fn dial(
+        self: &Arc<Self>,
+        device: PublicKey,
+        invite: Option<&Secret>,
+    ) -> io::Result<P2pStream> {
         let endpoint = self.endpoint()?;
         let id = iroh::EndpointId::from_bytes(device.as_bytes())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid device id"))?;
@@ -254,7 +260,8 @@ impl P2pNode {
                 task.abort();
             }
             tracing::info!("p2p endpoint released after idling");
-            self.handle.spawn(async move { released.endpoint.close().await });
+            self.handle
+                .spawn(async move { released.endpoint.close().await });
         }
     }
 }
@@ -270,7 +277,9 @@ impl Drop for ConnectionGuard {
         if self.connections.fetch_sub(1, Ordering::AcqRel) != 1 {
             return;
         }
-        let Some(node) = self.node.upgrade() else { return };
+        let Some(node) = self.node.upgrade() else {
+            return;
+        };
         if node.enabled {
             return;
         }
@@ -438,7 +447,10 @@ impl Read for P2pStream {
             match result {
                 Ok(Some(length)) => Ok(length),
                 Ok(None) => Ok(0),
-                Err(error) => Err(io::Error::new(io::ErrorKind::ConnectionReset, error.to_string())),
+                Err(error) => Err(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    error.to_string(),
+                )),
             }
         })
     }
@@ -522,7 +534,9 @@ fn rejected(reason: &str) -> io::Error {
 mod tests {
     use super::*;
     use crate::noise::{create_invite, revoke};
-    use condr_core::protocol::{Hello, PROTOCOL_VERSION, ServerMessage, read_message, write_message};
+    use condr_core::protocol::{
+        Hello, PROTOCOL_VERSION, ServerMessage, read_message, write_message,
+    };
     use std::sync::mpsc::Receiver;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {

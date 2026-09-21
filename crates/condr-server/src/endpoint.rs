@@ -66,8 +66,25 @@ impl P2pEndpoint {
 
     /// Asks this machine's Server to dial the Device; the returned stream carries the
     /// remote Server's frames from its `Welcome` on, or one `Error` if the dial failed.
+    /// Inside a Pane that is the Pane's Server; elsewhere the default Server, started
+    /// when it is not running, as the GUI does (ADR 0025).
     fn connect(&self) -> io::Result<EndpointStream> {
-        let mut stream = connect_local(&default_socket_path())?;
+        let local = match std::env::var(condr_core::PaneEnvironment::SOCKET_PATH) {
+            Ok(value) => Endpoint::from_env_value(&value)?,
+            Err(_) => crate::server::ensure_local_server()?,
+        };
+        let path = local.as_local_path().ok_or_else(|| {
+            io::Error::other("this machine's Server has no local socket to tunnel through")
+        })?;
+        let mut stream = connect_local(path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "this machine's Server is unreachable at {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
         condr_core::protocol::write_message(
             &mut stream,
             &condr_core::protocol::ClientMessage::Tunnel {

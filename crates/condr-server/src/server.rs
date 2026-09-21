@@ -279,13 +279,12 @@ impl BoundServer {
             crate::p2p::Network::Condr,
             p2p_sender,
         );
-        if self.p2p_enabled && let Err(error) = p2p.start() {
+        if self.p2p_enabled
+            && let Err(error) = p2p.start()
+        {
             tracing::error!("p2p endpoint not bound: {error}");
         }
-        self.state
-            .lock()
-            .expect("server state lock poisoned")
-            .p2p = Some(Arc::clone(&p2p));
+        self.state.lock().expect("server state lock poisoned").p2p = Some(Arc::clone(&p2p));
 
         tracing::info!(
             version = env!("CARGO_PKG_VERSION"),

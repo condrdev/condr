@@ -329,9 +329,12 @@ impl Condr {
                 Ok(application) => {
                     // The Server accepted the invite and recorded this device; from now on
                     // the device key alone is the credential.
-                    if let Endpoint::Tcp(tcp) = &mut connection.endpoint
-                        && tcp.invite.take().is_some()
-                    {
+                    let invite = match &mut connection.endpoint {
+                        Endpoint::Tcp(tcp) => tcp.invite.take(),
+                        Endpoint::P2p(p2p) => p2p.invite.take(),
+                        Endpoint::Local(_) | Endpoint::Ssh(_) => None,
+                    };
+                    if invite.is_some() {
                         paired = true;
                     }
                     Some(application)

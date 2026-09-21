@@ -102,6 +102,9 @@ pub(super) fn handle_client(
             // An unknown Peer-to-peer Device redeems its invite before Hello (ADR 0026).
             ClientMessage::Credential { invite } => {
                 let outcome = match &stream {
+                    // A Device paired already, over TCP or by an earlier attempt, needs no
+                    // invite; the Client cannot know that, so the one it carries is ignored.
+                    EndpointStream::P2p(peer) if peer.peer_authorized().unwrap_or(false) => Ok(()),
                     EndpointStream::P2p(peer) if peer.needs_credential().unwrap_or(false) => {
                         peer.present_invite(&crate::noise::Secret::from_bytes(invite))
                     }
