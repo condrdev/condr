@@ -717,6 +717,7 @@ impl Render for Condr {
                             let width = event.event.position.x - event.bounds.origin.x;
                             this.sidebar_width =
                                 width.max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH).round();
+                            this.schedule_state_save(cx);
                             cx.notify();
                         },
                     ))
@@ -727,6 +728,7 @@ impl Render for Condr {
                             let width = right - event.event.position.x;
                             this.changes_width =
                                 width.max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH).round();
+                            this.schedule_state_save(cx);
                             cx.notify();
                         },
                     ))

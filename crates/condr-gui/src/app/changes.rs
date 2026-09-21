@@ -12,8 +12,8 @@ use gpui_kit::component::input::{TextDecoration, TextDecorationCollection};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
 
-/// What the right sidebar shows (ADR 0018).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// What the right sidebar shows (ADR 0018); remembered per Workspace (ADR 0023).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) enum SidebarView {
     #[default]
     Changes,
@@ -239,6 +239,7 @@ impl Condr {
         if !self.changes_open.remove(&workspace) {
             self.changes_open.insert(workspace);
         }
+        self.schedule_state_save(cx);
         cx.notify();
     }
 
@@ -345,6 +346,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         if self.sidebar_views.insert((key, workspace_id), view) != Some(view) {
+            self.schedule_state_save(cx);
             cx.notify();
         }
     }

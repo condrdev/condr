@@ -230,6 +230,11 @@ impl Condr {
     }
 
     pub(super) fn rebuild_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Every view change ends here (ADR 0021), so this is where the state file learns
+        // of it; `show_view` has no context to schedule from.
+        if std::mem::take(&mut self.state_dirty) {
+            self.schedule_state_save(cx);
+        }
         if !self.diff_editors.is_empty() {
             self.prune_diff_editors();
         }

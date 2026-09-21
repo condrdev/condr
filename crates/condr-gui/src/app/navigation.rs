@@ -490,6 +490,7 @@ impl Condr {
 
     pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.schedule_state_save(cx);
         cx.notify();
     }
 

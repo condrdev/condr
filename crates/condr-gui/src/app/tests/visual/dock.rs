@@ -68,7 +68,11 @@ fn two_gui_clients_keep_independent_views_until_explicit_activation() {
 
     let mut second_cx = TestAppContext::single();
     second_cx.update(gpui_kit::init);
-    let (second, second_window) = connected_condr_at(&mut second_cx, endpoint.clone());
+    let (second, second_window) = connected_condr_at(
+        &mut second_cx,
+        endpoint.clone(),
+        gui_state::LoadedState::default(),
+    );
     assert!(wait_until(second_window, |window| {
         window.read(|app| {
             let connection = second.read(app).connection(1).unwrap();
@@ -762,4 +766,98 @@ fn moving_a_pane_into_a_nested_split_keeps_every_pane_on_screen() {
         (a_bounds.size.width - b_bounds.size.width * 2.).abs() < px(12.),
         "a takes half, b a quarter: {a_bounds:?} vs {b_bounds:?}"
     );
+}
+
+/// The GUI state file (ADR 0023): a second run on the same Server puts the sidebars, the
+/// widths and the shown Workspace and Tab back the way the first run left them.
+#[test]
+fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
+    let _serial_guard = acquire_visual_test_lock();
+    let first_root = TestDirectory::new("state-first");
+    let second_root = TestDirectory::new("state-second");
+    let state_directory = TestDirectory::new("state-file");
+    let path = state_directory.0.join(gui_state::STATE_FILE_NAME);
+    let (server, endpoint) = start_server();
+
+    let mut first_cx = TestAppContext::single();
+    first_cx.update(gpui_kit::init);
+    let (first, first_window) = connected_condr_at(
+        &mut first_cx,
+        endpoint.clone(),
+        gui_state::LoadedState::read(Some(path.clone())),
+    );
+    assert!(wait_until(first_window, |window| {
+        window.read(|app| {
+            first
+                .read(app)
+                .connection(1)
+                .is_some_and(ServerConnection::can_mutate)
+        })
+    }));
+    let (first_workspace, _, _) = create_workspace(first_window, &first, &first_root);
+    let (second_workspace, second_tab, _) = create_workspace(first_window, &first, &second_root);
+    assert_eq!(
+        presented(first_window, &first),
+        Some((1, second_workspace, second_tab))
+    );
+    first_window.update(|window, cx| {
+        first.update(cx, |this, cx| {
+            this.toggle_sidebar(cx);
+            this.sidebar_width = px(300.);
+            this.toggle_changes_sidebar(cx);
+            this.sidebar_views.insert(
+                (1, second_workspace),
+                crate::app::changes::SidebarView::Files,
+            );
+            // The Workspace not shown is folded by default; unfold it.
+            this.sidebar_workspace_open[&(1, first_workspace)].update(cx, |open, cx| {
+                *open = true;
+                cx.notify();
+            });
+            this.rebuild_dock(window, cx);
+            this.save_state_now(cx);
+        });
+    });
+    // Whatever the first run had for the shown Workspace, folded or not, comes back as is.
+    let second_open = first_window
+        .read(|app| *first.read(app).sidebar_workspace_open[&(1, second_workspace)].read(app));
+    assert!(
+        wait_until(first_window, |_| path.exists()),
+        "the state file should be written"
+    );
+    drop(first_cx);
+
+    let mut second_cx = TestAppContext::single();
+    second_cx.update(gpui_kit::init);
+    let (second, second_window) = connected_condr_at(
+        &mut second_cx,
+        endpoint.clone(),
+        gui_state::LoadedState::read(Some(path.clone())),
+    );
+    second_window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        presented(second_window, &second),
+        Some((1, second_workspace, second_tab)),
+        "the shown Workspace and Tab come back"
+    );
+    second_window.read(|app| {
+        let this = second.read(app);
+        assert!(this.sidebar_collapsed);
+        assert_eq!(this.sidebar_width, px(300.));
+        assert!(this.changes_open.contains(&(1, second_workspace)));
+        assert_eq!(
+            this.sidebar_views.get(&(1, second_workspace)),
+            Some(&crate::app::changes::SidebarView::Files)
+        );
+        assert!(
+            *this.sidebar_workspace_open[&(1, first_workspace)].read(app),
+            "the unfolded Workspace stays unfolded"
+        );
+        assert_eq!(
+            *this.sidebar_workspace_open[&(1, second_workspace)].read(app),
+            second_open,
+            "the shown Workspace is folded or not as before"
+        );
+    });
+    drop(server);
 }

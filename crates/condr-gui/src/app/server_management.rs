@@ -320,6 +320,9 @@ impl Condr {
             return;
         }
         let mut paired = false;
+        let first_bootstrap = self
+            .connection(key)
+            .is_some_and(|connection| connection.server_id.is_none());
         let application = if let Some(connection) = self.connection_mut(key) {
             connection.endpoint = endpoint;
             match Self::install_connection(connection, result, window, cx) {
@@ -359,6 +362,11 @@ impl Condr {
                 self.prune_dock_cache(key);
             }
             self.sync_sidebar_workspace_open(cx);
+            if first_bootstrap {
+                // The usual way a Server first bootstraps: the connect task, not the
+                // event loop. The state file's memory of it applies here (ADR 0023).
+                self.restore_server_state(key, cx);
+            }
             self.acquire_and_subscribe(key);
             self.refresh_target_pane(key);
             if key == self.active_connection {

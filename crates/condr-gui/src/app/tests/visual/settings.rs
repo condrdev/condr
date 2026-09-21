@@ -268,6 +268,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
                     endpoint.clone(),
                     Some(Ok(initial)),
                     config::LoadedConfig::read(Some(config_path.clone())),
+                    gui_state::LoadedState::default(),
                     window,
                     cx,
                 )
@@ -340,6 +341,7 @@ fn chosen_appearance_persists_and_survives_gui_restart() {
                 endpoint,
                 Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path)),
+                gui_state::LoadedState::default(),
                 window,
                 cx,
             )
@@ -377,6 +379,7 @@ fn font_changes_reach_the_config_once_the_debounce_elapses() {
                 endpoint.clone(),
                 Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path.clone())),
+                gui_state::LoadedState::default(),
                 window,
                 cx,
             )
@@ -442,6 +445,7 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
                 endpoint.clone(),
                 Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path.clone())),
+                gui_state::LoadedState::default(),
                 window,
                 cx,
             )

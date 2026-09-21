@@ -44,6 +44,9 @@ impl Condr {
         let connection_changed = self.active_connection != key;
         self.active_connection = key;
         self.refresh_target_pane(key);
+        if view_changed || connection_changed {
+            self.state_dirty = true;
+        }
         view_changed || connection_changed
     }
 

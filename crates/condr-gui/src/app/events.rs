@@ -20,6 +20,7 @@ impl Condr {
         }
         let message = match incoming {
             Incoming::Bootstrap(bootstrap) => {
+                let first_bootstrap = self.connections[index].server_id.is_none();
                 let application = self.connections[index].apply_bootstrap(bootstrap);
                 if self
                     .hovered_link
@@ -45,6 +46,10 @@ impl Condr {
                 // requests sent before it were dropped with the old connection.
                 self.clear_pending_requests(key);
                 self.sync_sidebar_workspace_open(cx);
+                if first_bootstrap {
+                    // Now that the Session is known, the file's memory of it applies.
+                    self.restore_server_state(key, cx);
+                }
                 if application.reacquire_control {
                     // Layout responses may have been lost to writer lag; this Bootstrap is
                     // the authoritative layout, so nothing stays pending against it.
@@ -67,7 +72,8 @@ impl Condr {
                     rebuild: application.rebuild
                         || application.reacquire_control
                         || active_projection_resolved
-                        || target_changed,
+                        || target_changed
+                        || first_bootstrap,
                     rebuild_active: false,
                     notify: true,
                 };

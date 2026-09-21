@@ -17,6 +17,7 @@ use super::super::{
     terminal_font_family, terminal_font_size,
 };
 use crate::app::config;
+use crate::app::gui_state;
 use crate::app::open_in::{OpenTarget, OpenTargetIcon};
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 use condr_core::SplitDirection;
@@ -127,7 +128,7 @@ fn connected_condr_with(
     server: TestServer,
     endpoint: Endpoint,
 ) -> (Entity<Condr>, &mut VisualTestContext, TestServer) {
-    let (view, window) = connected_condr_at(cx, endpoint);
+    let (view, window) = connected_condr_at(cx, endpoint, gui_state::LoadedState::default());
     assert!(
         wait_until(window, |window| {
             window.read(|app| {
@@ -145,6 +146,7 @@ fn connected_condr_with(
 fn connected_condr_at(
     cx: &mut TestAppContext,
     endpoint: Endpoint,
+    state: gui_state::LoadedState,
 ) -> (Entity<Condr>, &mut VisualTestContext) {
     let mut initial = None;
     let deadline = Instant::now() + TEST_TIMEOUT;
@@ -167,6 +169,7 @@ fn connected_condr_at(
                 endpoint,
                 Some(initial),
                 config::LoadedConfig::read(None),
+                state,
                 window,
                 cx,
             )

@@ -247,6 +247,7 @@ pub(crate) fn run() {
     };
     let endpoint = ServerConfig::default().local_endpoint();
     let config = config::LoadedConfig::read(condr_core::config_path());
+    let state = gui_state::LoadedState::read(gui_state::GuiState::default_path());
     let app = gpui_kit::application().with_assets(CondrAssets::new());
 
     app.run(move |cx| {
@@ -255,12 +256,13 @@ pub(crate) fn run() {
         register_notification_icon();
         bind_keys(cx);
         install_app_menus(cx);
-        let window_options = default_window_options(cx);
+        let window_options = default_window_options(state.state.window, cx);
+        let restored_window = state.state.window.is_some();
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |window, cx| {
                 // The drawn title bar carries no OS title; the taskbar still needs one.
                 window.set_window_title("Condr");
-                let view = cx.new(|cx| Condr::new(endpoint, None, config, window, cx));
+                let view = cx.new(|cx| Condr::new(endpoint, None, config, state, window, cx));
                 let handle = window.window_handle();
                 let target = view.downgrade();
                 cx.on_system_notification_response(move |response, cx| {
@@ -273,7 +275,9 @@ pub(crate) fn run() {
                     });
                 });
                 let root = cx.new(|cx| Root::new(view, window, cx));
-                window.resize(DEFAULT_WINDOW_SIZE);
+                if !restored_window {
+                    window.resize(DEFAULT_WINDOW_SIZE);
+                }
                 root
             })
             .expect("failed to open Condr window");

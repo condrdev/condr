@@ -101,10 +101,14 @@ impl Condr {
                 self.sidebar_workspace_open
                     .entry((key, workspace.id()))
                     .or_insert_with(|| {
-                        cx.new(|_| {
+                        let open = cx.new(|_| {
                             key == self.active_connection
                                 && active_workspace == Some(workspace.id())
-                        })
+                        });
+                        // A chevron click or an AgentChanged flips it; both are remembered.
+                        cx.observe(&open, |this, _, cx| this.schedule_state_save(cx))
+                            .detach();
+                        open
                     });
             }
         }

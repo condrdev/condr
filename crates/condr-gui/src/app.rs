@@ -8,6 +8,7 @@ mod dock;
 mod events;
 pub(crate) mod file_icons;
 mod files;
+mod gui_state;
 mod ime;
 mod navigation;
 mod notifications;
@@ -220,9 +221,12 @@ const WORKSPACE_TITLE_BAR_HEIGHT: Pixels = px(36.);
 #[derive(Clone)]
 struct DraggedSidebar;
 
-fn default_window_options(cx: &App) -> WindowOptions {
+fn default_window_options(state: Option<gui_state::WindowState>, cx: &App) -> WindowOptions {
     WindowOptions {
-        window_bounds: Some(WindowBounds::centered(DEFAULT_WINDOW_SIZE, cx)),
+        window_bounds: Some(state.map_or_else(
+            || WindowBounds::centered(DEFAULT_WINDOW_SIZE, cx),
+            |state| state.window_bounds(DEFAULT_WINDOW_SIZE, cx),
+        )),
         // The window draws its own title bar and owns dragging.
         ..crate::assets::window_options()
     }
@@ -330,6 +334,19 @@ pub(crate) struct Condr {
     pub(super) last_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
+    _window_bounds_subscription: Subscription,
+    /// The GUI state file (ADR 0023); `None` in tests that want no file.
+    state_path: Option<PathBuf>,
+    /// The state as read at startup: Servers not yet connected are restored from it when
+    /// they bootstrap, and Servers never connected are written back from it unchanged.
+    restored_state: gui_state::GuiState,
+    /// The window's bounds as last observed, so a save needs no `Window`.
+    window_state: Option<gui_state::WindowState>,
+    /// A view change noticed where no context could schedule the save; `rebuild_dock`
+    /// picks it up.
+    state_dirty: bool,
+    /// The debounce, then the write; awaited on quit like `config_save`.
+    state_save: Option<Task<()>>,
 }
 
 impl Condr {
@@ -337,9 +354,14 @@ impl Condr {
         endpoint: Endpoint,
         initial: Option<Result<ClientConnection, String>>,
         config: config::LoadedConfig,
+        state: gui_state::LoadedState,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let gui_state::LoadedState {
+            path: state_path,
+            state: restored_state,
+        } = state;
         let (connect_results_tx, connect_results_rx) =
             async_channel::bounded(CONNECTION_RESULT_BUFFER_CAPACITY);
         let mut connection = ServerConnection::new(1, "Local".into(), endpoint);
@@ -390,14 +412,23 @@ impl Condr {
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
+        let window_bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
+            this.window_state = Some(window.window_bounds().into());
+            this.schedule_state_save(cx);
+        });
         let quit_subscription = cx.on_app_quit(|this, cx| {
             // A change made less than a debounce before quitting is still saved.
             if this._font_save.is_some() {
                 this.save_terminal_font(cx);
             }
             let pending = this.config_save.take();
+            this.save_state_now(cx);
+            let pending_state = this.state_save.take();
             async move {
                 if let Some(pending) = pending {
+                    pending.await;
+                }
+                if let Some(pending) = pending_state {
                     pending.await;
                 }
             }
@@ -439,10 +470,18 @@ impl Condr {
             notifications,
             keep_awake,
             _keep_awake: None,
-            sidebar_width: INITIAL_SIDEBAR_WIDTH,
-            sidebar_collapsed: false,
+            sidebar_width: restored_state
+                .sidebar_width
+                .map_or(INITIAL_SIDEBAR_WIDTH, |width| {
+                    px(width).max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH)
+                }),
+            sidebar_collapsed: restored_state.sidebar_collapsed,
             changes_open: HashSet::new(),
-            changes_width: INITIAL_CHANGES_WIDTH,
+            changes_width: restored_state
+                .changes_width
+                .map_or(INITIAL_CHANGES_WIDTH, |width| {
+                    px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH)
+                }),
             collapsed_changes_sections: HashSet::new(),
             collapsed_change_dirs: HashSet::new(),
             diff_editors: HashMap::new(),
@@ -471,8 +510,18 @@ impl Condr {
             last_error: None,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
+            _window_bounds_subscription: window_bounds_subscription,
+            state_path,
+            window_state: Some(window.window_bounds().into()),
+            restored_state,
+            state_dirty: false,
+            state_save: None,
         };
         this.sync_sidebar_workspace_open(cx);
+        // A connection handed in ready has bootstrapped already, so restore it here.
+        if this.connections[0].server_id.is_some() {
+            this.restore_server_state(1, cx);
+        }
         this.refresh_target_pane(1);
         this.acquire_and_subscribe(1);
         if let Some(error) = config_error {

@@ -47,7 +47,7 @@ An absolute directory on the owning Server, selected when a Workspace is created
 _Avoid_: Current directory, identity cwd
 
 **View**:
-Which Workspace and which Tab one Client shows. It is that Client's own state, never part of the Session or its Snapshot (ADR 0021): two Clients on one Server look at different things, and selecting a Workspace or Tab in the GUI sends nothing. `ActivateWorkspace` and `ActivateTab` are requests to every Client to show a target, arriving as the `Activated` event; the CLI's `focus` commands and `--focus` flags send them.
+Which Workspace and which Tab one Client shows. It is that Client's own state, never part of the Session or its Snapshot (ADR 0021): two Clients on one Server look at different things, and selecting a Workspace or Tab in the GUI sends nothing. `ActivateWorkspace` and `ActivateTab` are requests to every Client to show a target, arriving as the `Activated` event; the CLI's `focus` commands and `--focus` flags send them. The GUI remembers its View, its window and its sidebars across runs in its own state file (ADR 0023).
 _Avoid_: Active Workspace, active Tab, selection
 
 **Tab**:

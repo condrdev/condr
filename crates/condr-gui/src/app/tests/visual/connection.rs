@@ -694,6 +694,7 @@ fn invalid_saved_server_protects_the_list_but_allows_preferences() {
                 Endpoint::local(directory.0.join("unused.sock")),
                 Some(Err("offline for config test".into())),
                 config,
+                gui_state::LoadedState::default(),
                 window,
                 cx,
             )
@@ -782,6 +783,7 @@ fn added_server_survives_gui_restart() {
                     endpoint.clone(),
                     Some(Ok(initial)),
                     config::LoadedConfig::read(Some(config_path.clone())),
+                    gui_state::LoadedState::default(),
                     window,
                     cx,
                 )
@@ -819,6 +821,7 @@ fn added_server_survives_gui_restart() {
                 endpoint,
                 Some(Ok(initial)),
                 config::LoadedConfig::read(Some(config_path)),
+                gui_state::LoadedState::default(),
                 window,
                 cx,
             )

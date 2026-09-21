@@ -29,7 +29,7 @@ fn default_window_options_create_1280_by_720_window() {
     let _serial_guard = acquire_visual_test_lock();
     let app = TestAppContext::single();
     let handle = app.update(|cx| {
-        cx.open_window(default_window_options(cx), |_, cx| {
+        cx.open_window(default_window_options(None, cx), |_, cx| {
             cx.new(|_| gpui_kit::Empty)
         })
         .unwrap()
