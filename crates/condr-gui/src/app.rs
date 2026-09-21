@@ -25,6 +25,11 @@ mod terminal_panel;
 mod workspace;
 
 use crate::assets::{APP_LOGO, CondrAssets};
+
+/// Where the source lives and where the docs start; the About page and the Welcome
+/// page both point there.
+const REPOSITORY_URL: &str = "https://github.com/condrdev/condr";
+const DOCS_URL: &str = "https://condr.dev/docs/getting-started";
 use crate::terminal_element::{
     HoveredTerminalLink, TerminalElement, TerminalElementProps, TerminalPalette,
     TerminalRenderCache, link_at,

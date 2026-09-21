@@ -681,6 +681,11 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
         "without a Workspace there is nothing to open"
     );
 
+    assert!(
+        window.debug_bounds("welcome-github").is_some()
+            && window.debug_bounds("welcome-docs").is_some(),
+        "the Welcome page links to the repository and the docs"
+    );
     let button = window
         .debug_bounds("open-project")
         .expect("new workspace button should be rendered");

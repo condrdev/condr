@@ -410,6 +410,11 @@ pub(super) fn available_targets(roots: &InstallRoots, custom: &[CustomEditor]) -
     targets
 }
 
+/// Shows `path`, a directory on this machine, in the platform's file manager.
+pub(super) fn reveal(path: &Path) -> io::Result<()> {
+    launch(&file_manager(Platform::current()), path)
+}
+
 /// Starts the program on `path`, a directory or a file, and returns once it has been
 /// spawned. The child
 /// is reaped on a helper thread so a CLI that exits at once leaves no zombie behind.

@@ -423,7 +423,8 @@ impl Render for SettingsWindow {
                 .page(power_page(&self.owner))
                 .page(shortcuts_page())
                 .page(developer_page(&self.owner))
-                .page(licenses_page(&self.licenses)),
+                .page(licenses_page(&self.licenses))
+                .page(about_page()),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .page(server_terminal_page(&settings))
@@ -578,6 +579,103 @@ fn developer_page(owner: &WeakEntity<Condr>) -> SettingPage {
                 .description("Show GPUI frame rate and resource telemetry."),
             ),
         )
+        .group(
+            SettingGroup::new()
+                .title("Locations")
+                .item(location_row(
+                    owner,
+                    "Application",
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)),
+                ))
+                .item(location_row(
+                    owner,
+                    "Config",
+                    condr_core::config_directory(),
+                ))
+                .item(location_row(owner, "State", condr_core::state_directory()))
+                .item(location_row(owner, "Logs", condr_core::log_directory())),
+        )
+}
+
+/// One directory of this machine's Condr, its path as the description and an Open
+/// button that shows it in the file manager. A directory the platform cannot name
+/// has no button. Only this machine: the protocol carries no Server paths.
+fn location_row(
+    owner: &WeakEntity<Condr>,
+    label: &'static str,
+    path: Option<PathBuf>,
+) -> SettingItem {
+    let Some(path) = path else {
+        return SettingItem::new(label, SettingField::render(|_, _, _| div()))
+            .description("Not available on this platform.");
+    };
+    let description = SharedString::from(path.display().to_string());
+    let owner = owner.clone();
+    SettingItem::new(
+        label,
+        SettingField::render(move |_, _, _| {
+            let owner = owner.clone();
+            let path = path.clone();
+            Button::new(SharedString::from(format!("open-location-{label}")))
+                .small()
+                .outline()
+                .label("Open")
+                .on_click(move |_, _, cx| {
+                    if let Err(error) = open_in::reveal(&path) {
+                        let _ = owner.update(cx, |owner, cx| {
+                            owner.report_error(format!("Failed to open {label}: {error}"), cx)
+                        });
+                    }
+                })
+        }),
+    )
+    .description(description)
+    .keywords(["directory", "folder", "path"])
+}
+
+fn about_page() -> SettingPage {
+    let link_row = |label: &'static str, button: &'static str, url: &'static str| {
+        SettingItem::new(
+            label,
+            SettingField::render(move |_, _, _| {
+                Button::new(SharedString::from(format!("about-{button}")))
+                    .small()
+                    .outline()
+                    .label(button)
+                    .on_click(move |_, _, cx| cx.open_url(url))
+            }),
+        )
+        .description(url)
+    };
+    SettingPage::new("About").icon(IconName::Info).group(
+        SettingGroup::new()
+            .item(
+                SettingItem::render(|_, _, cx| {
+                    h_flex()
+                        .gap_3()
+                        .items_center()
+                        .child(img(APP_LOGO).size_8())
+                        .child(
+                            v_flex().child(condr_core::APP_NAME).child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(concat!("Version ", env!("CARGO_PKG_VERSION"))),
+                            ),
+                        )
+                })
+                .keywords(["about", "version"]),
+            )
+            .item(
+                link_row("Source code", "GitHub", REPOSITORY_URL)
+                    .keywords(["github", "repository"]),
+            )
+            .item(
+                link_row("Documentation", "Docs", DOCS_URL).keywords(["docs", "website", "help"]),
+            ),
+    )
 }
 
 impl SettingsWindow {

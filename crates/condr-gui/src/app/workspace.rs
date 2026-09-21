@@ -377,6 +377,16 @@ fn welcome_row(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> 
         .child(div().flex_1())
 }
 
+/// A footer link on the welcome page: muted text that opens `url` in the browser.
+fn welcome_link(id: &'static str, label: &'static str, url: &'static str) -> Button {
+    Button::new(id)
+        .debug_selector(move || id.into())
+        .link()
+        .xsmall()
+        .label(label)
+        .on_click(move |_, _, cx| cx.open_url(url))
+}
+
 /// The strip's wording for a denied control; the busy reason is the Server's own words.
 fn viewing_only_text(reason: &str) -> &str {
     if reason == CONTROL_BUSY_REASON {
@@ -467,6 +477,16 @@ impl Condr {
                             Condr::add_server_menu(menu, connect_owner.clone())
                         }),
                     ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(welcome_link("welcome-github", "GitHub", REPOSITORY_URL))
+                    .child("·")
+                    .child(welcome_link("welcome-docs", "Docs", DOCS_URL)),
             )
             .into_any_element()
     }
