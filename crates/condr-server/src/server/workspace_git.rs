@@ -213,6 +213,11 @@ struct Watched {
     pending: Vec<PathBuf>,
     due: Option<Instant>,
     forced: bool,
+    /// The last window dropped paths past `MAX_PENDING_PATHS`.
+    overflow: bool,
+    /// Overflowing, all-ignored windows were skipped: a build is writing. The first quiet
+    /// window after them is scanned in full, in case a real change hid among the drops.
+    storm: bool,
 }
 
 impl GitWatcher {
@@ -286,6 +291,8 @@ fn run_watcher(
                     pending: Vec::new(),
                     due: None,
                     forced: false,
+                    overflow: false,
+                    storm: false,
                 });
                 if entry.root != root {
                     if let Some(watcher) = &mut watcher
@@ -342,7 +349,7 @@ fn run_watcher(
                             if entry.pending.len() < MAX_PENDING_PATHS {
                                 entry.pending.push(relative);
                             } else {
-                                entry.forced = true;
+                                entry.overflow = true;
                             }
                             entry.due = Some(now + GIT_WATCH_DEBOUNCE);
                         }
@@ -365,6 +372,7 @@ fn run_watcher(
             entry.due = None;
             let pending = std::mem::take(&mut entry.pending);
             let forced = std::mem::take(&mut entry.forced);
+            let overflow = std::mem::take(&mut entry.overflow);
             // `git status` rewriting the index, a commit or a fetch touch only `.git`: the
             // Git state may move, the working tree the Files sidebar and Preview Tabs show
             // did not. Without this every status-line poll refetched every open file.
@@ -375,9 +383,13 @@ fn run_watcher(
             let next = match discover_repository(&root) {
                 Ok(None) => Ok(None),
                 Ok(Some(repository)) => {
-                    if !forced && repository.ignores_all(&pending) {
+                    // An overflowing window is judged by its sample and, while all
+                    // ignored, only marks the storm; the first window after it scans.
+                    if !forced && (overflow || !entry.storm) && repository.ignores_all(&pending) {
+                        entry.storm = overflow;
                         continue;
                     }
+                    entry.storm = false;
                     watch_git_dir(
                         entry,
                         watcher.as_mut(),
@@ -409,8 +421,10 @@ fn run_watcher(
     }
 }
 
-/// Past this many distinct paths in one window the batch is treated as "everything changed"
-/// rather than checked path by path against the ignore rules.
+/// Past this many paths in one window the rest are dropped and the kept ones stand in for
+/// the batch: a build writing thousands of ignored files must not turn into a status walk
+/// per window. A real change hidden behind them is picked up by the next event or by the
+/// terminal-activity scan.
 const MAX_PENDING_PATHS: usize = 256;
 
 fn subscribe(
