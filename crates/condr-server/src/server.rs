@@ -38,10 +38,9 @@ use condr_core::{
     TerminalAgentProbe, TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget,
     TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate,
     TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree,
-    default_worktree_root, discover_repository, open_worktree, remove_worktree,
-    validate_worktree_removal,
+    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
 };
-use config::{load_shell, save_shell};
+use config::{load_shell, load_worktree_root, save_shell};
 use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
@@ -613,7 +612,7 @@ impl RuntimeState {
             git_watcher: None,
             workspace_git_scanned_at: std::collections::HashMap::new(),
             workspace_git_heads: std::collections::HashMap::new(),
-            worktree_root: default_worktree_root(),
+            worktree_root: load_worktree_root(config_path.as_deref()),
             active_controller: None,
             focused_terminal: None,
             events: std::collections::VecDeque::new(),

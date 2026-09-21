@@ -23,8 +23,8 @@ pub use files::{
 pub use git::{
     DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitChangeEntry, GitChangeStatus,
     GitChanges, GitDiffStat, GitError, GitFingerprint, GitRepository, GitUpstream, MAX_DIFF_BYTES,
-    MAX_GIT_CHANGES, create_worktree, default_worktree_root, discover_repository, open_worktree,
-    remove_worktree, validate_worktree_removal,
+    MAX_GIT_CHANGES, create_worktree, discover_repository, open_worktree, remove_worktree,
+    validate_worktree_removal, worktree_destination,
 };
 pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,

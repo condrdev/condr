@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use condr_core::{
     GitUpstream, Session, create_worktree, discover_repository, open_worktree, remove_worktree,
+    worktree_destination,
 };
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
@@ -55,8 +56,22 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     assert_eq!(parent.branch(), Some("main"));
     assert!(!parent.is_linked_worktree());
 
+    // Without a configured root the checkout lands beside the repository, on the same volume.
+    let beside = create_worktree(&parent, "feature/beside", None).unwrap();
+    assert_eq!(
+        beside.root(),
+        temp.path()
+            .join("repository.worktrees")
+            .join("feature-beside")
+    );
+    remove_worktree(&parent, &beside).unwrap();
+
     let worktree_root = temp.path().join("worktrees");
-    let existing = create_worktree(&parent, "existing", &worktree_root).unwrap();
+    let existing = create_worktree(&parent, "existing", Some(&worktree_root)).unwrap();
+    assert_eq!(
+        existing.root(),
+        worktree_root.join("repository").join("existing")
+    );
     assert_eq!(existing.branch(), Some("existing"));
     assert!(existing.is_linked_worktree());
     assert_eq!(open_worktree(&parent, existing.root()).unwrap(), existing);
@@ -68,7 +83,7 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     );
     assert!(git_stdout(existing.root(), ["status", "--porcelain"]).is_empty());
     assert!(existing.root().join("README.md").is_file());
-    let duplicate = create_worktree(&parent, "existing", temp.path().join("elsewhere"));
+    let duplicate = create_worktree(&parent, "existing", None);
     assert!(
         duplicate
             .unwrap_err()
@@ -83,7 +98,7 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
         ["show-ref", "--verify", "refs/heads/existing"]
     ));
 
-    let dirty = create_worktree(&parent, "feature/dirty", &worktree_root).unwrap();
+    let dirty = create_worktree(&parent, "feature/dirty", Some(&worktree_root)).unwrap();
     fs::write(dirty.root().join("untracked.txt"), "keep me\n").unwrap();
     let error = remove_worktree(&parent, &dirty).unwrap_err();
     assert!(error.to_string().contains("modified or untracked"));
@@ -281,4 +296,40 @@ fn git_status<const N: usize>(cwd: &Path, args: [&str; N]) -> bool {
         .status()
         .unwrap()
         .success()
+}
+
+#[test]
+fn worktree_destination_follows_the_configured_root_kind() {
+    let repo = Path::new("/srv/code/condr");
+    assert_eq!(
+        worktree_destination(repo, "feature/x", None),
+        PathBuf::from("/srv/code/condr.worktrees/feature-x")
+    );
+    let shared = if cfg!(windows) {
+        "C:/data/worktrees"
+    } else {
+        "/data/worktrees"
+    };
+    assert_eq!(
+        worktree_destination(repo, "feature/x", Some(Path::new(shared))),
+        Path::new(shared).join("condr").join("feature-x")
+    );
+    assert_eq!(
+        worktree_destination(repo, "feature/x", Some(Path::new(".."))),
+        PathBuf::from("/srv/code/condr/../feature-x")
+    );
+    assert_eq!(
+        worktree_destination(repo, "feature/x", Some(Path::new(".worktrees"))),
+        PathBuf::from("/srv/code/condr/.worktrees/feature-x")
+    );
+    let home = dirs::home_dir().unwrap();
+    assert_eq!(
+        worktree_destination(repo, "feature/x", Some(Path::new("~/worktrees"))),
+        home.join("worktrees").join("condr").join("feature-x")
+    );
+    // `~user` is a literal directory name, not a home shorthand.
+    assert_eq!(
+        worktree_destination(repo, "feature/x", Some(Path::new("~other"))),
+        PathBuf::from("/srv/code/condr/~other/feature-x")
+    );
 }

@@ -76,6 +76,16 @@ pub(super) fn load_shell(path: Option<&std::path::Path>) -> String {
     .unwrap_or_default()
 }
 
+/// `[server] worktree_root` from the Server's `config.toml`, as written: `condr_core::worktree_destination`
+/// expands a leading `~` and resolves a relative path against each repository. `None`
+/// (unset, blank, missing or malformed file) puts each checkout in `<repo>.worktrees/<branch>`
+/// beside its repository.
+pub(super) fn load_worktree_root(path: Option<&std::path::Path>) -> Option<PathBuf> {
+    let value = condr_core::read_config_value(path?, &["server"], "worktree_root").ok()??;
+    let root = value.as_str()?.trim();
+    (!root.is_empty()).then(|| PathBuf::from(root))
+}
+
 /// Writes `[server.terminal] shell` back, keeping the rest of the hand-editable file
 /// (other keys, comments, formatting) as it was.
 pub(super) fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> {

@@ -18,7 +18,7 @@ pub(super) enum ExternalLayoutPlan {
         parent_workspace_id: WorkspaceId,
         parent_root: PathBuf,
         branch: String,
-        worktree_root: PathBuf,
+        worktree_root: Option<PathBuf>,
     },
     OpenWorktree {
         parent_workspace_id: WorkspaceId,
@@ -89,14 +89,11 @@ pub(super) fn external_layout_plan(
                 .ok_or_else(|| "unknown parent Workspace".to_string())?
                 .root_directory()
                 .to_path_buf();
-            let worktree_root = state.worktree_root.clone().ok_or_else(|| {
-                "cannot determine the managed worktree directory for this user".to_string()
-            })?;
             ExternalLayoutPlan::CreateWorktree {
                 parent_workspace_id: *parent_workspace_id,
                 parent_root,
                 branch: branch.clone(),
-                worktree_root,
+                worktree_root: state.worktree_root.clone(),
             }
         }
         LayoutCommand::OpenWorktree {
@@ -156,7 +153,7 @@ pub(super) fn prepare_external_layout(
             let parent = discover_repository(&parent_root)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
-            let child = create_worktree(&parent, &branch, &worktree_root)
+            let child = create_worktree(&parent, &branch, worktree_root.as_deref())
                 .map_err(|error| error.to_string())?;
             // The shell starts in `apply_prepared_external_layout`, once the Pane exists
             // and its id can go into the shell's environment.

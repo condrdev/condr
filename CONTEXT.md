@@ -83,7 +83,7 @@ A conversation owned and stored by a native Agent CLI, identified by that CLI’
 _Avoid_: Session, process snapshot
 
 **Managed Worktree**:
-A linked Git worktree created by Condr and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact.
+A linked Git worktree created by Condr and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact. It lives in `<repo>.worktrees/<branch>` beside the repository, or where `[server] worktree_root` says: absolute or `~` paths group by repository, relative paths resolve against the repository (ADR 0002).
 _Avoid_: Git Workspace, any detected worktree
 
 **Session Snapshot**:

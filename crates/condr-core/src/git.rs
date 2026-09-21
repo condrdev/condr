@@ -217,16 +217,45 @@ fn count_commits(
     Ok(count)
 }
 
-pub fn default_worktree_root() -> Option<PathBuf> {
-    crate::data_directory().map(|root| root.join("worktrees"))
+/// Where a new checkout of `parent` for `branch` goes. Without a configured root it is
+/// `<repo>.worktrees/<slug>` beside the repository, so it stays on the same volume and in
+/// sight of the user. A configured root that is absolute, or starts with `~` (the home
+/// directory), gathers every repository's checkouts as `<root>/<repo>/<slug>`; a relative
+/// one is resolved against the repository itself and holds `<repo>/<root>/<slug>`, since
+/// a per-repository place needs no repository grouping.
+pub fn worktree_destination(parent: &Path, branch: &str, worktree_root: Option<&Path>) -> PathBuf {
+    let repo_name = parent
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("repository");
+    let slug = branch_slug(branch);
+    match worktree_root {
+        Some(root) => match root.strip_prefix("~") {
+            // No home directory is a broken environment; the repository is the only anchor left.
+            Ok(rest) => dirs::home_dir()
+                .unwrap_or_else(|| parent.to_path_buf())
+                .join(rest)
+                .join(repo_name)
+                .join(slug),
+            Err(_) if root.is_absolute() => root.join(repo_name).join(slug),
+            Err(_) => parent.join(root).join(slug),
+        },
+        None => parent
+            .parent()
+            .unwrap_or(parent)
+            .join(format!("{repo_name}.worktrees"))
+            .join(slug),
+    }
 }
 
 /// `git worktree add`: registers the checkout under `<common>/worktrees/<id>`, creates the
-/// branch from HEAD when it does not exist yet, and checks its tree out into the destination.
+/// branch from HEAD when it does not exist yet, and checks its tree out into
+/// [`worktree_destination`].
 pub fn create_worktree(
     parent: &GitRepository,
     branch: &str,
-    worktree_root: impl AsRef<Path>,
+    worktree_root: Option<&Path>,
 ) -> Result<GitRepository, GitError> {
     if parent.is_linked_worktree() {
         return Err(GitError(
@@ -239,16 +268,7 @@ pub fn create_worktree(
     }
     let reference = branch_ref_name(branch)?;
 
-    let repo_name = parent
-        .root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repository");
-    let destination = worktree_root
-        .as_ref()
-        .join(repo_name)
-        .join(branch_slug(branch));
+    let destination = worktree_destination(&parent.root, branch, worktree_root);
     if destination.exists() {
         return Err(GitError(format!(
             "worktree destination already exists: {}",
