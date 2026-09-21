@@ -86,6 +86,10 @@ impl ServerIdentity {
         self.key.public()
     }
 
+    pub(crate) fn device_key(&self) -> &DeviceKey {
+        &self.key
+    }
+
     /// Whether `remote` may connect without an invite, as of the store on disk right now.
     pub fn is_authorized(&self, remote: &PublicKey) -> io::Result<bool> {
         if self.always_authorized.contains(remote) {
@@ -114,6 +118,23 @@ impl ServerIdentity {
         })
     }
 
+    /// Whether `presented` is the pending invite, compared in constant time; a Peer-to-peer
+    /// Device the store does not know redeems its invite this way (ADR 0026).
+    pub(crate) fn pending_invite_matches(&self, presented: &Secret) -> io::Result<bool> {
+        let Some(store) = &self.store else {
+            return Ok(false);
+        };
+        Ok(read_invite(store)?.is_some_and(|invite| {
+            invite
+                .secret
+                .0
+                .iter()
+                .zip(presented.0.iter())
+                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                == 0
+        }))
+    }
+
     /// The pre-shared key to answer `remote` with: the zero key for an authorized device,
     /// or the pending invite for an unknown one. `None` refuses the peer.
     pub(super) fn psk_for(
@@ -131,7 +152,7 @@ impl ServerIdentity {
 
     /// Records `remote` as paired, provided `invite` is still the pending one: the first
     /// device to finish wins, and a stale invite cannot consume a newer one.
-    pub(super) fn complete_pairing(
+    pub(crate) fn complete_pairing(
         &self,
         remote: PublicKey,
         name: &str,

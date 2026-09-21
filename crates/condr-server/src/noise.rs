@@ -128,6 +128,11 @@ impl DeviceKey {
         &self.noise_private
     }
 
+    /// The Ed25519 seed, which is also this Device's Peer-to-peer secret key.
+    pub(crate) fn seed(&self) -> &[u8; 32] {
+        &self.seed
+    }
+
     /// Reads the hex seed at `path`, or generates one and stores it owner-only.
     /// Two processes creating the same key at once both end up with the one that won.
     pub fn load_or_create(path: &Path) -> io::Result<Self> {
@@ -163,6 +168,14 @@ impl Secret {
 
     pub fn to_hex(&self) -> String {
         hex_encode(&self.0)
+    }
+
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 }
 

@@ -25,6 +25,8 @@ socket2.workspace = true
 getrandom.workspace = true
 curve25519-dalek.workspace = true
 sha2.workspace = true
+iroh.workspace = true
+url.workspace = true
 toml_edit.workspace = true
 condr-core = { path = "../condr-core" }
 tokio.workspace = true

@@ -80,6 +80,9 @@ enum ServerCommand {
         /// Also listen on this TCP address from now on (saved to config.toml)
         #[arg(long, value_name = "ADDR")]
         listen: Option<SocketAddr>,
+        /// Also accept Peer-to-peer connections from now on (saved to config.toml)
+        #[arg(long)]
+        p2p: bool,
         /// Where the session snapshot is persisted
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
@@ -89,6 +92,9 @@ enum ServerCommand {
         /// Also listen on this TCP address from now on (saved to config.toml)
         #[arg(long, value_name = "ADDR")]
         listen: Option<SocketAddr>,
+        /// Also accept Peer-to-peer connections from now on (saved to config.toml)
+        #[arg(long)]
+        p2p: bool,
         /// Where the session snapshot is persisted
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
@@ -133,6 +139,9 @@ enum ServerCommand {
         /// Also listen on this TCP address, overriding config.toml for this run
         #[arg(long, value_name = "ADDR")]
         listen: Option<SocketAddr>,
+        /// Also accept Peer-to-peer connections, overriding config.toml for this run
+        #[arg(long)]
+        p2p: bool,
         /// Where the session snapshot is persisted
         #[arg(long, value_name = "PATH")]
         snapshot: Option<PathBuf>,
@@ -257,7 +266,16 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             condr_server::ssh::bridge(&endpoint.unwrap_or_else(condr_server::default_socket_path))?;
             Ok(0)
         }
-        ServerCommand::Start { listen, snapshot } | ServerCommand::Restart { listen, snapshot } => {
+        ServerCommand::Start {
+            listen,
+            p2p,
+            snapshot,
+        }
+        | ServerCommand::Restart {
+            listen,
+            p2p,
+            snapshot,
+        } => {
             // Shutdown terminates every Pane's process tree, including a restart CLI
             // running inside it, before that CLI could launch the replacement Server.
             if restart && std::env::var_os("CONDR_PANE_ID").is_some() {
@@ -277,6 +295,16 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     )
                 })?;
                 config.listen = Some(address);
+            }
+            if p2p {
+                let path = config_path()?;
+                condr_server::save_p2p(&path, true).map_err(|error| {
+                    failure(
+                        format!("could not save the p2p setting to {}", path.display()),
+                        [error.to_string()],
+                    )
+                })?;
+                config.p2p = true;
             }
             if let Some(path) = snapshot {
                 config = config.with_snapshot_path(path);
@@ -302,6 +330,13 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 }
                 (None, _) => {}
             }
+            match (config.p2p, already_running) {
+                (true, false) => println!("also accepting Peer-to-peer connections"),
+                (true, true) => println!(
+                    "the running Server keeps its previous Peer-to-peer setting; restart it to apply"
+                ),
+                (false, _) => {}
+            }
             Ok(0)
         }
         ServerCommand::Status { json } => {
@@ -323,6 +358,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             };
             let ServerAdminResponse::Status {
                 listen,
+                p2p,
                 connected,
                 version,
                 uptime_secs,
@@ -347,6 +383,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         "version": version,
                         "protocol": condr_core::protocol::PROTOCOL_VERSION,
                         "listen": listen,
+                        "p2p": p2p,
                         "connected_devices": connected,
                         "uptime_secs": uptime_secs,
                         "workspaces": workspaces,
@@ -368,6 +405,9 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             );
             if let Some(address) = listen {
                 println!("listening at tcp://{address}");
+            }
+            if p2p {
+                println!("accepting Peer-to-peer connections");
             }
             println!(
                 "{workspaces} workspace(s), {tabs} tab(s), {panes} pane(s), {agents} agent(s)"
@@ -414,6 +454,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
         ServerCommand::Run {
             endpoint,
             listen,
+            p2p,
             snapshot,
             detached,
         } => {
@@ -423,6 +464,9 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             };
             if let Some(address) = listen {
                 config.listen = Some(address);
+            }
+            if p2p {
+                config.p2p = true;
             }
             if let Some(path) = snapshot {
                 config = config.with_snapshot_path(path);
@@ -444,22 +488,31 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             let directory = identity_directory()?;
             let identity = load_identity(&directory)?;
             let invite = noise::create_invite(&directory)?;
-            let port = ServerConfig::default()
-                .listen
-                .map_or_else(|| "<port>".to_owned(), |address| address.port().to_string());
+            let config = ServerConfig::default();
+            if config.listen.is_none() && !config.p2p {
+                println!(
+                    "neither a TCP listener nor Peer-to-peer is enabled; run \
+                     `condr server start --listen <addr>` or `condr server start --p2p` first"
+                );
+                return Ok(1);
+            }
             println!(
                 "invite valid for {} minutes; in Condr, Connect Remote Device with",
                 noise::INVITE_TTL.as_secs() / 60
             );
-            println!(
-                "  tcp://{}.{}@<host>:{port}",
-                identity.public_key(),
-                invite.secret.to_hex()
-            );
-            if port == "<port>" {
+            if let Some(address) = config.listen {
                 println!(
-                    "no TCP listener is configured yet; start one with \
-                     `condr server start --listen <addr>`"
+                    "  tcp://{}.{}@<host>:{}",
+                    identity.public_key(),
+                    invite.secret.to_hex(),
+                    address.port()
+                );
+            }
+            if config.p2p {
+                println!(
+                    "  p2p://{}.{}",
+                    identity.public_key(),
+                    invite.secret.to_hex()
                 );
             }
             Ok(0)
@@ -577,7 +630,7 @@ mod tests {
 
     #[test]
     fn lifecycle_commands_parse_their_supported_options() {
-        let ServerCommand::Start { listen, snapshot } = parse(&[
+        let ServerCommand::Start { listen, snapshot, .. } = parse(&[
             "start",
             "--listen",
             "127.0.0.1:4242",
@@ -590,7 +643,7 @@ mod tests {
         assert_eq!(listen, Some("127.0.0.1:4242".parse().unwrap()));
         assert_eq!(snapshot, Some("state.snapshot".into()));
 
-        let ServerCommand::Restart { listen, snapshot } = parse(&[
+        let ServerCommand::Restart { listen, snapshot, .. } = parse(&[
             "restart",
             "--listen",
             "127.0.0.1:4243",
@@ -606,6 +659,7 @@ mod tests {
             parse(&["restart"]),
             Ok(ServerCommand::Restart {
                 listen: None,
+                p2p: false,
                 snapshot: None
             })
         ));

@@ -36,6 +36,9 @@ getrandom = "0.3"
 curve25519-dalek = { version = "4.1", default-features = false }
 # Ed25519 seed -> X25519 Noise key (ADR 0025); the hash Ed25519 itself uses.
 sha2 = { version = "0.10", default-features = false }
+# Peer-to-peer connections (ADR 0026): QUIC dialled by Device key, hole punching, relay.
+iroh = { version = "1.2", default-features = false, features = ["tls-ring"] }
+url = "2"
 regex = "1"
 # Protocol relative paths: `/`-separated whatever platform the client or Server runs on.
 relative-path = { version = "2.0", features = ["serde"] }

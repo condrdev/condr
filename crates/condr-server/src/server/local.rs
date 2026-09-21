@@ -172,6 +172,9 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
     if let Some(address) = config.listen {
         command.arg("--listen").arg(address.to_string());
     }
+    if config.p2p {
+        command.arg("--p2p");
+    }
     if let Some(path) = config.snapshot_path() {
         command.arg("--snapshot").arg(path);
     }

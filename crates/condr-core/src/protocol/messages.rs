@@ -18,6 +18,17 @@ pub struct Hello {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello(Hello),
+    /// First frame of a Peer-to-peer connection from a Device the Server does not know:
+    /// the invite it redeems (ADR 0026). The Server records the Device once `Hello` follows.
+    Credential {
+        invite: [u8; 32],
+    },
+    /// First frame from a local Client asking its own Server, the machine's Peer-to-peer
+    /// endpoint, to dial `device` and splice this connection onto it (ADR 0025).
+    Tunnel {
+        device: [u8; 32],
+        invite: Option<[u8; 32]>,
+    },
     SnapshotRequest {
         session_id: SessionId,
     },
@@ -776,6 +787,8 @@ pub enum ServerMessage {
 pub enum ServerAdminResponse {
     Status {
         listen: Option<String>,
+        /// Whether `[server.p2p] enabled` accepts Peer-to-peer connections.
+        p2p: bool,
         connected: Vec<String>,
         /// The Server binary's crate version.
         version: String,

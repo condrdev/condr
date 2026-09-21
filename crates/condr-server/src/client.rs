@@ -311,8 +311,10 @@ impl ClientConnection {
             FramingError::Io(error) => error,
             other => io::Error::other(other.to_string()),
         };
-        // SSH also establishes its encrypted session before the first protocol byte.
-        let timeout = if matches!(stream, EndpointStream::Ssh(_)) {
+        // SSH establishes its encrypted session before the first protocol byte, and a
+        // tunnelled Peer-to-peer dial looks the Device up, reaches the relay and punches
+        // through before the remote answers.
+        let timeout = if matches!(stream, EndpointStream::Ssh(_) | EndpointStream::Tunnel(_)) {
             Duration::from_secs(15)
         } else {
             crate::server::HANDSHAKE_TIMEOUT

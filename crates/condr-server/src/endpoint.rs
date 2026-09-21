@@ -28,6 +28,56 @@ pub enum Endpoint {
     Local(PathBuf),
     Tcp(TcpEndpoint),
     Ssh(SshEndpoint),
+    P2p(P2pEndpoint),
+}
+
+/// A Device reached Peer-to-peer by its key alone (ADR 0026). The Client does not dial
+/// it itself: its own local Server is the machine's Peer-to-peer endpoint, so `connect`
+/// opens the local socket and asks for a `Tunnel` (ADR 0025).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct P2pEndpoint {
+    pub device: PublicKey,
+    pub invite: Option<Secret>,
+}
+
+impl P2pEndpoint {
+    /// Parses `p2p://<id>[.<invite>]`, as printed by an invite.
+    pub fn parse(text: &str) -> io::Result<Self> {
+        let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
+        let credentials = text
+            .trim()
+            .strip_prefix("p2p://")
+            .ok_or_else(|| invalid("expected p2p://<id>[.<invite>]"))?
+            .trim_end_matches('/');
+        let (device, invite) = match credentials.split_once('.') {
+            Some((device, invite)) => (device, Some(Secret::parse(invite)?)),
+            None => (credentials, None),
+        };
+        Ok(Self {
+            device: PublicKey::parse(device)?,
+            invite,
+        })
+    }
+
+    pub fn without_invite(mut self) -> Self {
+        self.invite = None;
+        self
+    }
+
+    /// Asks this machine's Server to dial the Device; the returned stream carries the
+    /// remote Server's frames from its `Welcome` on, or one `Error` if the dial failed.
+    fn connect(&self) -> io::Result<EndpointStream> {
+        let mut stream = connect_local(&default_socket_path())?;
+        condr_core::protocol::write_message(
+            &mut stream,
+            &condr_core::protocol::ClientMessage::Tunnel {
+                device: *self.device.as_bytes(),
+                invite: self.invite.as_ref().map(|invite| *invite.as_bytes()),
+            },
+        )
+        .map_err(|error| io::Error::other(error.to_string()))?;
+        Ok(EndpointStream::Tunnel(stream))
+    }
 }
 
 /// Everything a Client needs to reach one TCP Server: where it listens, whose Device key
@@ -121,6 +171,9 @@ impl Endpoint {
         if text.starts_with("ssh://") {
             return SshEndpoint::parse(text).map(Self::Ssh);
         }
+        if text.starts_with("p2p://") {
+            return P2pEndpoint::parse(text).map(Self::P2p);
+        }
         if text.starts_with("tcp://") {
             let key = client_key.ok_or_else(|| {
                 io::Error::other("this device has no TCP key; see the startup error")
@@ -129,7 +182,7 @@ impl Endpoint {
         }
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "use a tcp:// or ssh:// address",
+            "use a tcp://, ssh:// or p2p:// address",
         ))
     }
 
@@ -152,6 +205,7 @@ impl Endpoint {
             )
             .map(EndpointStream::Tcp),
             Self::Ssh(ssh) => ssh.connect().map(EndpointStream::Ssh),
+            Self::P2p(p2p) => p2p.connect(),
         }
     }
 
@@ -170,7 +224,7 @@ impl Endpoint {
     /// A failed connect in words. A missing socket file and a refused TCP connect both
     /// mean nobody is listening; the raw OS text says neither that nor which endpoint.
     pub fn describe_connect_error(&self, error: &io::Error) -> String {
-        if matches!(self, Self::Ssh(_)) {
+        if matches!(self, Self::Ssh(_) | Self::P2p(_)) {
             return format!("could not connect to {self}: {error}");
         }
         match error.kind() {
@@ -193,14 +247,14 @@ impl Endpoint {
     pub fn as_local_path(&self) -> Option<&Path> {
         match self {
             Self::Local(path) => Some(path),
-            Self::Tcp(_) | Self::Ssh(_) => None,
+            Self::Tcp(_) | Self::Ssh(_) | Self::P2p(_) => None,
         }
     }
 
     /// The host and port of a TCP endpoint, which identify a saved Server in the GUI.
     pub fn tcp_host_port(&self) -> Option<(&str, u16)> {
         match self {
-            Self::Local(_) | Self::Ssh(_) => None,
+            Self::Local(_) | Self::Ssh(_) | Self::P2p(_) => None,
             Self::Tcp(tcp) => Some((tcp.host.as_str(), tcp.port)),
         }
     }
@@ -213,6 +267,7 @@ impl fmt::Display for Endpoint {
             Self::Local(path) => write!(f, "{}", path.display()),
             Self::Tcp(tcp) => write!(f, "tcp://{}", tcp.authority()),
             Self::Ssh(ssh) => ssh.fmt(f),
+            Self::P2p(p2p) => write!(f, "p2p://{}", p2p.device),
         }
     }
 }

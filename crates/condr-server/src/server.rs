@@ -62,7 +62,7 @@ use terminal_stream::{
 };
 use workspace_git::*;
 
-pub use config::{ServerConfig, load_listen, save_listen};
+pub use config::{ServerConfig, load_listen, load_p2p, save_listen, save_p2p};
 pub use local::{
     connected_devices, ensure_local_server, ensure_server, ensure_server_from, probe_server,
     restart_server, restart_server_from, revoke_devices, server_status, stop_server,
@@ -147,6 +147,10 @@ pub struct BoundServer {
     lifecycle: Arc<ServerLifecycle>,
     state: Arc<Mutex<RuntimeState>>,
     startup_terminals: Vec<StartedTerminal>,
+    /// `[server.p2p] enabled`: bind the Peer-to-peer endpoint at startup and accept (ADR 0026).
+    p2p_enabled: bool,
+    /// The identity the Peer-to-peer endpoint uses; `None` loads it from disk on demand.
+    identity: Option<Arc<ServerIdentity>>,
 }
 
 impl BoundServer {
@@ -155,6 +159,7 @@ impl BoundServer {
         local.set_nonblocking(true)?;
         let mut endpoint = Endpoint::local(&config.socket_path);
         let mut tcp = None;
+        let mut resolved_identity = config.identity.clone();
         if let Some(address) = config.listen {
             let identity = match config.identity {
                 Some(identity) => identity,
@@ -162,6 +167,7 @@ impl BoundServer {
                     &crate::noise::identity_directory()?,
                 )?),
             };
+            resolved_identity = Some(Arc::clone(&identity));
             let listener = match EndpointListener::tcp(address, Arc::clone(&identity)) {
                 Ok(listener) => listener,
                 Err(error) => {
@@ -205,6 +211,8 @@ impl BoundServer {
             lifecycle: Arc::new(ServerLifecycle::default()),
             state,
             startup_terminals,
+            p2p_enabled: config.p2p,
+            identity: resolved_identity,
         })
     }
 
@@ -260,10 +268,30 @@ impl BoundServer {
             });
         }
 
+        // This machine's only Peer-to-peer endpoint (ADR 0025): it accepts remote Devices
+        // when enabled and dials for local `Tunnel` frames either way. Built here because
+        // it needs the runtime this `spawn_blocking` task runs on.
+        let (p2p_sender, p2p_accepted) = std::sync::mpsc::channel();
+        let p2p = crate::p2p::P2pNode::new(
+            tokio::runtime::Handle::current(),
+            self.identity.clone(),
+            self.p2p_enabled,
+            crate::p2p::Network::Condr,
+            p2p_sender,
+        );
+        if self.p2p_enabled && let Err(error) = p2p.start() {
+            tracing::error!("p2p endpoint not bound: {error}");
+        }
+        self.state
+            .lock()
+            .expect("server state lock poisoned")
+            .p2p = Some(Arc::clone(&p2p));
+
         tracing::info!(
             version = env!("CARGO_PKG_VERSION"),
             pid = std::process::id(),
             tcp = self.tcp.is_some(),
+            p2p = self.p2p_enabled,
             "Server started"
         );
         let mut run_result = Ok(());
@@ -297,6 +325,17 @@ impl BoundServer {
                         break 'accept;
                     }
                 }
+            }
+            // Peer-to-peer connections arrive from the accept task on the runtime, not a
+            // listener, so they are drained from the channel the same way (ADR 0026).
+            while let Ok(stream) = p2p_accepted.try_recv() {
+                accepted = true;
+                let client_id = next_client_id;
+                next_client_id = next_client_id.wrapping_add(1);
+                let state = Arc::clone(&self.state);
+                let stop = Arc::clone(&self.stop);
+                let lifecycle = Arc::clone(&self.lifecycle);
+                thread::spawn(move || handle_client(stream, client_id, state, stop, lifecycle));
             }
             if !accepted {
                 thread::sleep(ACCEPT_POLL);
@@ -474,8 +513,12 @@ struct RuntimeState {
     focused_terminal: Option<PaneId>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
-    /// Live TCP peers by client id, so a revocation can drop their connections.
+    /// Live remote peers by client id, so a revocation can drop their connections. Named
+    /// for TCP but holds every remote transport, Peer-to-peer included (ADR 0025).
     tcp_peers: std::collections::HashMap<u64, (crate::noise::PublicKey, EndpointStream)>,
+    /// This machine's Peer-to-peer endpoint, so a `Tunnel` frame can dial (ADR 0026); set
+    /// once the runtime is up.
+    p2p: Option<Arc<crate::p2p::P2pNode>>,
     /// Clipboard images staged for each Client (ADR 0012); removed with the Client.
     staged_images: std::collections::HashMap<u64, Vec<PathBuf>>,
     settings_write: Arc<Mutex<()>>,
@@ -618,6 +661,7 @@ impl RuntimeState {
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             tcp_peers: std::collections::HashMap::new(),
+            p2p: None,
             staged_images: std::collections::HashMap::new(),
             settings_write: Arc::new(Mutex::new(())),
             persistence,

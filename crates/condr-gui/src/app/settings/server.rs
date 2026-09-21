@@ -179,6 +179,7 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
                 Endpoint::Local(_) => ("Local", None),
                 Endpoint::Ssh(ssh) => ("SSH", Some(ssh.destination().to_owned())),
                 Endpoint::Tcp(tcp) => ("TCP", Some(tcp.authority())),
+                Endpoint::P2p(p2p) => ("Peer-to-peer", Some(p2p.device.to_hex())),
             };
             (c.status, kind, address)
         })

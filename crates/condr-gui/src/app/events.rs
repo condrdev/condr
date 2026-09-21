@@ -603,6 +603,8 @@ impl Condr {
                 match response {
                     ServerAdminResponse::Status {
                         listen,
+                        // ponytail: shown in Settings alongside `listen` in the p2p GUI pass.
+                        p2p: _,
                         connected,
                         version,
                         uptime_secs,

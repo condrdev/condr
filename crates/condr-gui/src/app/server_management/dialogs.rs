@@ -123,6 +123,8 @@ impl Condr {
                 let label = match &endpoint {
                     Endpoint::Tcp(tcp) => tcp.authority(),
                     Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
+                    // ponytail: short id as the default label; renaming lands in the p2p GUI pass.
+                    Endpoint::P2p(p2p) => format!("p2p {}", &p2p.device.to_hex()[..8]),
                     Endpoint::Local(_) => unreachable!("remote address parser"),
                 };
                 self.connections
@@ -149,7 +151,9 @@ impl Condr {
         let Some((label, endpoint)) = self.connection(key).and_then(|connection| match &connection
             .endpoint
         {
-            Endpoint::Local(_) => None,
+            // A p2p device has no editable host/port (its address is `p2p://<id>`); the host/port
+            // dialog is skipped for it, same as Local. ponytail: renaming is a p2p GUI-pass item.
+            Endpoint::Local(_) | Endpoint::P2p(_) => None,
             endpoint => Some((connection.label.clone(), endpoint.clone())),
         }) else {
             return;
@@ -161,7 +165,7 @@ impl Condr {
                 Some(tcp.server_key.to_hex()),
             ),
             Endpoint::Ssh(ssh) => (ssh.to_string(), String::new(), None),
-            Endpoint::Local(_) => unreachable!(),
+            Endpoint::Local(_) | Endpoint::P2p(_) => unreachable!("no host/port dialog"),
         };
         let ssh = server_key.is_none();
         // Typing is limited to what the field can hold: a host name or address, a port
@@ -317,7 +321,7 @@ impl Condr {
             return Ok(());
         };
         let endpoint = match &connection.endpoint {
-            Endpoint::Local(_) => return Ok(()),
+            Endpoint::Local(_) | Endpoint::P2p(_) => return Ok(()),
             Endpoint::Tcp(tcp) => {
                 TcpEndpoint::split_authority(&format!("{host}:{port}")).map(|(host, port)| {
                     Endpoint::Tcp(TcpEndpoint {

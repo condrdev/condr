@@ -6,6 +6,8 @@ use super::*;
 pub struct ServerConfig {
     pub socket_path: PathBuf,
     pub listen: Option<std::net::SocketAddr>,
+    /// `[server.p2p] enabled`: accept Peer-to-peer connections (ADR 0026).
+    pub p2p: bool,
     pub(super) snapshot_path: Option<PathBuf>,
     /// The Server's own `config.toml`; `None` keeps settings in memory only.
     pub(super) config_path: Option<PathBuf>,
@@ -30,6 +32,7 @@ impl Default for ServerConfig {
         let socket_path = default_socket_path();
         Self {
             listen: load_listen(config_path.as_deref()),
+            p2p: load_p2p(config_path.as_deref()),
             snapshot_path: default_snapshot_path(&socket_path),
             socket_path,
             config_path,
@@ -48,6 +51,26 @@ pub fn load_listen(path: Option<&std::path::Path>) -> Option<std::net::SocketAdd
         .trim()
         .parse()
         .ok()
+}
+
+/// `[server.p2p] enabled` from `config.toml`; absent or malformed means off.
+pub fn load_p2p(path: Option<&std::path::Path>) -> bool {
+    path.and_then(|path| {
+        condr_core::read_config_value(path, &["server", "p2p"], "enabled")
+            .ok()
+            .flatten()
+            .and_then(|value| value.as_bool())
+    })
+    .unwrap_or(false)
+}
+
+/// Persists `[server.p2p] enabled`, leaving every other key, comment and line as written.
+pub fn save_p2p(path: &std::path::Path, enabled: bool) -> io::Result<()> {
+    condr_core::update_config_values(
+        path,
+        &["server", "p2p"],
+        [("enabled", Some(toml_edit::value(enabled)))],
+    )
 }
 
 /// Persists `[server] listen`, or removes it for `None`, leaving every other key,
@@ -102,6 +125,7 @@ impl ServerConfig {
         let socket_path = socket_path.into();
         Self {
             listen: None,
+            p2p: false,
             snapshot_path: default_snapshot_path(&socket_path),
             socket_path,
             config_path: condr_core::config_path(),
@@ -115,6 +139,7 @@ impl ServerConfig {
         Self {
             socket_path: socket_path.into(),
             listen: None,
+            p2p: false,
             snapshot_path: None,
             config_path: None,
             identity: None,
@@ -137,6 +162,7 @@ impl ServerConfig {
         Ok(Self {
             socket_path,
             listen: Some(address),
+            p2p: false,
             snapshot_path: None,
             config_path: None,
             identity: Some(Arc::new(identity)),

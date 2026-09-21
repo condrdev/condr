@@ -15,6 +15,40 @@ impl Drop for PeerRegistration {
     }
 }
 
+/// Dials the Peer-to-peer Device a local `Tunnel` names and splices the local socket onto
+/// it, so the Client's next frame is the remote `Welcome` (ADR 0025). Any failure is one
+/// `Error` to the local socket, which then closes.
+fn tunnel(
+    local: EndpointStream,
+    state: &Arc<Mutex<RuntimeState>>,
+    device: [u8; 32],
+    invite: Option<[u8; 32]>,
+) {
+    let node = state
+        .lock()
+        .expect("server state lock poisoned")
+        .p2p
+        .clone();
+    let mut local = local;
+    let Some(node) = node else {
+        let _ = send_error(&mut local, state, "peer-to-peer is not available");
+        return;
+    };
+    let device = crate::noise::PublicKey::from_bytes(device);
+    let invite = invite.map(crate::noise::Secret::from_bytes);
+    match node.dial(device, invite.as_ref()) {
+        Ok(remote) => {
+            if let Err(error) = crate::p2p::splice(local, remote) {
+                tracing::debug!("tunnel ended: {error}");
+            }
+        }
+        Err(error) => {
+            tracing::warn!("tunnel dial failed: {error}");
+            let _ = send_error(&mut local, state, &format!("could not reach the device: {error}"));
+        }
+    }
+}
+
 /// Logs when the connection's thread leaves `handle_client`, whichever way it leaves.
 struct DisconnectLog;
 
@@ -40,21 +74,75 @@ pub(super) fn handle_client(
     {
         return;
     }
-    let hello = match condr_core::protocol::read_message::<_, ClientMessage>(&mut stream) {
-        Ok(ClientMessage::Hello(hello)) => hello,
-        Ok(_) => {
-            tracing::warn!("refused: expected Hello as first message");
-            let _ = send_error(&mut stream, &state, "expected Hello as first message");
-            return;
-        }
-        Err(error) => {
-            tracing::warn!("refused: invalid handshake frame: {error}");
-            let _ = send_error(
-                &mut stream,
-                &state,
-                &format!("invalid handshake frame: {error}"),
-            );
-            return;
+    let hello = loop {
+        let message = match condr_core::protocol::read_message::<_, ClientMessage>(&mut stream) {
+            Ok(message) => message,
+            Err(error) => {
+                tracing::warn!("refused: invalid handshake frame: {error}");
+                let _ = send_error(
+                    &mut stream,
+                    &state,
+                    &format!("invalid handshake frame: {error}"),
+                );
+                return;
+            }
+        };
+        match message {
+            // A local Client asking its own Server to reach a Peer-to-peer Device (ADR 0025).
+            // Only a local connection may tunnel, or any paired Device could hop through here.
+            ClientMessage::Tunnel { device, invite } => {
+                if !matches!(stream, EndpointStream::Local(_)) {
+                    tracing::warn!("refused: only a local connection may tunnel");
+                    let _ = send_error(&mut stream, &state, "only a local connection may tunnel");
+                    return;
+                }
+                tunnel(stream, &state, device, invite);
+                return;
+            }
+            // An unknown Peer-to-peer Device redeems its invite before Hello (ADR 0026).
+            ClientMessage::Credential { invite } => {
+                let outcome = match &stream {
+                    EndpointStream::P2p(peer) if peer.needs_credential().unwrap_or(false) => {
+                        peer.present_invite(&crate::noise::Secret::from_bytes(invite))
+                    }
+                    _ => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unexpected credential",
+                    )),
+                };
+                if let Err(error) = outcome {
+                    tracing::warn!("refused: {error}");
+                    let message = if error.kind() == io::ErrorKind::InvalidData {
+                        "unexpected credential"
+                    } else {
+                        "not authorized; a valid invite is required"
+                    };
+                    let _ = send_error(&mut stream, &state, message);
+                    return;
+                }
+            }
+            ClientMessage::Hello(hello) => {
+                // An unknown Peer-to-peer Device that skipped the invite is refused here.
+                let unproven = matches!(
+                    &stream,
+                    EndpointStream::P2p(peer) if peer.needs_credential().unwrap_or(true)
+                );
+                if unproven {
+                    tracing::warn!("refused: not authorized");
+                    let _ = send_error(
+                        &mut stream,
+                        &state,
+                        "not authorized; a valid invite is required",
+                    );
+                    return;
+                }
+                break hello;
+            }
+            _ => {
+                tracing::warn!("refused: expected Hello as first message");
+                let _ = send_error(&mut stream, &state, "expected Hello as first message");
+                return;
+            }
         }
     };
 
@@ -1255,7 +1343,11 @@ pub(super) fn handle_client(
                 queue_message(&outbound, response)
             }
             ClientMessage::Detach => true,
-            ClientMessage::Hello(Hello { .. }) => false,
+            // Handshake-only frames; a Client that sends them later is confused, not
+            // dangerous, so they are ignored like a late Hello.
+            ClientMessage::Hello(Hello { .. })
+            | ClientMessage::Credential { .. }
+            | ClientMessage::Tunnel { .. } => false,
         };
         for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
             started_terminals
@@ -1351,6 +1443,7 @@ fn server_admin(
                 listen: ServerConfig::default()
                     .listen
                     .map(|address| address.to_string()),
+                p2p: ServerConfig::default().p2p,
                 connected,
                 version: env!("CARGO_PKG_VERSION").into(),
                 uptime_secs: state.started_at.elapsed().as_secs(),

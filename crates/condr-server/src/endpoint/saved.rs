@@ -17,7 +17,7 @@ const SERVERS_KEY: &str = "servers";
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct SavedServer {
     pub name: String,
-    /// `tcp://<server key>@host:port` or `ssh://[user@]host[:port]`; never an invite.
+    /// `tcp://<id>@host:port`, `ssh://[user@]host[:port]` or `p2p://<id>`; never an invite.
     pub address: String,
 }
 
@@ -28,6 +28,7 @@ impl SavedServer {
             Endpoint::Local(_) => return None,
             Endpoint::Tcp(tcp) => format!("tcp://{}@{}", tcp.server_key, tcp.authority()),
             Endpoint::Ssh(ssh) => ssh.to_string(),
+            Endpoint::P2p(p2p) => format!("p2p://{}", p2p.device),
         };
         Some(Self {
             name: name.into(),
