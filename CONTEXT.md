@@ -60,7 +60,7 @@ A terminal location and layout leaf within a terminal Tab. It may show a shell o
 _Avoid_: Agent
 
 **Diff Tab**:
-The one viewer Tab a Workspace may have, showing one file's working-tree changes against `HEAD` as the Server computes them (ADR 0017). Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its name starts as "Diff" and is display only.
+The one viewer Tab a Workspace may have, showing one file's working-tree changes against `HEAD` as the Server computes them (ADR 0017). Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its header's "Show File" opens the same file in the Preview Tab at the line under the diff cursor. Its name starts as "Diff" and is display only.
 
 **Preview Tab**:
 The one viewer Tab a Workspace may have for a file's content as it is on disk, read by the Server under the Root Directory (ADR 0018). Clicking a file in the Files view creates it or retargets it; it sits beside the Diff Tab and behaves like it. Its name starts as "Preview" and is display only.

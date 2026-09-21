@@ -121,6 +121,69 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     });
     assert_eq!(tab_count, 2, "one terminal Tab and one Diff Tab");
 
+    // "Show File" opens the Preview Tab at the new-file line under the diff cursor: the
+    // unified text is "@@ -1,2 +1,3 @@", " alpha", "-beta", "+BETA", "+gamma", so a cursor on
+    // "-beta" lands on "BETA", the second line of the file.
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let editor = view
+                .diff_editors
+                .values()
+                .next()
+                .expect("one Diff Tab Editor");
+            editor.state.update(cx, |state, cx| {
+                state.set_cursor_position(
+                    gpui_kit::component::input::Position::new(2, 0),
+                    window,
+                    cx,
+                );
+            });
+        });
+    });
+    let show_file = window
+        .debug_bounds("diff-show-file")
+        .expect("the Diff Tab header should offer Show File");
+    window.simulate_click(show_file.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.update(|_, cx| {
+                let view = view.read(cx);
+                view.presented().is_some_and(|(_, session, _, tab_id)| {
+                    session.tab(tab_id).unwrap().file().is_some_and(|file| {
+                        file.path() == relative_path::RelativePath::new("notes.txt")
+                    })
+                }) && view.file_editors.values().any(|editor| {
+                    let state = editor.state.read(cx);
+                    state.value().contains("BETA") && state.cursor_position().line == 1
+                })
+            })
+        }),
+        "the Preview Tab should show notes.txt with its cursor on BETA"
+    );
+    let tab_count = window.read(|app| {
+        view.read(app)
+            .active_session()
+            .unwrap()
+            .workspace(workspace_id)
+            .unwrap()
+            .tabs()
+            .len()
+    });
+    assert_eq!(tab_count, 3, "the Preview Tab sits beside the Diff Tab");
+    // Back to the Diff Tab for the rest.
+    let row = window.debug_bounds("change-notes.txt").unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .presented()
+                .is_some_and(|(_, session, _, tab_id)| {
+                    session.tab(tab_id).unwrap().diff().is_some()
+                })
+        })
+    }));
+
     // A second file retargets the same Tab rather than adding one.
     let fresh = window.debug_bounds("change-fresh.txt").unwrap();
     window.simulate_click(fresh.center(), Modifiers::default());
@@ -133,7 +196,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
                     .is_some_and(|diff| {
                         diff.path() == relative_path::RelativePath::new("fresh.txt")
                     })
-                    && session.workspace(workspace_id).unwrap().tabs().len() == 2
+                    && session.workspace(workspace_id).unwrap().tabs().len() == 3
             })
         })
     }));

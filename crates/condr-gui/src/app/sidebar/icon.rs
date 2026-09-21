@@ -41,6 +41,8 @@ pub(in crate::app) enum CondrIconName {
     SquarePlus,
     SquareDot,
     SquareMinus,
+    /// Lucide `file-text`: the Diff Tab's "Show File" button.
+    FileText,
     /// The agent CLIs' marks (assets/agents/NOTICE at the repository root), recolored to
     /// `currentColor` so they follow the text like every other icon.
     Claude,
@@ -101,6 +103,7 @@ impl IconNamed for CondrIconName {
             Self::SquarePlus => "icons/square-plus.svg",
             Self::SquareDot => "icons/square-dot.svg",
             Self::SquareMinus => "icons/square-minus.svg",
+            Self::FileText => "icons/file-text.svg",
             Self::Claude => "icons/claude.svg",
             Self::Codex => "icons/codex.svg",
             Self::OpenCode => "icons/opencode.svg",

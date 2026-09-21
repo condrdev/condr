@@ -300,6 +300,10 @@ pub(crate) struct Condr {
     file_editors: HashMap<(ConnectionKey, TabId), FileEditor>,
     pending_directories: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     pending_files: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
+    /// The 0-based line the Preview Tab lands on once it shows this file: set by the Diff
+    /// Tab's "Show File", applied by `sync_file_view` when the text is there, then cleared.
+    /// Presentation only, so it never rides `ShowFile`.
+    pending_file_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -449,6 +453,7 @@ impl Condr {
             file_editors: HashMap::new(),
             pending_directories: HashSet::new(),
             pending_files: HashSet::new(),
+            pending_file_line: None,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

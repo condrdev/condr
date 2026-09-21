@@ -694,7 +694,13 @@ impl Condr {
                     this.show_diff_on(key, workspace_id, path.clone(), window, cx);
                 });
             })
-            .context_menu(self.file_context_menu(key, workspace_id, &entry.path, cx))
+            .context_menu(self.file_context_menu(
+                key,
+                workspace_id,
+                &entry.path,
+                Some(!deleted),
+                cx,
+            ))
             .child(status_glyph(entry.status, cx))
             .child(
                 div()
@@ -751,6 +757,32 @@ impl Condr {
             )
             .when_some(entry.and_then(|entry| entry.stat), |this, stat| {
                 this.child(diff_stat(stat, cx))
+            })
+            .child({
+                // A deleted file has nothing on disk to show.
+                let deleted = entry.is_some_and(|entry| entry.status == GitChangeStatus::Deleted);
+                let owner = cx.weak_entity();
+                let path = path.to_relative_path_buf();
+                Button::new("diff-show-file")
+                    .ghost()
+                    .xsmall()
+                    .icon(Icon::new(CondrIconName::FileText))
+                    .debug_selector(|| "diff-show-file".into())
+                    .tooltip("Show File")
+                    .accessibility_label("Show File")
+                    .disabled(deleted)
+                    .on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.show_file_from_diff(
+                                key,
+                                workspace_id,
+                                tab_id,
+                                path.clone(),
+                                window,
+                                cx,
+                            );
+                        });
+                    })
             });
         let body = match (&content, editor) {
             (DiffContent::Text { .. }, Some(editor)) => div()
@@ -796,6 +828,36 @@ impl Condr {
             .child(header)
             .child(body)
             .into_any_element()
+    }
+
+    /// The Diff Tab's "Show File": opens the file in the Preview Tab at the line the diff
+    /// cursor is on, so the hunk's surroundings are one click away (ADR 0017). The line is
+    /// this Client's presentation: it waits in `pending_file_line` until the text lands.
+    fn show_file_from_diff(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_id: TabId,
+        path: RelativePathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let row = self
+            .diff_editors
+            .get(&(key, tab_id))
+            .map(|editor| editor.state.read(cx).cursor_position().line as usize);
+        let line = self
+            .connection(key)
+            .and_then(|connection| connection.diffs.get(&(workspace_id, path.clone())))
+            .and_then(|answer| answer.as_ref().ok())
+            .and_then(|diff| match &diff.content {
+                FileDiffContent::Text { hunks } => Some(hunks),
+                _ => None,
+            })
+            .zip(row)
+            .and_then(|(hunks, row)| file_line_for_diff_row(hunks, row));
+        self.pending_file_line = line.map(|line| (key, workspace_id, path.clone(), line));
+        self.show_file_on(key, workspace_id, path, window, cx);
     }
 
     /// Brings the Diff Tab's Editor in line with the Server's answer for its file: asks
@@ -937,6 +999,34 @@ pub(super) fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement
 
 /// The hunks as unified-diff text, the byte ranges of added and removed lines tinted, and
 /// the line counts. The `diff` grammar colours the prefixes; the tint marks whole lines.
+/// The 0-based line of the new file that `row` of `unified_text`'s layout is about: a
+/// hunk header stands for the hunk's first line, a removed line for the new-file line it
+/// was removed before, and a row past the last hunk for the end of that hunk. `None` when
+/// there is no hunk at all.
+fn file_line_for_diff_row(hunks: &[condr_core::DiffHunk], row: usize) -> Option<u32> {
+    let mut display = 0;
+    for hunk in hunks {
+        // `new_start` is 1-based and 0 for a file with no lines left.
+        let mut new_line = hunk.new_start.max(1);
+        if row == display {
+            return Some(new_line - 1);
+        }
+        display += 1;
+        for line in &hunk.lines {
+            if row == display {
+                return Some(new_line - 1);
+            }
+            display += 1;
+            if line.kind != DiffLineKind::Removed {
+                new_line += 1;
+            }
+        }
+    }
+    hunks
+        .last()
+        .map(|hunk| (hunk.new_start + hunk.new_lines).max(1) - 1)
+}
+
 fn unified_text(
     hunks: &[condr_core::DiffHunk],
     cx: &App,
@@ -986,7 +1076,7 @@ fn unified_text(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChangeNode, ChangesSection, change_tree};
+    use super::{ChangeNode, ChangesSection, change_tree, file_line_for_diff_row};
     use condr_core::{GitChangeEntry, GitChangeStatus};
     use relative_path::{RelativePath, RelativePathBuf};
 
@@ -1060,5 +1150,68 @@ mod tests {
         assert!(matches!(&children[1], ChangeNode::File { name, .. } if name == "dock.rs"));
         assert!(matches!(&tree[1], ChangeNode::File { name, .. } if name == "Cargo.toml"));
         assert!(matches!(&tree[2], ChangeNode::File { name, .. } if name == "README.md"));
+    }
+
+    #[test]
+    fn a_diff_row_names_the_new_file_line_it_is_about() {
+        use condr_core::{DiffHunk, DiffLine, DiffLineKind};
+        let line = |kind, new_number| DiffLine {
+            kind,
+            old_number: None,
+            new_number,
+            text: String::new(),
+        };
+        // @@ -1,2 +1,3 @@ / " alpha" / "-beta" / "+BETA" / "+gamma"
+        // @@ -10,1 +11,1 @@ / "-old" / "+new"
+        let hunks = [
+            DiffHunk {
+                old_start: 1,
+                old_lines: 2,
+                new_start: 1,
+                new_lines: 3,
+                lines: vec![
+                    line(DiffLineKind::Context, Some(1)),
+                    line(DiffLineKind::Removed, None),
+                    line(DiffLineKind::Added, Some(2)),
+                    line(DiffLineKind::Added, Some(3)),
+                ],
+            },
+            DiffHunk {
+                old_start: 10,
+                old_lines: 1,
+                new_start: 11,
+                new_lines: 1,
+                lines: vec![
+                    line(DiffLineKind::Removed, None),
+                    line(DiffLineKind::Added, Some(11)),
+                ],
+            },
+        ];
+        let rows: Vec<Option<u32>> = (0..9)
+            .map(|row| file_line_for_diff_row(&hunks, row))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                Some(0),  // hunk header: its first line
+                Some(0),  // " alpha"
+                Some(1),  // "-beta": where it was removed, i.e. "BETA"
+                Some(1),  // "+BETA"
+                Some(2),  // "+gamma"
+                Some(10), // second hunk header
+                Some(10), // "-old"
+                Some(10), // "+new"
+                Some(11), // past the end: after the last hunk
+            ]
+        );
+        assert_eq!(file_line_for_diff_row(&[], 0), None);
+        let emptied = [DiffHunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 0,
+            new_lines: 0,
+            lines: vec![line(DiffLineKind::Removed, None)],
+        }];
+        assert_eq!(file_line_for_diff_row(&emptied, 1), Some(0));
     }
 }

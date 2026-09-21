@@ -5,6 +5,7 @@
 use super::changes::{empty_state, status_color, status_glyph, tree_indent};
 use super::*;
 use condr_core::{DirectoryEntry, FileKind};
+use gpui_kit::component::input::{Position, RopeExt as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use std::path::{Path, PathBuf};
@@ -32,6 +33,32 @@ fn language_for(path: &RelativePath) -> SharedString {
         .map(|extension| extension.to_ascii_lowercase())
         .unwrap_or_else(|| "text".to_owned())
         .into()
+}
+
+/// Takes the line the Diff Tab asked the Preview Tab to land on, if it is for this file.
+fn take_pending_line(
+    pending: &mut Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
+    key: ConnectionKey,
+    workspace_id: WorkspaceId,
+    path: &RelativePath,
+) -> Option<u32> {
+    let (pending_key, pending_workspace, pending_path, _) = pending.as_ref()?;
+    if *pending_key != key || *pending_workspace != workspace_id || pending_path != path {
+        return None;
+    }
+    pending.take().map(|(_, _, _, line)| line)
+}
+
+/// Puts the cursor at the start of the 0-based `line`, clamped to the text; Kit scrolls
+/// the cursor into view and focuses the Editor.
+fn land_on_line(
+    state: &mut EditorState,
+    line: u32,
+    window: &mut Window,
+    cx: &mut Context<EditorState>,
+) {
+    let last = state.text().lines_len().saturating_sub(1) as u32;
+    state.set_cursor_position(Position::new(line.min(last), 0), window, cx);
 }
 
 /// The Preview Tab's Editor and what it currently shows.
@@ -321,7 +348,7 @@ impl Condr {
         let selector: SharedString = format!("file-{}", path.as_str()).into();
         let id = selector.clone();
         let owner = cx.weak_entity();
-        let menu = self.file_context_menu(context.key, context.workspace_id, path, cx);
+        let menu = self.file_context_menu(context.key, context.workspace_id, path, None, cx);
         let (key, workspace_id, path) = (
             context.key,
             context.workspace_id,
@@ -387,14 +414,18 @@ impl Condr {
     /// The right-click menu of a file row in either view (ADR 0018): the read-only
     /// actions a path affords. Opening runs on the GUI's machine, so it needs a local
     /// Server like "Open in"; inserting goes to the Workspace's terminal on any Server.
+    /// `show_file` is `Some(enabled)` in the Changes view, whose click opens the diff, so
+    /// the menu offers the Preview Tab (ADR 0017); the Files view's click already does.
     pub(super) fn file_context_menu(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         path: &RelativePath,
+        show_file: Option<bool>,
         cx: &Context<Self>,
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let owner = cx.weak_entity();
+        let show_path = path.to_relative_path_buf();
         let relative = path.to_string();
         let (root, target_pane) = self
             .connection(key)
@@ -426,6 +457,18 @@ impl Condr {
             let open_owner = owner.clone();
             let insert_owner = owner.clone();
             let insert_text = terminal_path_text(&relative);
+            let menu = menu.when_some(show_file, |menu, enabled| {
+                let show_owner = owner.clone();
+                let show_path = show_path.clone();
+                menu.item(PopupMenuItem::new("Show File").disabled(!enabled).on_click(
+                    move |_, window, cx| {
+                        let _ = show_owner.update(cx, |this, cx| {
+                            this.show_file_on(key, workspace_id, show_path.clone(), window, cx);
+                        });
+                    },
+                ))
+                .separator()
+            });
             let menu = menu
                 .item(
                     PopupMenuItem::new("Copy Relative Path").on_click(move |_, _, cx| {
@@ -576,7 +619,7 @@ impl Condr {
 
     /// Shows `path` in the Workspace's Preview Tab: a layout command like any other,
     /// presented once the Server confirms it.
-    fn show_file_on(
+    pub(super) fn show_file_on(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -725,6 +768,14 @@ impl Condr {
             return;
         };
         if editor.shown.as_ref() == Some(&(path.clone(), generation)) {
+            if editor.content == FileViewContent::Text
+                && let Some(line) =
+                    take_pending_line(&mut self.pending_file_line, key, workspace_id, &path)
+            {
+                editor
+                    .state
+                    .update(cx, |state, cx| land_on_line(state, line, window, cx));
+            }
             return;
         }
         let shown_path = path.clone();
@@ -744,6 +795,9 @@ impl Condr {
         let text_to_text = same_file
             && editor.content == FileViewContent::Text
             && content == FileViewContent::Text;
+        let land = (content == FileViewContent::Text)
+            .then(|| take_pending_line(&mut self.pending_file_line, key, workspace_id, &shown_path))
+            .flatten();
         editor.content = content;
         let language = language_for(&shown_path);
         editor.state.update(cx, |state, cx| {
@@ -762,6 +816,9 @@ impl Condr {
             } else {
                 state.set_highlighter(language, cx);
                 state.set_value(text, window, cx);
+            }
+            if let Some(line) = land {
+                land_on_line(state, line, window, cx);
             }
         });
     }
