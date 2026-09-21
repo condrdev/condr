@@ -239,7 +239,7 @@ impl BoundServer {
 
     pub fn run(self) -> io::Result<()> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_time()
+            .enable_all()
             .build()
             .map_err(|error| {
                 io::Error::other(format!("failed to create server runtime: {error}"))
