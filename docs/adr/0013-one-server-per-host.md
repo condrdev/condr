@@ -7,3 +7,5 @@ Before this decision `condr server start --listen` created a second, TCP-only Se
 Because processes on the host reach the Server through the socket, no device key is authorized by default: the former "host client key" exception is gone, `CONDR_SOCKET_PATH` is always a local path, and administration such as `RevokeDevice` is accepted only on local connections. Pairing, invites and the authorized list work as ADR 0011 describes, for TCP devices only; SSH uses the remote login user’s local socket permissions (ADR 0015). `condr server invite` prints the configured port, or says that no TCP listener is configured yet.
 
 Tests that need TCP use `ServerConfig::ephemeral_tcp`, which binds a temporary socket plus a loopback TCP port with a fresh identity and one authorized test device; `BoundServer::endpoint` hands back the endpoint that device connects to.
+
+> ADR 0026 adds Peer-to-peer as a third door to the same Session, and one invite pairs a Device over TCP and Peer-to-peer alike.

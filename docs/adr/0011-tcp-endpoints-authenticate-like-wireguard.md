@@ -13,3 +13,5 @@ The GUI keeps its device key beside `config.toml` and stores each TCP Server as 
 The handshake runs on the connecting thread at first use rather than on accept, so a slow or hostile peer cannot stall the accept loop, and it stays inside the existing handshake timeout. Transport records carry at most 64 KiB of ciphertext; the framed protocol above is unchanged and clones of a stream share one transport state so the reader and writer threads keep their separate nonces in step. Full records are encrypted directly from input slices into a reusable ciphertext buffer; only an incomplete final record remains pending until another write or flush.
 
 Deferred from the roadmap's M3 list: storing the device key in an OS keychain, capability-based authorization, rate limiting, audit logging, and a GUI pairing flow beyond the text dialog. The pattern string and the store format are the only things such work changes; the record layer and handshake driver stay.
+
+> ADR 0025 replaces the two X25519 files with one Ed25519 `device-key`, derives the Noise key from it and stores Ed25519 keys in `authorized-clients`; the handshake, record layer and store rules here are unchanged.
