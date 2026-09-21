@@ -25,7 +25,7 @@ impl Condr {
         );
         menu.item(
             PopupMenuItem::new("Peer-to-peer link")
-                .icon(IconName::Network)
+                .icon(Icon::new(super::super::sidebar::CondrIconName::Waypoints))
                 .on_click(move |_, window, cx| {
                     let _ = p2p_owner.update(cx, |this, cx| this.prompt_add_server_p2p(window, cx));
                 }),

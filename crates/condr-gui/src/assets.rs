@@ -102,6 +102,9 @@ impl AssetSource for CondrAssets {
             "icons/coffee.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/coffee.svg"
             )))),
+            "icons/waypoints.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/waypoints.svg"
+            )))),
             "icons/claude.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../../../assets/agents/claude.svg"
             )))),
