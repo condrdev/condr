@@ -27,12 +27,17 @@ impl Condr {
         if !self.notifications {
             return;
         }
-        let title = match (previous, agent.state) {
+        // Blocked to Blocked is a new question or request: the Server publishes only
+        // changed snapshots. It replaces the toast without asking for attention again.
+        let (title, attention) = match (previous, agent.state) {
             (Some(AgentState::Working | AgentState::Blocked), AgentState::Idle) => {
-                format!("{} finished", agent.kind.label())
+                (format!("{} finished", agent.kind.label()), true)
             }
             (Some(AgentState::Working), AgentState::Blocked) => {
-                format!("{} needs your input", agent.kind.label())
+                (format!("{} needs your input", agent.kind.label()), true)
+            }
+            (Some(AgentState::Blocked), AgentState::Blocked) if agent.blocked_on.is_some() => {
+                (format!("{} needs your input", agent.kind.label()), false)
             }
             _ => return,
         };
@@ -46,12 +51,16 @@ impl Condr {
                     .workspace_for_pane(pane_id)
                     .map(|workspace| workspace.name().to_owned())
             });
-        let body = match (workspace, connection.terminal_titles.get(&pane_id)) {
-            (Some(workspace), Some(terminal)) => format!("{workspace} · {terminal}"),
-            (Some(workspace), None) => workspace,
-            (None, Some(terminal)) => terminal.clone(),
-            (None, None) => String::new(),
-        };
+        // What it waits for comes first (ADR 0024): that is what decides whether to come.
+        let body = [
+            agent.blocked_on.clone(),
+            workspace,
+            connection.terminal_titles.get(&pane_id).cloned(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         cx.show_system_notification(SystemNotification {
             tag: agent_notification_tag(key, pane_id),
             title: title.into(),
@@ -61,6 +70,9 @@ impl Condr {
         // The taskbar button or Dock icon asks for attention too, the way a chat app
         // does; the platform skips it while the window is active. Deferred because the
         // Window is out of its table for the duration of the update this runs in.
+        if !attention {
+            return;
+        }
         let window = self.window_handle;
         cx.defer(move |cx| {
             let _ = window.update(cx, |_, window, _| window.request_attention());

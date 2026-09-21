@@ -334,6 +334,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Idle,
+            blocked_on: None,
         }),
     );
     assert_eq!(window.update(|window, cx| window.focused(cx)), focus_before);
@@ -402,6 +403,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
                 session_id: None,
                 kind: AgentKind::Codex,
                 state,
+                blocked_on: None,
             }),
         );
         assert!(
@@ -418,6 +420,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
+            blocked_on: None,
         }),
     );
     assert!(window.debug_bounds(agent_selector).is_some());
@@ -438,6 +441,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
+            blocked_on: None,
         }),
     );
     assert!(window.debug_bounds(agent_selector).is_some());
@@ -801,5 +805,89 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
             .cloned()),
         Some("ok".to_owned()),
         "and the project's own choice"
+    );
+}
+
+#[test]
+fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            let workspace = session.workspaces().first()?;
+            Some(workspace.tabs().first()?.focused_pane()?.id())
+        });
+        pane_id.is_some()
+    }));
+    let pane_id = pane_id.unwrap();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds("needs-you-heading").is_none(),
+        "nothing blocked, no section"
+    );
+
+    let snapshot = |state, blocked_on: Option<&str>| {
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Claude,
+            state,
+            blocked_on: blocked_on.map(str::to_owned),
+        })
+    };
+    agent_changed(window, &view, pane_id, snapshot(AgentState::Working, None));
+    assert!(window.debug_bounds("needs-you-heading").is_none());
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        snapshot(AgentState::Blocked, Some("Bash: cargo test")),
+    );
+    let row_selector = leaked_selector(format!("needs-you-1-{}", pane_id.as_u64()));
+    let row = window
+        .debug_bounds(row_selector)
+        .expect("a Blocked agent should be listed under Needs you");
+    let heading = window.debug_bounds("needs-you-heading").unwrap();
+    assert!(
+        heading.bottom() <= row.top(),
+        "the row sits under its heading"
+    );
+    let agent_row = window
+        .debug_bounds(leaked_selector(format!("agent-1-{}", pane_id.as_u64())))
+        .unwrap();
+    assert!(
+        row.bottom() <= agent_row.top(),
+        "Needs you comes before the Devices"
+    );
+
+    // Selecting another target first, so the click has something to change.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| this.target_pane = None);
+    });
+    window.simulate_click(row.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        window.read(|app| view.read(app).target_pane),
+        Some((1, pane_id)),
+        "clicking the row lands in the Pane"
+    );
+
+    agent_changed(window, &view, pane_id, snapshot(AgentState::Working, None));
+    assert!(
+        window.debug_bounds(row_selector).is_none()
+            && window.debug_bounds("needs-you-heading").is_none(),
+        "a Working agent leaves the list"
     );
 }

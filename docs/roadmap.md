@@ -26,7 +26,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | --- | --- |
 | 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY/Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；当前 Workspace/Tab 是每个客户端自己的视图，`ActivateWorkspace/ActivateTab` 只是「请大家看这里」的广播（ADR 0021） |
 | 终端 | `alacritty_terminal` + 自绘 GPUI 元素；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
-| Agent | 10 种 CLI 的 hook 安装（Kimi 上游不可用）；状态只来自 hooks，经 OSC 777 回写（ADR 0014）；完成/需输入时 OS 通知 |
+| Agent | 10 种 CLI 的 hook 安装（Kimi 上游不可用）；状态只来自 hooks，经 OSC 777 回写（ADR 0014）；`Blocked` 带 `blocked_on` 说明在等哪个工具/命令或哪个问题，sidebar、OS 通知、CLI JSON 都显示，左侧栏顶部有跨 Device 的「Needs you」列表（ADR 0024）；完成/需输入时 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` / `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes/Files、Diff Tab（对 HEAD）、Preview Tab（ADR 0017/0018） |
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；Settings 可签 invite、撤销设备 |
@@ -70,15 +70,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 3. Blocked 说清在等什么
 
-**为什么**：sidebar 现在只有一个圆点和一条 OS 通知；用户要切过去看屏幕才知道是权限请求还是提问。这正是 hooks 能给而屏幕识别给不了的信息。
-
-**做到哪**：
-
-- `agent-hook` 把 `permission-request`/`question-asked` 里的工具名或问题摘要带进 OSC 777 事件，`AgentChanged` 携带它。
-- sidebar 的 Agent 行、OS 通知、`condr agent list`/`wait` 的返回都显示这段摘要。
-- 一个跨 Workspace 的"需要你"列表，点击即跳转到对应 Pane。
-
-**停在哪**：不代替用户批准；不解析屏幕文本补全缺失的 hook。
+已完成（ADR 0024，2026-09-21）：`agent-hook` 从原生 payload 取工具名加命令首行（`Bash: cargo test`）或问题文本，截到 200 字符后随 `permission-request`/`question-asked` 进 OSC 777；OpenCode 插件与 Pi/OMP 扩展传同一个 `detail` 字段。`AgentSnapshot.blocked_on` 只在 `Blocked` 期间存在，离开即清；sidebar Agent 行的第二行、OS 通知正文、`agent list|wait|prompt --wait` 与 `pane list` 的 `blocked_on` 都显示它；左侧栏顶部的「Needs you」列出所有 Device 上的 Blocked Agent，点击落到 Pane。没有做替用户批准，也没有解析屏幕文本补全缺失的 hook。
 
 ### 4. 远程安全边界（对外宣传 remote 之前）
 

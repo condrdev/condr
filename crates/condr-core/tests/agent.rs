@@ -73,6 +73,7 @@ fn a_delayed_grok_completion_cannot_finish_a_newer_prompt() {
             kind: AgentKind::Grok,
             session_id: Some("root".into()),
             state: AgentState::Idle,
+            blocked_on: None,
         })
     );
 }
@@ -173,6 +174,7 @@ fn a_new_agent_is_unknown_until_it_reports_and_a_restart_is_a_new_agent() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
+            blocked_on: None,
         })
     );
     assert_eq!(
@@ -195,6 +197,7 @@ fn a_new_agent_is_unknown_until_it_reports_and_a_restart_is_a_new_agent() {
             session_id: None,
             kind: AgentKind::Claude,
             state: AgentState::Unknown,
+            blocked_on: None,
         })
     );
 }
@@ -291,6 +294,60 @@ fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
 }
 
 #[test]
+fn a_blocked_agent_says_what_it_waits_for_until_it_moves_on() {
+    let mut detector = AgentDetector::new();
+    let now = Instant::now();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now);
+    let blocked = |detail: Option<&str>, kind| {
+        let mut event = AgentEvent::new(AgentKind::Claude, kind, None, Some("root".into()));
+        event.detail = detail.map(str::to_owned);
+        event
+    };
+    let snapshot = |state, blocked_on: Option<&str>| {
+        AgentPublish::Snapshot(AgentSnapshot {
+            session_id: Some("root".into()),
+            kind: AgentKind::Claude,
+            state,
+            blocked_on: blocked_on.map(str::to_owned),
+        })
+    };
+    assert_eq!(
+        detector.observe_event(&blocked(
+            Some("Bash: cargo test"),
+            AgentEventKind::PermissionRequest
+        )),
+        snapshot(AgentState::Blocked, Some("Bash: cargo test"))
+    );
+    // A new question while still blocked is a change worth publishing.
+    assert_eq!(
+        detector.observe_event(&blocked(Some("Which DB?"), AgentEventKind::QuestionAsked)),
+        snapshot(AgentState::Blocked, Some("Which DB?"))
+    );
+    assert_eq!(
+        detector.observe_event(&blocked(Some("Which DB?"), AgentEventKind::QuestionAsked)),
+        AgentPublish::Nothing
+    );
+    // A blocking event without a detail clears the stale one.
+    assert_eq!(
+        detector.observe_event(&blocked(None, AgentEventKind::PermissionRequest)),
+        snapshot(AgentState::Blocked, None)
+    );
+    // Leaving Blocked never carries a detail, even if the event has one.
+    assert_eq!(
+        detector.observe_event(&blocked(Some("Bash"), AgentEventKind::ToolStart)),
+        snapshot(AgentState::Working, None)
+    );
+    let bytes = blocked(Some("Bash: cargo test"), AgentEventKind::PermissionRequest).encode();
+    assert_eq!(
+        AgentEvent::decode(&bytes[2..bytes.len() - 1]).and_then(|event| event.detail),
+        Some("Bash: cargo test".to_owned())
+    );
+    // A detail with a control character or over the bound is not accepted off the wire.
+    let bytes = blocked(Some("a\x1bb"), AgentEventKind::PermissionRequest).encode();
+    assert_eq!(AgentEvent::decode(&bytes[2..bytes.len() - 1]), None);
+}
+
+#[test]
 fn events_only_count_for_the_agent_the_process_table_shows() {
     let mut detector = AgentDetector::new();
     let now = Instant::now();
@@ -315,6 +372,7 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Idle,
+            blocked_on: None,
         })
     );
     assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
@@ -331,6 +389,7 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
+            blocked_on: None,
         })
     );
 }
@@ -353,6 +412,7 @@ fn an_agent_behind_an_opaque_launcher_is_named_by_its_own_events() {
             session_id: None,
             kind: AgentKind::Claude,
             state: AgentState::Idle,
+            blocked_on: None,
         })
     );
     assert_eq!(detector.agent(), Some(AgentKind::Claude));
@@ -405,6 +465,7 @@ fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
                 kind: AgentKind::Claude,
                 state: AgentState::Idle,
                 session_id: Some(id.into()),
+                blocked_on: None,
             })
         );
     }
@@ -429,6 +490,7 @@ fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
             kind: AgentKind::Claude,
             state: AgentState::Working,
             session_id: Some("third".into()),
+            blocked_on: None,
         })
     );
     assert_eq!(
@@ -440,7 +502,8 @@ fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
         AgentPublish::Snapshot(AgentSnapshot {
             kind: AgentKind::Claude,
             state: AgentState::Unknown,
-            session_id: None
+            session_id: None,
+            blocked_on: None,
         })
     );
     for id in ["--last", "../conversation", "a;exit"] {

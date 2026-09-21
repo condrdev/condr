@@ -478,6 +478,7 @@ impl RuntimeState {
                 session_id: None,
                 kind,
                 state: AgentState::Unknown,
+                blocked_on: None,
             });
         Some(AgentInfo {
             pane_id,

@@ -331,3 +331,19 @@ Windows 11 笔记本、ConPTY、PowerShell Pane，隔离 Server（`CONDR_SOCKET_
 - Pi 0.85.1（npm 隔离 prefix，`pi.cmd` → node）+ Ollama `qwen3.8:27b`（openai-completions）：`agent hooks install pi` 写入 `extensions/condr-pi.ts`；`agent start` 后 session_start 立即上报 Idle 并带原生 session ID；`agent prompt --wait` Working → Idle；扩展 `ctx.ui.confirm` 触发 Blocked，Escape 后 Idle；`server restart` 用 `pi --session <id>` 恢复同一会话并再次上报 Idle。hook 子进程为 `condr.exe` 绝对路径，经 ConPTY 的 OSC 777 路径全链路通过。
 - GUI Agents 页：全部 10 个 agent 行、图标与状态渲染正常；Kimi 显示 Unavailable 且无按钮；Pi 行 Uninstall/Install 按钮实时刷新状态。
 - 注意：resume 由 Pane 的 shell 解析 `pi`，与 `agent available` 解析的可执行文件可能不同（本机 PATH 顺序下恢复到了全局 0.80.6）。OMP、Grok、Cursor、Copilot、Antigravity 未在 Windows 安装，未验证。
+
+## Blocked 的 detail 字段来源（ADR 0024）
+
+`condr agent-hook` 只在 `permission-request` / `question-asked` 上附带 `detail`，取值顺序：插件给的 `detail` → 问题文本 → `tool_name` 加命令首行 → 通知 message。Rust 侧统一去控制字符、压空白、截到 200 字符。各 CLI 的原生字段：
+
+| CLI | 权限请求 | 提问 |
+| --- | --- | --- |
+| Claude Code | `PermissionRequest`：`tool_name`、`tool_input.command`（Bash）；`Notification(permission_prompt)`：`message`，新版本另带 `tool_name` | `PreToolUse(AskUserQuestion)`：`tool_input.questions[0].question` |
+| Codex | `PermissionRequest`：`tool_name`、`tool_input.command`（字符串或 argv 数组，数组按空格拼接） | 无 |
+| OpenCode | TUI 插件读 `api.state.session.permission(id)[0]` 的 `title` / `permission` / `type` | `api.state.session.question(id)[0]` 的 `questions[0].question` / `question` |
+| Pi / OMP | 扩展在 `tool_approval_requested` 记 `toolName`；`ui_prompt_start` 记 `title` | `ask` 工具的 `input.question` / `input.prompt` |
+| Grok / Copilot | `Notification` / `notification`：`message`（或 `title`） | 无 |
+| Antigravity | 无实际等待事件 | `ask_question`：`toolCall.args.question` |
+| Cursor | 无实际等待事件 | 无 |
+
+OpenCode、Pi/OMP 的字段名来自各自公开 API 的类型定义，未逐一在真机上抓包核对；取不到时 `detail` 缺省，状态仍是 `Blocked`。

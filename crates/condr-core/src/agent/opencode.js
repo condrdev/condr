@@ -6,14 +6,14 @@ export default {
   tui: async (api) => {
     if (process.env.CONDR_ENV !== "1") return
     const exe = __CONDR_EXECUTABLE__
-    const report = (event, id) => new Promise((resolve) => {
+    const report = (event, id, detail) => new Promise((resolve) => {
       const child = spawn(exe, ["agent-hook", "opencode", event], {
         stdio: ["pipe", "ignore", "ignore"], timeout: 2000,
       })
       child.on("error", () => resolve(false))
       child.on("close", (code) => resolve(code === 0))
       child.stdin.on("error", () => {})
-      child.stdin.end(JSON.stringify({ session_id: id }))
+      child.stdin.end(JSON.stringify({ session_id: id, detail }))
     })
     let selected, last, reportedAt = 0, running = false, disposed = false
     const tick = async () => {
@@ -30,15 +30,22 @@ export default {
           last = undefined
         }
         const status = api.state.session.status(id)?.type
-        const event = api.state.session.permission(id).length ? "permission-request"
-          : api.state.session.question(id).length ? "question-asked"
+        const [permission] = api.state.session.permission(id)
+        const [question] = api.state.session.question(id)
+        const event = permission ? "permission-request"
+          : question ? "question-asked"
           : status === "busy" || status === "retry" ? "prompt-submit"
           : status === "idle" ? "stop" : undefined
+        // What the wait is for (ADR 0024); the Rust side bounds it.
+        const text = (value) => typeof value === "string" && value ? value : undefined
+        const detail = permission ? text(permission.title) ?? text(permission.permission) ?? text(permission.type)
+          : question ? text(question.questions?.[0]?.question) ?? text(question.question) : undefined
         // A hook can precede process discovery. A sparse heartbeat also recovers that
         // first report without queuing work or blocking the TUI on child processes.
-        if (event && (event !== last || Date.now() - reportedAt >= 5000)) {
-          if (await report(event, id)) {
-            last = event
+        const key = `${event}\n${detail ?? ""}`
+        if (event && (key !== last || Date.now() - reportedAt >= 5000)) {
+          if (await report(event, id, detail)) {
+            last = key
             reportedAt = Date.now()
           }
         }

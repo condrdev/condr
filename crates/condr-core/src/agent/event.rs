@@ -69,6 +69,10 @@ pub struct AgentEvent {
     /// next prompt has already started (Grok).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_id: Option<String>,
+    /// What a `permission-request` or `question-asked` waits for: the tool (and command)
+    /// or the question, already bounded by `bound_detail` (ADR 0024). Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl AgentEvent {
@@ -85,6 +89,7 @@ impl AgentEvent {
             source,
             session_id,
             prompt_id: None,
+            detail: None,
         }
     }
 
@@ -103,7 +108,8 @@ impl AgentEvent {
                 .session_id
                 .as_deref()
                 .is_none_or(super::valid_session_id)
-            && event.prompt_id.as_deref().is_none_or(valid_prompt_id))
+            && event.prompt_id.as_deref().is_none_or(valid_prompt_id)
+            && event.detail.as_deref().is_none_or(valid_detail))
         .then_some(event)
     }
 
@@ -130,4 +136,42 @@ impl AgentEvent {
 
 pub(super) fn valid_prompt_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control)
+}
+
+/// Characters a detail may carry; the bound keeps it, the session ID and the JSON
+/// framing together well under the PTY scanner's OSC cap.
+pub const MAX_DETAIL_CHARS: usize = 200;
+
+fn valid_detail(detail: &str) -> bool {
+    !detail.is_empty()
+        && detail.chars().count() <= MAX_DETAIL_CHARS
+        && !detail.chars().any(char::is_control)
+}
+
+/// Makes native text fit a detail: control characters and runs of whitespace become one
+/// space, and anything past `MAX_DETAIL_CHARS` is cut behind an ellipsis. Empty in, none out.
+pub fn bound_detail(raw: &str) -> Option<String> {
+    let mut detail = String::new();
+    let mut space = true;
+    for ch in raw.chars() {
+        if ch.is_control() || ch.is_whitespace() {
+            if !space {
+                detail.push(' ');
+                space = true;
+            }
+        } else {
+            detail.push(ch);
+            space = false;
+        }
+    }
+    let detail = detail.trim_end();
+    if detail.is_empty() {
+        return None;
+    }
+    if detail.chars().count() <= MAX_DETAIL_CHARS {
+        return Some(detail.to_owned());
+    }
+    let mut cut: String = detail.chars().take(MAX_DETAIL_CHARS - 1).collect();
+    cut.push('…');
+    Some(cut)
 }

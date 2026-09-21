@@ -43,7 +43,7 @@ pub fn run(agent: &str, event: &str) -> bool {
         return false;
     };
     let source = (event == AgentEventKind::SessionStart)
-        .then_some(input.source)
+        .then(|| input.source.clone())
         .flatten();
     // An agent an agent runs (Claude Code calling `claude -p` from its Bash tool) has
     // the same hooks and the same terminal; its turns are not this Pane's.
@@ -59,8 +59,9 @@ pub fn run(agent: &str, event: &str) -> bool {
     let Ok(Some(mut terminal)) = wait.recv_timeout(OPEN_DEADLINE) else {
         return false;
     };
-    let mut report = AgentEvent::new(agent, event, source, input.session_id);
-    report.prompt_id = input.prompt_id;
+    let mut report = AgentEvent::new(agent, event, source, input.session_id.clone());
+    report.prompt_id = input.prompt_id.clone();
+    report.detail = input.detail(event);
     let bytes = report.encode();
     terminal
         .write_all(&bytes)
@@ -77,9 +78,42 @@ struct HookInput {
     initial_prompt: bool,
     prompt_id: Option<String>,
     fully_idle: Option<bool>,
+    /// A ready-made detail from Condr's own OpenCode/Pi plugins.
+    detail: Option<String>,
+    /// The question a question tool asks.
+    question: Option<String>,
+    /// The command a shell tool wants to run.
+    command: Option<String>,
+    /// A notification's text, when that is all the native event carries.
+    message: Option<String>,
 }
 
 impl HookInput {
+    /// What the user is being asked for (ADR 0024): the question for a question, else
+    /// the tool and its command for a permission, else the notification text. Only a
+    /// blocking event carries one.
+    fn detail(&self, event: AgentEventKind) -> Option<String> {
+        let raw = match event {
+            AgentEventKind::QuestionAsked => self
+                .detail
+                .clone()
+                .or_else(|| self.question.clone())
+                .or_else(|| self.message.clone()),
+            AgentEventKind::PermissionRequest => {
+                self.detail
+                    .clone()
+                    .or_else(|| match (&self.tool_name, &self.command) {
+                        (Some(tool), Some(command)) => Some(format!("{tool}: {command}")),
+                        (Some(tool), None) => Some(tool.clone()),
+                        (None, Some(command)) => Some(command.clone()),
+                        (None, None) => self.message.clone(),
+                    })
+            }
+            _ => None,
+        }?;
+        super::event::bound_detail(&raw)
+    }
+
     fn event(&self, agent: AgentKind, event: AgentEventKind) -> Option<AgentEventKind> {
         if self.subagent
             || (agent == AgentKind::Antigravity
@@ -149,6 +183,34 @@ impl HookInput {
             initial_prompt: field("initialPrompt").is_some_and(|prompt| !prompt.is_empty()),
             prompt_id: field("promptId").filter(|id| super::event::valid_prompt_id(id)),
             fully_idle: value.get("fullyIdle").and_then(serde_json::Value::as_bool),
+            detail: field("detail"),
+            question: [&value["tool_input"], &value["toolCall"]["args"], &value]
+                .into_iter()
+                .find_map(|input| {
+                    // Claude's AskUserQuestion takes `questions: [{question}]`; other
+                    // question tools take one `question`.
+                    input["questions"][0]["question"]
+                        .as_str()
+                        .or_else(|| input["question"].as_str())
+                        .map(str::to_owned)
+                }),
+            command: [&value["tool_input"], &value["toolCall"]["args"]]
+                .into_iter()
+                .find_map(|input| match &input["command"] {
+                    serde_json::Value::String(command) => Some(command.clone()),
+                    // Codex hands a shell command over as argv.
+                    serde_json::Value::Array(argv) => Some(
+                        argv.iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    ),
+                    _ => None,
+                })
+                .filter(|command| !command.is_empty())
+                // The first line says what runs; a heredoc body is not the point.
+                .map(|command| command.lines().next().unwrap_or_default().to_owned()),
+            message: field("message").or_else(|| field("title")),
         }
     }
 }
@@ -372,6 +434,11 @@ mod tests {
         assert_eq!(input.session_id.as_deref(), Some("abc"));
         assert_eq!(input.source.as_deref(), Some("compact"));
         assert_eq!(input.tool_name.as_deref(), Some("Bash"));
+        assert_eq!(
+            input.detail(AgentEventKind::PermissionRequest).as_deref(),
+            Some("Bash")
+        );
+        assert_eq!(input.detail(AgentEventKind::ToolStart), None);
         let long = format!(r#"{{"source":"{}"}}"#, "x".repeat(5000));
         assert_eq!(HookInput::parse(long.as_bytes()).source, None);
         assert_eq!(HookInput::parse(br#"{"session_id":"abc"}"#).source, None);
@@ -388,6 +455,73 @@ mod tests {
             let json = serde_json::json!({"session_id": id}).to_string();
             assert_eq!(HookInput::parse(json.as_bytes()).session_id, None, "{id:?}");
         }
+    }
+
+    #[test]
+    fn blocking_hooks_say_what_they_wait_for() {
+        use AgentEventKind::*;
+        let detail = |json: &str, event| HookInput::parse(json.as_bytes()).detail(event);
+        // Claude Code PermissionRequest: the tool and the command's first line.
+        assert_eq!(
+            detail(
+                r#"{"tool_name":"Bash","tool_input":{"command":"cargo test\n# and more"}}"#,
+                PermissionRequest
+            )
+            .as_deref(),
+            Some("Bash: cargo test")
+        );
+        // Codex hands argv over.
+        assert_eq!(
+            detail(
+                r#"{"tool_name":"shell","tool_input":{"command":["git","status"]}}"#,
+                PermissionRequest
+            )
+            .as_deref(),
+            Some("shell: git status")
+        );
+        // A notification only has its message.
+        assert_eq!(
+            detail(
+                r#"{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}"#,
+                PermissionRequest
+            )
+            .as_deref(),
+            Some("Claude needs your permission to use Bash")
+        );
+        // AskUserQuestion and Antigravity's ask_question.
+        assert_eq!(
+            detail(
+                r#"{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which  DB?\n"}]}}"#,
+                QuestionAsked
+            )
+            .as_deref(),
+            Some("Which DB?")
+        );
+        assert_eq!(
+            detail(
+                r#"{"toolCall":{"name":"ask_question","args":{"question":"Deploy?"}}}"#,
+                QuestionAsked
+            )
+            .as_deref(),
+            Some("Deploy?")
+        );
+        // Condr's own plugins pass a finished detail; it still gets bounded.
+        let long = format!(r#"{{"detail":"{}"}}"#, "x".repeat(400));
+        let bounded = detail(&long, QuestionAsked).unwrap();
+        assert_eq!(
+            bounded.chars().count(),
+            super::super::event::MAX_DETAIL_CHARS
+        );
+        assert!(bounded.ends_with('…'));
+        // Nothing usable stays absent; non-blocking events never carry one.
+        assert_eq!(detail(r#"{"session_id":"x"}"#, PermissionRequest), None);
+        assert_eq!(detail(r#"{"tool_name":"Bash"}"#, ToolStart), None);
+        // And the OSC carries it through.
+        let mut event = AgentEvent::new(AgentKind::Claude, PermissionRequest, None, None);
+        event.detail = Some("Bash: rm -rf target".into());
+        let payload = event.encode();
+        let decoded = AgentEvent::decode(&payload[2..payload.len() - 1]).unwrap();
+        assert_eq!(decoded.detail.as_deref(), Some("Bash: rm -rf target"));
     }
 
     #[cfg(unix)]

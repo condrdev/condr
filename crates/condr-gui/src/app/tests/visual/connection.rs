@@ -1061,6 +1061,7 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
                     session_id: None,
                     kind: AgentKind::Claude,
                     state,
+                    blocked_on: None,
                 })
             };
             for (offset, event) in [

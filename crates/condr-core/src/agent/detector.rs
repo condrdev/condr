@@ -48,6 +48,7 @@ pub struct AgentDetector {
     state: Option<AgentState>,
     session_id: Option<String>,
     prompt_id: Option<String>,
+    blocked_on: Option<String>,
     /// No observation yet / cleared / the current native conversation. Kept alongside
     /// the live state so shutdown can read a hook before its monitor commits it.
     resume: Option<Option<AgentResume>>,
@@ -134,6 +135,7 @@ impl AgentDetector {
                 }
                 self.agent = Some(agent);
                 self.prompt_id = None;
+                self.blocked_on = None;
                 self.session_id = self
                     .restoring
                     .take()
@@ -149,6 +151,7 @@ impl AgentDetector {
                     session_id: self.session_id.clone(),
                     kind: agent,
                     state: AgentState::Unknown,
+                    blocked_on: None,
                 })
             }
             ProcessProbeResult::ShellOnly | ProcessProbeResult::Unidentified => {
@@ -171,6 +174,7 @@ impl AgentDetector {
                 self.agent = None;
                 self.session_id = None;
                 self.prompt_id = None;
+                self.blocked_on = None;
                 self.resume = Some(None);
                 self.restoring = None;
                 self.state = None;
@@ -234,15 +238,22 @@ impl AgentDetector {
                 session_id: id.clone(),
             }));
         }
-        if next == state && session_id == self.session_id {
+        // What blocks is only what the blocking event said; leaving Blocked, or a second
+        // Blocked without a detail, clears it (ADR 0024).
+        let blocked_on = (next == AgentState::Blocked)
+            .then(|| event.detail.clone())
+            .flatten();
+        if next == state && session_id == self.session_id && blocked_on == self.blocked_on {
             return AgentPublish::Nothing;
         }
         self.state = Some(next);
         self.session_id = session_id;
+        self.blocked_on = blocked_on;
         AgentPublish::Snapshot(AgentSnapshot {
             session_id: self.session_id.clone(),
             kind: agent,
             state: next,
+            blocked_on: self.blocked_on.clone(),
         })
     }
 }

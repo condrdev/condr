@@ -143,6 +143,9 @@ pub struct AgentSnapshot {
     pub session_id: Option<String>,
     pub kind: AgentKind,
     pub state: AgentState,
+    /// What a `Blocked` agent waits for, from the hook that blocked it (ADR 0024);
+    /// `None` in every other state or when the hook had nothing to say.
+    pub blocked_on: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

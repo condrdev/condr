@@ -53,11 +53,13 @@ try {
   const switchedAt = reports().findIndex(report => report.session_id === "ses_B")
   // An old root finishing cannot replace the selected conversation.
   status.set("ses_A", "idle")
-  permission = [{ id: "permission" }]
+  permission = [{ id: "permission", title: "Run cargo test" }]
   await waitFor(() => reports().at(-1)?.event === "permission-request")
+  assert.equal(reports().at(-1).detail, "Run cargo test", "a permission says what it is for")
   permission = []
-  question = [{ id: "question" }]
+  question = [{ id: "question", questions: [{ question: "Which DB?" }] }]
   await waitFor(() => reports().at(-1)?.event === "question-asked")
+  assert.equal(reports().at(-1).detail, "Which DB?", "a question carries its text")
   question = []
   route.current = { name: "session", params: { sessionID: "ses_child" } }
   await delay(250)

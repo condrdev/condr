@@ -131,6 +131,7 @@ impl Condr {
         }
         let owner = cx.weak_entity();
         let sessions = self.restored_sessions();
+        let needs_you = self.needs_you_items(&sessions, cx);
         let items = self.connections.iter().map(|connection| {
             let key = connection.key;
             let server_target = DropTarget::Server { key, after: false };
@@ -218,6 +219,10 @@ impl Condr {
                                             ),
                                             format!("{agent_label}: {}", status.label),
                                         ))
+                                        // What a Blocked agent waits for (ADR 0024).
+                                        .when_some(agent.blocked_on.clone(), |item, text| {
+                                            item.detail(text)
+                                        })
                                         .active(
                                             active_server
                                                 && self.target_pane == Some((key, pane_id)),
@@ -582,6 +587,15 @@ impl Condr {
         Sidebar::new("condr-sidebar")
             .collapsible(SidebarCollapsible::None)
             .w_full()
+            // Every Blocked agent on every Device, first (ADR 0024); absent when none.
+            .children((!needs_you.is_empty()).then(|| {
+                CondrSidebarSection::new(
+                    "Needs you",
+                    "needs-you-heading",
+                    |_, _| div().into_any_element(),
+                    needs_you,
+                )
+            }))
             .children(items)
             // The app name lives in the title bar; the keep-awake toggle sits at the bottom
             // left, the actions at the bottom right, Connect Remote Device left of Settings.
@@ -625,6 +639,65 @@ impl Condr {
                     ),
             )
             .into_any_element()
+    }
+
+    /// One row per Blocked agent across all connections: its mark, the Workspace (and
+    /// the Device once there is more than one), and what it waits for. A click lands in
+    /// the Pane, as the OS notification's click does.
+    fn needs_you_items(
+        &self,
+        sessions: &HashMap<ConnectionKey, Session>,
+        cx: &mut Context<Self>,
+    ) -> Vec<CondrSidebarTreeItem> {
+        let owner = cx.weak_entity();
+        let several_devices = self.connections.len() > 1;
+        let status = agent_sidebar_status(AgentDisplayState::Blocked);
+        let mut items = Vec::new();
+        for connection in &self.connections {
+            let key = connection.key;
+            let Some(session) = sessions.get(&key) else {
+                continue;
+            };
+            for workspace in session.workspaces() {
+                for pane in workspace.tabs().iter().flat_map(|tab| tab.panes()) {
+                    let pane_id = pane.id();
+                    let Some(agent) = connection
+                        .agents
+                        .get(&pane_id)
+                        .filter(|agent| agent.state == AgentState::Blocked)
+                    else {
+                        continue;
+                    };
+                    let label = if several_devices {
+                        format!("{} · {}", workspace.name(), connection.label)
+                    } else {
+                        workspace.name().to_owned()
+                    };
+                    let owner = owner.clone();
+                    items.push(
+                        CondrSidebarTreeItem::new(
+                            format!("needs-you-{key}-{}", pane_id.as_u64()),
+                            format!("needs-you-{key}-{}", pane_id.as_u64()),
+                            format!("needs-you-label-{key}-{}", pane_id.as_u64()),
+                            label,
+                        )
+                        .icon(CondrSidebarIcon::agent(
+                            agent.kind,
+                            status,
+                            format!("needs-you-status-{key}-{}", pane_id.as_u64()),
+                            format!("{}: {}", agent.kind.label(), status.label),
+                        ))
+                        .when_some(agent.blocked_on.clone(), |item, text| item.detail(text))
+                        .disable(!connection.can_mutate())
+                        .on_click(move |_, window, cx| {
+                            let _ = owner
+                                .update(cx, |this, cx| this.select_pane(key, pane_id, window, cx));
+                        }),
+                    );
+                }
+            }
+        }
+        items
     }
 
     fn render_collapsed_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {

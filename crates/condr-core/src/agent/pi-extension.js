@@ -7,9 +7,11 @@ export default function (api) {
   const agent = __CONDR_AGENT__
   let queue = Promise.resolve()
   let active = false
-  const waiting = new Set()
+  // Outstanding waits, each with what it waits for (ADR 0024); the newest is reported.
+  const waiting = new Map()
   const report = (ctx, event, source) => {
-    const input = JSON.stringify({ session_id: ctx.sessionManager.getSessionId(), source })
+    const detail = event === "question-asked" ? [...waiting.values()].filter(Boolean).pop() : undefined
+    const input = JSON.stringify({ session_id: ctx.sessionManager.getSessionId(), source, detail })
     queue = queue.then(() => new Promise((resolve) => {
       const child = spawn(exe, ["agent-hook", agent, event], {
         stdio: ["pipe", "ignore", "ignore"], timeout: 2000,
@@ -37,7 +39,7 @@ export default function (api) {
   on("agent_start", (_, ctx) => { active = true; return update(ctx) })
   if (agent === "pi") {
     on("agent_settled", (_, ctx) => { active = false; return update(ctx) })
-    on("ui_prompt_start", (_, ctx) => { waiting.add("ui"); return update(ctx) })
+    on("ui_prompt_start", (event, ctx) => { waiting.set("ui", event.title); return update(ctx) })
     on("ui_prompt_end", (_, ctx) => {
       waiting.delete("ui")
       active = !ctx.isIdle()
@@ -52,7 +54,7 @@ export default function (api) {
       return update(ctx)
     })
     on("tool_approval_requested", (event, ctx) => {
-      waiting.add(`approval:${event.toolCallId}`)
+      waiting.set(`approval:${event.toolCallId}`, event.toolName)
       return update(ctx)
     })
     on("tool_approval_resolved", (event, ctx) => {
@@ -61,7 +63,7 @@ export default function (api) {
     })
     on("tool_execution_start", (event, ctx) => {
       if (event.toolName !== "ask") return
-      waiting.add(`ask:${event.toolCallId}`)
+      waiting.set(`ask:${event.toolCallId}`, event.input?.question ?? event.input?.prompt)
       return update(ctx)
     })
     on("tool_result", (event, ctx) => {

@@ -711,6 +711,7 @@ fn foreground_agent_process_produces_an_unknown_snapshot() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
+            blocked_on: None,
         },
         "agent process was not detected",
     );
@@ -740,6 +741,7 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
             session_id: None,
             kind: AgentKind::Codex,
             state,
+            blocked_on: None,
         })
     };
     let events = std::env::temp_dir().join(format!(
@@ -857,6 +859,7 @@ done
                 kind: AgentKind::Codex,
                 state: AgentState::Idle,
                 session_id: Some("first".into()),
+                blocked_on: None,
             },
             "first hook was not detected",
         );
@@ -931,6 +934,7 @@ fn foreground_agent_survives_its_process_group_leader_exiting() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
+            blocked_on: None,
         },
         "agent process was not detected after the pipeline leader exited",
     );

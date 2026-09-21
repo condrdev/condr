@@ -75,7 +75,7 @@ The other view of the right sidebar: the presented Workspace's directory tree un
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent.
 
 **Agent**:
-A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`) comes only from hooks Condr installed into that CLI, delivered in-band as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed.
+A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`) comes only from hooks Condr installed into that CLI, delivered in-band as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed. A `Blocked` Agent may carry `blocked_on`, what its hook said it waits for (a tool and command, or a question), cleared with the state (ADR 0024).
 _Avoid_: Pane
 
 **Agent Conversation**:

@@ -169,6 +169,9 @@ pub(super) struct PaneInfo {
     pub(super) agent: Option<&'static str>,
     /// `idle`, `working`, `blocked`, or `unknown` for a plain shell.
     pub(super) agent_status: &'static str,
+    /// What a `blocked` agent waits for, when its hook said (ADR 0024).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) blocked_on: Option<String>,
 }
 
 pub(super) fn pane_info(
@@ -209,6 +212,7 @@ pub(super) fn pane_info(
             Some(AgentState::Blocked) => "blocked",
             Some(AgentState::Unknown) | None => "unknown",
         },
+        blocked_on: agent.and_then(|agent| agent.blocked_on.clone()),
     }
 }
 
