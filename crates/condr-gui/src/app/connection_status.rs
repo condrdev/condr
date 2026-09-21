@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::button::ButtonRounded;
 use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::popover::Popover;
 
@@ -216,6 +217,7 @@ impl Condr {
                             .trigger(
                                 Button::new(("connection-details-trigger", key))
                                     .small()
+                                    .rounded(ButtonRounded::Size(px(999.)))
                                     .ghost()
                                     .label("Details"),
                             )
@@ -251,6 +253,7 @@ impl Condr {
                         Button::new(("connect-server", key))
                             .debug_selector(move || format!("connect-server-{key}"))
                             .small()
+                            .rounded(ButtonRounded::Size(px(999.)))
                             .outline()
                             .label("Connect")
                             .on_click(move |_, window, cx| {
