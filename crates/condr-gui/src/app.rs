@@ -74,7 +74,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::setting::{
-    SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+    SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
 use gpui_kit::component::sidebar::{Sidebar, SidebarCollapsible, SidebarItem};
 use gpui_kit::component::spinner::Spinner;
@@ -97,9 +97,10 @@ use settings::{
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
     SettingsTab, color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
-    select_settings_server, select_settings_tab, select_terminal_font_family,
-    select_terminal_font_size, selected_appearance, server_listen, server_shell, set_server_listen,
-    step_terminal_font_size, terminal_font_family, terminal_font_size,
+    select_settings_server, select_settings_server_page, select_settings_tab,
+    select_terminal_font_family, select_terminal_font_size, selected_appearance, server_listen,
+    server_shell, set_server_listen, step_terminal_font_size, terminal_font_family,
+    terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;

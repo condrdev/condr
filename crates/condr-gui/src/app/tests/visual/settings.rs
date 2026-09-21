@@ -594,14 +594,53 @@ fn the_daemon_page_keeps_half_typed_addresses_local_and_invites_follow_the_liste
                 1,
                 generation,
                 Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::Invite {
-                    address: "tcp://key.secret@<host>:2637".into(),
+                    tcp: Some("tcp://key.secret@<host>:2637".into()),
+                    p2p: Some("p2p://key.secret".into()),
                     expires_in_secs: 600,
                 })),
                 cx,
             );
-            assert_eq!(
-                this.connection(1).unwrap().invite,
-                Some(("tcp://key.secret@<host>:2637".to_owned(), 600))
+            let invite = this.connection(1).unwrap().invite.clone().unwrap();
+            assert_eq!(invite.tcp.as_deref(), Some("tcp://key.secret@<host>:2637"));
+            assert_eq!(invite.p2p.as_deref(), Some("p2p://key.secret"));
+            assert_eq!(invite.expires_in_secs, 600);
+        });
+    });
+    // The invite lives on the Server tab's Paired devices page, its third page.
+    settings.update(|_, cx| {
+        select_settings_server_page(&settings_view, 2, cx);
+        select_settings_tab(&settings_view, SettingsTab::Server, cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        settings.debug_bounds("server-invite-tcp").is_some()
+            && settings.debug_bounds("server-invite-p2p").is_some(),
+        "one link per enabled transport"
+    );
+
+    settings.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::P2pSaved {
+                    enabled: true,
+                })),
+                cx,
+            );
+            let connection = this.connection(1).unwrap();
+            assert!(connection.p2p, "the p2p setting follows the Server's reply");
+            assert_eq!(connection.invite, None, "a p2p change voids the old invite");
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::Invite {
+                    tcp: Some("tcp://key.secret@<host>:2637".into()),
+                    p2p: None,
+                    expires_in_secs: 600,
+                })),
+                cx,
             );
             this.handle_incoming(
                 1,
@@ -620,7 +659,8 @@ fn the_daemon_page_keeps_half_typed_addresses_local_and_invites_follow_the_liste
     });
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(
-        settings.debug_bounds("server-invite-address").is_none(),
+        settings.debug_bounds("server-invite-tcp").is_none()
+            && settings.debug_bounds("server-invite-p2p").is_none(),
         "no invite is shown after the listener changed"
     );
 }

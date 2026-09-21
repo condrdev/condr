@@ -64,14 +64,15 @@ pub(super) struct ServerConnection {
     /// Why the last hooks request failed, until the next report.
     pub(super) hooks_error: Option<String>,
     pub(super) listen: Option<String>,
+    /// `[server.p2p] enabled` on the Server, as its last `Status` or `P2pSaved` said.
+    pub(super) p2p: bool,
     /// The Server's last `Status` report; `None` until the first one arrives.
     pub(super) health: Option<ServerHealth>,
     pub(super) clients: Vec<ServerClientInfo>,
     pub(super) connected_devices: Vec<String>,
     pub(super) admin_error: Option<String>,
-    /// The last invite this Server issued and how long it said it was valid, for the
-    /// Clients page to show and copy.
-    pub(super) invite: Option<(String, u64)>,
+    /// The last invite this Server issued, for the Clients page to show and copy.
+    pub(super) invite: Option<ServerInvite>,
     pub(super) io: Option<ClientIo>,
     pub(super) cancellation: ConnectionCancellation,
     pub(super) connect_generation: u64,
@@ -145,6 +146,7 @@ impl ServerConnection {
             hooks: Vec::new(),
             hooks_error: None,
             listen: None,
+            p2p: false,
             health: None,
             clients: Vec::new(),
             connected_devices: Vec::new(),
@@ -476,6 +478,14 @@ impl ServerConnection {
         self.request_snapshot_for(authoritative_session_id);
         true
     }
+}
+
+/// One invite as the Server printed it: a link per enabled transport (ADR 0026).
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ServerInvite {
+    pub(super) tcp: Option<String>,
+    pub(super) p2p: Option<String>,
+    pub(super) expires_in_secs: u64,
 }
 
 /// Runtime figures from the Server's `Status` reply, shown on the Daemon settings page.

@@ -154,11 +154,19 @@ pub enum DiffBase {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ServerAdminCommand {
     Status,
-    SaveListen { address: Option<String> },
+    SaveListen {
+        address: Option<String>,
+    },
+    /// `[server.p2p] enabled` (ADR 0026); like `SaveListen`, it applies on the next start.
+    SaveP2p {
+        enabled: bool,
+    },
     Restart,
     Clients,
     Invite,
-    Revoke { key: String },
+    Revoke {
+        key: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -787,7 +795,8 @@ pub enum ServerMessage {
 pub enum ServerAdminResponse {
     Status {
         listen: Option<String>,
-        /// Whether `[server.p2p] enabled` accepts Peer-to-peer connections.
+        /// `[server.p2p] enabled` as saved, like `listen`; a bind that failed is one of
+        /// `recent_errors`.
         p2p: bool,
         connected: Vec<String>,
         /// The Server binary's crate version.
@@ -805,12 +814,19 @@ pub enum ServerAdminResponse {
     ListenSaved {
         listen: Option<String>,
     },
+    P2pSaved {
+        enabled: bool,
+    },
     Clients {
         clients: Vec<ServerClientInfo>,
         connected: Vec<String>,
     },
+    /// One invite, printed for every enabled transport (ADR 0026).
     Invite {
-        address: String,
+        /// `tcp://<id>.<invite>@<host>:<port>` when a TCP listener is configured.
+        tcp: Option<String>,
+        /// `p2p://<id>.<invite>` when Peer-to-peer is enabled.
+        p2p: Option<String>,
         expires_in_secs: u64,
     },
     Revoked {

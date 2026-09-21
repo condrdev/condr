@@ -407,7 +407,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 println!("listening at tcp://{address}");
             }
             if p2p {
-                println!("accepting Peer-to-peer connections");
+                println!("Peer-to-peer enabled");
             }
             println!(
                 "{workspaces} workspace(s), {tabs} tab(s), {panes} pane(s), {agents} agent(s)"
@@ -630,27 +630,33 @@ mod tests {
 
     #[test]
     fn lifecycle_commands_parse_their_supported_options() {
-        let ServerCommand::Start { listen, snapshot, .. } = parse(&[
+        let ServerCommand::Start {
+            listen, snapshot, ..
+        } = parse(&[
             "start",
             "--listen",
             "127.0.0.1:4242",
             "--snapshot",
             "state.snapshot",
         ])
-        .unwrap() else {
+        .unwrap()
+        else {
             panic!("expected start");
         };
         assert_eq!(listen, Some("127.0.0.1:4242".parse().unwrap()));
         assert_eq!(snapshot, Some("state.snapshot".into()));
 
-        let ServerCommand::Restart { listen, snapshot, .. } = parse(&[
+        let ServerCommand::Restart {
+            listen, snapshot, ..
+        } = parse(&[
             "restart",
             "--listen",
             "127.0.0.1:4243",
             "--snapshot",
             "restart.snapshot",
         ])
-        .unwrap() else {
+        .unwrap()
+        else {
             panic!("expected restart");
         };
         assert_eq!(listen, Some("127.0.0.1:4243".parse().unwrap()));

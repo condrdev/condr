@@ -44,7 +44,11 @@ fn tunnel(
         }
         Err(error) => {
             tracing::warn!("tunnel dial failed: {error}");
-            let _ = send_error(&mut local, state, &format!("could not reach the device: {error}"));
+            let _ = send_error(
+                &mut local,
+                state,
+                &format!("could not reach the device: {error}"),
+            );
         }
     }
 }
@@ -1472,6 +1476,11 @@ fn server_admin(
                 listen: listen.map(|address| address.to_string()),
             })
         }
+        ServerAdminCommand::SaveP2p { enabled } => {
+            let path = config_path.ok_or_else(|| io::Error::other("no Server config path"))?;
+            crate::server::save_p2p(&path, enabled)?;
+            Ok(ServerAdminResponse::P2pSaved { enabled })
+        }
         ServerAdminCommand::Restart => {
             Err(io::Error::other("restart is handled by the Server runtime"))
         }
@@ -1493,18 +1502,19 @@ fn server_admin(
         ServerAdminCommand::Invite => {
             let directory = crate::noise::identity_directory()?;
             let identity = crate::noise::ServerIdentity::load_or_create(&directory)?;
+            let config = ServerConfig::default();
+            if config.listen.is_none() && !config.p2p {
+                return Err(io::Error::other(
+                    "neither a TCP listener nor Peer-to-peer is enabled",
+                ));
+            }
             let invite = crate::noise::create_invite(&directory)?;
-            let port = ServerConfig::default()
-                .listen
-                .map(|address| address.port().to_string())
-                .unwrap_or_else(|| "<port>".into());
+            let (id, secret) = (identity.public_key(), invite.secret.to_hex());
             Ok(ServerAdminResponse::Invite {
-                address: format!(
-                    "tcp://{}.{}@<host>:{}",
-                    identity.public_key(),
-                    invite.secret.to_hex(),
-                    port
-                ),
+                tcp: config
+                    .listen
+                    .map(|address| format!("tcp://{id}.{secret}@<host>:{}", address.port())),
+                p2p: config.p2p.then(|| format!("p2p://{id}.{secret}")),
                 expires_in_secs: crate::noise::INVITE_TTL.as_secs(),
             })
         }

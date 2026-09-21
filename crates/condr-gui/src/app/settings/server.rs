@@ -44,6 +44,23 @@ pub(in crate::app) fn select_settings_tab(
     });
 }
 
+/// Which page the Server tab shows when first drawn; tests set it before selecting the
+/// tab, since Kit keeps the page selection once the tab has rendered.
+#[cfg(all(test, feature = "test-support"))]
+pub(in crate::app) fn select_settings_server_page(
+    settings: &Entity<SettingsWindow>,
+    page_ix: usize,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        this.server_page = SelectIndex {
+            page_ix,
+            group_ix: None,
+        };
+        cx.notify();
+    });
+}
+
 /// What the Shell field shows; tests read it without the widget.
 #[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn server_shell(settings: &Entity<SettingsWindow>, cx: &App) -> SharedString {
@@ -207,7 +224,7 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
         "Connection",
         SettingField::render(move |_, _, _| div().text_sm().child(kind)),
     )
-    .keywords(["connection", "local", "ssh", "tcp"]);
+    .keywords(["connection", "local", "ssh", "tcp", "p2p"]);
     let connection = match address {
         Some(address) => connection.description(SharedString::from(address)),
         None => connection,
@@ -369,13 +386,18 @@ fn server_network_group(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingGroup {
-    let over_tcp = this
-        .selected_connection(cx, |c| matches!(c.endpoint, Endpoint::Tcp(_)))
+    let remote = this
+        .selected_connection(cx, |c| {
+            matches!(c.endpoint, Endpoint::Tcp(_) | Endpoint::P2p(_))
+        })
         .unwrap_or(false);
     let group = SettingGroup::new().title("Network");
-    // The Server refuses admin commands over TCP (ADR 0015); say so only when it applies.
-    let group = if over_tcp {
-        group.description("Read-only over TCP. Connect locally or over SSH to change these.")
+    // The Server refuses admin commands over TCP and p2p (ADR 0015); say so only when it
+    // applies.
+    let group = if remote {
+        group.description(
+            "Read-only over TCP and Peer-to-peer. Connect locally or over SSH to change these.",
+        )
     } else {
         group
     };
@@ -401,6 +423,24 @@ fn server_network_group(
             )
             .description("host:port"),
         )
+        .item(
+            SettingItem::new(
+                "Peer-to-peer",
+                SettingField::switch(
+                    {
+                        let settings = settings.clone();
+                        move |cx| server_p2p_enabled(&settings, cx)
+                    },
+                    {
+                        let settings = settings.clone();
+                        move |enabled, cx| set_server_p2p_enabled(&settings, enabled, cx)
+                    },
+                )
+                .default_value(false),
+            )
+            .description("Lets other devices reach this one by its key. No port to open.")
+            .keywords(["p2p", "peer-to-peer", "relay"]),
+        )
         .item(server_restart_row(settings))
 }
 
@@ -412,7 +452,7 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
             SettingItem::render(move |_, _, cx| {
                 let settings = invite_settings.clone();
                 let allowed = server_admin_allowed(&settings, cx);
-                let (listening, invite) = settings
+                let (listening, p2p, invite) = settings
                     .read(cx)
                     .owner
                     .upgrade()
@@ -423,12 +463,15 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                             .connections
                             .iter()
                             .find(|c| c.key == this.selected_server)
-                            .map(|c| (c.listen.is_some(), c.invite.clone()))
+                            .map(|c| (c.listen.is_some(), c.p2p, c.invite.clone()))
                     })
                     .unwrap_or_default();
-                let hint = match (allowed, listening) {
+                let reachable = listening || p2p;
+                let hint = match (allowed, reachable) {
                     (false, _) => "Only a local or SSH connection can invite devices.",
-                    (true, false) => "Turn on the TCP listener first: devices pair over TCP.",
+                    (true, false) => {
+                        "Turn on the TCP listener or Peer-to-peer first: devices pair over either."
+                    }
                     (true, true) => {
                         "A one-time address for Connect Remote Device on the new device."
                     }
@@ -446,7 +489,7 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                                 })
                                 .small()
                                 .outline()
-                                .disabled(!(allowed && listening))
+                                .disabled(!(allowed && reachable))
                                 .on_click({
                                     let settings = settings.clone();
                                     move |_, _, cx| {
@@ -466,37 +509,46 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                                 .child(hint),
                         ),
                 );
-                if let Some((address, expires_in_secs)) = invite {
+                if let Some(invite) = invite {
+                    // One line per enabled transport, each with its own Copy.
+                    let link = |id: &'static str, address: String| {
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .debug_selector(move || id.into())
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_sm()
+                                    .font_family("monospace")
+                                    .child(address.clone()),
+                            )
+                            .child(
+                                Clipboard::new(format!("{id}-copy"))
+                                    .value(address)
+                                    .tooltip("Copy invite"),
+                            )
+                    };
+                    let has_tcp = invite.tcp.is_some();
                     column = column.child(
                         v_flex()
                             .gap_1()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .debug_selector(|| "server-invite-address".into())
-                                            .min_w_0()
-                                            .truncate()
-                                            .text_sm()
-                                            .font_family("monospace")
-                                            .child(address.clone()),
-                                    )
-                                    .child(
-                                        Clipboard::new("server-invite-copy")
-                                            .value(address)
-                                            .tooltip("Copy invite"),
-                                    ),
-                            )
+                            .children(invite.p2p.map(|address| link("server-invite-p2p", address)))
+                            .children(invite.tcp.map(|address| link("server-invite-tcp", address)))
                             .child(
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(format!(
-                                        "Copied. Valid for {} minutes; replace <host> with an \
-                                         address the new device can reach.",
-                                        expires_in_secs.div_ceil(60)
+                                        "Copied. Valid for {} minutes{}",
+                                        invite.expires_in_secs.div_ceil(60),
+                                        if has_tcp {
+                                            "; in the TCP address, replace <host> with one the \
+                                             new device can reach."
+                                        } else {
+                                            "."
+                                        }
                                     )),
                             ),
                     );
@@ -688,6 +740,23 @@ fn set_server_listen_value(
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| this.send_listen(address, cx));
+}
+
+fn server_p2p_enabled(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
+    selected_connection(settings, cx, |c| c.p2p).unwrap_or(false)
+}
+
+/// Saves `[server.p2p] enabled` on the selected Server; the restart row applies it.
+fn set_server_p2p_enabled(settings: &Entity<SettingsWindow>, enabled: bool, cx: &mut App) {
+    settings.update(cx, |this, cx| {
+        if !admin_allowed(this, cx) {
+            return;
+        }
+        let key = this.selected_server;
+        let _ = this.owner.update(cx, |owner, _| {
+            owner.server_admin(key, ServerAdminCommand::SaveP2p { enabled })
+        });
+    });
 }
 
 /// What one hooks action does: asks the selected Server and lets the reply repaint.

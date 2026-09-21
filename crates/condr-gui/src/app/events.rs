@@ -603,8 +603,7 @@ impl Condr {
                 match response {
                     ServerAdminResponse::Status {
                         listen,
-                        // ponytail: shown in Settings alongside `listen` in the p2p GUI pass.
-                        p2p: _,
+                        p2p,
                         connected,
                         version,
                         uptime_secs,
@@ -616,6 +615,7 @@ impl Condr {
                         recent_errors,
                     } => {
                         connection.listen = listen;
+                        connection.p2p = p2p;
                         connection.connected_devices = connected;
                         connection.health = Some(ServerHealth {
                             version,
@@ -633,16 +633,30 @@ impl Condr {
                         connection.connected_devices = connected;
                     }
                     ServerAdminResponse::Invite {
-                        address,
+                        tcp,
+                        p2p,
                         expires_in_secs,
                     } => {
-                        cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
-                        connection.invite = Some((address, expires_in_secs));
+                        // The paste-ready link goes to the clipboard: a p2p link has no
+                        // `<host>` to fill in.
+                        if let Some(address) = p2p.as_ref().or(tcp.as_ref()) {
+                            cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
+                        }
+                        connection.invite = Some(ServerInvite {
+                            tcp,
+                            p2p,
+                            expires_in_secs,
+                        });
                     }
                     // The stored listen address changed: a pending invite still points at
                     // the old port, and none can be issued without a listener.
                     ServerAdminResponse::ListenSaved { listen } => {
                         connection.listen = listen;
+                        connection.invite = None;
+                    }
+                    // Likewise: an invite's p2p link is only good while p2p is enabled.
+                    ServerAdminResponse::P2pSaved { enabled } => {
+                        connection.p2p = enabled;
                         connection.invite = None;
                     }
                     ServerAdminResponse::Revoked { .. } => {

@@ -136,6 +136,9 @@ pub(super) struct SettingsWindow {
     pub(super) listen_refused: bool,
     /// Which tab is showing: this Client's settings or one Server's.
     pub(super) tab: SettingsTab,
+    /// The page the Server tab opens on when it is first drawn; Kit keeps the selection
+    /// from then on. Tests point it at a page they need to see.
+    pub(super) server_page: SelectIndex,
     /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
     /// refreshed on render when the connection list changes.
     server_select: Entity<ServerSelect>,
@@ -310,6 +313,7 @@ impl SettingsWindow {
             _saved_clear: None,
             listen_refused: false,
             tab: SettingsTab::default(),
+            server_page: SelectIndex::default(),
             server_select,
             server_keys,
             server_labels,
@@ -427,6 +431,7 @@ impl Render for SettingsWindow {
                 .page(about_page()),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
+                .default_selected_index(self.server_page)
                 .page(server_terminal_page(&settings))
                 .page(server_network_page(self, &settings, cx))
                 .page(server_clients_page(&settings))

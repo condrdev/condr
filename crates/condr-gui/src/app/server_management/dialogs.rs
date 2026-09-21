@@ -123,7 +123,7 @@ impl Condr {
                 let label = match &endpoint {
                     Endpoint::Tcp(tcp) => tcp.authority(),
                     Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
-                    // ponytail: short id as the default label; renaming lands in the p2p GUI pass.
+                    // The short id is the default name; Edit renames it.
                     Endpoint::P2p(p2p) => format!("p2p {}", &p2p.device.to_hex()[..8]),
                     Endpoint::Local(_) => unreachable!("remote address parser"),
                 };
@@ -151,13 +151,13 @@ impl Condr {
         let Some((label, endpoint)) = self.connection(key).and_then(|connection| match &connection
             .endpoint
         {
-            // A p2p device has no editable host/port (its address is `p2p://<id>`); the host/port
-            // dialog is skipped for it, same as Local. ponytail: renaming is a p2p GUI-pass item.
-            Endpoint::Local(_) | Endpoint::P2p(_) => None,
+            Endpoint::Local(_) => None,
             endpoint => Some((connection.label.clone(), endpoint.clone())),
         }) else {
             return;
         };
+        // A p2p Device is reached by its key alone, so only its name is editable.
+        let p2p = matches!(endpoint, Endpoint::P2p(_));
         let (host_value, port_value, server_key) = match endpoint {
             Endpoint::Tcp(tcp) => (
                 tcp.host,
@@ -165,7 +165,8 @@ impl Condr {
                 Some(tcp.server_key.to_hex()),
             ),
             Endpoint::Ssh(ssh) => (ssh.to_string(), String::new(), None),
-            Endpoint::Local(_) | Endpoint::P2p(_) => unreachable!("no host/port dialog"),
+            Endpoint::P2p(p2p) => (String::new(), String::new(), Some(p2p.device.to_hex())),
+            Endpoint::Local(_) => unreachable!("no dialog for the Local Server"),
         };
         let ssh = server_key.is_none();
         // Typing is limited to what the field can hold: a host name or address, a port
@@ -228,7 +229,7 @@ impl Condr {
                                 .child(field(name))
                                 // Host and port belong together, as `host:port` reads.
                                 .when(ssh, |form| form.child(field(host)))
-                                .when(!ssh, |form| {
+                                .when(!ssh && !p2p, |form| {
                                     form.child(
                                         h_flex()
                                             .gap_2()
@@ -321,7 +322,8 @@ impl Condr {
             return Ok(());
         };
         let endpoint = match &connection.endpoint {
-            Endpoint::Local(_) | Endpoint::P2p(_) => return Ok(()),
+            Endpoint::Local(_) => return Ok(()),
+            Endpoint::P2p(p2p) => Ok(Endpoint::P2p(p2p.clone())),
             Endpoint::Tcp(tcp) => {
                 TcpEndpoint::split_authority(&format!("{host}:{port}")).map(|(host, port)| {
                     Endpoint::Tcp(TcpEndpoint {
