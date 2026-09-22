@@ -481,3 +481,85 @@ fn terminal_size_rejects_unbounded_grid_allocations() {
     assert!(TerminalSize::new(256, 256).validate().is_ok());
     assert!(TerminalSize::new(257, 256).validate().is_err());
 }
+
+/// The burst benchmark AGENTS.md asks for, VT side: an agent CLI redrawing a three-line status
+/// block hundreds of times per second, with the monitor taking one frame per display interval.
+/// Every frame must be a sparse delta, the retained view must equal the VT afterwards, and
+/// the last frame must carry the last revision. Run with `--nocapture` for the timing.
+#[test]
+fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision() {
+    const CHUNKS: u64 = 5_000;
+    /// PTY reads per 60 Hz frame; the monitor coalesces them into one `take_frame`.
+    const CHUNKS_PER_FRAME: u64 = 40;
+    const REDRAWN_ROWS: usize = 3;
+
+    let size = TerminalSize::new(24, 80);
+    let screen = (0..21)
+        .map(|row| format!("\x1b[{};1H{row:02}{}", row + 1, "x".repeat(78)))
+        .collect::<String>();
+    let terminal = Arc::new(Mutex::new(terminal_showing(size, screen.as_bytes())));
+    let revision = Arc::new(AtomicU64::new(1));
+    let source = TerminalViewSource {
+        terminal: Arc::clone(&terminal),
+        size: Arc::new(Mutex::new(size)),
+        revision: Arc::clone(&revision),
+        damage_baseline: Arc::new(Mutex::new(None)),
+        cursor_settle: Arc::new(Mutex::new(CursorSettle::default())),
+    };
+    let Some(TerminalViewFrame::Full(mut retained)) = source.take_frame() else {
+        panic!("the first frame is full");
+    };
+
+    let spinner = ['|', '/', '-', '\\'];
+    let mut parser: Processor = Processor::new();
+    let (mut frames, mut delta_cells) = (0u64, 0usize);
+    let started = std::time::Instant::now();
+    for chunk in 1..=CHUNKS {
+        let tick = format!(
+            "\x1b[22;1H\x1b[2K{} working on step {chunk}\x1b[23;1H\x1b[2Kelapsed {}s\x1b[24;1H\x1b[2K> ",
+            spinner[usize::try_from(chunk % 4).unwrap()],
+            chunk / 10
+        );
+        parser.advance(&mut *terminal.lock().unwrap(), tick.as_bytes());
+        revision.fetch_add(1, Ordering::AcqRel);
+        if chunk % CHUNKS_PER_FRAME != 0 && chunk != CHUNKS {
+            continue;
+        }
+        let frame = source.take_frame().expect("new output produces a frame");
+        match &frame {
+            TerminalViewFrame::Delta(delta) => {
+                delta_cells += delta.runs.iter().map(|run| run.cells.len()).sum::<usize>();
+            }
+            TerminalViewFrame::Full(_) => {
+                panic!("a status-line redraw must not invalidate the whole screen")
+            }
+        }
+        frames += 1;
+        retained.apply_frame(frame).unwrap();
+    }
+    let elapsed = started.elapsed();
+
+    assert_eq!(frames, CHUNKS / CHUNKS_PER_FRAME);
+    assert_eq!(
+        retained.revision,
+        revision.load(Ordering::Acquire),
+        "the final frame carries the last revision"
+    );
+    // Plus one row: the first tick also damages the cell the cursor left on row 21.
+    let columns = usize::from(size.columns);
+    assert!(
+        delta_cells <= usize::try_from(frames).unwrap() * REDRAWN_ROWS * columns + columns,
+        "each frame carries at most the redrawn rows, got {delta_cells} cells over {frames} frames"
+    );
+    // The settled cursor may still be held back; everything else must match the VT.
+    let mut current = source.view();
+    retained.cursor = None;
+    current.cursor = None;
+    assert_eq!(
+        retained, current,
+        "the retained view matches the VT after the burst"
+    );
+    eprintln!(
+        "burst: {CHUNKS} chunks -> {frames} frames, {delta_cells} delta cells, {elapsed:.2?}"
+    );
+}

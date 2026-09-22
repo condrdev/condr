@@ -197,4 +197,95 @@ mod tests {
             "stale x was swept and reshaped"
         );
     }
+
+    /// The burst benchmark AGENTS.md asks for, GUI side: a full screen where every cell differs,
+    /// then thousands of frames in which only a spinner cell changes, then a one-row scroll.
+    /// Shaping work must follow the changed content, not the screen area. `--nocapture` prints
+    /// the timing.
+    #[test]
+    fn a_spinner_burst_reshapes_only_the_changed_cells() {
+        const FRAMES: usize = 2_000;
+        let size = TerminalSize::new(24, 80);
+        let (rows, columns) = (usize::from(size.rows), usize::from(size.columns));
+        let cells = rows * columns;
+        let mut cache = TerminalRenderCache::default();
+        let key = TerminalRenderCacheKey {
+            runtime_epoch: None,
+            size,
+            style: TextStyle::default(),
+            font_size: px(14.),
+            palette: TerminalPalette::default(),
+        };
+        let foreground: Hsla = rgb(0xffffff).into();
+        let screen = (0..cells)
+            .map(|index| SmolStr::from(index.to_string()))
+            .collect::<Vec<_>>();
+        let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"].map(SmolStr::new_inline);
+        let spinner_cell = cells - columns;
+
+        let started = std::time::Instant::now();
+        let mut shaped_per_frame = Vec::with_capacity(FRAMES);
+        for frame in 0..FRAMES {
+            cache.prepare(key.clone(), cells);
+            let before = cache.shaped_cells();
+            for (index, text) in screen.iter().enumerate() {
+                let text = if index == spinner_cell {
+                    &spinner[frame % spinner.len()]
+                } else {
+                    text
+                };
+                cache.shaped_line(text, foreground, 0, ShapedLine::default);
+            }
+            shaped_per_frame.push(cache.shaped_cells() - before);
+        }
+        let elapsed = started.elapsed();
+
+        assert_eq!(
+            shaped_per_frame[0], cells,
+            "the first frame shapes the whole screen"
+        );
+        assert!(
+            shaped_per_frame[1..spinner.len()]
+                .iter()
+                .all(|shaped| *shaped == 1),
+            "each new spinner glyph shapes once: {:?}",
+            &shaped_per_frame[..spinner.len()]
+        );
+        assert!(
+            shaped_per_frame[spinner.len()..]
+                .iter()
+                .all(|shaped| *shaped == 0),
+            "a full spinner cycle later nothing shapes"
+        );
+
+        // Output scrolled up one row: every surviving cell keeps its shaped line; the one
+        // shaping is the text the spinner had covered, shown for the first time.
+        cache.prepare(key, cells);
+        let before = cache.shaped_cells();
+        for index in 0..cells {
+            let text = if index < cells - columns {
+                &screen[index + columns]
+            } else {
+                &screen[index]
+            };
+            cache.shaped_line(text, foreground, 0, ShapedLine::default);
+        }
+        assert_eq!(
+            cache.shaped_cells() - before,
+            1,
+            "a scroll reuses every row"
+        );
+        cache.prepare(
+            TerminalRenderCacheKey {
+                font_size: px(15.),
+                ..cache.key.clone().unwrap()
+            },
+            cells,
+        );
+        assert!(
+            cache.shapes.is_empty(),
+            "a font change is the one whole-screen invalidation"
+        );
+        eprintln!("burst: {FRAMES} frames over {cells} cells, {elapsed:.2?}");
+    }
 }

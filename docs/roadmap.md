@@ -1,6 +1,6 @@
 # Condr Roadmap
 
-> 最近核对：2026-09-19。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
+> 最近核对：2026-09-22。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
 
 ## 定位
 
@@ -16,7 +16,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 三问都过才排进近期；只过第一问的放到摩擦记录里等证据。
 
-## 现状（2026-09-19）
+## 现状（2026-09-22）
 
 单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭；此后两周补齐了发布和日常体验。仓库 2026-09-16 转为公开，尚无外部用户，Issue tracker 当前为空。
 
@@ -35,7 +35,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **代码里确实没有的**
 
-- 可观测性：burst 合并、最终帧不丢、未变 cell 不重 shaping 各有一个单元测试，但没有带负载的可重复基准；AGENTS.md 要求的性能验收仍靠手工观察。
+- 可观测性：burst 基准只覆盖 VT 增量、monitor 合并与 shaping 缓存三段，各自在进程内跑；整条 PTY → GPUI 链路的帧率仍靠 Windows 上手工观察。
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、首连指纹确认、密钥进 Keychain。
 - 代码签名、自动更新、Quickstart 文档、支持矩阵和协议兼容策略。
 - 终端内搜索、命令面板、Diff 对 base 分支比较（`GitDiff.against` 已预留）。
@@ -60,13 +60,11 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **为什么**：单人 dogfood 也已遇到只能靠猜的故障（重连、hook 配对、PTY 收尾）；有外部用户之前必须先能拿到证据，否则 Issue 无法处理。
 
-**做到哪**：日志、panic hook 和 `server status --json` 已在现状表里。剩下一项：一个可重复跑的终端 burst 基准（合并到最新 revision、最终帧不丢、未变 cell 不重新 shaping），放进 `cargo test`，不引入 criterion 之外的东西。
-
-**停在哪**：不做遥测上报、不做 metrics exporter。
+已完成（2026-09-22）：日志、panic hook 和 `server status --json` 在现状表里；终端 burst 基准是三个带负载的 `cargo test`，不引入任何依赖：VT 侧 5000 次状态行重绘合并为 125 个稀疏 delta 且末帧带最后的 revision（`condr-core` `terminal/tests/view.rs`），monitor 侧每秒十万次唤醒只按显示节拍发布、顺序不乱、退出必达（`condr-server` `server/tests/unit.rs`），GUI 侧 2000 帧只换 spinner 的整屏只重新 shaping 变化的 cell（`condr-gui` `terminal_element/cache.rs`）。三者都用 `--nocapture` 打印耗时供对比。没有做遥测上报、metrics exporter，也没有端到端帧率测量。
 
 ### 2. 多客户端各看各的
 
-已完成（ADR 0021，2026-09-18）：当前 Workspace/Tab 从 Session 移到每个客户端本地；`ActivateWorkspace`/`ActivateTab` 变为广播事件 `Activated`，CLI 的 `focus` 与 `--focus` 用它；`CreateTab` 以 `cwd_from` 指明继承哪个 Pane 的目录。GUI 重启后从第一个 Workspace 打开，记住上次视图留到有摩擦再做。
+已完成（ADR 0021，2026-09-18）：当前 Workspace/Tab 从 Session 移到每个客户端本地；`ActivateWorkspace`/`ActivateTab` 变为广播事件 `Activated`，CLI 的 `focus` 与 `--focus` 用它；`CreateTab` 以 `cwd_from` 指明继承哪个 Pane 的目录。GUI 重启后恢复上次的窗口、侧栏与视图（ADR 0023）。
 
 ### 3. Blocked 说清在等什么
 

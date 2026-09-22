@@ -423,6 +423,63 @@ fn terminal_exit_supersedes_queued_view_updates() {
     );
 }
 
+/// The burst benchmark AGENTS.md asks for, monitor side: a producer streams wakeups for about
+/// a tenth of a second, far faster than any display, and the consumer loops exactly as
+/// `monitor_terminal` does. Publications keep coming while output streams, stay bounded by
+/// the display cadence, never reorder, and the exit always arrives. `--nocapture` prints the
+/// timing.
+#[test]
+fn a_burst_of_wakeups_publishes_at_display_cadence_and_ends_with_exit() {
+    const WAKEUPS: u64 = 20_000;
+    /// 200 wakeups, then a millisecond: 100 000 wakeups per second over ~100 ms.
+    const WAKEUPS_PER_PAUSE: u64 = 200;
+    let (sender, updates) = mpsc::channel();
+    let producer = std::thread::spawn(move || {
+        for revision in 1..=WAKEUPS {
+            sender.send(TerminalUpdate::View(revision)).unwrap();
+            if revision % WAKEUPS_PER_PAUSE == 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        sender.send(TerminalUpdate::Exited).unwrap();
+    });
+
+    let mut published = Vec::new();
+    let mut last_publish = Instant::now() - TERMINAL_FRAME_INTERVAL;
+    let started = Instant::now();
+    loop {
+        let first = updates
+            .recv()
+            .expect("the producer closes only after Exited");
+        match coalesce_terminal_update(first, &updates, last_publish + TERMINAL_FRAME_INTERVAL) {
+            TerminalUpdate::View(revision) => {
+                published.push(revision);
+                last_publish = Instant::now();
+            }
+            TerminalUpdate::Exited => break,
+        }
+    }
+    let elapsed = started.elapsed();
+    producer.join().unwrap();
+
+    assert!(
+        published.windows(2).all(|pair| pair[0] < pair[1]),
+        "revisions only move forward: {published:?}"
+    );
+    // At most one publication per frame interval, plus the first and the tail; and more than
+    // one, since output streamed for several intervals.
+    let frame_budget = elapsed.as_micros() / TERMINAL_FRAME_INTERVAL.as_micros() + 2;
+    assert!(
+        published.len() >= 2 && u128::try_from(published.len()).unwrap() <= frame_budget,
+        "{} publications for {WAKEUPS} wakeups in {elapsed:?}",
+        published.len()
+    );
+    eprintln!(
+        "burst: {WAKEUPS} wakeups -> {} publications in {elapsed:.2?}",
+        published.len()
+    );
+}
+
 #[test]
 fn client_terminal_baseline_advances_only_for_an_accepted_render() {
     let mut session = Session::new();
