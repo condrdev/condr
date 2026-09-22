@@ -30,15 +30,16 @@ pub struct UninstallOptions {
     pub json: bool,
 }
 
-/// One line per step for a person; silent when a program asked for `--json`.
+/// One `label  value` line per step for a person, in the layout of `condr server status`;
+/// silent when a program asked for `--json`.
 struct Steps {
     json: bool,
 }
 
 impl Steps {
-    fn say(&self, text: impl AsRef<str>) {
+    fn say(&self, label: &str, text: impl AsRef<str>) {
         if !self.json {
-            println!("{}", text.as_ref());
+            println!("{label:<13} {}", text.as_ref());
         }
     }
 }
@@ -266,7 +267,10 @@ fn register_path(target: &Path, steps: &Steps) -> io::Result<()> {
     }
     std::os::unix::fs::symlink(target, &link)
         .map_err(|error| detail(format!("could not link {}", link.display()), error))?;
-    steps.say(format!("linked {} -> {}", link.display(), target.display()));
+    steps.say(
+        "Link",
+        format!("{} -> {}", link.display(), target.display()),
+    );
 
     let profile = profile_path(&home);
     let text = match fs::read_to_string(&profile) {
@@ -286,15 +290,15 @@ fn register_path(target: &Path, steps: &Steps) -> io::Result<()> {
             }
             fs::write(&profile, text)
                 .map_err(|error| detail(format!("could not write {}", profile.display()), error))?;
-            steps.say(format!(
-                "added ~/.local/bin to PATH in {}",
-                profile.display()
-            ));
+            steps.say(
+                "PATH",
+                format!("added ~/.local/bin in {}", profile.display()),
+            );
         }
-        None => steps.say(format!(
-            "{} already puts ~/.local/bin on PATH",
-            profile.display()
-        )),
+        None => steps.say(
+            "PATH",
+            format!("{} already puts ~/.local/bin on it", profile.display()),
+        ),
     }
     Ok(())
 }
@@ -305,7 +309,7 @@ fn unregister_path(target: &Path, steps: &Steps) -> io::Result<()> {
     let link = home.join(".local").join("bin").join(BINARY);
     if fs::read_link(&link).is_ok_and(|to| to == target) {
         fs::remove_file(&link)?;
-        steps.say(format!("removed {}", link.display()));
+        steps.say("Link", format!("removed {}", link.display()));
     }
     let profile = profile_path(&home);
     if let Ok(text) = fs::read_to_string(&profile)
@@ -313,7 +317,10 @@ fn unregister_path(target: &Path, steps: &Steps) -> io::Result<()> {
     {
         fs::write(&profile, text)
             .map_err(|error| detail(format!("could not write {}", profile.display()), error))?;
-        steps.say(format!("removed the PATH lines from {}", profile.display()));
+        steps.say(
+            "PATH",
+            format!("removed the lines from {}", profile.display()),
+        );
     }
     Ok(())
 }
@@ -393,9 +400,9 @@ fn register_path(target: &Path, steps: &Steps) -> io::Result<()> {
     match user_path_with(&current, &dir) {
         Some(value) => {
             write_user_path(&value, &kind)?;
-            steps.say(format!("added {dir} to the user Path"));
+            steps.say("Path", format!("added {dir} to the user Path"));
         }
-        None => steps.say(format!("{dir} is already on the user Path")),
+        None => steps.say("Path", format!("{dir} is already on the user Path")),
     }
     Ok(())
 }
@@ -407,7 +414,7 @@ fn unregister_path(target: &Path, steps: &Steps) -> io::Result<()> {
     let (current, kind) = read_user_path()?;
     if let Some(value) = user_path_without(&current, &dir) {
         write_user_path(&value, &kind)?;
-        steps.say(format!("removed {dir} from the user Path"));
+        steps.say("Path", format!("removed {dir} from the user Path"));
     }
     Ok(())
 }
@@ -420,22 +427,25 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
     let source = std::env::current_exe()?;
 
     let replaced = if same_file(&source, &target) {
-        steps.say(format!(
-            "{} is already the installed copy",
-            target.display()
-        ));
+        steps.say(
+            "Binary",
+            format!("{} is already the installed copy", target.display()),
+        );
         false
     } else {
         let replaced = place_binary(&source, &target)?;
-        steps.say(format!(
-            "{} {}",
-            if replaced { "replaced" } else { "installed" },
-            target.display()
-        ));
+        steps.say(
+            "Binary",
+            format!(
+                "{} {}",
+                if replaced { "replaced" } else { "installed" },
+                target.display()
+            ),
+        );
         replaced
     };
     for leftover in sweep_old_files(target.parent().expect("install path has a directory")) {
-        steps.say(format!("{} is still in use; left it", leftover.display()));
+        steps.say("Left", format!("{} is still in use", leftover.display()));
     }
     register_path(&target, &steps)?;
 
@@ -475,11 +485,12 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
         "none"
     };
     match server {
-        "none" => steps.say("no Server is running; start one with `condr server start`"),
+        "none" => steps.say("Server", "not running; `condr server start` starts one"),
         "running" => steps.say(
-            "a Server is running from its previous binary; `condr server restart` switches it",
+            "Server",
+            "running from its previous binary; `condr server restart` switches it",
         ),
-        _ => steps.say(format!("Server {server} at {endpoint}")),
+        _ => steps.say("Server", format!("{server} at {endpoint}")),
     }
 
     if options.json {
@@ -495,7 +506,7 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
             })
         );
     } else {
-        steps.say("open a new terminal, then run: condr --help");
+        steps.say("Next", "open a new terminal, then run `condr --help`");
     }
     Ok(0)
 }
@@ -525,7 +536,7 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
         crate::stop_server(&endpoint)
             .map_err(|error| detail("failed to stop the Server", error))?;
         crate::wait_for_shutdown(&config.socket_path)?;
-        steps.say("stopped the Server");
+        steps.say("Server", "stopped");
         "stopped"
     } else {
         "none"
@@ -533,20 +544,23 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
 
     let mut leftovers = Vec::new();
     match fs::remove_file(&target) {
-        Ok(()) => steps.say(format!("removed {}", target.display())),
+        Ok(()) => steps.say("Binary", format!("removed {}", target.display())),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            steps.say(format!("{} was not installed", target.display()));
+            steps.say("Binary", format!("{} was not installed", target.display()));
         }
         Err(error) if cfg!(windows) => {
             // The running condr.exe cannot delete itself; a later install sweeps it.
             let old = dir.join(format!("condr-{:x}.old", unique_suffix()));
             fs::rename(&target, &old)
                 .map_err(|_| detail(format!("could not remove {}", target.display()), error))?;
-            steps.say(format!(
-                "{} is in use; renamed to {}",
-                target.display(),
-                old.display()
-            ));
+            steps.say(
+                "Binary",
+                format!(
+                    "{} is in use; renamed to {}",
+                    target.display(),
+                    old.display()
+                ),
+            );
             leftovers.push(old);
         }
         Err(error) => {
@@ -558,9 +572,12 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
     }
     leftovers.extend(sweep_old_files(&dir));
     if fs::remove_dir(&dir).is_ok() {
-        steps.say(format!("removed {}", dir.display()));
+        steps.say("Directory", format!("removed {}", dir.display()));
     } else if dir.exists() {
-        steps.say(format!("kept {}; other files are in it", dir.display()));
+        steps.say(
+            "Directory",
+            format!("kept {}; other files are in it", dir.display()),
+        );
     }
     unregister_path(&target, &steps)?;
 
@@ -585,7 +602,7 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
         .collect();
         kept.dedup();
         for path in kept {
-            steps.say(format!("kept your data in {}", path.display()));
+            steps.say("Kept", path.display().to_string());
         }
     }
     Ok(0)

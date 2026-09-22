@@ -105,7 +105,7 @@ pub fn wait_for_shutdown(socket_path: &Path) -> io::Result<()> {
         if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "Server did not finish shutting down within 30 seconds; no replacement was started",
+                "the Server did not finish shutting down within 30 seconds",
             ));
         }
         thread::sleep(Duration::from_millis(50));

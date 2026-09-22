@@ -240,6 +240,11 @@ fn dispatch(command: ServerCommand) -> i32 {
     }
 }
 
+/// One `label  value` line of `condr server status`, labels padded to a common width.
+fn field(label: &str, value: impl std::fmt::Display) {
+    println!("{label:<13} {value}");
+}
+
 /// Prints `headline`, then each detail line indented.
 fn report(headline: &str, details: &str) {
     eprintln!("{headline}");
@@ -316,26 +321,42 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 condr_server::ensure_server(config.clone())
                     .map_err(|error| failure("failed to start the Server", [error.to_string()]))?
             };
-            println!("running at {endpoint}");
-            match (config.listen, already_running) {
-                (Some(address), false) => {
-                    println!("also listening at tcp://{address}");
-                    println!("pair another device with `condr server invite`");
-                }
-                (Some(address), true) => {
-                    println!(
-                        "the running Server keeps its previous TCP listener; \
-                         restart it to listen at tcp://{address}"
-                    );
-                }
-                (None, _) => {}
-            }
-            match (config.p2p, already_running) {
-                (true, false) => println!("also accepting Peer-to-peer connections"),
-                (true, true) => println!(
-                    "the running Server keeps its previous Peer-to-peer setting; restart it to apply"
+            field(
+                "Status",
+                match (restart, already_running) {
+                    (true, _) => "restarted",
+                    (false, true) => "already running",
+                    (false, false) => "started",
+                },
+            );
+            field("Endpoint", &endpoint);
+            // A setting saved just now only reaches a Server started just now; a running
+            // one keeps what it was started with until `condr server restart`.
+            let pending = if already_running {
+                " (saved; `condr server restart` applies it)"
+            } else {
+                ""
+            };
+            match config.listen {
+                Some(address) => field(
+                    "Listen",
+                    format_args!(
+                        "tcp://{address}{}",
+                        if listen.is_some() { pending } else { "" }
+                    ),
                 ),
-                (false, _) => {}
+                None => field("Listen", "off"),
+            }
+            field(
+                "Peer-to-peer",
+                format_args!(
+                    "{}{}",
+                    if config.p2p { "on" } else { "off" },
+                    if p2p { pending } else { "" }
+                ),
+            );
+            if (config.listen.is_some() || config.p2p) && !already_running {
+                field("Next", "pair another device with `condr server invite`");
             }
             Ok(0)
         }
@@ -351,7 +372,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                             json!({ "running": false, "endpoint": endpoint.to_string(), "error": detail })
                         );
                     } else {
-                        report("not running", &detail);
+                        field("Status", "not running");
+                        field("Reason", &detail);
                     }
                     return Ok(1);
                 }
@@ -396,31 +418,38 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 );
                 return Ok(0);
             }
-            // First, so it lines up with the Fingerprint field in the GUI's Edit Server
-            // dialog for a side-by-side check.
-            println!("fingerprint {}", identity.public_key());
-            println!(
-                "running at {endpoint}, version {version}, up {}",
-                uptime_text(uptime_secs)
+            field("Status", "running");
+            field("Endpoint", &endpoint);
+            // Same label as the GUI's Edit Server dialog, for a side-by-side check.
+            field("Fingerprint", identity.public_key());
+            field(
+                "Version",
+                format_args!(
+                    "{version} (protocol {})",
+                    condr_core::protocol::PROTOCOL_VERSION
+                ),
             );
-            if let Some(address) = listen {
-                println!("listening at tcp://{address}");
+            field("Uptime", uptime_text(uptime_secs));
+            match listen {
+                Some(address) => field("Listen", format_args!("tcp://{address}")),
+                None => field("Listen", "off"),
             }
-            if p2p {
-                println!("Peer-to-peer enabled");
-            }
-            println!(
-                "{workspaces} workspace(s), {tabs} tab(s), {panes} pane(s), {agents} agent(s)"
-            );
-            println!(
-                "{clients} client(s) subscribed, {} device(s) connected over TCP",
-                connected.len()
+            field("Peer-to-peer", if p2p { "on" } else { "off" });
+            field("Workspaces", workspaces);
+            field("Tabs", tabs);
+            field("Panes", panes);
+            field("Agents", agents);
+            field("Clients", clients);
+            field(
+                "Devices",
+                format_args!("{} connected over TCP", connected.len()),
             );
             if !recent_errors.is_empty() {
-                println!("recent errors:");
+                println!();
+                println!("Recent errors");
                 for record in recent_errors {
                     println!(
-                        "  {:<5} {}  {}",
+                        "  {:<5} {:>8}  {}",
                         record.level,
                         relative_age(record.at),
                         record.message
@@ -444,11 +473,33 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             condr_server::install::uninstall(condr_server::install::UninstallOptions { yes, json })
         }
         ServerCommand::Stop => {
-            let endpoint = ServerConfig::default().local_endpoint();
-            condr_server::stop_server(&endpoint).map_err(|error| {
-                failure("failed to stop", [endpoint.describe_connect_error(&error)])
-            })?;
-            println!("stopping");
+            let config = ServerConfig::default();
+            let endpoint = config.local_endpoint();
+            // Stopping is idempotent: nothing listening is the state asked for, as
+            // `restart_server` already treats it.
+            let status = match condr_server::stop_server(&endpoint) {
+                Ok(()) => "stopped",
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    "not running"
+                }
+                Err(error) => {
+                    return Err(failure(
+                        "failed to stop",
+                        [endpoint.describe_connect_error(&error)],
+                    ));
+                }
+            };
+            // The Server answered "stopping"; PTYs and the final Snapshot flush follow.
+            // Report only once it has released its listener, so `stopped` means stopped.
+            condr_server::wait_for_shutdown(&config.socket_path)
+                .map_err(|error| failure("asked the Server to stop", [error.to_string()]))?;
+            field("Status", status);
+            field("Endpoint", &endpoint);
             Ok(0)
         }
         ServerCommand::Run {
@@ -490,31 +541,34 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             let invite = noise::create_invite(&directory)?;
             let config = ServerConfig::default();
             if config.listen.is_none() && !config.p2p {
-                println!(
-                    "neither a TCP listener nor Peer-to-peer is enabled; run \
-                     `condr server start --listen <addr>` or `condr server start --p2p` first"
-                );
-                return Ok(1);
+                return Err(failure(
+                    "neither a TCP listener nor Peer-to-peer is enabled",
+                    ["run `condr server start --listen <addr>` or `condr server start --p2p` first"
+                        .to_owned()],
+                ));
             }
-            println!(
-                "invite valid for {} minutes; in Condr, Connect Remote Device with",
-                noise::INVITE_TTL.as_secs() / 60
+            field(
+                "Expires",
+                format_args!("in {} minutes", noise::INVITE_TTL.as_secs() / 60),
             );
             if let Some(address) = config.listen {
-                println!(
-                    "  tcp://{}.{}@<host>:{}",
-                    identity.public_key(),
-                    invite.secret.to_hex(),
-                    address.port()
+                field(
+                    "TCP",
+                    format_args!(
+                        "tcp://{}.{}@<host>:{}",
+                        identity.public_key(),
+                        invite.secret.to_hex(),
+                        address.port()
+                    ),
                 );
             }
             if config.p2p {
-                println!(
-                    "  p2p://{}.{}",
-                    identity.public_key(),
-                    invite.secret.to_hex()
+                field(
+                    "Peer-to-peer",
+                    format_args!("p2p://{}.{}", identity.public_key(), invite.secret.to_hex()),
                 );
             }
+            field("Next", "in Condr, Connect Remote Device and paste a link");
             Ok(0)
         }
         ServerCommand::Clients => {
@@ -555,13 +609,13 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     ["list paired devices with `condr server clients`".to_owned()],
                 ));
             };
-            println!("revoked device {key}");
+            field("Revoked", key);
             // The file already refuses their next handshake; a running Server also drops
             // the connections they hold now.
             let endpoint = ServerConfig::default().local_endpoint();
             match condr_server::revoke_devices(&endpoint, &key) {
                 Ok(disconnected) => {
-                    println!("closed {disconnected} live connection(s)");
+                    field("Closed", format_args!("{disconnected} live connection(s)"));
                     Ok(0)
                 }
                 // The file edit stands, but nobody closed the device's live connections;
