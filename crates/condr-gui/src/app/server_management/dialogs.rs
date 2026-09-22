@@ -42,6 +42,7 @@ impl Condr {
             "Pairing link",
             "Paste p2p://… invite link",
             Some("p2p://"),
+            None,
             window,
             cx,
         );
@@ -55,7 +56,8 @@ impl Condr {
         self.prompt_add_server_input(
             "Connect over SSH",
             "SSH address",
-            "ssh://user@host[:port]",
+            "user@host[:port]",
+            Some("ssh://"),
             Some("ssh://"),
             window,
             cx,
@@ -72,6 +74,7 @@ impl Condr {
             "Pairing link",
             "Paste tcp://… invite link",
             Some("tcp://"),
+            None,
             window,
             cx,
         );
@@ -89,17 +92,20 @@ impl Condr {
             "Address",
             "ssh://user@host, tcp://… or p2p://… link",
             None,
+            None,
             window,
             cx,
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prompt_add_server_input(
         &mut self,
         title: &'static str,
         field_label: &'static str,
         placeholder: &'static str,
         expected_scheme: Option<&'static str>,
+        prefix: Option<&'static str>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -113,6 +119,7 @@ impl Condr {
             String::new(),
             Some(field_label.into()),
             Some(placeholder.into()),
+            prefix,
             true,
             move |this, value, _, cx| {
                 if let Some(scheme) = expected_scheme

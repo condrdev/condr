@@ -935,6 +935,34 @@ fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
 }
 
 #[test]
+fn ssh_prompt_supplies_the_scheme_and_tolerates_a_typed_one() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    for typed in ["builder@127.0.0.1:1", "ssh://builder@127.0.0.1:2"] {
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| this.prompt_add_server_ssh(window, cx));
+        });
+        submit_text_dialog(window, typed);
+    }
+    let destinations = window.read(|app| {
+        view.read(app)
+            .connections
+            .iter()
+            .filter_map(|connection| match &connection.endpoint {
+                Endpoint::Ssh(ssh) => Some(ssh.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        destinations,
+        ["ssh://builder@127.0.0.1:1", "ssh://builder@127.0.0.1:2"]
+    );
+}
+
+#[test]
 fn ssh_addresses_add_edit_and_use_remote_paths() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();

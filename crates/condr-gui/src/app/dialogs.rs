@@ -58,6 +58,7 @@ impl Condr {
             initial,
             None,
             None,
+            None,
             true,
             apply,
             window,
@@ -80,6 +81,7 @@ impl Condr {
             String::new(),
             Some("Root directory".into()),
             Some("Absolute path on the device".into()),
+            None,
             false,
             apply,
             window,
@@ -169,6 +171,9 @@ impl Condr {
         initial: String,
         field_label: Option<SharedString>,
         placeholder: Option<SharedString>,
+        // Shown inside the field and prepended to what the user types, so a fixed scheme
+        // such as `ssh://` is never typed; typing or pasting it anyway is fine.
+        prefix: Option<&'static str>,
         trim_value: bool,
         apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
         + 'static,
@@ -208,7 +213,16 @@ impl Condr {
                                 .when_some(field_label.clone(), |field, label| {
                                     field.child(div().text_sm().child(label))
                                 })
-                                .child(Input::new(&input_for_content).w_full())
+                                .child(Input::new(&input_for_content).w_full().when_some(
+                                    prefix,
+                                    |input, prefix| {
+                                        input.prefix(
+                                            div()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(prefix),
+                                        )
+                                    },
+                                ))
                                 .when_some(content_error.read(cx).clone(), |field, error| {
                                     field.child(
                                         div().text_sm().text_color(cx.theme().danger).child(error),
@@ -243,6 +257,12 @@ impl Condr {
                         let value = input_for_ok.read(cx).value().to_string();
                         let Some(value) = accepted_text_input(value, trim_value) else {
                             return false;
+                        };
+                        let value = match prefix {
+                            Some(prefix) => {
+                                format!("{prefix}{}", value.strip_prefix(prefix).unwrap_or(&value))
+                            }
+                            None => value,
                         };
                         let apply = apply.clone();
                         // A rejected value keeps the dialog and the typed text.
