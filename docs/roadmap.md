@@ -36,7 +36,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 **代码里确实没有的**
 
 - 可观测性：burst 基准只覆盖 VT 增量、monitor 合并与 shaping 缓存三段，各自在进程内跑；整条 PTY → GPUI 链路的帧率仍靠 Windows 上手工观察。
-- 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、首连指纹确认、密钥进 Keychain。
+- 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、密钥进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
 - 代码签名、自动更新、Quickstart 文档、支持矩阵和协议兼容策略。
 - 终端内搜索、命令面板、Diff 对 base 分支比较（`GitDiff.against` 已预留）。
 
@@ -70,18 +70,6 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 已完成（ADR 0024，2026-09-21）：`agent-hook` 从原生 payload 取工具名加命令首行（`Bash: cargo test`）或问题文本，截到 200 字符后随 `permission-request`/`question-asked` 进 OSC 777；OpenCode 插件与 Pi/OMP 扩展传同一个 `detail` 字段。`AgentSnapshot.blocked_on` 只在 `Blocked` 期间存在，离开即清；sidebar Agent 行的第二行、OS 通知正文、`agent list|wait|prompt --wait` 与 `pane list` 的 `blocked_on` 都显示它；左侧栏顶部的「Needs you」列出所有 Device 上的 Blocked Agent，点击落到 Pane。没有做替用户批准，也没有解析屏幕文本补全缺失的 hook。
 
-### 4. 远程安全边界（对外宣传 remote 之前）
-
-**为什么**：TCP 配对已经能用，但认证等于全权。在只有自己两台机器时够用；一旦有第二个人或不受信网络，这就是最先被问的问题。
-
-**做到哪**（按顺序，前两项先做）：
-
-- 首次连接在 GUI 显示 Server 指纹并要求确认，而不是只写在 invite 里。
-- `observe` 与 `control` 两级 capability：观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；capability 在配对时决定，`condr server clients` 可看可改。
-- 之后再谈：设备密钥进 OS Keychain、密钥轮换、审计日志。
-
-**停在哪**：不做账号体系、不做多用户、不做公网 listener。
-
 ### 5. 对外发布门（等发布决定）
 
 发布基础设施已就绪，剩下的全是"有外部用户才值得付的成本"，一起做，不拆开：
@@ -105,14 +93,14 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 1. 探测：Server 在进程表变化时查 Pane 进程树的监听端口（Linux `/proc/net/tcp*`，macOS `proc_pidfdinfo`，Windows `GetExtendedTcpTable`），作为 Pane 状态经事件下发；GUI 在 Workspace/Pane 上显示端口徽标，`condr pane|workspace` JSON 携带。
 2. 转发（SSH Device）：点击端口即在本机开 listener，另起一条 `ssh -N -L` 到远端 `localhost:<port>`；`condr port forward <device> <port>` 同义。
-3. 转发（TCP/Noise Device）：协议增加一种 multiplexed 字节流帧，把本机 listener 的连接经 Noise 隧道接到远端 `localhost:<port>`。需要方向 4 的 capability：只有 `control` 能开转发。
+3. 转发（TCP/Noise Device）：协议增加一种 multiplexed 字节流帧，把本机 listener 的连接经 Noise 隧道接到远端 `localhost:<port>`。默认只有配对设备能开转发；若届时已有 observe/control capability，则只允许 `control`。
 4. 一键在浏览器打开本机转发地址。
 
 **停在哪**：不做反向转发、不做 UDP、不自动转发所有探测到的端口（默认只列出，点了才转）、不解析进程输出里的 URL。
 
 ### 8. Peer-to-peer 连接（NAT 后两台机器直连）
 
-**为什么**：TCP 要固定地址，SSH 要用户已经配好登录，两台都在 NAT 后的机器今天没有答案——这是 remote 价值里唯一被 SSH/TCP 落下的场景。它不以方向 4 的 capability 为前置：relay 只转发密文、不参与授权，Peer-to-peer 的授权模型与 TCP 完全相同（同一套 Invite / `authorized-clients` / revoke）。
+**为什么**：TCP 要固定地址，SSH 要用户已经配好登录，两台都在 NAT 后的机器今天没有答案——这是 remote 价值里唯一被 SSH/TCP 落下的场景。relay 只转发密文、不参与授权，Peer-to-peer 的授权模型与 TCP 完全相同（同一套 Invite / `authorized-clients` / revoke）。
 
 已完成（ADR 0025、0026，2026-09-22 验收）：一台机器一把 device-key；`p2p://<id>` 作为第三种 Endpoint 与 `tcp://`、`ssh://` 并列；Server 是机器唯一的 Peer-to-peer 端点，GUI/CLI 经本地 socket 的 `Tunnel` 帧隧道出去；`[server.p2p] enabled` 与 `--p2p` 是 opt-in 的接受端；自建 relay（`relay.condr.dev`）与 DNS/pkarr（`dns.condr.dev`）已上线，真实 NAT 后两台机器打洞连通；GUI 里 Peer-to-peer 设备可重命名，Settings 显示接受状态；SECURITY.md 写明 relay 与 DNS 能看到什么。指纹与 invite 链接改为 43 字符 base64url。
 
@@ -124,6 +112,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 - 终端内搜索；命令面板。
 - Diff 对 base 分支比较；Diff Tab 内跳到编辑器。
+- `observe` 与 `control` 两级 capability（观察者拿 Bootstrap 和视觉流，不能输入、改布局、读文件；配对时决定，`condr server clients` 可看可改）：触发条件是第二个人开始共用同一个 Server。之后再谈设备密钥进 OS Keychain、密钥轮换、审计日志。不做账号体系、不做公网 listener。
 - Kimi hooks（等上游能区分主任务与子 agent 的 Stop）。
 - Agent Profile（声明式 manifest 描述可执行文件、参数、图标、检测规则）：目前 10 种 CLI 都是代码内置，第 11 种出现时再抽象。
 - 把 `ClientConnection` 拆成独立 crate：只有 GUI 和 `condr` CLI 两个客户端时没有收益。
@@ -136,9 +125,9 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | --- | --- | --- |
 | 自动更新（GUI 提示新版本 → 下载校验 → 同时替换 Client 与 Server） | 有外部用户；Client/Server 必须同版本这一点已在手动更新中造成抱怨 | 代码签名（方向 5）；`condr server install` 已能原地替换运行中的二进制（ADR 0016） |
 | 遥测（opt-in） | 有外部用户，且方向 1 的本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
-| Mobile Companion（done/blocked 通知、查看、少量动作） | 厂商 Remote Control 覆盖不了的跨 Agent 场景被反复提出 | 方向 4；一个不依赖 GPUI 的语义 API 适配层；Push 只作提醒，打开后重新拉取 Server 权威状态 |
+| Mobile Companion（done/blocked 通知、查看、少量动作） | 厂商 Remote Control 覆盖不了的跨 Agent 场景被反复提出 | 一个不依赖 GPUI 的语义 API 适配层；Push 只作提醒，打开后重新拉取 Server 权威状态 |
 | 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | 方向 3 之后 Agent Profile 先从代码内置抽成 manifest |
-| 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | 方向 4 的 capability 扩展为多用户；审计日志 |
+| 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | observe/control capability（见摩擦记录）扩展为多用户；审计日志 |
 | 编辑器、内置浏览器、任务看板等 IDE 化能力 | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
 
 不做的两件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Peer-to-peer 和 Mobile Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它）。
