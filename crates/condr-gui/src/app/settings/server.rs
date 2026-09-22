@@ -245,7 +245,7 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
     };
     let value =
         |text: String| SettingField::render(move |_, _, _| div().text_sm().child(text.clone()));
-    let this_version = env!("CARGO_PKG_VERSION");
+    let this_version = condr_core::build_identity();
     let mismatch = health.version != this_version;
     let version = health.version.clone();
     let version = SettingItem::new(

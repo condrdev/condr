@@ -498,7 +498,7 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
             "{}",
             json!({
                 "install_path": target,
-                "version": env!("CARGO_PKG_VERSION"),
+                "version": condr_core::build_identity(),
                 "protocol": condr_core::protocol::PROTOCOL_VERSION,
                 "replaced": replaced,
                 "path_registered": true,

@@ -116,6 +116,7 @@ fn stale_connection_result_cannot_replace_the_current_attempt() {
                     generation: original_generation,
                     endpoint: tcp("127.0.0.1:9"),
                     result: Err("stale failure".into()),
+                    refusal: None,
                 },
                 window,
                 cx,

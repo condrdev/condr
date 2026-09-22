@@ -80,7 +80,7 @@ fn install_places_links_registers_and_uninstall_takes_it_all_back() {
         report["install_path"],
         Value::from(installed.to_str().unwrap())
     );
-    assert_eq!(report["version"], Value::from(env!("CARGO_PKG_VERSION")));
+    assert_eq!(report["version"], Value::from(condr_core::build_identity()));
     assert_eq!(
         report["protocol"],
         Value::from(condr_core::protocol::PROTOCOL_VERSION)

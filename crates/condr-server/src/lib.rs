@@ -13,7 +13,7 @@ pub mod ssh;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-pub use client::ClientConnection;
+pub use client::{ClientConnection, Refused};
 pub use endpoint::{
     ConnectionCancellation, Endpoint, EndpointStream, P2pEndpoint, SavedServer, TcpEndpoint,
     default_socket_path, load_saved_servers, save_saved_servers,

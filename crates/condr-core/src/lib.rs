@@ -51,13 +51,76 @@ pub use terminal::{
 pub const APP_NAME: &str = "Condr";
 
 /// What this binary is: the crate version, and the commit CI built it from when it did
-/// (`CONDR_BUILD_COMMIT` at compile time; a local `cargo build` has none). Every Condr
-/// crate shares the workspace version, so one value names the whole build.
-pub fn build_identity() -> String {
-    match option_env!("CONDR_BUILD_COMMIT") {
-        Some(commit) if !commit.is_empty() => {
-            format!("{}+{commit}", env!("CARGO_PKG_VERSION"))
-        }
-        _ => env!("CARGO_PKG_VERSION").to_string(),
+/// (`CONDR_BUILD_COMMIT` at compile time, shortened to twelve characters; a local
+/// `cargo build` has none). Every Condr crate shares the workspace version, so one value
+/// names the whole build, as `<semver>[+<commit>]` (ADR 0027).
+pub fn build_identity() -> &'static str {
+    static IDENTITY: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| match option_env!("CONDR_BUILD_COMMIT") {
+            Some(commit) if !commit.is_empty() => {
+                let short = commit.get(..12).unwrap_or(commit);
+                format!("{}+{short}", env!("CARGO_PKG_VERSION"))
+            }
+            _ => env!("CARGO_PKG_VERSION").to_string(),
+        });
+    &IDENTITY
+}
+
+/// How another Condr's [`build_identity`] relates to this one's.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BuildComparison {
+    Same,
+    /// The other build's version is lower.
+    OtherOlder,
+    /// The other build's version is higher.
+    OtherNewer,
+    /// Same version, different commit: two nightlies, or a release beside a dev build.
+    /// Commits have no order, so neither side is called old.
+    DifferentCommit,
+}
+
+pub fn compare_builds(this: &str, other: &str) -> BuildComparison {
+    if this == other {
+        return BuildComparison::Same;
+    }
+    let version = |identity: &str| -> Option<(u64, u64, u64)> {
+        let mut parts = identity.split('+').next()?.split('.');
+        let mut next = || parts.next()?.parse().ok();
+        Some((next()?, next()?, next()?))
+    };
+    match (version(this), version(other)) {
+        (Some(this), Some(other)) if other < this => BuildComparison::OtherOlder,
+        (Some(this), Some(other)) if other > this => BuildComparison::OtherNewer,
+        _ => BuildComparison::DifferentCommit,
+    }
+}
+
+#[cfg(test)]
+mod build_identity_tests {
+    use super::*;
+
+    #[test]
+    fn builds_compare_by_version_then_commit() {
+        assert_eq!(compare_builds("0.2.0", "0.2.0"), BuildComparison::Same);
+        assert_eq!(
+            compare_builds("0.2.0", "0.1.9"),
+            BuildComparison::OtherOlder
+        );
+        assert_eq!(
+            compare_builds("0.2.0", "0.10.0"),
+            BuildComparison::OtherNewer
+        );
+        assert_eq!(
+            compare_builds("0.2.0+aaaaaaaaaaaa", "0.2.0+bbbbbbbbbbbb"),
+            BuildComparison::DifferentCommit
+        );
+        assert_eq!(
+            compare_builds("0.2.0", "0.2.0+abc"),
+            BuildComparison::DifferentCommit
+        );
+        assert_eq!(
+            compare_builds("0.2.0", "garbage"),
+            BuildComparison::DifferentCommit
+        );
     }
 }

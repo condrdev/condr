@@ -36,7 +36,7 @@ impl Hello {
     pub fn new(client_name: impl Into<String>) -> Self {
         Self {
             protocol: PROTOCOL_VERSION,
-            build: crate::build_identity(),
+            build: crate::build_identity().to_owned(),
             client_name: client_name.into(),
         }
     }

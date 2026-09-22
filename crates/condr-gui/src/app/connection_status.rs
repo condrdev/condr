@@ -6,10 +6,19 @@ use gpui_kit::component::popover::Popover;
 /// Wide enough for a connect error to wrap into two or three readable lines.
 const DISCONNECTED_COLUMN_WIDTH: Rems = rems(30.);
 
-/// One sentence on what to do about a connect failure, keyed on the wording the
-/// connect path produces (`Endpoint::describe_connect_error`, `disconnect_reason`,
-/// the SSH bridge, local startup). The raw reason is shown under it either way.
-fn connection_advice(reason: &str, endpoint: &Endpoint) -> &'static str {
+/// One sentence on what to do about a connect failure: by the Server's typed refusal
+/// when it sent one, otherwise keyed on the wording the connect path produces
+/// (`Endpoint::describe_connect_error`, `disconnect_reason`, the SSH bridge, local
+/// startup). The raw reason is shown under it either way.
+fn connection_advice(
+    reason: &str,
+    endpoint: &Endpoint,
+    refusal: Option<&condr_core::protocol::Refusal>,
+) -> &'static str {
+    if let Some(condr_core::protocol::Refusal::IncompatibleProtocol) = refusal {
+        return "Condr there and here speak different protocol versions, so trying again \
+                will not help. Update both to the same version.";
+    }
     if reason.contains("Failed to start Condr on this device") {
         return "Condr's own server could not start on this device. Connect tries again.";
     }
@@ -64,9 +73,9 @@ impl Condr {
         };
         // A stale reason under a spinner reads as a fresh failure; show it when settled.
         let reason = (!busy).then(|| connection.error.clone()).flatten();
-        let advice = reason
-            .as_deref()
-            .map(|reason| connection_advice(reason, &connection.endpoint));
+        let advice = reason.as_deref().map(|reason| {
+            connection_advice(reason, &connection.endpoint, connection.refusal.as_ref())
+        });
         let is_local = connection.endpoint.as_local_path().is_some();
         let connect_owner = cx.weak_entity();
         let edit_owner = cx.weak_entity();
@@ -185,6 +194,7 @@ impl Condr {
         let owner = cx.weak_entity();
         let reason = (!busy).then(|| connection.error.clone()).flatten();
         let endpoint = connection.endpoint.clone();
+        let refusal = connection.refusal.clone();
         let muted = cx.theme().muted_foreground;
         Some(
             h_flex()
@@ -211,7 +221,7 @@ impl Condr {
                 })
                 .child(div().text_color(muted).child(text))
                 .when_some(reason, |pill, reason| {
-                    let advice = connection_advice(&reason, &endpoint);
+                    let advice = connection_advice(&reason, &endpoint, refusal.as_ref());
                     pill.child(
                         Popover::new(("connection-details", key))
                             .trigger(

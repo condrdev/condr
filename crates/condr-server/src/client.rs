@@ -48,6 +48,13 @@ impl fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
+impl Refused {
+    /// The refusal behind a connect error, if that is what it was.
+    pub fn from_error(error: &io::Error) -> Option<&Self> {
+        error.get_ref()?.downcast_ref()
+    }
+}
+
 impl From<Refused> for io::Error {
     fn from(refused: Refused) -> Self {
         io::Error::new(refused.kind(), refused)
@@ -59,6 +66,8 @@ pub struct ClientConnection {
     cancellation: ConnectionCancellation,
     bootstrap: Option<SessionBootstrap>,
     overview: SessionOverview,
+    /// The Server's [`condr_core::build_identity`], from its `Welcome`.
+    server_build: String,
     next_request_id: u64,
 }
 
@@ -138,6 +147,7 @@ impl ClientConnection {
     ) -> io::Result<Self> {
         let (mut stream, welcome) = Self::welcome(stream, client_name)?;
         let session_id = welcome.session_id;
+        let server_build = welcome.build;
         // Authentication is complete. Bootstrap may be large: bound inactivity,
         // not total transfer time, just as socket read timeouts do.
         stream.set_handshake_timeout(Some(crate::server::HANDSHAKE_TIMEOUT))?;
@@ -186,6 +196,7 @@ impl ClientConnection {
             cancellation,
             bootstrap,
             overview,
+            server_build,
             next_request_id: 1,
         })
     }
@@ -420,6 +431,10 @@ impl ClientConnection {
     }
 
     /// Initial Bootstrap, present only for `connect`, which requests terminal views.
+    pub fn server_build(&self) -> &str {
+        &self.server_build
+    }
+
     pub fn bootstrap(&self) -> Option<&SessionBootstrap> {
         self.bootstrap.as_ref()
     }

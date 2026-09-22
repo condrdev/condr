@@ -75,6 +75,9 @@ try {
   }
   if (Test-Path (Join-Path $headless 'condr-gui.exe')) { throw 'headless ZIP contains the GUI' }
   if ((Get-Content (Join-Path $headless 'BUILD-COMMIT') -Raw).Trim() -ne $commit) { throw 'headless ZIP has the wrong commit' }
+  # The binary knows its own build: `condr <version>+<12-char commit>` (ADR 0027).
+  $identity = (& (Join-Path $headless 'condr.exe') --version | Out-String).Trim()
+  if ($identity.Split('+')[-1] -ne $commit.Substring(0, 12)) { throw "condr --version says '$identity', not commit $commit" }
 
   # Updating replaces the CLI without asking and leaves the GUI alone (ADR 0016).
   $env:CONDR_INSTALL_DIR = $gui

@@ -241,6 +241,17 @@ impl Endpoint {
     /// A failed connect in words. A missing socket file and a refused TCP connect both
     /// mean nobody is listening; the raw OS text says neither that nor which endpoint.
     pub fn describe_connect_error(&self, error: &io::Error) -> String {
+        if let Some(refused) = crate::Refused::from_error(error)
+            && refused.refusal == condr_core::protocol::Refusal::IncompatibleProtocol
+        {
+            return format!(
+                "the device at {self} runs Condr {} (protocol {}); this is Condr {} (protocol {})",
+                refused.server_build,
+                refused.server_protocol,
+                condr_core::build_identity(),
+                condr_core::protocol::PROTOCOL_VERSION
+            );
+        }
         if matches!(self, Self::Ssh(_) | Self::P2p(_)) {
             return format!("could not connect to {self}: {error}");
         }

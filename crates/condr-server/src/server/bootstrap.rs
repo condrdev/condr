@@ -127,7 +127,7 @@ pub(super) fn send_welcome(
     };
     let welcome = Welcome {
         protocol: PROTOCOL_VERSION,
-        build: condr_core::build_identity(),
+        build: condr_core::build_identity().to_owned(),
         server_id,
         session_id,
         refusal,

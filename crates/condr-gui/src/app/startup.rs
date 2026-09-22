@@ -186,6 +186,7 @@ pub(super) fn connect_to_server_with<T>(
 pub(super) fn connect_to_server(
     endpoint: Endpoint,
     cancellation: ConnectionCancellation,
+    refusal: &std::cell::Cell<Option<condr_core::protocol::Refusal>>,
 ) -> (Endpoint, Result<ClientConnection, String>) {
     connect_to_server_with(endpoint, condr_server::ensure_local_server, |endpoint| {
         ClientConnection::connect_cancellable(
@@ -193,7 +194,12 @@ pub(super) fn connect_to_server(
             condr_server::noise::device_name(),
             cancellation,
         )
-        .map_err(|error| endpoint.describe_connect_error(&error))
+        .map_err(|error| {
+            refusal.set(
+                condr_server::Refused::from_error(&error).map(|refused| refused.refusal.clone()),
+            );
+            endpoint.describe_connect_error(&error)
+        })
     })
 }
 

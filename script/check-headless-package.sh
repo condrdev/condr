@@ -25,6 +25,12 @@ if [ "$(cat "$payload/BUILD-COMMIT")" != "$commit" ]; then
     exit 1
 fi
 "$payload/condr" server --help > /dev/null
+# The binary knows its own build: `condr <version>+<12-char commit>` (ADR 0027).
+identity=$("$payload/condr" --version)
+if [ "${identity##*+}" != "$(printf '%s' "$commit" | cut -c 1-12)" ]; then
+    echo "condr --version says '$identity', not commit $commit" >&2
+    exit 1
+fi
 
 CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
     HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive"

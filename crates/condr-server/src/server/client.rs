@@ -231,6 +231,14 @@ pub(super) fn handle_client(
         (state.server_id, state.session_id)
     };
     tracing::info!(name = %hello.client_name, build = %hello.build, "connected");
+    if hello.build != condr_core::build_identity() {
+        tracing::info!(
+            name = %hello.client_name,
+            client = %hello.build,
+            server = condr_core::build_identity(),
+            "client and server are different builds"
+        );
+    }
     // Declared after the span, so it drops (and logs) while the span is still entered.
     let _disconnect_log = DisconnectLog;
     let _ = stream.set_handshake_timeout(None);
@@ -1446,7 +1454,7 @@ fn server_admin(
                     .map(|address| address.to_string()),
                 p2p: ServerConfig::default().p2p,
                 connected,
-                version: env!("CARGO_PKG_VERSION").into(),
+                version: condr_core::build_identity().to_owned(),
                 uptime_secs: state.started_at.elapsed().as_secs(),
                 workspaces: workspaces.len() as u32,
                 tabs: tabs.clone().count() as u32,

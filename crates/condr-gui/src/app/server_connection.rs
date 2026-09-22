@@ -5,6 +5,8 @@ pub(super) struct ConnectionResult {
     pub(super) generation: u64,
     pub(super) endpoint: Endpoint,
     pub(super) result: Result<ClientConnection, String>,
+    /// Set when the Server read this Client's `Hello` and closed the connection.
+    pub(super) refusal: Option<condr_core::protocol::Refusal>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -19,6 +21,10 @@ pub(super) struct ServerConnection {
     pub(super) label: String,
     pub(super) endpoint: Endpoint,
     pub(super) status: ConnectionStatus,
+    /// The Server's build identity from its last `Welcome` (ADR 0027).
+    pub(super) server_build: Option<String>,
+    /// The person closed the "different build" mark for the current `server_build`.
+    pub(super) build_notice_dismissed: bool,
     pub(super) server_id: Option<ServerId>,
     pub(super) runtime_epoch: Option<RuntimeEpoch>,
     pub(super) session_id: Option<SessionId>,
@@ -88,6 +94,8 @@ pub(super) struct ServerConnection {
     /// Why the connection is not up: the connect attempt's or the disconnect's reason.
     /// Only that; a refused command is a toast and a denied control is `control_denied`.
     pub(super) error: Option<String>,
+    /// The typed reason behind `error` when the Server refused the handshake.
+    pub(super) refusal: Option<condr_core::protocol::Refusal>,
     /// The Server's reason for not granting this Client control, while it stands. Not an
     /// error: the Session is still viewable, and the busy case retries on its own.
     pub(super) control_denied: Option<String>,
@@ -115,12 +123,39 @@ impl Drop for ServerConnection {
 }
 
 impl ServerConnection {
+    /// One sentence when the Server is another build than this window, with the side to
+    /// update when the versions say which is older; `None` when they match or it was
+    /// dismissed.
+    pub(super) fn build_notice(&self) -> Option<String> {
+        if self.build_notice_dismissed {
+            return None;
+        }
+        let server = self.server_build.as_deref()?;
+        let this = condr_core::build_identity();
+        let label = &self.label;
+        Some(match condr_core::compare_builds(this, server) {
+            condr_core::BuildComparison::Same => return None,
+            condr_core::BuildComparison::OtherOlder => format!(
+                "{label} runs Condr {server}; this window is {this}. Update Condr on {label}."
+            ),
+            condr_core::BuildComparison::OtherNewer => format!(
+                "{label} runs Condr {server}; this window is {this}. Update Condr on this device."
+            ),
+            condr_core::BuildComparison::DifferentCommit => format!(
+                "{label} runs a different Condr build ({server}); this window is {this}. \
+                 Update both to the same version."
+            ),
+        })
+    }
+
     pub(super) fn new(key: ConnectionKey, label: String, endpoint: Endpoint) -> Self {
         Self {
             key,
             label,
             endpoint,
             status: ConnectionStatus::Disconnected,
+            server_build: None,
+            build_notice_dismissed: false,
             server_id: None,
             runtime_epoch: None,
             session_id: None,
@@ -164,6 +199,7 @@ impl ServerConnection {
             bootstrap_resync_session_id: None,
             reacquire_after_bootstrap: false,
             error: None,
+            refusal: None,
             control_denied: None,
             disconnected_at: None,
             next_layout_request_id: 1,

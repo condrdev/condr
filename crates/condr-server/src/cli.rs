@@ -9,7 +9,7 @@ mod pane;
 mod workspace;
 
 use clap::{Subcommand, ValueEnum};
-use condr_core::protocol::{LayoutCommand, LayoutResult};
+use condr_core::protocol::{LayoutCommand, LayoutResult, Refusal};
 use condr_core::{
     AgentKind, AgentState, PaneDirection, PaneEnvironment, PaneId, PaneLayout, Session,
     SplitDirection, Tab, TabId, TerminalCommand, TerminalKey, TerminalModifiers, Workspace,
@@ -74,6 +74,11 @@ fn connect(device: Option<&str>) -> Result<ClientConnection, CliError> {
 
 fn connect_to(endpoint: &Endpoint) -> Result<ClientConnection, CliError> {
     ClientConnection::connect_overview(endpoint, "condr-cli").map_err(|error| match error.kind() {
+        _ if condr_server::Refused::from_error(&error)
+            .is_some_and(|refused| refused.refusal == Refusal::IncompatibleProtocol) =>
+        {
+            CliError::new("protocol_mismatch", endpoint.describe_connect_error(&error))
+        }
         io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => CliError::new(
             "server_not_running",
             endpoint.describe_connect_error(&error),

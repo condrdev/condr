@@ -109,6 +109,10 @@ impl Condr {
     ) -> Result<BootstrapApplication, String> {
         let client = result?;
         let bootstrap = client.bootstrap().unwrap().clone();
+        if connection.server_build.as_deref() != Some(client.server_build()) {
+            connection.server_build = Some(client.server_build().to_owned());
+            connection.build_notice_dismissed = false;
+        }
         connection.cancellation = client.cancellation();
         let io = ClientIo::start(
             client,
@@ -232,8 +236,10 @@ impl Condr {
         let sender = self.connect_results_tx.clone();
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
         thread::spawn(move || {
-            let (connected_endpoint, result) = connect_to_server(endpoint, cancellation);
+            let refusal = std::cell::Cell::new(None);
+            let (connected_endpoint, result) = connect_to_server(endpoint, cancellation, &refusal);
             let _ = sender.send_blocking(ConnectionResult {
+                refusal: refusal.into_inner(),
                 key,
                 generation,
                 endpoint: connected_endpoint,
@@ -312,6 +318,7 @@ impl Condr {
             generation,
             endpoint,
             result,
+            refusal,
         } = result;
         if !self.connection(key).is_some_and(|connection| {
             connection.status == ConnectionStatus::Connecting
@@ -325,6 +332,7 @@ impl Condr {
             .is_some_and(|connection| connection.server_id.is_none());
         let application = if let Some(connection) = self.connection_mut(key) {
             connection.endpoint = endpoint;
+            connection.refusal = refusal;
             match Self::install_connection(connection, result, window, cx) {
                 Ok(application) => {
                     // The Server accepted the invite and recorded this device; from now on

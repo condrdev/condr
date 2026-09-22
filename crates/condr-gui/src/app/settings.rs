@@ -667,7 +667,7 @@ fn about_page() -> SettingPage {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(concat!("Version ", env!("CARGO_PKG_VERSION"))),
+                                    .child(format!("Version {}", condr_core::build_identity())),
                             ),
                         )
                 })

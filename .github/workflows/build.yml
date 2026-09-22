@@ -22,6 +22,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CONDR_RELEASE: ${{ inputs.release && '1' || '0' }}
+  # Compiled into every binary as its build identity (ADR 0027); the package checks
+  # compare `condr --version` against BUILD-COMMIT so a build without it cannot ship.
+  CONDR_BUILD_COMMIT: ${{ github.sha }}
 
 jobs:
   linux:

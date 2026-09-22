@@ -774,7 +774,7 @@ pub enum ServerAdminResponse {
         /// `recent_errors`.
         p2p: bool,
         connected: Vec<String>,
-        /// The Server binary's crate version.
+        /// The Server's [`crate::build_identity`].
         version: String,
         uptime_secs: u64,
         workspaces: u32,

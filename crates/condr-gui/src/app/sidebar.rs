@@ -432,6 +432,7 @@ impl Condr {
             let server_name = connection.label.clone();
             let status = connection.status;
             let connect_reason = connection.error.clone();
+            let build_notice = connection.build_notice();
             let is_local = connection.endpoint.as_local_path().is_some();
             let new_workspace_label = connection.label.clone();
             let descendant_selected = workspaces.iter().any(CondrSidebarTreeItem::subtree_active);
@@ -445,7 +446,30 @@ impl Condr {
                     // Workspaces below look the same either way; the mark tells why on
                     // hover and connects on click.
                     let indicator = match status {
-                        ConnectionStatus::Connected => None,
+                        // A connected Server of another build gets a mark that says which
+                        // side to update (ADR 0027); clicking it puts it away.
+                        ConnectionStatus::Connected => build_notice.clone().map(|notice| {
+                            let dismiss_owner = owner.clone();
+                            Button::new(("build-notice", key))
+                                .debug_selector(move || format!("build-notice-{key}"))
+                                .ghost()
+                                .xsmall()
+                                .compact()
+                                .icon(
+                                    Icon::new(IconName::TriangleAlert)
+                                        .text_color(cx.theme().warning),
+                                )
+                                .tooltip(format!("{notice}\nClick to dismiss."))
+                                .on_click(move |_, _, cx| {
+                                    let _ = dismiss_owner.update(cx, |this, cx| {
+                                        if let Some(connection) = this.connection_mut(key) {
+                                            connection.build_notice_dismissed = true;
+                                        }
+                                        cx.notify();
+                                    });
+                                })
+                                .into_any_element()
+                        }),
                         ConnectionStatus::Connecting => {
                             Some(Spinner::new().xsmall().into_any_element())
                         }

@@ -287,7 +287,7 @@ impl BoundServer {
         self.state.lock().expect("server state lock poisoned").p2p = Some(Arc::clone(&p2p));
 
         tracing::info!(
-            version = env!("CARGO_PKG_VERSION"),
+            version = condr_core::build_identity(),
             pid = std::process::id(),
             tcp = self.tcp.is_some(),
             p2p = self.p2p_enabled,
