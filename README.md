@@ -76,7 +76,7 @@ On that device, run the command for its platform:
 
 ## Connect to a Remote Device
 
-In the sidebar, click **Connect Remote Device**, then enter the link to the remote device. The link is in SSH or TCP format.
+In the sidebar, click **Connect Remote Device**, then enter the link to the remote device. The link is in SSH, TCP or Peer-to-peer format: SSH when you already have SSH access, TCP when the remote device has a fixed address, Peer-to-peer when neither machine does.
 
 ### SSH
 
@@ -104,6 +104,25 @@ TCP listening is off by default. The remote device generates the pairing link. O
 3. Enter the pairing link in Condr within 10 minutes. If it expires, repeat step 2.
 
 Both sides authenticate each other with static keys (`Noise_IKpsk2`), and the connection is encrypted.
+
+### Peer-to-peer
+
+```text
+p2p://<server key>.<invite>
+```
+
+For two machines that are both behind NAT, such as a home desktop and a laptop at work. No fixed IP needed, no VPN to install. Peer-to-peer is off by default. On the remote device:
+
+1. Start the Server with Peer-to-peer enabled. If the Server is already running, use `restart` instead of `start`. The setting is saved to the configuration file:
+
+   ```bash
+   condr server start --p2p
+   ```
+
+2. Run `condr server invite`. The command prints the pairing link.
+3. Enter the pairing link in Condr within 10 minutes. If it expires, repeat step 2.
+
+The two devices connect directly when they can, and through Condr's relay when they can't. The connection between the two devices is end-to-end encrypted with their keys, so the relay never sees what you send. The relay is Condr's only hosted service, and a device that never uses Peer-to-peer never contacts it. See [SECURITY.md](SECURITY.md) for what the relay can and cannot see.
 
 ## Development
 

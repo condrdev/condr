@@ -5,7 +5,7 @@ import '../styles/home.css';
 
 const features = [
   { title: 'Always on', copy: 'Close the window or disconnect. The Server and your agents keep working.' },
-  { title: 'Remote access', copy: 'Manage local and remote devices in one window, over SSH or TCP.' },
+  { title: 'Remote access', copy: 'Manage local and remote devices in one window, over SSH, TCP or Peer-to-peer.' },
   { title: 'Agent status', copy: 'The sidebar shows what each agent is doing. Condr notifies you when an agent finishes.' },
   { title: 'Agent driven', copy: 'Agents can use Condr too: create panes, read output, assign tasks, and talk to other agents.' },
   { title: 'Real terminals', copy: 'Every pane is a real terminal built on the alacritty core. Run any CLI agent or terminal program.' },
@@ -85,9 +85,9 @@ const agents = [
       </section>
 
       <section class="remote shell" id="remote">
-        <div class="remote-copy"><div class="section-label">Local or remote</div><h2>Leave the machine.<br /><span>Keep the work.</span></h2><p>Install the headless Server on any device, then connect from your desktop over SSH or pair over TCP with a one-time link. Either way, you get the same window and the same workspaces.</p><a class="text-link" href="/docs/getting-started/#connect-to-a-remote-device">How to connect a remote device <span>→</span></a></div>
+        <div class="remote-copy"><div class="section-label">Local or remote</div><h2>Leave the machine.<br /><span>Keep the work.</span></h2><p>Install the headless Server on any device, then connect from your desktop over SSH, pair over TCP with a one-time link, or go Peer-to-peer when both machines sit behind NAT: no fixed IP needed, no VPN to install. Every way gives you the same window and the same workspaces.</p><a class="text-link" href="/docs/getting-started/#connect-to-a-remote-device">How to connect a remote device <span>→</span></a></div>
         <div class="connection-card">
-          <div class="connection-head"><span class="connection-live"></span><span>Remote connections</span><span class="connection-count">SSH · TCP</span></div>
+          <div class="connection-head"><span class="connection-live"></span><span>Remote connections</span><span class="connection-count">SSH · TCP · P2P</span></div>
           <div class="remote-method">
             <div class="method-icon">↗</div>
             <strong>SSH</strong>
@@ -100,6 +100,12 @@ const agents = [
             <small class="method-description">Pairing link from <code>condr server invite</code>.</small>
           </div>
           <code class="remote-code">tcp://&lt;server key&gt;.&lt;invite&gt;@&lt;host&gt;:&lt;port&gt;</code>
+          <div class="remote-method">
+            <div class="method-icon method-p2p">⟷</div>
+            <strong>Peer-to-peer</strong>
+            <small class="method-description">Both behind NAT. End-to-end encrypted over <a href="https://www.iroh.computer/">iroh</a>; the relay never sees what you send.</small>
+          </div>
+          <code class="remote-code">p2p://&lt;server key&gt;.&lt;invite&gt;</code>
         </div>
       </section>
     </main>

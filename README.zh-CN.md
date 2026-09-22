@@ -76,7 +76,7 @@ xattr -cr /Applications/Condr.app
 
 ## 连接远程设备
 
-在侧栏点击 **Connect Remote Device**，然后输入远程设备的链接。链接有 SSH 和 TCP 两种格式。
+在侧栏点击 **Connect Remote Device**，然后输入远程设备的链接。链接有 SSH、TCP 和 Peer-to-peer 三种格式：已有 SSH 登录用 SSH，远程设备有固定地址用 TCP，两台机器都没有公网地址用 Peer-to-peer。
 
 ### SSH
 
@@ -104,6 +104,25 @@ TCP 监听默认关闭。配对链接由远程设备生成，在该设备上完�
 3. 在 10 分钟内把配对链接填入 Condr。如果链接过期，重复第 2 步。
 
 双方使用静态密钥互相验证身份（`Noise_IKpsk2`），连接全程加密。
+
+### Peer-to-peer
+
+```text
+p2p://<server key>.<invite>
+```
+
+适用于两台都在 NAT 后面的机器，比如家里的台式机和公司的笔记本。不需要有固定 IP，也不用装 VPN。Peer-to-peer 默认关闭，在远程设备上完成以下步骤：
+
+1. 启动 Server 并开启 Peer-to-peer。如果 Server 已在运行，把 `start` 换成 `restart`。设置会保存到配置文件：
+
+   ```bash
+   condr server start --p2p
+   ```
+
+2. 运行 `condr server invite`。命令会输出配对链接。
+3. 在 10 分钟内把配对链接填入 Condr。如果链接过期，重复第 2 步。
+
+两台设备能直连就直连，不能直连时经 Condr 的中继转发。在两台设备之间的连接使用密钥端到端加密，中继看不到你的传输内容。中继是 Condr 唯一的托管服务，不使用 Peer-to-peer 的设备不会连接它。中继能看到和看不到什么，见 [SECURITY.md](SECURITY.md)。
 
 ## 开发
 
