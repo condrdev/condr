@@ -20,7 +20,9 @@ impl TempDirectory {
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&path).unwrap();
-        Self(path)
+        // `discover_repository` reports one canonical spelling per directory; on macOS the
+        // temp dir is reached through the `/var` -> `/private/var` symlink.
+        Self(path.canonicalize().unwrap())
     }
 
     fn path(&self) -> &Path {

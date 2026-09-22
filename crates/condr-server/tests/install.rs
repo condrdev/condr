@@ -147,5 +147,9 @@ fn human_output_is_one_line_per_step() {
     let output = home.run(&condr, &["server", "uninstall", "--yes"]);
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("kept your data in "), "{stdout}");
+    // The data directories are listed one per `Kept` line, not removed.
+    assert!(
+        stdout.lines().any(|line| line.starts_with("Kept ")),
+        "{stdout}"
+    );
 }
