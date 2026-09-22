@@ -1,6 +1,6 @@
 # Releases
 
-Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the desktop installer and the headless archive for Linux x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together.
+Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the desktop installer and the headless archive for Linux x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together. Every binary reports its build as `<version>+<12-character commit>` (`condr --version`, `condr-gui --version`; ADR 0027), and a GUI connected to a Server of another build marks that Device in the sidebar.
 
 ## Nightly
 

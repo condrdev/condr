@@ -76,7 +76,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 - 代码签名：Windows 安装器与 EXE（SmartScreen），macOS 签名与公证。需要证书，是流程决定不是脚本改动。
 - Quickstart、支持矩阵（现有构建：Linux x86_64/arm64、Windows x86_64、macOS x86_64/arm64，不多承诺）、远程安全边界说明、故障排查。文档站放在 `condr-website`。
-- 冻结 `PROTOCOL_VERSION` 的语义并写下兼容策略：公开前仍保持 `1`，不做兼容层。
+- ~~冻结 `PROTOCOL_VERSION` 的语义并写下兼容策略~~ 已完成（ADR 0027，2026-09-22）：握手帧独立冻结并携带 build 身份，协议不同即拒绝、build 不同即提醒；公开前 `PROTOCOL_VERSION` 仍为 `1`，不做兼容层。发布前还要补一条 CI 守卫：握手之后的协议消息字节快照变了而 `PROTOCOL_VERSION` 未变则失败。
 - 第一批外部 dogfood 跑同一个 canonical workflow：多 worktree/Agent、断开 GUI、重连、Server 重启。
 
 进入条件是一句明确的"邀请外部用户"，退出条件是新机器按文档能装、能连、能恢复，并且方向 1 的日志能支撑排障。

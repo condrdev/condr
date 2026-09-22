@@ -42,7 +42,7 @@ Condr has two parts:
 ## Install
 
 > [!WARNING]
-> Condr is in early development. A new [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day. The Client and the Server must be the same build.
+> Condr is in early development. A new [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day. The Client and the Server must be the same build; Condr marks a Device whose Server is another build.
 
 ### Desktop App
 
