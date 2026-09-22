@@ -32,8 +32,9 @@ pub use identity::{
 };
 pub use stream::NoiseStream;
 
-/// A Device's Ed25519 public key; its hex form is the fingerprint shown to people, and
-/// the same 32 bytes are the Device's Peer-to-peer endpoint id (ADR 0025).
+/// A Device's Ed25519 public key; its 43-character base64url form is the fingerprint shown
+/// to people and carried in `tcp://` and `p2p://` links, and the same 32 bytes are the
+/// Device's Peer-to-peer endpoint id (ADR 0025). The identity files keep hex.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct PublicKey([u8; 32]);
 
@@ -53,7 +54,13 @@ pub struct DeviceKey {
 pub struct Secret([u8; 32]);
 
 impl PublicKey {
-    pub fn parse(hex: &str) -> io::Result<Self> {
+    /// Parses the fingerprint form, as a person pastes it.
+    pub fn parse(text: &str) -> io::Result<Self> {
+        decode(text).map(Self)
+    }
+
+    /// Parses the hex form the identity files store.
+    pub fn parse_hex(hex: &str) -> io::Result<Self> {
         hex_decode(hex).map(Self)
     }
 
@@ -77,22 +84,22 @@ impl PublicKey {
             .map(|point| point.to_montgomery().to_bytes())
     }
 
-    /// True when `prefix` is a hex prefix of this key, so people can name a key by its
+    /// True when `prefix` starts this key's fingerprint, so people can name a key by its
     /// first characters as Git does with commits.
     pub fn matches_prefix(&self, prefix: &str) -> bool {
-        !prefix.is_empty() && self.to_hex().starts_with(&prefix.to_ascii_lowercase())
+        !prefix.is_empty() && self.to_string().starts_with(prefix)
     }
 }
 
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PublicKey({})", self.to_hex())
+        write!(f, "PublicKey({self})")
     }
 }
 
 impl fmt::Display for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_hex())
+        f.write_str(&encode(&self.0))
     }
 }
 
@@ -162,7 +169,18 @@ impl Secret {
         random().map(Self)
     }
 
-    pub fn parse(hex: &str) -> io::Result<Self> {
+    /// Parses the link form, as a person pastes it.
+    pub fn parse(text: &str) -> io::Result<Self> {
+        decode(text).map(Self)
+    }
+
+    /// The link form; deliberately not `Display`, so a secret never reaches a log by accident.
+    pub fn encode(&self) -> String {
+        encode(&self.0)
+    }
+
+    /// Parses the hex form `pending-invite` stores.
+    pub fn parse_hex(hex: &str) -> io::Result<Self> {
         hex_decode(hex).map(Self)
     }
 
@@ -191,6 +209,23 @@ fn random() -> io::Result<[u8; 32]> {
     Ok(bytes)
 }
 
+/// Unpadded base64url: 43 characters for 32 bytes, against 64 in hex, and no `.`, `@`
+/// or `/`, so it sits inside a link untouched.
+fn encode(bytes: &[u8; 32]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn decode(text: &str) -> io::Result<[u8; 32]> {
+    use base64::Engine as _;
+    let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "expected a 43-character key");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(text)
+        .map_err(|_| invalid())?
+        .try_into()
+        .map_err(|_| invalid())
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -217,15 +252,22 @@ mod tests {
     use super::identity::now;
     use super::*;
     #[test]
-    fn keys_and_secrets_round_trip_through_hex_and_files() {
+    fn keys_and_secrets_round_trip_through_text_and_files() {
         let key = DeviceKey::generate().unwrap();
+        let fingerprint = key.public().to_string();
+        assert_eq!(fingerprint.len(), 43);
+        assert_eq!(PublicKey::parse(&fingerprint).unwrap(), key.public());
         assert_eq!(
-            PublicKey::parse(&key.public().to_hex()).unwrap(),
+            PublicKey::parse_hex(&key.public().to_hex()).unwrap(),
             key.public()
         );
         assert!(PublicKey::parse("abc").is_err());
-        assert!(key.public().matches_prefix(&key.public().to_hex()[..6]));
+        assert!(PublicKey::parse(&key.public().to_hex()).is_err());
+        assert!(key.public().matches_prefix(&fingerprint[..6]));
         assert!(!key.public().matches_prefix(""));
+        let secret = Secret::generate().unwrap();
+        assert_eq!(Secret::parse(&secret.encode()).unwrap(), secret);
+        assert_eq!(Secret::parse_hex(&secret.to_hex()).unwrap(), secret);
 
         let path =
             std::env::temp_dir().join(format!("condr-noise-key-{}-{}", std::process::id(), now()));

@@ -280,7 +280,9 @@ pub fn revoke_devices(endpoint: &Endpoint, key: &crate::noise::PublicKey) -> io:
     let (mut stream, _, _) = ClientConnection::welcome(endpoint.connect()?, "condr-revoke")?;
     condr_core::protocol::write_message(
         &mut stream,
-        &ClientMessage::RevokeDevice { key: key.to_hex() },
+        &ClientMessage::RevokeDevice {
+            key: key.to_string(),
+        },
     )
     .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)
@@ -297,7 +299,7 @@ pub fn revoke_devices(endpoint: &Endpoint, key: &crate::noise::PublicKey) -> io:
     }
 }
 
-/// The hex keys of paired devices holding a live TCP connection to the running Server.
+/// The fingerprints of paired devices holding a live TCP connection to the running Server.
 pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
     let (mut stream, _, _) = ClientConnection::welcome(endpoint.connect()?, "condr-clients")?;
     condr_core::protocol::write_message(&mut stream, &ClientMessage::ConnectedDevices)

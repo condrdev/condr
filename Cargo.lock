@@ -1404,6 +1404,7 @@ name = "condr-server"
 version = "0.1.0"
 dependencies = [
  "atomicwrites",
+ "base64 0.22.1",
  "bincode",
  "clap",
  "condr-core",

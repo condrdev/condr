@@ -557,7 +557,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                     format_args!(
                         "tcp://{}.{}@<host>:{}",
                         identity.public_key(),
-                        invite.secret.to_hex(),
+                        invite.secret.encode(),
                         address.port()
                     ),
                 );
@@ -565,7 +565,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             if config.p2p {
                 field(
                     "Peer-to-peer",
-                    format_args!("p2p://{}.{}", identity.public_key(), invite.secret.to_hex()),
+                    format_args!("p2p://{}.{}", identity.public_key(), invite.secret.encode()),
                 );
             }
             field("Next", "in Condr, Connect Remote Device and paste a link");
@@ -591,7 +591,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 .max("NAME".len());
             println!("{:<name_width$}  {:<14}  FINGERPRINT", "NAME", "LAST SEEN");
             for client in clients {
-                let seen = if connected.contains(&client.key.to_hex()) {
+                let seen = if connected.contains(&client.key.to_string()) {
                     "connected".to_owned()
                 } else {
                     relative_age(client.last_seen)

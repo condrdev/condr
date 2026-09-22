@@ -650,7 +650,7 @@ mod tests {
 
         // A revoke closes the door: the still-open connection is no longer authorized.
         assert_eq!(
-            revoke(&server_dir, &client_public.to_hex()[..8]).unwrap(),
+            revoke(&server_dir, &client_public.to_string()[..8]).unwrap(),
             Some(client_public)
         );
         assert!(!peer.peer_authorized().unwrap(), "revoked device refused");

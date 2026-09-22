@@ -1295,7 +1295,7 @@ pub(super) fn handle_client(
                     let mut keys = state
                         .tcp_peers
                         .values()
-                        .map(|(key, _)| key.to_hex())
+                        .map(|(key, _)| key.to_string())
                         .collect::<Vec<_>>();
                     keys.sort();
                     keys.dedup();
@@ -1434,7 +1434,7 @@ fn server_admin(
         let mut keys = state
             .tcp_peers
             .values()
-            .map(|(key, _)| key.to_hex())
+            .map(|(key, _)| key.to_string())
             .collect::<Vec<_>>();
         keys.sort();
         keys.dedup();
@@ -1490,7 +1490,7 @@ fn server_admin(
                 .into_iter()
                 .map(|client| ServerClientInfo {
                     name: client.name,
-                    fingerprint: client.key.to_hex(),
+                    fingerprint: client.key.to_string(),
                     last_seen: client.last_seen,
                 })
                 .collect();
@@ -1509,7 +1509,7 @@ fn server_admin(
                 ));
             }
             let invite = crate::noise::create_invite(&directory)?;
-            let (id, secret) = (identity.public_key(), invite.secret.to_hex());
+            let (id, secret) = (identity.public_key(), invite.secret.encode());
             Ok(ServerAdminResponse::Invite {
                 tcp: config
                     .listen

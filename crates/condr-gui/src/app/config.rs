@@ -631,7 +631,7 @@ appearance = 'light'   # was system
 # The Linux box in the corner.
 [[client.servers]]
 name = 'Linux'
-address = 'tcp://0000000000000000000000000000000000000000000000000000000000000000@127.0.0.1:4242'
+address = 'tcp://AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@127.0.0.1:4242'
 ";
         fs::write(&path, original).unwrap();
 

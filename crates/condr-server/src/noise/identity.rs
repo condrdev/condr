@@ -257,7 +257,7 @@ fn read_invite(directory: &Path) -> io::Result<Option<Invite>> {
         ));
     };
     let invite = Invite {
-        secret: Secret::parse(secret)?,
+        secret: Secret::parse_hex(secret)?,
         expires_at: expires_at
             .parse()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "malformed invite expiry"))?,
@@ -287,7 +287,7 @@ pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
                 return Err(malformed());
             };
             Ok(AuthorizedClient {
-                key: PublicKey::parse(key)?,
+                key: PublicKey::parse_hex(key)?,
                 paired_at: paired_at.parse().map_err(|_| malformed())?,
                 last_seen: last_seen.parse().map_err(|_| malformed())?,
                 name: name.to_owned(),
@@ -327,7 +327,10 @@ fn write_authorized(directory: &Path, clients: &[AuthorizedClient]) -> io::Resul
         .map(|client| {
             format!(
                 "{} {} {} {}\n",
-                client.key, client.paired_at, client.last_seen, client.name
+                client.key.to_hex(),
+                client.paired_at,
+                client.last_seen,
+                client.name
             )
         })
         .collect::<String>();

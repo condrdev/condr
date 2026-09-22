@@ -147,7 +147,7 @@ impl Condr {
                     Endpoint::Tcp(tcp) => tcp.authority(),
                     Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
                     // The short id is the default name; Edit renames it.
-                    Endpoint::P2p(p2p) => format!("p2p {}", &p2p.device.to_hex()[..8]),
+                    Endpoint::P2p(p2p) => format!("p2p {}", &p2p.device.to_string()[..8]),
                     Endpoint::Local(_) => unreachable!("remote address parser"),
                 };
                 self.connections
@@ -185,10 +185,10 @@ impl Condr {
             Endpoint::Tcp(tcp) => (
                 tcp.host,
                 tcp.port.to_string(),
-                Some(tcp.server_key.to_hex()),
+                Some(tcp.server_key.to_string()),
             ),
             Endpoint::Ssh(ssh) => (ssh.to_string(), String::new(), None),
-            Endpoint::P2p(p2p) => (String::new(), String::new(), Some(p2p.device.to_hex())),
+            Endpoint::P2p(p2p) => (String::new(), String::new(), Some(p2p.device.to_string())),
             Endpoint::Local(_) => unreachable!("no dialog for the Local Server"),
         };
         let ssh = server_key.is_none();

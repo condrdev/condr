@@ -26,8 +26,9 @@ fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() 
         std::process::id(),
         now()
     ));
-    let first = PublicKey::parse(&format!("aa01{}", "00".repeat(30))).unwrap();
-    let second = PublicKey::parse(&format!("aa02{}", "00".repeat(30))).unwrap();
+    // Fingerprints "qqqq…" and "q6ur…": one shared first character, distinct second.
+    let first = PublicKey::from_bytes([0xaa; 32]);
+    let second = PublicKey::from_bytes([0xab; 32]);
     let clients = [first, second].map(|key| AuthorizedClient {
         key,
         paired_at: 1,
@@ -37,14 +38,19 @@ fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() 
     write_authorized(&directory, &clients).unwrap();
     let before = fs::read(directory.join(AUTHORIZED_FILE)).unwrap();
     assert_eq!(
-        revoke(&directory, "AA").unwrap_err().kind(),
+        revoke(&directory, &first.to_string()[..1])
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::InvalidInput
     );
     assert_eq!(fs::read(directory.join(AUTHORIZED_FILE)).unwrap(), before);
     assert_eq!(revoke(&directory, "bb").unwrap(), None);
     assert_eq!(revoke(&directory, "").unwrap(), None);
     assert_eq!(fs::read(directory.join(AUTHORIZED_FILE)).unwrap(), before);
-    assert_eq!(revoke(&directory, "AA01").unwrap(), Some(first));
+    assert_eq!(
+        revoke(&directory, &first.to_string()[..2]).unwrap(),
+        Some(first)
+    );
     assert_eq!(
         read_authorized(&directory).unwrap(),
         vec![clients[1].clone()]
@@ -172,7 +178,7 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
     assert_eq!(&server.join().unwrap().unwrap(), b"again");
 
     assert_eq!(
-        revoke(&directory, &device.public().to_hex()[..8]).unwrap(),
+        revoke(&directory, &device.public().to_string()[..8]).unwrap(),
         Some(device.public())
     );
     let (mut client, server) = pair(&identity, &device, None);
@@ -198,15 +204,16 @@ fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
     assert!(read_authorized(&directory).unwrap().is_empty());
     let old = DeviceKey::generate().unwrap().public();
     let new = DeviceKey::generate().unwrap().public();
+    let (old_hex, new_hex) = (old.to_hex(), new.to_hex());
     fs::write(
         directory.join(AUTHORIZED_FILE),
-        format!("{old} 100 old laptop\n"),
+        format!("{old_hex} 100 old laptop\n"),
     )
     .unwrap();
     assert!(read_authorized(&directory).is_err());
     fs::write(
         directory.join(AUTHORIZED_FILE),
-        format!("{old} 100 100 old laptop\n{new} 200 300 new laptop\n"),
+        format!("{old_hex} 100 100 old laptop\n{new_hex} 200 300 new laptop\n"),
     )
     .unwrap();
 

@@ -603,11 +603,11 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     }
 
     // A paired device is not the host and may not revoke anyone.
-    let prefix = device_key.public().to_hex()[..12].to_owned();
+    let prefix = device_key.public().to_string()[..12].to_owned();
     condr_core::protocol::write_message(
         &mut second,
         &ClientMessage::RevokeDevice {
-            key: device_key.public().to_hex(),
+            key: device_key.public().to_string(),
         },
     )
     .unwrap();
@@ -621,7 +621,7 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     condr_core::protocol::write_message(&mut admin, &ClientMessage::ConnectedDevices).unwrap();
     assert!(matches!(
         read_server(&mut admin),
-        ServerMessage::ConnectedDevices { keys } if keys == vec![device_key.public().to_hex()]
+        ServerMessage::ConnectedDevices { keys } if keys == vec![device_key.public().to_string()]
     ));
     let paired = noise::read_authorized(&directory).unwrap();
     assert!(paired[0].last_seen >= paired[0].paired_at);
@@ -645,7 +645,7 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     condr_core::protocol::write_message(
         &mut admin,
         &ClientMessage::RevokeDevice {
-            key: device_key.public().to_hex(),
+            key: device_key.public().to_string(),
         },
     )
     .unwrap();

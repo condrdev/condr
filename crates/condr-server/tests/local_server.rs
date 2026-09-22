@@ -386,6 +386,10 @@ fn lifecycle_commands_manage_a_detached_server() {
         .map(str::trim)
         .find(|line| line.contains("@<host>:"))
         .unwrap_or_else(|| panic!("invite output names no locator:\n{invite_text}"))
+        // `TCP           tcp://…@<host>:port`: the link is the value after the label.
+        .rsplit(char::is_whitespace)
+        .next()
+        .unwrap()
         .replace("<host>", &address.ip().to_string());
     assert!(
         locator.ends_with(&format!(":{}", address.port())),
