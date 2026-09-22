@@ -30,8 +30,8 @@ app="$stage/dmg/Condr.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 iconutil --convert icns --output "$app/Contents/Resources/condr.icns" assets/brand/condr.iconset
 install -m 755 target/release/condr target/release/condr-gui "$app/Contents/MacOS/"
-install -m 644 LICENSE "$app/LICENSE"
-printf '%s\n' "$CONDR_COMMIT" >"$app/BUILD-COMMIT"
+install -m 644 LICENSE "$app/Contents/Resources/LICENSE"
+printf '%s\n' "$CONDR_COMMIT" >"$app/Contents/Resources/BUILD-COMMIT"
 # The launcher is not called `Condr`: the default case-insensitive APFS would merge it
 # with the `condr` CLI binary next to it.
 # A drag-and-drop DMG has no installer step, so the launcher registers the CLI on
@@ -59,9 +59,9 @@ cat >"$app/Contents/Info.plist" <<EOF
 <key>CFBundleShortVersionString</key><string>$CONDR_VERSION</string>
 </dict></plist>
 EOF
-# Unsigned and notarized we are not (no Apple Developer account), but an ad-hoc
-# signature seals the bundle so Gatekeeper reports "unverified developer" instead
-# of "damaged"; the user allows it once under Privacy & Security.
+# Not notarized (no Apple Developer account yet), but an ad-hoc signature seals
+# the bundle (everything must sit under Contents/) so Gatekeeper reports
+# "unverified developer" instead of "damaged"; the user allows it once.
 codesign --force --deep --sign - "$app"
 ln -s /Applications "$stage/dmg/Applications"
 dmg="$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"

@@ -17,7 +17,7 @@ CONDR_COMMIT="$commit" sh "$repo/script/check-headless-package.sh" "$2"
 hdiutil attach -quiet -nobrowse -readonly -mountpoint "$stage/volume" "$1"
 test "$(readlink "$stage/volume/Applications")" = /Applications
 app="$stage/volume/Condr.app"
-test "$(cat "$app/BUILD-COMMIT")" = "$commit"
+test "$(cat "$app/Contents/Resources/BUILD-COMMIT")" = "$commit"
 contents="$app/Contents"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = condr-launcher
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$contents/Info.plist")" = condr.icns
