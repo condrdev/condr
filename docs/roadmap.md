@@ -114,10 +114,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **为什么**：TCP 要固定地址，SSH 要用户已经配好登录，两台都在 NAT 后的机器今天没有答案——这是 remote 价值里唯一被 SSH/TCP 落下的场景。它不以方向 4 的 capability 为前置：relay 只转发密文、不参与授权，Peer-to-peer 的授权模型与 TCP 完全相同（同一套 Invite / `authorized-clients` / revoke）。
 
-**做到哪**：
-
-- 已完成（ADR 0025、0026）：一台机器一把 device-key；`p2p://<id>` 作为第三种 Endpoint 与 `tcp://`、`ssh://` 并列；Server 是机器唯一的 Peer-to-peer 端点，GUI/CLI 经本地 socket 的 `Tunnel` 帧隧道出去；`[server.p2p] enabled` 与 `--p2p` 是 opt-in 的接受端；进程内配对/撤销测试通过。
-- 待做：自建 relay（`relay.condr.dev`）与 DNS/pkarr（`dns.condr.dev`）部署上线，实测国内 UDP/WebSocket 出境；Windows 上 UDP 防火墙提示与真实 NAT 打洞验收；GUI 里 Peer-to-peer 设备的重命名与接受状态展示；SECURITY.md 与网站的诚实项。
+已完成（ADR 0025、0026，2026-09-22 验收）：一台机器一把 device-key；`p2p://<id>` 作为第三种 Endpoint 与 `tcp://`、`ssh://` 并列；Server 是机器唯一的 Peer-to-peer 端点，GUI/CLI 经本地 socket 的 `Tunnel` 帧隧道出去；`[server.p2p] enabled` 与 `--p2p` 是 opt-in 的接受端；自建 relay（`relay.condr.dev`）与 DNS/pkarr（`dns.condr.dev`）已上线，真实 NAT 后两台机器打洞连通；GUI 里 Peer-to-peer 设备可重命名，Settings 显示接受状态；SECURITY.md 写明 relay 与 DNS 能看到什么。指纹与 invite 链接改为 43 字符 base64url。
 
 **停在哪**：不用 n0 的任何基础设施，连兜底也不接；不做用户自建 relay/DNS（现阶段没有配置键）；不做 mDNS 局域网发现；relay 不落盘、无账号。
 

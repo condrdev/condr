@@ -494,9 +494,12 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
     const REDRAWN_ROWS: usize = 3;
 
     let size = TerminalSize::new(24, 80);
+    // 21 rows of distinct text, then the cursor parked where the status block will draw,
+    // so the cell it leaves on the first tick is inside the redrawn rows.
     let screen = (0..21)
         .map(|row| format!("\x1b[{};1H{row:02}{}", row + 1, "x".repeat(78)))
-        .collect::<String>();
+        .collect::<String>()
+        + "\x1b[22;1H";
     let terminal = Arc::new(Mutex::new(terminal_showing(size, screen.as_bytes())));
     let revision = Arc::new(AtomicU64::new(1));
     let source = TerminalViewSource {
@@ -545,10 +548,9 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
         revision.load(Ordering::Acquire),
         "the final frame carries the last revision"
     );
-    // Plus one row: the first tick also damages the cell the cursor left on row 21.
     let columns = usize::from(size.columns);
     assert!(
-        delta_cells <= usize::try_from(frames).unwrap() * REDRAWN_ROWS * columns + columns,
+        delta_cells <= usize::try_from(frames).unwrap() * REDRAWN_ROWS * columns,
         "each frame carries at most the redrawn rows, got {delta_cells} cells over {frames} frames"
     );
     // The settled cursor may still be held back; everything else must match the VT.
