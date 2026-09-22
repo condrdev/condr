@@ -676,14 +676,24 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
 }
 
 #[test]
-fn invalid_saved_server_protects_the_list_but_allows_preferences() {
+fn unreadable_saved_server_is_skipped_reported_and_kept_on_disk() {
     let _serial_guard = acquire_visual_test_lock();
     let directory = TestDirectory::new("invalid-client-config");
     let config_path = directory.0.join("config.toml");
-    let original = "# keep these entries\n[[client.servers]]\nname = 'Old TCP'\naddress = '127.0.0.1:4242'\nserver_key = 'legacy'\n[[client.servers]]\nname = 'Valid SSH'\naddress = 'ssh://build-box'\n";
+    let original = "[[client.servers]]\nname = 'Old TCP'\naddress = '127.0.0.1:4242'\n[[client.servers]]\nname = 'Valid SSH'\naddress = 'ssh://build-box'\n";
     std::fs::write(&config_path, original).unwrap();
     let config = config::LoadedConfig::read(Some(config_path.clone()));
-    assert!(config.servers_error.is_some());
+    // One bad address must not take the list down with it: the rest loads, adding works,
+    // and the startup toast names the entry so the user can re-add or remove it.
+    assert!(config.servers_error.is_none());
+    assert_eq!(config.servers.len(), 1);
+    assert!(
+        config
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Old TCP (127.0.0.1:4242)")
+    );
     let mut cx = TestAppContext::single();
     cx.update(gpui_kit::init);
     let view_holder = Rc::new(RefCell::new(None));
@@ -704,42 +714,17 @@ fn invalid_saved_server_protects_the_list_but_allows_preferences() {
     });
     let view = view_holder.borrow_mut().take().unwrap();
     window.update(|window, cx| {
-        view.update(cx, |this, cx| {
-            assert!(this.servers_error.is_some());
-            this.prompt_add_server(window, cx);
-            assert!(!window.has_active_dialog(cx));
-            assert!(
-                this.last_error
-                    .as_ref()
-                    .unwrap()
-                    .contains("fix the file and restart")
-            );
-            // Even direct writeback and mutations must respect the failed load.
-            this.connections.push(ServerConnection::new(
-                2,
-                "Unsaved".into(),
-                Endpoint::parse("ssh://new-box", None).unwrap(),
-            ));
-            assert!(
-                this.apply_server_edit(2, "Edited", "ssh://edited", "", window, cx)
-                    .is_err()
-            );
-            this.remove_server(2, window, cx);
-            assert_eq!(this.connection(2).unwrap().label, "Unsaved");
-            this.save_servers(cx);
-            assert!(this.config_save.is_none());
-        });
+        view.update(cx, |this, cx| this.prompt_add_server(window, cx));
     });
-    window.run_until_parked();
-    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), original);
-    window.update(|_, cx| view.update(cx, |this, cx| this.set_appearance(Appearance::Dark, cx)));
+    submit_text_dialog(window, "ssh://new-box");
     window.run_until_parked();
     let saved = std::fs::read_to_string(&config_path).unwrap();
-    assert!(saved.contains("appearance = \"dark\""));
-    assert!(saved.contains("# keep these entries"));
-    assert!(saved.contains("address = '127.0.0.1:4242'"));
-    assert!(saved.contains("address = 'ssh://build-box'"));
-    assert!(!saved.contains("new-box"));
+    assert!(saved.contains("ssh://new-box"));
+    assert!(saved.contains("ssh://build-box"));
+    assert!(
+        saved.contains("127.0.0.1:4242"),
+        "an entry that did not load stays on disk: {saved}"
+    );
 }
 
 #[test]

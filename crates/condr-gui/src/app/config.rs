@@ -69,35 +69,45 @@ impl LoadedConfig {
                 )),
             ),
         };
-        let (servers, servers_error) = path
+        let file = path.as_deref().map_or_else(
+            || "config.toml".to_owned(),
+            |path| path.display().to_string(),
+        );
+        // One entry whose address no longer parses (a link format change, a hand edit) is
+        // skipped and reported; it stays in the file untouched and the rest of the list
+        // keeps working. Only an unreadable file disables Device list changes.
+        let mut skipped = Vec::new();
+        let (servers, servers_error) = match path
             .as_deref()
             .map_or_else(|| Ok(Vec::new()), load_saved_servers)
-            .and_then(|servers| {
-                servers
+        {
+            Ok(saved) => (
+                saved
                     .into_iter()
                     .filter(|server| device_key.is_some() || !server.is_tcp())
-                    .map(|server| {
-                        server
-                            .endpoint(device_key.as_ref())
-                            .map(|endpoint| (server.name, endpoint))
+                    .filter_map(|server| match server.endpoint(device_key.as_ref()) {
+                        Ok(endpoint) => Some((server.name, endpoint)),
+                        Err(error) => {
+                            skipped.push(format!("{} ({}): {error}", server.name, server.address));
+                            None
+                        }
                     })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .map_or_else(
-                |error| {
-                    (
-                        Vec::new(),
-                        Some(format!(
-                            "Failed to load {}: {error}. Device list changes are disabled; fix the file and restart Condr.",
-                            path.as_deref().map_or_else(
-                                || "config.toml".to_owned(),
-                                |path| path.display().to_string()
-                            )
-                        )),
-                    )
-                },
-                |servers| (servers, None),
-            );
+                    .collect(),
+                None,
+            ),
+            Err(error) => (
+                Vec::new(),
+                Some(format!(
+                    "Failed to load {file}: {error}. Device list changes are disabled; fix the file and restart Condr."
+                )),
+            ),
+        };
+        let skipped_error = (!skipped.is_empty()).then(|| {
+            format!(
+                "Skipped saved devices with an address Condr cannot read; they stay in {file} until you re-add or remove them: {}",
+                skipped.join("; ")
+            )
+        });
         // A malformed `[[client.editors]]` is reported, not dropped: the user should learn
         // why their editor is missing from the menu.
         let (custom_editors, editors_error) = match path
@@ -147,7 +157,11 @@ impl LoadedConfig {
             path,
             device_key,
             servers,
-            error: servers_error.clone().or(key_error).or(editors_error),
+            error: servers_error
+                .clone()
+                .or(key_error)
+                .or(skipped_error)
+                .or(editors_error),
             servers_error,
         }
     }
@@ -257,7 +271,7 @@ impl Condr {
             self.report_error(error, cx);
             return;
         }
-        let preserve_tcp = self.device_key.is_none();
+        let device_key = self.device_key.clone();
         let mut servers = self
             .connections
             .iter()
@@ -266,15 +280,13 @@ impl Condr {
             })
             .collect::<Vec<_>>();
         self.save_config(cx, move |path| {
-            // A failed device-key load hides TCP entries, but SSH still works. Preserve
-            // the entries we could not load when saving SSH changes.
-            if preserve_tcp {
-                servers.extend(
-                    load_saved_servers(path)?
-                        .into_iter()
-                        .filter(SavedServer::is_tcp),
-                );
-            }
+            // Entries that did not load (a TCP Device without our key, an address that no
+            // longer parses) are not in `connections`; keep them as they are on disk.
+            servers.extend(
+                load_saved_servers(path)?
+                    .into_iter()
+                    .filter(|server| server.endpoint(device_key.as_ref()).is_err()),
+            );
             save_saved_servers(path, servers)
         });
     }
