@@ -56,6 +56,12 @@ Condr 由两部分组成：
 | macOS x86_64 / arm64 | `.dmg`   |
 | Windows x86_64       | `.exe`   |
 
+macOS 应用没有经过 Apple 公证（尚未完成 Apple 开发者账号注册），首次启动会提示无法验证。点 **完成**，打开 **系统设置 › 隐私与安全性**，滚到底部点 **仍要打开**。或者在终端里清除一次下载标记：
+
+```sh
+xattr -cr /Applications/Condr.app
+```
+
 ### Headless Server
 
 安装在你想远程运行 Agent 的设备上。它只包含 `condr` 命令，没有图形界面。

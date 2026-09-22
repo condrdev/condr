@@ -59,6 +59,10 @@ cat >"$app/Contents/Info.plist" <<EOF
 <key>CFBundleShortVersionString</key><string>$CONDR_VERSION</string>
 </dict></plist>
 EOF
+# Unsigned and notarized we are not (no Apple Developer account), but an ad-hoc
+# signature seals the bundle so Gatekeeper reports "unverified developer" instead
+# of "damaged"; the user allows it once under Privacy & Security.
+codesign --force --deep --sign - "$app"
 ln -s /Applications "$stage/dmg/Applications"
 dmg="$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"
 # hdiutil sizes an auto-sized image from the source's allocated blocks, which APFS
