@@ -87,7 +87,7 @@ impl P2pEndpoint {
         })?;
         condr_core::protocol::write_message(
             &mut stream,
-            &condr_core::protocol::ClientMessage::Tunnel {
+            &condr_core::protocol::ClientHandshake::Tunnel {
                 device: *self.device.as_bytes(),
                 invite: self.invite.as_ref().map(|invite| *invite.as_bytes()),
             },

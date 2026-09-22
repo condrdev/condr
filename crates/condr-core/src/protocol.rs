@@ -1,13 +1,14 @@
 //! Versioned, transport-independent server/client protocol.
 //!
-//! The server owns the runtime. [`ClientMessage::Hello`] receives only
-//! [`ServerMessage::Welcome`]. Clients explicitly request a lightweight overview
+//! The server owns the runtime. A frozen [`ClientHandshake`] receives only a frozen
+//! [`Welcome`] (see `handshake`). Clients explicitly request a lightweight overview
 //! or a complete Bootstrap, then optionally subscribe to ordered reliable events
 //! and coalesced terminal visual frames. The same framing works over local IPC
 //! and authenticated, encrypted TCP transports.
 
 mod bootstrap;
 mod framing;
+mod handshake;
 mod messages;
 
 use crate::{
@@ -29,14 +30,14 @@ pub use framing::{
     encode_pane_terminal_frame, read_message, read_message_with_limit, write_client_message,
     write_message, write_message_with_limit,
 };
+pub use handshake::{ClientHandshake, Hello, Refusal, Welcome};
 pub use messages::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, Hello, LayoutCommand,
-    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
-    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, relative_age,
-    uptime_text,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, LayoutCommand, LayoutResult,
+    PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch,
+    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
+    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview,
+    TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, relative_age, uptime_text,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -58,19 +59,3 @@ pub const BOOTSTRAP_BATCH_FRAME_OVERHEAD: usize = 64;
 pub const MAX_FRAMED_BOOTSTRAP_BYTES: usize = (MAX_FRAME_SIZE + 4)
     + MAX_BOOTSTRAP_TOTAL_SIZE
     + MAX_BOOTSTRAP_BATCHES as usize * BOOTSTRAP_BATCH_FRAME_OVERHEAD;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VersionCheck {
-    Compatible,
-    Incompatible(String),
-}
-
-pub fn check_version(version: u32) -> VersionCheck {
-    if version == PROTOCOL_VERSION {
-        VersionCheck::Compatible
-    } else {
-        VersionCheck::Incompatible(format!(
-            "protocol version {version} is incompatible with server version {PROTOCOL_VERSION}"
-        ))
-    }
-}

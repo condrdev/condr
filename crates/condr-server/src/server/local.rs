@@ -277,7 +277,7 @@ pub fn probe_server(endpoint: &Endpoint) -> io::Result<()> {
 /// returns how many it closed. The caller has already edited the
 /// authorized list, so those devices cannot come back.
 pub fn revoke_devices(endpoint: &Endpoint, key: &crate::noise::PublicKey) -> io::Result<u32> {
-    let (mut stream, _, _) = ClientConnection::welcome(endpoint.connect()?, "condr-revoke")?;
+    let (mut stream, _) = ClientConnection::welcome(endpoint.connect()?, "condr-revoke")?;
     condr_core::protocol::write_message(
         &mut stream,
         &ClientMessage::RevokeDevice {
@@ -301,7 +301,7 @@ pub fn revoke_devices(endpoint: &Endpoint, key: &crate::noise::PublicKey) -> io:
 
 /// The fingerprints of paired devices holding a live TCP connection to the running Server.
 pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
-    let (mut stream, _, _) = ClientConnection::welcome(endpoint.connect()?, "condr-clients")?;
+    let (mut stream, _) = ClientConnection::welcome(endpoint.connect()?, "condr-clients")?;
     condr_core::protocol::write_message(&mut stream, &ClientMessage::ConnectedDevices)
         .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)
@@ -320,12 +320,11 @@ pub fn connected_devices(endpoint: &Endpoint) -> io::Result<Vec<String>> {
 
 /// Asks the running Server for its `Status` admin report.
 pub fn server_status(endpoint: &Endpoint) -> io::Result<ServerAdminResponse> {
-    let (mut stream, server_id, _) =
-        ClientConnection::welcome(endpoint.connect()?, "condr-status")?;
+    let (mut stream, welcome) = ClientConnection::welcome(endpoint.connect()?, "condr-status")?;
     condr_core::protocol::write_message(
         &mut stream,
         &ClientMessage::ServerAdmin {
-            server_id,
+            server_id: welcome.server_id,
             command: ServerAdminCommand::Status,
         },
     )
@@ -343,9 +342,14 @@ pub fn server_status(endpoint: &Endpoint) -> io::Result<ServerAdminResponse> {
 }
 
 pub fn stop_server(endpoint: &Endpoint) -> io::Result<()> {
-    let (mut stream, server_id, _) = ClientConnection::welcome(endpoint.connect()?, "condr-stop")?;
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::StopServer { server_id })
-        .map_err(|error| io::Error::other(error.to_string()))?;
+    let (mut stream, welcome) = ClientConnection::welcome(endpoint.connect()?, "condr-stop")?;
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::StopServer {
+            server_id: welcome.server_id,
+        },
+    )
+    .map_err(|error| io::Error::other(error.to_string()))?;
     match condr_core::protocol::read_message(&mut stream)
         .map_err(|error| io::Error::other(error.to_string()))?
     {

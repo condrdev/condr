@@ -9,7 +9,7 @@
 
 use crate::endpoint::EndpointStream;
 use crate::noise::{PublicKey, Secret, ServerIdentity};
-use condr_core::protocol::ClientMessage;
+use condr_core::protocol::ClientHandshake;
 use iroh::address_lookup::{DnsAddressLookup, MemoryLookup, PkarrPublisher};
 use iroh::endpoint::{Connection, Incoming, RecvStream, SendStream, presets};
 use iroh::{Endpoint as IrohEndpoint, EndpointAddr, RelayMode, RelayUrl, SecretKey, TransportAddr};
@@ -206,7 +206,7 @@ impl P2pNode {
             let mut frame = Vec::new();
             condr_core::protocol::write_message(
                 &mut frame,
-                &ClientMessage::Credential {
+                &ClientHandshake::Credential {
                     invite: *invite.as_bytes(),
                 },
             )
@@ -534,9 +534,7 @@ fn rejected(reason: &str) -> io::Error {
 mod tests {
     use super::*;
     use crate::noise::{create_invite, revoke};
-    use condr_core::protocol::{
-        Hello, PROTOCOL_VERSION, ServerMessage, read_message, write_message,
-    };
+    use condr_core::protocol::{Hello, ServerMessage, read_message, write_message};
     use std::sync::mpsc::Receiver;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -569,7 +567,7 @@ mod tests {
         (node, rx)
     }
 
-    fn frame(message: &ClientMessage) -> Vec<u8> {
+    fn frame(message: &ClientHandshake) -> Vec<u8> {
         let mut bytes = Vec::new();
         write_message(&mut bytes, message).unwrap();
         bytes
@@ -602,10 +600,7 @@ mod tests {
             let mut stream = client_node.dial(server_id, Some(&invite)).unwrap();
             stream.set_read_timeout(Some(Duration::from_secs(10)));
             stream
-                .write_all(&frame(&ClientMessage::Hello(Hello {
-                    version: PROTOCOL_VERSION,
-                    client_name: "laptop".into(),
-                })))
+                .write_all(&frame(&ClientHandshake::Hello(Hello::new("laptop"))))
                 .unwrap();
             match read_message::<_, ServerMessage>(&mut stream).unwrap() {
                 ServerMessage::Error { message } => message,
@@ -622,14 +617,14 @@ mod tests {
         };
         peer.set_read_timeout(Some(Duration::from_secs(10)));
         assert!(peer.needs_credential().unwrap(), "the device is unknown");
-        match read_message::<_, ClientMessage>(&mut peer).unwrap() {
-            ClientMessage::Credential { invite } => {
+        match read_message::<_, ClientHandshake>(&mut peer).unwrap() {
+            ClientHandshake::Credential { invite } => {
                 peer.present_invite(&Secret::from_bytes(invite)).unwrap();
             }
             other => panic!("expected a credential, got {other:?}"),
         }
-        match read_message::<_, ClientMessage>(&mut peer).unwrap() {
-            ClientMessage::Hello(hello) => assert_eq!(hello.client_name, "laptop"),
+        match read_message::<_, ClientHandshake>(&mut peer).unwrap() {
+            ClientHandshake::Hello(hello) => assert_eq!(hello.client_name, "laptop"),
             other => panic!("expected Hello, got {other:?}"),
         }
         peer.complete_pairing("laptop").unwrap();

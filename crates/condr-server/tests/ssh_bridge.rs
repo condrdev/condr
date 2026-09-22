@@ -1,9 +1,12 @@
+use std::io::Read;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use condr_core::protocol::{self, ClientMessage, Hello, PROTOCOL_VERSION, ServerMessage};
+use condr_core::protocol::{
+    self, ClientHandshake, ClientMessage, Hello, PROTOCOL_VERSION, Refusal, ServerMessage, Welcome,
+};
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig};
 
 mod common;
@@ -12,7 +15,7 @@ use common::unique_suffix;
 struct Bridge {
     child: Child,
     input: Option<ChildStdin>,
-    output: mpsc::Receiver<Result<ServerMessage, String>>,
+    output: mpsc::Receiver<Result<Vec<u8>, String>>,
 }
 
 impl Bridge {
@@ -28,12 +31,20 @@ impl Bridge {
         let input = child.stdin.take();
         let mut stdout = child.stdout.take().unwrap();
         let (tx, output) = mpsc::channel();
+        // Frames are relayed raw so the test decodes each as the type it expects.
         thread::spawn(move || {
             loop {
-                let message =
-                    protocol::read_message(&mut stdout).map_err(|error| error.to_string());
-                let failed = message.is_err();
-                if tx.send(message).is_err() || failed {
+                let frame = (|| {
+                    let mut prefix = [0; 4];
+                    stdout.read_exact(&mut prefix)?;
+                    let mut frame = vec![0; 4 + u32::from_le_bytes(prefix) as usize];
+                    frame[..4].copy_from_slice(&prefix);
+                    stdout.read_exact(&mut frame[4..])?;
+                    Ok::<_, std::io::Error>(frame)
+                })()
+                .map_err(|error| error.to_string());
+                let failed = frame.is_err();
+                if tx.send(frame).is_err() || failed {
                     break;
                 }
             }
@@ -45,15 +56,17 @@ impl Bridge {
         }
     }
 
-    fn send(&mut self, message: &ClientMessage) {
+    fn send<M: serde::Serialize>(&mut self, message: &M) {
         protocol::write_message(self.input.as_mut().unwrap(), message).unwrap();
     }
 
-    fn read(&self) -> ServerMessage {
-        self.output
+    fn read<M: serde::de::DeserializeOwned>(&self) -> M {
+        let frame = self
+            .output
             .recv_timeout(Duration::from_secs(5))
             .unwrap()
-            .unwrap()
+            .unwrap();
+        protocol::read_message(&mut frame.as_slice()).unwrap()
     }
 
     fn wait_exit(&mut self) {
@@ -103,23 +116,23 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
     let expected = direct.bootstrap().unwrap().clone();
     for close_input in [false, true] {
         let mut bridge = Bridge::start(&endpoint);
-        bridge.send(&ClientMessage::Hello(Hello {
-            version: PROTOCOL_VERSION,
-            client_name: "ssh".into(),
-        }));
-        assert!(
-            matches!(bridge.read(), ServerMessage::Welcome { server_id, session_id, error: None, .. }
-            if server_id == expected.server_id && session_id == expected.session_id)
-        );
+        bridge.send(&ClientHandshake::Hello(Hello::new("ssh")));
+        let welcome: Welcome = bridge.read();
+        assert_eq!(welcome.refusal, None);
+        assert_eq!(welcome.server_id, expected.server_id);
+        assert_eq!(welcome.session_id, expected.session_id);
         bridge.send(&ClientMessage::SnapshotRequest {
             session_id: expected.session_id,
         });
-        let ServerMessage::Bootstrap(bootstrap) = bridge.read() else {
+        let ServerMessage::Bootstrap(bootstrap) = bridge.read::<ServerMessage>() else {
             panic!("expected Bootstrap");
         };
         assert_eq!(bootstrap.runtime_epoch, expected.runtime_epoch);
         for _ in 0..bootstrap.batch_count {
-            assert!(matches!(bridge.read(), ServerMessage::BootstrapBatch(_)));
+            assert!(matches!(
+                bridge.read::<ServerMessage>(),
+                ServerMessage::BootstrapBatch(_)
+            ));
         }
         if close_input {
             drop(bridge.input.take());
@@ -137,14 +150,12 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
         );
     }
     let mut incompatible = Bridge::start(&endpoint);
-    incompatible.send(&ClientMessage::Hello(Hello {
-        version: PROTOCOL_VERSION + 1,
-        client_name: "old".into(),
+    incompatible.send(&ClientHandshake::Hello(Hello {
+        protocol: PROTOCOL_VERSION + 1,
+        ..Hello::new("old")
     }));
-    assert!(matches!(
-        incompatible.read(),
-        ServerMessage::Welcome { error: Some(_), .. }
-    ));
+    let welcome: Welcome = incompatible.read();
+    assert_eq!(welcome.refusal, Some(Refusal::IncompatibleProtocol));
     incompatible.wait_exit();
     drop(incompatible);
     drop(direct);
@@ -182,17 +193,10 @@ fn bridge_starts_the_server_on_the_default_socket_when_none_runs() {
         .unwrap();
     let mut input = bridge.stdin.take().unwrap();
     let mut stdout = bridge.stdout.take().unwrap();
-    protocol::write_message(
-        &mut input,
-        &ClientMessage::Hello(Hello {
-            version: PROTOCOL_VERSION,
-            client_name: "ssh".into(),
-        }),
-    )
-    .unwrap();
-    let welcome: ServerMessage = protocol::read_message(&mut stdout).unwrap();
-    assert!(
-        matches!(welcome, ServerMessage::Welcome { error: None, .. }),
+    protocol::write_message(&mut input, &ClientHandshake::Hello(Hello::new("ssh"))).unwrap();
+    let welcome: Welcome = protocol::read_message(&mut stdout).unwrap();
+    assert_eq!(
+        welcome.refusal, None,
         "the bridge should have started a Server and relayed its Welcome: {welcome:?}"
     );
     assert!(

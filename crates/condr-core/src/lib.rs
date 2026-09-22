@@ -49,3 +49,15 @@ pub use terminal::{
 };
 
 pub const APP_NAME: &str = "Condr";
+
+/// What this binary is: the crate version, and the commit CI built it from when it did
+/// (`CONDR_BUILD_COMMIT` at compile time; a local `cargo build` has none). Every Condr
+/// crate shares the workspace version, so one value names the whole build.
+pub fn build_identity() -> String {
+    match option_env!("CONDR_BUILD_COMMIT") {
+        Some(commit) if !commit.is_empty() => {
+            format!("{}+{commit}", env!("CARGO_PKG_VERSION"))
+        }
+        _ => env!("CARGO_PKG_VERSION").to_string(),
+    }
+}

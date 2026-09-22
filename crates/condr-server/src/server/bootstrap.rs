@@ -115,26 +115,24 @@ pub(super) fn queue_runtime_bootstrap(
     result == Err(ReliableSendError::Disconnected)
 }
 
-pub(super) fn send_error(
+/// The Server's one answer to a handshake; with a `refusal` the caller closes the stream.
+pub(super) fn send_welcome(
     stream: &mut EndpointStream,
     state: &Arc<Mutex<RuntimeState>>,
-    message: &str,
+    refusal: Option<Refusal>,
 ) -> io::Result<()> {
-    let state = state.lock().expect("server state lock poisoned");
-    send_message(
-        stream,
-        &ServerMessage::Welcome {
-            version: PROTOCOL_VERSION,
-            server_id: state.server_id,
-            runtime_epoch: state.runtime_epoch,
-            session_id: state.session_id,
-            error: Some(message.into()),
-        },
-    )
-}
-
-pub(super) fn send_message(stream: &mut EndpointStream, message: &ServerMessage) -> io::Result<()> {
-    condr_core::protocol::write_message(stream, message)
+    let (server_id, session_id) = {
+        let state = state.lock().expect("server state lock poisoned");
+        (state.server_id, state.session_id)
+    };
+    let welcome = Welcome {
+        protocol: PROTOCOL_VERSION,
+        build: condr_core::build_identity(),
+        server_id,
+        session_id,
+        refusal,
+    };
+    condr_core::protocol::write_message(stream, &welcome)
         .map_err(|error| io::Error::other(error.to_string()))
 }
 

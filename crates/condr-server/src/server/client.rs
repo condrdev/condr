@@ -31,7 +31,13 @@ fn tunnel(
         .clone();
     let mut local = local;
     let Some(node) = node else {
-        let _ = send_error(&mut local, state, "peer-to-peer is not available");
+        let _ = send_welcome(
+            &mut local,
+            state,
+            Some(Refusal::TunnelFailed(
+                "peer-to-peer is not available".into(),
+            )),
+        );
         return;
     };
     let device = crate::noise::PublicKey::from_bytes(device);
@@ -44,10 +50,10 @@ fn tunnel(
         }
         Err(error) => {
             tracing::warn!("tunnel dial failed: {error}");
-            let _ = send_error(
+            let _ = send_welcome(
                 &mut local,
                 state,
-                &format!("could not reach the device: {error}"),
+                Some(Refusal::TunnelFailed(error.to_string())),
             );
         }
     }
@@ -79,14 +85,14 @@ pub(super) fn handle_client(
         return;
     }
     let hello = loop {
-        let message = match condr_core::protocol::read_message::<_, ClientMessage>(&mut stream) {
+        let message = match condr_core::protocol::read_message::<_, ClientHandshake>(&mut stream) {
             Ok(message) => message,
             Err(error) => {
                 tracing::warn!("refused: invalid handshake frame: {error}");
-                let _ = send_error(
+                let _ = send_welcome(
                     &mut stream,
                     &state,
-                    &format!("invalid handshake frame: {error}"),
+                    Some(Refusal::Malformed(error.to_string())),
                 );
                 return;
             }
@@ -94,17 +100,23 @@ pub(super) fn handle_client(
         match message {
             // A local Client asking its own Server to reach a Peer-to-peer Device (ADR 0025).
             // Only a local connection may tunnel, or any paired Device could hop through here.
-            ClientMessage::Tunnel { device, invite } => {
+            ClientHandshake::Tunnel { device, invite } => {
                 if !matches!(stream, EndpointStream::Local(_)) {
                     tracing::warn!("refused: only a local connection may tunnel");
-                    let _ = send_error(&mut stream, &state, "only a local connection may tunnel");
+                    let _ = send_welcome(
+                        &mut stream,
+                        &state,
+                        Some(Refusal::NotAuthorized(
+                            "only a local connection may tunnel".into(),
+                        )),
+                    );
                     return;
                 }
                 tunnel(stream, &state, device, invite);
                 return;
             }
             // An unknown Peer-to-peer Device redeems its invite before Hello (ADR 0026).
-            ClientMessage::Credential { invite } => {
+            ClientHandshake::Credential { invite } => {
                 let outcome = match &stream {
                     // A Device paired already, over TCP or by an earlier attempt, needs no
                     // invite; the Client cannot know that, so the one it carries is ignored.
@@ -119,16 +131,16 @@ pub(super) fn handle_client(
                 };
                 if let Err(error) = outcome {
                     tracing::warn!("refused: {error}");
-                    let message = if error.kind() == io::ErrorKind::InvalidData {
-                        "unexpected credential"
+                    let refusal = if error.kind() == io::ErrorKind::InvalidData {
+                        Refusal::Malformed("unexpected credential".into())
                     } else {
-                        "not authorized; a valid invite is required"
+                        Refusal::NotAuthorized("a valid invite is required".into())
                     };
-                    let _ = send_error(&mut stream, &state, message);
+                    let _ = send_welcome(&mut stream, &state, Some(refusal));
                     return;
                 }
             }
-            ClientMessage::Hello(hello) => {
+            ClientHandshake::Hello(hello) => {
                 // An unknown Peer-to-peer Device that skipped the invite is refused here.
                 let unproven = matches!(
                     &stream,
@@ -136,39 +148,27 @@ pub(super) fn handle_client(
                 );
                 if unproven {
                     tracing::warn!("refused: not authorized");
-                    let _ = send_error(
+                    let _ = send_welcome(
                         &mut stream,
                         &state,
-                        "not authorized; a valid invite is required",
+                        Some(Refusal::NotAuthorized("a valid invite is required".into())),
                     );
                     return;
                 }
                 break hello;
             }
-            _ => {
-                tracing::warn!("refused: expected Hello as first message");
-                let _ = send_error(&mut stream, &state, "expected Hello as first message");
-                return;
-            }
         }
     };
 
-    let (server_id, runtime_epoch, session_id) = {
-        let state = state.lock().expect("server state lock poisoned");
-        (state.server_id, state.runtime_epoch, state.session_id)
-    };
-    if let VersionCheck::Incompatible(reason) = check_version(hello.version) {
-        tracing::warn!(name = %hello.client_name, version = hello.version, "refused: {reason}");
-        let _ = send_message(
-            &mut stream,
-            &ServerMessage::Welcome {
-                version: PROTOCOL_VERSION,
-                server_id,
-                runtime_epoch,
-                session_id,
-                error: Some(reason),
-            },
+    if hello.protocol != PROTOCOL_VERSION {
+        tracing::warn!(
+            name = %hello.client_name,
+            protocol = hello.protocol,
+            build = %hello.build,
+            "refused: protocol version {} is incompatible with server version {PROTOCOL_VERSION}",
+            hello.protocol
         );
+        let _ = send_welcome(&mut stream, &state, Some(Refusal::IncompatibleProtocol));
         return;
     }
 
@@ -176,7 +176,11 @@ pub(super) fn handle_client(
     // before it learns anything about this Server.
     if let Err(error) = stream.complete_pairing(&hello.client_name) {
         tracing::warn!(name = %hello.client_name, "refused: pairing failed: {error}");
-        let _ = send_error(&mut stream, &state, &format!("pairing failed: {error}"));
+        let _ = send_welcome(
+            &mut stream,
+            &state,
+            Some(Refusal::PairingFailed(error.to_string())),
+        );
         return;
     }
     // A TCP peer stays addressable by its device key until it leaves, so revoking that
@@ -201,37 +205,32 @@ pub(super) fn handle_client(
             Ok(false) => {
                 drop(state_guard);
                 tracing::warn!(name = %hello.client_name, "refused: device revoked");
-                let _ = send_error(&mut stream, &state, "device revoked");
+                let _ = send_welcome(&mut stream, &state, Some(Refusal::DeviceRevoked));
                 return;
             }
             Err(error) => {
                 drop(state_guard);
                 tracing::warn!(name = %hello.client_name, "refused: authorization check failed: {error}");
-                let _ = send_error(
+                let _ = send_welcome(
                     &mut stream,
                     &state,
-                    &format!("authorization check failed: {error}"),
+                    Some(Refusal::NotAuthorized(format!(
+                        "authorization check failed: {error}"
+                    ))),
                 );
                 return;
             }
         }
     }
 
-    if send_message(
-        &mut stream,
-        &ServerMessage::Welcome {
-            version: PROTOCOL_VERSION,
-            server_id,
-            runtime_epoch,
-            session_id,
-            error: None,
-        },
-    )
-    .is_err()
-    {
+    if send_welcome(&mut stream, &state, None).is_err() {
         return;
     }
-    tracing::info!(name = %hello.client_name, "connected");
+    let (server_id, session_id) = {
+        let state = state.lock().expect("server state lock poisoned");
+        (state.server_id, state.session_id)
+    };
+    tracing::info!(name = %hello.client_name, build = %hello.build, "connected");
     // Declared after the span, so it drops (and logs) while the span is still entered.
     let _disconnect_log = DisconnectLog;
     let _ = stream.set_handshake_timeout(None);
@@ -1350,11 +1349,6 @@ pub(super) fn handle_client(
                 queue_message(&outbound, response)
             }
             ClientMessage::Detach => true,
-            // Handshake-only frames; a Client that sends them later is confused, not
-            // dangerous, so they are ignored like a late Hello.
-            ClientMessage::Hello(Hello { .. })
-            | ClientMessage::Credential { .. }
-            | ClientMessage::Tunnel { .. } => false,
         };
         for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
             started_terminals

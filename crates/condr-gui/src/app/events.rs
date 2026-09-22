@@ -810,7 +810,7 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
-            ServerMessage::Welcome { .. } | ServerMessage::Pong { .. } => IncomingEffect::default(),
+            ServerMessage::Pong { .. } => IncomingEffect::default(),
         }
     }
 }

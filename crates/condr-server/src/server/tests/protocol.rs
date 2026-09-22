@@ -1,4 +1,5 @@
 use super::*;
+use condr_core::protocol::Hello;
 
 #[test]
 fn overview_frames_fit_near_the_snapshot_and_terminal_metadata_limits() {
@@ -103,17 +104,12 @@ fn tcp_peers_leave_the_table_when_initial_connections_are_abandoned() {
         let mut stream = endpoint.connect().unwrap();
         condr_core::protocol::write_message(
             &mut stream,
-            &ClientMessage::Hello(Hello {
-                version: PROTOCOL_VERSION,
-                client_name: "abandoned".into(),
-            }),
+            &ClientHandshake::Hello(Hello::new("abandoned")),
         )
         .unwrap();
         if index % 2 == 0 {
-            assert!(matches!(
-                read_server(&mut stream),
-                ServerMessage::Welcome { error: None, .. }
-            ));
+            let welcome: Welcome = condr_core::protocol::read_message(&mut stream).unwrap();
+            assert_eq!(welcome.refusal, None);
         }
         stream.shutdown().unwrap();
     }
@@ -666,16 +662,11 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         .unwrap();
     condr_core::protocol::write_message(
         &mut delayed,
-        &ClientMessage::Hello(Hello {
-            version: PROTOCOL_VERSION,
-            client_name: "delayed".into(),
-        }),
+        &ClientHandshake::Hello(Hello::new("delayed")),
     )
     .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut delayed),
-        Ok(ServerMessage::Welcome { error: Some(message), .. }) if message == "device revoked"
-    ));
+    let welcome: Welcome = condr_core::protocol::read_message(&mut delayed).unwrap();
+    assert_eq!(welcome.refusal, Some(Refusal::DeviceRevoked));
     drop(delayed);
     let error = match ClientConnection::connect(&device(None), "revoked") {
         Ok(_) => panic!("a revoked device reconnected"),

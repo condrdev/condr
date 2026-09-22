@@ -9,26 +9,8 @@ pub struct SessionId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeEpoch(pub u128);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Hello {
-    pub version: u32,
-    pub client_name: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClientMessage {
-    Hello(Hello),
-    /// First frame of a Peer-to-peer connection from a Device the Server does not know:
-    /// the invite it redeems (ADR 0026). The Server records the Device once `Hello` follows.
-    Credential {
-        invite: [u8; 32],
-    },
-    /// First frame from a local Client asking its own Server, the machine's Peer-to-peer
-    /// endpoint, to dial `device` and splice this connection onto it (ADR 0025).
-    Tunnel {
-        device: [u8; 32],
-        invite: Option<[u8; 32]>,
-    },
     SnapshotRequest {
         session_id: SessionId,
     },
@@ -664,13 +646,6 @@ impl ClientMessage {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ServerMessage {
-    Welcome {
-        version: u32,
-        server_id: ServerId,
-        runtime_epoch: RuntimeEpoch,
-        session_id: SessionId,
-        error: Option<String>,
-    },
     Bootstrap(BootstrapHeader),
     /// Overview header with an empty terminal list; exactly one OverviewTerminals follows.
     Overview(SessionOverview),

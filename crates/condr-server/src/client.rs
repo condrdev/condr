@@ -2,13 +2,57 @@
 
 use crate::{ConnectionCancellation, Endpoint, EndpointStream};
 use condr_core::protocol::{
-    BootstrapAssembler, ClientMessage, FramingError, Hello, LayoutCommand, LayoutResult,
-    PROTOCOL_VERSION, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId,
-    SessionOverview,
+    BootstrapAssembler, ClientHandshake, ClientMessage, FramingError, Hello, LayoutCommand,
+    LayoutResult, PROTOCOL_VERSION, Refusal, ServerMessage, SessionBootstrap, SessionEvent,
+    SessionOverview, Welcome,
 };
 use condr_core::{PaneId, Session, TerminalCommand};
+use std::fmt;
 use std::io;
 use std::time::Duration;
+
+/// A Server read this Client's `Hello` and closed the connection. Reached through
+/// `io::Error::get_ref` so callers can tell the refusal, and the Server's build, apart
+/// from a transport failure without matching on text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Refused {
+    pub refusal: Refusal,
+    pub server_protocol: u32,
+    pub server_build: String,
+}
+
+impl Refused {
+    fn kind(&self) -> io::ErrorKind {
+        match self.refusal {
+            Refusal::IncompatibleProtocol | Refusal::Malformed(_) => io::ErrorKind::InvalidData,
+            Refusal::NotAuthorized(_) | Refusal::PairingFailed(_) | Refusal::DeviceRevoked => {
+                io::ErrorKind::PermissionDenied
+            }
+            Refusal::TunnelFailed(_) => io::ErrorKind::HostUnreachable,
+        }
+    }
+}
+
+impl fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.refusal {
+            Refusal::IncompatibleProtocol => write!(
+                formatter,
+                "protocol version {PROTOCOL_VERSION} is incompatible with server version {}",
+                self.server_protocol
+            ),
+            other => other.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for Refused {}
+
+impl From<Refused> for io::Error {
+    fn from(refused: Refused) -> Self {
+        io::Error::new(refused.kind(), refused)
+    }
+}
 
 pub struct ClientConnection {
     stream: EndpointStream,
@@ -92,7 +136,8 @@ impl ClientConnection {
         terminal_views: bool,
         cancellation: ConnectionCancellation,
     ) -> io::Result<Self> {
-        let (mut stream, _, session_id) = Self::welcome(stream, client_name)?;
+        let (mut stream, welcome) = Self::welcome(stream, client_name)?;
+        let session_id = welcome.session_id;
         // Authentication is complete. Bootstrap may be large: bound inactivity,
         // not total transfer time, just as socket read timeouts do.
         stream.set_handshake_timeout(Some(crate::server::HANDSHAKE_TIMEOUT))?;
@@ -304,7 +349,7 @@ impl ClientConnection {
     pub(super) fn welcome(
         mut stream: EndpointStream,
         client_name: impl Into<String>,
-    ) -> io::Result<(EndpointStream, ServerId, SessionId)> {
+    ) -> io::Result<(EndpointStream, Welcome)> {
         // A refused handshake surfaces as an I/O error with its own kind; keep it so
         // callers can tell "not authorized" from a framing problem.
         let io_error = |error: FramingError| match error {
@@ -322,32 +367,19 @@ impl ClientConnection {
         stream.set_handshake_timeout(Some(timeout))?;
         condr_core::protocol::write_message(
             &mut stream,
-            &ClientMessage::Hello(Hello {
-                version: PROTOCOL_VERSION,
-                client_name: client_name.into(),
-            }),
+            &ClientHandshake::Hello(Hello::new(client_name)),
         )
         .map_err(io_error)?;
-        let welcome: ServerMessage =
-            condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
-        let (server_id, session_id) = match welcome {
-            ServerMessage::Welcome {
-                server_id,
-                session_id,
-                error: None,
-                ..
-            } => (server_id, session_id),
-            ServerMessage::Welcome {
-                error: Some(error), ..
-            } => return Err(io::Error::new(io::ErrorKind::InvalidData, error)),
-            other => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unexpected welcome response: {other:?}"),
-                ));
+        let welcome: Welcome = condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
+        if let Some(refusal) = welcome.refusal.clone() {
+            return Err(Refused {
+                refusal,
+                server_protocol: welcome.protocol,
+                server_build: welcome.build,
             }
-        };
-        Ok((stream, server_id, session_id))
+            .into());
+        }
+        Ok((stream, welcome))
     }
 
     /// Reads one complete Bootstrap: the header followed by its batches.

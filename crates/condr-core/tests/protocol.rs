@@ -6,10 +6,7 @@ use std::path::PathBuf;
 
 #[test]
 fn hello_round_trip_uses_length_prefix() {
-    let message = ClientMessage::Hello(Hello {
-        version: PROTOCOL_VERSION,
-        client_name: "test".into(),
-    });
+    let message = ClientHandshake::Hello(Hello::new("test"));
     let mut bytes = Vec::new();
     write_message(&mut bytes, &message).unwrap();
     assert_eq!(
@@ -17,8 +14,62 @@ fn hello_round_trip_uses_length_prefix() {
         bytes.len() - 4
     );
     assert_eq!(
-        read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+        read_message::<_, ClientHandshake>(&mut bytes.as_slice()).unwrap(),
         message
+    );
+}
+
+/// The handshake is frozen (ADR 0027): these bytes are what every past and future build
+/// puts on the wire first. A change here is a change no released Condr can read.
+#[test]
+fn handshake_wire_layout_is_frozen() {
+    let hello = ClientHandshake::Hello(Hello {
+        protocol: 7,
+        build: "1.2.3+abc".into(),
+        client_name: "gui".into(),
+    });
+    let mut bytes = Vec::new();
+    write_message(&mut bytes, &hello).unwrap();
+    assert_eq!(
+        bytes,
+        [
+            [36, 0, 0, 0].as_slice(), // frame length
+            &[0, 0, 0, 0],            // ClientHandshake::Hello
+            &[7, 0, 0, 0],            // protocol
+            &[9, 0, 0, 0, 0, 0, 0, 0],
+            b"1.2.3+abc", // build
+            &[3, 0, 0, 0, 0, 0, 0, 0],
+            b"gui", // client_name
+        ]
+        .concat()
+    );
+
+    let welcome = Welcome {
+        protocol: 7,
+        build: "1.2.3".into(),
+        server_id: ServerId(0x0102),
+        session_id: SessionId(1),
+        refusal: Some(Refusal::IncompatibleProtocol),
+    };
+    let mut bytes = Vec::new();
+    write_message(&mut bytes, &welcome).unwrap();
+    assert_eq!(
+        bytes,
+        [
+            [38, 0, 0, 0].as_slice(), // frame length
+            &[7, 0, 0, 0],            // protocol
+            &[5, 0, 0, 0, 0, 0, 0, 0],
+            b"1.2.3",                  // build
+            &[2, 1, 0, 0, 0, 0, 0, 0], // server_id
+            &[1, 0, 0, 0, 0, 0, 0, 0], // session_id
+            &[1],
+            &[0, 0, 0, 0], // Some(Refusal::IncompatibleProtocol)
+        ]
+        .concat()
+    );
+    assert_eq!(
+        read_message::<_, Welcome>(&mut bytes.as_slice()).unwrap(),
+        welcome
     );
 }
 
@@ -160,15 +211,6 @@ fn bootstrap_header_round_trip_uses_the_flat_snapshot_schema() {
         read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
         message
     );
-}
-
-#[test]
-fn incompatible_versions_are_rejected() {
-    assert_eq!(PROTOCOL_VERSION, 1);
-    assert!(matches!(
-        check_version(PROTOCOL_VERSION + 1),
-        VersionCheck::Incompatible(_)
-    ));
 }
 
 #[test]

@@ -2,7 +2,8 @@
 
 use condr_core::Session;
 use condr_core::protocol::{
-    ClientMessage, Hello, LayoutCommand, LayoutResult, PROTOCOL_VERSION, ServerMessage,
+    ClientHandshake, ClientMessage, Hello, LayoutCommand, LayoutResult, PROTOCOL_VERSION, Refusal,
+    ServerMessage, Welcome,
 };
 use condr_server::{
     BoundServer, ClientConnection, Endpoint, EndpointStream, ServerConfig, ServerHandle,
@@ -189,46 +190,24 @@ fn concurrent_creations_return_their_own_ids_and_keep_the_others_focus() {
 fn compatible_client_gets_bootstrap_and_reconnect_sees_same_epoch() {
     let (handle, endpoint, thread) = start();
     let first = connect_and_bootstrap(&endpoint);
-    let first_message: ServerMessage = {
+    let first_welcome: Welcome = {
         let mut stream = endpoint.connect().unwrap();
         condr_core::protocol::write_message(
             &mut stream,
-            &ClientMessage::Hello(Hello {
-                version: PROTOCOL_VERSION,
-                client_name: "first".into(),
-            }),
+            &ClientHandshake::Hello(Hello::new("first")),
         )
         .unwrap();
         condr_core::protocol::read_message(&mut stream).unwrap()
     };
-    let (first_id, first_epoch) = match first_message {
-        ServerMessage::Welcome {
-            server_id,
-            runtime_epoch,
-            ..
-        } => (server_id, runtime_epoch),
-        other => panic!("unexpected message: {other:?}"),
-    };
+    assert_eq!(first_welcome.refusal, None);
     drop(first);
     let mut second = endpoint.connect().unwrap();
-    condr_core::protocol::write_message(
-        &mut second,
-        &ClientMessage::Hello(Hello {
-            version: PROTOCOL_VERSION,
-            client_name: "second".into(),
-        }),
-    )
-    .unwrap();
-    let welcome: ServerMessage = condr_core::protocol::read_message(&mut second).unwrap();
-    assert!(matches!(
-        welcome,
-        ServerMessage::Welcome {
-            server_id,
-            runtime_epoch,
-            error: None,
-            ..
-        } if server_id == first_id && runtime_epoch == first_epoch
-    ));
+    condr_core::protocol::write_message(&mut second, &ClientHandshake::Hello(Hello::new("second")))
+        .unwrap();
+    let welcome: Welcome = condr_core::protocol::read_message(&mut second).unwrap();
+    assert_eq!(welcome.refusal, None);
+    assert_eq!(welcome.server_id, first_welcome.server_id);
+    assert_eq!(welcome.build, condr_core::build_identity());
     handle.stop();
     drop(second);
     thread.join().unwrap().unwrap();
@@ -240,13 +219,11 @@ fn non_hello_first_frame_is_rejected_with_a_clear_error() {
     let mut stream = endpoint.connect().unwrap();
     condr_core::protocol::write_message(&mut stream, &ClientMessage::Detach).unwrap();
 
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
-        ServerMessage::Welcome {
-            error: Some(message),
-            ..
-        } if message == "expected Hello as first message"
-    ));
+    let welcome: Welcome = condr_core::protocol::read_message(&mut stream).unwrap();
+    assert!(
+        matches!(welcome.refusal, Some(Refusal::Malformed(_))),
+        "{welcome:?}"
+    );
 
     handle.stop();
     drop(stream);
@@ -259,17 +236,15 @@ fn incompatible_client_is_rejected() {
     let mut stream = endpoint.connect().unwrap();
     condr_core::protocol::write_message(
         &mut stream,
-        &ClientMessage::Hello(Hello {
-            version: PROTOCOL_VERSION + 1,
-            client_name: "old".into(),
+        &ClientHandshake::Hello(Hello {
+            protocol: PROTOCOL_VERSION + 1,
+            ..Hello::new("old")
         }),
     )
     .unwrap();
-    let response: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
-    assert!(matches!(
-        response,
-        ServerMessage::Welcome { error: Some(_), .. }
-    ));
+    let welcome: Welcome = condr_core::protocol::read_message(&mut stream).unwrap();
+    assert_eq!(welcome.refusal, Some(Refusal::IncompatibleProtocol));
+    assert_eq!(welcome.protocol, PROTOCOL_VERSION);
     handle.stop();
     drop(stream);
     thread.join().unwrap().unwrap();

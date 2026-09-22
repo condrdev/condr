@@ -25,13 +25,13 @@ use client::*;
 #[cfg(test)]
 use condr_core::protocol::BootstrapAssembler;
 use condr_core::protocol::{
-    BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage, DiffBase, FramingError, Hello,
-    LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
+    BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientHandshake, ClientMessage, DiffBase,
+    FramingError, LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand,
+    PaneTerminalMetadata, PaneTerminalSnapshot, Refusal, RuntimeEpoch, ServerAdminCommand,
     ServerAdminResponse, ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
-    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, VersionCheck,
-    WorkspaceGitSnapshot, check_version, encode_bootstrap_record, encode_pane_terminal_frame,
+    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, Welcome,
+    WorkspaceGitSnapshot, encode_bootstrap_record, encode_pane_terminal_frame,
 };
 use condr_core::{
     AgentSnapshot, GitFingerprint, GitRepository, PaneEnvironment, PaneId, Session,

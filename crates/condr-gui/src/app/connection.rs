@@ -143,7 +143,7 @@ impl ClientIo {
                     ) {
                         match &message {
                             ServerMessage::Bootstrap(_) | ServerMessage::ServerStopping => {}
-                            ServerMessage::Welcome { .. } | ServerMessage::BootstrapBatch(_) => {
+                            ServerMessage::BootstrapBatch(_) => {
                                 let _ = incoming_tx.send_blocking(Incoming::Disconnected(error));
                                 break;
                             }
