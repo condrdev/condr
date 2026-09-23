@@ -248,6 +248,11 @@ impl TestDirectory {
             NEXT_TEST_SERVER_ID.fetch_add(1, Ordering::Relaxed),
         ));
         std::fs::create_dir_all(&path).unwrap();
+        // The Server reports Pane cwds and worktree roots resolved, and macOS's temp
+        // directory sits behind `/var` -> `/private/var`. Windows' canonical form is `\\?\`,
+        // which git cannot open, so it keeps the spelling it has.
+        #[cfg(unix)]
+        let path = std::fs::canonicalize(&path).unwrap();
         Self(path)
     }
 }

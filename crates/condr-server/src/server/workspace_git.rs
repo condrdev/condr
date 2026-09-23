@@ -204,6 +204,9 @@ pub(super) struct GitWatcher {
 
 struct Watched {
     root: PathBuf,
+    /// `root` with links resolved: FSEvents reports resolved paths (macOS's `/var` is
+    /// `/private/var`), inotify and ReadDirectoryChangesW the watched spelling.
+    real_root: PathBuf,
     root_subscribed: bool,
     git_dir: Option<PathBuf>,
     /// A git directory outside the root that has its own watch.
@@ -284,6 +287,7 @@ fn run_watcher(
                 git_dir,
             }) => {
                 let entry = watched.entry(workspace_id).or_insert_with(|| Watched {
+                    real_root: resolved(&root),
                     root: root.clone(),
                     root_subscribed: false,
                     git_dir: None,
@@ -300,6 +304,7 @@ fn run_watcher(
                     {
                         let _ = watcher.unwatch(&entry.root);
                     }
+                    entry.real_root = resolved(&root);
                     entry.root = root;
                     entry.root_subscribed = false;
                 }
@@ -465,6 +470,10 @@ fn watch_git_dir(
     entry.git_dir = Some(git_dir);
 }
 
+fn resolved(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// The path relative to the Workspace root when `path` can change its Git status; the
 /// object store never does, and a change under the git directory counts as `.git` itself.
 fn relevant_change(entry: &Watched, path: &Path) -> Option<PathBuf> {
@@ -474,7 +483,10 @@ fn relevant_change(entry: &Watched, path: &Path) -> Option<PathBuf> {
         return (!inside.starts_with("objects") && !inside.starts_with("lfs"))
             .then(|| PathBuf::from(".git"));
     }
-    let relative = path.strip_prefix(&entry.root).ok()?;
+    let relative = path
+        .strip_prefix(&entry.root)
+        .or_else(|_| path.strip_prefix(&entry.real_root))
+        .ok()?;
     if relative.starts_with(".git") {
         let inside = relative.strip_prefix(".git").unwrap_or(relative);
         return (!inside.starts_with("objects") && !inside.starts_with("lfs"))
