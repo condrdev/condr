@@ -1,7 +1,11 @@
-# `buf lint` runs in CI (ADR 0028); `buf breaking` against main joins it at the first release.
+# CI runs `buf lint` and `buf breaking` (ADR 0028). Only the binary encoding reaches peers
+# and the Session Snapshot, so breaking checks wire compatibility, not names.
 version: v2
 modules:
   - path: .
 lint:
   use:
     - STANDARD
+breaking:
+  use:
+    - WIRE

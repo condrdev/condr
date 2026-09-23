@@ -27,13 +27,14 @@ jobs:
         with:
           persist-credentials: false
       - run: cargo fmt --all -- --check
-      # The protocol contract (ADR 0028). `breaking` joins at the first release.
+      # The protocol contract (ADR 0028): pushes compare with the commit before, pull
+      # requests with their base.
       - uses: bufbuild/buf-action@v1
         with:
           input: proto
           lint: true
           format: false
-          breaking: false
+          breaking: true
           push: false
 
   test:
@@ -41,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [ubuntu-24.04, windows-2025, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -53,6 +54,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-x11-dev libwayland-dev libssl-dev libvulkan1
+      - name: Use a long temp path on Windows
+        if: runner.os == 'Windows'
+        # The runner's TEMP is an 8.3 short path (RUNNER~1), which shells and the
+        # process table report in its long form, so path comparisons in tests fail.
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - uses: Swatinem/rust-cache@v2
         with:
           # PR branches only restore main's cache; saving per branch would evict it.
