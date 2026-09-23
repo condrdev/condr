@@ -33,7 +33,7 @@ Condr 由两部分组成：
 ## 特性
 
 - **一直运行。** 关闭窗口或断开连接后，Server 和 Agent 继续工作。
-- **远程管理。** 在一个窗口里管理本机和远程设备。支持 SSH 和 TCP 两种连接方式。
+- **远程管理。** 在一个窗口里管理本机和远程设备。支持 SSH、TCP 和 Peer-to-peer 三种连接方式。
 - **Agent 状态。** 侧栏显示每个 Agent 正在做什么。Agent 完成任务时，Condr 发送通知。
 - **Agent 驱动。** Agent 也能操作 Condr：创建窗格、读取输出、分配任务、与其他 Agent 沟通。
 - **真实终端。** 每个窗格都是基于 `alacritty` 内核的真实终端，能运行任何命令行程序。
@@ -42,13 +42,13 @@ Condr 由两部分组成：
 ## 安装
 
 > [!WARNING]
-> Condr 处于早期开发阶段，每天发布新的 [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) 版本。Client 和 Server 必须使用同一个版本。
+> Condr 0.1 是公开预览版，版本之间仍可能有变化。Client 和 Server 请一起更新；Server 版本不同的设备会在侧栏标出，有新版本时 Condr 也会提示。想用最新改动，可以装每天发布的 [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) 版本。
 
 ### 桌面应用
 
 安装在你使用的电脑上。它已包含 Server，本机使用不需要再安装其他组件。
 
-从 [Releases](https://github.com/condrdev/condr/releases) 下载对应平台的安装包：
+从[最新版本](https://github.com/condrdev/condr/releases/latest)下载对应平台的安装包：
 
 | 平台                 | 安装包   |
 | -------------------- | -------- |
@@ -76,53 +76,13 @@ xattr -cr /Applications/Condr.app
 
 ## 连接远程设备
 
-在侧栏点击 **Connect Remote Device**，然后输入远程设备的链接。链接有 SSH、TCP 和 Peer-to-peer 三种格式：已有 SSH 登录用 SSH，远程设备有固定地址用 TCP，两台机器都没有公网地址用 Peer-to-peer。
+在侧栏点击 **Connect Remote Device**，然后输入远程设备的链接。支持三种链接：
 
-### SSH
+- **SSH**（`ssh://`）：已有 SSH 登录时使用，沿用你现有的 OpenSSH 配置。
+- **TCP**（`tcp://`）：远程设备有固定地址时使用，一次性邀请配对，`Noise_IKpsk2` 加密。
+- **Peer-to-peer**（`p2p://`）：两台机器都在 NAT 后面时使用，端到端加密，能直连就直连，不能直连时经中继转发。
 
-```text
-ssh://user@build-box
-```
-
-远程设备装好 `condr` 后就能连接。Condr 使用你现有的 OpenSSH 配置和 ssh-agent，不需要额外设置。
-
-### TCP
-
-```text
-tcp://<server key>.<invite>@<host>:<port>
-```
-
-TCP 监听默认关闭。配对链接由远程设备生成，在该设备上完成以下步骤：
-
-1. 启动 Server 并让它监听网络。如果 Server 已在运行，把 `start` 换成 `restart`。监听地址会保存到配置文件，之后启动不用再加：
-
-   ```bash
-   condr server start --listen 0.0.0.0:2637
-   ```
-
-2. 运行 `condr server invite`。命令会输出配对链接。
-3. 在 10 分钟内把配对链接填入 Condr。如果链接过期，重复第 2 步。
-
-双方使用静态密钥互相验证身份（`Noise_IKpsk2`），连接全程加密。
-
-### Peer-to-peer
-
-```text
-p2p://<server key>.<invite>
-```
-
-适用于两台都在 NAT 后面的机器，比如家里的台式机和公司的笔记本。不需要有固定 IP，也不用装 VPN。Peer-to-peer 默认关闭，在远程设备上完成以下步骤：
-
-1. 启动 Server 并开启 Peer-to-peer。如果 Server 已在运行，把 `start` 换成 `restart`。设置会保存到配置文件：
-
-   ```bash
-   condr server start --p2p
-   ```
-
-2. 运行 `condr server invite`。命令会输出配对链接。
-3. 在 10 分钟内把配对链接填入 Condr。如果链接过期，重复第 2 步。
-
-两台设备能直连就直连，不能直连时经 Condr 的中继转发。在两台设备之间的连接使用密钥端到端加密，中继看不到你的传输内容。中继是 Condr 唯一的托管服务，不使用 Peer-to-peer 的设备不会连接它。中继能看到和看不到什么，见 [SECURITY.md](SECURITY.md)。
+具体设置步骤见文档站的 [Connect to a Remote Device](https://condr.dev/docs/getting-started/#connect-to-a-remote-device)。
 
 ## 开发
 

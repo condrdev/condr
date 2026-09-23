@@ -11,14 +11,14 @@ Condr has two parts:
 ## Install
 
 :::caution
-Condr is in early development. A new [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day. The Client and the Server must be the same build.
+Condr 0.1 is a public preview, and things may still change between versions. Update the Client and the Server together; Condr marks a Device whose Server is another build, and tells you when a new version is out. For the latest changes, a [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day.
 :::
 
 ### Desktop App
 
 Install it on the computer you work at. It includes the Server, so local use needs nothing else.
 
-Download the installer for your platform from [Releases](https://github.com/condrdev/condr/releases):
+Download the installer for your platform from the [latest release](https://github.com/condrdev/condr/releases/latest):
 
 | Platform             | Package  |
 | -------------------- | -------- |

@@ -33,7 +33,7 @@ Condr has two parts:
 ## Features
 
 - **Always on.** Close the window or disconnect. The Server and your agents keep working.
-- **Remote access.** Manage local and remote devices in one window, over SSH or TCP.
+- **Remote access.** Manage local and remote devices in one window, over SSH, TCP or Peer-to-peer.
 - **Agent status.** The sidebar shows what each agent is doing. Condr notifies you when an agent finishes.
 - **Agent driven.** Agents can use Condr too: create panes, read output, assign tasks, and talk to other agents.
 - **Real terminals.** Every pane is a real terminal built on the `alacritty` core. Run any CLI agent or terminal program.
@@ -42,13 +42,13 @@ Condr has two parts:
 ## Install
 
 > [!WARNING]
-> Condr is in early development. A new [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day. The Client and the Server must be the same build; Condr marks a Device whose Server is another build.
+> Condr 0.1 is a public preview, and things may still change between versions. Update the Client and the Server together; Condr marks a Device whose Server is another build, and tells you when a new version is out. For the latest changes, a [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day.
 
 ### Desktop App
 
 Install it on the computer you work at. It includes the Server, so local use needs nothing else.
 
-Download the installer for your platform from [Releases](https://github.com/condrdev/condr/releases):
+Download the installer for your platform from the [latest release](https://github.com/condrdev/condr/releases/latest):
 
 | Platform             | Package  |
 | -------------------- | -------- |
@@ -76,53 +76,13 @@ On that device, run the command for its platform:
 
 ## Connect to a Remote Device
 
-In the sidebar, click **Connect Remote Device**, then enter the link to the remote device. The link is in SSH, TCP or Peer-to-peer format: SSH when you already have SSH access, TCP when the remote device has a fixed address, Peer-to-peer when neither machine does.
+In the sidebar, click **Connect Remote Device** and enter the link to the remote device. Three kinds of link are supported:
 
-### SSH
+- **SSH** (`ssh://`): when you already have SSH access. Uses your existing OpenSSH configuration.
+- **TCP** (`tcp://`): when the remote device has a fixed address. Paired with a one-time invite and encrypted with `Noise_IKpsk2`.
+- **Peer-to-peer** (`p2p://`): when both machines are behind NAT. End-to-end encrypted, direct when possible, relayed when not.
 
-```text
-ssh://user@build-box
-```
-
-You can connect as soon as `condr` is installed on the remote device. Condr uses your existing OpenSSH configuration and ssh-agent, so no other setup is needed.
-
-### TCP
-
-```text
-tcp://<server key>.<invite>@<host>:<port>
-```
-
-TCP listening is off by default. The remote device generates the pairing link. On that device:
-
-1. Start the Server and have it listen on the network. If the Server is already running, use `restart` instead of `start`. The listen address is saved to the configuration file, so you don't need to pass it again:
-
-   ```bash
-   condr server start --listen 0.0.0.0:2637
-   ```
-
-2. Run `condr server invite`. The command prints the pairing link.
-3. Enter the pairing link in Condr within 10 minutes. If it expires, repeat step 2.
-
-Both sides authenticate each other with static keys (`Noise_IKpsk2`), and the connection is encrypted.
-
-### Peer-to-peer
-
-```text
-p2p://<server key>.<invite>
-```
-
-For two machines that are both behind NAT, such as a home desktop and a laptop at work. No fixed IP needed, no VPN to install. Peer-to-peer is off by default. On the remote device:
-
-1. Start the Server with Peer-to-peer enabled. If the Server is already running, use `restart` instead of `start`. The setting is saved to the configuration file:
-
-   ```bash
-   condr server start --p2p
-   ```
-
-2. Run `condr server invite`. The command prints the pairing link.
-3. Enter the pairing link in Condr within 10 minutes. If it expires, repeat step 2.
-
-The two devices connect directly when they can, and through Condr's relay when they can't. The connection between the two devices is end-to-end encrypted with their keys, so the relay never sees what you send. The relay is Condr's only hosted service, and a device that never uses Peer-to-peer never contacts it. See [SECURITY.md](SECURITY.md) for what the relay can and cannot see.
+See [Connect to a Remote Device](https://condr.dev/docs/getting-started/#connect-to-a-remote-device) in the docs for the setup steps.
 
 ## Development
 

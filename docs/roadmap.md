@@ -1,6 +1,6 @@
 # Condr Roadmap
 
-> 最近核对：2026-09-22。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
+> 最近核对：2026-09-23。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
 
 ## 定位
 
@@ -16,7 +16,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 三问都过才排进近期；只过第一问的放到摩擦记录里等证据。
 
-## 现状（2026-09-22）
+## 现状（2026-09-23）
 
 单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭；此后两周补齐了发布和日常体验。仓库 2026-09-16 转为公开，尚无外部用户，Issue tracker 当前为空。
 
@@ -29,15 +29,15 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | Agent | 10 种 CLI 的 hook 安装（Kimi 上游不可用）；状态只来自 hooks，经 OSC 777 回写（ADR 0014）；`Blocked` 带 `blocked_on` 说明在等哪个工具/命令或哪个问题，sidebar、OS 通知、CLI JSON 都显示，左侧栏顶部有跨 Device 的「Needs you」列表（ADR 0024）；完成/需输入时 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` / `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes/Files、Diff Tab（对 HEAD）、Preview Tab（ADR 0017/0018） |
-| 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；Settings 可签 invite、撤销设备 |
+| 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备 |
 | 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、Workspace/Tab/Pane/Agent 计数、订阅客户端数、最近 warn/error |
-| 发布 | nightly + `v*` 正式版共用一条流水线；Linux/macOS/Windows 各两种架构的 desktop 与 headless 产物、校验和、安装脚本；README/CONTRIBUTING/SECURITY/CoC/Issue 模板 |
+| 发布 | nightly + `v*` 正式版共用一条流水线；Linux/macOS x86_64/arm64 与 Windows x86_64 的 desktop 与 headless 产物、校验和、安装脚本；GUI 按跟随的渠道检查新版本并提示，不自动安装（ADR 0029）；协议按字段号演进，CI 跑 `buf lint`（ADR 0028）；README/CONTRIBUTING/SECURITY/CoC/Issue 模板 |
 
 **代码里确实没有的**
 
 - 可观测性：burst 基准只覆盖 VT 增量、monitor 合并与 shaping 缓存三段，各自在进程内跑；整条 PTY → GPUI 链路的帧率仍靠 Windows 上手工观察。
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、密钥进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
-- 代码签名、自动更新、Quickstart 文档、支持矩阵和协议兼容策略。
+- 代码签名；自动安装更新（现在只提示）；故障排查、支持的 Agent、CLI 与配置参考文档。
 - 终端内搜索、命令面板、Diff 对 base 分支比较（`GitDiff.against` 已预留）。
 
 **已知限制**（原 Issue #23/#26/#28/#36 已随仓库公开被删除，暂记于此，出现摩擦再立新 Issue）：终端颜色查询（OSC 4/10/11）未回应；kitty keyboard 协议只覆盖已协商的子集；OpenCode 集成缺真机验证；OSC 支持范围没有对照表。
@@ -70,16 +70,17 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 已完成（ADR 0024，2026-09-21）：`agent-hook` 从原生 payload 取工具名加命令首行（`Bash: cargo test`）或问题文本，截到 200 字符后随 `permission-request`/`question-asked` 进 OSC 777；OpenCode 插件与 Pi/OMP 扩展传同一个 `detail` 字段。`AgentSnapshot.blocked_on` 只在 `Blocked` 期间存在，离开即清；sidebar Agent 行的第二行、OS 通知正文、`agent list|wait|prompt --wait` 与 `pane list` 的 `blocked_on` 都显示它；左侧栏顶部的「Needs you」列出所有 Device 上的 Blocked Agent，点击落到 Pane。没有做替用户批准，也没有解析屏幕文本补全缺失的 hook。
 
-### 5. 对外发布门（等发布决定）
+### 5. 公开预览 0.1.0
 
-发布基础设施已就绪，剩下的全是"有外部用户才值得付的成本"，一起做，不拆开：
+2026-09-23 决定以 0.1.0 作为公开预览、邀请外部用户。按顺序分三步：
 
-- 代码签名：Windows 安装器与 EXE（SmartScreen），macOS 签名与公证。需要证书，是流程决定不是脚本改动。
-- Quickstart、支持矩阵（现有构建：Linux x86_64/arm64、Windows x86_64、macOS x86_64/arm64，不多承诺）、远程安全边界说明、故障排查。文档站放在 `condr-website`。
-- ~~冻结 `PROTOCOL_VERSION` 的语义并写下兼容策略~~ 已完成（ADR 0027，2026-09-22）：握手帧独立冻结并携带 build 身份，协议不同即拒绝、build 不同即提醒；公开前 `PROTOCOL_VERSION` 仍为 `1`，不做兼容层。发布前还要补一条 CI 守卫：握手之后的协议消息字节快照变了而 `PROTOCOL_VERSION` 未变则失败。
-- 第一批外部 dogfood 跑同一个 canonical workflow：多 worktree/Agent、断开 GUI、重连、Server 重启。
+- **发版前**：协议兼容策略已完成（ADR 0027/0028）：握手按字段号冻结并携带 build 身份，协议是一个范围，build 不同只提醒，CI 对 `proto/` 跑 `buf lint`。README 与 getting-started 以正式版为准，官网 Download 指向 latest release。剩下的是在 Windows 与 macOS 上用候选 Nightly 跑一遍 canonical workflow：安装、连远程 Device、多 worktree/Agent、断开 GUI、重连、Server 重启。
+- **发版时**：按 [Releases](releases.md) 打 `v0.1.0`；release notes 手写（功能概览、支持矩阵、已知限制），因为直推 `main` 的仓库里 `--generate-notes` 只剩一行链接；CI 加 `buf breaking` 对比 `main` 并定下兼容窗口长度（ADR 0028）；发版后用 stable 渠道检查一次更新，应显示已是最新。
+- **对外宣布前**：文档站（`website/`）补故障排查（日志位置、`CONDR_LOG`、`condr server status --json`、提 Issue 附什么）、支持的 Agent（10 种 CLI 与 hook 安装）、CLI 与 Agent 驱动、配置参考；README 与 getting-started 在 macOS Gatekeeper 说明旁补 Windows SmartScreen 的放行步骤。
 
-进入条件是一句明确的"邀请外部用户"，退出条件是新机器按文档能装、能连、能恢复，并且方向 1 的日志能支撑排障。
+代码签名不在预览门内：Windows 安装器与 EXE（SmartScreen）、macOS 签名与公证需要证书和 Apple 开发者账号，是流程决定不是脚本改动；预览期不签名，文档写清放行步骤。
+
+退出条件是新机器按文档能装、能连、能恢复，并且方向 1 的日志能支撑排障。
 
 ### 6. 本机作为编排端驾驭远程 Device
 
@@ -123,7 +124,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 | 事项 | 启动条件 | 前置 |
 | --- | --- | --- |
-| 自动更新（GUI 提示新版本 → 下载校验 → 同时替换 Client 与 Server） | 有外部用户；Client/Server 必须同版本这一点已在手动更新中造成抱怨 | 代码签名（方向 5）；`condr server install` 已能原地替换运行中的二进制（ADR 0016） |
+| 自动安装更新（下载校验 → 同时替换 Client 与 Server；提示新版本已完成，ADR 0029） | 有外部用户；Client/Server 必须同版本这一点已在手动更新中造成抱怨 | 代码签名（方向 5）；`condr server install` 已能原地替换运行中的二进制（ADR 0016） |
 | 遥测（opt-in） | 有外部用户，且方向 1 的本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
 | Mobile Companion（done/blocked 通知、查看、少量动作） | 厂商 Remote Control 覆盖不了的跨 Agent 场景被反复提出 | 一个不依赖 GPUI 的语义 API 适配层；Push 只作提醒，打开后重新拉取 Server 权威状态 |
 | 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | 方向 3 之后 Agent Profile 先从代码内置抽成 manifest |
