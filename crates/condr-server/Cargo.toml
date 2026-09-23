@@ -15,7 +15,6 @@ path = "src/main.rs"
 [dependencies]
 atomicwrites.workspace = true
 base64.workspace = true
-bincode.workspace = true
 clap.workspace = true
 interprocess.workspace = true
 relative-path.workspace = true
@@ -37,6 +36,7 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 
 [dev-dependencies]
+prost.workspace = true
 uuid.workspace = true
 
 [build-dependencies]

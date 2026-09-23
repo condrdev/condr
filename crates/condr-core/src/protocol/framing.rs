@@ -1,55 +1,172 @@
 use super::*;
+use prost::Message as _;
 
-pub fn encode_bootstrap_record(record: &BootstrapRecord) -> Result<Vec<u8>, String> {
-    encode_chunked_value(record, "Bootstrap record")
+/// A message that travels as one frame: the handshake types, `ClientMessage` and
+/// `ServerMessage`. Sealed; the protobuf types behind it stay inside the crate.
+pub trait WireMessage: Sized + private::Sealed {}
+
+mod private {
+    use super::*;
+
+    pub trait Sealed: Sized {
+        /// The body of one frame, at most `limit` bytes, behind its varint length.
+        fn frame(&self, limit: usize) -> Result<Vec<u8>, FramingError>;
+        fn decode(body: &[u8]) -> Result<Self, FramingError>;
+    }
 }
 
-pub fn decode_bootstrap_record(payload: &[u8]) -> Result<BootstrapRecord, String> {
-    decode_chunked_value(payload, "Bootstrap record")
+macro_rules! wire_message {
+    ($domain:ty, $wire:ty, encode: $encode:expr) => {
+        impl WireMessage for $domain {}
+
+        impl private::Sealed for $domain {
+            fn frame(&self, limit: usize) -> Result<Vec<u8>, FramingError> {
+                let wire: $wire = ($encode)(self)?;
+                frame_body(&wire, limit)
+            }
+
+            fn decode(body: &[u8]) -> Result<Self, FramingError> {
+                let wire = <$wire>::decode(body)
+                    .map_err(|error| FramingError::Codec(error.to_string()))?;
+                <$domain>::try_from(wire).map_err(|error| FramingError::Codec(error.to_string()))
+            }
+        }
+    };
+}
+
+fn infallible<'a, D, W: From<&'a D>>(value: &'a D) -> Result<W, FramingError> {
+    Ok(W::from(value))
+}
+
+fn fallible<'a, D, W: TryFrom<&'a D, Error = String>>(value: &'a D) -> Result<W, FramingError> {
+    W::try_from(value).map_err(FramingError::Codec)
+}
+
+wire_message!(ClientHandshake, pb::ClientHandshake, encode: infallible);
+wire_message!(Welcome, pb::Welcome, encode: infallible);
+wire_message!(ClientMessage, pb::ClientMessage, encode: fallible);
+wire_message!(ServerMessage, pb::ServerMessage, encode: fallible);
+
+/// The longest varint length a frame carries: ten bytes encode any `u64`.
+pub const MAX_FRAME_PREFIX: usize = 10;
+
+fn frame_body<M: prost::Message>(message: &M, limit: usize) -> Result<Vec<u8>, FramingError> {
+    let length = message.encoded_len();
+    if length > limit {
+        return Err(FramingError::Oversized {
+            claimed: length,
+            max: limit,
+        });
+    }
+    let mut frame = Vec::with_capacity(prost::length_delimiter_len(length) + length);
+    message
+        .encode_length_delimited(&mut frame)
+        .expect("a Vec grows to fit");
+    Ok(frame)
+}
+
+pub fn encode_bootstrap_record(record: &BootstrapRecord) -> Result<Vec<u8>, String> {
+    encode_chunked_value(&pb::BootstrapRecord::from(record), "Bootstrap record")
+}
+
+/// `None` is a record kind this build does not know; the Bootstrap skips it (ADR 0028).
+pub fn decode_bootstrap_record(payload: &[u8]) -> Result<Option<BootstrapRecord>, String> {
+    let record: pb::BootstrapRecord = decode_chunked_value(payload, "Bootstrap record")?;
+    pb::decode_bootstrap_record(record)
+        .map_err(|error| format!("Bootstrap record cannot be decoded: {error}"))
 }
 
 pub fn encode_pane_terminal_frame(frame: &PaneTerminalFrame) -> Result<Vec<u8>, String> {
-    encode_chunked_value(frame, "Pane terminal frame")
+    encode_chunked_value(&pb::PaneTerminalFrame::from(frame), "Pane terminal frame")
 }
 
-pub fn decode_pane_terminal_frame(payload: &[u8]) -> Result<PaneTerminalFrame, String> {
-    decode_chunked_value(payload, "Pane terminal frame")
+/// `Ok(None)` is a frame from a newer protocol: the Client resynchronizes.
+pub fn decode_pane_terminal_frame(payload: &[u8]) -> Result<Option<PaneTerminalFrame>, String> {
+    let frame: pb::PaneTerminalFrame = decode_chunked_value(payload, "Pane terminal frame")?;
+    match PaneTerminalFrame::try_from(frame) {
+        Ok(frame) => Ok(Some(frame)),
+        Err(pb::WireError::Unknown) => Ok(None),
+        Err(error) => Err(format!("Pane terminal frame cannot be decoded: {error}")),
+    }
 }
 
-fn encode_chunked_value<T>(value: &T, description: &str) -> Result<Vec<u8>, String>
-where
-    T: Serialize,
-{
-    let payload = bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_limit(MAX_CHUNKED_RECORD_SIZE as u64)
-        .serialize(value)
-        .map_err(|error| format!("{description} cannot be encoded: {error}"))?;
+fn encode_chunked_value<M: prost::Message>(
+    value: &M,
+    description: &str,
+) -> Result<Vec<u8>, String> {
+    let length = value.encoded_len();
+    if length > MAX_CHUNKED_RECORD_SIZE {
+        return Err(format!(
+            "{description} is {length} bytes; limit is {MAX_CHUNKED_RECORD_SIZE} bytes"
+        ));
+    }
+    Ok(value.encode_to_vec())
+}
+
+fn decode_chunked_value<M: prost::Message + Default>(
+    payload: &[u8],
+    description: &str,
+) -> Result<M, String> {
     if payload.len() > MAX_CHUNKED_RECORD_SIZE {
         return Err(format!(
             "{description} is {} bytes; limit is {MAX_CHUNKED_RECORD_SIZE} bytes",
             payload.len()
         ));
     }
-    Ok(payload)
+    M::decode(payload).map_err(|error| format!("{description} cannot be decoded: {error}"))
 }
 
-fn decode_chunked_value<T>(payload: &[u8], description: &str) -> Result<T, String>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    if payload.len() > MAX_CHUNKED_RECORD_SIZE {
-        return Err(format!(
-            "{description} is {} bytes; limit is {MAX_CHUNKED_RECORD_SIZE} bytes",
-            payload.len()
-        ));
+/// A terminal frame converted to its wire form once, so the Server can size a batch by it
+/// and then encode it without converting again (ADR 0004, 0028).
+pub struct WirePaneFrame(pb::PaneTerminalFrame);
+
+impl WirePaneFrame {
+    pub fn new(frame: &PaneTerminalFrame) -> Self {
+        Self(frame.into())
     }
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_limit(MAX_CHUNKED_RECORD_SIZE as u64)
-        .reject_trailing_bytes()
-        .deserialize(payload)
-        .map_err(|error| format!("{description} cannot be decoded: {error}"))
+
+    /// The bytes this frame adds to a `TerminalFrame` batch, field tag and length included.
+    pub fn batch_len(&self) -> usize {
+        prost::encoding::message::encoded_len(3, &self.0)
+    }
+
+    /// The frame alone, as a chunked record.
+    pub fn encode_record(&self) -> Result<Vec<u8>, String> {
+        encode_chunked_value(&self.0, "Pane terminal frame")
+    }
+}
+
+/// One `TerminalFrame` message from frames already converted, as a complete frame.
+pub fn frame_terminal_batch(
+    server_id: ServerId,
+    session_id: SessionId,
+    panes: Vec<WirePaneFrame>,
+) -> Result<Vec<u8>, FramingError> {
+    let message = pb::ServerMessage {
+        message: Some(pb::server_message::Message::TerminalFrame(
+            pb::TerminalFrameBatch {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                panes: panes.into_iter().map(|pane| pane.0).collect(),
+            },
+        )),
+    };
+    frame_body(&message, MAX_FRAME_SIZE)
+}
+
+/// The bytes an empty `TerminalFrame` batch for this Session takes, before any frame.
+pub fn terminal_batch_overhead(server_id: ServerId, session_id: SessionId) -> usize {
+    let message = pb::ServerMessage {
+        message: Some(pb::server_message::Message::TerminalFrame(
+            pb::TerminalFrameBatch {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                panes: Vec::new(),
+            },
+        )),
+    };
+    // Growing the batch can widen the outer lengths; count them at their widest.
+    message.encoded_len() + 2 * MAX_FRAME_PREFIX
 }
 
 #[derive(Debug)]
@@ -88,10 +205,15 @@ impl From<io::Error> for FramingError {
     }
 }
 
+/// One complete frame, varint length included, for a writer queue to send as is.
+pub fn encode_frame<M: WireMessage>(message: &M, limit: usize) -> Result<Vec<u8>, FramingError> {
+    message.frame(limit)
+}
+
 pub fn write_message<W, M>(writer: &mut W, message: &M) -> Result<(), FramingError>
 where
     W: Write,
-    M: Serialize,
+    M: WireMessage,
 {
     write_message_with_limit(writer, message, MAX_FRAME_SIZE)
 }
@@ -111,24 +233,10 @@ pub fn write_message_with_limit<W, M>(
 ) -> Result<(), FramingError>
 where
     W: Write,
-    M: Serialize,
+    M: WireMessage,
 {
-    let payload = bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_limit(limit as u64)
-        .serialize(message)
-        .map_err(|error| FramingError::Codec(error.to_string()))?;
-    if payload.len() > limit {
-        return Err(FramingError::Oversized {
-            claimed: payload.len(),
-            max: limit,
-        });
-    }
-    let length = u32::try_from(payload.len()).map_err(|_| {
-        FramingError::Codec("payload length does not fit in the frame prefix".into())
-    })?;
-    writer.write_all(&length.to_le_bytes())?;
-    writer.write_all(&payload)?;
+    let frame = message.frame(limit)?;
+    writer.write_all(&frame)?;
     writer.flush()?;
     Ok(())
 }
@@ -136,40 +244,49 @@ where
 pub fn read_message<R, M>(reader: &mut R) -> Result<M, FramingError>
 where
     R: Read,
-    M: for<'de> Deserialize<'de>,
+    M: WireMessage,
 {
     read_message_with_limit(reader, MAX_FRAME_SIZE).map(|(message, _)| message)
 }
 
-/// Reads one frame of up to `limit` bytes, returning the message and the frame's payload
+/// Reads one frame of up to `limit` bytes, returning the message and the frame's body
 /// size, so a reader that admits large frames can still hold most kinds to the normal one.
+///
+/// The varint length is read a byte at a time, so nothing past this frame is consumed
+/// and the stream can be handed on (a Tunnel) right after; a length above `limit` is
+/// refused before anything is allocated for it.
 pub fn read_message_with_limit<R, M>(
     reader: &mut R,
     limit: usize,
 ) -> Result<(M, usize), FramingError>
 where
     R: Read,
-    M: for<'de> Deserialize<'de>,
+    M: WireMessage,
 {
-    let mut prefix = [0; 4];
-    read_exact_or_eof(reader, &mut prefix)?;
-    let claimed = u32::from_le_bytes(prefix) as usize;
-    if claimed > limit {
+    let claimed = read_frame_length(reader)?;
+    if claimed > limit as u64 {
         return Err(FramingError::Oversized {
-            claimed,
+            claimed: usize::try_from(claimed).unwrap_or(usize::MAX),
             max: limit,
         });
     }
+    let claimed = claimed as usize;
+    let mut body = vec![0; claimed];
+    read_exact_or_eof(reader, &mut body)?;
+    Ok((M::decode(&body)?, claimed))
+}
 
-    let mut payload = vec![0; claimed];
-    read_exact_or_eof(reader, &mut payload)?;
-    let message = bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_limit(limit as u64)
-        .reject_trailing_bytes()
-        .deserialize(&payload)
-        .map_err(|error| FramingError::Codec(error.to_string()))?;
-    Ok((message, claimed))
+fn read_frame_length<R: Read>(reader: &mut R) -> Result<u64, FramingError> {
+    let mut prefix = [0u8; MAX_FRAME_PREFIX];
+    for index in 0..MAX_FRAME_PREFIX {
+        read_exact_or_eof(reader, &mut prefix[index..=index])?;
+        if prefix[index] & 0x80 == 0 {
+            return prost::decode_length_delimiter(&prefix[..=index])
+                .map(|length| length as u64)
+                .map_err(|error| FramingError::Codec(error.to_string()));
+        }
+    }
+    Err(FramingError::Codec("frame length is not a varint".into()))
 }
 
 fn read_exact_or_eof<R: Read>(reader: &mut R, buffer: &mut [u8]) -> Result<(), FramingError> {

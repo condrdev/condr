@@ -63,8 +63,10 @@ impl ClientIo {
         window: &Window,
         cx: &Context<Condr>,
     ) -> std::io::Result<Self> {
-        let mut reader = connection.into_stream();
+        let reader = connection.into_stream();
         let mut writer = reader.try_clone()?;
+        // Buffered here, where nothing hands the stream on any more (ADR 0028).
+        let mut reader = std::io::BufReader::new(reader);
         let (outgoing, outgoing_rx) = mpsc::channel();
         let (incoming_tx, incoming_rx) = async_channel::bounded(SERVER_EVENT_BUFFER_CAPACITY);
         let writer_events = incoming_tx.clone();
@@ -161,6 +163,24 @@ impl ClientIo {
                         }
                     }
                     match message {
+                        // A frame this build cannot read: the Server already counts it as
+                        // delivered, so the next delta would not apply. Drop what is
+                        // pending and resynchronize, then let the UI count it (ADR 0028).
+                        message @ ServerMessage::Unknown(UnknownMessage::TerminalFrame) => {
+                            terminal_chunk_assembly = None;
+                            if request_terminal_resync(
+                                &reader_visual_slot,
+                                &incoming_tx,
+                                &mut resync_pending,
+                            )
+                            .is_err()
+                                || incoming_tx
+                                    .send_blocking(Incoming::Message(message))
+                                    .is_err()
+                            {
+                                break;
+                            }
+                        }
                         ServerMessage::TerminalFrame(batch) => {
                             if resync_pending {
                                 continue;
@@ -287,7 +307,7 @@ impl ClientIo {
                         }
                     }
                 }
-                let _ = reader.shutdown();
+                let _ = reader.get_ref().shutdown();
             })?;
 
         let incoming_task = cx.spawn_in(window, async move |owner, cx| {

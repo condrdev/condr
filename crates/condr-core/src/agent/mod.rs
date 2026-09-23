@@ -32,6 +32,9 @@ pub enum AgentKind {
     Cursor,
     Copilot,
     Kimi,
+    /// A kind a newer Server reported that this build does not know (ADR 0028): shown as
+    /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`].
+    Other,
 }
 
 impl AgentKind {
@@ -61,6 +64,7 @@ impl AgentKind {
             Self::Cursor => "cursor",
             Self::Copilot => "copilot",
             Self::Kimi => "kimi",
+            Self::Other => "other",
         }
     }
 
@@ -77,6 +81,7 @@ impl AgentKind {
             Self::Cursor => "Cursor CLI",
             Self::Copilot => "GitHub Copilot",
             Self::Kimi => "Kimi Code",
+            Self::Other => "Agent",
         }
     }
 
@@ -86,7 +91,12 @@ impl AgentKind {
     pub const fn reports_at_startup(self) -> bool {
         !matches!(
             self,
-            Self::Codex | Self::Copilot | Self::Cursor | Self::Antigravity | Self::Kimi
+            Self::Codex
+                | Self::Copilot
+                | Self::Cursor
+                | Self::Antigravity
+                | Self::Kimi
+                | Self::Other
         )
     }
 
@@ -120,7 +130,7 @@ impl AgentKind {
             ],
             Self::Omp => &["@oh-my-pi/pi-coding-agent"],
             Self::Copilot => &["@github/copilot"],
-            Self::Antigravity | Self::Grok | Self::Cursor | Self::Kimi => &[],
+            Self::Antigravity | Self::Grok | Self::Cursor | Self::Kimi | Self::Other => &[],
         }
     }
 }
@@ -231,6 +241,8 @@ impl AgentResume {
             AgentKind::Antigravity => "--conversation",
             AgentKind::Grok | AgentKind::Cursor => "--resume",
             AgentKind::Copilot => unreachable!("handled above"),
+            // The wire drops a resume for a kind this build does not know (ADR 0028).
+            AgentKind::Other => return Vec::new(),
         };
         vec![flag.into(), self.session_id.clone()]
     }

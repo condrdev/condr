@@ -24,7 +24,9 @@ pub struct Refused {
 impl Refused {
     fn kind(&self) -> io::ErrorKind {
         match self.refusal {
-            Refusal::IncompatibleProtocol | Refusal::Malformed(_) => io::ErrorKind::InvalidData,
+            Refusal::IncompatibleProtocol | Refusal::Malformed(_) | Refusal::Unknown => {
+                io::ErrorKind::InvalidData
+            }
             Refusal::NotAuthorized(_) | Refusal::PairingFailed(_) | Refusal::DeviceRevoked => {
                 io::ErrorKind::PermissionDenied
             }

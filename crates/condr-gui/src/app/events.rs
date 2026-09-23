@@ -101,6 +101,44 @@ impl Condr {
         };
 
         match message {
+            ServerMessage::Unknown(unknown) => {
+                let connection = &mut self.connections[index];
+                let now = Instant::now();
+                if connection
+                    .unknown_message_at
+                    .is_some_and(|at| now.duration_since(at) < UNKNOWN_MESSAGE_WINDOW)
+                {
+                    // No automatic reconnect: it would only fetch the same messages again.
+                    // Connecting by hand retries (ADR 0028).
+                    return self.mark_disconnected(
+                        key,
+                        index,
+                        "this Device sends messages this build cannot read; update it".into(),
+                    );
+                }
+                connection.unknown_message_at = Some(now);
+                let notify = match unknown {
+                    // The reader already dropped the visual state and asked for a Bootstrap.
+                    UnknownMessage::TerminalFrame => false,
+                    UnknownMessage::Event { .. } => {
+                        connection.subscribed = false;
+                        connection.subscription_pending = false;
+                        connection.request_snapshot()
+                    }
+                    // It may have been a reply something waits on: recover as for a reply
+                    // lost to writer lag, which also clears projections and reacquires.
+                    UnknownMessage::Reply => match (connection.server_id, connection.session_id) {
+                        (Some(server_id), Some(session_id)) => {
+                            connection.recover_rejected_subscription(server_id, session_id)
+                        }
+                        _ => false,
+                    },
+                };
+                IncomingEffect {
+                    notify,
+                    ..IncomingEffect::default()
+                }
+            }
             ServerMessage::Bootstrap(_)
             | ServerMessage::BootstrapBatch(_)
             | ServerMessage::TerminalFrameChunk(_) => {
@@ -194,6 +232,8 @@ impl Condr {
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);
                     }
+                    // Stands in for an event this build's protocol does not include.
+                    SessionEvent::Omitted => return IncomingEffect::default(),
                     SessionEvent::Activated {
                         workspace_id,
                         tab_id,

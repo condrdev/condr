@@ -252,21 +252,14 @@ pub(super) fn frame_terminal_batches(
 ) -> io::Result<Vec<Vec<u8>>> {
     let mut frames = Vec::new();
     let mut batch = Vec::new();
-    let empty = ServerMessage::TerminalFrame(TerminalFrameBatch {
-        server_id,
-        session_id,
-        panes: Vec::new(),
-    });
-    let overhead = usize::try_from(
-        bincode::serialized_size(&empty).map_err(|error| io::Error::other(error.to_string()))?,
-    )
-    .map_err(|_| io::Error::other("terminal frame size does not fit usize"))?;
+    // Each Pane is converted to its wire form once and sized by it (ADR 0028).
+    let overhead = terminal_batch_overhead(server_id, session_id);
     let mut batch_size = overhead;
     for pane in panes {
-        let pane_size = usize::try_from(
-            bincode::serialized_size(&pane).map_err(|error| io::Error::other(error.to_string()))?,
-        )
-        .map_err(|_| io::Error::other("terminal Pane frame size does not fit usize"))?;
+        let revision = terminal_frame_revision(&pane.frame);
+        let pane_id = pane.pane_id;
+        let wire = WirePaneFrame::new(&pane);
+        let pane_size = wire.batch_len();
         if overhead.saturating_add(pane_size) > MAX_FRAME_SIZE {
             append_terminal_frame_batch(
                 &mut frames,
@@ -276,9 +269,7 @@ pub(super) fn frame_terminal_batches(
             )?;
             batch_size = overhead;
 
-            let revision = terminal_frame_revision(&pane.frame);
-            let pane_id = pane.pane_id;
-            let payload = encode_pane_terminal_frame(&pane).map_err(io::Error::other)?;
+            let payload = wire.encode_record().map_err(io::Error::other)?;
             let chunk_count = u32::try_from(payload.len().div_ceil(MAX_CHUNK_PAYLOAD_SIZE))
                 .map_err(|_| io::Error::other("too many terminal frame chunks"))?;
             if chunk_count == 0 {
@@ -314,7 +305,7 @@ pub(super) fn frame_terminal_batches(
             batch_size = overhead;
         }
         batch_size += pane_size;
-        batch.push(pane);
+        batch.push(wire);
     }
     append_terminal_frame_batch(&mut frames, server_id, session_id, batch)?;
     Ok(frames)
@@ -324,16 +315,13 @@ fn append_terminal_frame_batch(
     frames: &mut Vec<Vec<u8>>,
     server_id: ServerId,
     session_id: SessionId,
-    panes: Vec<PaneTerminalFrame>,
+    panes: Vec<WirePaneFrame>,
 ) -> io::Result<()> {
     if !panes.is_empty() {
-        frames.push(frame_message(&ServerMessage::TerminalFrame(
-            TerminalFrameBatch {
-                server_id,
-                session_id,
-                panes,
-            },
-        ))?);
+        frames.push(
+            frame_terminal_batch(server_id, session_id, panes)
+                .map_err(|error| io::Error::other(error.to_string()))?,
+        );
     }
     Ok(())
 }

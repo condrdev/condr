@@ -13,7 +13,7 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
 
 /// What the right sidebar shows (ADR 0018); remembered per Workspace (ADR 0023).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum SidebarView {
     #[default]
     Changes,

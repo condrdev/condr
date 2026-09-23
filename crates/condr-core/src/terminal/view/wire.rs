@@ -1,43 +1,5 @@
 use super::*;
-
-#[derive(Serialize, Deserialize)]
-struct WireTerminalCell {
-    text: SmolStr,
-    foreground: TerminalColor,
-    background: TerminalColor,
-    flags: u16,
-    hyperlink: Option<u16>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct WireTerminalCellRun {
-    start: u32,
-    cells: Vec<WireTerminalCell>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct WireTerminalView {
-    revision: u64,
-    size: TerminalSize,
-    display_offset: u32,
-    mouse_tracking: TerminalMouseTracking,
-    hyperlinks: Vec<SmolStr>,
-    cells: Vec<WireTerminalCell>,
-    cursor: Option<TerminalCursor>,
-    selection: Option<TerminalSelection>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct WireTerminalViewDelta {
-    base_revision: u64,
-    revision: u64,
-    display_offset: u32,
-    mouse_tracking: TerminalMouseTracking,
-    cursor: Option<TerminalCursor>,
-    selection: Option<TerminalSelection>,
-    hyperlinks: Vec<SmolStr>,
-    runs: Vec<WireTerminalCellRun>,
-}
+use crate::protocol::pb::{self, WireError, WireResult, enum_or, malformed, narrow, required};
 
 /// Interns URIs for one wire frame. The pointer cache is sound only because a pass never
 /// allocates new strings: every cell keeps its `SmolStr` alive until the pass ends, so a
@@ -79,20 +41,6 @@ impl WireHyperlinks {
         self.values.push(hyperlink.clone());
         self.indices.insert(hyperlink.clone(), index);
         Some(index)
-    }
-
-    fn encode_cell(&mut self, cell: &TerminalCell) -> WireTerminalCell {
-        let hyperlink = cell
-            .hyperlink
-            .as_ref()
-            .and_then(|hyperlink| self.intern(hyperlink));
-        WireTerminalCell {
-            text: cell.text.clone(),
-            foreground: cell.foreground,
-            background: cell.background,
-            flags: cell.flags,
-            hyperlink,
-        }
     }
 
     fn normalize_cell(&mut self, cell: &mut TerminalCell) -> bool {
@@ -302,158 +250,424 @@ impl TerminalHyperlinkBudget {
     }
 }
 
-impl WireTerminalCell {
-    fn decode(self, hyperlinks: &[SmolStr]) -> Result<TerminalCell, &'static str> {
-        let hyperlink = self
+/// A cell color as one varint: the kind in the low two bits, its value above them.
+fn encode_color(color: TerminalColor) -> u32 {
+    match color {
+        TerminalColor::Named(value) => u32::from(value) << 2 | 1,
+        TerminalColor::Indexed(value) => u32::from(value) << 2 | 2,
+        TerminalColor::Rgb { red, green, blue } => {
+            (u32::from(red) << 16 | u32::from(green) << 8 | u32::from(blue)) << 2 | 3
+        }
+    }
+}
+
+fn decode_color(value: u32) -> WireResult<TerminalColor> {
+    let payload = value >> 2;
+    Ok(match value & 3 {
+        1 => TerminalColor::Named(narrow(payload, "named color")?),
+        2 => TerminalColor::Indexed(narrow(payload, "indexed color")?),
+        3 if payload <= 0xff_ffff => TerminalColor::Rgb {
+            red: (payload >> 16) as u8,
+            green: (payload >> 8) as u8,
+            blue: payload as u8,
+        },
+        _ => return Err(malformed("terminal cell color is not a known kind")),
+    })
+}
+
+/// Writes cells into columns, interning their hyperlinks. `flags` and `hyperlink` stay
+/// empty until a cell needs them, since most frames have neither.
+fn encode_cells<'a>(
+    cells: impl ExactSizeIterator<Item = &'a TerminalCell>,
+    hyperlinks: &mut WireHyperlinks,
+) -> pb::TerminalCells {
+    let count = cells.len();
+    let mut columns = pb::TerminalCells {
+        text: String::with_capacity(count),
+        text_len: Vec::with_capacity(count),
+        foreground: Vec::with_capacity(count),
+        background: Vec::with_capacity(count),
+        flags: Vec::new(),
+        hyperlink: Vec::new(),
+    };
+    let (mut any_flags, mut any_hyperlink) = (false, false);
+    for (index, cell) in cells.enumerate() {
+        columns.text.push_str(&cell.text);
+        columns.text_len.push(cell.text.len() as u32);
+        columns.foreground.push(encode_color(cell.foreground));
+        columns.background.push(encode_color(cell.background));
+        if cell.flags != 0 && !any_flags {
+            any_flags = true;
+            columns.flags.reserve(count);
+            columns.flags.resize(index, 0);
+        }
+        if any_flags {
+            columns.flags.push(u32::from(cell.flags));
+        }
+        let hyperlink = cell
             .hyperlink
-            .map(|index| {
-                hyperlinks
-                    .get(usize::from(index))
+            .as_ref()
+            .and_then(|hyperlink| hyperlinks.intern(hyperlink))
+            .map_or(0, |index| u32::from(index) + 1);
+        if hyperlink != 0 && !any_hyperlink {
+            any_hyperlink = true;
+            columns.hyperlink.reserve(count);
+            columns.hyperlink.resize(index, 0);
+        }
+        if any_hyperlink {
+            columns.hyperlink.push(hyperlink);
+        }
+    }
+    columns
+}
+
+/// Reads cells back out of their columns one at a time, checking every column against the
+/// cell count, every text slice against character boundaries and the per-cell byte limit,
+/// and every hyperlink against the frame's table. Nothing here can panic on peer input.
+struct CellReader<'a> {
+    columns: &'a pb::TerminalCells,
+    hyperlinks: &'a [SmolStr],
+    index: usize,
+    offset: usize,
+}
+
+impl<'a> CellReader<'a> {
+    fn new(
+        columns: &'a pb::TerminalCells,
+        hyperlinks: &'a [SmolStr],
+        count: usize,
+    ) -> WireResult<Self> {
+        let optional = |column: &[u32]| column.is_empty() || column.len() == count;
+        if columns.text_len.len() != count
+            || columns.foreground.len() != count
+            || columns.background.len() != count
+            || !optional(&columns.flags)
+            || !optional(&columns.hyperlink)
+        {
+            return Err(malformed(
+                "terminal cell columns disagree on the cell count",
+            ));
+        }
+        Ok(Self {
+            columns,
+            hyperlinks,
+            index: 0,
+            offset: 0,
+        })
+    }
+
+    fn next_cell(&mut self) -> WireResult<TerminalCell> {
+        let index = self.index;
+        let length = self.columns.text_len[index] as usize;
+        if length > MAX_TERMINAL_CELL_TEXT_BYTES {
+            return Err(malformed("terminal cell text exceeds the byte limit"));
+        }
+        let end = self.offset + length;
+        let text = self.columns.text.get(self.offset..end).ok_or_else(|| {
+            malformed("terminal cell text does not split on character boundaries")
+        })?;
+        let hyperlink = match self.columns.hyperlink.get(index).copied().unwrap_or(0) {
+            0 => None,
+            link => Some(
+                self.hyperlinks
+                    .get(link as usize - 1)
                     .cloned()
-                    .ok_or("terminal cell references an invalid hyperlink index")
-            })
-            .transpose()?;
+                    .ok_or_else(|| {
+                        malformed("terminal cell references an invalid hyperlink index")
+                    })?,
+            ),
+        };
+        let flags = match self.columns.flags.get(index) {
+            Some(&flags) => narrow(flags, "terminal cell flags")?,
+            None => 0,
+        };
+        self.index += 1;
+        self.offset = end;
         Ok(TerminalCell {
-            text: self.text,
-            foreground: self.foreground,
-            background: self.background,
-            flags: self.flags,
+            text: SmolStr::new(text),
+            foreground: decode_color(self.columns.foreground[index])?,
+            background: decode_color(self.columns.background[index])?,
+            flags,
             hyperlink,
         })
     }
+
+    fn cells(&mut self, count: usize) -> WireResult<Vec<TerminalCell>> {
+        let mut cells = Vec::with_capacity(count);
+        for _ in 0..count {
+            cells.push(self.next_cell()?);
+        }
+        Ok(cells)
+    }
+
+    fn finish(self) -> WireResult<()> {
+        if self.offset != self.columns.text.len() {
+            return Err(malformed("terminal cell text has bytes no cell covers"));
+        }
+        Ok(())
+    }
 }
 
-fn decode_wire_cells(
-    cells: Vec<WireTerminalCell>,
-    hyperlinks: &[SmolStr],
-) -> Result<Vec<TerminalCell>, &'static str> {
-    cells
-        .into_iter()
-        .map(|cell| cell.decode(hyperlinks))
-        .collect()
-}
-
-fn validate_wire_hyperlinks(hyperlinks: &[SmolStr]) -> Result<(), &'static str> {
+fn decode_hyperlinks(hyperlinks: Vec<String>) -> WireResult<Vec<SmolStr>> {
     if hyperlinks.len() > MAX_TERMINAL_HYPERLINKS {
-        return Err("terminal hyperlink table exceeds u16 indices");
+        return Err(malformed("terminal hyperlink table exceeds u16 indices"));
     }
     let mut bytes = 0usize;
-    for hyperlink in hyperlinks {
+    for hyperlink in &hyperlinks {
         if hyperlink.len() > MAX_TERMINAL_HYPERLINK_URI_BYTES {
-            return Err("terminal hyperlink URI exceeds the byte limit");
+            return Err(malformed("terminal hyperlink URI exceeds the byte limit"));
         }
-        bytes = bytes
-            .checked_add(hyperlink.len())
-            .ok_or("terminal hyperlink table byte count overflowed")?;
+        bytes += hyperlink.len();
         if bytes > MAX_TERMINAL_HYPERLINK_BYTES {
-            return Err("terminal hyperlink table exceeds the byte limit");
+            return Err(malformed("terminal hyperlink table exceeds the byte limit"));
         }
     }
-    Ok(())
+    Ok(hyperlinks.into_iter().map(SmolStr::from).collect())
 }
 
-impl Serialize for TerminalView {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+fn encode_size(size: TerminalSize) -> pb::TerminalSize {
+    pb::TerminalSize {
+        rows: size.rows.into(),
+        columns: size.columns.into(),
+        cell_width: size.cell_width.into(),
+        cell_height: size.cell_height.into(),
+    }
+}
+
+pub(crate) fn decode_size(size: pb::TerminalSize) -> WireResult<TerminalSize> {
+    Ok(TerminalSize {
+        rows: narrow(size.rows, "terminal rows")?,
+        columns: narrow(size.columns, "terminal columns")?,
+        cell_width: narrow(size.cell_width, "cell width")?,
+        cell_height: narrow(size.cell_height, "cell height")?,
+    })
+}
+
+fn encode_mouse_tracking(tracking: TerminalMouseTracking) -> i32 {
+    (match tracking {
+        TerminalMouseTracking::None => pb::TerminalMouseTracking::None,
+        TerminalMouseTracking::Click => pb::TerminalMouseTracking::Click,
+        TerminalMouseTracking::Drag => pb::TerminalMouseTracking::Drag,
+        TerminalMouseTracking::Motion => pb::TerminalMouseTracking::Motion,
+    }) as i32
+}
+
+fn decode_mouse_tracking(raw: i32) -> WireResult<TerminalMouseTracking> {
+    use pb::TerminalMouseTracking as Wire;
+    Ok(match enum_or(raw, "mouse tracking", Wire::None)? {
+        Wire::Unspecified => unreachable!("enum_or rejects 0"),
+        Wire::None => TerminalMouseTracking::None,
+        Wire::Click => TerminalMouseTracking::Click,
+        Wire::Drag => TerminalMouseTracking::Drag,
+        Wire::Motion => TerminalMouseTracking::Motion,
+    })
+}
+
+fn encode_cursor(cursor: TerminalCursor) -> pb::TerminalCursor {
+    use pb::TerminalCursorShape as Wire;
+    pb::TerminalCursor {
+        row: cursor.row.into(),
+        column: cursor.column.into(),
+        shape: match cursor.shape {
+            TerminalCursorShape::Block => Wire::Block,
+            TerminalCursorShape::Underline => Wire::Underline,
+            TerminalCursorShape::Beam => Wire::Beam,
+            TerminalCursorShape::HollowBlock => Wire::HollowBlock,
+            TerminalCursorShape::Hidden => Wire::Hidden,
+        } as i32,
+        blinking: cursor.blinking,
+    }
+}
+
+fn decode_cursor(cursor: pb::TerminalCursor) -> WireResult<TerminalCursor> {
+    use pb::TerminalCursorShape as Wire;
+    Ok(TerminalCursor {
+        row: narrow(cursor.row, "cursor row")?,
+        column: narrow(cursor.column, "cursor column")?,
+        shape: match enum_or(cursor.shape, "cursor shape", Wire::Block)? {
+            Wire::Unspecified => unreachable!("enum_or rejects 0"),
+            Wire::Block => TerminalCursorShape::Block,
+            Wire::Underline => TerminalCursorShape::Underline,
+            Wire::Beam => TerminalCursorShape::Beam,
+            Wire::HollowBlock => TerminalCursorShape::HollowBlock,
+            Wire::Hidden => TerminalCursorShape::Hidden,
+        },
+        blinking: cursor.blinking,
+    })
+}
+
+pub(crate) fn encode_position(position: TerminalPosition) -> pb::TerminalPosition {
+    pb::TerminalPosition {
+        row: position.row.into(),
+        column: position.column.into(),
+        side: match position.side {
+            TerminalSide::Left => pb::TerminalSide::Left,
+            TerminalSide::Right => pb::TerminalSide::Right,
+        } as i32,
+    }
+}
+
+pub(crate) fn decode_position(position: pb::TerminalPosition) -> WireResult<TerminalPosition> {
+    Ok(TerminalPosition {
+        row: narrow(position.row, "selection row")?,
+        column: narrow(position.column, "selection column")?,
+        side: match enum_or(position.side, "selection side", pb::TerminalSide::Left)? {
+            pb::TerminalSide::Unspecified => unreachable!("enum_or rejects 0"),
+            pb::TerminalSide::Left => TerminalSide::Left,
+            pb::TerminalSide::Right => TerminalSide::Right,
+        },
+    })
+}
+
+pub(crate) fn encode_selection(selection: TerminalSelection) -> pb::TerminalSelection {
+    pb::TerminalSelection {
+        start: Some(encode_position(selection.start)),
+        end: Some(encode_position(selection.end)),
+        display_offset: selection.display_offset,
+    }
+}
+
+pub(crate) fn decode_selection(selection: pb::TerminalSelection) -> WireResult<TerminalSelection> {
+    Ok(TerminalSelection {
+        start: decode_position(required(selection.start, "selection start")?)?,
+        end: decode_position(required(selection.end, "selection end")?)?,
+        display_offset: selection.display_offset,
+    })
+}
+
+impl From<&TerminalView> for pb::TerminalView {
+    fn from(view: &TerminalView) -> Self {
         let mut hyperlinks = WireHyperlinks::default();
-        let cells = self
-            .cells
-            .iter()
-            .map(|cell| hyperlinks.encode_cell(cell))
-            .collect();
-        WireTerminalView {
-            revision: self.revision,
-            size: self.size,
-            display_offset: self.display_offset,
-            mouse_tracking: self.mouse_tracking,
-            hyperlinks: hyperlinks.values,
-            cells,
-            cursor: self.cursor,
-            selection: self.selection,
+        let cells = encode_cells(view.cells.iter(), &mut hyperlinks);
+        Self {
+            revision: view.revision,
+            size: Some(encode_size(view.size)),
+            display_offset: view.display_offset,
+            mouse_tracking: encode_mouse_tracking(view.mouse_tracking),
+            hyperlinks: hyperlinks.values.into_iter().map(String::from).collect(),
+            cells: Some(cells),
+            cursor: view.cursor.map(encode_cursor),
+            selection: view.selection.map(encode_selection),
         }
-        .serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for TerminalView {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = WireTerminalView::deserialize(deserializer)?;
-        validate_wire_hyperlinks(&wire.hyperlinks).map_err(D::Error::custom)?;
-        let cells = decode_wire_cells(wire.cells, &wire.hyperlinks).map_err(D::Error::custom)?;
+impl TryFrom<pb::TerminalView> for TerminalView {
+    type Error = WireError;
+
+    fn try_from(view: pb::TerminalView) -> WireResult<Self> {
+        let size = decode_size(required(view.size, "terminal size")?)?;
+        let count = usize::from(size.rows) * usize::from(size.columns);
+        if count > MAX_TERMINAL_CELLS {
+            return Err(malformed("terminal grid exceeds the maximum cell count"));
+        }
+        let hyperlinks = decode_hyperlinks(view.hyperlinks)?;
+        let columns = required(view.cells, "terminal cells")?;
+        let mut reader = CellReader::new(&columns, &hyperlinks, count)?;
+        let cells = reader.cells(count)?;
+        reader.finish()?;
         Ok(Self {
-            revision: wire.revision,
-            size: wire.size,
-            display_offset: wire.display_offset,
-            mouse_tracking: wire.mouse_tracking,
+            revision: view.revision,
+            size,
+            display_offset: view.display_offset,
+            mouse_tracking: decode_mouse_tracking(view.mouse_tracking)?,
             cells,
-            cursor: wire.cursor,
-            selection: wire.selection,
+            cursor: view.cursor.map(decode_cursor).transpose()?,
+            selection: view.selection.map(decode_selection).transpose()?,
         })
     }
 }
 
-impl Serialize for TerminalViewDelta {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+impl From<&TerminalViewDelta> for pb::TerminalViewDelta {
+    fn from(delta: &TerminalViewDelta) -> Self {
         let mut hyperlinks = WireHyperlinks::default();
-        let runs = self
-            .runs
-            .iter()
-            .map(|run| WireTerminalCellRun {
-                start: run.start,
-                cells: run
-                    .cells
-                    .iter()
-                    .map(|cell| hyperlinks.encode_cell(cell))
-                    .collect(),
-            })
-            .collect();
-        WireTerminalViewDelta {
-            base_revision: self.base_revision,
-            revision: self.revision,
-            display_offset: self.display_offset,
-            mouse_tracking: self.mouse_tracking,
-            cursor: self.cursor,
-            selection: self.selection,
-            hyperlinks: hyperlinks.values,
-            runs,
+        let count = delta.runs.iter().map(|run| run.cells.len()).sum();
+        let cells = encode_cells(
+            ExactCells {
+                cells: delta.runs.iter().flat_map(|run| &run.cells),
+                remaining: count,
+            },
+            &mut hyperlinks,
+        );
+        Self {
+            base_revision: delta.base_revision,
+            revision: delta.revision,
+            display_offset: delta.display_offset,
+            mouse_tracking: encode_mouse_tracking(delta.mouse_tracking),
+            cursor: delta.cursor.map(encode_cursor),
+            selection: delta.selection.map(encode_selection),
+            hyperlinks: hyperlinks.values.into_iter().map(String::from).collect(),
+            run_start: delta.runs.iter().map(|run| run.start).collect(),
+            run_len: delta
+                .runs
+                .iter()
+                .map(|run| run.cells.len() as u32)
+                .collect(),
+            cells: Some(cells),
         }
-        .serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for TerminalViewDelta {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = WireTerminalViewDelta::deserialize(deserializer)?;
-        validate_wire_hyperlinks(&wire.hyperlinks).map_err(D::Error::custom)?;
-        let runs = wire
-            .runs
-            .into_iter()
-            .map(|run| {
+/// The cells of every run in order, with the total count `encode_cells` sizes by.
+struct ExactCells<I> {
+    cells: I,
+    remaining: usize,
+}
+
+impl<'a, I: Iterator<Item = &'a TerminalCell>> Iterator for ExactCells<I> {
+    type Item = &'a TerminalCell;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let cell = self.cells.next()?;
+        self.remaining -= 1;
+        Some(cell)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a TerminalCell>> ExactSizeIterator for ExactCells<I> {}
+
+impl TryFrom<pb::TerminalViewDelta> for TerminalViewDelta {
+    type Error = WireError;
+
+    /// Checks what can be checked without the view: run and cell counts, and each run's
+    /// cells. Order, overlap and bounds against the view are `validate_delta`'s.
+    fn try_from(delta: pb::TerminalViewDelta) -> WireResult<Self> {
+        if delta.run_start.len() != delta.run_len.len() {
+            return Err(malformed("terminal delta run columns disagree"));
+        }
+        let mut count = 0usize;
+        for &length in &delta.run_len {
+            count += length as usize;
+            if count > MAX_TERMINAL_CELLS {
+                return Err(malformed("terminal delta exceeds the maximum cell count"));
+            }
+        }
+        let hyperlinks = decode_hyperlinks(delta.hyperlinks)?;
+        let columns = required(delta.cells, "terminal cells")?;
+        let mut reader = CellReader::new(&columns, &hyperlinks, count)?;
+        let runs = delta
+            .run_start
+            .iter()
+            .zip(&delta.run_len)
+            .map(|(&start, &length)| {
                 Ok(TerminalCellRun {
-                    start: run.start,
-                    cells: decode_wire_cells(run.cells, &wire.hyperlinks)?,
+                    start,
+                    cells: reader.cells(length as usize)?,
                 })
             })
-            .collect::<Result<_, &'static str>>()
-            .map_err(D::Error::custom)?;
+            .collect::<WireResult<_>>()?;
+        reader.finish()?;
         Ok(Self {
-            base_revision: wire.base_revision,
-            revision: wire.revision,
-            display_offset: wire.display_offset,
-            mouse_tracking: wire.mouse_tracking,
-            cursor: wire.cursor,
-            selection: wire.selection,
+            base_revision: delta.base_revision,
+            revision: delta.revision,
+            display_offset: delta.display_offset,
+            mouse_tracking: decode_mouse_tracking(delta.mouse_tracking)?,
+            cursor: delta.cursor.map(decode_cursor).transpose()?,
+            selection: delta.selection.map(decode_selection).transpose()?,
             runs,
         })
     }

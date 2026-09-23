@@ -102,6 +102,9 @@ impl HookTarget {
             AgentKind::Cursor => self.cursor_dir.join("hooks.json"),
             AgentKind::Copilot => self.copilot_dir.join("hooks/condr.json"),
             AgentKind::Kimi => self.kimi_dir.join("config.toml"),
+            // Commands never carry `Other`: the wire refuses it (ADR 0028), and `run`
+            // turns it away before asking for a path.
+            AgentKind::Other => unreachable!("no hooks exist for an unknown agent"),
         }
     }
 
@@ -227,6 +230,12 @@ const KIMI_NOTE: &str = "Kimi 1.50 hooks cannot distinguish a subagent's Stop fr
 /// CLI runs it locally; the Server runs it for a GUI, whose hooks files live where the
 /// agents run.
 pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Result<HooksReport> {
+    if agent == AgentKind::Other {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this build does not know that agent",
+        ));
+    }
     let mut warning = None;
     let path = match action {
         HooksAction::Install => {

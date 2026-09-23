@@ -27,11 +27,12 @@ use condr_core::protocol::BootstrapAssembler;
 use condr_core::protocol::{
     BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientHandshake, ClientMessage, DiffBase,
     FramingError, LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
-    MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, PROTOCOL_VERSION, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalMetadata, PaneTerminalSnapshot, Refusal, RuntimeEpoch, ServerAdminCommand,
-    ServerAdminResponse, ServerId, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
-    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, Welcome,
-    WorkspaceGitSnapshot, encode_bootstrap_record, encode_pane_terminal_frame,
+    MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, MIN_CLIENT_PROTOCOL, PROTOCOL_VERSION,
+    PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, Refusal,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerId, ServerMessage, ServerSettings,
+    SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameChunk, Welcome,
+    WirePaneFrame, WorkspaceGitSnapshot, encode_bootstrap_record, frame_terminal_batch,
+    terminal_batch_overhead,
 };
 use condr_core::{
     AgentSnapshot, GitFingerprint, GitRepository, PaneEnvironment, PaneId, Session,

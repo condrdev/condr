@@ -140,12 +140,9 @@ impl SnapshotPersistence {
             }
             Err(error) => return Err(error),
         };
+        // An empty file is a valid Snapshot: a Session with no Workspaces encodes to
+        // nothing in protobuf (ADR 0028).
         let length = file.metadata()?.len();
-        if length == 0 {
-            return Ok(SnapshotLoad::Rejected(
-                "Session Snapshot file is empty".into(),
-            ));
-        }
         if length > MAX_SNAPSHOT_BYTES {
             return Ok(SnapshotLoad::Rejected(format!(
                 "Session Snapshot is {length} bytes; limit is {MAX_SNAPSHOT_BYTES} bytes"

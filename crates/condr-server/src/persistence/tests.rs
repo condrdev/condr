@@ -43,7 +43,7 @@ fn missing_empty_and_corrupt_snapshots_are_classified() {
     fs::write(&path, []).unwrap();
     assert!(matches!(
         persistence.load(),
-        SnapshotLoad::Rejected(reason) if reason.contains("empty")
+        SnapshotLoad::Loaded(snapshot) if snapshot == Session::new().snapshot()
     ));
 
     fs::write(&path, [0xff, 0x00, 0x7f]).unwrap();

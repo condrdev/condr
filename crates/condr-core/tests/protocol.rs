@@ -4,72 +4,94 @@ use condr_core::{
 };
 use std::path::PathBuf;
 
+/// A frame's varint length prefix (ADR 0028).
+fn varint(mut value: u64) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            bytes.push(byte);
+            return bytes;
+        }
+        bytes.push(byte | 0x80);
+    }
+}
+
 #[test]
-fn hello_round_trip_uses_length_prefix() {
+fn hello_round_trip_uses_a_varint_length_prefix() {
     let message = ClientHandshake::Hello(Hello::new("test"));
     let mut bytes = Vec::new();
     write_message(&mut bytes, &message).unwrap();
-    assert_eq!(
-        u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize,
-        bytes.len() - 4
-    );
+    assert_eq!(usize::from(bytes[0]), bytes.len() - 1);
     assert_eq!(
         read_message::<_, ClientHandshake>(&mut bytes.as_slice()).unwrap(),
         message
     );
 }
 
-/// The handshake is frozen (ADR 0027): these bytes are what every past and future build
-/// puts on the wire first. A change here is a change no released Condr can read.
+/// The handshake is frozen (ADR 0027, 0028): these are protocol 1's first frames, and
+/// every later build must keep reading them, with or without fields added since.
 #[test]
-fn handshake_wire_layout_is_frozen() {
-    let hello = ClientHandshake::Hello(Hello {
-        protocol: 7,
-        build: "1.2.3+abc".into(),
-        client_name: "gui".into(),
-    });
-    let mut bytes = Vec::new();
-    write_message(&mut bytes, &hello).unwrap();
+fn handshake_frames_from_protocol_1_keep_decoding() {
+    let hello = [
+        &[24, 0x0a, 22][..], // frame length, ClientHandshake.hello
+        &[0x08, 7],          // protocol
+        &[0x12, 9],          // build
+        b"1.2.3+abc",
+        &[0x1a, 3], // client_name
+        b"gui",
+        &[0x20, 1],  // min_server_protocol
+        &[0x78, 42], // field 15, unknown to this build
+    ]
+    .concat();
     assert_eq!(
-        bytes,
-        [
-            [36, 0, 0, 0].as_slice(), // frame length
-            &[0, 0, 0, 0],            // ClientHandshake::Hello
-            &[7, 0, 0, 0],            // protocol
-            &[9, 0, 0, 0, 0, 0, 0, 0],
-            b"1.2.3+abc", // build
-            &[3, 0, 0, 0, 0, 0, 0, 0],
-            b"gui", // client_name
-        ]
-        .concat()
+        read_message::<_, ClientHandshake>(&mut hello.as_slice()).unwrap(),
+        ClientHandshake::Hello(Hello {
+            protocol: 7,
+            build: "1.2.3+abc".into(),
+            client_name: "gui".into(),
+            min_server_protocol: 1,
+        })
     );
 
-    let welcome = Welcome {
-        protocol: 7,
-        build: "1.2.3".into(),
-        server_id: ServerId(0x0102),
-        session_id: SessionId(1),
-        refusal: Some(Refusal::IncompatibleProtocol),
-    };
-    let mut bytes = Vec::new();
-    write_message(&mut bytes, &welcome).unwrap();
+    let welcome = [
+        &[20][..],  // frame length
+        &[0x08, 7], // protocol
+        &[0x12, 5], // build
+        b"1.2.3",
+        &[0x18, 0x82, 0x02], // server_id
+        &[0x20, 1],          // session_id
+        &[0x2a, 2, 0x0a, 0], // refusal: incompatible_protocol
+        &[0x30, 1],          // min_client_protocol
+    ]
+    .concat();
+    let decoded = read_message::<_, Welcome>(&mut welcome.as_slice()).unwrap();
     assert_eq!(
-        bytes,
-        [
-            [38, 0, 0, 0].as_slice(), // frame length
-            &[7, 0, 0, 0],            // protocol
-            &[5, 0, 0, 0, 0, 0, 0, 0],
-            b"1.2.3",                  // build
-            &[2, 1, 0, 0, 0, 0, 0, 0], // server_id
-            &[1, 0, 0, 0, 0, 0, 0, 0], // session_id
-            &[1],
-            &[0, 0, 0, 0], // Some(Refusal::IncompatibleProtocol)
-        ]
-        .concat()
+        decoded,
+        Welcome {
+            protocol: 7,
+            build: "1.2.3".into(),
+            server_id: ServerId(0x0102),
+            session_id: SessionId(1),
+            refusal: Some(Refusal::IncompatibleProtocol),
+            min_client_protocol: 1,
+        }
     );
+    let mut encoded = Vec::new();
+    write_message(&mut encoded, &decoded).unwrap();
     assert_eq!(
-        read_message::<_, Welcome>(&mut bytes.as_slice()).unwrap(),
-        welcome
+        encoded, welcome,
+        "and this build still writes them the same way"
+    );
+
+    // A refusal reason from a newer Server reads as one this build does not know.
+    let newer = [&[8][..], &[0x2a, 2, 0x3a, 0], &[0x30, 1, 0x08, 1]].concat();
+    assert_eq!(
+        read_message::<_, Welcome>(&mut newer.as_slice())
+            .unwrap()
+            .refusal,
+        Some(Refusal::Unknown)
     );
 }
 
@@ -215,7 +237,7 @@ fn bootstrap_header_round_trip_uses_the_flat_snapshot_schema() {
 
 #[test]
 fn oversized_frame_is_rejected_before_allocation() {
-    let bytes = ((MAX_FRAME_SIZE as u32) + 1).to_le_bytes();
+    let bytes = varint(MAX_FRAME_SIZE as u64 + 1);
     assert!(matches!(
         read_message::<_, ClientMessage>(&mut bytes.as_slice()),
         Err(FramingError::Oversized { .. })
@@ -224,11 +246,9 @@ fn oversized_frame_is_rejected_before_allocation() {
 
 #[test]
 fn forged_collection_length_is_rejected_without_allocating_it() {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_le_bytes());
-    payload.extend_from_slice(&PROTOCOL_VERSION.to_le_bytes());
-    payload.extend_from_slice(&u64::MAX.to_le_bytes());
-    let mut frame = Vec::from((payload.len() as u32).to_le_bytes());
+    // A `snapshot_request` claiming four gigabytes inside a six-byte frame.
+    let payload = [0x0a, 0xff, 0xff, 0xff, 0xff, 0x0f];
+    let mut frame = varint(payload.len() as u64);
     frame.extend_from_slice(&payload);
 
     assert!(matches!(
@@ -241,10 +261,7 @@ fn forged_collection_length_is_rejected_without_allocating_it() {
 fn bootstrap_assembler_reassembles_multiple_record_chunks() {
     let (mut header, pane_id, workspace_id) = bootstrap_header(0);
     let records = vec![
-        BootstrapRecord::Terminal(terminal_snapshot(
-            pane_id,
-            "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024),
-        )),
+        BootstrapRecord::Terminal(large_terminal_snapshot(pane_id)),
         BootstrapRecord::Agent(PaneAgentSnapshot {
             pane_id,
             agent: AgentSnapshot {
@@ -405,7 +422,7 @@ fn chunked_record_codecs_reject_trailing_and_oversized_payloads() {
     let (_, pane_id, _) = bootstrap_header(0);
     let record = BootstrapRecord::ZoomedPane(pane_id);
     let mut encoded = encode_bootstrap_record(&record).unwrap();
-    assert_eq!(decode_bootstrap_record(&encoded).unwrap(), record);
+    assert_eq!(decode_bootstrap_record(&encoded).unwrap(), Some(record));
     encoded.push(0);
     assert!(decode_bootstrap_record(&encoded).is_err());
 
@@ -414,7 +431,7 @@ fn chunked_record_codecs_reject_trailing_and_oversized_payloads() {
         frame: TerminalViewFrame::Full(terminal_snapshot(pane_id, "frame".into()).view),
     };
     let encoded = encode_pane_terminal_frame(&frame).unwrap();
-    assert_eq!(decode_pane_terminal_frame(&encoded).unwrap(), frame);
+    assert_eq!(decode_pane_terminal_frame(&encoded).unwrap(), Some(frame));
     assert!(decode_pane_terminal_frame(&vec![0; MAX_CHUNKED_RECORD_SIZE + 1]).is_err());
 }
 
@@ -523,6 +540,24 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
         title: None,
         attention: false,
     }
+}
+
+/// A full screen of cells at the per-cell text limit's neighbourhood: larger than one
+/// chunk, so its record spans several.
+fn large_terminal_snapshot(pane_id: PaneId) -> PaneTerminalSnapshot {
+    let mut snapshot = terminal_snapshot(pane_id, String::new());
+    snapshot.view.size = condr_core::TerminalSize::new(64, 1024);
+    snapshot.view.cells = vec![
+        condr_core::TerminalCell {
+            text: "x".repeat(40).into(),
+            foreground: condr_core::TerminalColor::Named(0),
+            background: condr_core::TerminalColor::Named(0),
+            flags: 0,
+            hyperlink: None,
+        };
+        64 * 1024
+    ];
+    snapshot
 }
 
 fn bootstrap_batches(

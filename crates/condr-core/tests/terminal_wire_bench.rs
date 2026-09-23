@@ -156,7 +156,10 @@ fn terminal_frame_wire_benchmark() {
     println!("{ROWS}x{COLUMNS} screen; best of 5, µs per call");
     for (label, frame, iterations) in workloads {
         let bytes = encode_pane_terminal_frame(&frame).unwrap();
-        assert_eq!(decode_pane_terminal_frame(&bytes).unwrap(), frame);
+        assert_eq!(
+            decode_pane_terminal_frame(&bytes).unwrap(),
+            Some(frame.clone())
+        );
         let encode = time(iterations, || encode_pane_terminal_frame(&frame).unwrap());
         let decode = time(iterations, || decode_pane_terminal_frame(&bytes).unwrap());
         println!(

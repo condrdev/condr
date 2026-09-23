@@ -2,7 +2,6 @@ mod snapshot;
 mod wire;
 
 use super::*;
-use serde::{Deserializer, Serializer, de::Error as _};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -14,6 +13,9 @@ pub(super) use snapshot::{
 #[cfg(test)]
 pub(super) use snapshot::{blank_cell, terminal_cell_text};
 pub use wire::TerminalHyperlinkBudget;
+pub(crate) use wire::{
+    decode_position, decode_selection, decode_size, encode_position, encode_selection,
+};
 
 const MAX_TERMINAL_HYPERLINKS: usize = u16::MAX as usize + 1;
 
@@ -148,7 +150,7 @@ pub struct TerminalViewDelta {
     pub runs: Vec<TerminalCellRun>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalViewFrame {
     Full(TerminalView),
     Delta(TerminalViewDelta),

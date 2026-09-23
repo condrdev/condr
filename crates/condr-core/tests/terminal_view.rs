@@ -79,7 +79,11 @@ fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
         TerminalViewFrame::Full(view),
         TerminalViewFrame::Delta(delta),
     ] {
-        let encoded = bincode::serialize(&frame).unwrap();
+        let frame = condr_core::protocol::PaneTerminalFrame {
+            pane_id: condr_core::PaneId::from_u64(1),
+            frame,
+        };
+        let encoded = condr_core::protocol::encode_pane_terminal_frame(&frame).unwrap();
         assert_eq!(
             encoded
                 .windows(uri.len())
@@ -88,8 +92,8 @@ fn terminal_frame_wire_interns_hyperlinks_and_round_trips() {
             1
         );
         assert_eq!(
-            bincode::deserialize::<TerminalViewFrame>(&encoded).unwrap(),
-            frame
+            condr_core::protocol::decode_pane_terminal_frame(&encoded).unwrap(),
+            Some(frame)
         );
     }
 }

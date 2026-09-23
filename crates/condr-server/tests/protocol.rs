@@ -230,23 +230,44 @@ fn non_hello_first_frame_is_rejected_with_a_clear_error() {
     thread.join().unwrap().unwrap();
 }
 
+/// The protocol is a range (ADR 0028): a newer Client within it is served, and the
+/// Server refuses in both directions when one side is below the other's minimum.
 #[test]
-fn incompatible_client_is_rejected() {
+fn the_server_serves_its_protocol_range_and_refuses_outside_it() {
     let (handle, endpoint, thread) = start();
-    let mut stream = endpoint.connect().unwrap();
-    condr_core::protocol::write_message(
-        &mut stream,
-        &ClientHandshake::Hello(Hello {
-            protocol: PROTOCOL_VERSION + 1,
-            ..Hello::new("old")
-        }),
-    )
-    .unwrap();
-    let welcome: Welcome = condr_core::protocol::read_message(&mut stream).unwrap();
-    assert_eq!(welcome.refusal, Some(Refusal::IncompatibleProtocol));
-    assert_eq!(welcome.protocol, PROTOCOL_VERSION);
+    let welcome_for = |hello: Hello| {
+        let mut stream = endpoint.connect().unwrap();
+        condr_core::protocol::write_message(&mut stream, &ClientHandshake::Hello(hello)).unwrap();
+        condr_core::protocol::read_message::<_, Welcome>(&mut stream).unwrap()
+    };
+
+    let newer = welcome_for(Hello {
+        protocol: PROTOCOL_VERSION + 1,
+        ..Hello::new("newer")
+    });
+    assert_eq!(newer.refusal, None);
+
+    let too_old = welcome_for(Hello {
+        protocol: condr_core::protocol::MIN_CLIENT_PROTOCOL - 1,
+        ..Hello::new("too old")
+    });
+    assert_eq!(too_old.refusal, Some(Refusal::IncompatibleProtocol));
+    assert_eq!(too_old.protocol, PROTOCOL_VERSION);
+    assert_eq!(
+        too_old.min_client_protocol,
+        condr_core::protocol::MIN_CLIENT_PROTOCOL
+    );
+
+    let needs_newer_server = welcome_for(Hello {
+        min_server_protocol: PROTOCOL_VERSION + 1,
+        ..Hello::new("needs a newer server")
+    });
+    assert_eq!(
+        needs_newer_server.refusal,
+        Some(Refusal::IncompatibleProtocol)
+    );
+
     handle.stop();
-    drop(stream);
     thread.join().unwrap().unwrap();
 }
 
@@ -254,8 +275,15 @@ fn incompatible_client_is_rejected() {
 fn oversized_client_frame_is_rejected_with_a_clear_error() {
     let (handle, endpoint, thread) = start();
     let mut stream = connect_and_bootstrap(&endpoint);
-    let claimed = (condr_core::protocol::MAX_IMAGE_FRAME_SIZE as u32) + 1;
-    std::io::Write::write_all(&mut stream, &claimed.to_le_bytes()).unwrap();
+    // The varint length of a frame one byte over the image allowance.
+    let mut claimed = condr_core::protocol::MAX_IMAGE_FRAME_SIZE as u64 + 1;
+    let mut prefix = Vec::new();
+    while claimed >= 0x80 {
+        prefix.push((claimed as u8) | 0x80);
+        claimed >>= 7;
+    }
+    prefix.push(claimed as u8);
+    std::io::Write::write_all(&mut stream, &prefix).unwrap();
 
     let response: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
     assert!(matches!(

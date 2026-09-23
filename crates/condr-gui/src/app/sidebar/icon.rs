@@ -75,6 +75,8 @@ impl CondrIconName {
             AgentKind::Cursor => Self::Cursor,
             AgentKind::Copilot => Self::Copilot,
             AgentKind::Kimi => Self::Kimi,
+            // A kind a newer Server reported (ADR 0028): a plain mark, no brand.
+            AgentKind::Other => Self::CircleFilled,
         }
     }
 }

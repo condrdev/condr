@@ -59,47 +59,80 @@ fn write_snapshot_fixture(path: PathBuf, snapshot: condr_core::SessionSnapshot) 
     std::fs::write(path, snapshot.to_bytes().unwrap()).unwrap();
 }
 
-/// Mirrors the snapshot's Tab content enum, variant order included.
-#[derive(serde::Serialize)]
-enum EncodedTabContent {
-    Terminals {
-        panes: Vec<(PaneId, Option<PathBuf>, Option<condr_core::AgentResume>)>,
-        focused_pane: PaneId,
-        focus_history: Vec<PaneId>,
-        layout: (u32, Vec<(u32, PaneId)>),
-    },
-    #[expect(dead_code, reason = "the Diff variant keeps the wire order honest")]
-    Diff { path: PathBuf },
-}
-
+/// A Snapshot that decodes but cannot be restored: its layout names a root node that
+/// does not exist. Built from `session.proto`'s field numbers, since `Session` never
+/// produces one.
 fn structurally_invalid_snapshot(root: PathBuf) -> Vec<u8> {
-    let mut session = Session::new();
-    let workspace_id = session
-        .create_workspace(root.clone())
-        .expect("Workspace capacity");
-    let tab = &session.workspaces()[0].tabs()[0];
-    let tab_id = tab.id();
-    let pane_id = tab.focused_pane().unwrap().id();
-    bincode::serialize(&(
-        1u32,
-        vec![(
-            workspace_id,
-            "invalid".to_string(),
-            root.clone(),
-            Option::<condr_core::WorktreeAssociation>::None,
-            vec![(
-                tab_id,
-                String::new(),
-                EncodedTabContent::Terminals {
-                    panes: vec![(pane_id, Some(root), Option::<condr_core::AgentResume>::None)],
-                    focused_pane: pane_id,
-                    focus_history: Vec::<PaneId>::new(),
-                    layout: (u32::MAX, vec![(0u32, pane_id)]),
-                },
-            )],
-        )],
-    ))
-    .unwrap()
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Snapshot {
+        #[prost(message, repeated, tag = "1")]
+        workspaces: Vec<Workspace>,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Workspace {
+        #[prost(uint64, tag = "1")]
+        id: u64,
+        #[prost(string, tag = "2")]
+        name: String,
+        #[prost(string, tag = "3")]
+        root_directory: String,
+        #[prost(message, repeated, tag = "5")]
+        tabs: Vec<Tab>,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Tab {
+        #[prost(uint64, tag = "1")]
+        id: u64,
+        #[prost(message, optional, tag = "3")]
+        terminals: Option<Terminals>,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Terminals {
+        #[prost(message, repeated, tag = "1")]
+        panes: Vec<Pane>,
+        #[prost(uint64, tag = "2")]
+        focused_pane: u64,
+        #[prost(message, optional, tag = "4")]
+        layout: Option<Layout>,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Pane {
+        #[prost(uint64, tag = "1")]
+        id: u64,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Layout {
+        #[prost(uint32, tag = "1")]
+        root: u32,
+        #[prost(message, repeated, tag = "2")]
+        nodes: Vec<LayoutNode>,
+    }
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct LayoutNode {
+        #[prost(uint64, optional, tag = "1")]
+        pane: Option<u64>,
+    }
+
+    use prost::Message as _;
+    Snapshot {
+        workspaces: vec![Workspace {
+            id: 1,
+            name: "invalid".into(),
+            root_directory: root.to_str().unwrap().into(),
+            tabs: vec![Tab {
+                id: 2,
+                terminals: Some(Terminals {
+                    panes: vec![Pane { id: 3 }],
+                    focused_pane: 3,
+                    layout: Some(Layout {
+                        root: u32::MAX,
+                        nodes: vec![LayoutNode { pane: Some(3) }],
+                    }),
+                }),
+            }],
+        }],
+    }
+    .encode_to_vec()
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

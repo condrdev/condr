@@ -41,7 +41,7 @@ use condr_core::protocol::{
     LayoutResult, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame,
     PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
     ServerId, ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
-    SessionId, TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot,
+    SessionId, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
     decode_pane_terminal_frame, relative_age, uptime_text,
 };
 use condr_core::{
@@ -212,6 +212,9 @@ const RESTART_RECONNECT_DELAY: Duration = Duration::from_millis(500);
 /// a blip that comes back inside this never shows.
 const RECONNECT_GRACE: Duration = Duration::from_secs(2);
 const RESTART_RECONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+/// Two messages from a newer protocol this close together mean the Server keeps sending
+/// what this build cannot read: stop resynchronizing and say to update (ADR 0028).
+const UNKNOWN_MESSAGE_WINDOW: Duration = Duration::from_secs(10);
 const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);

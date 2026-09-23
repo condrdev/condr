@@ -1,4 +1,8 @@
+mod common;
+
 use std::path::{Path, PathBuf};
+
+use common::*;
 
 use relative_path::{RelativePath, RelativePathBuf};
 
@@ -573,27 +577,6 @@ fn pane_layout_commands_preserve_focus_and_keep_zoom_runtime_only() {
 }
 
 #[test]
-fn restore_rejects_an_unsupported_snapshot_version() {
-    #[derive(serde::Serialize)]
-    struct UnsupportedSnapshot {
-        version: u32,
-        workspaces: Vec<()>,
-    }
-
-    let bytes = bincode::serialize(&UnsupportedSnapshot {
-        version: 3,
-        workspaces: Vec::new(),
-    })
-    .expect("test snapshot encodes");
-    let snapshot = SessionSnapshot::from_bytes(&bytes).expect("schema decodes");
-
-    assert_eq!(
-        Session::restore(snapshot).expect_err("version is unsupported"),
-        SnapshotError::UnsupportedVersion(3)
-    );
-}
-
-#[test]
 fn snapshot_decode_rejects_trailing_bytes() {
     let mut bytes = Session::new().snapshot().to_bytes().unwrap();
     bytes.extend_from_slice(b"trailing corruption");
@@ -924,11 +907,7 @@ fn restore_enforces_a_64_level_layout_depth_limit() {
 }
 
 fn encode_session(workspaces: Vec<EncodedWorkspace>) -> Vec<u8> {
-    bincode::serialize(&EncodedSession {
-        version: 1,
-        workspaces,
-    })
-    .unwrap()
+    encode(&EncodedSession { workspaces })
 }
 
 fn encoded_workspace(id: u64, tabs: Vec<EncodedTab>) -> EncodedWorkspace {
@@ -949,11 +928,7 @@ fn encoded_tab(id: u64, pane_ids: Vec<u64>, layout: EncodedLayout) -> EncodedTab
             focused_pane: pane_ids[0],
             panes: pane_ids
                 .into_iter()
-                .map(|id| EncodedPane {
-                    id,
-                    cwd: None,
-                    agent_resume: None,
-                })
+                .map(|id| EncodedPane { id, cwd: None })
                 .collect(),
             focus_history: Vec::new(),
             layout,
@@ -981,93 +956,6 @@ fn encoded_chain_layout(depth: usize, first_pane_id: u64) -> (Vec<u64>, EncodedL
     }
     nodes.extend(pane_ids.iter().copied().map(EncodedLayoutNode::Pane));
     (pane_ids, EncodedLayout { root: 0, nodes })
-}
-
-#[derive(serde::Serialize)]
-struct EncodedSession {
-    version: u32,
-    workspaces: Vec<EncodedWorkspace>,
-}
-
-#[derive(serde::Serialize)]
-struct EncodedWorkspace {
-    id: u64,
-    name: String,
-    root_directory: PathBuf,
-    worktree: Option<EncodedWorktree>,
-    tabs: Vec<EncodedTab>,
-}
-
-#[derive(serde::Serialize)]
-struct EncodedWorktree {
-    parent_workspace_id: u64,
-    parent_root_directory: PathBuf,
-    managed: bool,
-}
-
-#[derive(serde::Serialize)]
-struct EncodedTab {
-    id: u64,
-    name: String,
-    content: EncodedTabContent,
-}
-
-/// Mirrors the snapshot's Tab content enum, variant order included.
-#[derive(serde::Serialize)]
-enum EncodedTabContent {
-    Terminals {
-        panes: Vec<EncodedPane>,
-        focused_pane: u64,
-        focus_history: Vec<u64>,
-        layout: EncodedLayout,
-    },
-    Diff {
-        path: PathBuf,
-    },
-}
-
-#[derive(serde::Serialize)]
-struct EncodedPane {
-    id: u64,
-    cwd: Option<PathBuf>,
-    agent_resume: Option<condr_core::AgentResume>,
-}
-
-#[derive(serde::Serialize)]
-struct EncodedLayout {
-    root: u32,
-    nodes: Vec<EncodedLayoutNode>,
-}
-
-impl EncodedLayout {
-    fn pane(pane_id: u64) -> Self {
-        Self {
-            root: 0,
-            nodes: vec![EncodedLayoutNode::Pane(pane_id)],
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-enum EncodedLayoutNode {
-    Pane(u64),
-    Split {
-        direction: SplitDirection,
-        ratio: f32,
-        first: u32,
-        second: u32,
-    },
-}
-
-impl EncodedLayoutNode {
-    fn split(first: u32, second: u32) -> Self {
-        Self::Split {
-            direction: SplitDirection::Horizontal,
-            ratio: 0.5,
-            first,
-            second,
-        }
-    }
 }
 
 fn only_split_ratio(session: &Session) -> f32 {
@@ -1255,8 +1143,7 @@ fn show_file_keeps_one_preview_tab_beside_the_diff_tab_and_survives_a_snapshot()
 
 #[test]
 fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
-    let one_diff = bincode::serialize(&EncodedSession {
-        version: 1,
+    let one_diff = encode(&EncodedSession {
         workspaces: vec![EncodedWorkspace {
             id: 1,
             name: "Workspace".into(),
@@ -1280,8 +1167,7 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
                 },
             ],
         }],
-    })
-    .unwrap();
+    });
     let restored = Session::restore(SessionSnapshot::from_bytes(&one_diff).unwrap()).unwrap();
     assert_eq!(
         restored
@@ -1293,8 +1179,7 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
         RelativePath::new("src/main.rs")
     );
 
-    let two_diffs = bincode::serialize(&EncodedSession {
-        version: 1,
+    let two_diffs = encode(&EncodedSession {
         workspaces: vec![EncodedWorkspace {
             id: 1,
             name: "Workspace".into(),
@@ -1325,12 +1210,10 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
                 },
             ],
         }],
-    })
-    .unwrap();
+    });
     assert!(Session::restore(SessionSnapshot::from_bytes(&two_diffs).unwrap()).is_err());
 
-    let escaping = bincode::serialize(&EncodedSession {
-        version: 1,
+    let escaping = encode(&EncodedSession {
         workspaces: vec![EncodedWorkspace {
             id: 1,
             name: "Workspace".into(),
@@ -1354,7 +1237,6 @@ fn restore_rejects_a_second_diff_tab_and_an_escaping_diff_path() {
                 },
             ],
         }],
-    })
-    .unwrap();
+    });
     assert!(Session::restore(SessionSnapshot::from_bytes(&escaping).unwrap()).is_err());
 }

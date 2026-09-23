@@ -242,9 +242,16 @@ fn terminal_frame_wire_drops_hyperlinks_over_budget_without_losing_text() {
     ] {
         let mut projected = frame.clone();
         assert!(projected.normalize_hyperlinks_for_wire());
-        let encoded = bincode::serialize(&frame).unwrap();
+        let pane = crate::protocol::PaneTerminalFrame {
+            pane_id: crate::PaneId::from_u64(1),
+            frame,
+        };
+        let encoded = crate::protocol::encode_pane_terminal_frame(&pane).unwrap();
         assert!(encoded.len() <= crate::protocol::MAX_CHUNKED_RECORD_SIZE);
-        let decoded = bincode::deserialize::<TerminalViewFrame>(&encoded).unwrap();
+        let decoded = crate::protocol::decode_pane_terminal_frame(&encoded)
+            .unwrap()
+            .unwrap()
+            .frame;
         assert_eq!(decoded, projected);
         let cells = match &decoded {
             TerminalViewFrame::Full(view) => &view.cells,

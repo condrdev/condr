@@ -1,15 +1,15 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ServerId(pub u64);
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SessionId(pub u64);
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RuntimeEpoch(pub u128);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ClientMessage {
     SnapshotRequest {
         session_id: SessionId,
@@ -124,16 +124,19 @@ pub enum ClientMessage {
         command: ServerAdminCommand,
     },
     Detach,
+    /// A message from a newer Client that this Server does not know. It is answered with
+    /// an error and the connection goes on (ADR 0028). Never sent.
+    Unknown,
 }
 
 /// What a diff compares the working tree against.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DiffBase {
     #[default]
     Head,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServerAdminCommand {
     Status,
     SaveListen {
@@ -151,7 +154,7 @@ pub enum ServerAdminCommand {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ServerClientInfo {
     pub name: String,
     pub fingerprint: String,
@@ -159,7 +162,7 @@ pub struct ServerClientInfo {
 }
 
 /// One `warn` or `error` log record the Server keeps for `condr server status`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ServerLogRecord {
     /// Unix seconds.
     pub at: u64,
@@ -217,7 +220,7 @@ mod relative_age_tests {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentCommand {
     Available,
     List,
@@ -247,7 +250,7 @@ pub enum AgentCommand {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentInfo {
     pub pane_id: PaneId,
     pub name: Option<String>,
@@ -255,7 +258,7 @@ pub struct AgentInfo {
     pub launch_pending: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentResponse {
     Available(Vec<crate::agent_discovery::AgentInstallation>),
     List(Vec<AgentInfo>),
@@ -263,13 +266,13 @@ pub enum AgentResponse {
     Hooks(crate::agent_hooks::HooksReport),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentError {
     pub code: String,
     pub message: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 /// Structural changes to the shared Session. None of them says which Workspace or Tab a
 /// client shows: that is each client's own view (ADR 0021). `ActivateWorkspace` and
 /// `ActivateTab` are the one exception, and they change no Session state either: they ask
@@ -386,7 +389,7 @@ pub enum LayoutCommand {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum LayoutResult {
     #[default]
     Changed,
@@ -415,7 +418,7 @@ pub enum LayoutResult {
 }
 
 /// A lightweight authoritative Session query for CLI inspection and orchestration.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SessionOverview {
     pub server_id: ServerId,
     pub runtime_epoch: RuntimeEpoch,
@@ -427,7 +430,7 @@ pub struct SessionOverview {
     pub zoomed_panes: Vec<PaneId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PaneTerminalMetadata {
     pub pane_id: PaneId,
     pub title: Option<String>,
@@ -457,7 +460,7 @@ impl From<&SessionBootstrap> for SessionOverview {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BootstrapHeader {
     pub server_id: ServerId,
     pub runtime_epoch: RuntimeEpoch,
@@ -471,7 +474,7 @@ pub struct BootstrapHeader {
 /// Server-owned preferences, persisted in the Server's own `config.toml`. Clients
 /// change them through [`ClientMessage::SetServerSettings`] and learn the current
 /// values from the Bootstrap and [`SessionEvent::ServerSettingsChanged`].
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ServerSettings {
     /// Program started in new terminals; empty means `default_shell`.
     pub shell: String,
@@ -493,7 +496,7 @@ pub struct SessionBootstrap {
     pub zoomed_panes: Vec<PaneId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BootstrapBatch {
     pub server_id: ServerId,
     pub session_id: SessionId,
@@ -504,7 +507,7 @@ pub struct BootstrapBatch {
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaneTerminalSnapshot {
     pub pane_id: PaneId,
     pub view: TerminalView,
@@ -515,13 +518,13 @@ pub struct PaneTerminalSnapshot {
     pub attention: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaneAgentSnapshot {
     pub pane_id: PaneId,
     pub agent: AgentSnapshot,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceGitSnapshot {
     pub workspace_id: WorkspaceId,
     pub branch: Option<String>,
@@ -531,7 +534,7 @@ pub struct WorkspaceGitSnapshot {
     pub changes: crate::GitChanges,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BootstrapRecord {
     Terminal(PaneTerminalSnapshot),
     Agent(PaneAgentSnapshot),
@@ -539,20 +542,20 @@ pub enum BootstrapRecord {
     ZoomedPane(PaneId),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaneTerminalFrame {
     pub pane_id: PaneId,
     pub frame: TerminalViewFrame,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalFrameBatch {
     pub server_id: ServerId,
     pub session_id: SessionId,
     pub panes: Vec<PaneTerminalFrame>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalFrameChunk {
     pub server_id: ServerId,
     pub session_id: SessionId,
@@ -563,7 +566,7 @@ pub struct TerminalFrameChunk {
     pub payload: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SessionEvent {
     /// The Session structure after a layout change. It carries the new structural
     /// Snapshot (a few KB: ids, names, split trees) and the live zoom state, so a client
@@ -609,11 +612,14 @@ pub enum SessionEvent {
         workspace_id: WorkspaceId,
         tab_id: Option<TabId>,
     },
+    /// An event this Client's protocol does not include, sent under its sequence so the
+    /// cursor stays contiguous (ADR 0028). Nothing to apply.
+    Omitted,
 }
 
 /// The image encodings a pasted clipboard image may arrive in. The Server names the
 /// staged file after the format; the Client never supplies a name.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClipboardImageFormat {
     Png,
     Jpeg,
@@ -644,7 +650,7 @@ impl ClientMessage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServerMessage {
     Bootstrap(BootstrapHeader),
     /// Overview header with an empty terminal list; exactly one OverviewTerminals follows.
@@ -764,9 +770,24 @@ pub enum ServerMessage {
     Error {
         message: String,
     },
+    /// A message from a newer Server that this Client does not know (ADR 0028). Never
+    /// sent; it says only which stream it was on, which decides the recovery.
+    Unknown(UnknownMessage),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Where a [`ServerMessage::Unknown`] arrived.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UnknownMessage {
+    /// A reliable Session event: the Client requests one Bootstrap.
+    Event { sequence: u64 },
+    /// A terminal frame or chunk: the visual baseline is lost; one Bootstrap restores it.
+    TerminalFrame,
+    /// Anything else, possibly the reply something is waiting on: the stronger recovery
+    /// that also clears pending requests and reacquires control.
+    Reply,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServerAdminResponse {
     Status {
         listen: Option<String>,

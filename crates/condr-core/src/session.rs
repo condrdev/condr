@@ -5,8 +5,8 @@ mod workspace;
 
 use crate::snapshot::{
     LayoutNodeSnapshot, LayoutSnapshot, MAX_SNAPSHOT_LAYOUT_DEPTH, MAX_SNAPSHOT_LAYOUT_NODES,
-    MAX_SNAPSHOT_PANES, MAX_SNAPSHOT_TABS, MAX_SNAPSHOT_WORKSPACES, PaneSnapshot, SNAPSHOT_VERSION,
-    SessionSnapshot, SnapshotError, TabSnapshot, WorkspaceSnapshot,
+    MAX_SNAPSHOT_PANES, MAX_SNAPSHOT_TABS, MAX_SNAPSHOT_WORKSPACES, PaneSnapshot, SessionSnapshot,
+    SnapshotError, TabSnapshot, WorkspaceSnapshot,
 };
 use layout::*;
 use relative_path::{RelativePath, RelativePathBuf};
@@ -178,9 +178,9 @@ pub struct Pane {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorktreeAssociation {
-    parent_workspace_id: WorkspaceId,
-    parent_root_directory: PathBuf,
-    managed: bool,
+    pub(crate) parent_workspace_id: WorkspaceId,
+    pub(crate) parent_root_directory: PathBuf,
+    pub(crate) managed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

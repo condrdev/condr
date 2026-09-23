@@ -1,0 +1,247 @@
+// Terminal views, frames and input (ADR 0004, 0028). Every enum names the value an
+// unknown one decodes to, or says it has none: then the enclosing message is unknown.
+syntax = "proto3";
+
+package condr.v1;
+
+message TerminalSize {
+  uint32 rows = 1;
+  uint32 columns = 2;
+  uint32 cell_width = 3;
+  uint32 cell_height = 4;
+}
+
+// Unknown decodes to BLOCK.
+enum TerminalCursorShape {
+  TERMINAL_CURSOR_SHAPE_UNSPECIFIED = 0;
+  TERMINAL_CURSOR_SHAPE_BLOCK = 1;
+  TERMINAL_CURSOR_SHAPE_UNDERLINE = 2;
+  TERMINAL_CURSOR_SHAPE_BEAM = 3;
+  TERMINAL_CURSOR_SHAPE_HOLLOW_BLOCK = 4;
+  TERMINAL_CURSOR_SHAPE_HIDDEN = 5;
+}
+
+message TerminalCursor {
+  uint32 row = 1;
+  uint32 column = 2;
+  TerminalCursorShape shape = 3;
+  bool blinking = 4;
+}
+
+// Unknown decodes to NONE.
+enum TerminalMouseTracking {
+  TERMINAL_MOUSE_TRACKING_UNSPECIFIED = 0;
+  TERMINAL_MOUSE_TRACKING_NONE = 1;
+  TERMINAL_MOUSE_TRACKING_CLICK = 2;
+  TERMINAL_MOUSE_TRACKING_DRAG = 3;
+  TERMINAL_MOUSE_TRACKING_MOTION = 4;
+}
+
+// Unknown decodes to LEFT.
+enum TerminalSide {
+  TERMINAL_SIDE_UNSPECIFIED = 0;
+  TERMINAL_SIDE_LEFT = 1;
+  TERMINAL_SIDE_RIGHT = 2;
+}
+
+message TerminalPosition {
+  uint32 row = 1;
+  uint32 column = 2;
+  TerminalSide side = 3;
+}
+
+message TerminalSelection {
+  TerminalPosition start = 1;
+  TerminalPosition end = 2;
+  uint32 display_offset = 3;
+}
+
+// Cells as parallel packed columns, one entry per cell, so a frame is one message decode
+// and no per-cell allocation. A color is `value << 2 | kind`: kind 1 named (value is the
+// named index), 2 indexed, 3 rgb (value is 0xRRGGBB). A hyperlink is its index in the
+// frame's table plus one, 0 for none. `flags` and `hyperlink` may be empty, meaning zero
+// for every cell.
+message TerminalCells {
+  // The text of every cell, concatenated.
+  string text = 1;
+  // Each cell's byte length in `text`.
+  repeated uint32 text_len = 2;
+  repeated uint32 foreground = 3;
+  repeated uint32 background = 4;
+  repeated uint32 flags = 5;
+  repeated uint32 hyperlink = 6;
+}
+
+message TerminalView {
+  uint64 revision = 1;
+  TerminalSize size = 2;
+  uint32 display_offset = 3;
+  TerminalMouseTracking mouse_tracking = 4;
+  // Interned OSC 8 targets for this frame.
+  repeated string hyperlinks = 5;
+  TerminalCells cells = 6;
+  TerminalCursor cursor = 7;
+  TerminalSelection selection = 8;
+}
+
+// Runs of changed cells, flattened: the cells of every run in one set of columns, run i
+// covering `run_len[i]` cells from viewport cell `run_start[i]`.
+message TerminalViewDelta {
+  uint64 base_revision = 1;
+  uint64 revision = 2;
+  uint32 display_offset = 3;
+  TerminalMouseTracking mouse_tracking = 4;
+  TerminalCursor cursor = 5;
+  TerminalSelection selection = 6;
+  repeated string hyperlinks = 7;
+  repeated uint32 run_start = 8;
+  repeated uint32 run_len = 9;
+  TerminalCells cells = 10;
+}
+
+message TerminalViewFrame {
+  oneof frame {
+    TerminalView full = 1;
+    TerminalViewDelta delta = 2;
+  }
+}
+
+message TerminalModifiers {
+  bool shift = 1;
+  bool alt = 2;
+  bool control = 3;
+  bool platform = 4;
+}
+
+// No fallback.
+enum TerminalMouseButton {
+  TERMINAL_MOUSE_BUTTON_UNSPECIFIED = 0;
+  TERMINAL_MOUSE_BUTTON_LEFT = 1;
+  TERMINAL_MOUSE_BUTTON_MIDDLE = 2;
+  TERMINAL_MOUSE_BUTTON_RIGHT = 3;
+}
+
+// No fallback.
+enum TerminalMouseWheel {
+  TERMINAL_MOUSE_WHEEL_UNSPECIFIED = 0;
+  TERMINAL_MOUSE_WHEEL_UP = 1;
+  TERMINAL_MOUSE_WHEEL_DOWN = 2;
+  TERMINAL_MOUSE_WHEEL_LEFT = 3;
+  TERMINAL_MOUSE_WHEEL_RIGHT = 4;
+}
+
+message TerminalMousePosition {
+  uint32 row = 1;
+  uint32 column = 2;
+}
+
+message TerminalMouseButtonEvent {
+  TerminalMouseButton button = 1;
+  bool pressed = 2;
+  TerminalMousePosition position = 3;
+  TerminalModifiers modifiers = 4;
+}
+
+message TerminalMouseMotionEvent {
+  // Unset when no button is held.
+  optional TerminalMouseButton button = 1;
+  TerminalMousePosition position = 2;
+  TerminalModifiers modifiers = 3;
+}
+
+message TerminalMouseWheelEvent {
+  TerminalMouseWheel direction = 1;
+  uint32 amount = 2;
+  TerminalMousePosition position = 3;
+  TerminalModifiers modifiers = 4;
+}
+
+message TerminalMouseEvent {
+  oneof event {
+    TerminalMouseButtonEvent button = 1;
+    TerminalMouseMotionEvent motion = 2;
+    TerminalMouseWheelEvent wheel = 3;
+  }
+}
+
+// No fallback.
+enum TerminalNamedKey {
+  TERMINAL_NAMED_KEY_UNSPECIFIED = 0;
+  TERMINAL_NAMED_KEY_ENTER = 1;
+  TERMINAL_NAMED_KEY_TAB = 2;
+  TERMINAL_NAMED_KEY_BACK_TAB = 3;
+  TERMINAL_NAMED_KEY_BACKSPACE = 4;
+  TERMINAL_NAMED_KEY_DELETE = 5;
+  TERMINAL_NAMED_KEY_ESCAPE = 6;
+  TERMINAL_NAMED_KEY_UP = 7;
+  TERMINAL_NAMED_KEY_DOWN = 8;
+  TERMINAL_NAMED_KEY_RIGHT = 9;
+  TERMINAL_NAMED_KEY_LEFT = 10;
+  TERMINAL_NAMED_KEY_HOME = 11;
+  TERMINAL_NAMED_KEY_END = 12;
+  TERMINAL_NAMED_KEY_PAGE_UP = 13;
+  TERMINAL_NAMED_KEY_PAGE_DOWN = 14;
+  TERMINAL_NAMED_KEY_INSERT = 15;
+}
+
+message TerminalKey {
+  oneof key {
+    string character = 1;
+    TerminalNamedKey named = 2;
+    uint32 function = 3;
+  }
+}
+
+// No fallback.
+enum TerminalScrollTarget {
+  TERMINAL_SCROLL_TARGET_UNSPECIFIED = 0;
+  TERMINAL_SCROLL_TARGET_PAGE_UP = 1;
+  TERMINAL_SCROLL_TARGET_PAGE_DOWN = 2;
+  TERMINAL_SCROLL_TARGET_TOP = 3;
+  TERMINAL_SCROLL_TARGET_BOTTOM = 4;
+}
+
+message TerminalScroll {
+  oneof scroll {
+    sint32 lines = 1;
+    TerminalScrollTarget target = 2;
+  }
+}
+
+// No fallback.
+enum TerminalSelectionUnit {
+  TERMINAL_SELECTION_UNIT_UNSPECIFIED = 0;
+  TERMINAL_SELECTION_UNIT_WORD = 1;
+  TERMINAL_SELECTION_UNIT_LINE = 2;
+}
+
+message TerminalKeyCommand {
+  TerminalKey key = 1;
+  TerminalModifiers modifiers = 2;
+}
+
+// An unset selection clears or copies the Server-tracked one.
+message TerminalSelectionCommand {
+  TerminalSelection selection = 1;
+}
+
+message TerminalSelectAtCommand {
+  TerminalPosition position = 1;
+  uint32 display_offset = 2;
+  TerminalSelectionUnit unit = 3;
+}
+
+message TerminalCommand {
+  oneof command {
+    TerminalKeyCommand key = 1;
+    string text = 2;
+    string paste = 3;
+    TerminalMouseEvent mouse = 4;
+    bool focus = 5;
+    TerminalSize resize = 6;
+    TerminalScroll scroll = 7;
+    TerminalSelectionCommand select = 8;
+    TerminalSelectAtCommand select_at = 9;
+    TerminalSelectionCommand copy = 10;
+  }
+}

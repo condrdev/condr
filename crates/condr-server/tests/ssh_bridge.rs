@@ -35,11 +35,22 @@ impl Bridge {
         thread::spawn(move || {
             loop {
                 let frame = (|| {
-                    let mut prefix = [0; 4];
-                    stdout.read_exact(&mut prefix)?;
-                    let mut frame = vec![0; 4 + u32::from_le_bytes(prefix) as usize];
-                    frame[..4].copy_from_slice(&prefix);
-                    stdout.read_exact(&mut frame[4..])?;
+                    // The varint length, then that many bytes (ADR 0028).
+                    let mut frame = Vec::new();
+                    let (mut length, mut shift) = (0usize, 0);
+                    loop {
+                        let mut byte = [0];
+                        stdout.read_exact(&mut byte)?;
+                        frame.push(byte[0]);
+                        length |= usize::from(byte[0] & 0x7f) << shift;
+                        shift += 7;
+                        if byte[0] & 0x80 == 0 {
+                            break;
+                        }
+                    }
+                    let start = frame.len();
+                    frame.resize(start + length, 0);
+                    stdout.read_exact(&mut frame[start..])?;
                     Ok::<_, std::io::Error>(frame)
                 })()
                 .map_err(|error| error.to_string());
@@ -56,11 +67,11 @@ impl Bridge {
         }
     }
 
-    fn send<M: serde::Serialize>(&mut self, message: &M) {
+    fn send<M: protocol::WireMessage>(&mut self, message: &M) {
         protocol::write_message(self.input.as_mut().unwrap(), message).unwrap();
     }
 
-    fn read<M: serde::de::DeserializeOwned>(&self) -> M {
+    fn read<M: protocol::WireMessage>(&self) -> M {
         let frame = self
             .output
             .recv_timeout(Duration::from_secs(5))
@@ -151,8 +162,8 @@ fn bridge_uses_only_the_running_local_server_and_reconnects_to_its_session() {
     }
     let mut incompatible = Bridge::start(&endpoint);
     incompatible.send(&ClientHandshake::Hello(Hello {
-        protocol: PROTOCOL_VERSION + 1,
-        ..Hello::new("old")
+        min_server_protocol: PROTOCOL_VERSION + 1,
+        ..Hello::new("newer")
     }));
     let welcome: Welcome = incompatible.read();
     assert_eq!(welcome.refusal, Some(Refusal::IncompatibleProtocol));

@@ -99,6 +99,9 @@ pub use view::{
     TerminalPosition, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
     TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
 };
+pub(crate) use view::{
+    decode_position, decode_selection, decode_size, encode_position, encode_selection,
+};
 pub use view_source::TerminalViewSource;
 
 const MAX_TERMINAL_CELLS: usize = 65_536;

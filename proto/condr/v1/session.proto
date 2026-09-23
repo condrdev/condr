@@ -1,0 +1,251 @@
+// The Session Snapshot (ADR 0005), sent on the wire and written to disk, and the agent,
+// Git and file types Session messages carry. Paths are UTF-8 strings; relative ones are
+// `/`-separated and relative to the Workspace root.
+syntax = "proto3";
+
+package condr.v1;
+
+import "condr/v1/handshake.proto";
+
+message SessionSnapshot {
+  repeated WorkspaceSnapshot workspaces = 1;
+}
+
+message WorkspaceSnapshot {
+  uint64 id = 1;
+  string name = 2;
+  string root_directory = 3;
+  WorktreeAssociation worktree = 4;
+  repeated TabSnapshot tabs = 5;
+}
+
+message WorktreeAssociation {
+  uint64 parent_workspace_id = 1;
+  string parent_root_directory = 2;
+  bool managed = 3;
+}
+
+message TabSnapshot {
+  uint64 id = 1;
+  string name = 2;
+  oneof content {
+    TerminalsTabSnapshot terminals = 3;
+    PathTabSnapshot diff = 4;
+    PathTabSnapshot file = 5;
+  }
+}
+
+message TerminalsTabSnapshot {
+  repeated PaneSnapshot panes = 1;
+  uint64 focused_pane = 2;
+  repeated uint64 focus_history = 3;
+  LayoutSnapshot layout = 4;
+}
+
+message PathTabSnapshot {
+  string path = 1;
+}
+
+message PaneSnapshot {
+  uint64 id = 1;
+  optional string cwd = 2;
+  AgentResume agent_resume = 3;
+}
+
+// The split tree as a flat arena of nodes that name their children by index.
+message LayoutSnapshot {
+  uint32 root = 1;
+  repeated LayoutNodeSnapshot nodes = 2;
+}
+
+message LayoutNodeSnapshot {
+  oneof node {
+    uint64 pane = 1;
+    LayoutSplitSnapshot split = 2;
+  }
+}
+
+message LayoutSplitSnapshot {
+  SplitDirection direction = 1;
+  float ratio = 2;
+  uint32 first = 3;
+  uint32 second = 4;
+}
+
+// No fallback.
+enum SplitDirection {
+  SPLIT_DIRECTION_UNSPECIFIED = 0;
+  SPLIT_DIRECTION_HORIZONTAL = 1;
+  SPLIT_DIRECTION_VERTICAL = 2;
+}
+
+// No fallback.
+enum PaneDirection {
+  PANE_DIRECTION_UNSPECIFIED = 0;
+  PANE_DIRECTION_LEFT = 1;
+  PANE_DIRECTION_RIGHT = 2;
+  PANE_DIRECTION_UP = 3;
+  PANE_DIRECTION_DOWN = 4;
+}
+
+// Unknown decodes to OTHER, shown as a generic agent.
+enum AgentKind {
+  AGENT_KIND_UNSPECIFIED = 0;
+  AGENT_KIND_CLAUDE = 1;
+  AGENT_KIND_CODEX = 2;
+  AGENT_KIND_OPEN_CODE = 3;
+  AGENT_KIND_PI = 4;
+  AGENT_KIND_OMP = 5;
+  AGENT_KIND_ANTIGRAVITY = 6;
+  AGENT_KIND_GROK = 7;
+  AGENT_KIND_CURSOR = 8;
+  AGENT_KIND_COPILOT = 9;
+  AGENT_KIND_KIMI = 10;
+  AGENT_KIND_OTHER = 11;
+}
+
+// Unknown decodes to UNKNOWN.
+enum AgentState {
+  AGENT_STATE_UNSPECIFIED = 0;
+  AGENT_STATE_UNKNOWN = 1;
+  AGENT_STATE_IDLE = 2;
+  AGENT_STATE_WORKING = 3;
+  AGENT_STATE_BLOCKED = 4;
+}
+
+message AgentSnapshot {
+  optional string session_id = 1;
+  AgentKind kind = 2;
+  AgentState state = 3;
+  optional string blocked_on = 4;
+}
+
+message AgentResume {
+  AgentKind kind = 1;
+  string session_id = 2;
+}
+
+// Unknown decodes to UNSUPPORTED.
+enum HooksState {
+  HOOKS_STATE_UNSPECIFIED = 0;
+  HOOKS_STATE_INSTALLED = 1;
+  HOOKS_STATE_OUTDATED = 2;
+  HOOKS_STATE_MISSING = 3;
+  HOOKS_STATE_UNSUPPORTED = 4;
+}
+
+// No fallback.
+enum HooksAction {
+  HOOKS_ACTION_UNSPECIFIED = 0;
+  HOOKS_ACTION_INSTALL = 1;
+  HOOKS_ACTION_UNINSTALL = 2;
+  HOOKS_ACTION_STATUS = 3;
+}
+
+message HooksReport {
+  AgentKind agent = 1;
+  string path = 2;
+  HooksState state = 3;
+  optional string note = 4;
+  optional string warning = 5;
+}
+
+message AgentInstallation {
+  AgentKind kind = 1;
+  string executable = 2;
+}
+
+message GitUpstream {
+  uint32 ahead = 1;
+  uint32 behind = 2;
+}
+
+// Unknown decodes to MODIFIED.
+enum GitChangeStatus {
+  GIT_CHANGE_STATUS_UNSPECIFIED = 0;
+  GIT_CHANGE_STATUS_ADDED = 1;
+  GIT_CHANGE_STATUS_MODIFIED = 2;
+  GIT_CHANGE_STATUS_DELETED = 3;
+  GIT_CHANGE_STATUS_RENAMED = 4;
+  GIT_CHANGE_STATUS_UNTRACKED = 5;
+  GIT_CHANGE_STATUS_CONFLICTED = 6;
+}
+
+message GitDiffStat {
+  uint32 added = 1;
+  uint32 deleted = 2;
+}
+
+message GitChangeEntry {
+  string path = 1;
+  optional string old_path = 2;
+  GitChangeStatus status = 3;
+  GitDiffStat stat = 4;
+}
+
+message GitChanges {
+  repeated GitChangeEntry entries = 1;
+  bool truncated = 2;
+}
+
+// Unknown decodes to CONTEXT.
+enum DiffLineKind {
+  DIFF_LINE_KIND_UNSPECIFIED = 0;
+  DIFF_LINE_KIND_CONTEXT = 1;
+  DIFF_LINE_KIND_ADDED = 2;
+  DIFF_LINE_KIND_REMOVED = 3;
+}
+
+message DiffLine {
+  DiffLineKind kind = 1;
+  optional uint32 old_number = 2;
+  optional uint32 new_number = 3;
+  string text = 4;
+}
+
+message DiffHunk {
+  uint32 old_start = 1;
+  uint32 old_lines = 2;
+  uint32 new_start = 3;
+  uint32 new_lines = 4;
+  repeated DiffLine lines = 5;
+}
+
+message DiffHunks {
+  repeated DiffHunk hunks = 1;
+}
+
+message FileDiff {
+  string path = 1;
+  oneof content {
+    DiffHunks text = 2;
+    Empty binary = 3;
+    uint64 too_large = 4;
+  }
+}
+
+// Unknown decodes to FILE.
+enum FileKind {
+  FILE_KIND_UNSPECIFIED = 0;
+  FILE_KIND_DIRECTORY = 1;
+  FILE_KIND_FILE = 2;
+}
+
+message DirectoryEntry {
+  string name = 1;
+  FileKind kind = 2;
+  bool ignored = 3;
+}
+
+message DirectoryListing {
+  repeated DirectoryEntry entries = 1;
+  bool truncated = 2;
+}
+
+message FileContent {
+  oneof content {
+    string text = 1;
+    Empty binary = 2;
+    uint64 too_large = 3;
+  }
+}

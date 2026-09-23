@@ -160,12 +160,15 @@ pub(super) fn handle_client(
         }
     };
 
-    if hello.protocol != PROTOCOL_VERSION {
+    // The protocol range (ADR 0028): each side names the oldest peer it works with, and
+    // the Server refuses for both directions so it can log which side is behind.
+    if hello.protocol < MIN_CLIENT_PROTOCOL || PROTOCOL_VERSION < hello.min_server_protocol {
         tracing::warn!(
             name = %hello.client_name,
             protocol = hello.protocol,
+            min_server_protocol = hello.min_server_protocol,
             build = %hello.build,
-            "refused: protocol version {} is incompatible with server version {PROTOCOL_VERSION}",
+            "refused: client protocol {} and server protocol {PROTOCOL_VERSION} are incompatible",
             hello.protocol
         );
         let _ = send_welcome(&mut stream, &state, Some(Refusal::IncompatibleProtocol));
@@ -281,6 +284,9 @@ pub(super) fn handle_client(
         outbound_rx.close();
     });
 
+    // Buffered from here on: the handshake above read unbuffered so a Tunnel could take
+    // the raw stream, and nothing hands it on after this point (ADR 0028).
+    let mut stream = io::BufReader::new(stream);
     let mut stopping_server = false;
     loop {
         let message = match condr_core::protocol::read_message_with_limit::<_, ClientMessage>(
@@ -315,6 +321,13 @@ pub(super) fn handle_client(
         let mut started_terminals = Vec::new();
         let mut removed_terminals = Vec::new();
         let should_close = match message {
+            // A newer Client should not have sent it (ADR 0028); say so and go on.
+            ClientMessage::Unknown => queue_message(
+                &outbound,
+                ServerMessage::Error {
+                    message: "this Server does not support that request; update it".into(),
+                },
+            ),
             ClientMessage::SnapshotRequest { session_id } => {
                 queue_runtime_bootstrap(&state, client_id, session_id, &outbound)
             }
@@ -1271,7 +1284,7 @@ pub(super) fn handle_client(
                 }
             }
             ClientMessage::RevokeDevice { key } => {
-                let response = if !stream.may_administer() {
+                let response = if !stream.get_ref().may_administer() {
                     ServerMessage::Error {
                         message: "only the Server host may revoke devices".into(),
                     }
@@ -1293,7 +1306,7 @@ pub(super) fn handle_client(
                 queue_message(&outbound, response)
             }
             ClientMessage::ConnectedDevices => {
-                let response = if !stream.may_administer() {
+                let response = if !stream.get_ref().may_administer() {
                     ServerMessage::Error {
                         message: "only the Server host may list connected devices".into(),
                     }
@@ -1313,7 +1326,7 @@ pub(super) fn handle_client(
             ClientMessage::ServerAdmin { server_id, command } => {
                 let restart = matches!(command, ServerAdminCommand::Restart);
                 let readonly_status = matches!(command, ServerAdminCommand::Status);
-                let response = if !stream.may_administer() && !readonly_status {
+                let response = if !stream.get_ref().may_administer() && !readonly_status {
                     ServerMessage::Error {
                         message: "only a local or SSH connection may administer the Server".into(),
                     }

@@ -125,22 +125,14 @@ pub(super) fn send_welcome(
         let state = state.lock().expect("server state lock poisoned");
         (state.server_id, state.session_id)
     };
-    let welcome = Welcome {
-        protocol: PROTOCOL_VERSION,
-        build: condr_core::build_identity().to_owned(),
-        server_id,
-        session_id,
-        refusal,
-    };
+    let welcome = Welcome::new(server_id, session_id, refusal);
     condr_core::protocol::write_message(stream, &welcome)
         .map_err(|error| io::Error::other(error.to_string()))
 }
 
 pub(super) fn frame_message(message: &ServerMessage) -> io::Result<Vec<u8>> {
-    let mut data = Vec::new();
-    condr_core::protocol::write_message(&mut data, message)
-        .map_err(|error| io::Error::other(error.to_string()))?;
-    Ok(data)
+    condr_core::protocol::encode_frame(message, MAX_FRAME_SIZE)
+        .map_err(|error| io::Error::other(error.to_string()))
 }
 
 pub(super) fn validate_persistable_snapshot(

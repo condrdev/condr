@@ -1,18 +1,17 @@
 //! The GUI's own window state (ADR 0023): what this Client showed when it last ran, so the
 //! next run opens the same way. Everything here is Client presentation; the Server never
-//! sees it and `config.toml` never carries it. Stored as `bincode + serde` like a Snapshot,
-//! in the platform state directory, rewritten whole after every change with a debounce.
+//! sees it and `config.toml` never carries it. Stored as one protobuf message (ADR 0028), in
+//! the platform state directory, rewritten whole after every change with a debounce.
 
 use super::*;
-use bincode::Options as _;
-use serde::{Deserialize, Serialize};
+use prost::Message as _;
 use std::fs;
 use std::path::Path;
 
 pub(super) const STATE_FILE_NAME: &str = "condr-gui.state";
 pub(super) const STATE_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Far above any real state; a file past it is someone else's.
-const MAX_STATE_BYTES: u64 = 1024 * 1024;
+const MAX_STATE_BYTES: usize = 1024 * 1024;
 
 /// What startup read: where the file is, and what it said. A `None` path never writes.
 #[derive(Clone, Debug, Default)]
@@ -28,7 +27,7 @@ impl LoadedState {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct GuiState {
     pub window: Option<WindowState>,
     /// Logical pixels, as the handles set them; `None` keeps the defaults.
@@ -42,13 +41,13 @@ pub(super) struct GuiState {
     pub servers: HashMap<ServerId, ServerState>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ServerState {
     pub view_workspace: Option<WorkspaceId>,
     pub workspaces: HashMap<WorkspaceId, WorkspaceState>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct WorkspaceState {
     pub view_tab: Option<TabId>,
     /// Unfolded in the left sidebar.
@@ -59,7 +58,7 @@ pub(super) struct WorkspaceState {
 }
 
 /// GPUI's `WindowBounds` with plain numbers, since it has no serde of its own.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum WindowState {
     Windowed(WindowRect),
     /// The rectangle is the restore size, as GPUI keeps it.
@@ -67,7 +66,7 @@ pub(super) enum WindowState {
     Fullscreen(WindowRect),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct WindowRect {
     pub x: f32,
     pub y: f32,
@@ -198,22 +197,188 @@ impl GuiState {
         fs::rename(&temporary, path)
     }
 
-    fn to_bytes(&self) -> bincode::Result<Vec<u8>> {
-        bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_limit(MAX_STATE_BYTES)
-            .serialize(self)
+    fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        let wire = wire::GuiState::from(self);
+        if wire.encoded_len() > MAX_STATE_BYTES {
+            return Err(format!("GUI state exceeds {MAX_STATE_BYTES} bytes"));
+        }
+        Ok(wire.encode_to_vec())
     }
 
-    fn from_bytes(bytes: &[u8]) -> bincode::Result<Self> {
-        if bytes.len() as u64 > MAX_STATE_BYTES {
-            return Err(Box::new(bincode::ErrorKind::SizeLimit));
+    fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() > MAX_STATE_BYTES {
+            return Err(format!("GUI state exceeds {MAX_STATE_BYTES} bytes"));
         }
-        bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_limit(MAX_STATE_BYTES)
-            .reject_trailing_bytes()
-            .deserialize(bytes)
+        wire::GuiState::decode(bytes)
+            .map(Self::from)
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// The file's protobuf shape. Private to the GUI, so it is declared here rather than in
+/// `proto/`: nothing else reads it. A value this build does not know is dropped, which
+/// costs a window position or a sidebar choice at most.
+mod wire {
+    use super::{SidebarView, WindowRect, WindowState};
+    use condr_core::protocol::ServerId;
+    use condr_core::{TabId, WorkspaceId};
+    use std::collections::HashMap;
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub(super) struct GuiState {
+        #[prost(message, optional, tag = "1")]
+        window: Option<Window>,
+        #[prost(float, optional, tag = "2")]
+        sidebar_width: Option<f32>,
+        #[prost(bool, tag = "3")]
+        sidebar_collapsed: bool,
+        #[prost(float, optional, tag = "4")]
+        changes_width: Option<f32>,
+        #[prost(uint64, optional, tag = "5")]
+        active_server: Option<u64>,
+        #[prost(map = "uint64, message", tag = "6")]
+        servers: HashMap<u64, Server>,
+    }
+
+    /// `mode` 1 windowed, 2 maximized, 3 fullscreen.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Window {
+        #[prost(uint32, tag = "1")]
+        mode: u32,
+        #[prost(float, tag = "2")]
+        x: f32,
+        #[prost(float, tag = "3")]
+        y: f32,
+        #[prost(float, tag = "4")]
+        width: f32,
+        #[prost(float, tag = "5")]
+        height: f32,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Server {
+        #[prost(uint64, optional, tag = "1")]
+        view_workspace: Option<u64>,
+        #[prost(map = "uint64, message", tag = "2")]
+        workspaces: HashMap<u64, Workspace>,
+    }
+
+    /// `sidebar_view` 1 Changes, 2 Files.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Workspace {
+        #[prost(uint64, optional, tag = "1")]
+        view_tab: Option<u64>,
+        #[prost(bool, tag = "2")]
+        sidebar_open: bool,
+        #[prost(bool, tag = "3")]
+        changes_open: bool,
+        #[prost(uint32, optional, tag = "4")]
+        sidebar_view: Option<u32>,
+    }
+
+    impl From<&super::GuiState> for GuiState {
+        fn from(state: &super::GuiState) -> Self {
+            Self {
+                window: state.window.map(|window| {
+                    let (mode, rect) = match window {
+                        WindowState::Windowed(rect) => (1, rect),
+                        WindowState::Maximized(rect) => (2, rect),
+                        WindowState::Fullscreen(rect) => (3, rect),
+                    };
+                    Window {
+                        mode,
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        height: rect.height,
+                    }
+                }),
+                sidebar_width: state.sidebar_width,
+                sidebar_collapsed: state.sidebar_collapsed,
+                changes_width: state.changes_width,
+                active_server: state.active_server.map(|server| server.0),
+                servers: state
+                    .servers
+                    .iter()
+                    .map(|(server, state)| {
+                        let workspaces = state
+                            .workspaces
+                            .iter()
+                            .map(|(workspace, state)| {
+                                let workspace_state = Workspace {
+                                    view_tab: state.view_tab.map(TabId::as_u64),
+                                    sidebar_open: state.sidebar_open,
+                                    changes_open: state.changes_open,
+                                    sidebar_view: state.sidebar_view.map(|view| match view {
+                                        SidebarView::Changes => 1,
+                                        SidebarView::Files => 2,
+                                    }),
+                                };
+                                (workspace.as_u64(), workspace_state)
+                            })
+                            .collect();
+                        let server_state = Server {
+                            view_workspace: state.view_workspace.map(WorkspaceId::as_u64),
+                            workspaces,
+                        };
+                        (server.0, server_state)
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    impl From<GuiState> for super::GuiState {
+        fn from(state: GuiState) -> Self {
+            Self {
+                window: state.window.and_then(|window| {
+                    let rect = WindowRect {
+                        x: window.x,
+                        y: window.y,
+                        width: window.width,
+                        height: window.height,
+                    };
+                    match window.mode {
+                        1 => Some(WindowState::Windowed(rect)),
+                        2 => Some(WindowState::Maximized(rect)),
+                        3 => Some(WindowState::Fullscreen(rect)),
+                        _ => None,
+                    }
+                }),
+                sidebar_width: state.sidebar_width,
+                sidebar_collapsed: state.sidebar_collapsed,
+                changes_width: state.changes_width,
+                active_server: state.active_server.map(ServerId),
+                servers: state
+                    .servers
+                    .into_iter()
+                    .map(|(server, state)| {
+                        let workspaces = state
+                            .workspaces
+                            .into_iter()
+                            .map(|(workspace, state)| {
+                                let workspace_state = super::WorkspaceState {
+                                    view_tab: state.view_tab.map(TabId::from_u64),
+                                    sidebar_open: state.sidebar_open,
+                                    changes_open: state.changes_open,
+                                    sidebar_view: state.sidebar_view.and_then(|view| match view {
+                                        1 => Some(SidebarView::Changes),
+                                        2 => Some(SidebarView::Files),
+                                        _ => None,
+                                    }),
+                                };
+                                (WorkspaceId::from_u64(workspace), workspace_state)
+                            })
+                            .collect();
+                        let server_state = super::ServerState {
+                            view_workspace: state.view_workspace.map(WorkspaceId::from_u64),
+                            workspaces,
+                        };
+                        (ServerId(server), server_state)
+                    })
+                    .collect(),
+            }
+        }
     }
 }
 

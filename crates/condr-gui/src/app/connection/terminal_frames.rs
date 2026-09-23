@@ -176,7 +176,10 @@ pub(in crate::app) fn assemble_terminal_frame_chunk(
     let completed = assembly
         .take()
         .expect("terminal frame chunk assembly must exist");
-    let pane = decode_pane_terminal_frame(&completed.payload)?;
+    // A frame from a newer protocol leaves the visual baseline behind: resynchronize.
+    let Some(pane) = decode_pane_terminal_frame(&completed.payload)? else {
+        return Err("terminal frame from a newer protocol".into());
+    };
     if pane.pane_id != completed.pane_id
         || terminal_view_frame_revision(&pane.frame) != completed.revision
     {

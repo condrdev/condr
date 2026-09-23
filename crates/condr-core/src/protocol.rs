@@ -10,13 +10,12 @@ mod bootstrap;
 mod framing;
 mod handshake;
 mod messages;
+pub(crate) mod pb;
 
 use crate::{
     AgentSnapshot, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, TerminalCommand,
     TerminalView, TerminalViewFrame, WorkspaceId,
 };
-use bincode::Options as _;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -26,9 +25,10 @@ pub use relative_path::{RelativePath, RelativePathBuf};
 
 pub use bootstrap::BootstrapAssembler;
 pub use framing::{
-    FramingError, decode_bootstrap_record, decode_pane_terminal_frame, encode_bootstrap_record,
-    encode_pane_terminal_frame, read_message, read_message_with_limit, write_client_message,
-    write_message, write_message_with_limit,
+    FramingError, MAX_FRAME_PREFIX, WireMessage, WirePaneFrame, decode_bootstrap_record,
+    decode_pane_terminal_frame, encode_bootstrap_record, encode_frame, encode_pane_terminal_frame,
+    frame_terminal_batch, read_message, read_message_with_limit, terminal_batch_overhead,
+    write_client_message, write_message, write_message_with_limit,
 };
 pub use handshake::{ClientHandshake, Hello, Refusal, Welcome};
 pub use messages::{
@@ -37,10 +37,18 @@ pub use messages::{
     PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch,
     ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
     ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview,
-    TerminalFrameBatch, TerminalFrameChunk, WorkspaceGitSnapshot, relative_age, uptime_text,
+    TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot, relative_age,
+    uptime_text,
 };
 
+/// This build's protocol (ADR 0028). Fields and oneof members are added without raising
+/// it past what the minimums below accept; only a change an older peer cannot survive
+/// raises a minimum.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// The oldest Client protocol this Server works with.
+pub const MIN_CLIENT_PROTOCOL: u32 = 1;
+/// The oldest Server protocol this Client works with.
+pub const MIN_SERVER_PROTOCOL: u32 = 1;
 pub const MAX_FRAME_SIZE: usize = 2 * 1024 * 1024;
 /// The largest clipboard image a Client may paste into a remote Pane (ADR 0012).
 pub const MAX_CLIPBOARD_IMAGE_BYTES: usize = 16 * 1024 * 1024;

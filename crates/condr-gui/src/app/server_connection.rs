@@ -91,6 +91,9 @@ pub(super) struct ServerConnection {
     /// Set by a subscription rejection: the next Bootstrap must re-acquire control and drop
     /// pending layout projections, because responses may have been lost to writer lag.
     pub(super) reacquire_after_bootstrap: bool,
+    /// When a message from a newer protocol last forced a Bootstrap. A second within
+    /// [`UNKNOWN_MESSAGE_WINDOW`] disconnects rather than loop (ADR 0028).
+    pub(super) unknown_message_at: Option<Instant>,
     /// Why the connection is not up: the connect attempt's or the disconnect's reason.
     /// Only that; a refused command is a toast and a denied control is `control_denied`.
     pub(super) error: Option<String>,
@@ -198,6 +201,7 @@ impl ServerConnection {
             control_retry_scheduled: false,
             bootstrap_resync_session_id: None,
             reacquire_after_bootstrap: false,
+            unknown_message_at: None,
             error: None,
             refusal: None,
             control_denied: None,

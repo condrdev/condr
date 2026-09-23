@@ -10,8 +10,6 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
     std::fs::create_dir_all(&directory).unwrap();
 
     let valid_empty = Session::new().snapshot().to_bytes().unwrap();
-    let mut unsupported = valid_empty.clone();
-    unsupported[..std::mem::size_of::<u32>()].copy_from_slice(&3u32.to_le_bytes());
     let structurally_invalid = structurally_invalid_snapshot(directory.clone());
     let relative_root = {
         let mut session = Session::new();
@@ -70,7 +68,6 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
                 (crate::persistence::MAX_SNAPSHOT_BYTES + 1) as usize
             ]),
         ),
-        ("unsupported", Some(unsupported)),
         ("structurally-invalid", Some(structurally_invalid)),
         ("relative-root", Some(relative_root)),
         ("relative-parent-root", Some(relative_parent_root)),

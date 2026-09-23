@@ -1,0 +1,62 @@
+// The first exchange on every connection (ADR 0027, 0028). Frozen: fields may be added,
+// never renumbered or reused, so every build of Condr can finish this exchange.
+syntax = "proto3";
+
+package condr.v1;
+
+// A oneof member that carries nothing.
+message Empty {}
+
+// The Client's first frame. Credential and Tunnel precede Hello on a Peer-to-peer
+// connection from an unknown Device (ADR 0026) and a local tunnel request (ADR 0025).
+message ClientHandshake {
+  oneof kind {
+    Hello hello = 1;
+    Credential credential = 2;
+    Tunnel tunnel = 3;
+  }
+}
+
+message Hello {
+  uint32 protocol = 1;
+  string build = 2;
+  string client_name = 3;
+  // The oldest Server protocol this Client works with.
+  uint32 min_server_protocol = 4;
+}
+
+message Credential {
+  // 32 bytes.
+  bytes invite = 1;
+}
+
+message Tunnel {
+  // 32 bytes.
+  bytes device = 1;
+  // 32 bytes when present.
+  optional bytes invite = 2;
+}
+
+// The Server's only answer to a handshake. With a refusal the connection closes.
+message Welcome {
+  uint32 protocol = 1;
+  string build = 2;
+  uint64 server_id = 3;
+  uint64 session_id = 4;
+  Refusal refusal = 5;
+  // The oldest Client protocol this Server works with.
+  uint32 min_client_protocol = 6;
+}
+
+// Why a Server closes a connection after reading its handshake. Members are only added;
+// one this build does not know reads as "refused for a reason this build does not know".
+message Refusal {
+  oneof reason {
+    Empty incompatible_protocol = 1;
+    string not_authorized = 2;
+    string pairing_failed = 3;
+    Empty device_revoked = 4;
+    string malformed = 5;
+    string tunnel_failed = 6;
+  }
+}

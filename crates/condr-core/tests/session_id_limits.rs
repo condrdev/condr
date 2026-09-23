@@ -1,14 +1,16 @@
+mod common;
+
 use std::path::PathBuf;
 
+use common::*;
+
 use condr_core::{Session, SessionSnapshot, SplitDirection};
-use serde::Serialize;
 
 const MAX_STABLE_ID: u64 = u64::MAX / 2;
 
 #[test]
 fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
-    let bytes = bincode::serialize(&EncodedSession {
-        version: 1,
+    let bytes = encode(&EncodedSession {
         workspaces: vec![EncodedWorkspace {
             id: MAX_STABLE_ID - 2,
             name: "boundary".into(),
@@ -21,7 +23,6 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
                     panes: vec![EncodedPane {
                         id: MAX_STABLE_ID,
                         cwd: Some(PathBuf::from("projects/boundary")),
-                        agent_resume: None,
                     }],
                     focused_pane: MAX_STABLE_ID,
                     focus_history: Vec::new(),
@@ -32,8 +33,7 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
                 },
             }],
         }],
-    })
-    .expect("boundary Snapshot encodes");
+    });
     let snapshot = SessionSnapshot::from_bytes(&bytes).expect("boundary schema decodes");
     let mut session = Session::restore(snapshot).expect("maximum stable ID is valid");
     let workspace_id = session.workspaces()[0].id();
@@ -53,57 +53,4 @@ fn restored_maximum_stable_id_blocks_all_new_allocations_without_mutation() {
         None
     );
     assert_eq!(session.snapshot(), before);
-}
-
-#[derive(Serialize)]
-struct EncodedSession {
-    version: u32,
-    workspaces: Vec<EncodedWorkspace>,
-}
-
-#[derive(Serialize)]
-struct EncodedWorkspace {
-    id: u64,
-    name: String,
-    root_directory: PathBuf,
-    worktree: Option<()>,
-    tabs: Vec<EncodedTab>,
-}
-
-#[derive(Serialize)]
-struct EncodedTab {
-    id: u64,
-    name: String,
-    content: EncodedTabContent,
-}
-
-/// Mirrors the snapshot's Tab content enum, variant order included.
-#[derive(Serialize)]
-enum EncodedTabContent {
-    Terminals {
-        panes: Vec<EncodedPane>,
-        focused_pane: u64,
-        focus_history: Vec<u64>,
-        layout: EncodedLayout,
-    },
-    #[expect(dead_code, reason = "the Diff variant keeps the wire order honest")]
-    Diff { path: PathBuf },
-}
-
-#[derive(Serialize)]
-struct EncodedPane {
-    id: u64,
-    cwd: Option<PathBuf>,
-    agent_resume: Option<condr_core::AgentResume>,
-}
-
-#[derive(Serialize)]
-struct EncodedLayout {
-    root: u32,
-    nodes: Vec<EncodedLayoutNode>,
-}
-
-#[derive(Serialize)]
-enum EncodedLayoutNode {
-    Pane(u64),
 }

@@ -136,8 +136,11 @@ impl BootstrapAssembler {
             .ok_or_else(|| "Bootstrap chunk index overflowed u32".to_string())?;
 
         if self.next_chunk_index == batch.chunk_count {
-            let record = decode_bootstrap_record(&self.current_payload)?;
-            self.insert_record(record)?;
+            // A record kind this build does not know is skipped: the rest of the Bootstrap
+            // is still complete state (ADR 0028).
+            if let Some(record) = decode_bootstrap_record(&self.current_payload)? {
+                self.insert_record(record)?;
+            }
             self.current_payload.clear();
             self.current_chunk_count = None;
             self.next_chunk_index = 0;

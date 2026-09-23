@@ -4,7 +4,6 @@ use crate::snapshot::TabContentSnapshot;
 impl Session {
     pub fn snapshot(&self) -> SessionSnapshot {
         SessionSnapshot {
-            version: SNAPSHOT_VERSION,
             workspaces: self
                 .workspaces
                 .iter()
@@ -49,9 +48,6 @@ impl Session {
     }
 
     pub fn restore(snapshot: SessionSnapshot) -> Result<Self, SnapshotError> {
-        if snapshot.version != SNAPSHOT_VERSION {
-            return Err(SnapshotError::UnsupportedVersion(snapshot.version));
-        }
         validate_snapshot_resources(&snapshot)?;
 
         let mut workspaces = Vec::with_capacity(snapshot.workspaces.len());

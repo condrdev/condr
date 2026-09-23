@@ -580,7 +580,7 @@ fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
         .into_iter()
         .flat_map(|batch| batch.payload)
         .collect::<Vec<_>>();
-    let BootstrapRecord::Terminal(projected) =
+    let Some(BootstrapRecord::Terminal(projected)) =
         condr_core::protocol::decode_bootstrap_record(&payload).unwrap()
     else {
         panic!("the Bootstrap record must remain a Terminal");
@@ -911,7 +911,7 @@ fn full_render_slot_regenerates_the_latest_tail_after_drain() {
     let message: ServerMessage = condr_core::protocol::read_message(&mut data.as_slice()).unwrap();
     assert!(matches!(
         message,
-        ServerMessage::TerminalFrame(TerminalFrameBatch { panes, .. })
+        ServerMessage::TerminalFrame(condr_core::protocol::TerminalFrameBatch { panes, .. })
             if panes.len() == 1
                 && matches!(
                     &panes[0].frame,
@@ -939,21 +939,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
         .focused_pane()
         .unwrap()
         .id();
-    let large_view = |revision| TerminalView {
-        selection: None,
-        revision,
-        size: TerminalSize::new(1, 1),
-        display_offset: 0,
-        mouse_tracking: condr_core::TerminalMouseTracking::None,
-        cells: vec![condr_core::TerminalCell {
-            text: "x".repeat(MAX_FRAME_SIZE / 2 + 1024).into(),
-            foreground: condr_core::TerminalColor::Named(0),
-            background: condr_core::TerminalColor::Named(0),
-            flags: 0,
-            hyperlink: None,
-        }],
-        cursor: None,
-    };
+    let large_view = |revision| wide_view(revision, MAX_FRAME_SIZE / 2 + 1024);
     let frames = frame_terminal_batches(
         ServerId(1),
         SessionId(1),
@@ -976,7 +962,7 @@ fn terminal_batches_are_split_before_the_protocol_limit() {
         let message: ServerMessage = condr_core::protocol::read_message(&mut frame).unwrap();
         assert!(matches!(
             message,
-            ServerMessage::TerminalFrame(TerminalFrameBatch { panes, .. })
+            ServerMessage::TerminalFrame(condr_core::protocol::TerminalFrameBatch { panes, .. })
                 if panes.len() == 1
                     && matches!(
                         &panes[0].frame,
@@ -999,21 +985,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
         .id();
     let expected = PaneTerminalFrame {
         pane_id,
-        frame: TerminalViewFrame::Full(TerminalView {
-            selection: None,
-            revision: 9,
-            size: TerminalSize::new(1, 1),
-            display_offset: 0,
-            mouse_tracking: condr_core::TerminalMouseTracking::None,
-            cells: vec![condr_core::TerminalCell {
-                text: "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024).into(),
-                foreground: condr_core::TerminalColor::Named(0),
-                background: condr_core::TerminalColor::Named(0),
-                flags: 0,
-                hyperlink: None,
-            }],
-            cursor: None,
-        }),
+        frame: TerminalViewFrame::Full(wide_view(9, MAX_CHUNK_PAYLOAD_SIZE + 1_024)),
     };
     let frames = frame_terminal_batches(ServerId(1), SessionId(1), vec![expected.clone()])
         .expect("oversized terminal frame should be chunked");
@@ -1037,7 +1009,7 @@ fn oversized_terminal_frame_is_transported_as_ordered_chunks() {
     assert_eq!(chunks, 2);
     assert_eq!(
         condr_core::protocol::decode_pane_terminal_frame(&payload).unwrap(),
-        expected
+        Some(expected)
     );
 }
 
@@ -1054,21 +1026,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
     let second_pane = session
         .split_pane(first_pane, condr_core::SplitDirection::Horizontal, 0.5)
         .unwrap();
-    let large_view = |revision| TerminalView {
-        selection: None,
-        revision,
-        size: TerminalSize::new(1, 1),
-        display_offset: 0,
-        mouse_tracking: condr_core::TerminalMouseTracking::None,
-        cells: vec![condr_core::TerminalCell {
-            text: "x".repeat(MAX_CHUNK_PAYLOAD_SIZE + 1_024).into(),
-            foreground: condr_core::TerminalColor::Named(0),
-            background: condr_core::TerminalColor::Named(0),
-            flags: 0,
-            hyperlink: None,
-        }],
-        cursor: None,
-    };
+    let large_view = |revision| wide_view(revision, MAX_CHUNK_PAYLOAD_SIZE + 1_024);
     let expected = SessionBootstrap {
         settings: Default::default(),
         server_id: ServerId(1),
@@ -1294,4 +1252,28 @@ fn load_shell_reads_the_nested_table() {
     assert_eq!(load_shell(Some(&path)), "nu");
     assert_eq!(load_shell(None), "");
     let _ = std::fs::remove_file(path);
+}
+
+/// One row of cells at 200 bytes each, `bytes` in all: a view larger than a frame, with
+/// every cell inside the per-cell text limit.
+fn wide_view(revision: u64, bytes: usize) -> TerminalView {
+    let columns = bytes.div_ceil(200);
+    TerminalView {
+        selection: None,
+        revision,
+        size: TerminalSize::new(1, u16::try_from(columns).unwrap()),
+        display_offset: 0,
+        mouse_tracking: condr_core::TerminalMouseTracking::None,
+        cells: vec![
+            condr_core::TerminalCell {
+                text: "x".repeat(200).into(),
+                foreground: condr_core::TerminalColor::Named(0),
+                background: condr_core::TerminalColor::Named(0),
+                flags: 0,
+                hyperlink: None,
+            };
+            columns
+        ],
+        cursor: None,
+    }
 }
