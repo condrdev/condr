@@ -1,6 +1,15 @@
 # cargo-about configuration for script/generate-licenses.
 no-clearly-defined = true
 private = { ignore = true }
+# The targets build.yml ships. Crates only other targets pull in (iroh's wasm transport)
+# are not in any Condr binary, so they are not listed.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
 # Licenses allowed in Condr's dependencies.
 accepted = [
     "Apache-2.0",
