@@ -97,8 +97,8 @@ pub(crate) fn relative_path(text: String) -> WireResult<RelativePathBuf> {
     Ok(RelativePathBuf::from(text))
 }
 
-/// Rejects `count` items of `what` above `limit`, the bound bincode checked while
-/// deserializing. prost has already materialized them; the frame limit bounds that.
+/// Rejects `count` items of `what` above `limit`. prost has already materialized them;
+/// the frame limit bounds that.
 pub(crate) fn bounded(count: usize, limit: usize, what: &str) -> WireResult<()> {
     if count > limit {
         return Err(malformed(format!(
@@ -107,3 +107,6 @@ pub(crate) fn bounded(count: usize, limit: usize, what: &str) -> WireResult<()> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

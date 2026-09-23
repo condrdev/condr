@@ -18,30 +18,36 @@ impl RuntimeState {
         let mut session = Session::new();
         let mut restored = false;
         if let Some(persistence) = persistence.as_ref() {
-            match persistence.load() {
-                SnapshotLoad::Missing => {}
+            let rejected = match persistence.load() {
+                SnapshotLoad::Missing => None,
                 SnapshotLoad::Loaded(snapshot) => match validate_persistable_snapshot(&snapshot)
                     .and_then(|()| validate_snapshot_root_paths(&snapshot))
+                    .and_then(|()| Session::restore(snapshot).map_err(|error| error.to_string()))
                 {
-                    Ok(()) => match Session::restore(snapshot) {
-                        Ok(loaded) => {
-                            session = loaded;
-                            restored = true;
-                        }
-                        Err(error) => tracing::warn!(
-                            "ignoring invalid Session Snapshot at {}: {error}",
-                            persistence.path().display()
-                        ),
-                    },
+                    Ok(loaded) => {
+                        session = loaded;
+                        restored = true;
+                        None
+                    }
+                    Err(error) => Some(("invalid", error)),
+                },
+                SnapshotLoad::Rejected(reason) => Some(("unreadable", reason)),
+            };
+            // Whatever was not restored is set aside before the empty Session can be
+            // saved over it: a newer Server's file, a corrupt one, one from elsewhere.
+            if let Some((kind, reason)) = rejected {
+                match persistence.set_aside(kind) {
+                    Ok(aside) => tracing::warn!(
+                        "set aside the Session Snapshot at {} as {}: {reason}",
+                        persistence.path().display(),
+                        aside.display()
+                    ),
                     Err(error) => tracing::warn!(
-                        "ignoring invalid Session Snapshot at {}: {error}",
+                        "ignoring invalid Session Snapshot at {}: {reason}; \
+                         it could not be set aside: {error}",
                         persistence.path().display()
                     ),
-                },
-                SnapshotLoad::Rejected(reason) => tracing::warn!(
-                    "ignoring invalid Session Snapshot at {}: {reason}",
-                    persistence.path().display()
-                ),
+                }
             }
         }
 

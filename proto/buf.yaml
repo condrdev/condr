@@ -1,0 +1,7 @@
+# `buf lint` runs in CI (ADR 0028); `buf breaking` against main joins it at the first release.
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD

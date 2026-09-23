@@ -12,11 +12,14 @@ mod private {
         /// The body of one frame, at most `limit` bytes, behind its varint length.
         fn frame(&self, limit: usize) -> Result<Vec<u8>, FramingError>;
         fn decode(body: &[u8]) -> Result<Self, FramingError>;
+        /// Refuses a body before it is decoded, where its size alone says it cannot be
+        /// what it claims.
+        fn admit(body: &[u8]) -> Result<(), FramingError>;
     }
 }
 
 macro_rules! wire_message {
-    ($domain:ty, $wire:ty, encode: $encode:expr) => {
+    ($domain:ty, $wire:ty, encode: $encode:ident, admit: $admit:ident) => {
         impl WireMessage for $domain {}
 
         impl private::Sealed for $domain {
@@ -30,8 +33,16 @@ macro_rules! wire_message {
                     .map_err(|error| FramingError::Codec(error.to_string()))?;
                 <$domain>::try_from(wire).map_err(|error| FramingError::Codec(error.to_string()))
             }
+
+            fn admit(body: &[u8]) -> Result<(), FramingError> {
+                $admit(body)
+            }
         }
     };
+}
+
+fn admit_any(_body: &[u8]) -> Result<(), FramingError> {
+    Ok(())
 }
 
 fn infallible<'a, D, W: From<&'a D>>(value: &'a D) -> Result<W, FramingError> {
@@ -42,10 +53,30 @@ fn fallible<'a, D, W: TryFrom<&'a D, Error = String>>(value: &'a D) -> Result<W,
     W::try_from(value).map_err(FramingError::Codec)
 }
 
-wire_message!(ClientHandshake, pb::ClientHandshake, encode: infallible);
-wire_message!(Welcome, pb::Welcome, encode: infallible);
-wire_message!(ClientMessage, pb::ClientMessage, encode: fallible);
-wire_message!(ServerMessage, pb::ServerMessage, encode: fallible);
+wire_message!(ClientHandshake, pb::ClientHandshake, encode: infallible, admit: admit_any);
+wire_message!(Welcome, pb::Welcome, encode: infallible, admit: admit_any);
+wire_message!(ClientMessage, pb::ClientMessage, encode: fallible, admit: admit_client_frame);
+
+/// Only `PasteImage` may use the image allowance, and a frame over the normal limit is
+/// checked to be exactly that one field before it is decoded: decoding a large frame of
+/// something else could cost many times its size (ADR 0028).
+fn admit_client_frame(body: &[u8]) -> Result<(), FramingError> {
+    const PASTE_IMAGE: u8 = 9 << 3 | 2;
+    if body.len() <= MAX_FRAME_SIZE {
+        return Ok(());
+    }
+    let refused = || FramingError::Oversized {
+        claimed: body.len(),
+        max: MAX_FRAME_SIZE,
+    };
+    let (&tag, rest) = body.split_first().ok_or_else(refused)?;
+    let length = prost::decode_length_delimiter(rest).map_err(|_| refused())?;
+    if tag != PASTE_IMAGE || 1 + prost::length_delimiter_len(length) + length != body.len() {
+        return Err(refused());
+    }
+    Ok(())
+}
+wire_message!(ServerMessage, pb::ServerMessage, encode: fallible, admit: admit_any);
 
 /// The longest varint length a frame carries: ten bytes encode any `u64`.
 pub const MAX_FRAME_PREFIX: usize = 10;
@@ -273,6 +304,7 @@ where
     let claimed = claimed as usize;
     let mut body = vec![0; claimed];
     read_exact_or_eof(reader, &mut body)?;
+    M::admit(&body)?;
     Ok((M::decode(&body)?, claimed))
 }
 

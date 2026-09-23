@@ -502,6 +502,40 @@ impl ServerConnection {
         self.request_snapshot_for(authoritative_session_id)
     }
 
+    /// A message from a newer protocol (ADR 0028): recover as its stream requires and
+    /// report whether to repaint, or `None` when it is the second within
+    /// [`UNKNOWN_MESSAGE_WINDOW`] and the connection should end instead of looping.
+    pub(super) fn receive_unknown(
+        &mut self,
+        unknown: UnknownMessage,
+        now: Instant,
+    ) -> Option<bool> {
+        if self
+            .unknown_message_at
+            .is_some_and(|at| now.duration_since(at) < UNKNOWN_MESSAGE_WINDOW)
+        {
+            return None;
+        }
+        self.unknown_message_at = Some(now);
+        Some(match unknown {
+            // The reader already dropped the visual state and asked for a Bootstrap.
+            UnknownMessage::TerminalFrame => false,
+            UnknownMessage::Event { .. } => {
+                self.subscribed = false;
+                self.subscription_pending = false;
+                self.request_snapshot()
+            }
+            // It may have been a reply something waits on: recover as for a reply lost
+            // to writer lag, which also clears projections and reacquires control.
+            UnknownMessage::Reply => match (self.server_id, self.session_id) {
+                (Some(server_id), Some(session_id)) => {
+                    self.recover_rejected_subscription(server_id, session_id)
+                }
+                _ => false,
+            },
+        })
+    }
+
     pub(super) fn recover_rejected_subscription(
         &mut self,
         server_id: ServerId,

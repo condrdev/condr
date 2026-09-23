@@ -317,37 +317,48 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
 impl TryFrom<super::ClientMessage> for ClientMessage {
     type Error = WireError;
 
+    /// An unknown value anywhere inside becomes [`ClientMessage::Unknown`], which the
+    /// Server answers without closing the connection; only malformed input is an error.
     fn try_from(message: super::ClientMessage) -> WireResult<Self> {
+        match decode_client_message(message) {
+            Err(WireError::Unknown) => Ok(Self::Unknown),
+            other => other,
+        }
+    }
+}
+
+fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMessage> {
+    {
         use client_message::Message;
         let session = |request: SessionRequest| SessionId(request.session_id);
         Ok(match member(message.message)? {
-            Message::SnapshotRequest(request) => Self::SnapshotRequest {
+            Message::SnapshotRequest(request) => ClientMessage::SnapshotRequest {
                 session_id: session(request),
             },
-            Message::OverviewRequest(request) => Self::OverviewRequest {
+            Message::OverviewRequest(request) => ClientMessage::OverviewRequest {
                 session_id: session(request),
             },
-            Message::Subscribe(subscribe) => Self::Subscribe {
+            Message::Subscribe(subscribe) => ClientMessage::Subscribe {
                 session_id: SessionId(subscribe.session_id),
                 after_sequence: subscribe.after_sequence,
             },
-            Message::Ping(ping) => Self::Ping {
+            Message::Ping(ping) => ClientMessage::Ping {
                 server_id: ServerId(ping.server_id),
                 nonce: ping.nonce,
             },
-            Message::AcquireControl(request) => Self::AcquireControl {
+            Message::AcquireControl(request) => ClientMessage::AcquireControl {
                 session_id: session(request),
             },
-            Message::ReleaseControl(request) => Self::ReleaseControl {
+            Message::ReleaseControl(request) => ClientMessage::ReleaseControl {
                 session_id: session(request),
             },
-            Message::Layout(layout) => Self::Layout {
+            Message::Layout(layout) => ClientMessage::Layout {
                 server_id: ServerId(layout.server_id),
                 session_id: SessionId(layout.session_id),
                 request_id: layout.request_id,
                 command: required(layout.command, "layout command")?.try_into()?,
             },
-            Message::Terminal(terminal) => Self::Terminal {
+            Message::Terminal(terminal) => ClientMessage::Terminal {
                 server_id: ServerId(terminal.server_id),
                 session_id: SessionId(terminal.session_id),
                 pane_id: pane(terminal.pane_id),
@@ -356,7 +367,7 @@ impl TryFrom<super::ClientMessage> for ClientMessage {
                     "terminal command",
                 )?)?,
             },
-            Message::PasteImage(image) => Self::PasteImage {
+            Message::PasteImage(image) => ClientMessage::PasteImage {
                 server_id: ServerId(image.server_id),
                 session_id: SessionId(image.session_id),
                 pane_id: pane(image.pane_id),
@@ -372,13 +383,13 @@ impl TryFrom<super::ClientMessage> for ClientMessage {
                 },
                 bytes: image.bytes,
             },
-            Message::ReadPane(read) => Self::ReadPane {
+            Message::ReadPane(read) => ClientMessage::ReadPane {
                 server_id: ServerId(read.server_id),
                 session_id: SessionId(read.session_id),
                 pane_id: pane(read.pane_id),
                 lines: read.lines,
             },
-            Message::GitDiff(diff) => Self::GitDiff {
+            Message::GitDiff(diff) => ClientMessage::GitDiff {
                 server_id: ServerId(diff.server_id),
                 session_id: SessionId(diff.session_id),
                 request_id: diff.request_id,
@@ -389,39 +400,39 @@ impl TryFrom<super::ClientMessage> for ClientMessage {
                     super::DiffBase::Head => DiffBase::Head,
                 },
             },
-            Message::ListDirectory(request) => Self::ListDirectory {
+            Message::ListDirectory(request) => ClientMessage::ListDirectory {
                 server_id: ServerId(request.server_id),
                 session_id: SessionId(request.session_id),
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
                 path: relative_path(request.path)?,
             },
-            Message::ReadFile(request) => Self::ReadFile {
+            Message::ReadFile(request) => ClientMessage::ReadFile {
                 server_id: ServerId(request.server_id),
                 session_id: SessionId(request.session_id),
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
                 path: relative_path(request.path)?,
             },
-            Message::Agent(agent) => Self::Agent {
+            Message::Agent(agent) => ClientMessage::Agent {
                 server_id: ServerId(agent.server_id),
                 session_id: SessionId(agent.session_id),
                 command: required(agent.command, "agent command")?.try_into()?,
             },
-            Message::SetServerSettings(settings) => Self::SetServerSettings {
+            Message::SetServerSettings(settings) => ClientMessage::SetServerSettings {
                 server_id: ServerId(settings.server_id),
                 shell: settings.shell,
             },
-            Message::StopServer(request) => Self::StopServer {
+            Message::StopServer(request) => ClientMessage::StopServer {
                 server_id: ServerId(request.server_id),
             },
-            Message::RevokeDevice(revoke) => Self::RevokeDevice { key: revoke.key },
-            Message::ConnectedDevices(_) => Self::ConnectedDevices,
-            Message::ServerAdmin(admin) => Self::ServerAdmin {
+            Message::RevokeDevice(revoke) => ClientMessage::RevokeDevice { key: revoke.key },
+            Message::ConnectedDevices(_) => ClientMessage::ConnectedDevices,
+            Message::ServerAdmin(admin) => ClientMessage::ServerAdmin {
                 server_id: ServerId(admin.server_id),
                 command: required(admin.command, "admin command")?.try_into()?,
             },
-            Message::Detach(_) => Self::Detach,
+            Message::Detach(_) => ClientMessage::Detach,
         })
     }
 }

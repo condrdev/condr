@@ -386,11 +386,11 @@ fn maximum_chunk_payloads_fit_the_outer_protocol_frame() {
 
 #[test]
 fn bootstrap_assembler_rejects_oversized_records_before_decode() {
-    let (header, _, _) = bootstrap_header(17);
-    let mut assembler = BootstrapAssembler::new(header.clone()).unwrap();
     let full_chunks = MAX_CHUNKED_RECORD_SIZE / MAX_CHUNK_PAYLOAD_SIZE;
     let tail = MAX_CHUNKED_RECORD_SIZE % MAX_CHUNK_PAYLOAD_SIZE;
-    assert_eq!(full_chunks, 16);
+    assert!(tail > 0, "the limit is not a whole number of chunks");
+    let (header, _, _) = bootstrap_header(full_chunks as u32 + 1);
+    let mut assembler = BootstrapAssembler::new(header.clone()).unwrap();
     for chunk_index in 0..full_chunks {
         assembler
             .push(bootstrap_batch(
@@ -398,7 +398,7 @@ fn bootstrap_assembler_rejects_oversized_records_before_decode() {
                 chunk_index as u32,
                 0,
                 chunk_index as u32,
-                17,
+                full_chunks as u32 + 1,
                 vec![0; MAX_CHUNK_PAYLOAD_SIZE],
             ))
             .unwrap();
@@ -410,7 +410,7 @@ fn bootstrap_assembler_rejects_oversized_records_before_decode() {
                 full_chunks as u32,
                 0,
                 full_chunks as u32,
-                17,
+                full_chunks as u32 + 1,
                 vec![0; tail + 1],
             ))
             .is_err()
@@ -668,5 +668,67 @@ fn server_admin_commands_round_trip() {
     assert_eq!(
         read_message::<_, ClientMessage>(&mut frame.as_slice()).unwrap(),
         message
+    );
+}
+
+/// The record limit is the largest legitimate record plus a margin (ADR 0028): every
+/// cell of the largest grid at the per-cell text limit, every cell linked, the hyperlink
+/// table full, and the widest colors.
+#[test]
+fn the_largest_terminal_record_fits_the_record_limit() {
+    const CELLS: usize = 65_536;
+    const CELL_TEXT: usize = 256;
+    const URI: usize = 8 * 1024;
+    let links = 4 * 1024 * 1024 / URI;
+    let cells = (0..CELLS)
+        .map(|index| condr_core::TerminalCell {
+            text: "x".repeat(CELL_TEXT).into(),
+            foreground: condr_core::TerminalColor::Rgb {
+                red: 255,
+                green: 255,
+                blue: 255,
+            },
+            background: condr_core::TerminalColor::Rgb {
+                red: 255,
+                green: 255,
+                blue: 255,
+            },
+            flags: u16::MAX,
+            hyperlink: Some(format!("{:08}{}", index % links, "x".repeat(URI - 8)).into()),
+        })
+        .collect();
+    let mut snapshot = terminal_snapshot(PaneId::from_u64(u64::MAX), "x".into());
+    snapshot.view.size = condr_core::TerminalSize::new(256, 256);
+    snapshot.view.cells = cells;
+    snapshot.title = Some("t".repeat(4096));
+    let encoded = encode_bootstrap_record(&BootstrapRecord::Terminal(snapshot)).unwrap();
+    assert!(
+        encoded.len() + encoded.len() / 8 <= MAX_CHUNKED_RECORD_SIZE,
+        "{} bytes leave under an eighth of the limit spare",
+        encoded.len()
+    );
+}
+
+/// A frame over the normal limit that is not exactly one pasted image is refused before
+/// it is decoded (ADR 0028).
+#[test]
+fn only_a_pasted_image_may_arrive_over_the_normal_frame_limit() {
+    let layout = ClientMessage::Layout {
+        server_id: ServerId(1),
+        session_id: SessionId(1),
+        request_id: 1,
+        command: LayoutCommand::SetSplitRatios {
+            tab_id: TabId::from_u64(1),
+            ratios: vec![0.5; MAX_FRAME_SIZE / 4],
+        },
+    };
+    let mut frame = Vec::new();
+    write_message_with_limit(&mut frame, &layout, MAX_IMAGE_FRAME_SIZE).unwrap();
+    let read =
+        read_message_with_limit::<_, ClientMessage>(&mut frame.as_slice(), MAX_IMAGE_FRAME_SIZE);
+    assert!(
+        matches!(read, Err(FramingError::Oversized { .. })),
+        "{} bytes: {read:?}",
+        frame.len()
     );
 }

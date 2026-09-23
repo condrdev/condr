@@ -56,14 +56,17 @@ pub const MAX_CLIPBOARD_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 /// message's own fields. Every other message keeps `MAX_FRAME_SIZE`.
 pub const MAX_IMAGE_FRAME_SIZE: usize = MAX_CLIPBOARD_IMAGE_BYTES + 1024;
 pub const MAX_BOOTSTRAP_BATCHES: u32 = 65_536;
-pub const MAX_CHUNKED_RECORD_SIZE: usize = 32 * 1024 * 1024;
+/// The largest chunked record: a full-grid Terminal record is at most 16 MiB of cell
+/// text, 4 MiB of hyperlink table and about 1 MiB of columns, and
+/// `the_largest_terminal_record_fits_the_record_limit` holds it to that (ADR 0028).
+pub const MAX_CHUNKED_RECORD_SIZE: usize = 24 * 1024 * 1024;
 pub const MAX_BOOTSTRAP_TOTAL_SIZE: usize = 64 * 1024 * 1024;
 pub const MAX_CHUNK_PAYLOAD_SIZE: usize = MAX_FRAME_SIZE - 256;
-/// Bytes a framed `BootstrapBatch` adds on top of its payload: the 4-byte length prefix plus
-/// the bincode envelope (discriminant, identifiers, indices, payload length).
+/// Bytes a framed `BootstrapBatch` adds on top of its payload: the varint length prefix
+/// plus the protobuf envelope (tags, identifiers, indices, payload length).
 pub const BOOTSTRAP_BATCH_FRAME_OVERHEAD: usize = 64;
 /// The largest complete framed Bootstrap the limits above allow: one header frame, every
 /// batch envelope, and the aggregate record payload.
-pub const MAX_FRAMED_BOOTSTRAP_BYTES: usize = (MAX_FRAME_SIZE + 4)
+pub const MAX_FRAMED_BOOTSTRAP_BYTES: usize = (MAX_FRAME_SIZE + MAX_FRAME_PREFIX)
     + MAX_BOOTSTRAP_TOTAL_SIZE
     + MAX_BOOTSTRAP_BATCHES as usize * BOOTSTRAP_BATCH_FRAME_OVERHEAD;

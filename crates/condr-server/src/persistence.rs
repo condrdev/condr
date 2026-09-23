@@ -126,6 +126,19 @@ impl SnapshotPersistence {
         &self.path
     }
 
+    /// Moves a Snapshot this Server will not restore out of the way, as
+    /// `<file>.<kind>-<unix seconds>`, so starting empty never overwrites it (ADR 0028).
+    pub(crate) fn set_aside(&self, kind: &str) -> io::Result<PathBuf> {
+        let seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let mut aside = self.path.clone().into_os_string();
+        aside.push(format!(".{kind}-{seconds}"));
+        let aside = PathBuf::from(aside);
+        fs::rename(&self.path, &aside)?;
+        Ok(aside)
+    }
+
     pub(crate) fn load(&self) -> SnapshotLoad {
         self.load_inner().unwrap_or_else(|error| {
             SnapshotLoad::Rejected(format!("cannot read Session Snapshot: {error}"))

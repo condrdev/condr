@@ -1,4 +1,7 @@
 use super::*;
+use crate::app::UNKNOWN_MESSAGE_WINDOW;
+use condr_core::protocol::UnknownMessage;
+use std::time::{Duration, Instant};
 
 #[test]
 fn edit_server_fields_only_accept_host_and_port_shaped_text() {
@@ -420,4 +423,56 @@ fn bootstrap_attention_survives_arriving_before_control_is_granted() {
         zoomed_panes: Vec::new(),
     });
     assert!(connection.attention.contains(&pane));
+}
+
+#[test]
+fn a_message_from_a_newer_protocol_resynchronizes_once_then_disconnects() {
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
+    connection.status = ConnectionStatus::Connected;
+    connection.server_id = Some(ServerId(1));
+    connection.session_id = Some(SessionId(3));
+    connection.subscribed = true;
+    let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
+    connection.io = Some(ClientIo {
+        outgoing,
+        _incoming_task: Task::ready(()),
+    });
+    let start = Instant::now();
+
+    // An unknown event: one Bootstrap, and the subscription is renewed after it.
+    assert_eq!(
+        connection.receive_unknown(UnknownMessage::Event { sequence: 8 }, start),
+        Some(true)
+    );
+    assert_eq!(
+        outgoing_rx.recv().unwrap(),
+        condr_core::protocol::ClientMessage::SnapshotRequest {
+            session_id: SessionId(3),
+        }
+    );
+    assert!(!connection.subscribed);
+
+    // A second within the window ends the connection instead of looping.
+    assert_eq!(
+        connection.receive_unknown(
+            UnknownMessage::TerminalFrame,
+            start + Duration::from_secs(1)
+        ),
+        None
+    );
+
+    // After the window, an unknown reply takes the stronger recovery.
+    connection.bootstrap_resync_session_id = None;
+    let later = start + UNKNOWN_MESSAGE_WINDOW + Duration::from_secs(1);
+    assert_eq!(
+        connection.receive_unknown(UnknownMessage::Reply, later),
+        Some(true)
+    );
+    assert!(connection.reacquire_after_bootstrap);
+    assert_eq!(
+        outgoing_rx.recv().unwrap(),
+        condr_core::protocol::ClientMessage::SnapshotRequest {
+            session_id: SessionId(3),
+        }
+    );
 }

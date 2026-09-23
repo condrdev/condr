@@ -213,8 +213,6 @@ pub enum HooksAction {
 /// `note` is standing advice for the agent; `warning` is a step the install could not
 /// finish on the user's behalf.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-// No `skip_serializing_if`: bincode has no field names, so a skipped field is read
-// as the next one and the frame ends early.
 pub struct HooksReport {
     pub agent: AgentKind,
     pub path: PathBuf,

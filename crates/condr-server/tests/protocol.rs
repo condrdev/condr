@@ -271,6 +271,42 @@ fn the_server_serves_its_protocol_range_and_refuses_outside_it() {
     thread.join().unwrap().unwrap();
 }
 
+/// A request from a newer Client is answered and the connection goes on (ADR 0028).
+#[test]
+fn an_unknown_client_message_is_answered_without_closing_the_connection() {
+    let (handle, endpoint, thread) = start();
+    let connection = ClientConnection::connect(&endpoint, "test").unwrap();
+    let server_id = connection.bootstrap().unwrap().server_id;
+    let mut stream = connection.into_stream();
+    // A ClientMessage whose only field is member 99 of its oneof, empty.
+    std::io::Write::write_all(&mut stream, &[3, 0x9a, 0x06, 0x00]).unwrap();
+    let response: ServerMessage = condr_core::protocol::read_message(&mut stream).unwrap();
+    assert!(
+        matches!(&response, ServerMessage::Error { message } if message.contains("update")),
+        "{response:?}"
+    );
+
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Ping {
+            server_id,
+            nonce: 5,
+        },
+    )
+    .unwrap();
+    loop {
+        match condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap() {
+            ServerMessage::Pong { nonce: 5, .. } => break,
+            ServerMessage::Error { message } => panic!("{message}"),
+            _ => {}
+        }
+    }
+
+    handle.stop();
+    drop(stream);
+    thread.join().unwrap().unwrap();
+}
+
 #[test]
 fn oversized_client_frame_is_rejected_with_a_clear_error() {
     let (handle, endpoint, thread) = start();

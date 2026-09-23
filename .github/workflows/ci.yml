@@ -27,6 +27,14 @@ jobs:
         with:
           persist-credentials: false
       - run: cargo fmt --all -- --check
+      # The protocol contract (ADR 0028). `breaking` joins at the first release.
+      - uses: bufbuild/buf-action@v1
+        with:
+          input: proto
+          lint: true
+          format: false
+          breaking: false
+          push: false
 
   test:
     name: clippy and test (${{ matrix.os }})

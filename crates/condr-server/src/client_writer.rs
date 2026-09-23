@@ -3,12 +3,13 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use condr_core::protocol::{MAX_FRAME_SIZE, MAX_FRAMED_BOOTSTRAP_BYTES};
+use condr_core::protocol::{MAX_FRAME_PREFIX, MAX_FRAME_SIZE, MAX_FRAMED_BOOTSTRAP_BYTES};
 
 const MAX_RELIABLE_QUEUE_ITEMS: usize = 512;
 // Room for the largest framed Bootstrap the protocol allows plus one ordinary frame, so a
 // legitimate recovery Bootstrap can never itself trip the lag bound.
-const MAX_RELIABLE_QUEUE_BYTES: usize = MAX_FRAMED_BOOTSTRAP_BYTES + MAX_FRAME_SIZE + 4;
+const MAX_RELIABLE_QUEUE_BYTES: usize =
+    MAX_FRAMED_BOOTSTRAP_BYTES + MAX_FRAME_SIZE + MAX_FRAME_PREFIX;
 
 /// Why a reliable send was refused. `Lagged` means the backlog was replaced by the lag
 /// notice and the client will re-Bootstrap; the connection itself is still alive.

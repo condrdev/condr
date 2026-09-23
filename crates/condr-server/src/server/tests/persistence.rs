@@ -81,9 +81,12 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
         if let Some(bytes) = bytes {
             std::fs::write(&path, bytes).unwrap();
         }
-        let (state, startup_terminals) =
-            RuntimeState::recover(test_endpoint().as_local_path().unwrap(), Some(path), None)
-                .unwrap();
+        let (state, startup_terminals) = RuntimeState::recover(
+            test_endpoint().as_local_path().unwrap(),
+            Some(path.clone()),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             state.session.snapshot(),
             Session::new().snapshot(),
@@ -91,6 +94,28 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
         );
         assert!(state.terminals.is_empty(), "{name}");
         assert!(startup_terminals.is_empty(), "{name}");
+        // A file that was not restored is set aside, never left for the empty Session to
+        // overwrite (ADR 0028); the valid empty one stays where it is.
+        let aside = std::fs::read_dir(&directory)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                let file = entry.file_name().into_string().unwrap();
+                file.starts_with(&format!("{name}.snapshot."))
+                    && !file.ends_with(".lock")
+                    && !file.ends_with(".tmp")
+            })
+            .count();
+        match name {
+            // A root that is a file restores; the Workspace is dropped afterwards.
+            "missing" | "empty" | "valid-empty" | "absolute-file-root" => {
+                assert_eq!(aside, 0, "{name}")
+            }
+            _ => {
+                assert_eq!(aside, 1, "{name}");
+                assert!(!path.exists(), "{name}");
+            }
+        }
     }
 
     let _ = std::fs::remove_dir_all(directory);
