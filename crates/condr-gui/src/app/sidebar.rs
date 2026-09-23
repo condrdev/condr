@@ -656,13 +656,14 @@ impl Condr {
     /// Carries a dot while the update check has found a newer build (ADR 0029); the
     /// About page says which.
     fn settings_button(&self, owner: WeakEntity<Self>, cx: &App) -> AnyElement {
+        let update = matches!(self.update_state, UpdateState::Available(_));
         let button = Button::new("open-settings")
             .debug_selector(|| "open-settings".into())
             .ghost()
             .small()
             .icon(IconName::Settings)
             .tooltip_with_action("Settings", &OpenSettings, Some(SHORTCUT_CONTEXT))
-            .accessibility_label(if self.available_update.is_some() {
+            .accessibility_label(if update {
                 "Settings, update available"
             } else {
                 "Settings"
@@ -670,7 +671,7 @@ impl Condr {
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| this.open_settings(window, cx));
             });
-        if self.available_update.is_none() {
+        if !update {
             return button.into_any_element();
         }
         Badge::new()

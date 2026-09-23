@@ -8,25 +8,23 @@ use gpui_kit::http_client::{AsyncBody, HttpClient};
 
 /// The first check waits this long after start, so it never competes with startup.
 pub(super) const FIRST_CHECK_DELAY: Duration = Duration::from_secs(5);
-const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+pub(super) const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60 * 60);
 const REPOSITORY_API: &str = "https://api.github.com/repos/condrdev/condr";
 
-/// Which published builds the update check looks for: `[client] update_channel`.
+/// Which published builds the update check looks for: `[client.updates] channel`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) enum UpdateChannel {
     Stable,
     Nightly,
-    Off,
 }
 
 impl UpdateChannel {
-    pub(in crate::app) const ALL: [Self; 3] = [Self::Stable, Self::Nightly, Self::Off];
+    pub(in crate::app) const ALL: [Self; 2] = [Self::Stable, Self::Nightly];
 
     pub(in crate::app) fn as_str(self) -> &'static str {
         match self {
             Self::Stable => "stable",
             Self::Nightly => "nightly",
-            Self::Off => "off",
         }
     }
 
@@ -34,7 +32,6 @@ impl UpdateChannel {
         match self {
             Self::Stable => "Stable",
             Self::Nightly => "Nightly",
-            Self::Off => "Off",
         }
     }
 
@@ -57,13 +54,22 @@ impl UpdateChannel {
 
     /// Where the GitHub API names this channel's newest build, and the JSON field that
     /// holds it: the stable tag, or the commit the `nightly` tag points at.
-    fn latest_source(self) -> Option<(&'static str, &'static str)> {
+    fn latest_source(self) -> (&'static str, &'static str) {
         match self {
-            Self::Stable => Some(("releases/latest", "/tag_name")),
-            Self::Nightly => Some(("git/ref/tags/nightly", "/object/sha")),
-            Self::Off => None,
+            Self::Stable => ("releases/latest", "/tag_name"),
+            Self::Nightly => ("git/ref/tags/nightly", "/object/sha"),
         }
     }
+}
+
+/// What the last check on the current channel found. Back to `Unknown` when the channel
+/// changes or automatic checks are turned off.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(in crate::app) enum UpdateState {
+    #[default]
+    Unknown,
+    UpToDate,
+    Available(AvailableUpdate),
 }
 
 /// A build on the followed channel that is newer than this one.
@@ -98,13 +104,12 @@ fn available_update(
             name: format!("Nightly {}", latest.get(..12).unwrap_or(latest)).into(),
             url: format!("{REPOSITORY_URL}/releases/tag/nightly").into(),
         }),
-        UpdateChannel::Off => None,
     }
 }
 
 /// Gives GPUI its HTTP client, built off the main thread: loading the platform's CA
 /// certificates is not free, and nothing needs it before the first check. Only
-/// `startup::run` calls this, so tests keep GPUI's null client and never reach GitHub.
+/// `startup::run` calls this, so tests keep GPUI's test client and never reach GitHub.
 pub(super) fn install_http_client(cx: &mut App) {
     let client = cx.background_executor().spawn(async {
         // Not `ReqwestClient::user_agent`: it leaves rustls to pick a crypto provider,
@@ -152,6 +157,23 @@ async fn fetch_latest(
 }
 
 impl Condr {
+    pub(in crate::app) fn set_auto_check_updates(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.auto_check_updates == enabled {
+            return;
+        }
+        self.auto_check_updates = enabled;
+        self.save_auto_check_updates(cx);
+        if enabled {
+            self.start_automatic_update_checks(Duration::ZERO, cx);
+        } else {
+            self._automatic_update_checks = Task::ready(());
+            self.update_state = UpdateState::Unknown;
+        }
+        cx.notify();
+    }
+
+    /// What the last channel's check found no longer applies; with automatic checks on,
+    /// the new channel is checked right away, outside the five-hour schedule.
     pub(in crate::app) fn set_update_channel(
         &mut self,
         channel: UpdateChannel,
@@ -162,57 +184,95 @@ impl Condr {
         }
         self.update_channel = channel;
         self.save_update_channel(cx);
-        self.start_update_checks(Duration::ZERO, cx);
+        self.update_state = UpdateState::Unknown;
+        if self.auto_check_updates {
+            self.check_for_updates(false, cx).detach();
+        }
         cx.notify();
     }
 
-    /// Checks the channel after `delay`, then once a day for as long as Condr runs;
-    /// replacing the task stops the previous channel's checks. A failure is only
-    /// logged: nobody asked for this check, so it shows no error, and the next retries.
-    pub(super) fn start_update_checks(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        self.available_update = None;
-        let channel = self.update_channel;
-        let Some((path, field)) = channel.latest_source() else {
-            self._update_checks = Task::ready(());
-            return;
-        };
-        self._update_checks = cx.spawn(async move |this, cx| {
+    /// The Check button: works whether or not automatic checks are on, and leaves their
+    /// schedule alone.
+    pub(in crate::app) fn check_for_updates_now(&mut self, cx: &mut Context<Self>) {
+        self.check_for_updates(true, cx).detach();
+        cx.notify();
+    }
+
+    /// The first automatic check after `delay`, then one every five hours; replacing the
+    /// task stops them. Each checks the channel current when it runs.
+    pub(super) fn start_automatic_update_checks(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        self._automatic_update_checks = cx.spawn(async move |this, cx| {
             let mut delay = delay;
             loop {
                 cx.background_executor().timer(delay).await;
                 delay = CHECK_INTERVAL;
-                let client = cx.update(|cx| cx.http_client());
-                let latest = cx
-                    .background_executor()
-                    .spawn(fetch_latest(client, path, field))
-                    .await;
-                let latest = match latest {
-                    Ok(latest) => latest,
-                    Err(error) => {
-                        tracing::warn!(
-                            "Update check on the {} channel failed: {error}",
-                            channel.as_str()
-                        );
-                        continue;
-                    }
+                let Ok(check) = this.update(cx, |this, cx| this.check_for_updates(false, cx))
+                else {
+                    break;
                 };
-                let update = available_update(
+                check.await;
+            }
+        });
+    }
+
+    /// One check of the current channel. `manual` is the Check button: its spinner turns
+    /// while the request runs and a failure is reported. An automatic check nobody asked
+    /// for only logs its failure, and the next one retries.
+    fn check_for_updates(&mut self, manual: bool, cx: &mut Context<Self>) -> Task<()> {
+        let channel = self.update_channel;
+        let (path, field) = channel.latest_source();
+        if manual {
+            self.checking_updates = true;
+        }
+        cx.spawn(async move |this, cx| {
+            let client = cx.update(|cx| cx.http_client());
+            let latest = cx
+                .background_executor()
+                .spawn(fetch_latest(client, path, field))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_update_check(channel, latest, manual, cx);
+            });
+        })
+    }
+
+    fn finish_update_check(
+        &mut self,
+        channel: UpdateChannel,
+        latest: Result<String, String>,
+        manual: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if manual {
+            self.checking_updates = false;
+        }
+        cx.notify();
+        // The channel changed while the request ran: its answer is about the old one.
+        if channel != self.update_channel {
+            return;
+        }
+        match latest {
+            Ok(latest) => {
+                self.update_state = available_update(
                     channel,
                     &latest,
                     condr_core::build_identity(),
                     option_env!("CONDR_BUILD_COMMIT").filter(|commit| !commit.is_empty()),
-                );
-                let applied = this.update(cx, |this, cx| {
-                    if this.available_update != update {
-                        this.available_update = update;
-                        cx.notify();
-                    }
-                });
-                if applied.is_err() {
-                    break;
-                }
+                )
+                .map_or(UpdateState::UpToDate, UpdateState::Available);
             }
-        });
+            Err(error) if manual => {
+                self.report_error(format!("Failed to check for updates: {error}"), cx);
+            }
+            Err(error) => tracing::warn!(
+                "Update check on the {} channel failed: {error}",
+                channel.as_str()
+            ),
+        }
     }
 }
 
@@ -259,12 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn off_offers_nothing_and_unknown_values_follow_the_build() {
-        assert_eq!(
-            available_update(UpdateChannel::Off, "v9.0.0", "0.1.0", None),
-            None
-        );
-        assert_eq!(UpdateChannel::Off.latest_source(), None);
+    fn unknown_channels_follow_the_build() {
         for channel in UpdateChannel::ALL {
             assert_eq!(UpdateChannel::from_str(channel.as_str()), channel);
         }

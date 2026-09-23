@@ -726,3 +726,59 @@ fn the_settings_window_draws_its_confirm_dialogs() {
             .is_some()
     }));
 }
+
+#[test]
+fn only_the_check_button_reports_a_failed_update_check() {
+    use crate::app::updates::{CHECK_INTERVAL, FIRST_CHECK_DELAY, UpdateChannel, UpdateState};
+    use gpui_kit::http_client::{FakeHttpClient, Response};
+
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.set_update_channel(UpdateChannel::Stable, cx)
+        })
+    });
+    let state =
+        |window: &mut VisualTestContext| window.read(|app| view.read(app).update_state.clone());
+
+    // GPUI's test client answers 404: the automatic check only logs it.
+    window.executor().advance_clock(FIRST_CHECK_DELAY);
+    window.run_until_parked();
+    assert_eq!(state(window), UpdateState::Unknown);
+    assert!(window.read(|app| view.read(app).last_error.is_none()));
+
+    window.update(|_, cx| view.update(cx, |this, cx| this.check_for_updates_now(cx)));
+    assert!(window.read(|app| view.read(app).checking_updates));
+    window.run_until_parked();
+    assert!(!window.read(|app| view.read(app).checking_updates));
+    assert!(
+        window
+            .read(|app| view.read(app).last_error.clone())
+            .is_some_and(|error| error.starts_with("Failed to check for updates")),
+        "a failed Check must be reported"
+    );
+
+    window.update(|_, cx| {
+        cx.set_http_client(FakeHttpClient::create(|_| async {
+            Ok(Response::builder()
+                .status(200)
+                .body(r#"{"tag_name":"v99.0.0"}"#.into())
+                .unwrap())
+        }))
+    });
+    let found = |window: &mut VisualTestContext| matches!(state(window), UpdateState::Available(update) if update.name.as_ref() == "Condr 99.0.0");
+    // The next automatic check comes five hours after the last, whatever Check did.
+    window.executor().advance_clock(CHECK_INTERVAL);
+    window.run_until_parked();
+    assert!(found(window), "the automatic checks must repeat");
+
+    // Turning automatic checks off forgets what they found; Check still works.
+    window.update(|_, cx| view.update(cx, |this, cx| this.set_auto_check_updates(false, cx)));
+    assert_eq!(state(window), UpdateState::Unknown);
+    window.update(|_, cx| view.update(cx, |this, cx| this.check_for_updates_now(cx)));
+    window.run_until_parked();
+    assert!(found(window));
+}

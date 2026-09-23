@@ -11,7 +11,7 @@ A long-lived Condr runtime that owns one or more Sessions and their Terminals. E
 What one Condr binary is, as `<version>[+<12-character commit>]` (ADR 0027): the workspace version, plus the commit CI built from. `condr --version`, `condr-gui --version` and the Server's `Status` report it, `Hello` and `Welcome` exchange it, and the GUI marks a Device whose Server is another build than the window. A different protocol number is a refusal; a different build under the same protocol is only that mark.
 
 **Update Channel**:
-Which published builds the GUI's update check follows (ADR 0029): `stable`, the `v*` releases, or `nightly`, the daily build of `main`; `off` checks nothing. Unset, it is the channel the running build came from. A newer build on it marks the Settings button and is named on the About page; Condr never installs it.
+Which published builds the GUI's update check follows (ADR 0029): `stable`, the `v*` releases, or `nightly`, the daily build of `main`. Unset, it is the channel the running build came from; the automatic check has its own switch. A newer build on it marks the Settings button and is named on the About page; Condr never installs it.
 _Avoid_: release track, update ring
 
 **Device**:

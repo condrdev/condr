@@ -689,16 +689,32 @@ fn about_page(owner: &WeakEntity<Condr>, cx: &App) -> SettingPage {
         .group(updates_group(owner, cx))
 }
 
-/// The channel the update check follows, and the newer build it found, if any.
+/// The update check: the newer build it found, if any, its switch, its channel and the
+/// Check button (ADR 0029).
 fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
-    let available = owner
+    let (state, checking) = owner
         .upgrade()
-        .and_then(|owner| owner.read(cx).available_update.clone());
+        .map(|owner| {
+            let owner = owner.read(cx);
+            (owner.update_state.clone(), owner.checking_updates)
+        })
+        .unwrap_or_default();
+    let check_value_owner = owner.clone();
+    let check_set_owner = owner.clone();
     let selected_owner = owner.clone();
     let select_owner = owner.clone();
+    let check_now_owner = owner.clone();
     let options = UpdateChannel::ALL
         .map(|channel| (channel.as_str().into(), channel.label().into()))
         .to_vec();
+    let check_now_status = match &state {
+        UpdateState::UpToDate => "Condr is up to date.",
+        UpdateState::Unknown | UpdateState::Available(_) => "Look for a newer build now.",
+    };
+    let available = match state {
+        UpdateState::Available(update) => Some(update),
+        UpdateState::Unknown | UpdateState::UpToDate => None,
+    };
     SettingGroup::new()
         .title("Updates")
         .items(available.map(|update| {
@@ -718,6 +734,25 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
             .description(update.url)
             .keywords(["update", "release", "download"])
         }))
+        .item(
+            SettingItem::new(
+                "Check automatically",
+                SettingField::switch(
+                    move |cx| {
+                        check_value_owner
+                            .upgrade()
+                            .is_none_or(|owner| owner.read(cx).auto_check_updates)
+                    },
+                    move |enabled, cx| {
+                        let _ = check_set_owner
+                            .update(cx, |owner, cx| owner.set_auto_check_updates(enabled, cx));
+                    },
+                )
+                .default_value(true),
+            )
+            .description("Every five hours while Condr runs.")
+            .keywords(["update", "version"]),
+        )
         .item(
             SettingItem::new(
                 "Update channel",
@@ -740,8 +775,27 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
                 )
                 .default_value(UpdateChannel::of_this_build().as_str()),
             )
-            .description("Which published builds to look for once a day. Off makes no requests.")
+            .description("Stable releases, or the daily build of main.")
             .keywords(["update", "nightly", "stable", "version"]),
+        )
+        .item(
+            SettingItem::new(
+                "Check now",
+                SettingField::render(move |_, _, _| {
+                    let owner = check_now_owner.clone();
+                    Button::new("about-check-updates")
+                        .debug_selector(|| "about-check-updates".into())
+                        .small()
+                        .outline()
+                        .label("Check")
+                        .loading(checking)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |owner, cx| owner.check_for_updates_now(cx));
+                        })
+                }),
+            )
+            .description(check_now_status)
+            .keywords(["update", "version"]),
         )
 }
 

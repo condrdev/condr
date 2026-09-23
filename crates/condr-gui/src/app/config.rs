@@ -16,7 +16,10 @@ const APPEARANCE_KEY: &str = "appearance";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const KEEP_AWAKE_KEY: &str = "keep_awake";
-const UPDATE_CHANNEL_KEY: &str = "update_channel";
+/// `[client.updates]` holds the update check's preferences (ADR 0029).
+const UPDATES_TABLE: [&str; 2] = ["client", "updates"];
+const AUTO_CHECK_KEY: &str = "auto_check";
+const CHANNEL_KEY: &str = "channel";
 /// `[client] editor`: the "Open in" target used last, and so the default for a project
 /// without its own choice.
 const EDITOR_KEY: &str = "editor";
@@ -47,6 +50,7 @@ pub(super) struct LoadedConfig {
     pub fps_monitor: bool,
     pub notifications: bool,
     pub keep_awake: bool,
+    pub auto_check_updates: bool,
     pub update_channel: UpdateChannel,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
@@ -139,6 +143,10 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_keep_awake(path).ok())
                 .unwrap_or(false),
+            auto_check_updates: path
+                .as_deref()
+                .and_then(|path| load_auto_check_updates(path).ok())
+                .unwrap_or(true),
             update_channel: path
                 .as_deref()
                 .and_then(|path| load_update_channel(path).ok())
@@ -204,12 +212,24 @@ pub(super) fn load_keep_awake(path: &Path) -> io::Result<bool> {
         .unwrap_or(false))
 }
 
+/// Automatic update checks are on unless the user turned them off.
+pub(super) fn load_auto_check_updates(path: &Path) -> io::Result<bool> {
+    Ok(
+        condr_core::read_config_value(path, &UPDATES_TABLE, AUTO_CHECK_KEY)?
+            .as_ref()
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true),
+    )
+}
+
 /// Unset follows the channel this build was published on.
 pub(super) fn load_update_channel(path: &Path) -> io::Result<UpdateChannel> {
-    Ok(read_client_value(path, UPDATE_CHANNEL_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_str)
-        .map_or_else(UpdateChannel::of_this_build, UpdateChannel::from_str))
+    Ok(
+        condr_core::read_config_value(path, &UPDATES_TABLE, CHANNEL_KEY)?
+            .as_ref()
+            .and_then(toml::Value::as_str)
+            .map_or_else(UpdateChannel::of_this_build, UpdateChannel::from_str),
+    )
 }
 
 /// A missing or malformed key keeps its default so the terminal always has a font.
@@ -333,10 +353,27 @@ impl Condr {
         });
     }
 
+    pub(super) fn save_auto_check_updates(&mut self, cx: &mut Context<Self>) {
+        let enabled = self.auto_check_updates;
+        self.save_config(cx, move |path| {
+            write_value(
+                path,
+                &UPDATES_TABLE,
+                AUTO_CHECK_KEY,
+                toml_edit::value(enabled),
+            )
+        });
+    }
+
     pub(super) fn save_update_channel(&mut self, cx: &mut Context<Self>) {
         let channel = self.update_channel;
         self.save_config(cx, move |path| {
-            write_client_value(path, UPDATE_CHANNEL_KEY, toml_edit::value(channel.as_str()))
+            write_value(
+                path,
+                &UPDATES_TABLE,
+                CHANNEL_KEY,
+                toml_edit::value(channel.as_str()),
+            )
         });
     }
 
