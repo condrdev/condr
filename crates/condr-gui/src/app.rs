@@ -22,6 +22,7 @@ mod sidebar;
 mod startup;
 mod terminal_input;
 mod terminal_panel;
+mod updates;
 mod workspace;
 
 use crate::assets::{APP_LOGO, CondrAssets};
@@ -61,6 +62,7 @@ use connection::*;
 use dialogs::accepted_text_input;
 use dock::*;
 use files::*;
+use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
 use gpui_kit::component::dock::{
@@ -123,6 +125,7 @@ use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
 };
 use terminal_panel::TerminalPanel;
+use updates::{AvailableUpdate, UpdateChannel};
 use workspace::{default_worktree_branch, title_bar};
 
 pub(crate) use startup::run;
@@ -280,6 +283,13 @@ pub(crate) struct Condr {
     notifications: bool,
     /// Whether the machine is kept from sleeping and blanking while Condr runs.
     keep_awake: bool,
+    /// Which published builds the update check looks for (ADR 0029).
+    update_channel: UpdateChannel,
+    /// A newer build on that channel, once a check found one; the Settings button then
+    /// carries a dot and the About page names it.
+    available_update: Option<AvailableUpdate>,
+    /// The running checks; replaced when the channel changes.
+    _update_checks: Task<()>,
     /// The OS request behind `keep_awake`; dropping it lets the machine sleep again.
     /// Windows implements it with `SetThreadExecutionState`, which is per thread: it must
     /// be created and dropped on the GPUI main thread, never from a background task.
@@ -394,6 +404,7 @@ impl Condr {
             fps_monitor,
             notifications,
             keep_awake,
+            update_channel,
             terminal_font,
             terminal_color_scheme,
             default_editor,
@@ -478,6 +489,9 @@ impl Condr {
             fps_monitor,
             notifications,
             keep_awake,
+            update_channel,
+            available_update: None,
+            _update_checks: Task::ready(()),
             _keep_awake: None,
             sidebar_width: restored_state
                 .sidebar_width
@@ -538,6 +552,7 @@ impl Condr {
         }
         this.apply_keep_awake(cx);
         this.scan_open_targets(cx);
+        this.start_update_checks(updates::FIRST_CHECK_DELAY, cx);
 
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {
             while let Ok(result) = connect_results_rx.recv().await {

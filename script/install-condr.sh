@@ -2,6 +2,7 @@
 # Install the Condr headless build (the condr CLI/Server binary) on Linux or macOS.
 #   curl -fsSL https://condr.dev/install.sh | sh
 #   curl -fsSL https://condr.dev/install.sh | sh -s -- --start
+#   CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh
 #   CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
 #   sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz
 # Downloads the archive for this machine from GitHub Releases (or takes --from),
@@ -11,7 +12,7 @@ set -eu
 
 main() {
     repo=${CONDR_REPO:-condrdev/condr}
-    version=${CONDR_VERSION:-nightly}
+    version=${CONDR_VERSION:-latest}
     source=
     if [ "${1:-}" = --from ]; then
         source=${2:?--from needs an archive}

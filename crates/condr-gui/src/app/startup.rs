@@ -262,6 +262,7 @@ pub(crate) fn run() {
         register_notification_icon();
         bind_keys(cx);
         install_app_menus(cx);
+        super::updates::install_http_client(cx);
         let window_options = default_window_options(state.state.window, cx);
         let restored_window = state.state.window.is_some();
         cx.spawn(async move |cx| {

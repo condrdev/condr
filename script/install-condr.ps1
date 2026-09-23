@@ -1,5 +1,6 @@
 # Install the Condr headless build (the condr CLI/Server binary) on Windows x86_64.
 #   irm https://condr.dev/install.ps1 | iex
+#   $env:CONDR_VERSION = 'nightly'; irm https://condr.dev/install.ps1 | iex
 #   $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
 #   $env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
 #   powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-windows-x86_64.zip
@@ -14,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repo = if ($env:CONDR_REPO) { $env:CONDR_REPO } else { 'condrdev/condr' }
-if (-not $Version) { $Version = if ($env:CONDR_VERSION) { $env:CONDR_VERSION } else { 'nightly' } }
+if (-not $Version) { $Version = if ($env:CONDR_VERSION) { $env:CONDR_VERSION } else { 'latest' } }
 if (-not $InstallArgs -and $env:CONDR_INSTALL_ARGS) { $InstallArgs = $env:CONDR_INSTALL_ARGS -split '\s+' }
 # The binary resolves a relative CONDR_INSTALL_DIR against the process directory; use PowerShell's location.
 if ($env:CONDR_INSTALL_DIR) {

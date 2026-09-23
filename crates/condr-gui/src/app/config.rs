@@ -9,13 +9,14 @@ use serde::Deserialize;
 use condr_server::{DeviceKey, SavedServer, load_saved_servers, save_saved_servers};
 
 use super::open_in::CustomEditor;
-use super::{Appearance, Condr, Endpoint, TerminalFont};
+use super::{Appearance, Condr, Endpoint, TerminalFont, UpdateChannel};
 use std::collections::BTreeMap;
 
 const APPEARANCE_KEY: &str = "appearance";
 const FPS_MONITOR_KEY: &str = "fps_monitor";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const KEEP_AWAKE_KEY: &str = "keep_awake";
+const UPDATE_CHANNEL_KEY: &str = "update_channel";
 /// `[client] editor`: the "Open in" target used last, and so the default for a project
 /// without its own choice.
 const EDITOR_KEY: &str = "editor";
@@ -46,6 +47,7 @@ pub(super) struct LoadedConfig {
     pub fps_monitor: bool,
     pub notifications: bool,
     pub keep_awake: bool,
+    pub update_channel: UpdateChannel,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
     pub default_editor: Option<String>,
@@ -137,6 +139,10 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_keep_awake(path).ok())
                 .unwrap_or(false),
+            update_channel: path
+                .as_deref()
+                .and_then(|path| load_update_channel(path).ok())
+                .unwrap_or_else(UpdateChannel::of_this_build),
             terminal_font: path
                 .as_deref()
                 .and_then(|path| load_terminal_font(path).ok())
@@ -196,6 +202,14 @@ pub(super) fn load_keep_awake(path: &Path) -> io::Result<bool> {
         .as_ref()
         .and_then(toml::Value::as_bool)
         .unwrap_or(false))
+}
+
+/// Unset follows the channel this build was published on.
+pub(super) fn load_update_channel(path: &Path) -> io::Result<UpdateChannel> {
+    Ok(read_client_value(path, UPDATE_CHANNEL_KEY)?
+        .as_ref()
+        .and_then(toml::Value::as_str)
+        .map_or_else(UpdateChannel::of_this_build, UpdateChannel::from_str))
 }
 
 /// A missing or malformed key keeps its default so the terminal always has a font.
@@ -316,6 +330,13 @@ impl Condr {
         let enabled = self.keep_awake;
         self.save_config(cx, move |path| {
             write_client_value(path, KEEP_AWAKE_KEY, toml_edit::value(enabled))
+        });
+    }
+
+    pub(super) fn save_update_channel(&mut self, cx: &mut Context<Self>) {
+        let channel = self.update_channel;
+        self.save_config(cx, move |path| {
+            write_client_value(path, UPDATE_CHANNEL_KEY, toml_edit::value(channel.as_str()))
         });
     }
 

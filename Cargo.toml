@@ -27,6 +27,11 @@ interprocess = "2.4.2"
 nix = { version = "0.28.0", features = ["fs", "hostname", "poll", "process"] }
 # GPUI Kit owns the matching GPUI, component, platform, and asset dependencies.
 gpui-kit = "0.6"
+# The one Kit-managed crate declared directly: Kit builds it but does not re-export it,
+# and the GUI's update check (ADR 0029) is its only user. Keep it on Kit's gpui-pre line.
+gpui-pre-reqwest-client = "0.3"
+# Reads GPUI's `AsyncBody`, a `futures::AsyncRead`; already built for GPUI.
+futures-lite = "2"
 gpui-fps = "0.6"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "png"] }
 serde = { version = "1.0", features = ["derive"] }

@@ -10,6 +10,10 @@ A long-lived Condr runtime that owns one or more Sessions and their Terminals. E
 **Build identity**:
 What one Condr binary is, as `<version>[+<12-character commit>]` (ADR 0027): the workspace version, plus the commit CI built from. `condr --version`, `condr-gui --version` and the Server's `Status` report it, `Hello` and `Welcome` exchange it, and the GUI marks a Device whose Server is another build than the window. A different protocol number is a refusal; a different build under the same protocol is only that mark.
 
+**Update Channel**:
+Which published builds the GUI's update check follows (ADR 0029): `stable`, the `v*` releases, or `nightly`, the daily build of `main`; `off` checks nothing. Unset, it is the channel the running build came from. A newer build on it marks the Settings button and is named on the About page; Condr never installs it.
+_Avoid_: release track, update ring
+
 **Device**:
 A machine running Condr, identified by its one persistent key stored beside its `config.toml` (ADR 0025). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. Device is the interface's name for a whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. The Device key is also this machine's Peer-to-peer endpoint, so one pairing is honored over TCP and Peer-to-peer alike (ADR 0026). A Device reaching a Server over TCP or Peer-to-peer is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no pairing.
 

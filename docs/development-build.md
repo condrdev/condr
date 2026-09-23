@@ -36,7 +36,7 @@ Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下
 sh script/install-condr.sh --from ./condr-headless-<version>-<short_sha>-linux-x86_64.tar.gz
 ```
 
-安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从已登录的 GitHub CLI 下载 `nightly` release；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
+安装后重新打开终端即可执行 `condr`。脚本也可以省略 `--from`，从 GitHub Releases 下载最新正式版（`CONDR_VERSION=nightly` 或具体 tag 可改选）；服务器安装应使用对应架构的归档。GUI 的 Linux AppImage 安装会把同一版本的 `condr` 提取到稳定用户目录，再注册 `~/.local/bin/condr`，不能直接链接到 AppImage 的临时挂载目录。
 
 检测到已有 `condr` 时，脚本提示确认覆盖，默认取消；确认后只更新 CLI，保留已有 GUI 文件。自动化环境通过 Unix 的 `--yes` 或 PowerShell 的 `-Yes` 显式确认。两个脚本都支持 `CONDR_INSTALL_DIR` 覆盖安装目录；默认 Unix 使用 `~/.local/opt/condr`，Windows 与 GUI 共用 `%LOCALAPPDATA%\Programs\Condr`。安装不会自动启动 Server，需要时执行 `condr server start`。
 

@@ -428,7 +428,7 @@ impl Render for SettingsWindow {
                 .page(shortcuts_page())
                 .page(developer_page(&self.owner))
                 .page(licenses_page(&self.licenses))
-                .page(about_page()),
+                .page(about_page(&self.owner, cx)),
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .default_selected_index(self.server_page)
@@ -640,7 +640,9 @@ fn location_row(
     .keywords(["directory", "folder", "path"])
 }
 
-fn about_page() -> SettingPage {
+/// Built on every render like the other pages, so a found update or a changed channel
+/// shows as soon as the owner notifies.
+fn about_page(owner: &WeakEntity<Condr>, cx: &App) -> SettingPage {
     let link_row = |label: &'static str, button: &'static str, url: &'static str| {
         SettingItem::new(
             label,
@@ -654,33 +656,93 @@ fn about_page() -> SettingPage {
         )
         .description(url)
     };
-    SettingPage::new("About").icon(IconName::Info).group(
-        SettingGroup::new()
-            .item(
-                SettingItem::render(|_, _, cx| {
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(img(APP_LOGO).size_8())
-                        .child(
-                            v_flex().child(condr_core::APP_NAME).child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("Version {}", condr_core::build_identity())),
-                            ),
-                        )
-                })
-                .keywords(["about", "version"]),
+    SettingPage::new("About")
+        .icon(IconName::Info)
+        .group(
+            SettingGroup::new()
+                .item(
+                    SettingItem::render(|_, _, cx| {
+                        h_flex()
+                            .gap_3()
+                            .items_center()
+                            .child(img(APP_LOGO).size_8())
+                            .child(
+                                v_flex().child(condr_core::APP_NAME).child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(format!("Version {}", condr_core::build_identity())),
+                                ),
+                            )
+                    })
+                    .keywords(["about", "version"]),
+                )
+                .item(
+                    link_row("Source code", "GitHub", REPOSITORY_URL)
+                        .keywords(["github", "repository"]),
+                )
+                .item(
+                    link_row("Documentation", "Docs", DOCS_URL)
+                        .keywords(["docs", "website", "help"]),
+                ),
+        )
+        .group(updates_group(owner, cx))
+}
+
+/// The channel the update check follows, and the newer build it found, if any.
+fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
+    let available = owner
+        .upgrade()
+        .and_then(|owner| owner.read(cx).available_update.clone());
+    let selected_owner = owner.clone();
+    let select_owner = owner.clone();
+    let options = UpdateChannel::ALL
+        .map(|channel| (channel.as_str().into(), channel.label().into()))
+        .to_vec();
+    SettingGroup::new()
+        .title("Updates")
+        .items(available.map(|update| {
+            let url = update.url.clone();
+            SettingItem::new(
+                format!("{} is available", update.name),
+                SettingField::render(move |_, _, _| {
+                    let url = url.clone();
+                    Button::new("about-view-update")
+                        .debug_selector(|| "about-view-update".into())
+                        .small()
+                        .outline()
+                        .label("View")
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                }),
             )
-            .item(
-                link_row("Source code", "GitHub", REPOSITORY_URL)
-                    .keywords(["github", "repository"]),
+            .description(update.url)
+            .keywords(["update", "release", "download"])
+        }))
+        .item(
+            SettingItem::new(
+                "Update channel",
+                SettingField::dropdown(
+                    options,
+                    move |cx| {
+                        selected_owner
+                            .upgrade()
+                            .map_or_else(UpdateChannel::of_this_build, |owner| {
+                                owner.read(cx).update_channel
+                            })
+                            .as_str()
+                            .into()
+                    },
+                    move |value: SharedString, cx| {
+                        let channel = UpdateChannel::from_str(&value);
+                        let _ = select_owner
+                            .update(cx, |owner, cx| owner.set_update_channel(channel, cx));
+                    },
+                )
+                .default_value(UpdateChannel::of_this_build().as_str()),
             )
-            .item(
-                link_row("Documentation", "Docs", DOCS_URL).keywords(["docs", "website", "help"]),
-            ),
-    )
+            .description("Which published builds to look for once a day. Off makes no requests.")
+            .keywords(["update", "nightly", "stable", "version"]),
+        )
 }
 
 impl SettingsWindow {

@@ -648,20 +648,35 @@ impl Condr {
                             })
                             .anchor(Anchor::BottomLeft),
                     )
-                    .child(
-                        Button::new("open-settings")
-                            .debug_selector(|| "open-settings".into())
-                            .ghost()
-                            .small()
-                            .icon(IconName::Settings)
-                            .tooltip_with_action("Settings", &OpenSettings, Some(SHORTCUT_CONTEXT))
-                            .accessibility_label("Settings")
-                            .on_click(move |_, window, cx| {
-                                let _ = settings_owner
-                                    .update(cx, |this, cx| this.open_settings(window, cx));
-                            }),
-                    ),
+                    .child(self.settings_button(settings_owner, cx)),
             )
+            .into_any_element()
+    }
+
+    /// Carries a dot while the update check has found a newer build (ADR 0029); the
+    /// About page says which.
+    fn settings_button(&self, owner: WeakEntity<Self>, cx: &App) -> AnyElement {
+        let button = Button::new("open-settings")
+            .debug_selector(|| "open-settings".into())
+            .ghost()
+            .small()
+            .icon(IconName::Settings)
+            .tooltip_with_action("Settings", &OpenSettings, Some(SHORTCUT_CONTEXT))
+            .accessibility_label(if self.available_update.is_some() {
+                "Settings, update available"
+            } else {
+                "Settings"
+            })
+            .on_click(move |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| this.open_settings(window, cx));
+            });
+        if self.available_update.is_none() {
+            return button.into_any_element();
+        }
+        Badge::new()
+            .dot()
+            .color(cx.theme().info)
+            .child(button)
             .into_any_element()
     }
 

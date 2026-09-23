@@ -49,11 +49,13 @@ The script downloads the headless build, verifies it against `SHA256SUMS`, and r
 To install a specific version, or to start the Server right after installing:
 
 ```sh
-CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh   # a versioned release (default: nightly)
-curl -fsSL https://condr.dev/install.sh | sh -s -- --start           # also start the Server
+CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh   # the nightly (default: the latest release)
+CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh    # one versioned release
+curl -fsSL https://condr.dev/install.sh | sh -s -- --start            # also start the Server
 ```
 
 ```powershell
+$env:CONDR_VERSION = 'nightly'; irm https://condr.dev/install.ps1 | iex
 $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
 $env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
 ```
