@@ -414,6 +414,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
             assert_eq!((updated.start, updated.end), (range.start, range.end));
             assert_eq!(updated.display_offset, 7);
             assert!(this.copy_terminal_selection(1, pane_id, cx));
+            assert!(this.terminal_selection.is_none());
         });
     });
 
@@ -718,12 +719,15 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         });
     });
     window.simulate_keystrokes(copy_shortcut);
-    assert!(window.read(|app| view.read(app).selection_for(1, pane_id).is_some()));
     assert!(wait_until_event_driven(window, |window| {
         window
             .read_from_clipboard()
             .and_then(|item| item.text())
             .is_some_and(|text| text == word)
+    }));
+    // A successful copy ends the selection, the Server-tracked one included.
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| view.read(app).selection_for(1, pane_id).is_none())
     }));
 }
 

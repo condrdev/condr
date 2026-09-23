@@ -5,7 +5,7 @@ impl Condr {
         &mut self,
         key: ConnectionKey,
         pane_id: PaneId,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> bool {
         let Some((selection, server_tracked)) = self.effective_selection(key, pane_id) else {
             return false;
@@ -21,8 +21,21 @@ impl Condr {
         }
 
         // The Server's own selection also covers rows scrolled out of the viewport.
-        let selection = (!server_tracked).then_some(selection);
-        self.terminal_command(key, pane_id, TerminalCommand::Copy { selection })
+        let copied = self.terminal_command(
+            key,
+            pane_id,
+            TerminalCommand::Copy {
+                selection: (!server_tracked).then_some(selection),
+            },
+        );
+        // A copy ends the selection. The Server reads it before this later Select clears it.
+        if copied {
+            if server_tracked {
+                self.terminal_command(key, pane_id, TerminalCommand::Select(None));
+            }
+            self.clear_selection(cx);
+        }
+        copied
     }
 
     pub(in crate::app) fn paste_into_terminal(
