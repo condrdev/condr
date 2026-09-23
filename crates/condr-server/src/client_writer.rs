@@ -563,7 +563,7 @@ mod tests {
         let batches = MAX_BOOTSTRAP_BATCHES as usize;
         let payload_per_batch = MAX_BOOTSTRAP_TOTAL_SIZE / batches;
         let mut frames = Vec::with_capacity(batches + 1);
-        frames.push(vec![0; MAX_FRAME_SIZE + 4]);
+        frames.push(vec![0; MAX_FRAME_SIZE + MAX_FRAME_PREFIX]);
         frames.extend(
             (0..batches).map(|_| vec![0; BOOTSTRAP_BATCH_FRAME_OVERHEAD + payload_per_batch]),
         );
@@ -574,9 +574,9 @@ mod tests {
 
         let (writer, receiver) = ClientWriter::channel_with_lag_notice(b"resync".to_vec());
         writer.send_reliable_batch(frames).unwrap();
-        writer.send_reliable(vec![0; MAX_FRAME_SIZE + 4]).unwrap();
+        writer.send_reliable(vec![0; MAX_FRAME_SIZE + MAX_FRAME_PREFIX]).unwrap();
         assert_eq!(
-            writer.send_reliable(vec![0; MAX_FRAME_SIZE + 4]),
+            writer.send_reliable(vec![0; MAX_FRAME_SIZE + MAX_FRAME_PREFIX]),
             Err(ReliableSendError::Lagged)
         );
         assert_eq!(

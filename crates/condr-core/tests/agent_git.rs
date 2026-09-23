@@ -21,8 +21,9 @@ impl TempDirectory {
         ));
         fs::create_dir_all(&path).unwrap();
         // `discover_repository` reports one canonical spelling per directory; on macOS the
-        // temp dir is reached through the `/var` -> `/private/var` symlink.
-        Self(path.canonicalize().unwrap())
+        // temp dir is reached through the `/var` -> `/private/var` symlink. Resolve it the
+        // way discovery does: `fs::canonicalize` would give Windows a `\\?\` verbatim path.
+        Self(gix::path::realpath(&path).unwrap())
     }
 
     fn path(&self) -> &Path {
