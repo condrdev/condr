@@ -723,23 +723,27 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
             });
         });
     });
-    assert!(wait_until(window, |window| {
-        window.read(|app| {
-            view.read(app)
-                .active_session()
-                .is_some_and(|session| session.workspaces().len() == 2)
-        })
-    }));
+    // The Session grows with the LayoutChanged event; the view switches on the
+    // LayoutApplied reply behind it, so wait for both.
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                let view = view.read(app);
+                view.active_session()
+                    .is_some_and(|session| session.workspaces().len() == 2)
+                    && view
+                        .presented()
+                        .is_some_and(|(_, _, workspace_id, _)| workspace_id != first_workspace)
+            })
+        }),
+        "the created Workspace is shown"
+    );
     let second_workspace = window.read(|app| {
         view.read(app)
             .presented()
             .map(|(_, _, workspace_id, _)| workspace_id)
             .unwrap()
     });
-    assert_ne!(
-        second_workspace, first_workspace,
-        "the created Workspace is shown"
-    );
 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
