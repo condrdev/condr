@@ -804,7 +804,9 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         }));
     }
 
-    window.simulate_keystrokes("ctrl-u");
+    // Submit the pasted markers rather than erase them: stock PSReadLine binds no
+    // Ctrl+U, so the next command would be appended to them.
+    window.simulate_keystrokes("enter");
     // Read the pasted path inside the Pane: screen cells include wide-character
     // spacers, and shell echo/wrapping is not a lossless representation of input.
     #[cfg(not(windows))]
