@@ -1136,36 +1136,36 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     // happens on a slow CI runner.
     let new_pane = window
         .read(|app| {
-            view.read(app)
-                .active_session()?
-                .workspaces()
-                .first()
-                .map(|workspace| {
-                    workspace
-                        .tabs()
-                        .first()
-                        .unwrap()
-                        .focused_pane()
-                        .unwrap()
-                        .id()
-                })
+            let (_, session, _, tab_id) = view.read(app).presented()?;
+            Some(session.tab(tab_id)?.focused_pane()?.id())
         })
         .unwrap();
     let prompt_ready = wait_until(window, |window| {
-        window.read(|app| {
-            view.read(app)
-                .connection(1)
-                .and_then(|connection| connection.terminals.get(&new_pane))
-                .is_some_and(|terminal| {
-                    terminal
-                        .view
-                        .cells
-                        .iter()
-                        .any(|cell| !cell.text.trim().is_empty())
-                })
-        })
+        let (prompt, focus) = window.read(|app| {
+            let condr = view.read(app);
+            (
+                condr
+                    .connection(1)
+                    .and_then(|connection| connection.terminals.get(&new_pane))
+                    .is_some_and(|terminal| {
+                        terminal
+                            .view
+                            .cells
+                            .iter()
+                            .any(|cell| !cell.text.trim().is_empty())
+                    }),
+                condr
+                    .panels
+                    .get(&(1, new_pane))
+                    .map(|panel| panel.read(app).focus_handle.clone()),
+            )
+        });
+        prompt && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
     });
-    assert!(prompt_ready, "the split Pane's shell did not show a prompt");
+    assert!(
+        prompt_ready,
+        "the split Pane's shell did not show a prompt with keyboard focus"
+    );
 
     window.simulate_input("printf CONDR_E2E");
     window.simulate_keystrokes("enter");
