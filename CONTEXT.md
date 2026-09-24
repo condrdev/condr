@@ -87,7 +87,7 @@ One of the two views of the right sidebar: the presented Workspace's working-tre
 The other view of the right sidebar: the presented Workspace's directory tree under its Root Directory, one level per Server answer, unfolded by the user, read-only (ADR 0018). `.git` is hidden, dotfiles are shown, ignored entries are dimmed but listed, rows carry JetBrains file-type icons, a changed file's name takes its status colour, and a directory holding a change carries a dot. The default view for a Workspace outside a repository. The Server's watcher refreshes it through `WorkspaceFilesChanged`. A file row's context menu copies its path, opens it in the "Open in" editor, or inserts its path into the Workspace's terminal.
 
 **Terminal**:
-The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent.
+The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent. Closing a Terminal, or its shell exiting, ends every process started in it except one that detached on purpose: its own session on Unix, a breakaway from the Terminal's Job on Windows (ADR 0030).
 
 **Agent**:
 A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`) comes only from hooks Condr installed into that CLI, delivered in-band as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed. A `Blocked` Agent may carry `blocked_on`, what its hook said it waits for (a tool and command, or a question), cleared with the state (ADR 0024).

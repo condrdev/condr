@@ -1,6 +1,6 @@
 # Windows 上用 Job Object 管理 Pane 的进程树
 
-日期：2026-09-24。本文是调研与实现草案，不是 ADR。Condr 对照 HEAD `d53348f`。
+日期：2026-09-24。本文是调研与实现草案，不是 ADR。Condr 对照 HEAD `d53348f`。同日讨论后已定为 [ADR 0030](../adr/0030-windows-terminals-run-in-job-objects.md)：「行为变化与待定问题」三项的结论都在那里（GUI 程序随 Pane 结束，可主动 breakaway；空闲判断保持"有任何成员即忙"；不加温和关闭阶段），另外定了 shell 自己退出时结束剩余成员、设 `KILL_ON_JOB_CLOSE`、加入 Job 失败即启动失败且不回退。
 
 ## 结论
 
