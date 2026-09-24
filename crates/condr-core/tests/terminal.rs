@@ -2,6 +2,8 @@
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "windows")]
+use condr_core::TerminalUpdate;
 #[cfg(target_os = "linux")]
 use condr_core::{
     AgentEvent, AgentEventKind, AgentKind, AgentSnapshot, AgentState, TerminalAgentProbe,
@@ -1005,22 +1007,164 @@ fn conpty_close_terminates_descendant_processes() {
         .start_time();
 
     runtime.close().unwrap();
-    // Windows reuses PIDs quickly and the suite spawns many shells at once, so the
-    // process at this PID counts as the descendant only while its start time matches;
-    // the runtime's own shutdown tracks ownership the same way.
+    let alive = wait_for_process_exit(descendant, started_at);
+    assert!(
+        alive.is_none(),
+        "ConPTY descendant {descendant} (started {started_at}) survived Terminal close: {alive:?}"
+    );
+    let _ = std::fs::remove_file(pid_file);
+}
+
+/// The shell starts a sleeper in a hidden console of its own and exits at once, so no live
+/// parent and no pseudoconsole tie the sleeper to the Terminal: only the Job does (ADR 0030).
+#[cfg(target_os = "windows")]
+#[test]
+fn conpty_close_after_the_shell_exits_ends_what_it_left_running() {
+    let pid_file = windows_temp_path("condr-conpty-orphan");
+    let script = pid_file.with_extension("ps1");
+    std::fs::write(
+        &script,
+        format!(
+            "Set-Content -NoNewline -LiteralPath '{}' -Value $PID; Start-Sleep -Seconds 30",
+            powershell_literal(&pid_file)
+        ),
+    )
+    .unwrap();
+    let launch = format!(
+        "Start-Process pwsh.exe -WindowStyle Hidden -ArgumentList @('-NoLogo','-NoProfile','-File','{}')",
+        powershell_literal(&script)
+    );
+    let mut command = CommandBuilder::new("pwsh.exe");
+    command.args(["-NoLogo", "-NoProfile", "-Command", &launch]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    let updates = runtime.take_updates().unwrap();
+    let orphan = wait_for_pid_file(&pid_file);
+    let started_at = System::new_all()
+        .process(Pid::from_u32(orphan))
+        .expect("the sleeper is running")
+        .start_time();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !matches!(
+        updates.recv_timeout(deadline.saturating_duration_since(Instant::now())),
+        Ok(TerminalUpdate::Exited)
+    ) {
+        assert!(Instant::now() < deadline, "the shell never exited");
+    }
+
+    // The Server closes an exited Terminal, as it does here.
+    runtime.close().unwrap();
+    let alive = wait_for_process_exit(orphan, started_at);
+    assert!(
+        alive.is_none(),
+        "{orphan} (started {started_at}) outlived its exited shell's Terminal: {alive:?}"
+    );
+    let _ = std::fs::remove_file(pid_file);
+    let _ = std::fs::remove_file(script);
+}
+
+/// Run inside a Pane by `conpty_close_spares_a_process_that_left_the_job`: starts a sleeper
+/// that leaves the Terminal's Job, as a program meant to outlive the Terminal would.
+#[cfg(target_os = "windows")]
+#[test]
+fn breakaway_launcher_helper() {
+    use std::os::windows::process::CommandExt as _;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Some(pid_file) = std::env::var_os("CONDR_BREAKAWAY_PID_FILE") else {
+        return;
+    };
+    #[allow(clippy::zombie_processes)] // It must outlive this helper, which ends first.
+    let sleeper = std::process::Command::new("ping")
+        .args(["-n", "30", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW)
+        .spawn()
+        .unwrap();
+    std::fs::write(pid_file, sleeper.id().to_string()).unwrap();
+    std::thread::sleep(Duration::from_secs(30));
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn conpty_close_spares_a_process_that_left_the_job() {
+    let pid_file = windows_temp_path("condr-conpty-breakaway");
+    let mut command = CommandBuilder::new(std::env::current_exe().unwrap());
+    command.args(["--exact", "breakaway_launcher_helper", "--nocapture"]);
+    command.env("CONDR_BREAKAWAY_PID_FILE", &pid_file);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    let sleeper = wait_for_pid_file(&pid_file);
+
+    runtime.close().unwrap();
+    let system = System::new_all();
+    let survivor = system.process(Pid::from_u32(sleeper));
+    assert!(
+        survivor.is_some_and(|process| process.name().eq_ignore_ascii_case("ping.exe")),
+        "a process that broke away from the Job ended with the Terminal"
+    );
+    if let Some(process) = survivor {
+        process.kill();
+    }
+    let _ = std::fs::remove_file(pid_file);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn launch_probe_counts_any_other_process_in_the_job_as_busy() {
+    let mut command = CommandBuilder::new("pwsh.exe");
+    command.args(["-NoLogo", "-NoProfile"]);
+    command.cwd(std::env::temp_dir());
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
+    wait_for_terminal_output(&runtime);
+    assert!(runtime.launch_probe().is_idle());
+
+    runtime
+        .execute(TerminalCommand::Text(
+            "Start-Process ping.exe -WindowStyle Hidden -ArgumentList '-n','30','127.0.0.1'\r"
+                .into(),
+        ))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while runtime.launch_probe().is_idle() {
+        assert!(
+            Instant::now() < deadline,
+            "a background process in the Job left the shell idle"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    runtime.close().unwrap();
+}
+
+/// Waits for the process at `pid` to end and returns it if it did not. Windows reuses PIDs
+/// quickly and the suite spawns many shells at once, so the process at this PID counts only
+/// while its start time matches.
+#[cfg(target_os = "windows")]
+fn wait_for_process_exit(pid: u32, started_at: u64) -> Option<(String, u64, Vec<String>)> {
     let survivor =
-        || windows_process_identity(descendant).filter(|(_, started, _)| *started == started_at);
+        || windows_process_identity(pid).filter(|(_, started, _)| *started == started_at);
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut alive = survivor();
     while alive.is_some() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
         alive = survivor();
     }
-    assert!(
-        alive.is_none(),
-        "ConPTY descendant {descendant} (started {started_at}) survived Terminal close: {alive:?}"
-    );
-    let _ = std::fs::remove_file(pid_file);
+    alive
+}
+
+#[cfg(target_os = "windows")]
+fn windows_temp_path(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "{label}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_literal(path: &std::path::Path) -> String {
+    path.display().to_string().replace('\'', "''")
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

@@ -12,7 +12,7 @@ impl TerminalRuntime {
         TerminalLaunchProbe {
             #[cfg(unix)]
             master: self.master.as_ref().map(Arc::downgrade),
-            process: self.process,
+            process: self.process.clone(),
         }
     }
 
@@ -80,7 +80,15 @@ impl TerminalLaunchProbe {
     fn idle_shell(&self) -> Option<String> {
         let shell_pid = Pid::from_u32(self.process.shell_pid?);
         let mut system = System::new();
+        // Unix looks for other members of the foreground group among every process;
+        // Windows asks the shell's Job, so it needs the shell's own row only.
+        #[cfg(unix)]
         system.refresh_processes_specifics(ProcessesToUpdate::All, ProcessRefreshKind::new());
+        #[cfg(windows)]
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[shell_pid]),
+            ProcessRefreshKind::new(),
+        );
         let shell = system.process(shell_pid)?;
         if Some(shell.start_time()) != self.process.shell_started_at {
             return None;
@@ -106,11 +114,16 @@ impl TerminalLaunchProbe {
                 return None;
             }
         }
+        // Any other process in the Job keeps the shell busy (ADR 0030).
         #[cfg(windows)]
-        if system
-            .processes()
-            .keys()
-            .any(|pid| *pid != shell_pid && descendant_depth(&system, *pid, shell_pid).is_some())
+        if self
+            .process
+            .job
+            .as_ref()?
+            .process_ids()
+            .ok()?
+            .iter()
+            .any(|pid| *pid != shell_pid.as_u32())
         {
             return None;
         }

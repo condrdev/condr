@@ -21,6 +21,7 @@ fn unix_pty_probe_uses_the_child_as_the_expected_session_leader() {
     assert_eq!(probe.session_id, Some(12_345));
 }
 
+#[cfg(unix)]
 #[test]
 fn process_exit_checks_reject_a_reused_pid_identity() {
     let system = System::new_all();
@@ -45,6 +46,7 @@ fn process_exit_checks_reject_a_reused_pid_identity() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn process_refresh_keeps_retained_identity_after_shell_disappears() {
     let system = System::new_all();
@@ -55,7 +57,7 @@ fn process_refresh_keeps_retained_identity_after_shell_disappears() {
     };
     let mut owned = vec![identity];
 
-    let system = refresh_owned_processes(ProcessProbe::new(None), &mut owned);
+    let system = refresh_owned_processes(&ProcessProbe::new(None), &mut owned);
 
     assert_eq!(owned, [identity]);
     assert!(!process_tree_exited(&system, &owned, None, false, false));

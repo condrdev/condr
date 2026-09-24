@@ -1,6 +1,8 @@
 mod cursor_settle;
 mod input;
 mod input_queue;
+#[cfg(windows)]
+mod job;
 mod launch;
 mod mouse;
 mod notices;
@@ -37,6 +39,8 @@ use cursor_settle::{CURSOR_POSITION_SETTLE_ENABLED, CursorSettle};
 use filedescriptor::FileDescriptor;
 use input::{encode_key, encode_key_in_mode, encode_paste, encode_text_in_mode};
 use input_queue::*;
+#[cfg(windows)]
+use job::Job;
 use mouse::{MAX_MOUSE_WHEEL_STEPS, encode_mouse};
 #[cfg(unix)]
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
@@ -71,7 +75,9 @@ use std::{
     os::fd::{AsFd, AsRawFd, RawFd},
     os::unix::net::UnixStream,
 };
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
+#[cfg(unix)]
+use sysinfo::Signal;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use view::{
     SnapshotHyperlinks, detect_links, publish_view, side, snapshot_terminal,
     snapshot_terminal_with_links, terminal_cell, terminal_cursor, viewport_point,
@@ -119,6 +125,7 @@ const TERMINAL_CONTROL_QUEUE_RESERVE: usize = INPUT_QUEUE_CAPACITY + 1;
 const MAX_PENDING_INPUT_BYTES: usize = 8 * 1024 * 1024;
 const IO_CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// How long a process tree gets to leave after a signal it may handle (hangup, term).
+#[cfg(unix)]
 const PROCESS_SHUTDOWN_GRACE: Duration = Duration::from_millis(250);
 /// How long it gets after a kill it cannot handle. Exit is then certain, only the
 /// scheduler's timing is not: each poll enumerates every process, which on a loaded

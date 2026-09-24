@@ -111,9 +111,26 @@ impl TerminalRuntime {
         let (writer, writer_cancel) = unix_pty_writer(&*pair.master)?;
         #[cfg(not(unix))]
         let writer = pair.master.take_writer().map_err(other_error)?;
+        #[cfg(windows)]
+        let job = Job::new()?;
         let mut child = pair.slave.spawn_command(command).map_err(other_error)?;
+        // ponytail: portable-pty starts the shell running, so a child it starts before this
+        // line escapes the Job; shells take far longer than that. Creating it inside the Job
+        // needs PROC_THREAD_ATTRIBUTE_JOB_LIST in portable-pty's CreateProcessW.
+        #[cfg(windows)]
+        if let Err(error) = child
+            .as_raw_handle()
+            .ok_or_else(|| io::Error::other("the shell has no process handle"))
+            .and_then(|handle| job.assign(handle))
+        {
+            let _ = child.kill();
+            return Err(error);
+        }
         let shell_pid = child.process_id();
+        #[cfg(not(windows))]
         let process = ProcessProbe::new(shell_pid);
+        #[cfg(windows)]
+        let process = ProcessProbe::in_job(shell_pid, job);
         drop(pair.slave);
         let master = Arc::new(Mutex::new(pair.master));
 
@@ -142,7 +159,7 @@ impl TerminalRuntime {
             }) {
             Ok(thread) => thread,
             Err(error) => {
-                let _ = shutdown_process_tree(process, Some(&mut *child));
+                let _ = shutdown_process_tree(&process, Some(&mut *child));
                 return Err(error);
             }
         };
@@ -173,7 +190,7 @@ impl TerminalRuntime {
                 #[cfg(unix)]
                 let _ = writer_cancel.shutdown(Shutdown::Both);
                 let _ = writer_thread.join();
-                let _ = shutdown_process_tree(process, Some(&mut *child));
+                let _ = shutdown_process_tree(&process, Some(&mut *child));
                 return Err(error);
             }
         };
@@ -211,7 +228,7 @@ impl TerminalRuntime {
                 let _ = writer_cancel.shutdown(Shutdown::Both);
                 let _ = writer_thread.join();
                 let _ = resize_thread.join();
-                let _ = shutdown_process_tree(process, Some(&mut *child));
+                let _ = shutdown_process_tree(&process, Some(&mut *child));
                 return Err(error);
             }
         };
@@ -234,7 +251,7 @@ impl TerminalRuntime {
             #[cfg(unix)]
             let _ = writer_cancel.shutdown(Shutdown::Both);
             let mut child = lock_child(&child).take();
-            let _ = shutdown_process_tree(process, child.as_deref_mut());
+            let _ = shutdown_process_tree(&process, child.as_deref_mut());
             #[cfg(unix)]
             let _ = reader_cancel.shutdown(Shutdown::Both);
             #[cfg(not(unix))]
@@ -317,7 +334,7 @@ impl TerminalRuntime {
             #[cfg(unix)]
             master: self.master.as_ref().map(Arc::downgrade),
             process: if lock_child(&self.child).is_some() {
-                self.process
+                self.process.clone()
             } else {
                 ProcessProbe::new(None)
             },
@@ -503,7 +520,7 @@ impl TerminalRuntime {
         Some(TerminalAgentProbe {
             #[cfg(unix)]
             master: Arc::downgrade(self.master.as_ref().expect("checked Terminal PTY master")),
-            process: self.process,
+            process: self.process.clone(),
             notices: Arc::clone(&self.notices),
             revision: Arc::clone(&self.revision),
             activity_revision: None,
@@ -643,33 +660,18 @@ impl TerminalRuntime {
         &mut self,
         child: Option<&mut (dyn Child + Send + Sync)>,
     ) -> io::Result<Option<ExitStatus>> {
-        let process = self.process;
+        let process = self.process.clone();
         let requires_child_status = child.is_some();
         let mut child = child;
         self.request_write_stop();
-        let initial_process_result = attempt_process_tree_shutdown(
-            process,
+        let process_result = attempt_process_tree_shutdown(
+            &process,
             &mut child,
             requires_child_status,
             &mut self.process_shutdown,
         );
         self.request_reader_stop();
         let io_result = self.finish_io();
-        #[cfg(windows)]
-        let process_result = if initial_process_result.is_err() {
-            // Releasing ConPTY can be the final exit trigger. Reuse the first attempt's
-            // process identities so descendants remain visible after the shell exits.
-            attempt_process_tree_shutdown(
-                process,
-                &mut child,
-                requires_child_status,
-                &mut self.process_shutdown,
-            )
-        } else {
-            initial_process_result
-        };
-        #[cfg(not(windows))]
-        let process_result = initial_process_result;
         combine_cleanup_results(process_result, io_result, "stop terminal I/O")?;
         Ok(self.process_shutdown.status.take())
     }

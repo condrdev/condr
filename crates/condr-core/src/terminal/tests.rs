@@ -1,4 +1,6 @@
 mod input;
+#[cfg(windows)]
+mod job;
 mod notices;
 mod osc;
 mod process;

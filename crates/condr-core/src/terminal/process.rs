@@ -1,11 +1,14 @@
 use super::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct ProcessProbe {
     pub(super) shell_pid: Option<u32>,
     pub(super) shell_started_at: Option<u64>,
     #[cfg(unix)]
     pub(super) session_id: Option<i32>,
+    /// The Job the shell runs in (ADR 0030); `None` only for a probe without a shell.
+    #[cfg(windows)]
+    pub(super) job: Option<Arc<Job>>,
 }
 
 pub(super) struct ProcessSnapshot {
@@ -35,6 +38,7 @@ pub(super) fn process_table() -> System {
     system
 }
 
+#[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct OwnedProcess {
     pub(super) pid: Pid,
@@ -42,6 +46,7 @@ pub(super) struct OwnedProcess {
 }
 
 /// Only the processes already known to belong to the tree, for a cheap exit poll.
+#[cfg(unix)]
 fn owned_process_table(owned: &[OwnedProcess]) -> System {
     let pids = owned.iter().map(|process| process.pid).collect::<Vec<_>>();
     let mut system = System::new();
@@ -54,13 +59,15 @@ fn owned_process_table(owned: &[OwnedProcess]) -> System {
 
 #[derive(Default)]
 pub(super) struct ProcessShutdownState {
+    #[cfg(unix)]
     pub(super) owned: Vec<OwnedProcess>,
     pub(super) status: Option<ExitStatus>,
     child_error: Option<io::Error>,
 }
 
+#[cfg(unix)]
 pub(super) fn attempt_process_tree_shutdown(
-    process: ProcessProbe,
+    process: &ProcessProbe,
     child: &mut Option<&mut (dyn Child + Send + Sync)>,
     requires_child_status: bool,
     state: &mut ProcessShutdownState,
@@ -157,8 +164,80 @@ pub(super) fn attempt_process_tree_shutdown(
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
 }
 
+/// Ends the Terminal's Job as a whole (ADR 0030): whatever the shell started goes with
+/// it, whether or not the shell, or a process between them, is still alive. Windows sent
+/// nothing gentler than a kill before the Job either.
+#[cfg(windows)]
+pub(super) fn attempt_process_tree_shutdown(
+    process: &ProcessProbe,
+    child: &mut Option<&mut (dyn Child + Send + Sync)>,
+    requires_child_status: bool,
+    state: &mut ProcessShutdownState,
+) -> io::Result<()> {
+    poll_child_exit(child, &mut state.status, &mut state.child_error);
+    match &process.job {
+        Some(job) => job.terminate()?,
+        None => {
+            if state.status.is_none()
+                && let Some(child) = child.as_deref_mut()
+                && let Err(error) = child.kill()
+            {
+                record_process_error(&mut state.child_error, error);
+            }
+        }
+    }
+    let deadline = Instant::now() + PROCESS_KILL_GRACE;
+    loop {
+        poll_child_exit(child, &mut state.status, &mut state.child_error);
+        let active = match &process.job {
+            Some(job) => job.active_processes()?,
+            None => 0,
+        };
+        if active == 0 && (state.status.is_some() || !requires_child_status) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let running = match &process.job {
+        Some(job) => job.process_ids()?,
+        None => Vec::new(),
+    };
+    let pids = running
+        .iter()
+        .copied()
+        .map(Pid::from_u32)
+        .collect::<Vec<_>>();
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), ProcessRefreshKind::new());
+    let survivors = pids
+        .iter()
+        .map(|pid| match system.process(*pid) {
+            Some(running) => format!("{pid} {}", running.name().to_string_lossy()),
+            None => pid.to_string(),
+        })
+        .collect::<Vec<_>>();
+    let mut message = format!(
+        "terminal Job did not empty after it was terminated; shell {:?}, exit status {}; still running: [{}]",
+        process.shell_pid,
+        if state.status.is_some() {
+            "reaped"
+        } else {
+            "missing"
+        },
+        survivors.join(", ")
+    );
+    if let Some(error) = &state.child_error {
+        message.push_str(&format!("; child process operation failed: {error}"));
+    }
+    Err(io::Error::new(io::ErrorKind::TimedOut, message))
+}
+
 pub(super) fn shutdown_process_tree(
-    process: ProcessProbe,
+    process: &ProcessProbe,
     child: Option<&mut (dyn Child + Send + Sync)>,
 ) -> io::Result<Option<ExitStatus>> {
     let requires_child_status = child.is_some();
@@ -195,8 +274,9 @@ pub(super) fn record_process_error(current: &mut Option<io::Error>, error: io::E
     }
 }
 
+#[cfg(unix)]
 pub(super) fn wait_for_process_tree(
-    process: ProcessProbe,
+    process: &ProcessProbe,
     owned: &mut Vec<OwnedProcess>,
     child: &mut Option<&mut (dyn Child + Send + Sync)>,
     status: &mut Option<ExitStatus>,
@@ -236,8 +316,9 @@ pub(super) fn wait_for_process_tree(
     }
 }
 
+#[cfg(unix)]
 pub(super) fn refresh_owned_processes(
-    process: ProcessProbe,
+    process: &ProcessProbe,
     owned: &mut Vec<OwnedProcess>,
 ) -> System {
     let system = process_table();
@@ -250,7 +331,6 @@ pub(super) fn refresh_owned_processes(
             .is_some_and(|started_at| shell.start_time() == started_at)
     });
     for (pid, candidate) in system.processes() {
-        #[cfg(unix)]
         let belongs = process.session_id.is_some_and(|session_id| {
             i32::try_from(pid.as_u32())
                 .ok()
@@ -259,9 +339,6 @@ pub(super) fn refresh_owned_processes(
         }) || (process.session_id.is_none()
             && shell_identity_matches
             && descendant_depth(&system, *pid, shell_pid).is_some());
-        #[cfg(not(unix))]
-        let belongs =
-            shell_identity_matches && descendant_depth(&system, *pid, shell_pid).is_some();
         let identity = OwnedProcess {
             pid: *pid,
             started_at: candidate.start_time(),
@@ -274,6 +351,7 @@ pub(super) fn refresh_owned_processes(
     system
 }
 
+#[cfg(unix)]
 pub(super) fn signal_processes(system: &System, owned: &[OwnedProcess], signal: Signal) {
     for owned_process in owned {
         let _ = system
@@ -283,6 +361,7 @@ pub(super) fn signal_processes(system: &System, owned: &[OwnedProcess], signal: 
     }
 }
 
+#[cfg(unix)]
 pub(super) fn process_tree_exited(
     system: &System,
     owned: &[OwnedProcess],
@@ -326,6 +405,17 @@ impl ProcessProbe {
             // the session leader. Never adopt an arbitrary observed SID here:
             // the parent may briefly see its own session during spawn.
             session_id: shell_pid.and_then(|pid| i32::try_from(pid).ok()),
+            #[cfg(windows)]
+            job: None,
+        }
+    }
+
+    /// The probe of a shell already put in its Terminal's Job (ADR 0030).
+    #[cfg(windows)]
+    pub(super) fn in_job(shell_pid: Option<u32>, job: Job) -> Self {
+        Self {
+            job: Some(Arc::new(job)),
+            ..Self::new(shell_pid)
         }
     }
 
@@ -442,40 +532,36 @@ impl ProcessProbe {
         }
     }
 
-    /// Identifies the agent among the shell's descendants. Windows has no foreground
-    /// group, so the topmost identified process in the tree stands in for the leader;
-    /// a shell with no descendants at all means the agent has exited.
+    /// Identifies the agent among the other processes in the shell's Job. Windows has no
+    /// foreground group, so the topmost identified process stands in for the leader; a
+    /// shell alone in its Job means the agent has exited.
     #[cfg(windows)]
     pub(super) fn probe_agent(&self) -> ProcessProbeResult {
-        let (Some(shell_pid), Some(shell_started_at)) = (self.shell_pid, self.shell_started_at)
+        let (Some(shell_pid), Some(shell_started_at), Some(job)) =
+            (self.shell_pid, self.shell_started_at, &self.job)
         else {
             return ProcessProbeResult::Unidentified;
         };
-        let shell_pid = Pid::from_u32(shell_pid);
-        let processes = process_snapshot();
-        if processes
-            .system
-            .process(shell_pid)
+        let Ok(members) = job.process_ids() else {
+            return ProcessProbeResult::Unidentified;
+        };
+        let shell = Pid::from_u32(shell_pid);
+        let descendants = members
+            .into_iter()
+            .filter(|pid| *pid != shell_pid)
+            .map(Pid::from_u32)
+            .collect::<Vec<_>>();
+        // Command lines, the expensive part on Windows, are read for the members only.
+        let system = command_line_processes(&[&[shell], descendants.as_slice()].concat());
+        if system
+            .process(shell)
             .is_none_or(|shell| shell.start_time() != shell_started_at)
         {
             return ProcessProbeResult::Unidentified;
         }
-        // Phase one is the cheap table (names and parents); command lines, the expensive part
-        // on Windows, are read only for the shell's descendants.
-        let descendants = processes
-            .system
-            .processes()
-            .keys()
-            .copied()
-            .filter(|pid| {
-                *pid != shell_pid && descendant_depth(&processes.system, *pid, shell_pid).is_some()
-            })
-            .collect::<Vec<_>>();
         if descendants.is_empty() {
             return ProcessProbeResult::ShellOnly;
         }
-        drop(processes);
-        let system = command_line_processes(&descendants);
         let candidates = descendants
             .iter()
             .filter_map(|pid| {

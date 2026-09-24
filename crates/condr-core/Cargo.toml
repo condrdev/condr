@@ -34,7 +34,7 @@ filedescriptor.workspace = true
 nix.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [lints]
 workspace = true
