@@ -1,6 +1,6 @@
 # Releases
 
-Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the desktop installer and the headless archive for Linux x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together. Every binary reports its build as `<version>+<12-character commit>` (`condr --version`, `condr-gui --version`; ADR 0027), and a GUI connected to a Server of another build marks that Device in the sidebar.
+Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the desktop installer and the headless archive for Linux x86_64/arm64, macOS x86_64/arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together. Every binary reports its build as `<version>+<12-character commit>` (`condr --version`, `condr-gui --version`; ADR 0027), a nightly with `(nightly)` after it, and a GUI connected to a Server of another build marks that Device in the sidebar.
 
 ## Nightly
 
@@ -25,13 +25,14 @@ Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call t
 
 ## Installing a build
 
-Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use `script/install-condr.sh` / `.ps1`, which condr.dev serves as `install.sh` / `install.ps1`: the script picks the headless archive for the current machine from GitHub Releases, verifies it against `SHA256SUMS`, and runs `condr server install` with any remaining arguments (ADR 0016).
+Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use `script/install-condr.sh` / `.ps1`, which condr.dev serves as `install.sh` / `install.ps1`: the script picks the headless archive for the current machine from GitHub Releases, verifies it against `SHA256SUMS`, and runs `condr server install` with any remaining arguments (ADR 0016). Asked for nothing else, it first compares the installed `condr --version` with `condr.dev/version.txt` (the Cargo.toml version the site was built from, redeployed by `release.yml`) and stops without downloading when that release is already installed; `--force` reinstalls.
 
 ```bash
 curl -fsSL https://condr.dev/install.sh | sh                          # the latest release
 CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh    # the nightly
 CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh     # one versioned release
 curl -fsSL https://condr.dev/install.sh | sh -s -- --start            # also start the Server
+curl -fsSL https://condr.dev/install.sh | sh -s -- --force            # reinstall even when up to date
 sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz
 ```
 
@@ -40,6 +41,7 @@ irm https://condr.dev/install.ps1 | iex                                 # the la
 $env:CONDR_VERSION = 'nightly'; irm https://condr.dev/install.ps1 | iex
 $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
 $env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
+$env:CONDR_INSTALL_ARGS = '--force'; irm https://condr.dev/install.ps1 | iex
 powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-windows-x86_64.zip
 ```
 

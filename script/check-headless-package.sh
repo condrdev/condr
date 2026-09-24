@@ -25,12 +25,18 @@ if [ "$(cat "$payload/BUILD-COMMIT")" != "$commit" ]; then
     exit 1
 fi
 "$payload/condr" server --help > /dev/null
-# The binary knows its own build: `condr <version>+<12-char commit>` (ADR 0027).
-identity=$("$payload/condr" --version)
+# The binary knows its own build: `condr <version>+<12-char commit>` (ADR 0027),
+# followed by `(nightly)` exactly when this is not a release.
+version_line=$("$payload/condr" --version)
+identity=$(printf '%s' "$version_line" | awk '{print $2}')
 if [ "${identity##*+}" != "$(printf '%s' "$commit" | cut -c 1-12)" ]; then
-    echo "condr --version says '$identity', not commit $commit" >&2
+    echo "condr --version says '$version_line', not commit $commit" >&2
     exit 1
 fi
+case "$version_line" in
+    *' (nightly)') [ "${CONDR_RELEASE:-0}" != 1 ] ;;
+    *) [ "${CONDR_RELEASE:-0}" = 1 ] ;;
+esac || { echo "condr --version says '$version_line' with CONDR_RELEASE=${CONDR_RELEASE:-0}" >&2; exit 1; }
 
 CONDR_INSTALL_DIR="$stage/install" CONDR_PROFILE="$stage/profile" \
     HOME="$stage/home" sh "$repo/script/install-condr.sh" --from "$archive"

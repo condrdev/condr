@@ -4,8 +4,9 @@ name: Website
 # (a Direct Upload project; it is not connected to GitHub). The install
 # scripts come from script/ and the logo and agent marks from assets/, so
 # changes there also redeploy the site. /download/ links to the files of the
-# Cargo.toml version, so release.yml calls this once that release is published
-# (a Cargo.toml push alone would link to files that do not exist yet).
+# Cargo.toml version and /version.txt names it for the install scripts, so
+# release.yml calls this once that release is published (a Cargo.toml push
+# alone would point at files that do not exist yet).
 
 on:
   push:

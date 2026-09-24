@@ -44,20 +44,22 @@ On that device, run the command for its platform:
 | macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
 
-The script downloads the headless build, verifies it against `SHA256SUMS`, and runs `condr server install`. The binary goes to `~/.local/opt/condr` (`%LOCALAPPDATA%\Programs\Condr` on Windows) and is added to your PATH. To check, open a new terminal and run `condr --help`.
+The script downloads the headless build, verifies it against `SHA256SUMS`, and runs `condr server install`. The binary goes to `~/.local/opt/condr` (`%LOCALAPPDATA%\Programs\Condr` on Windows) and is added to your PATH. When updating with a Server already running, it asks whether to restart the Server so the new version takes over; until it does, the app shows a version mismatch for that Device. To check, open a new terminal and run `condr --help`.
 
-To install a specific version, or to start the Server right after installing:
+Run again, the script stops without downloading when the latest release is already installed. To install a specific version, start the Server right after installing, or reinstall anyway:
 
 ```sh
 CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh   # the nightly (default: the latest release)
 CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh    # one versioned release
 curl -fsSL https://condr.dev/install.sh | sh -s -- --start            # also start the Server
+curl -fsSL https://condr.dev/install.sh | sh -s -- --force            # reinstall even when up to date
 ```
 
 ```powershell
 $env:CONDR_VERSION = 'nightly'; irm https://condr.dev/install.ps1 | iex
 $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
 $env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
+$env:CONDR_INSTALL_ARGS = '--force'; irm https://condr.dev/install.ps1 | iex
 ```
 
 To install somewhere else, set `CONDR_INSTALL_DIR`.

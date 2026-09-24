@@ -19,7 +19,7 @@ mod cli;
 #[command(
     name = "condr",
     bin_name = "condr",
-    version = condr_core::build_identity(),
+    version = condr_core::version_text(),
     arg_required_else_help = true
 )]
 struct Cli {

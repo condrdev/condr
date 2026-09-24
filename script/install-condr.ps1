@@ -3,10 +3,13 @@
 #   $env:CONDR_VERSION = 'nightly'; irm https://condr.dev/install.ps1 | iex
 #   $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
 #   $env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
+#   $env:CONDR_INSTALL_ARGS = '--force'; irm https://condr.dev/install.ps1 | iex
 #   powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-windows-x86_64.zip
 # Downloads the archive from GitHub Releases (or takes -From), verifies it against
 # SHA256SUMS, then runs `condr server install` with the remaining arguments or
-# $env:CONDR_INSTALL_ARGS (ADR 0016). Desktop users use the installer instead.
+# $env:CONDR_INSTALL_ARGS (ADR 0016). With no other arguments it first compares the
+# installed condr with condr.dev/version.txt and stops when the latest release is
+# already there; --force reinstalls. Desktop users use the installer instead.
 param(
   [string] $From,
   [string] $Version,
@@ -17,9 +20,24 @@ $ErrorActionPreference = 'Stop'
 $repo = if ($env:CONDR_REPO) { $env:CONDR_REPO } else { 'condrdev/condr' }
 if (-not $Version) { $Version = if ($env:CONDR_VERSION) { $env:CONDR_VERSION } else { 'latest' } }
 if (-not $InstallArgs -and $env:CONDR_INSTALL_ARGS) { $InstallArgs = $env:CONDR_INSTALL_ARGS -split '\s+' }
+$force = $InstallArgs -contains '--force'
+$InstallArgs = @($InstallArgs | Where-Object { $_ -and $_ -ne '--force' })
 # The binary resolves a relative CONDR_INSTALL_DIR against the process directory; use PowerShell's location.
 if ($env:CONDR_INSTALL_DIR) {
   $env:CONDR_INSTALL_DIR = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:CONDR_INSTALL_DIR)
+}
+
+# Nothing else asked and the latest release already installed: nothing to do.
+$installDir = if ($env:CONDR_INSTALL_DIR) { $env:CONDR_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Condr' }
+$installed = Join-Path $installDir 'condr.exe'
+if (-not $From -and -not $force -and -not $InstallArgs -and $Version -eq 'latest' -and $repo -eq 'condrdev/condr' -and (Test-Path -LiteralPath $installed -PathType Leaf)) {
+  $latest = try { "$(Invoke-RestMethod -Uri 'https://condr.dev/version.txt')".Trim() } catch { '' }
+  # Only a release prints nothing after its version; a nightly adds `(nightly)`.
+  $current = try { $fields = "$(& $installed --version)".Trim().Split(' '); if ($fields.Count -eq 2) { $fields[1] } else { '' } } catch { '' }
+  if ($latest -and $current.Split('+')[0] -eq $latest) {
+    Write-Output "condr $current is already the latest release; pass --force to reinstall"
+    return
+  }
 }
 
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("condr-install-" + [guid]::NewGuid())

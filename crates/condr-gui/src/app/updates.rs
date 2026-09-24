@@ -43,12 +43,12 @@ impl UpdateChannel {
             .unwrap_or_else(Self::of_this_build)
     }
 
-    /// The channel this build was published on. CI sets `CONDR_RELEASE` to `0` for a
-    /// nightly and `1` for a `v*` release; a local build has neither and counts as stable.
+    /// The channel this build was published on ([`condr_core::is_nightly`]).
     pub(in crate::app) fn of_this_build() -> Self {
-        match option_env!("CONDR_RELEASE") {
-            Some("0") => Self::Nightly,
-            _ => Self::Stable,
+        if condr_core::is_nightly() {
+            Self::Nightly
+        } else {
+            Self::Stable
         }
     }
 

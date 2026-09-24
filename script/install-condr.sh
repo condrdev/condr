@@ -2,21 +2,42 @@
 # Install the Condr headless build (the condr CLI/Server binary) on Linux or macOS.
 #   curl -fsSL https://condr.dev/install.sh | sh
 #   curl -fsSL https://condr.dev/install.sh | sh -s -- --start
+#   curl -fsSL https://condr.dev/install.sh | sh -s -- --force
 #   CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh
 #   CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
 #   sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz
 # Downloads the archive for this machine from GitHub Releases (or takes --from),
 # verifies it against SHA256SUMS, then runs `condr server install` with the
-# remaining arguments (ADR 0016). Desktop users use a platform package instead.
+# remaining arguments (ADR 0016). With no other arguments it first compares the
+# installed condr with condr.dev/version.txt and stops when the latest release is
+# already there; --force reinstalls. Desktop users use a platform package instead.
 set -eu
 
 main() {
     repo=${CONDR_REPO:-condrdev/condr}
     version=${CONDR_VERSION:-latest}
+    force=
+    for arg do
+        shift
+        if [ "$arg" = --force ]; then force=1; else set -- "$@" "$arg"; fi
+    done
     source=
     if [ "${1:-}" = --from ]; then
         source=${2:?--from needs an archive}
         shift 2
+    fi
+
+    # Nothing else asked and the latest release already installed: nothing to do.
+    installed=${CONDR_INSTALL_DIR:-${HOME:-}/.local/opt/condr}/condr
+    if [ -z "$source$force" ] && [ $# -eq 0 ] && [ "$version" = latest ] \
+        && [ "$repo" = condrdev/condr ] && [ -x "$installed" ]; then
+        latest=$(curl -fsSL https://condr.dev/version.txt 2>/dev/null || true)
+        # Only a release prints nothing after its version; a nightly adds `(nightly)`.
+        current=$("$installed" --version 2>/dev/null | awk 'NF == 2 {print $2}')
+        if [ -n "$latest" ] && [ "${current%%+*}" = "$latest" ]; then
+            echo "condr $current is already the latest release; pass --force to reinstall"
+            exit 0
+        fi
     fi
 
     stage=$(mktemp -d "${TMPDIR:-/tmp}/condr-install.XXXXXX")
@@ -70,7 +91,12 @@ main() {
     tar -xzf "$source" -C "$stage/payload"
     condr="$stage/payload/condr-headless/condr"
     [ -x "$condr" ] || { echo "$name does not contain condr-headless/condr" >&2; exit 1; }
-    "$condr" server install "$@"
+    # `curl | sh` leaves stdin on the pipe; hand install the terminal so it can ask.
+    if (true </dev/tty) 2>/dev/null; then
+        "$condr" server install "$@" </dev/tty
+    else
+        "$condr" server install "$@"
+    fi
 }
 
 main "$@"

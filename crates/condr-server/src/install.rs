@@ -157,16 +157,25 @@ fn user_path_without(path: &str, dir: &str) -> Option<String> {
     (kept.len() != parts.len()).then(|| kept.join(";"))
 }
 
+/// A person can see a question and answer it: both stdin and stdout are a terminal.
+fn interactive() -> bool {
+    io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
 /// Asks on a terminal; without one, only `--yes` answers.
 fn confirm(question: &str, yes: bool) -> io::Result<bool> {
     if yes {
         return Ok(true);
     }
-    if !io::stdin().is_terminal() {
+    if !interactive() {
         return Err(io::Error::other(format!(
             "{question}\nno terminal to ask on; pass --yes to confirm"
         )));
     }
+    ask(question)
+}
+
+fn ask(question: &str) -> io::Result<bool> {
     print!("{question} [y/N] ");
     io::stdout().flush()?;
     let mut answer = String::new();
@@ -465,7 +474,7 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
             )?
         {
             return Err(io::Error::other(
-                "not restarted; the running Server keeps serving from its previous binary",
+                "not restarted; the Server keeps running the old version",
             ));
         }
         crate::restart_server_from(config, &target)
@@ -479,6 +488,17 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
                 .map_err(|error| detail("failed to start the Server", error))?;
             "started"
         }
+    } else if running
+        && !options.json
+        && std::env::var_os("CONDR_PANE_ID").is_none()
+        && interactive()
+        && ask(
+            "The Server is still running the old version. Restart it now to switch to the new one? Programs in its terminals end; Workspaces and Agent conversations reopen.",
+        )?
+    {
+        crate::restart_server_from(config, &target)
+            .map_err(|error| detail("failed to restart the Server", error))?;
+        "restarted"
     } else if running {
         "running"
     } else {
@@ -488,7 +508,7 @@ pub fn install(options: InstallOptions) -> io::Result<i32> {
         "none" => steps.say("Server", "not running; `condr server start` starts one"),
         "running" => steps.say(
             "Server",
-            "running from its previous binary; `condr server restart` switches it",
+            "still running the old version; `condr server restart` switches to the new one",
         ),
         _ => steps.say("Server", format!("{server} at {endpoint}")),
     }

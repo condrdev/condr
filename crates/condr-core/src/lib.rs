@@ -67,6 +67,25 @@ pub fn build_identity() -> &'static str {
     &IDENTITY
 }
 
+/// Whether CI published this build as a nightly: it sets `CONDR_RELEASE` to `0` for a
+/// nightly and `1` for a `v*` release; a local build has neither and counts as stable.
+pub fn is_nightly() -> bool {
+    option_env!("CONDR_RELEASE") == Some("0")
+}
+
+/// What `--version` prints after the program name: the [`build_identity`], and
+/// `(nightly)` after a nightly's. Only for people; the handshake carries the identity.
+pub fn version_text() -> &'static str {
+    static TEXT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        if is_nightly() {
+            format!("{} (nightly)", build_identity())
+        } else {
+            build_identity().to_owned()
+        }
+    });
+    &TEXT
+}
+
 /// How another Condr's [`build_identity`] relates to this one's.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BuildComparison {
