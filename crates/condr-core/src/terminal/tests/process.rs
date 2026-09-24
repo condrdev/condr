@@ -136,3 +136,21 @@ fn windows_agent_selection_requires_one_candidate_to_own_the_tree() {
         None
     );
 }
+
+#[test]
+fn an_orphan_older_than_a_reused_parent_pid_is_not_a_descendant() {
+    // pid -> (parent, started at): 1 is the shell, 2 and 4 its tree; 3 is an orphan whose
+    // dead parent's PID the shell now carries.
+    let table = std::collections::HashMap::from([
+        (1, (None, 100)),
+        (2, (Some(1), 100)),
+        (3, (Some(1), 90)),
+        (4, (Some(2), 105)),
+        (5, (Some(3), 95)),
+    ]);
+    let process = |pid| table.get(&pid).copied();
+    assert_eq!(descendant_depth_by(1, 1, process), Some(0));
+    assert_eq!(descendant_depth_by(4, 1, process), Some(2));
+    assert_eq!(descendant_depth_by(3, 1, process), None);
+    assert_eq!(descendant_depth_by(5, 1, process), None);
+}

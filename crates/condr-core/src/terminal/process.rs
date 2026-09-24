@@ -123,14 +123,37 @@ pub(super) fn attempt_process_tree_shutdown(
         }
     }
 
-    let message = state.child_error.as_ref().map_or_else(
-        || "terminal process tree did not exit after forced shutdown".into(),
-        |error| {
-            format!(
-                "terminal process tree did not exit after forced shutdown; child process operation failed: {error}"
-            )
+    let system = owned_process_table(&state.owned);
+    let survivors = state
+        .owned
+        .iter()
+        .filter_map(|owned| {
+            let running = system.process(owned.pid)?;
+            (running.start_time() == owned.started_at).then(|| {
+                format!(
+                    "{} {} (parent {:?}, started {})",
+                    owned.pid,
+                    running.name().to_string_lossy(),
+                    running.parent(),
+                    owned.started_at
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut message = format!(
+        "terminal process tree did not exit after forced shutdown; shell {:?} started {:?}, exit status {}; still running: [{}]",
+        process.shell_pid,
+        process.shell_started_at,
+        if state.status.is_some() {
+            "reaped"
+        } else {
+            "missing"
         },
+        survivors.join(", ")
     );
+    if let Some(error) = &state.child_error {
+        message.push_str(&format!("; child process operation failed: {error}"));
+    }
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
 }
 
@@ -568,12 +591,32 @@ pub(super) fn identify_process(process: &sysinfo::Process) -> Option<AgentKind> 
     identify_agent_process(CandidateProcess::new(process).info())
 }
 
-pub(super) fn descendant_depth(system: &System, mut pid: Pid, ancestor: Pid) -> Option<usize> {
+pub(super) fn descendant_depth(system: &System, pid: Pid, ancestor: Pid) -> Option<usize> {
+    descendant_depth_by(pid, ancestor, |pid| {
+        system
+            .process(pid)
+            .map(|process| (process.parent(), process.start_time()))
+    })
+}
+
+/// Windows keeps a dead parent's PID on its children and soon hands the PID to a new
+/// process, which then looks like the parent of an unrelated orphan. A parent that
+/// started after its child is that stranger, so the chain stops there.
+pub(super) fn descendant_depth_by<P: Copy + Eq>(
+    mut pid: P,
+    ancestor: P,
+    process: impl Fn(P) -> Option<(Option<P>, u64)>,
+) -> Option<usize> {
     for depth in 0..32 {
         if pid == ancestor {
             return Some(depth);
         }
-        pid = system.process(pid)?.parent()?;
+        let (parent, started_at) = process(pid)?;
+        let parent = parent?;
+        if process(parent).is_some_and(|(_, parent_started_at)| parent_started_at > started_at) {
+            return None;
+        }
+        pid = parent;
     }
     None
 }
