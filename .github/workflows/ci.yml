@@ -66,4 +66,5 @@ jobs:
           # PR branches only restore main's cache; saving per branch would evict it.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets --features condr-gui/test-support --locked -- -D warnings
-      - run: cargo test --workspace --features condr-gui/test-support --locked
+      # Every test binary runs, so one run reports every failure.
+      - run: cargo test --workspace --features condr-gui/test-support --locked --no-fail-fast
