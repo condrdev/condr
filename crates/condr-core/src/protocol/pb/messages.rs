@@ -15,8 +15,8 @@ use crate::protocol::{
     TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
 use crate::{
-    AgentKind, AgentSnapshot, DirectoryListing, FileContent, FileDiff, PaneId, SessionSnapshot,
-    TabId, TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
+    AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
+    SessionSnapshot, TabId, TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -277,6 +277,12 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 workspace_id,
                 path,
             )),
+            ClientMessage::BrowseDirectory { request_id, path } => {
+                Message::BrowseDirectory(super::BrowseDirectory {
+                    request_id: *request_id,
+                    path: path_text(path)?,
+                })
+            }
             ClientMessage::Agent {
                 server_id,
                 session_id,
@@ -413,6 +419,10 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
                 path: relative_path(request.path)?,
+            },
+            Message::BrowseDirectory(request) => ClientMessage::BrowseDirectory {
+                request_id: request.request_id,
+                path: PathBuf::from(request.path),
             },
             Message::Agent(agent) => ClientMessage::Agent {
                 server_id: ServerId(agent.server_id),
@@ -1531,6 +1541,21 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                     Err(error) => file_content_reply::Result::Err(error.clone()),
                 }),
             }),
+            ServerMessage::BrowsedDirectory { request_id, result } => {
+                Message::BrowsedDirectory(BrowsedDirectoryReply {
+                    request_id: *request_id,
+                    result: Some(match result {
+                        Ok(browsed) => {
+                            browsed_directory_reply::Result::Ok(super::BrowsedDirectory {
+                                path: path_text(&browsed.path)?,
+                                parent: optional_path_text(browsed.parent.as_ref())?,
+                                listing: Some((&browsed.listing).into()),
+                            })
+                        }
+                        Err(error) => browsed_directory_reply::Result::Err(error.clone()),
+                    }),
+                })
+            }
             ServerMessage::AgentResult { result } => {
                 Message::AgentResult(encode_agent_result(result)?)
             }
@@ -1715,6 +1740,17 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             result: match member(reply.result)? {
                 file_content_reply::Result::Ok(content) => Ok(FileContent::try_from(content)?),
                 file_content_reply::Result::Err(error) => Err(error),
+            },
+        },
+        Message::BrowsedDirectory(reply) => ServerMessage::BrowsedDirectory {
+            request_id: reply.request_id,
+            result: match member(reply.result)? {
+                browsed_directory_reply::Result::Ok(browsed) => Ok(BrowsedDirectory {
+                    path: PathBuf::from(browsed.path),
+                    parent: browsed.parent.map(PathBuf::from),
+                    listing: required(browsed.listing, "directory listing")?.try_into()?,
+                }),
+                browsed_directory_reply::Result::Err(error) => Err(error),
             },
         },
         Message::AgentResult(result) => ServerMessage::AgentResult {

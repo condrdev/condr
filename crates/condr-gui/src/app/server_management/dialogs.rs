@@ -121,6 +121,7 @@ impl Condr {
             Some(placeholder.into()),
             prefix,
             true,
+            None,
             move |this, value, _, cx| {
                 if let Some(scheme) = expected_scheme
                     && !value.trim().to_ascii_lowercase().starts_with(scheme)

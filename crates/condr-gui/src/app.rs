@@ -46,9 +46,9 @@ use condr_core::protocol::{
     decode_pane_terminal_frame, relative_age, uptime_text,
 };
 use condr_core::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, DirectoryListing,
-    FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, Session, SessionSnapshot,
-    SplitDirection, Tab, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
+    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, BrowsedDirectory,
+    DirectoryListing, FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, Session,
+    SessionSnapshot, SplitDirection, Tab, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
     TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
     TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
     TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, Workspace,
@@ -58,6 +58,7 @@ use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
 };
 use connection::*;
+use dialogs::DirectoryBrowser;
 #[cfg(test)]
 use dialogs::accepted_text_input;
 use dock::*;
@@ -331,6 +332,9 @@ pub(crate) struct Condr {
     /// Tab's "Show File", applied by `sync_file_view` when the text is there, then cleared.
     /// Presentation only, so it never rides `ShowFile`.
     pending_file_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
+    /// What the open Root Directory dialog lists for a remote Device; replaced by the
+    /// next such dialog, so a closed one is harmless.
+    directory_browser: Option<DirectoryBrowser>,
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
@@ -523,6 +527,7 @@ impl Condr {
             pending_directories: HashSet::new(),
             pending_files: HashSet::new(),
             pending_file_line: None,
+            directory_browser: None,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,

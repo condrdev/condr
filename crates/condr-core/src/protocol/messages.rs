@@ -95,6 +95,13 @@ pub enum ClientMessage {
         /// Relative to the Workspace root.
         path: RelativePathBuf,
     },
+    /// The subdirectories of an absolute path on the Server's machine, or of its home
+    /// directory when `path` is empty, for choosing a Root Directory; answered with
+    /// [`ServerMessage::BrowsedDirectory`]. No Session control needed.
+    BrowseDirectory {
+        request_id: u64,
+        path: PathBuf,
+    },
     /// Agent orchestration is owned by the Server, including name resolution and waits.
     Agent {
         server_id: ServerId,
@@ -748,6 +755,11 @@ pub enum ServerMessage {
         /// Relative to the Workspace root, as requested.
         path: RelativePathBuf,
         result: Result<crate::FileContent, String>,
+    },
+    /// The reply to [`ClientMessage::BrowseDirectory`].
+    BrowsedDirectory {
+        request_id: u64,
+        result: Result<crate::BrowsedDirectory, String>,
     },
     AgentResult {
         result: Result<AgentResponse, AgentError>,

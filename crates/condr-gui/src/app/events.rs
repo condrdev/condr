@@ -752,6 +752,13 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
+            ServerMessage::BrowsedDirectory { request_id, result } => {
+                self.apply_browsed_directory(key, request_id, result, cx);
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
             ServerMessage::TerminalCopied { text, .. } => {
                 if let Some(text) = text {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));

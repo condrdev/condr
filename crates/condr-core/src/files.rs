@@ -1,6 +1,7 @@
 //! The Files sidebar's data (ADR 0018): one directory level of a Workspace root and one
 //! file's content, read by the Server and answered over the protocol. Plain filesystem
-//! reads: browsing a Workspace does not need it to be a repository.
+//! reads: browsing a Workspace does not need it to be a repository. Also the subdirectories
+//! of any absolute path, for choosing a Root Directory on another Device.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,18 @@ pub struct DirectoryListing {
     pub entries: Vec<DirectoryEntry>,
     /// The listing stopped at [`MAX_DIRECTORY_ENTRIES`].
     pub truncated: bool,
+}
+
+/// A directory on the Server's machine and its subdirectories, for choosing a Root
+/// Directory from a Client that cannot open a native picker there.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BrowsedDirectory {
+    /// As asked, or the home directory when the request was empty.
+    pub path: PathBuf,
+    /// Named by the Server, since a Client cannot split a path of another platform.
+    pub parent: Option<PathBuf>,
+    /// Directories only.
+    pub listing: DirectoryListing,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -90,6 +103,27 @@ pub fn list_directory(root: &Path, relative: &RelativePath) -> Result<DirectoryL
             .then_with(|| a.name.cmp(&b.name))
     });
     Ok(DirectoryListing { entries, truncated })
+}
+
+/// The subdirectories of the absolute `path`, or of the home directory when it is empty.
+pub fn browse_directory(path: &Path) -> Result<BrowsedDirectory, String> {
+    let path = if path.as_os_str().is_empty() {
+        dirs::home_dir().ok_or("cannot locate the home directory")?
+    } else {
+        path.to_path_buf()
+    };
+    if !path.is_absolute() {
+        return Err(format!("not an absolute path: {}", path.display()));
+    }
+    let mut listing = list_directory(&path, RelativePath::new(""))?;
+    listing
+        .entries
+        .retain(|entry| entry.kind == FileKind::Directory);
+    Ok(BrowsedDirectory {
+        parent: path.parent().map(Path::to_path_buf),
+        path,
+        listing,
+    })
 }
 
 /// `relative`'s content under `root`, as text when it looks like text.

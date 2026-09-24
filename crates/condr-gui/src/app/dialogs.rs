@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::scroll::ScrollableElement as _;
 
 /// What the Host field lets you type: host-name and IP characters, at most 253 of them.
 /// Brackets allow a literal IPv6 address; completeness is judged on Save.
@@ -60,14 +61,17 @@ impl Condr {
             None,
             None,
             true,
+            None,
             apply,
             window,
             cx,
         );
     }
 
+    /// A path on `key`'s Device, typed or picked from the directories listed under the field.
     pub(super) fn prompt_server_path(
         &mut self,
+        key: ConnectionKey,
         title: String,
         ok_text: &'static str,
         apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
@@ -83,10 +87,66 @@ impl Condr {
             Some("Absolute path on the device".into()),
             None,
             false,
+            Some(key),
             apply,
             window,
             cx,
         );
+    }
+
+    fn browse_directory(&mut self, key: ConnectionKey, path: String) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if connection.status != ConnectionStatus::Connected {
+            return;
+        }
+        let request_id = connection.next_layout_request_id;
+        connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
+        connection.send(ClientMessage::BrowseDirectory {
+            request_id,
+            path: PathBuf::from(path),
+        });
+        if let Some(browser) = self
+            .directory_browser
+            .as_mut()
+            .filter(|browser| browser.key == key)
+        {
+            browser.request_id = request_id;
+        }
+    }
+
+    pub(super) fn apply_browsed_directory(
+        &mut self,
+        key: ConnectionKey,
+        request_id: u64,
+        result: Result<BrowsedDirectory, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(browser) = self
+            .directory_browser
+            .as_mut()
+            .filter(|browser| browser.key == key && browser.request_id == request_id)
+        else {
+            return;
+        };
+        // Only the first request goes out with the field empty; its answer names the
+        // home directory, which the field then shows selected, so typing replaces it.
+        if let (Ok(browsed), Some(input)) = (&result, browser.input.upgrade()) {
+            let path = browsed.path.to_string_lossy().into_owned();
+            let handle = self.window_handle;
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    input.update(cx, |input, cx| {
+                        if input.value().is_empty() {
+                            input.set_value(path, window, cx);
+                            input.select_all(window, cx);
+                        }
+                    });
+                });
+            });
+        }
+        browser.listing = Some(result);
     }
 
     pub(super) fn prompt_directory_on(
@@ -106,6 +166,7 @@ impl Condr {
         };
         if !local_endpoint {
             self.prompt_server_path(
+                key,
                 title,
                 ok_text,
                 move |this, path, window, cx| {
@@ -146,6 +207,7 @@ impl Condr {
                             // Say why, and take the path as text so work can go on.
                             this.report_error(error, cx);
                             this.prompt_server_path(
+                                key,
                                 title,
                                 ok_text,
                                 move |this, path, window, cx| {
@@ -175,6 +237,8 @@ impl Condr {
         // such as `ssh://` is never typed; typing or pasting it anyway is fine.
         prefix: Option<&'static str>,
         trim_value: bool,
+        // Lists the directories on this Device under what the field names, for a path.
+        browse: Option<ConnectionKey>,
         apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
         + 'static,
         window: &mut Window,
@@ -188,6 +252,23 @@ impl Condr {
                 input
             }
         });
+        if let Some(key) = browse {
+            self.directory_browser = Some(DirectoryBrowser {
+                key,
+                request_id: 0,
+                input: input.downgrade(),
+                listing: None,
+            });
+            // An emptied field keeps the last listing rather than jump back home.
+            cx.subscribe(&input, move |this, input, event: &InputEvent, cx| {
+                let path = input.read(cx).value().trim().to_owned();
+                if matches!(event, InputEvent::Change) && !path.is_empty() {
+                    this.browse_directory(key, path);
+                }
+            })
+            .detach();
+            self.browse_directory(key, String::new());
+        }
         let owner = cx.weak_entity();
         let apply = Rc::new(apply);
         let error = cx.new(|_| None::<String>);
@@ -202,6 +283,7 @@ impl Condr {
                 let owner = owner.clone();
                 let apply = apply.clone();
                 let field_label = field_label.clone();
+                let content_owner = owner.clone();
                 let content_error = error.clone();
                 let submit_error = error.clone();
                 dialog
@@ -223,6 +305,9 @@ impl Condr {
                                         )
                                     },
                                 ))
+                                .children(browse.and_then(|_| {
+                                    directory_browser_list(&content_owner, &input_for_content, cx)
+                                }))
                                 .when_some(content_error.read(cx).clone(), |field, error| {
                                     field.child(
                                         div().text_sm().text_color(cx.theme().danger).child(error),
@@ -447,6 +532,111 @@ impl Condr {
             cx,
         );
     }
+}
+
+/// What a Root Directory dialog for a remote Device lists under its field (ADR 0002).
+pub(super) struct DirectoryBrowser {
+    key: ConnectionKey,
+    /// The latest request; an answer to an older one is dropped.
+    request_id: u64,
+    input: WeakEntity<InputState>,
+    listing: Option<Result<BrowsedDirectory, String>>,
+}
+
+/// The parent and subdirectories of what the field names; a click puts one in the field.
+fn directory_browser_list(
+    owner: &WeakEntity<Condr>,
+    input: &Entity<InputState>,
+    cx: &App,
+) -> Option<AnyElement> {
+    let condr = owner.upgrade()?;
+    let browser = condr.read(cx).directory_browser.as_ref()?;
+    let theme = cx.theme();
+    let note = |text: String| {
+        div()
+            .h_7()
+            .px_2()
+            .flex()
+            .items_center()
+            .text_sm()
+            .text_color(theme.muted_foreground)
+            .truncate()
+            .child(text)
+            .into_any_element()
+    };
+    // A path still being typed does not exist yet: that is not an error, so it is muted.
+    let browsed = match &browser.listing {
+        None => return Some(note("Loading…".into())),
+        Some(Err(reason)) => return Some(note(reason.clone())),
+        Some(Ok(browsed)) => browsed,
+    };
+    let key = browser.key;
+    let row = |id: String, label: String, path: String| {
+        let (input, owner) = (input.clone(), owner.clone());
+        h_flex()
+            .id(SharedString::from(id.clone()))
+            .debug_selector(move || id.clone())
+            .h_7()
+            .w_full()
+            .px_2()
+            .gap_1()
+            .items_center()
+            .cursor_pointer()
+            .rounded(theme.radius)
+            .text_sm()
+            .hover(|this| this.bg(theme.list_hover))
+            .on_click(move |_, window, cx| {
+                input.update(cx, |input, cx| input.set_value(path.clone(), window, cx));
+                let _ = owner.update(cx, |this, _| this.browse_directory(key, path.clone()));
+            })
+            .child(
+                img(file_icons::folder_icon(theme.is_dark()))
+                    .size_4()
+                    .flex_shrink_0(),
+            )
+            .child(div().min_w_0().flex_1().truncate().child(label))
+            .into_any_element()
+    };
+    let parent = browsed.parent.as_ref().map(|parent| {
+        row(
+            "directory-browser-parent".into(),
+            "..".into(),
+            parent.to_string_lossy().into_owned(),
+        )
+    });
+    let directories = browsed.listing.entries.iter().map(|entry| {
+        let path = absolute_path(&browsed.path, RelativePath::new(&entry.name));
+        row(
+            format!("directory-browser-{}", entry.name),
+            entry.name.clone(),
+            path.to_string_lossy().into_owned(),
+        )
+    });
+    Some(
+        v_flex()
+            // Keyed by the directory, so entering one starts at its top.
+            .id(SharedString::from(format!(
+                "directory-browser-{}",
+                browsed.path.display()
+            )))
+            .debug_selector(|| "directory-browser".into())
+            .h_64()
+            .w_full()
+            .p_1()
+            .border_1()
+            .border_color(theme.border)
+            .rounded(theme.radius)
+            .overflow_y_scrollbar()
+            .when(browsed.listing.truncated, |list| {
+                list.child(truncated_note(cx))
+            })
+            .children(parent)
+            .children(directories)
+            .when(browsed.listing.entries.is_empty(), |list| {
+                list.child(note("No subdirectories".into()))
+            })
+            .into_any_element(),
+    )
 }
 
 pub(super) fn accepted_text_input(value: String, trim_value: bool) -> Option<String> {

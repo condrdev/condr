@@ -1192,6 +1192,13 @@ pub(super) fn handle_client(
                     },
                 )
             }
+            ClientMessage::BrowseDirectory { request_id, path } => queue_message(
+                &outbound,
+                ServerMessage::BrowsedDirectory {
+                    request_id,
+                    result: condr_core::browse_directory(&path),
+                },
+            ),
             ClientMessage::Agent {
                 server_id,
                 session_id,

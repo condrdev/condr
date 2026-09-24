@@ -31,6 +31,7 @@ message ClientMessage {
     Empty connected_devices = 18;
     ServerAdminRequest server_admin = 19;
     Empty detach = 20;
+    BrowseDirectory browse_directory = 21;
   }
 }
 
@@ -112,6 +113,12 @@ message PathRequest {
   uint64 request_id = 3;
   uint64 workspace_id = 4;
   string path = 5;
+}
+
+// An absolute path on the Server's machine; empty for its home directory.
+message BrowseDirectory {
+  uint64 request_id = 1;
+  string path = 2;
 }
 
 message AgentRequest {
@@ -343,6 +350,7 @@ message ServerMessage {
     ConnectedDevices connected_devices = 26;
     ServerAdminResponse server_admin = 27;
     string error = 28;
+    BrowsedDirectoryReply browsed_directory = 29;
   }
 }
 
@@ -593,6 +601,21 @@ message DirectoryReply {
   oneof result {
     DirectoryListing ok = 4;
     string err = 5;
+  }
+}
+
+message BrowsedDirectory {
+  string path = 1;
+  optional string parent = 2;
+  // Directories only.
+  DirectoryListing listing = 3;
+}
+
+message BrowsedDirectoryReply {
+  uint64 request_id = 1;
+  oneof result {
+    BrowsedDirectory ok = 2;
+    string err = 3;
   }
 }
 

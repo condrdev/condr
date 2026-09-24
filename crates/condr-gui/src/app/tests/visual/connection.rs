@@ -889,6 +889,76 @@ fn text_dialog_actions_are_compact_and_submit() {
 }
 
 #[test]
+fn a_device_path_dialog_opens_at_home_and_browses_by_clicking() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let home = std::env::home_dir().expect("the test needs a home directory");
+    let home_name = home.file_name().unwrap().to_string_lossy().into_owned();
+    let chosen = Rc::new(RefCell::new(None::<String>));
+
+    let open = |window: &mut VisualTestContext| {
+        let chosen = chosen.clone();
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| {
+                this.prompt_server_path(
+                    1,
+                    "New Workspace on Local".into(),
+                    "Create",
+                    move |_, path, _, _| {
+                        *chosen.borrow_mut() = Some(path);
+                        Ok(())
+                    },
+                    window,
+                    cx,
+                )
+            });
+        });
+    };
+    let click_when_shown = |window: &mut VisualTestContext, selector: &'static str| {
+        let mut bounds = None;
+        assert!(
+            wait_until(window, |window| {
+                window.update(|window, cx| _ = window.draw(cx));
+                bounds = window.debug_bounds(selector);
+                bounds.is_some()
+            }),
+            "{selector} should be listed"
+        );
+        window.simulate_click(bounds.unwrap().center(), Modifiers::default());
+    };
+
+    // The field starts at the Server's home directory.
+    open(window);
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("directory-browser-parent").is_some()
+    }));
+    click_when_shown(window, "dialog-primary-action");
+    window.run_until_parked();
+    assert_eq!(
+        chosen.borrow_mut().take().map(std::path::PathBuf::from),
+        Some(home.clone())
+    );
+
+    // Up to the parent, then back down by name.
+    open(window);
+    click_when_shown(window, "directory-browser-parent");
+    click_when_shown(
+        window,
+        leaked_selector(format!("directory-browser-{home_name}")),
+    );
+    window.run_until_parked();
+    click_when_shown(window, "dialog-primary-action");
+    window.run_until_parked();
+    assert_eq!(
+        chosen.borrow_mut().take().map(std::path::PathBuf::from),
+        Some(home)
+    );
+}
+
+#[test]
 fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();

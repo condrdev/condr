@@ -1,9 +1,11 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use relative_path::RelativePath;
 
-use condr_core::{FileContent, FileKind, MAX_FILE_BYTES, list_directory, read_file};
+use condr_core::{
+    FileContent, FileKind, MAX_FILE_BYTES, browse_directory, list_directory, read_file,
+};
 
 fn scratch(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("condr-files-{}-{name}", std::process::id()));
@@ -45,6 +47,33 @@ fn listing_puts_directories_first_hides_git_and_refuses_escapes() {
 
     assert!(list_directory(&root, RelativePath::new("../")).is_err());
     assert!(list_directory(&root, RelativePath::new("missing")).is_err());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn browsing_lists_only_directories_names_the_parent_and_starts_at_home() {
+    let root = scratch("browsing");
+    fs::create_dir_all(root.join("project")).unwrap();
+    fs::write(root.join("notes.txt"), "n").unwrap();
+
+    let browsed = browse_directory(&root).unwrap();
+    assert_eq!(browsed.path, root);
+    assert_eq!(browsed.parent.as_deref(), root.parent());
+    let names: Vec<&str> = browsed
+        .listing
+        .entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(names, ["project"]);
+
+    assert_eq!(
+        browse_directory(Path::new("")).unwrap().path,
+        dirs::home_dir().unwrap()
+    );
+    assert!(browse_directory(Path::new("relative")).is_err());
+    assert!(browse_directory(&root.join("missing")).is_err());
 
     let _ = fs::remove_dir_all(&root);
 }

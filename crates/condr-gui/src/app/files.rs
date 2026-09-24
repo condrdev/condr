@@ -89,9 +89,10 @@ struct FilesContext<'a> {
 
 /// `relative` under the Workspace root, spelled the way the root is: the root is the
 /// Server's path, so a POSIX root stays `/`-separated when this client is Windows.
-fn absolute_path(root: &Path, relative: &RelativePath) -> PathBuf {
-    if root.to_string_lossy().starts_with('/') {
-        PathBuf::from(format!("{}/{relative}", root.display()))
+pub(super) fn absolute_path(root: &Path, relative: &RelativePath) -> PathBuf {
+    let root_text = root.to_string_lossy();
+    if root_text.starts_with('/') {
+        PathBuf::from(format!("{}/{relative}", root_text.trim_end_matches('/')))
     } else {
         relative.to_path(root)
     }
@@ -1022,7 +1023,7 @@ fn note_row(text: impl Into<SharedString>, depth: usize, cx: &App) -> AnyElement
         .into_any_element()
 }
 
-fn truncated_note(cx: &App) -> AnyElement {
+pub(super) fn truncated_note(cx: &App) -> AnyElement {
     div()
         .px_2()
         .py_1()
@@ -1050,6 +1051,10 @@ mod tests {
             )
             .to_string_lossy(),
             "/home/me/condr/crates/core"
+        );
+        assert_eq!(
+            absolute_path(Path::new("/"), RelativePath::new("home")).to_string_lossy(),
+            "/home"
         );
         assert_eq!(
             absolute_path(Path::new(r"C:\me\condr"), RelativePath::new("crates/core")),
