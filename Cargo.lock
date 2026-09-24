@@ -1364,6 +1364,7 @@ dependencies = [
  "alacritty_terminal",
  "atomicwrites",
  "base64 0.22.1",
+ "core-foundation-sys",
  "dirs 6.0.0",
  "filedescriptor",
  "gix",

@@ -113,6 +113,69 @@ pub fn default_shell_program() -> String {
     CommandBuilder::new_default_prog().get_shell()
 }
 
+/// A Server started by the app inherits launchd's environment, which names no locale, so
+/// the shell would fall back to C and mangle UTF-8 input. Name the system locale the way
+/// Terminal.app does, or only the UTF-8 encoding when that locale is not installed (an
+/// `en_CN` system); a locale the environment already names wins.
+#[cfg(target_os = "macos")]
+pub(super) fn set_missing_locale(command: &mut CommandBuilder) {
+    if ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .any(|name| command.get_env(name).is_some_and(|value| !value.is_empty()))
+    {
+        return;
+    }
+    match system_locale().filter(|locale| Path::new("/usr/share/locale").join(locale).is_dir()) {
+        Some(locale) => command.env("LANG", locale),
+        None => command.env("LC_CTYPE", "UTF-8"),
+    }
+}
+
+/// The user's locale as `language_COUNTRY.UTF-8`.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)] // CFLocale has no safe wrapper in the CoreFoundation crates GPUI builds.
+fn system_locale() -> Option<String> {
+    use core_foundation_sys::base::CFRelease;
+    use core_foundation_sys::locale::{
+        CFLocaleCopyCurrent, CFLocaleGetValue, CFLocaleKey, CFLocaleRef, kCFLocaleCountryCode,
+        kCFLocaleLanguageCode,
+    };
+    use core_foundation_sys::string::{CFStringGetCString, kCFStringEncodingUTF8};
+
+    let code = |locale: CFLocaleRef, key: CFLocaleKey| {
+        let mut buffer = [0; 16];
+        // SAFETY: `locale` is live and owns the CFString it returns, which is copied into
+        // `buffer` within its length and NUL-terminated when the copy succeeds.
+        unsafe {
+            let value = CFLocaleGetValue(locale, key);
+            (!value.is_null()
+                && CFStringGetCString(
+                    value.cast(),
+                    buffer.as_mut_ptr(),
+                    buffer.len() as _,
+                    kCFStringEncodingUTF8,
+                ) != 0)
+                .then(|| {
+                    std::ffi::CStr::from_ptr(buffer.as_ptr())
+                        .to_string_lossy()
+                        .into_owned()
+                })
+        }
+    };
+    // SAFETY: the copied locale is released once, after its codes were copied out.
+    unsafe {
+        let locale = CFLocaleCopyCurrent();
+        if locale.is_null() {
+            return None;
+        }
+        let name = code(locale, kCFLocaleLanguageCode)
+            .zip(code(locale, kCFLocaleCountryCode))
+            .map(|(language, country)| format!("{language}_{country}.UTF-8"));
+        CFRelease(locale.cast());
+        name
+    }
+}
+
 #[cfg(windows)]
 fn is_on_path(file_name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {

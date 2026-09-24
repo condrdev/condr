@@ -19,6 +19,8 @@ clap = { version = "4.5", features = ["derive"] }
 prost = "0.14"
 prost-build = "0.14"
 protox = "0.9"
+# The macOS system locale for a Pane; already built for GPUI.
+core-foundation-sys = "0.8.7"
 dirs = "6.0"
 gix = { version = "0.87", default-features = false, features = ["sha1", "revision", "status", "worktree-mutation", "parallel"] }
 embed-resource = "3.0.11"

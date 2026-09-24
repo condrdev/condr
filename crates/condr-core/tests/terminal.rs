@@ -1,7 +1,9 @@
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "macos")]
+use condr_core::CommandBuilder;
 #[cfg(target_os = "windows")]
 use condr_core::TerminalUpdate;
 #[cfg(target_os = "linux")]
@@ -161,6 +163,31 @@ fn runtime_cwd_uses_a_foreground_group_member_when_the_leader_matches_the_shell(
 
     runtime.shutdown().unwrap();
     std::fs::remove_dir_all(root).unwrap();
+}
+
+// An app-started Server has no locale; a C-locale zsh shows 世界 as `<0096>`.
+#[cfg(target_os = "macos")]
+#[test]
+fn shell_without_a_locale_gets_the_system_one_and_a_set_one_is_kept() {
+    for (lang, expected) in [
+        (None, "charmap=UTF-8"),
+        (Some("zh_CN.UTF-8"), "lang=zh_CN.UTF-8"),
+    ] {
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args([
+            "-c",
+            "printf 'lang=%s\\r\\ncharmap=%s\\r\\n' \"$LANG\" \"$(locale charmap)\"; sleep 30",
+        ]);
+        for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
+            command.env_remove(name);
+        }
+        if let Some(lang) = lang {
+            command.env("LANG", lang);
+        }
+        let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+        wait_for_text(&runtime, expected);
+        runtime.shutdown().unwrap();
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1167,7 +1194,7 @@ fn powershell_literal(path: &std::path::Path) -> String {
     path.display().to_string().replace('\'', "''")
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn wait_for_text(runtime: &TerminalRuntime, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {

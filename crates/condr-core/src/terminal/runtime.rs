@@ -89,6 +89,8 @@ impl TerminalRuntime {
             .and_then(resolve_initial_cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        #[cfg(target_os = "macos")]
+        shell::set_missing_locale(&mut command);
 
         let pair = native_pty_system()
             .openpty(size.into())
