@@ -18,7 +18,7 @@ Condr 0.1 is a public preview, and things may still change between versions. Upd
 
 Install it on the computer you work at. It includes the Server, so local use needs nothing else.
 
-Download the installer for your platform from the [latest release](https://github.com/condrdev/condr/releases/latest):
+Download the installer for your platform from the [download page](/download/):
 
 | Platform             | Package  |
 | -------------------- | -------- |

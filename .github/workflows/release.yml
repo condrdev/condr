@@ -64,3 +64,9 @@ jobs:
             --generate-notes \
             --verify-tag \
             --latest
+
+  website:
+    name: Point condr.dev/download at the release
+    needs: publish
+    uses: ./.github/workflows/website.yml
+    secrets: inherit

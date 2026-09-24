@@ -1,0 +1,161 @@
+---
+import Site from "../layouts/Site.astro";
+import cargo from "../../../Cargo.toml?raw";
+
+// The links name the workspace version's files. release.yml redeploys the site
+// once that release is published, so they exist by the time the page does.
+const version = /\[workspace\.package\][^[]*?\bversion = "([^"]+)"/.exec(cargo)?.[1];
+if (!version) throw new Error("Cargo.toml has no [workspace.package] version");
+
+const repo = "https://github.com/condrdev/condr";
+const release = `${repo}/releases/tag/v${version}`;
+const app = (target: string) => `${repo}/releases/download/v${version}/condr-${version}-${target}`;
+
+const platforms = [
+    {
+        os: "macos",
+        name: "macOS",
+        builds: [
+            { label: "Apple silicon", href: app("macos-arm64.dmg") },
+            { label: "Intel", href: app("macos-x86_64.dmg") },
+        ],
+        note: "macOS blocks the first launch.",
+        link: { label: "How to open it", href: "/docs/getting-started/#desktop-app" },
+    },
+    {
+        os: "windows",
+        name: "Windows",
+        builds: [{ label: "Installer", href: app("windows-x86_64.exe") }],
+    },
+    {
+        os: "linux",
+        name: "Linux",
+        builds: [
+            { label: "x86_64", href: app("linux-x86_64.AppImage") },
+            { label: "arm64", href: app("linux-arm64.AppImage") },
+        ],
+        note: "Run chmod +x on the AppImage, then open it.",
+    },
+];
+
+const commands = [
+    { platform: "Linux · macOS", command: "curl -fsSL https://condr.dev/install.sh | sh" },
+    { platform: "Windows", command: "irm https://condr.dev/install.ps1 | iex" },
+];
+---
+
+<Site title="Condr — Download" description={`Download Condr ${version} for macOS, Windows and Linux.`}>
+    <section class="download shell">
+        <div class="download-main">
+            <h1>Download Condr</h1>
+            <div class="download-sub">
+                <span>Version {version} · Public preview</span>
+                <a href={release}>What's new →</a>
+            </div>
+
+            {platforms.map((platform) => (
+                <div class="download-platform" data-os={platform.os}>
+                    <div class="download-head">
+                        <span>{platform.name}</span>
+                        <div class="download-choice" role="radiogroup" aria-label={`${platform.name} build`}>
+                            {platform.builds.map((build, i) => (
+                                <label>
+                                    <input
+                                        type="radio"
+                                        name={platform.os}
+                                        value={build.href}
+                                        checked={i === 0}
+                                        data-for={`download-${platform.os}`}
+                                    />
+                                    <span>{build.label}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                    <a class="download-button" id={`download-${platform.os}`} href={platform.builds[0].href}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M3 13.5h10" />
+                        </svg>
+                        Download
+                    </a>
+                    {platform.note && (
+                        <p class="download-note">
+                            {platform.note}
+                            {platform.link && (
+                                <>
+                                    {" "}
+                                    <a href={platform.link.href}>{platform.link.label} →</a>
+                                </>
+                            )}
+                        </p>
+                    )}
+                </div>
+            ))}
+            <script is:inline>
+                // Inline so the visitor's platform moves to the top before the first paint.
+                {
+                    const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+                    const os = /android/i.test(navigator.userAgent)
+                        ? ""
+                        : platform.startsWith("mac")
+                          ? "macos"
+                          : platform.startsWith("win")
+                            ? "windows"
+                            : platform.startsWith("linux")
+                              ? "linux"
+                              : "";
+                    const current = os && document.querySelector(`[data-os="${os}"]`);
+                    if (current) {
+                        current.classList.add("is-current");
+                        document.querySelector(".download-platform").before(current);
+                    }
+                }
+            </script>
+            <hr />
+
+            <div class="download-head">
+                <span>Headless Server</span>
+            </div>
+            <p class="download-note">To run agents on a remote device, run this on it:</p>
+            {commands.map((row) => (
+                <div class="download-command">
+                    <small>{row.platform}</small>
+                    <code>{row.command}</code>
+                    <button type="button" data-copy={row.command} aria-label={`Copy the ${row.platform} command`}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true">
+                            <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+                            <path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" />
+                        </svg>
+                    </button>
+                </div>
+            ))}
+            <p class="download-note">
+                Or download an archive from the <a href={release}>release page</a>.
+            </p>
+
+            <hr />
+
+            <p class="download-note">
+                Want the newest changes? <a href={`${repo}/releases/tag/nightly`}>Try Nightly →</a>
+            </p>
+        </div>
+    </section>
+</Site>
+
+<script>
+    for (const input of document.querySelectorAll<HTMLInputElement>("input[data-for]")) {
+        // Also on load: a back navigation can restore the choice but not the link.
+        const sync = () =>
+            input.checked && document.getElementById(input.dataset.for!)!.setAttribute("href", input.value);
+        sync();
+        input.addEventListener("change", sync);
+    }
+
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+        button.addEventListener("click", async () => {
+            await navigator.clipboard.writeText(button.dataset.copy!);
+            button.dataset.copied = "";
+            setTimeout(() => delete button.dataset.copied, 1500);
+        });
+    }
+</script>

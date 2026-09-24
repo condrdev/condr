@@ -19,8 +19,10 @@ pnpm preview
 
 ## 内容
 
+- `src/layouts/Site.astro`：首页和下载页共用的 head、页眉、页脚。
 - `src/pages/index.astro`：官网首页。
-- `src/styles/home.css`：首页样式。
+- `src/pages/download.astro`：下载页 `/download/`。链接指向根 `Cargo.toml` 版本的 release 文件；`release.yml` 发布完 release 后调用 `website.yml` 重新部署，所以只改版本号不会让页面指向还不存在的文件。
+- `src/styles/home.css`：首页和下载页样式。
 - `src/content/docs/docs/`：文档，对应 `/docs/`。
 - `public/`：只放网站自己的静态文件（目前只有 `_headers`）。`install.sh` / `install.ps1`、`condr.svg`、`agents/*.svg` 由 `prebuild` 从仓库根的 `script/` 和 `assets/` 拷入，已 gitignore；要改就改原件。首页截图从 `../assets/screenshots/hero.png` import，由 Astro 优化输出。
 

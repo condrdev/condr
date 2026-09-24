@@ -1,0 +1,41 @@
+---
+import '../styles/home.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const github = 'https://github.com/condrdev/condr';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <link rel="icon" href="/condr.svg" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+    <header class="site-header shell">
+      <a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a>
+      <div class="header-actions">
+        <nav aria-label="Main navigation">
+          <a href="/docs/">Docs</a>
+          <a href={github}>GitHub</a>
+        </nav>
+        <a class="header-button" href="/download/">Download</a>
+      </div>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="site-footer shell"><a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a><span>Keep your agents running.</span><div><a href="/docs/">Docs</a> <a href={github}>GitHub</a></div></footer>
+  </body>
+</html>

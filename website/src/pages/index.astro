@@ -1,7 +1,7 @@
 ---
 import { Image } from 'astro:assets';
 import hero from '../../../assets/screenshots/hero.png';
-import '../styles/home.css';
+import Site from '../layouts/Site.astro';
 
 const features = [
   { title: 'Always on', copy: 'Close the window or disconnect. The Server and your agents keep working.' },
@@ -11,9 +11,6 @@ const features = [
   { title: 'Real terminals', copy: 'Every pane is a real terminal built on the alacritty core. Run any CLI agent or terminal program.' },
   { title: 'Fast', copy: 'Written entirely in Rust, with no Electron. Small and responsive, even while agents are busy.' },
 ];
-
-const releases = 'https://github.com/condrdev/condr/releases/latest';
-const github = 'https://github.com/condrdev/condr';
 
 const agents = [
   { name: 'Claude Code', icon: 'claude' },
@@ -29,34 +26,12 @@ const agents = [
 ];
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width" />
-    <meta name="description" content="Condr keeps your agents running. One window for all your agents, local or remote." />
-    <link rel="icon" href="/condr.svg" />
-    <title>Condr — Keep your agents running</title>
-  </head>
-  <body>
-    <div class="ambient ambient-one" aria-hidden="true"></div>
-    <div class="ambient ambient-two" aria-hidden="true"></div>
-    <header class="site-header shell">
-      <a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a>
-      <div class="header-actions">
-        <nav aria-label="Main navigation">
-          <a href="/docs/">Docs</a>
-          <a href={github}>GitHub</a>
-        </nav>
-        <a class="header-button" href={releases}>Download</a>
-      </div>
-    </header>
-
-    <main>
+<Site title="Condr — Keep your agents running" description="Condr keeps your agents running. One window for all your agents, local or remote.">
       <section class="hero shell">
         <h1>Keep your agents<br /><span>running.</span></h1>
         <p class="hero-lede">One window for all your agents.<br />Local or remote, step away and pick up where you left off.</p>
         <div class="hero-actions">
-          <a class="button button-primary" href={releases}>Download</a>
+          <a class="button button-primary" href="/download/">Download</a>
           <a class="button button-secondary" href="/docs/getting-started/">Get started <span>→</span></a>
         </div>
         <div class="hero-meta"><span>Windows</span><i></i><span>macOS</span><i></i><span>Linux</span><i></i><span>Built in Rust</span></div>
@@ -108,8 +83,4 @@ const agents = [
           <code class="remote-code">p2p://&lt;server key&gt;.&lt;invite&gt;</code>
         </div>
       </section>
-    </main>
-
-    <footer class="site-footer shell"><a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a><span>Keep your agents running.</span><div><a href="/docs/">Docs</a> <a href={github}>GitHub</a></div></footer>
-  </body>
-</html>
+</Site>
