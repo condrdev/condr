@@ -124,6 +124,7 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
         KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
     ]);
+    cx.bind_keys(super::directory_browser::key_bindings());
     FIXED_BINDINGS.with(|bindings| cx.bind_keys(bindings.clone()));
 }
 

@@ -1192,13 +1192,21 @@ pub(super) fn handle_client(
                     },
                 )
             }
-            ClientMessage::BrowseDirectory { request_id, path } => queue_message(
-                &outbound,
-                ServerMessage::BrowsedDirectory {
-                    request_id,
-                    result: condr_core::browse_directory(&path),
-                },
-            ),
+            ClientMessage::BrowseDirectory { request_id, path } => {
+                // Any path may be a slow or hung mount, so it is read off this loop, which
+                // also carries the Client's terminal input.
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::BrowsedDirectory {
+                            request_id,
+                            result: condr_core::browse_directory(&path),
+                        },
+                    )
+                });
+                false
+            }
             ClientMessage::Agent {
                 server_id,
                 session_id,

@@ -46,7 +46,7 @@ pub struct DirectoryListing {
 /// Directory from a Client that cannot open a native picker there.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BrowsedDirectory {
-    /// As asked, or the home directory when the request was empty.
+    /// As asked with a leading `~` expanded, or the home directory for an empty request.
     pub path: PathBuf,
     /// Named by the Server, since a Client cannot split a path of another platform.
     pub parent: Option<PathBuf>,
@@ -71,8 +71,38 @@ pub fn list_directory(root: &Path, relative: &RelativePath) -> Result<DirectoryL
     if !valid_directory_path(relative) {
         return Err("invalid directory path".into());
     }
-    let directory = relative.to_path(root);
-    let read = fs::read_dir(&directory).map_err(|error| error.to_string())?;
+    read_listing(&relative.to_path(root), |_| true)
+}
+
+/// The subdirectories of the absolute `path`, a leading `~` standing for the home
+/// directory, or of the home directory itself when `path` is empty.
+pub fn browse_directory(path: &Path) -> Result<BrowsedDirectory, String> {
+    let home = || dirs::home_dir().ok_or("cannot locate the home directory");
+    let path = if path.as_os_str().is_empty() {
+        home()?
+    } else if let Ok(rest) = path.strip_prefix("~") {
+        home()?.join(rest)
+    } else {
+        path.to_path_buf()
+    };
+    if !path.is_absolute() {
+        return Err(format!("not an absolute path: {}", path.display()));
+    }
+    let listing = read_listing(&path, |kind| kind == FileKind::Directory)?;
+    Ok(BrowsedDirectory {
+        parent: path.parent().map(Path::to_path_buf),
+        path,
+        listing,
+    })
+}
+
+/// One level of `directory`, `.git` left out, of the kinds `keep` accepts; the cap counts
+/// only those.
+fn read_listing(
+    directory: &Path,
+    keep: impl Fn(FileKind) -> bool,
+) -> Result<DirectoryListing, String> {
+    let read = fs::read_dir(directory).map_err(|error| error.to_string())?;
     let mut entries = Vec::new();
     let mut truncated = false;
     for entry in read {
@@ -81,15 +111,18 @@ pub fn list_directory(root: &Path, relative: &RelativePath) -> Result<DirectoryL
         if name == ".git" {
             continue;
         }
-        if entries.len() >= MAX_DIRECTORY_ENTRIES {
-            truncated = true;
-            break;
-        }
         // `metadata` follows symlinks, so a link to a directory expands like one.
         let kind = match fs::metadata(entry.path()) {
             Ok(meta) if meta.is_dir() => FileKind::Directory,
             _ => FileKind::File,
         };
+        if !keep(kind) {
+            continue;
+        }
+        if entries.len() >= MAX_DIRECTORY_ENTRIES {
+            truncated = true;
+            break;
+        }
         entries.push(DirectoryEntry {
             name,
             kind,
@@ -103,27 +136,6 @@ pub fn list_directory(root: &Path, relative: &RelativePath) -> Result<DirectoryL
             .then_with(|| a.name.cmp(&b.name))
     });
     Ok(DirectoryListing { entries, truncated })
-}
-
-/// The subdirectories of the absolute `path`, or of the home directory when it is empty.
-pub fn browse_directory(path: &Path) -> Result<BrowsedDirectory, String> {
-    let path = if path.as_os_str().is_empty() {
-        dirs::home_dir().ok_or("cannot locate the home directory")?
-    } else {
-        path.to_path_buf()
-    };
-    if !path.is_absolute() {
-        return Err(format!("not an absolute path: {}", path.display()));
-    }
-    let mut listing = list_directory(&path, RelativePath::new(""))?;
-    listing
-        .entries
-        .retain(|entry| entry.kind == FileKind::Directory);
-    Ok(BrowsedDirectory {
-        parent: path.parent().map(Path::to_path_buf),
-        path,
-        listing,
-    })
 }
 
 /// `relative`'s content under `root`, as text when it looks like text.

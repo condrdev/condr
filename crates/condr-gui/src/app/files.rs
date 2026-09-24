@@ -88,14 +88,19 @@ struct FilesContext<'a> {
 }
 
 /// `relative` under the Workspace root, spelled the way the root is: the root is the
-/// Server's path, so a POSIX root stays `/`-separated when this client is Windows.
+/// Server's path, so a POSIX root stays `/`-separated when this client is Windows and a
+/// Windows root `\`-separated when it is not.
 pub(super) fn absolute_path(root: &Path, relative: &RelativePath) -> PathBuf {
-    let root_text = root.to_string_lossy();
-    if root_text.starts_with('/') {
-        PathBuf::from(format!("{}/{relative}", root_text.trim_end_matches('/')))
+    let root = root.to_string_lossy();
+    PathBuf::from(if root.starts_with('/') {
+        format!("{}/{relative}", root.trim_end_matches('/'))
     } else {
-        relative.to_path(root)
-    }
+        format!(
+            "{}\\{}",
+            root.trim_end_matches(['\\', '/']),
+            relative.as_str().replace('/', "\\")
+        )
+    })
 }
 
 /// A JetBrains file-type icon at row size, using its native palette, dimmed when ignored.
@@ -1057,8 +1062,13 @@ mod tests {
             "/home"
         );
         assert_eq!(
-            absolute_path(Path::new(r"C:\me\condr"), RelativePath::new("crates/core")),
-            Path::new(r"C:\me\condr").join("crates").join("core")
+            absolute_path(Path::new(r"C:\me\condr"), RelativePath::new("crates/core"))
+                .to_string_lossy(),
+            r"C:\me\condr\crates\core"
+        );
+        assert_eq!(
+            absolute_path(Path::new(r"C:\"), RelativePath::new("Users")).to_string_lossy(),
+            r"C:\Users"
         );
     }
 

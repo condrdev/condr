@@ -55,7 +55,10 @@ fn listing_puts_directories_first_hides_git_and_refuses_escapes() {
 fn browsing_lists_only_directories_names_the_parent_and_starts_at_home() {
     let root = scratch("browsing");
     fs::create_dir_all(root.join("project")).unwrap();
-    fs::write(root.join("notes.txt"), "n").unwrap();
+    // More files than a listing holds must not crowd out the directory.
+    for index in 0..=condr_core::MAX_DIRECTORY_ENTRIES {
+        fs::write(root.join(format!("file-{index}.txt")), "").unwrap();
+    }
 
     let browsed = browse_directory(&root).unwrap();
     assert_eq!(browsed.path, root);
@@ -67,11 +70,13 @@ fn browsing_lists_only_directories_names_the_parent_and_starts_at_home() {
         .map(|entry| entry.name.as_str())
         .collect();
     assert_eq!(names, ["project"]);
+    assert!(!browsed.listing.truncated);
 
-    assert_eq!(
-        browse_directory(Path::new("")).unwrap().path,
-        dirs::home_dir().unwrap()
-    );
+    let home = dirs::home_dir().unwrap();
+    assert_eq!(browse_directory(Path::new("")).unwrap().path, home);
+    let tilde = browse_directory(Path::new("~")).unwrap();
+    assert_eq!(tilde.path, home, "a leading ~ is the home directory");
+    assert_eq!(tilde.parent.as_deref(), home.parent());
     assert!(browse_directory(Path::new("relative")).is_err());
     assert!(browse_directory(&root.join("missing")).is_err());
 

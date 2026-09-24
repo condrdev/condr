@@ -4,6 +4,7 @@ mod config;
 mod connection;
 mod connection_status;
 mod dialogs;
+mod directory_browser;
 mod dock;
 mod events;
 pub(crate) mod file_icons;
@@ -58,9 +59,9 @@ use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
 };
 use connection::*;
-use dialogs::DirectoryBrowser;
 #[cfg(test)]
 use dialogs::accepted_text_input;
+use directory_browser::{DirectoryBrowser, browser_field, render_directory_browser};
 use dock::*;
 use files::*;
 use gpui_kit::component::badge::Badge;

@@ -889,14 +889,21 @@ fn text_dialog_actions_are_compact_and_submit() {
 }
 
 #[test]
-fn a_device_path_dialog_opens_at_home_and_browses_by_clicking() {
+fn a_device_path_dialog_filters_as_typed_and_steps_in_by_tab_or_click() {
     let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("browse");
+    for name in ["alpha", "beta", "Project"] {
+        std::fs::create_dir(root.0.join(name)).unwrap();
+    }
+    std::fs::write(root.0.join("notes.txt"), "n").unwrap();
     let mut cx = TestAppContext::single();
     cx.update(gpui_kit::init);
+    cx.update(crate::app::startup::bind_keys);
     let (view, window, _server) = connected_condr(&mut cx);
     let home = std::env::home_dir().expect("the test needs a home directory");
-    let home_name = home.file_name().unwrap().to_string_lossy().into_owned();
     let chosen = Rc::new(RefCell::new(None::<String>));
+    let under_root =
+        |name: &str| format!("{}{}{name}", root.0.display(), std::path::MAIN_SEPARATOR);
 
     let open = |window: &mut VisualTestContext| {
         let chosen = chosen.clone();
@@ -916,46 +923,74 @@ fn a_device_path_dialog_opens_at_home_and_browses_by_clicking() {
             });
         });
     };
-    let click_when_shown = |window: &mut VisualTestContext, selector: &'static str| {
+    let shown = |window: &mut VisualTestContext, selector: &'static str| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds(selector)
+    };
+    let wait_shown = |window: &mut VisualTestContext, selector: &'static str| {
         let mut bounds = None;
         assert!(
             wait_until(window, |window| {
-                window.update(|window, cx| _ = window.draw(cx));
-                bounds = window.debug_bounds(selector);
+                bounds = shown(window, selector);
                 bounds.is_some()
             }),
             "{selector} should be listed"
         );
-        window.simulate_click(bounds.unwrap().center(), Modifiers::default());
+        bounds.unwrap()
+    };
+    let wait_gone = |window: &mut VisualTestContext, selector: &'static str| {
+        assert!(
+            wait_until(window, |window| shown(window, selector).is_none()),
+            "{selector} should no longer be listed"
+        );
+    };
+    let click = |window: &mut VisualTestContext, selector: &'static str| {
+        let bounds = wait_shown(window, selector);
+        window.simulate_click(bounds.center(), Modifiers::default());
+    };
+    let take_chosen = |window: &mut VisualTestContext| {
+        window.run_until_parked();
+        chosen.borrow_mut().take().map(std::path::PathBuf::from)
     };
 
-    // The field starts at the Server's home directory.
+    // The field opens on the Server's home directory, which Enter takes as it is.
     open(window);
-    assert!(wait_until(window, |window| {
-        window.update(|window, cx| _ = window.draw(cx));
-        window.debug_bounds("directory-browser-parent").is_some()
-    }));
-    click_when_shown(window, "dialog-primary-action");
-    window.run_until_parked();
-    assert_eq!(
-        chosen.borrow_mut().take().map(std::path::PathBuf::from),
-        Some(home.clone())
-    );
+    wait_shown(window, "directory-browser-current");
+    window.simulate_keystrokes("enter");
+    assert_eq!(take_chosen(window), Some(home));
 
-    // Up to the parent, then back down by name.
+    // Typing filters the directory the field names; Enter takes the first match.
     open(window);
-    click_when_shown(window, "directory-browser-parent");
-    click_when_shown(
-        window,
-        leaked_selector(format!("directory-browser-{home_name}")),
-    );
-    window.run_until_parked();
-    click_when_shown(window, "dialog-primary-action");
-    window.run_until_parked();
-    assert_eq!(
-        chosen.borrow_mut().take().map(std::path::PathBuf::from),
-        Some(home)
-    );
+    wait_shown(window, "directory-browser-current");
+    window.simulate_input(&under_root("pro"));
+    wait_shown(window, "directory-browser-Project");
+    wait_gone(window, "directory-browser-alpha");
+    assert!(shown(window, "directory-browser-current").is_none());
+    window.simulate_keystrokes("enter");
+    assert_eq!(take_chosen(window), Some(root.0.join("Project")));
+
+    // Down moves past "This directory" and "..", Tab steps into the highlighted one.
+    open(window);
+    wait_shown(window, "directory-browser-current");
+    window.simulate_input(&under_root(""));
+    wait_shown(window, "directory-browser-alpha");
+    window.simulate_keystrokes("down down tab");
+    wait_gone(window, "directory-browser-beta");
+    wait_shown(window, "directory-browser-current");
+    window.simulate_keystrokes("enter");
+    assert_eq!(take_chosen(window), Some(root.0.join("alpha")));
+
+    // A click steps in too, ".." steps out, and Create takes what is highlighted.
+    open(window);
+    wait_shown(window, "directory-browser-current");
+    window.simulate_input(&under_root(""));
+    click(window, "directory-browser-beta");
+    wait_gone(window, "directory-browser-alpha");
+    click(window, "directory-browser-parent");
+    click(window, "directory-browser-Project");
+    wait_gone(window, "directory-browser-alpha");
+    click(window, "dialog-primary-action");
+    assert_eq!(take_chosen(window), Some(root.0.join("Project")));
 }
 
 #[test]
