@@ -300,7 +300,9 @@ fn pane_cli_survives_a_child_shell_path_reset() {
         r#"/bin/sh -lc 'PATH=/usr/bin:/bin; export PATH; "$CONDR_BIN_PATH" pane current > pane-current.json'"#
     };
     server.ok(&["pane", "run", &pane, command]);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Bounded by the shell's start under parallel test load: Windows PowerShell on a CI
+    // runner can take longer than five seconds to show its first prompt.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let current = loop {
         if let Some(current) = std::fs::read(server.root.join("pane-current.json"))
             .ok()
