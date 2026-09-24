@@ -1359,7 +1359,7 @@ dependencies = [
 
 [[package]]
 name = "condr-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alacritty_terminal",
  "atomicwrites",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "condr-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-channel",
  "condr-core",
@@ -1412,7 +1412,7 @@ dependencies = [
 
 [[package]]
 name = "condr-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "atomicwrites",
  "base64 0.22.1",
