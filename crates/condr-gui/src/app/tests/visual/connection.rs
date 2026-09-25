@@ -1,6 +1,8 @@
 use super::*;
+use crate::app::WAKE_PROBE_TIMEOUT;
 use crate::app::tests::tcp;
 use condr_server::DeviceKey;
+use std::sync::mpsc;
 
 #[test]
 fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
@@ -1274,6 +1276,65 @@ fn an_unexpected_disconnect_reconnects_on_its_own_and_says_so() {
             })
         }),
         "the GUI did not reconnect on its own"
+    );
+}
+
+#[test]
+fn a_wake_probe_keeps_an_answering_device_and_reconnects_a_silent_one() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| view.update(cx, |this, cx| this.probe_connections(cx)));
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .connection(1)
+                    .is_some_and(|connection| connection.wake_probe.is_none())
+            })
+        }),
+        "the Server's Pong did not answer the probe"
+    );
+    window.executor().advance_clock(WAKE_PROBE_TIMEOUT);
+    window.run_until_parked();
+    assert!(view.read_with(window, |this, _| {
+        this.connection(1).unwrap().status == ConnectionStatus::Connected
+    }));
+
+    // The device went away during sleep: the Ping goes nowhere and nothing answers.
+    let _silent = window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let (outgoing, silent) = mpsc::channel();
+            this.connection_mut(1).unwrap().io = Some(ClientIo {
+                outgoing,
+                _incoming_task: Task::ready(()),
+            });
+            this.probe_connections(cx);
+            silent
+        })
+    });
+    window.executor().advance_clock(WAKE_PROBE_TIMEOUT);
+    window.run_until_parked();
+    view.read_with(window, |this, _| {
+        let connection = this.connection(1).unwrap();
+        assert!(connection.status != ConnectionStatus::Connected);
+        assert!(connection.reconnect_deadline.is_some());
+        assert_eq!(
+            connection.error.as_deref(),
+            Some("the device stopped answering")
+        );
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app).connection(1).is_some_and(|connection| {
+                    connection.status == ConnectionStatus::Connected
+                        && connection.reconnect_deadline.is_none()
+                })
+            })
+        }),
+        "the GUI did not reconnect after the probe went unanswered"
     );
 }
 

@@ -218,6 +218,9 @@ const RESTART_RECONNECT_DELAY: Duration = Duration::from_millis(500);
 /// a blip that comes back inside this never shows.
 const RECONNECT_GRACE: Duration = Duration::from_secs(2);
 const RESTART_RECONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+/// How long a Ping sent after the machine wakes may go unanswered before the connection
+/// counts as gone. Wi-Fi takes a few seconds to come back, so not less.
+const WAKE_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Two messages from a newer protocol this close together mean the Server keeps sending
 /// what this build cannot read: stop resynchronizing and say to update (ADR 0028).
 const UNKNOWN_MESSAGE_WINDOW: Duration = Duration::from_secs(10);
@@ -364,6 +367,7 @@ pub(crate) struct Condr {
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
     _window_bounds_subscription: Subscription,
+    _system_wake_subscription: Subscription,
     /// The GUI state file (ADR 0023); `None` in tests that want no file.
     state_path: Option<PathBuf>,
     /// The state as read at startup: Servers not yet connected are restored from it when
@@ -446,6 +450,10 @@ impl Condr {
         let window_bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
             this.window_state = Some(window.window_bounds().into());
             this.schedule_state_save(cx);
+        });
+        let owner = cx.weak_entity();
+        let system_wake_subscription = cx.on_system_wake(move |cx| {
+            let _ = owner.update(cx, |this, cx| this.probe_connections(cx));
         });
         let quit_subscription = cx.on_app_quit(|this, cx| {
             // A change made less than a debounce before quitting is still saved.
@@ -548,6 +556,7 @@ impl Condr {
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
             _window_bounds_subscription: window_bounds_subscription,
+            _system_wake_subscription: system_wake_subscription,
             state_path,
             window_state: Some(window.window_bounds().into()),
             restored_state,

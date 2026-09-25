@@ -101,6 +101,53 @@ impl Condr {
         .detach();
     }
 
+    /// After the machine sleeps, a connection whose device went away still looks up
+    /// until TCP keepalive or SSH gives up, up to a minute on. A Ping each connection
+    /// leaves unanswered for `WAKE_PROBE_TIMEOUT` ends it now, and the reconnect follows.
+    pub(super) fn probe_connections(&mut self, cx: &mut Context<Self>) {
+        let sent_at = Instant::now();
+        for connection in &mut self.connections {
+            if connection.status != ConnectionStatus::Connected {
+                continue;
+            }
+            let Some(server_id) = connection.server_id else {
+                continue;
+            };
+            connection.wake_probe = Some(sent_at);
+            connection.send(ClientMessage::Ping {
+                server_id,
+                nonce: 0,
+            });
+        }
+        let window = self.window_handle;
+        cx.spawn(async move |owner, cx| {
+            cx.background_executor().timer(WAKE_PROBE_TIMEOUT).await;
+            let _ = cx.update_window(window, |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    let mut rebuild = false;
+                    for index in 0..this.connections.len() {
+                        if this.connections[index].wake_probe != Some(sent_at) {
+                            continue;
+                        }
+                        let key = this.connections[index].key;
+                        let effect = this.mark_disconnected(
+                            key,
+                            index,
+                            "the device stopped answering".into(),
+                        );
+                        rebuild |= effect.rebuild;
+                        this.begin_reconnect(key, cx);
+                    }
+                    if rebuild {
+                        this.rebuild_dock(window, cx);
+                    }
+                    cx.notify();
+                });
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn install_connection(
         connection: &mut ServerConnection,
         result: Result<ClientConnection, String>,

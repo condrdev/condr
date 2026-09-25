@@ -107,6 +107,8 @@ pub(super) struct ServerConnection {
     pub(super) reconnect_deadline: Option<Instant>,
     /// When an established connection last went down, for `RECONNECT_GRACE`.
     pub(super) disconnected_at: Option<Instant>,
+    /// When the Ping sent after the machine woke left, until a Pong answers it.
+    pub(super) wake_probe: Option<Instant>,
     pub(super) next_layout_request_id: u64,
 }
 
@@ -206,6 +208,7 @@ impl ServerConnection {
             refusal: None,
             control_denied: None,
             disconnected_at: None,
+            wake_probe: None,
             next_layout_request_id: 1,
         }
     }
@@ -225,6 +228,7 @@ impl ServerConnection {
         self.control_retry_scheduled = false;
         self.bootstrap_resync_session_id = None;
         self.reacquire_after_bootstrap = false;
+        self.wake_probe = None;
     }
 
     pub(super) fn is_synchronized(&self) -> bool {

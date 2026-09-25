@@ -834,7 +834,10 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
-            ServerMessage::Pong { .. } => IncomingEffect::default(),
+            ServerMessage::Pong { .. } => {
+                self.connections[index].wake_probe = None;
+                IncomingEffect::default()
+            }
         }
     }
 }
