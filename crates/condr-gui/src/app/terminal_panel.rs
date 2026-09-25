@@ -214,11 +214,22 @@ impl Render for TerminalPanel {
             .map(|link| SharedString::from(link.uri.as_str()));
         let focus = self.focus_handle.clone();
         let click_owner = self.owner.clone();
+        let copy_owner = self.owner.clone();
+        let paste_owner = self.owner.clone();
         let body = div()
             .id(format!("terminal-pane-{key}-{}", pane_id.as_u64()))
             .debug_selector(move || format!("terminal-pane-{}", pane_id.as_u64()))
             .key_context("CondrTerminal")
             .track_focus(&self.focus_handle)
+            // The Edit menu's items; the keys themselves go through `Condr::key_down`.
+            .on_action(move |_: &gpui_kit::component::input::Copy, _, cx| {
+                let _ = copy_owner.update(cx, |app, cx| {
+                    app.copy_terminal_selection(key, pane_id, cx);
+                });
+            })
+            .on_action(move |_: &gpui_kit::component::input::Paste, _, cx| {
+                let _ = paste_owner.update(cx, |app, cx| app.paste_into_terminal(key, pane_id, cx));
+            })
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 let accepted = click_owner
                     .update(cx, |app, cx| app.select_pane(key, pane_id, window, cx))

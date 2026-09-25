@@ -2,6 +2,8 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io;
 
 use super::*;
+#[cfg(target_os = "macos")]
+use gpui_kit::component::input;
 
 thread_local! {
     static FIXED_BINDINGS: Vec<KeyBinding> = fixed_bindings();
@@ -95,6 +97,7 @@ fn fixed_bindings() -> Vec<KeyBinding> {
             KeyBinding::new("cmd-h", HideApp, Some("Condr")),
             KeyBinding::new("cmd-alt-h", HideOtherApps, Some("Condr")),
             KeyBinding::new("cmd-m", MinimizeWindow, Some("Condr")),
+            KeyBinding::new("cmd-ctrl-f", ToggleFullScreen, Some("Condr")),
         ]);
     } else {
         bindings.extend([
@@ -149,9 +152,22 @@ pub(super) fn install_app_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action(format!("Quit {}", condr_core::APP_NAME), QuitApp),
         ]),
+        // A text field answers every item and a terminal Copy and Paste. The OS actions
+        // let macOS recognise the menu and append Dictation and Emoji & Symbols.
+        Menu::new("Edit").items([
+            MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
+            MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
+            MenuItem::separator(),
+            MenuItem::os_action("Cut", input::Cut, OsAction::Cut),
+            MenuItem::os_action("Copy", input::Copy, OsAction::Copy),
+            MenuItem::os_action("Paste", input::Paste, OsAction::Paste),
+            MenuItem::os_action("Select All", input::SelectAll, OsAction::SelectAll),
+        ]),
         Menu::new("Window").items([
             MenuItem::action("Minimize", MinimizeWindow),
             MenuItem::action("Zoom", ZoomWindow),
+            MenuItem::separator(),
+            MenuItem::action("Toggle Full Screen", ToggleFullScreen),
         ]),
     ]);
 }

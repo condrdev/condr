@@ -681,6 +681,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_open_settings))
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ZoomWindow, window, _| window.zoom_window())
+            .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())
             .on_action(cx.listener(Self::action_rename_workspace))
             .on_action(cx.listener(Self::action_rename_tab))
             .on_action(cx.listener(Self::action_close_pane))

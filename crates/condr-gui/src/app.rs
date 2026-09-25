@@ -173,7 +173,8 @@ actions!(
         HideOtherApps,
         ShowAllApps,
         MinimizeWindow,
-        ZoomWindow
+        ZoomWindow,
+        ToggleFullScreen
     ]
 );
 
