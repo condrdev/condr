@@ -1,0 +1,33 @@
+# Release notes from the commits since the previous `v*` tag (docs/releases.md).
+# `release.yml` runs `git cliff --latest --strip header`; preview the next release with
+# `git cliff --unreleased --tag v<next> --strip header`.
+
+[changelog]
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+## {{ group | striptags | trim }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}
+## Update
+
+Update the app and every Device's Server to {{ version | trim_start_matches(pat="v") }}.
+
+- Desktop: download the installer below.
+- Headless Server: `curl -fsSL https://condr.dev/install.sh | sh`, or on Windows `irm https://condr.dev/install.ps1 | iex`.
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+# `nightly` is a mutable tag on main; only versioned tags bound a release.
+tag_pattern = "^v[0-9]"
+# The group comments only order the sections.
+commit_parsers = [
+  { message = "^feat\\(website\\)", skip = true },
+  { message = "^feat", group = "<!-- 0 -->New" },
+  { message = "^fix", group = "<!-- 1 -->Fixed" },
+  { message = ".*", skip = true },
+]

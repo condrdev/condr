@@ -45,6 +45,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The whole history and every tag, so git-cliff finds the previous release.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Write the release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --latest --strip header --output release-notes.md
       - uses: actions/download-artifact@v8
         with:
           name: condr-dist
@@ -61,7 +70,7 @@ jobs:
           fi
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "Condr $CONDR_VERSION" \
-            --generate-notes \
+            --notes-file release-notes.md \
             --verify-tag \
             --latest
 

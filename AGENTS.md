@@ -58,6 +58,10 @@ Closing the GUI only disconnects. The server, PTYs, agents and Session keep runn
 - Prefer the simplest final design with clear boundaries. Do not keep compatibility layers, migration paths or deprecated APIs just for old implementations.
 - When breaking something, update in-repo callers, tests and source docs in the same change. Implement migrations only when the task explicitly asks for them.
 
+### Commit subjects are release notes
+
+git-cliff turns every `feat` and `fix` subject into a line of the next release's notes (`cliff.toml`, `docs/releases.md`). Write that subject as what a user notices ("closing a Pane ends every program it started"); a change no user notices takes `refactor`, `test`, `chore`, `ci` or `docs`.
+
 ## Common commands
 
 ```bash
