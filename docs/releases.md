@@ -21,7 +21,7 @@ Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call t
    git push origin v0.1.0
    ```
 
-3. The workflow verifies the tag matches `Cargo.toml`, builds with `CONDR_RELEASE=1` (package names without the SHA), and creates an immutable release marked **Latest**. It fails instead of overwriting an existing release.
+3. The workflow verifies the tag matches `Cargo.toml`, builds with `CONDR_RELEASE=1` (package names without the SHA), and creates a release marked **Latest**. It fails instead of overwriting an existing release, so a published version's packages never change. GitHub's immutable releases setting stays off: `nightly.yml` deletes the Nightly release and recreates it under the same `nightly` tag, which an immutable release forbids.
 
 The release notes come from the commits since the previous `v*` tag: [git-cliff](https://git-cliff.org) with `cliff.toml` lists `feat` commits under New and `fix` commits under Fixed, by subject, skips every other type and `feat(website)`, and ends with the Update section. So a `feat` or `fix` subject is a line of the release notes. Preview them before tagging with `git cliff --unreleased --tag v<next> --strip header`; a summary sentence or a note that only the new Server has something can be added by editing the published release.
 
