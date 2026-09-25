@@ -255,7 +255,10 @@ pub(crate) fn run() {
     let endpoint = ServerConfig::default().local_endpoint();
     let config = config::LoadedConfig::read(condr_core::config_path());
     let state = gui_state::LoadedState::read(gui_state::GuiState::default_path());
-    let app = gpui_kit::application().with_assets(CondrAssets::new());
+    // macOS would otherwise keep a windowless process that a Dock click cannot reopen.
+    let app = gpui_kit::application()
+        .with_assets(CondrAssets::new())
+        .with_quit_mode(gpui_kit::QuitMode::LastWindowClosed);
 
     app.run(move |cx| {
         gpui_kit::init(cx);
