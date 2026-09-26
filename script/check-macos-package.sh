@@ -27,6 +27,9 @@ sh -n "$contents/MacOS/condr-launcher"
 for binary in condr condr-gui; do
     test "$(lipo -archs "$contents/MacOS/$binary")" = "$(uname -m)"
 done
+codesign --verify --deep --strict "$app"
+# Without this the notification center refuses the GUI (see package-macos.sh).
+codesign -dv "$contents/MacOS/condr-gui" 2>&1 | grep -qx 'Identifier=dev.condr.gui'
 
 mkdir -p "$HOME/Applications"
 cp -R "$app" "$HOME/Applications/"

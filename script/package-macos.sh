@@ -62,7 +62,12 @@ EOF
 # Not notarized (no Apple Developer account yet), but an ad-hoc signature seals
 # the bundle (everything must sit under Contents/) so Gatekeeper reports
 # "unverified developer" instead of "damaged"; the user allows it once.
-codesign --force --deep --sign - "$app"
+# The notification center only serves a process whose signing identifier is the
+# bundle identifier, and `condr-gui` is the process, so it is signed under that
+# name first. No `--deep` on the bundle: it re-signs nested code and resets that
+# identifier to one derived from the file name.
+codesign --force --sign - --identifier dev.condr.gui "$app/Contents/MacOS/condr-gui"
+codesign --force --sign - "$app"
 ln -s /Applications "$stage/dmg/Applications"
 dmg="$DIST_DIR/condr-${package_version}-macos-${arch}.dmg"
 # hdiutil sizes an auto-sized image from the source's allocated blocks, which APFS

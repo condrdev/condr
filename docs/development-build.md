@@ -154,7 +154,7 @@ CONDR_COMMIT=<commit> script/package-macos.sh
 
 DMG 没有安装脚本，所以 `Condr.app` 的启动器 `Contents/MacOS/condr-launcher`（不叫 `Condr`，否则在默认不区分大小写的 APFS 上会和同目录的 `condr` CLI 冲突） 每次启动先运行 bundle 内的 `condr server install`（ADR 0016，幂等）：把 CLI 复制到 `~/.local/opt/condr`，建立 `~/.local/bin/condr` 链接，并在 `~/.zprofile` 追加一次带标记的 PATH 行；随后 `exec` 成 `condr-gui`，并让 GUI 用安装后的稳定副本启动 Server，与 Linux AppImage 的 `AppRun` 一致。安装失败时 GUI 仍照常启动。重新打开 zsh 终端后即可运行 `condr --help`；bash 登录 shell 不注册，需要时手工把 `~/.local/bin` 加入 PATH。
 
-`sh script/check-macos-package.sh <dmg> <cli tar.gz>` 只在 macOS 上运行：挂载镜像，核对 `/Applications` 链接、提交号、图标、启动器语法和二进制架构与 runner 一致，再把 app 复制到 `~/Applications`，连续执行两次 `condr server install` 验证 `~/.zprofile` 不重复追加，并在全新 zsh 登录 shell 中执行 `condr server --help`。
+`sh script/check-macos-package.sh <dmg> <cli tar.gz>` 只在 macOS 上运行：挂载镜像，核对 `/Applications` 链接、提交号、图标、启动器语法、二进制架构与 runner 一致、bundle 签名完整，以及 `condr-gui` 的签名 identifier 为 `dev.condr.gui`（系统通知中心只接受签名 identifier 与 bundle identifier 相同的进程，否则发送测试通知也会被静默拒绝），再把 app 复制到 `~/Applications`，连续执行两次 `condr server install` 验证 `~/.zprofile` 不重复追加，并在全新 zsh 登录 shell 中执行 `condr server --help`。
 
 Linux/macOS 原生检查共用 `script/check-headless-package.sh`：归档必须只包含顶层目录 `condr-headless/`、可执行 `condr`、`LICENSE` 和 `BUILD-COMMIT`；随后实际运行 CLI，验证安装、覆盖确认和已有 GUI 文件保留。提交号默认比对 `GITHUB_SHA`（本地为当前 HEAD），检查旧产物时用 `CONDR_COMMIT` 显式指定期望 SHA。
 
