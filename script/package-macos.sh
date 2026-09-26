@@ -65,7 +65,9 @@ EOF
 # The notification center only serves a process whose signing identifier is the
 # bundle identifier, and `condr-gui` is the process, so it is signed under that
 # name first. No `--deep` on the bundle: it re-signs nested code and resets that
-# identifier to one derived from the file name.
+# identifier to one derived from the file name. The x86_64 linker, unlike the
+# arm64 one, leaves `condr` unsigned, so it is signed here too.
+codesign --force --sign - "$app/Contents/MacOS/condr"
 codesign --force --sign - --identifier dev.condr.gui "$app/Contents/MacOS/condr-gui"
 codesign --force --sign - "$app"
 ln -s /Applications "$stage/dmg/Applications"
