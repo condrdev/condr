@@ -1,73 +1,66 @@
 ---
 title: 快速上手
-description: 十分钟内装好 Condr，跑起第一个 Agent，再连上一台远程 Device。
+description: 安装 Condr，开始在一个窗口里运行你的 Agent。
 ---
 
-按下面的步骤装好 Condr，跑起一个 Agent，再连上第二台 Device。
+Condr 在你的机器上运行 Claude Code、Codex 等 Agent 命令行工具。无论 Agent 在本机还是远程设备上，你都能随时随地操控它们。
 
-Condr 由两部分组成：
-
-- **Server**：命令 `condr`。它运行你的 Agent，关掉窗口后也继续工作。
-- **窗口**：应用 `condr-gui`。它是你使用的界面。一个窗口可以同时显示多台 Device。
+Condr 目前提供桌面应用和 Headless 两种安装方式。
 
 :::caution
-Condr 0.1 是公开预览版，版本之间仍可能有变化。窗口和 Server 请一起更新。
+Condr 0.1 是公开预览版，版本之间仍可能有变化。
 :::
 
-## 1. 安装桌面应用
+## 桌面应用（推荐）
 
-从[下载页](/download/)下载对应平台的安装包，装在你工作用的电脑上。安装包已包含 Server。
+从[下载页](/download/)下载安装包，打开即可。
 
-| 平台 | 安装包 |
-| --- | --- |
-| Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.dmg` |
-| Windows x86_64 | `.exe` |
+桌面应用自带 Server 并自动启动，无须单独安装。第一次打开后：
 
-macOS 可能提示应用无法验证，Windows 可能弹出 SmartScreen。预览版还没有签名。打开应用、使用安装脚本选项和安装 Headless Server 的步骤，见[安装](/zh-cn/docs/install/)。
+1. 点 **Open Project**，选择项目文件夹。Condr 会打开一个 Workspace 并提供 shell。
+2. 安装 Agent 集成, 请打开 **Settings › Device › Agents**，在你用的 Agent 旁边点 **Install**。这样 Condr 才能追踪 Agent 的状态。
+3. 在 shell 里像平时一样运行 Agent，例如 `claude`。
 
-## 2. 跑起第一个 Agent
+### macOS
 
-1. 安装你要用的 Agent 命令行工具并登录，例如 Claude Code 或 Codex。Condr 不提供模型和账号。
-2. 打开 Condr。它会启动本机 Server。
-3. 点 **Open Project**，选一个项目文件夹，让 Condr 打开一个带 shell 的 Workspace。
-4. 让 Condr 读取 Agent 的状态。在这个 shell 里运行一次：
+由于我们还未完成 Apple 的相关认证工作, 所以首次启动时会提示无法验证。你可以通过以下两种方式解决:
 
-   ```sh
-   condr agent hooks install claude
-   ```
+- 打开 **系统设置 › 隐私与安全性**，滚到底部，点 **仍要打开**。
+- 在 Terminal 运行以下命令:
+  ```sh
+  xattr -cr /Applications/Condr.app
+  ```
 
-   把 `claude` 换成你的 Agent。每个 Agent 装一次 hook。
-5. 在同一个 shell 里像平时一样运行 Agent，例如 `claude`。侧栏显示它的状态：工作中是琥珀色，等你批准是红色。
-6. 给它一个任务，然后关掉窗口。Server 和 Agent 会继续运行。
-7. 再打开 Condr。Workspace 会回到原来的位置。Agent 如果已经完成，侧栏会标成绿色。
+## Headless Server
 
-现在你已经会用 Condr 了。要同时跑几个 Agent，在 Pane 菜单里选 **Split Right**。也可以右键 Workspace，选 **Create Worktree**，给每个 Agent 一个独立分支。见 [Workspace、Tab 与 Pane](/zh-cn/docs/workspaces/)。
+如果你需要在服务器、开发机和其他不需要窗口的机器中使用，只需要安装 `condr` 命令：
 
-## 3. 连接远程 Device
+Linux 或 macOS：
+```sh
+curl -fsSL https://condr.dev/install.sh | sh
+```
 
-让 Agent 在另一台机器上运行，并在同一个窗口里查看：
+Windows：
+```powershell
+irm https://condr.dev/install.ps1 | iex
+```
 
-1. 在那台机器上安装 Headless Server：
+安装完成后，请打开一个新的终端让新加入的 PATH 生效，然后启动 Server：
 
-   ```sh
-   curl -fsSL https://condr.dev/install.sh | sh
-   ```
+```sh
+condr server start
+```
 
-   Windows 使用 `irm https://condr.dev/install.ps1 | iex`。
-2. 在你的电脑上打开 Condr，点侧栏底部的 **Connect Remote Device**。选择 **SSH address**，输入你平时 SSH 登录用的地址：
+Server 在后台运行，关掉终端也不会停止。目前它不会开机自启，所以机器重启后需要手动启动。
 
-   ```text
-   user@build-box
-   ```
-
-3. 这台机器会出现在侧栏。点 **New Workspace**，之后用法和本机 Device 一样。
-
-SSH 使用你现有的 OpenSSH 配置和密钥。没有 SSH 的机器可以用 TCP 或 Peer-to-peer 连接。见[连接远程设备](/zh-cn/docs/remote/)。
+要从你的电脑连接这台机器，见[连接远程 Device](/zh-cn/docs/remote/)。用 SSH 连接时，Condr 会自动启动 Server，你可以跳过上面的步骤。
 
 ## 接下来
 
-- [Agent](/zh-cn/docs/agents/)：了解状态含义和支持的 Agent。
-- [Agent 驱动 Condr](/zh-cn/docs/automation/)：让一个 Agent 指挥其他 Agent。
-- [键盘快捷键](/zh-cn/docs/keybindings/)。
-- [故障排查](/zh-cn/docs/troubleshooting/)：出问题时先做哪些检查。
+- [核心概念](/zh-cn/docs/concepts/)：Device、Server、Workspace、Pane 和 Agent 分别是什么。
+- [Workspace、Tab 与 Pane](/zh-cn/docs/workspaces/)：分割 Pane，用 Worktree 给每个 Agent 一个独立分支。
+- [Agent](/zh-cn/docs/agents/)：支持的 Agent、hook，以及每种状态的含义。
+- [连接远程 Device](/zh-cn/docs/remote/)：用 SSH、TCP 或 Peer-to-peer 连接其他机器。
+- [Agent 驱动 Condr](/zh-cn/docs/automation/)：让一个 Agent 用 `condr` 命令指挥其他 Agent。
+- [CLI 参考](/zh-cn/docs/cli/)：每个 `condr` 命令。
+- [故障排查](/zh-cn/docs/troubleshooting/)：出问题时先查什么。
