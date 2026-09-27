@@ -1350,7 +1350,9 @@ pub(super) fn handle_client(
                         message: "unknown Server".into(),
                     }
                 } else if restart {
-                    match std::env::current_exe().and_then(|exe| {
+                    // Not `current_exe()`: after an update replaced the binary, Linux
+                    // reports it as `condr (deleted)`; the lookup finds the replacement.
+                    match super::local::resolve_server_executable().and_then(|exe| {
                         let mut command = std::process::Command::new(exe);
                         command
                             .args(["server", "restart"])
