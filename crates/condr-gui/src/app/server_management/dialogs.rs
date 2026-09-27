@@ -396,6 +396,45 @@ impl Condr {
         Ok(())
     }
 
+    /// An update replaced this machine's `condr`, but its Server still runs the old one.
+    /// Ask before switching: a restart ends every program in its Panes.
+    pub(in crate::app) fn offer_update_restart(
+        &mut self,
+        key: ConnectionKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        connection.update_restart_offered = true;
+        let server = connection.server_build.clone().unwrap_or_default();
+        let owner = cx.weak_entity();
+        window.defer(cx, move |window, cx| {
+            window.open_alert_dialog(cx, move |alert, _, _| {
+                let owner = owner.clone();
+                alert
+                    .title("Restart Condr to finish updating?")
+                    .description(format!(
+                        "This device still runs Condr {server}; this window is {}. Programs \
+                         in its terminals end; Workspaces and Agent conversations reopen.",
+                        condr_core::build_identity()
+                    ))
+                    .button_props(
+                        DialogButtonProps::default()
+                            .ok_text("Restart")
+                            .ok_variant(ButtonVariant::Danger)
+                            .cancel_text("Later")
+                            .show_cancel(true)
+                            .on_ok(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| this.restart_server(key, cx));
+                                true
+                            }),
+                    )
+            });
+        });
+    }
+
     pub(in crate::app) fn confirm_delete_server_on(
         &mut self,
         key: ConnectionKey,

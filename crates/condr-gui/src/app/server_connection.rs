@@ -25,6 +25,8 @@ pub(super) struct ServerConnection {
     pub(super) server_build: Option<String>,
     /// The person closed the "different build" mark for the current `server_build`.
     pub(super) build_notice_dismissed: bool,
+    /// This window already asked whether to restart a stale local Server; asked once.
+    pub(super) update_restart_offered: bool,
     pub(super) server_id: Option<ServerId>,
     pub(super) runtime_epoch: Option<RuntimeEpoch>,
     pub(super) session_id: Option<SessionId>,
@@ -138,6 +140,12 @@ impl ServerConnection {
         let server = self.server_build.as_deref()?;
         let this = condr_core::build_identity();
         let label = &self.label;
+        if local_server_is_stale(&self.endpoint, this, server) {
+            return Some(format!(
+                "{label} still runs Condr {server}; this window is {this}. \
+                 Restart Condr on {label} to switch."
+            ));
+        }
         Some(match condr_core::compare_builds(this, server) {
             condr_core::BuildComparison::Same => return None,
             condr_core::BuildComparison::OtherOlder => format!(
@@ -153,6 +161,14 @@ impl ServerConnection {
         })
     }
 
+    /// Whether to ask, once, to restart this machine's Server into this window's build.
+    pub(super) fn offers_update_restart(&self) -> bool {
+        !self.update_restart_offered
+            && self.server_build.as_deref().is_some_and(|server| {
+                local_server_is_stale(&self.endpoint, condr_core::build_identity(), server)
+            })
+    }
+
     pub(super) fn new(key: ConnectionKey, label: String, endpoint: Endpoint) -> Self {
         Self {
             key,
@@ -161,6 +177,7 @@ impl ServerConnection {
             status: ConnectionStatus::Disconnected,
             server_build: None,
             build_notice_dismissed: false,
+            update_restart_offered: false,
             server_id: None,
             runtime_epoch: None,
             session_id: None,
@@ -577,4 +594,34 @@ pub(super) struct ServerHealth {
     pub(super) agents: u32,
     pub(super) clients: u32,
     pub(super) recent_errors: Vec<ServerLogRecord>,
+}
+
+/// This machine's Server runs an older or a different build than this window: what an
+/// update leaves behind, since installing never stops a running Server (ADR 0016). A
+/// restart starts the `condr` that came with this window. A newer Server is left alone,
+/// because restarting it would downgrade.
+fn local_server_is_stale(endpoint: &Endpoint, this: &str, server: &str) -> bool {
+    matches!(endpoint, Endpoint::Local(_))
+        && matches!(
+            condr_core::compare_builds(this, server),
+            condr_core::BuildComparison::OtherOlder | condr_core::BuildComparison::DifferentCommit
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: the app module's glob brings in GPUI's `#[test]` macro.
+    use super::local_server_is_stale;
+    use condr_server::{Endpoint, SshEndpoint};
+
+    #[test]
+    fn only_an_older_or_other_local_server_is_stale() {
+        let local = Endpoint::local("/tmp/condr.sock");
+        assert!(local_server_is_stale(&local, "0.2.0", "0.1.9"));
+        assert!(local_server_is_stale(&local, "0.2.0+b", "0.2.0+a"));
+        assert!(!local_server_is_stale(&local, "0.2.0", "0.2.0"));
+        assert!(!local_server_is_stale(&local, "0.2.0", "0.3.0"));
+        let ssh = Endpoint::Ssh(SshEndpoint::parse("ssh://host").unwrap());
+        assert!(!local_server_is_stale(&ssh, "0.2.0", "0.1.9"));
+    }
 }

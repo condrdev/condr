@@ -430,6 +430,12 @@ impl Condr {
             if key == self.active_connection {
                 self.rebuild_dock(window, cx);
             }
+            if self
+                .connection(key)
+                .is_some_and(ServerConnection::offers_update_restart)
+            {
+                self.offer_update_restart(key, window, cx);
+            }
         }
     }
 
