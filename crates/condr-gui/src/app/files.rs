@@ -1085,6 +1085,23 @@ mod tests {
         assert_eq!(terminal_path_text("it's.md"), "'it'\\''s.md' ");
     }
 
+    /// Kit quietly falls back to plain text when a grammar's highlight query does not
+    /// compile, which is how Kotlin once shipped 5.6 MB of tables that coloured nothing.
+    #[test]
+    fn every_grammar_the_gui_enables_loads() {
+        use gpui_kit::component::highlighter::SyntaxHighlighter;
+        let manifest = include_str!("../../Cargo.toml");
+        let names: Vec<String> = manifest
+            .split('"')
+            .filter_map(|word| word.strip_prefix("tree-sitter-"))
+            .map(|feature| feature.replace('-', "_"))
+            .collect();
+        assert!(names.len() > 30, "{names:?}");
+        for name in names {
+            assert_eq!(SyntaxHighlighter::new(&name).language().as_ref(), name);
+        }
+    }
+
     #[test]
     fn the_highlighter_follows_the_extension_and_falls_back_to_plain_text() {
         assert_eq!(
