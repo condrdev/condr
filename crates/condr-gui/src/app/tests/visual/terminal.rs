@@ -63,7 +63,7 @@ fn terminal_tab_backtab_and_ctrl_c_reach_the_pty() {
                 1,
                 pane_id,
                 TerminalCommand::Text(
-                    "stty -echo -icanon -isig min 1 time 0; printf 'CONDR_TAB_READY\\n'; bytes=$(dd bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_TAB_BYTES_%s\\n' \"$bytes\"\r"
+                    "stty -echo -icanon -isig min 1 time 0; printf 'CONDR_TAB_%s\\n' READY; bytes=$(dd bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_TAB_BYTES_%s\\n' \"$bytes\"\r"
                         .into(),
                 ),
             );
