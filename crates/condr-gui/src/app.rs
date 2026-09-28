@@ -579,15 +579,17 @@ impl Condr {
             this.start_automatic_update_checks(updates::FIRST_CHECK_DELAY, cx);
         }
 
+        // In the main window by its handle, like each connection's incoming task.
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {
             while let Ok(result) = connect_results_rx.recv().await {
-                if owner
-                    .update_in(cx, |this, window, cx| {
+                let handled = cx.update(|window, cx| {
+                    owner.update(cx, |this, cx| {
                         this.handle_connection_result(result, window, cx);
                         cx.notify();
                     })
-                    .is_err()
-                {
+                });
+                if let Err(error) = handled.and_then(|handled| handled) {
+                    tracing::warn!("stopped taking connection results: {error:#}");
                     break;
                 }
             }

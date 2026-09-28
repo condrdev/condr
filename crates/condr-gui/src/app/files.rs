@@ -570,7 +570,7 @@ impl Condr {
         else {
             return;
         };
-        cx.spawn_in(window, async move |this, cx| {
+        cx.spawn_in(window, async move |_, cx| {
             let result = cx
                 .background_spawn({
                     let (target, path) = (target.clone(), path.clone());
@@ -578,7 +578,7 @@ impl Condr {
                 })
                 .await;
             if let Err(error) = result {
-                let _ = this.update_in(cx, |_, window, cx| {
+                let _ = cx.update(|window, cx| {
                     window.push_notification(
                         Notification::error(format!(
                             "Couldn't open {} in {}: {error}",

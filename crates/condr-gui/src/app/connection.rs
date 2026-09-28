@@ -110,6 +110,12 @@ impl ClientIo {
                             .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
                         break;
                     }
+                    // Nothing applies what comes back any more: the connection is over, and
+                    // dropping this half of the stream closes it, which a local pipe's
+                    // shutdown does not. The next send then finds the Client disconnected.
+                    if writer_events.is_closed() {
+                        break;
+                    }
                     // ponytail: "sent" is the socket accepting the last byte, not the Server
                     // pasting the path; add a Server ack if staging ever gets slow.
                     if let Some(pane_id) = image_pane
@@ -310,6 +316,10 @@ impl ClientIo {
                 let _ = reader.get_ref().shutdown();
             })?;
 
+        // Applies everything the Server sends in the window it was spawned in, the one that
+        // owns this connection. `WeakEntity::update_in` would look up the window that last
+        // rendered `Condr` instead, and the Settings window renders it too: once Settings
+        // closed, that lookup failed until the main window drew again.
         let incoming_task = cx.spawn_in(window, async move |owner, cx| {
             while let Ok(first) = incoming_rx.recv().await {
                 let mut incoming = Vec::with_capacity(SERVER_EVENT_BUFFER_CAPACITY.min(16));
@@ -317,8 +327,8 @@ impl ClientIo {
                 while let Ok(next) = incoming_rx.try_recv() {
                     incoming.push(next);
                 }
-                if owner
-                    .update_in(cx, |this, window, cx| {
+                let applied = cx.update(|window, cx| {
+                    owner.update(cx, |this, cx| {
                         let mut effect = IncomingEffect::default();
                         for incoming in incoming {
                             let incoming = match incoming {
@@ -346,8 +356,14 @@ impl ClientIo {
                             cx.notify();
                         }
                     })
-                    .is_err()
-                {
+                });
+                // Only the window or `Condr` going away fails this. Ending here ends the
+                // connection: the writer closes the stream behind it.
+                if let Err(error) = applied.and_then(|applied| applied) {
+                    tracing::warn!(
+                        connection = key,
+                        "stopped applying the device's messages: {error:#}"
+                    );
                     break;
                 }
             }

@@ -782,3 +782,75 @@ fn only_the_check_button_reports_a_failed_update_check() {
     window.run_until_parked();
     assert!(found(window));
 }
+
+/// Settings renders `Condr` too, so GPUI took it for `Condr`'s window, and closing Settings
+/// left `Condr` with no window until the main one drew again. A Server message landing
+/// then stopped the task that applies them for good: the terminal froze while keys still
+/// went out.
+#[test]
+fn closing_settings_leaves_the_terminal_taking_server_output() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            let session = view.read(app).active_session()?;
+            let pane_id = session
+                .workspaces()
+                .first()?
+                .tabs()
+                .first()?
+                .focused_pane()?
+                .id();
+            view.read(app).terminal(1, pane_id).map(|_| pane_id)
+        });
+        pane_id.is_some()
+    }));
+    let pane_id = pane_id.unwrap();
+    window.update(|window, cx| _ = window.draw(cx));
+
+    let main_window = window.update(|window, _| window.window_handle());
+    let settings_button = window.debug_bounds("open-settings").unwrap();
+    window.simulate_click(settings_button.center(), Modifiers::default());
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    settings.update(|window, cx| _ = window.draw(cx));
+    settings.update(|window, _| window.remove_window());
+    settings.run_until_parked();
+
+    // The main window does not draw again before the output arrives.
+    let marker = if cfg!(windows) {
+        "Write-Host ('CONDR_SETTINGS_' + 'CLOSED')\r"
+    } else {
+        "printf 'CONDR_SETTINGS_%s\n' CLOSED\r"
+    };
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(1, pane_id, TerminalCommand::Text(marker.into()));
+        });
+    });
+    assert!(
+        wait_until_event_driven(window, |window| {
+            terminal_contains(window, &view, 1, pane_id, "CONDR_SETTINGS_CLOSED")
+        }),
+        "the terminal stopped taking Server output once Settings closed"
+    );
+}

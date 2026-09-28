@@ -625,16 +625,18 @@ impl Condr {
                 })
                 .await;
             let launched = result.is_ok();
-            let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok(()) => this.remember_open_target(project, target.id, cx),
-                Err(error) => window.push_notification(
-                    Notification::error(format!(
-                        "Couldn't open {} in {}: {error}",
-                        root.display(),
-                        target.label
-                    )),
-                    cx,
-                ),
+            let _ = cx.update(|window, cx| {
+                this.update(cx, |this, cx| match result {
+                    Ok(()) => this.remember_open_target(project, target.id, cx),
+                    Err(error) => window.push_notification(
+                        Notification::error(format!(
+                            "Couldn't open {} in {}: {error}",
+                            root.display(),
+                            target.label
+                        )),
+                        cx,
+                    ),
+                })
             });
             // The error notification is feedback enough; only a launch that went quiet
             // keeps the spinner up.
