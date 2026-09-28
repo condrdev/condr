@@ -4,6 +4,8 @@ mod control;
 // Layout tests run only where CI exercises the Server's worktree and PTY paths.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod layout;
+#[cfg(windows)]
+mod local;
 mod persistence;
 mod protocol;
 mod shutdown;

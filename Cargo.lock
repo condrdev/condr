@@ -1442,6 +1442,7 @@ dependencies = [
  "uuid",
  "widestring",
  "windows-spawn",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

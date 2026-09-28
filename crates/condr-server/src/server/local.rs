@@ -184,8 +184,7 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(stderr));
     #[cfg(windows)]
-    let spawn_result =
-        command.spawn_with(SpawnOptions::new().creation_flags(CreationFlags::DETACHED_PROCESS));
+    let spawn_result = spawn_detached(&mut command);
     #[cfg(not(windows))]
     let spawn_result = command.spawn();
     spawn_result.map_err(|error| {
@@ -225,6 +224,46 @@ fn spawn_server(config: ServerConfig, server_executable: &Path) -> io::Result<En
         }
     }
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
+}
+
+/// Starts the detached Server with this session's desktop shell as its parent (ADR 0031):
+/// it then runs, and so does every Pane, as a program started from the Start menu would,
+/// whoever launched it. Windows hands a child its parent's process mitigations, and an
+/// installer or an agent's shell tool that enforces redirection trust would otherwise stop
+/// every Pane from following the junctions users make (pnpm's store, linked skills).
+#[cfg(windows)]
+pub(super) fn spawn_detached(command: &mut Command) -> io::Result<windows_spawn::Child> {
+    let options = SpawnOptions::new().creation_flags(CreationFlags::DETACHED_PROCESS);
+    match desktop_shell() {
+        Some(shell) => command.spawn_with(options.parent_process(&shell)),
+        None => {
+            tracing::debug!("no desktop shell; the Server starts as its launcher's child");
+            command.spawn_with(options)
+        }
+    }
+}
+
+/// The desktop shell of this session, `None` without a desktop (over SSH, in a service).
+#[cfg(windows)]
+#[allow(unsafe_code)] // Finding the shell's process has no safe wrapper.
+pub(super) fn desktop_shell() -> Option<windows_spawn::ParentProcess> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
+    // SAFETY: takes nothing; returns the shell's window or null.
+    let window = unsafe { GetShellWindow() };
+    if window.is_null() {
+        return None;
+    }
+    let mut pid = 0;
+    // SAFETY: `window` is a window handle and `pid` outlives the call.
+    unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    if pid == 0 {
+        return None;
+    }
+    windows_spawn::ParentProcess::open(pid)
+        .inspect_err(|error| {
+            tracing::debug!("cannot start the Server from the desktop shell: {error}")
+        })
+        .ok()
 }
 
 /// Where a detached Server's stderr goes. Not `.log`: the rolling appender prunes every
