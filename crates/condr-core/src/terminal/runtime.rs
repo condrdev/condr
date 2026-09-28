@@ -115,6 +115,16 @@ impl TerminalRuntime {
         let writer = pair.master.take_writer().map_err(other_error)?;
         #[cfg(windows)]
         let job = Job::new()?;
+        // Children inherit "ignore Ctrl+C", which a new process group or a parent's
+        // SetConsoleCtrlHandler(NULL, TRUE) sets (an agent's shell tool starting the Server,
+        // say); the shell would pass it to every program it runs. This is the Windows side
+        // of portable-pty resetting signal dispositions before exec on Unix.
+        #[cfg(windows)]
+        #[allow(unsafe_code)]
+        // SAFETY: a null handler only clears this process's flag, which the shell inherits.
+        unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 0);
+        }
         let mut child = pair.slave.spawn_command(command).map_err(other_error)?;
         // ponytail: portable-pty starts the shell running, so a child it starts before this
         // line escapes the Job; shells take far longer than that. Creating it inside the Job
