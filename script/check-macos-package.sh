@@ -19,17 +19,29 @@ test "$(readlink "$stage/volume/Applications")" = /Applications
 app="$stage/volume/Condr.app"
 test "$(cat "$app/Contents/Resources/BUILD-COMMIT")" = "$commit"
 contents="$app/Contents"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = condr-launcher
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$contents/Info.plist")" = condr-gui
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$contents/Info.plist")" = condr.icns
 iconutil --convert iconset --output "$stage/condr.iconset" "$contents/Resources/condr.icns"
 test -s "$stage/condr.iconset/icon_512x512@2x.png"
-sh -n "$contents/MacOS/condr-launcher"
 for binary in condr condr-gui; do
     test "$(lipo -archs "$contents/MacOS/$binary")" = "$(uname -m)"
 done
 codesign --verify --deep --strict "$app"
 # Without this the notification center refuses the GUI (see package-macos.sh).
 codesign -dv "$contents/MacOS/condr-gui" 2>&1 | grep -qx 'Identifier=dev.condr.gui'
+# Signed for real when the packaging script was given an identity; a silent fall back
+# to ad-hoc would otherwise ship. With notary credentials, Gatekeeper's own verdict:
+# the ticket stapled to the image, and the app's looked up online.
+if [ "${CONDR_SIGNING_IDENTITY:--}" != - ]; then
+    for binary in condr condr-gui; do
+        codesign -dvv "$contents/MacOS/$binary" 2>&1 | grep -q '^Authority=Developer ID Application'
+        codesign -d --verbose=2 "$contents/MacOS/$binary" 2>&1 | grep -q 'flags=.*runtime'
+    done
+fi
+if [ -n "${CONDR_NOTARY_PROFILE:-}${CONDR_NOTARY_KEY:-}" ]; then
+    xcrun stapler validate "$1"
+    spctl --assess --type execute "$app"
+fi
 
 mkdir -p "$HOME/Applications"
 cp -R "$app" "$HOME/Applications/"

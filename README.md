@@ -56,12 +56,6 @@ Download the installer for your platform from the [latest release](https://githu
 | macOS x86_64 / arm64 | `.dmg`   |
 | Windows x86_64       | `.exe`   |
 
-The macOS app is not notarized (the Apple Developer account registration is not done yet), so the first launch says the app cannot be verified. Click **Done**, open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**. Or clear the download flag once in a terminal:
-
-```sh
-xattr -cr /Applications/Condr.app
-```
-
 ### Headless Server
 
 Install it on the device where you want to run agents remotely. It includes only the `condr` command, with no graphical interface.

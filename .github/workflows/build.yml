@@ -131,6 +131,11 @@ jobs:
             runner: macos-14
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      # A step `if` cannot read `secrets`; empty in a fork or before the secrets exist,
+      # and the packages are then ad-hoc signed (docs/releases.md).
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -139,10 +144,36 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Build GUI and condr
         run: cargo build --release --locked -p condr-gui -p condr-server
+      - name: Import the Developer ID certificate and notary key
+        if: env.APPLE_CERTIFICATE_P12 != ''
+        env:
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          # A Keychain Access export holds only the leaf; codesign needs its chain.
+          curl -fsSLo "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" -T /usr/bin/codesign
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode >"$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)
+          test -n "$identity"
+          echo "CONDR_SIGNING_IDENTITY=$identity" >>"$GITHUB_ENV"
+          if [ -n "$APPLE_NOTARY_KEY" ]; then
+              printf '%s' "$APPLE_NOTARY_KEY" | base64 --decode >"$RUNNER_TEMP/notary.p8"
+              echo "CONDR_NOTARY_KEY=$RUNNER_TEMP/notary.p8" >>"$GITHUB_ENV"
+          fi
       - name: Package macOS artifacts
         env:
           CONDR_COMMIT: ${{ github.sha }}
           CONDR_ARCH: ${{ matrix.arch }}
+          CONDR_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          CONDR_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
         run: script/package-macos.sh
       - name: Check macOS packages and PATH registration
         run: sh script/check-macos-package.sh dist/*.dmg dist/condr-headless-*.tar.gz

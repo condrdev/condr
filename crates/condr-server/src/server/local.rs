@@ -277,6 +277,15 @@ fn server_log_path(socket_path: &Path) -> io::Result<PathBuf> {
     })
 }
 
+static SERVER_EXECUTABLE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Names the binary this process starts the Server from, after `CONDR_SERVER_EXECUTABLE`
+/// and before the sibling lookup. The macOS bundle's GUI sets it to the copy that
+/// `condr server install` just placed (ADR 0016), so the Server outlives the bundle.
+pub fn set_server_executable(path: PathBuf) {
+    let _ = SERVER_EXECUTABLE.set(path);
+}
+
 pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("CONDR_SERVER_EXECUTABLE") {
         let path = PathBuf::from(path);
@@ -286,6 +295,9 @@ pub(super) fn resolve_server_executable() -> io::Result<PathBuf> {
                 "CONDR_SERVER_EXECUTABLE does not name a file",
             )
         });
+    }
+    if let Some(path) = SERVER_EXECUTABLE.get() {
+        return Ok(path.clone());
     }
 
     let current_executable = std::env::current_exe()?;

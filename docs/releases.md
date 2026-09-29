@@ -25,6 +25,20 @@ Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call t
 
 The release notes come from the commits since the previous `v*` tag: [git-cliff](https://git-cliff.org) with `cliff.toml` lists `feat` commits under New and `fix` commits under Fixed, by subject, skips every other type and `feat(website)`, and ends with the Update section. So a `feat` or `fix` subject is a line of the release notes. Preview them before tagging with `git cliff --unreleased --tag v<next> --strip header`; a summary sentence or a note that only the new Server has something can be added by editing the published release.
 
+## macOS signing and notarization
+
+`build.yml` signs and notarizes the macOS packages, nightlies and releases alike, when the repository holds these secrets; without them (a fork, or before they are set) the packages are ad-hoc signed and Gatekeeper asks the user to allow the app once.
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE_P12` | The Developer ID Application certificate with its private key, exported from Keychain Access as `.p12`, base64-encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | The password given at that export |
+| `APPLE_NOTARY_KEY` | An App Store Connect team API key (`.p8`, Developer role or above), base64-encoded |
+| `APPLE_NOTARY_KEY_ID` | Its Key ID |
+| `APPLE_NOTARY_ISSUER` | The Issuer ID shown with the team's keys |
+
+The macOS job imports the certificate into a temporary keychain, reads the identity's name from it, writes the key to a file, and hands them to `script/package-macos.sh` as `CONDR_SIGNING_IDENTITY` and `CONDR_NOTARY_KEY`; `check-macos-package.sh` then holds the packages to Gatekeeper's verdict. The certificate is valid for five years, and the trusted timestamp keeps packages signed before it expires valid. Windows packages are not signed; SmartScreen needs a separate certificate. How the packaging script signs is described in [development-build.md](development-build.md).
+
 ## Installing a build
 
 Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use `script/install-condr.sh` / `.ps1`, which condr.dev serves as `install.sh` / `install.ps1`: the script picks the headless archive for the current machine from GitHub Releases, verifies it against `SHA256SUMS`, and runs `condr server install` with any remaining arguments (ADR 0016). Asked for nothing else, it first compares the installed `condr --version` with `condr.dev/version.txt` (the Cargo.toml version the site was built from, redeployed by `release.yml`) and stops without downloading when that release is already installed; `--force` reinstalls.

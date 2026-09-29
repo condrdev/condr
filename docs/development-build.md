@@ -152,9 +152,11 @@ macOS GUI + CLI 使用拖放安装的 `.dmg`（内含 `Condr.app` 与 `/Applicat
 CONDR_COMMIT=<commit> script/package-macos.sh
 ```
 
-DMG 没有安装脚本，所以 `Condr.app` 的启动器 `Contents/MacOS/condr-launcher`（不叫 `Condr`，否则在默认不区分大小写的 APFS 上会和同目录的 `condr` CLI 冲突） 每次启动先运行 bundle 内的 `condr server install`（ADR 0016，幂等）：把 CLI 复制到 `~/.local/opt/condr`，建立 `~/.local/bin/condr` 链接，并在 `~/.zprofile` 追加一次带标记的 PATH 行；随后 `exec` 成 `condr-gui`，并让 GUI 用安装后的稳定副本启动 Server，与 Linux AppImage 的 `AppRun` 一致。安装失败时 GUI 仍照常启动。重新打开 zsh 终端后即可运行 `condr --help`；bash 登录 shell 不注册，需要时手工把 `~/.local/bin` 加入 PATH。
+DMG 没有安装脚本，所以 `Condr.app` 的主程序 `condr-gui` 每次启动先运行 bundle 内的 `condr server install --json`（ADR 0016，幂等）：把 CLI 复制到 `~/.local/opt/condr`，建立 `~/.local/bin/condr` 链接，并在 `~/.zprofile` 追加一次带标记的 PATH 行；随后用安装后的稳定副本启动 Server，与 Linux AppImage 的 `AppRun` 一致。安装失败只记一条 warn 日志，GUI 仍照常启动并从 bundle 内启动 Server。主程序不能换成 shell 启动器：公证票据只登记 Mach-O，脚本主程序公证后仍会被 Gatekeeper 拦下。重新打开 zsh 终端后即可运行 `condr --help`；bash 登录 shell 不注册，需要时手工把 `~/.local/bin` 加入 PATH。
 
-`sh script/check-macos-package.sh <dmg> <cli tar.gz>` 只在 macOS 上运行：挂载镜像，核对 `/Applications` 链接、提交号、图标、启动器语法、二进制架构与 runner 一致、bundle 签名完整，以及 `condr-gui` 的签名 identifier 为 `dev.condr.gui`（系统通知中心只接受签名 identifier 与 bundle identifier 相同的进程，否则发送测试通知也会被静默拒绝），再把 app 复制到 `~/Applications`，连续执行两次 `condr server install` 验证 `~/.zprofile` 不重复追加，并在全新 zsh 登录 shell 中执行 `condr server --help`。
+签名与公证由环境变量决定。`CONDR_SIGNING_IDENTITY` 是 keychain 里 Developer ID Application 证书的名字，缺省 `-` 即 ad-hoc 签名，只封印 bundle，让 Gatekeeper 报"未验证的开发者"而不是"已损坏"；有身份时每个 Mach-O 都带 hardened runtime 与可信时间戳，DMG 也签名。公证凭据二选一：`CONDR_NOTARY_PROFILE`（`xcrun notarytool store-credentials` 存进 keychain 的 profile 名，本机用）或 `CONDR_NOTARY_KEY` + `CONDR_NOTARY_KEY_ID` + `CONDR_NOTARY_ISSUER`（App Store Connect API key，CI 用）。脚本把 DMG 提交公证、等待结果、把票据装订到 DMG，被拒时打印 notary log 并失败；app 本身不单独装订，首次启动时 Gatekeeper 在线核对票据。
+
+`sh script/check-macos-package.sh <dmg> <cli tar.gz>` 只在 macOS 上运行：挂载镜像，核对 `/Applications` 链接、提交号、图标、二进制架构与 runner 一致、bundle 签名完整，以及 `condr-gui` 的签名 identifier 为 `dev.condr.gui`（系统通知中心只接受签名 identifier 与 bundle identifier 相同的进程，否则发送测试通知也会被静默拒绝）；设置了 `CONDR_SIGNING_IDENTITY` 时还要求签名链是 Developer ID Application，设置了公证凭据时用 `stapler validate` 与 `spctl --assess` 取 Gatekeeper 自己的结论。再把 app 复制到 `~/Applications`，连续执行两次 `condr server install` 验证 `~/.zprofile` 不重复追加，并在全新 zsh 登录 shell 中执行 `condr server --help`。
 
 Linux/macOS 原生检查共用 `script/check-headless-package.sh`：归档必须只包含顶层目录 `condr-headless/`、可执行 `condr`、`LICENSE` 和 `BUILD-COMMIT`；随后实际运行 CLI，验证安装、覆盖确认和已有 GUI 文件保留。提交号默认比对 `GITHUB_SHA`（本地为当前 HEAD），检查旧产物时用 `CONDR_COMMIT` 显式指定期望 SHA。
 

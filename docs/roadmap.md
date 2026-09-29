@@ -31,13 +31,13 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes/Files、Diff Tab（对 HEAD）、Preview Tab（ADR 0017/0018） |
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备 |
 | 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、Workspace/Tab/Pane/Agent 计数、订阅客户端数、最近 warn/error |
-| 发布 | nightly + `v*` 正式版共用一条流水线；Linux/macOS x86_64/arm64 与 Windows x86_64 的 desktop 与 headless 产物、校验和、安装脚本；GUI 按跟随的渠道检查新版本并提示，不自动安装（ADR 0029）；协议按字段号演进，CI 跑 `buf lint`（ADR 0028）；README/CONTRIBUTING/SECURITY/CoC/Issue 模板 |
+| 发布 | nightly + `v*` 正式版共用一条流水线；Linux/macOS x86_64/arm64 与 Windows x86_64 的 desktop 与 headless 产物、校验和、安装脚本，macOS 包以 Developer ID 签名并公证；GUI 按跟随的渠道检查新版本并提示，不自动安装（ADR 0029）；协议按字段号演进，CI 跑 `buf lint`（ADR 0028）；README/CONTRIBUTING/SECURITY/CoC/Issue 模板 |
 
 **代码里确实没有的**
 
 - 可观测性：burst 基准只覆盖 VT 增量、monitor 合并与 shaping 缓存三段，各自在进程内跑；整条 PTY → GPUI 链路的帧率仍靠 Windows 上手工观察。
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"和单一 controller 租约。没有 capability、密钥进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
-- 代码签名；自动安装更新（现在只提示）；故障排查、支持的 Agent、CLI 与配置参考文档。
+- Windows 代码签名（SmartScreen）；自动安装更新（现在只提示）；故障排查、支持的 Agent、CLI 与配置参考文档。
 - 终端内搜索、命令面板、Diff 对 base 分支比较（`GitDiff.against` 已预留）。
 
 **已知限制**（原 Issue #23/#26/#28/#36 已随仓库公开被删除，暂记于此，出现摩擦再立新 Issue）：终端颜色查询（OSC 4/10/11）未回应；kitty keyboard 协议只覆盖已协商的子集；OpenCode 集成缺真机验证；OSC 支持范围没有对照表。
@@ -78,7 +78,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - **发版时**：按 [Releases](releases.md) 打 `v0.1.0`；release notes 手写（功能概览、支持矩阵、已知限制），因为直推 `main` 的仓库里 `--generate-notes` 只剩一行链接；CI 加 `buf breaking` 对比 `main` 并定下兼容窗口长度（ADR 0028）；发版后用 stable 渠道检查一次更新，应显示已是最新。
 - **对外宣布前**：文档站（`website/`）补故障排查（日志位置、`CONDR_LOG`、`condr server status --json`、提 Issue 附什么）、支持的 Agent（10 种 CLI 与 hook 安装）、CLI 与 Agent 驱动、配置参考；README 与 getting-started 在 macOS Gatekeeper 说明旁补 Windows SmartScreen 的放行步骤。
 
-代码签名不在预览门内：Windows 安装器与 EXE（SmartScreen）、macOS 签名与公证需要证书和 Apple 开发者账号，是流程决定不是脚本改动；预览期不签名，文档写清放行步骤。
+代码签名：macOS 包自 2026-09-29 起以 Developer ID 签名并公证（[Releases](releases.md) 列出流水线需要的 secret）；Windows 安装器与 EXE（SmartScreen）仍需另购证书，是流程决定不是脚本改动，预览期不签名，文档写清放行步骤。
 
 退出条件是新机器按文档能装、能连、能恢复，并且方向 1 的日志能支撑排障。
 
@@ -124,7 +124,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 | 事项 | 启动条件 | 前置 |
 | --- | --- | --- |
-| 自动安装更新（下载校验 → 同时替换 Client 与 Server；提示新版本已完成，ADR 0029） | 有外部用户；Client/Server 必须同版本这一点已在手动更新中造成抱怨 | 代码签名（方向 5）；`condr server install` 已能原地替换运行中的二进制（ADR 0016） |
+| 自动安装更新（下载校验 → 同时替换 Client 与 Server；提示新版本已完成，ADR 0029） | 有外部用户；Client/Server 必须同版本这一点已在手动更新中造成抱怨 | Windows 代码签名（方向 5，macOS 已签名公证）；`condr server install` 已能原地替换运行中的二进制（ADR 0016） |
 | 遥测（opt-in） | 有外部用户，且方向 1 的本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
 | Mobile Companion（done/blocked 通知、查看、少量动作） | 厂商 Remote Control 覆盖不了的跨 Agent 场景被反复提出 | 一个不依赖 GPUI 的语义 API 适配层；Push 只作提醒，打开后重新拉取 Server 权威状态 |
 | 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | 方向 3 之后 Agent Profile 先从代码内置抽成 manifest |
