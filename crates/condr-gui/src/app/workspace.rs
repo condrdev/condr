@@ -16,6 +16,8 @@ struct DraggedTab {
 const TAB_MAX_WIDTH: Rems = rems(8.);
 /// No Tab is narrower than this, so a one-digit name is still a target.
 const TAB_MIN_WIDTH: Rems = rems(6.);
+/// The hairline between two idle Tabs: shorter than the Tab, as Chrome draws it.
+const TAB_SEPARATOR_HEIGHT: Rems = rems(1.);
 /// The viewing-only note after the Tabs truncates past this instead of pushing them.
 const VIEWING_ONLY_MAX_WIDTH: Rems = rems(16.);
 
@@ -125,6 +127,7 @@ impl Condr {
     /// follows the last Tab and scrolls with it; the viewing-only note keeps its place
     /// after the row. The Tabs themselves keep Condr's ghost-button look, which none of
     /// the Kit `Tab` variants draw.
+    #[allow(clippy::too_many_arguments)]
     fn render_tab_strip(
         &self,
         key: ConnectionKey,
@@ -144,19 +147,24 @@ impl Condr {
                 .map(|tab| tab.id())
                 .collect::<Vec<_>>(),
         );
-        // A newly active Tab may sit past the row's edge; scroll it into view once. For
-        // the last Tab, scroll to "New Tab" behind it, so a just-created Tab does not
+        let active_index = tab_ids.iter().position(|id| *id == active_tab);
+        // A newly active Tab may sit past the row's edge; scroll it into view once. The
+        // row's children alternate Tab and separator, so Tab `i` is child `2i`. For the
+        // last Tab, scroll to "New Tab" right behind it, so a just-created Tab does not
         // leave the button it came from half hidden.
         if self.last_scrolled_tab.replace(Some(active_tab)) != Some(active_tab)
-            && let Some(index) = tab_ids.iter().position(|id| *id == active_tab)
+            && let Some(index) = active_index
         {
             let item = if index + 1 == tab_ids.len() {
-                index + 1
+                2 * index + 1
             } else {
-                index
+                2 * index
             };
             self.tab_strip_scroll.scroll_to_item(item);
         }
+        let tab_count = tab_ids.len();
+        let separator_color = cx.theme().border;
+        let transparent = cx.theme().transparent;
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
@@ -377,7 +385,28 @@ impl Condr {
                             .overflow_x_scroll()
                             .lock_scroll_axis()
                             .track_scroll(&self.tab_strip_scroll)
-                            .children(tab_buttons)
+                            // Chrome's cue between two idle Tabs: a hairline in the gap.
+                            // Beside the active Tab it is drawn transparent rather than
+                            // left out, so the child indices `scroll_to_item` counts on
+                            // hold, and the active Tab reads as one raised piece.
+                            .children(tab_buttons.enumerate().flat_map(|(tab_index, row)| {
+                                let separator = (tab_index + 1 < tab_count).then(|| {
+                                    let beside_active = active_index.is_some_and(|active| {
+                                        active == tab_index || active == tab_index + 1
+                                    });
+                                    div()
+                                        .flex_none()
+                                        .w(px(1.))
+                                        .h(TAB_SEPARATOR_HEIGHT)
+                                        .bg(if beside_active {
+                                            transparent
+                                        } else {
+                                            separator_color
+                                        })
+                                        .into_any_element()
+                                });
+                                std::iter::once(row.into_any_element()).chain(separator)
+                            }))
                             .child(
                                 Button::new("new-tab")
                                     .debug_selector(|| "new-tab".into())
