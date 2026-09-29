@@ -891,3 +891,70 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
         "a Working agent leaves the list"
     );
 }
+
+/// Twelve Tabs are wider than the title bar: the strip scrolls them, keeps "Open in" in
+/// place, and shows the newest, active Tab rather than the first.
+#[test]
+fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    // Narrow enough that a dozen Tabs outgrow the title bar.
+    window.simulate_resize(size(px(900.), px(700.)));
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window
+        .debug_bounds("open-project")
+        .expect("new workspace button should be rendered");
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = std::env::temp_dir();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    for expected in 2..=12 {
+        window.update(|window, cx| _ = window.draw(cx));
+        let new_tab = window.debug_bounds("new-tab").expect("New Tab is rendered");
+        window.simulate_click(new_tab.center(), Modifiers::default());
+        assert!(
+            wait_until(window, |window| {
+                window.read(|app| {
+                    view.read(app)
+                        .active_session()
+                        .is_some_and(|session| session.workspaces()[0].tabs().len() == expected)
+                })
+            }),
+            "Tab {expected} was not created"
+        );
+    }
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.update(|window, cx| _ = window.draw(cx));
+
+    let (first_tab, last_tab) = window.read(|app| {
+        let session = view.read(app).active_session().unwrap();
+        let tabs = session.workspaces()[0].tabs();
+        (tabs[0].id(), tabs[11].id())
+    });
+    let viewport = window.update(|window, _| window.viewport_size());
+    let tabs = window.debug_bounds("workspace-tabs").unwrap();
+    let open_in = window.debug_bounds("open-in").unwrap();
+    let first = window.debug_bounds(tab_selector(first_tab)).unwrap();
+    let last = window.debug_bounds(tab_selector(last_tab)).unwrap();
+    assert!(
+        open_in.right() <= viewport.width && open_in.left() >= tabs.right(),
+        "Open in stays in the title bar after the strip: {open_in:?} vs {tabs:?} in {viewport:?}"
+    );
+    assert!(
+        last.right() <= tabs.right() + px(1.) && last.left() >= tabs.left(),
+        "the active Tab is scrolled into view: {last:?} in {tabs:?}"
+    );
+    assert!(
+        first.left() < tabs.left(),
+        "the first Tab has scrolled out on the left: {first:?} in {tabs:?}"
+    );
+}

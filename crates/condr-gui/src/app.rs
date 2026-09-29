@@ -113,7 +113,7 @@ use sidebar::*;
 use startup::{connect_to_server, fixed_shortcut};
 #[cfg(test)]
 use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -366,6 +366,10 @@ pub(crate) struct Condr {
     /// The Shell value waiting for its debounce, and the Server it belongs to.
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
+    /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
+    /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
+    tab_strip_scroll: ScrollHandle,
+    last_scrolled_tab: Cell<Option<TabId>>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     /// The most recent failure given to `report_error`, kept so tests can check it.
@@ -565,6 +569,8 @@ impl Condr {
             _font_save: None,
             _code_font_save: None,
             drop_target: None,
+            tab_strip_scroll: ScrollHandle::new(),
+            last_scrolled_tab: Cell::new(None),
             _quit_subscription: quit_subscription,
             last_error: None,
             _window_activation_subscription: window_activation_subscription,

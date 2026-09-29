@@ -79,14 +79,14 @@
 - [ ] `CONDR_ICON_PATHS` 补上 `waypoints.svg`，或改成一张表同时驱动 `load` / `list`
 - [ ] 删 `CondrIconName::FileText` 和 `assets/icons/file-text.svg`，改用 `IconName::FileText`
 - [ ] `color_scheme.rs` 的 `Color` 换成 `Hsla`（先确认不支持用户导入配色）
-- [ ] 「已配对设备」换成 Kit `Table`
+- [x] 「已配对设备」换成 Kit `Table`（不换：几行设备不值一个 `TableDelegate`，改成 `SettingGroup` 每设备一行）
 - [ ] 窗口几何换成 GPUI 的 `Bounds` / `Size` / `Point` 方法（先复核）
 - [ ] AGENTS.md 把 `gpui-fps` 列为例外
 - [ ] 修 `open_in.rs:449-455` 错位的文档注释（先复核）
 
 第二批：改动较大，需要 Windows 手动验收
 
-- [ ] 先在 Windows 上复现 Tab 过多被裁掉，再把 Workspace Tab 栏换成 Kit `TabBar` / `Tab`
+- [x] 先在 Windows 上复现 Tab 过多被裁掉，再把 Workspace Tab 栏换成 Kit `TabBar` / `Tab`（不换：Kit 的 Tab 变体都自带边框或底色，对不上标题栏里的 ghost 样式。Tab 行改为可横向滚动，激活的 Tab 滚入视野）
 - [ ] Changes 树换成 Kit `Tree`，处理折叠状态同步
 - [ ] 合并 Changes / Files 两棵树重复的行构建函数
 
