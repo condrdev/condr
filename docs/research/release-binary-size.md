@@ -59,6 +59,8 @@ LTO 对 Server 更有效，因为 Server 基本全是代码；GUI 有一半是�
 
 ## 用 syntect 代替 tree-sitter 做高亮
 
+> 后续（2026-09-29）：ADR 0032 采用了 syntect + two-face，Oniguruma 引擎，去掉了全部 tree-sitter 语法。
+
 GPUI Kit 专门留了接口，不需要改 Kit，也不需要自己重写代码查看器：
 
 - `gpui-base` 的 `InputHighlighter` trait（`src/input/editor/highlighting.rs`），文档写的是"与解析器无关的语法高亮接缝"。实现者负责解析和增量状态，编辑器只通过 `styles(range, resolver)` 要带样式的区间，另外还有 `update(edit, text, …)` 和 `fold_ranges`。

@@ -51,6 +51,10 @@ iroh = { version = "1.2", default-features = false, features = ["tls-ring"] }
 url = "2"
 regex = "1"
 # Protocol relative paths: `/`-separated whatever platform the client or Server runs on.
+# Preview and Diff Tab highlighting (ADR 0032): the Sublime syntaxes bat curates, on Oniguruma,
+# and tmTheme loading for the themes two-face does not bundle.
+syntect = { version = "5.3", default-features = false, features = ["plist-load"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
 relative-path = { version = "2.0", features = ["serde"] }
 toml = "1.0"
 # Format-preserving writes, so a hand-edited config.toml keeps its comments.
@@ -84,6 +88,9 @@ gpui-pre-windows = { opt-level = 3 }
 gpui-base = { opt-level = 3 }
 gpui-component = { opt-level = 3 }
 gpui-kit = { opt-level = 3 }
+# Syntax highlighting parses whole files on a background thread (ADR 0032).
+onig_sys = { opt-level = 3 }
+syntect = { opt-level = 3 }
 condr-core = { opt-level = 2 }
 condr-gui = { opt-level = 2 }
 condr-server = { opt-level = 2 }

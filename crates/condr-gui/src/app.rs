@@ -21,6 +21,7 @@ mod server_management;
 mod settings;
 mod sidebar;
 mod startup;
+mod syntax;
 mod terminal_input;
 mod terminal_panel;
 mod updates;
@@ -100,11 +101,12 @@ use settings::{
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
-    SettingsTab, color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
+    SettingsTab, code_font_size, code_theme_is_dirty, color_scheme_is_dirty, reset_code_theme,
+    reset_color_scheme, select_appearance, select_code_theme, select_server_shell,
     select_settings_server, select_settings_server_page, select_settings_tab,
-    select_terminal_font_family, select_terminal_font_size, selected_appearance, server_listen,
-    server_shell, set_server_listen, step_terminal_font_size, terminal_font_family,
-    terminal_font_size,
+    select_terminal_font_family, select_terminal_font_size, selected_appearance,
+    selected_code_theme, server_listen, server_shell, set_server_listen, step_code_font_size,
+    step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;
@@ -343,6 +345,8 @@ pub(crate) struct Condr {
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
+    /// The Preview and Diff Tabs' font size; they share the terminal's font family.
+    code_font_size: f32,
     /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
     open_targets: Option<Vec<open_in::OpenTarget>>,
     /// The Workspace whose "Open in" launch is in flight; its button shows a spinner.
@@ -357,6 +361,8 @@ pub(crate) struct Condr {
     _settings_window_closed: Option<Subscription>,
     /// The pending debounced font save; replacing it cancels the previous one.
     _font_save: Option<Task<()>>,
+    /// The same for the Preview and Diff font size.
+    _code_font_save: Option<Task<()>>,
     /// The Shell value waiting for its debounce, and the Server it belongs to.
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
@@ -422,6 +428,8 @@ impl Condr {
             update_channel,
             terminal_font,
             terminal_color_scheme,
+            code_theme,
+            code_font_size,
             default_editor,
             custom_editors,
             workspace_editors,
@@ -447,6 +455,7 @@ impl Condr {
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
+        syntax::set_code_theme(code_theme, cx);
         let window_bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
             this.window_state = Some(window.window_bounds().into());
             this.schedule_state_save(cx);
@@ -459,6 +468,9 @@ impl Condr {
             // A change made less than a debounce before quitting is still saved.
             if this._font_save.is_some() {
                 this.save_terminal_font(cx);
+            }
+            if this._code_font_save.is_some() {
+                this.save_code_font_size(cx);
             }
             let pending = this.config_save.take();
             this.save_state_now(cx);
@@ -541,6 +553,7 @@ impl Condr {
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,
+            code_font_size,
             open_targets: None,
             opening_workspace: None,
             default_editor,
@@ -550,6 +563,7 @@ impl Condr {
             settings_view: None,
             _settings_window_closed: None,
             _font_save: None,
+            _code_font_save: None,
             drop_target: None,
             _quit_subscription: quit_subscription,
             last_error: None,

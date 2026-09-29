@@ -119,6 +119,8 @@ pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
     pub(super) color_scheme: Entity<ColorSchemeSelect>,
+    /// The Preview and Diff Tabs' theme, the same kind of Select.
+    pub(super) code_theme: Entity<ColorSchemeSelect>,
     /// The font as last committed from this window. `Condr` only ever holds the
     /// normalized form, so a half-edited value never reaches the theme or the config
     /// file, and reopening Settings starts from what is actually in use.
@@ -198,20 +200,11 @@ const LICENSES: &str = include_str!("../../assets/licenses.md");
 
 impl SettingsWindow {
     fn new(owner: WeakEntity<Condr>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let labels = std::iter::once(DEFAULT_COLOR_SCHEME_LABEL.into())
-            .chain(crate::color_scheme::names().map(SharedString::from))
-            .collect::<Vec<SharedString>>();
         let current = owner
             .upgrade()
             .map(|owner| owner.read(cx).terminal_color_scheme.clone())
             .unwrap_or_default();
-        let selected = labels
-            .iter()
-            .position(|label| color_scheme_name(label) == current)
-            .map(IndexPath::new);
-        let color_scheme = cx.new(|cx| {
-            SelectState::new(SearchableVec::new(labels), selected, window, cx).searchable(true)
-        });
+        let color_scheme = scheme_select(crate::color_scheme::names(), &current, window, cx);
         cx.subscribe(
             &color_scheme,
             |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
@@ -222,6 +215,17 @@ impl SettingsWindow {
                 let _ = this
                     .owner
                     .update(cx, |owner, cx| owner.set_terminal_color_scheme(name, cx));
+            },
+        )
+        .detach();
+        let current = selected_code_theme(cx);
+        let code_theme = scheme_select(crate::app::syntax::theme_names(), &current, window, cx);
+        cx.subscribe(
+            &code_theme,
+            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+                if let SelectEvent::Confirm(Some(label)) = event {
+                    select_code_theme(&this.owner, color_scheme_name(label), cx);
+                }
             },
         )
         .detach();
@@ -304,6 +308,7 @@ impl SettingsWindow {
             owner,
             focus_handle: cx.focus_handle(),
             color_scheme,
+            code_theme,
             font_draft,
             selected_server,
             font_family,
@@ -422,7 +427,12 @@ impl Render for SettingsWindow {
         let content = match tab {
             SettingsTab::Application => Settings::new("condr-settings-application")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(appearance_page(&self.owner, &settings, &self.color_scheme))
+                .page(appearance_page(
+                    &self.owner,
+                    &settings,
+                    &self.color_scheme,
+                    &self.code_theme,
+                ))
                 .page(notifications_page(&self.owner))
                 .page(power_page(&self.owner))
                 .page(shortcuts_page())
@@ -816,6 +826,23 @@ impl SettingsWindow {
             })
             .unwrap_or_default()
     }
+}
+
+/// A searchable Select over Default and `names`, open on `current` (empty for Default).
+fn scheme_select<'a>(
+    names: impl Iterator<Item = &'a str>,
+    current: &SharedString,
+    window: &mut Window,
+    cx: &mut Context<SettingsWindow>,
+) -> Entity<ColorSchemeSelect> {
+    let labels = std::iter::once(DEFAULT_COLOR_SCHEME_LABEL.into())
+        .chain(names.map(|name| SharedString::from(name.to_owned())))
+        .collect::<Vec<SharedString>>();
+    let selected = labels
+        .iter()
+        .position(|label| color_scheme_name(label) == *current)
+        .map(IndexPath::new);
+    cx.new(|cx| SelectState::new(SearchableVec::new(labels), selected, window, cx).searchable(true))
 }
 
 #[cfg(test)]

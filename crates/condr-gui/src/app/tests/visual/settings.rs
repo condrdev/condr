@@ -135,6 +135,24 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         TerminalPalette::default().background
     );
 
+    // The Preview and Diff Colors: a Select of the same kind, reset back to Default.
+    let code_select = settings.read(|app| settings_view.read(app).code_theme.clone());
+    assert!(
+        settings.debug_bounds("code-theme").is_some(),
+        "the code theme Select should render"
+    );
+    window.update(|_, cx| select_code_theme(&owner, "Dracula".into(), cx));
+    assert!(window.read(code_theme_is_dirty));
+    settings.update(|window, cx| reset_code_theme(&owner, &code_select, window, cx));
+    settings.run_until_parked();
+    assert_eq!(window.read(selected_code_theme), "");
+    assert!(!window.read(code_theme_is_dirty));
+    assert_eq!(
+        window.read(|app| code_select.read(app).selected_value().cloned()),
+        Some("Default".into()),
+        "the code theme Select must show Default after a reset"
+    );
+
     // Font: the field keeps what was typed; the theme gets the normalized value.
     window.update(|_, cx| select_terminal_font_family(&settings_view, "Cascadia Mono".into(), cx));
     assert_eq!(
@@ -483,6 +501,98 @@ fn the_mode_dropdown_reads_and_writes_the_appearance() {
     assert_eq!(
         window.read(|app| selected_appearance(&owner, app)),
         "system"
+    );
+    drop(server);
+}
+
+/// The Preview and Diff Tabs paint with the code theme (ADR 0032): Default follows the
+/// GUI's mode, and a chosen theme is saved, reaches Kit's editor background and holds
+/// across a mode change.
+#[test]
+fn the_code_theme_dropdown_reaches_the_editor_and_default_follows_the_mode() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("client-code-theme");
+    let config_path = directory.0.join("config.toml");
+    let (server, endpoint) = start_server();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
+    let view_holder = Rc::new(RefCell::new(None));
+    let view_holder_for_window = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            Condr::new(
+                endpoint.clone(),
+                Some(Ok(initial)),
+                config::LoadedConfig::read(Some(config_path.clone())),
+                gui_state::LoadedState::default(),
+                window,
+                cx,
+            )
+        });
+        view_holder_for_window.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    let owner = view.downgrade();
+    let editor_background = |window: &mut VisualTestContext| {
+        window.update(|_, cx| cx.theme().highlight_theme.style.editor_background)
+    };
+
+    let github_dark = Some(gpui_kit::rgb(0x0d1117).into());
+    let github_light = Some(gpui_kit::rgb(0xffffff).into());
+
+    window.update(|_, cx| select_appearance(&owner, "dark", cx));
+    window.run_until_parked();
+    assert_eq!(window.read(selected_code_theme), "", "unset is Default");
+    assert_eq!(editor_background(window), github_dark);
+    window.update(|_, cx| select_appearance(&owner, "light", cx));
+    window.run_until_parked();
+    assert_eq!(
+        editor_background(window),
+        github_light,
+        "Default follows the mode"
+    );
+
+    window.update(|_, cx| select_code_theme(&owner, "Dracula".into(), cx));
+    window.run_until_parked();
+    assert_eq!(window.read(selected_code_theme), "Dracula");
+    assert_eq!(
+        editor_background(window),
+        Some(gpui_kit::rgb(0x282a36).into()),
+        "the chosen theme must reach the editor background"
+    );
+    assert!(
+        std::fs::read_to_string(&config_path)
+            .unwrap()
+            .contains("theme = \"Dracula\""),
+        "choosing a theme must reach the client config file"
+    );
+
+    window.update(|_, cx| select_appearance(&owner, "dark", cx));
+    window.run_until_parked();
+    assert_eq!(
+        editor_background(window),
+        Some(gpui_kit::rgb(0x282a36).into()),
+        "a chosen theme holds across a mode change"
+    );
+
+    window.update(|_, cx| select_code_theme(&owner, "".into(), cx));
+    window.run_until_parked();
+    assert_eq!(editor_background(window), github_dark, "back to Default");
+
+    // Their font size is their own, apart from the terminal's.
+    let default_size = TerminalFont::default().size;
+    window.update(|_, cx| step_code_font_size(&owner, 1., cx));
+    assert_eq!(
+        window.read(|app| code_font_size(&owner, app)),
+        default_size + 1.
+    );
+    assert_eq!(
+        window.read(|app| view.read(app).terminal_font.size),
+        default_size,
+        "the terminal keeps its own size"
     );
     drop(server);
 }
