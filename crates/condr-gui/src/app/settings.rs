@@ -444,7 +444,7 @@ impl Render for SettingsWindow {
                 .default_selected_index(self.server_page)
                 .page(server_general_page(self, &settings, cx))
                 .page(server_remote_access_page(self, &settings, cx))
-                .page(server_clients_page(&settings))
+                .page(server_clients_page(self, &settings, cx))
                 .page(agents_page(&settings, self.connection_hooks(cx))),
         };
         let tabs = TabBar::new("condr-settings-tabs")

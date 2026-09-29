@@ -265,6 +265,7 @@ pub(super) fn appearance_page(
     let scheme_select = color_scheme.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
+        .default_open(true)
         .group(
             SettingGroup::new().item(
                 SettingItem::new(

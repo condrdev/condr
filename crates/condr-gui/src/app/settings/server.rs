@@ -118,11 +118,15 @@ pub(super) fn server_remote_access_page(
         .group(server_network_group(this, settings, cx))
 }
 
-pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingPage {
+pub(super) fn server_clients_page(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
     SettingPage::new("Paired devices")
         .icon(IconName::Network)
-        .default_open(true)
-        .group(server_clients_group(settings))
+        .group(server_invite_group(this, settings, cx))
+        .group(server_devices_group(this, settings, cx))
 }
 
 /// Whether this Client may change the selected Server: only a local or SSH connection
@@ -480,252 +484,258 @@ fn server_network_group(
         .item(server_restart_row(this, settings, cx))
 }
 
-fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
-    let invite_settings = settings.clone();
-    let list_settings = settings.clone();
-    SettingGroup::new()
-        .item(
-            SettingItem::render(move |_, _, cx| {
-                let settings = invite_settings.clone();
-                let allowed = server_admin_allowed(&settings, cx);
-                // Whether a device could reach this one now: what the process bound, not
-                // what is saved for the next restart.
-                let (reachable, pending, invite) = settings
-                    .read(cx)
-                    .owner
-                    .upgrade()
-                    .and_then(|owner| {
-                        let this = settings.read(cx);
-                        owner
-                            .read(cx)
-                            .connections
-                            .iter()
-                            .find(|c| c.key == this.selected_server)
-                            .map(|c| {
-                                (
-                                    c.running_listen.is_some() || c.running_p2p,
-                                    c.listen != c.running_listen || c.p2p != c.running_p2p,
-                                    c.invite.clone(),
-                                )
-                            })
-                    })
-                    .unwrap_or_default();
-                // Why the button is off is the header's business when this window is
-                // remote; the hint only covers the Server's own state.
-                let hint = match (reachable, pending) {
-                    (false, true) => "Restart Condr to apply the Remote access changes first.",
-                    (false, false) => {
-                        "Turn on the TCP listener or Peer-to-peer first: devices pair over either."
-                    }
-                    (true, _) => "A one-time address for Connect Remote Device on the new device.",
-                };
-                let mut column = v_flex().gap_2().child(
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(
-                            Button::new("server-invite")
-                                .label(if invite.is_some() {
-                                    "New invite"
-                                } else {
-                                    "Generate invite"
-                                })
-                                .small()
-                                .outline()
-                                .disabled(!(allowed && reachable))
-                                .on_click({
-                                    let settings = settings.clone();
-                                    move |_, _, cx| {
-                                        settings.update(cx, |this, cx| {
-                                            let key = this.selected_server;
-                                            let _ = this.owner.update(cx, |owner, _| {
-                                                owner.server_admin(key, ServerAdminCommand::Invite)
-                                            });
-                                        });
-                                    }
-                                }),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(hint),
-                        ),
-                );
-                if let Some(invite) = invite {
-                    // One line per enabled transport, each with its own Copy.
-                    let link = |id: &'static str, address: String| {
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .debug_selector(move || id.into())
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_sm()
-                                    .font_family("monospace")
-                                    .child(address.clone()),
-                            )
-                            .child(
-                                Clipboard::new(format!("{id}-copy"))
-                                    .value(address)
-                                    .tooltip("Copy invite"),
-                            )
-                    };
-                    let has_tcp = invite.tcp.is_some();
-                    column = column.child(
-                        v_flex()
-                            .gap_1()
-                            .children(invite.p2p.map(|address| link("server-invite-p2p", address)))
-                            .children(invite.tcp.map(|address| link("server-invite-tcp", address)))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!(
-                                        "Copied to the clipboard. Valid for {} minutes{}",
-                                        invite.expires_in_secs.div_ceil(60),
-                                        if has_tcp {
-                                            "; in the TCP address, replace <host> with one the \
-                                             new device can reach."
-                                        } else {
-                                            "."
-                                        }
-                                    )),
-                            ),
-                    );
-                }
-                column.into_any_element()
-            })
+/// The invite a new device pairs with. Its rows are the Kit's, one per transport link,
+/// so the page reads like the rest of Settings rather than a block of prose.
+fn server_invite_group(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingGroup {
+    let allowed = admin_allowed(this, cx);
+    // Whether a device could reach this one now: what the process bound, not what is
+    // saved for the next restart.
+    let (reachable, pending, invite) = this
+        .selected_connection(cx, |c| {
+            (
+                c.running_listen.is_some() || c.running_p2p,
+                c.listen != c.running_listen || c.p2p != c.running_p2p,
+                c.invite.clone(),
+            )
+        })
+        .unwrap_or_default();
+    // Why the button is off is the header's business when this window is remote; the
+    // description only covers the Server's own state. The clipboard got the p2p link,
+    // or the TCP one without it (see the `Invite` reply).
+    let description: SharedString = match (&invite, reachable, pending) {
+        (Some(invite), _, _) => format!(
+            "The {} link is on the clipboard. Valid for {} minutes.",
+            if invite.p2p.is_some() {
+                "Peer-to-peer"
+            } else {
+                "TCP"
+            },
+            invite.expires_in_secs.div_ceil(60)
+        )
+        .into(),
+        (None, false, true) => "Restart Condr to apply the Remote access changes first.".into(),
+        (None, false, false) => {
+            "Turn on the TCP listener or Peer-to-peer under Remote access first.".into()
+        }
+        (None, true, _) => "A one-time address for Connect Remote Device on the new device.".into(),
+    };
+    let has_invite = invite.is_some();
+    let button = {
+        let settings = settings.clone();
+        SettingField::render(move |_, _, _| {
+            let settings = settings.clone();
+            Button::new("server-invite")
+                .label(if has_invite {
+                    "New invite"
+                } else {
+                    "Generate invite"
+                })
+                .small()
+                .outline()
+                .disabled(!(allowed && reachable))
+                .on_click(move |_, _, cx| {
+                    settings.update(cx, |this, cx| {
+                        let key = this.selected_server;
+                        let _ = this.owner.update(cx, |owner, _| {
+                            owner.server_admin(key, ServerAdminCommand::Invite)
+                        });
+                    });
+                })
+        })
+    };
+    let mut group = SettingGroup::new().title("Invite").item(
+        SettingItem::new("Invite a device", button)
+            .description(description)
             .keywords(["invite", "pair"]),
-        )
-        .item(
-            SettingItem::render(move |_, _, cx| {
-                let settings = list_settings.clone();
-                let allowed = server_admin_allowed(&settings, cx);
-                let (mut clients, connected) = settings
-                    .read(cx)
-                    .owner
-                    .upgrade()
-                    .and_then(|owner| {
-                        let this = settings.read(cx);
-                        owner
-                            .read(cx)
-                            .connections
-                            .iter()
-                            .find(|c| c.key == this.selected_server)
-                            .map(|c| (c.clients.clone(), c.connected_devices.clone()))
-                    })
-                    .unwrap_or_default();
-                if clients.is_empty() {
-                    return div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No paired devices yet. Generate an invite above to pair one.")
-                        .into_any_element();
-                }
-                // Connected devices first; the Server's order (pairing order) otherwise.
-                clients.sort_by_key(|client| !connected.contains(&client.fingerprint));
-                // The same columns as `condr server clients`.
-                let header = |text: &'static str| {
+    );
+    if let Some(invite) = invite {
+        if let Some(address) = invite.p2p {
+            group = group.item(invite_link_row(
+                "Peer-to-peer",
+                "server-invite-p2p",
+                address,
+                None,
+            ));
+        }
+        if let Some(address) = invite.tcp {
+            group = group.item(invite_link_row(
+                "TCP",
+                "server-invite-tcp",
+                address,
+                Some("Replace <host> with an address the new device can reach."),
+            ));
+        }
+    }
+    group
+}
+
+/// One transport's link under its name with its own Copy: too long for the field slot
+/// beside a title, so the row stacks.
+fn invite_link_row(
+    title: &'static str,
+    id: &'static str,
+    address: String,
+    description: Option<&'static str>,
+) -> SettingItem {
+    let item = SettingItem::new(
+        title,
+        SettingField::render(move |_, _, _| {
+            h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(text)
-                };
-                let mut table = v_flex().gap_2().child(
+                        .debug_selector(move || id.into())
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .font_family("monospace")
+                        .child(address.clone()),
+                )
+                .child(
+                    Clipboard::new(format!("{id}-copy"))
+                        .value(address.clone())
+                        .tooltip("Copy invite"),
+                )
+        }),
+    )
+    .layout(Axis::Vertical)
+    .keywords(["invite"]);
+    match description {
+        Some(description) => item.description(description),
+        None => item,
+    }
+}
+
+/// One row per paired device, connected ones first: the name over its fingerprint (the
+/// same one `condr server clients` prints), when it was last seen, and Revoke.
+fn server_devices_group(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingGroup {
+    let allowed = admin_allowed(this, cx);
+    let (mut clients, connected) = this
+        .selected_connection(cx, |c| (c.clients.clone(), c.connected_devices.clone()))
+        .unwrap_or_default();
+    let mut group = SettingGroup::new().title("Devices");
+    if clients.is_empty() {
+        return group.item(
+            SettingItem::render(|_, _, cx| {
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No paired devices yet.")
+            })
+            .keywords(["clients", "devices"]),
+        );
+    }
+    // Connected devices first; the Server's order (pairing order) otherwise.
+    clients.sort_by_key(|client| !connected.contains(&client.fingerprint));
+    for client in clients {
+        let is_connected = connected.contains(&client.fingerprint);
+        let settings = settings.clone();
+        let keywords = [SharedString::from(client.name.clone()), "revoke".into()];
+        group = group.item(
+            SettingItem::render(move |_, _, cx| {
+                let seen: AnyElement = if is_connected {
                     h_flex()
-                        .gap_4()
+                        .gap_1()
                         .items_center()
-                        .child(div().w(rems(10.)).child(header("NAME")))
-                        .child(div().w(rems(8.)).child(header("LAST SEEN")))
-                        .child(div().flex_1().child(header("FINGERPRINT"))),
-                );
-                for client in clients {
-                    let seen = if connected.contains(&client.fingerprint) {
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(
-                                Icon::new(super::sidebar::CondrIconName::CircleFilled)
-                                    .size_2()
-                                    .text_color(cx.theme().success),
-                            )
-                            .child("Connected")
-                    } else {
-                        h_flex().child(relative_age(client.last_seen))
-                    };
-                    let key = client.fingerprint.clone();
-                    let name = client.name.clone();
-                    let settings = settings.clone();
-                    table = table.child(
-                        h_flex()
-                            .gap_4()
-                            .items_center()
-                            .text_sm()
-                            .child(div().w(rems(10.)).truncate().child(client.name))
-                            .child(div().w(rems(8.)).whitespace_nowrap().child(seen))
+                        .child(
+                            Icon::new(super::sidebar::CondrIconName::CircleFilled)
+                                .size_2()
+                                .text_color(cx.theme().success),
+                        )
+                        .child("Connected")
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(relative_age(client.last_seen))
+                        .into_any_element()
+                };
+                h_flex()
+                    .w_full()
+                    .gap_4()
+                    .items_center()
+                    .text_sm()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(client.name.clone())
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
                                     .font_family("monospace")
-                                    .child(client.fingerprint),
-                            )
-                            .child(
-                                Button::new(format!("revoke-{key}"))
-                                    .label("Revoke")
-                                    .small()
-                                    .ghost()
-                                    .disabled(!allowed)
-                                    .on_click(move |_, window, cx| {
-                                        let (owner, selected) = {
-                                            let this = settings.read(cx);
-                                            (this.owner.clone(), this.selected_server)
-                                        };
-                                        let key = key.clone();
-                                        let name = name.clone();
-                                        window.defer(cx, move |window, cx| {
-                                            window.open_alert_dialog(cx, move |alert, _, _| {
-                                                let owner = owner.clone();
-                                                let key = key.clone();
-                                                alert
-                                                    .confirm()
-                                                    .title(format!(
-                                                        "Revoke \u{201c}{name}\u{201d}?"
-                                                    ))
-                                                    .description(
-                                                        "Its connections close now, and it \
-                                                             needs a new invite to pair again.",
-                                                    )
-                                                    .button_props(
-                                                        DialogButtonProps::default()
-                                                            .ok_text("Revoke")
-                                                            .ok_variant(ButtonVariant::Danger),
-                                                    )
-                                                    .on_ok(move |_, _, cx| {
-                                                        let _ = owner.update(cx, |owner, _| {
-                                                            owner.server_admin(
-                                                                selected,
-                                                                ServerAdminCommand::Revoke {
-                                                                    key: key.clone(),
-                                                                },
-                                                            )
-                                                        });
-                                                        true
-                                                    })
-                                            });
-                                        });
-                                    }),
+                                    .truncate()
+                                    .child(client.fingerprint.clone()),
                             ),
-                    );
-                }
-                table.into_any_element()
+                    )
+                    .child(div().whitespace_nowrap().child(seen))
+                    .child(revoke_button(&settings, &client, allowed))
             })
-            .keywords(["clients", "devices", "revoke"]),
-        )
+            .keywords(keywords),
+        );
+    }
+    group
+}
+
+fn revoke_button(
+    settings: &Entity<SettingsWindow>,
+    client: &ServerClientInfo,
+    allowed: bool,
+) -> Button {
+    let settings = settings.clone();
+    let key = client.fingerprint.clone();
+    let name = client.name.clone();
+    Button::new(format!("revoke-{key}"))
+        .label("Revoke")
+        .small()
+        .ghost()
+        .disabled(!allowed)
+        .on_click(move |_, window, cx| {
+            let (owner, selected) = {
+                let this = settings.read(cx);
+                (this.owner.clone(), this.selected_server)
+            };
+            let key = key.clone();
+            let name = name.clone();
+            window.defer(cx, move |window, cx| {
+                window.open_alert_dialog(cx, move |alert, _, _| {
+                    let owner = owner.clone();
+                    let key = key.clone();
+                    alert
+                        .confirm()
+                        .title(format!("Revoke \u{201c}{name}\u{201d}?"))
+                        .description(
+                            "Its connections close now, and it needs a new invite to pair again.",
+                        )
+                        .button_props(
+                            DialogButtonProps::default()
+                                .ok_text("Revoke")
+                                .ok_variant(ButtonVariant::Danger),
+                        )
+                        .on_ok(move |_, _, cx| {
+                            let _ = owner.update(cx, |owner, _| {
+                                owner.server_admin(
+                                    selected,
+                                    ServerAdminCommand::Revoke { key: key.clone() },
+                                )
+                            });
+                            true
+                        })
+                });
+            });
+        })
 }
 
 /// The listen address a Server stores, or the default when it has none.
