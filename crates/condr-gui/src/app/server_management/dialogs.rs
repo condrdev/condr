@@ -7,29 +7,27 @@ impl Condr {
         owner: WeakEntity<Condr>,
     ) -> PopupMenu {
         let ssh_owner = owner.clone();
-        let tcp_owner = owner.clone();
-        let p2p_owner = owner;
+        let p2p_owner = owner.clone();
+        let tcp_owner = owner;
         menu = menu.item(
-            PopupMenuItem::new("SSH address")
+            PopupMenuItem::new("SSH")
                 .icon(IconName::SquareTerminal)
                 .on_click(move |_, window, cx| {
                     let _ = ssh_owner.update(cx, |this, cx| this.prompt_add_server_ssh(window, cx));
                 }),
         );
         menu = menu.item(
-            PopupMenuItem::new("TCP pairing link")
-                .icon(IconName::Network)
-                .on_click(move |_, window, cx| {
-                    let _ = tcp_owner.update(cx, |this, cx| this.prompt_add_server_tcp(window, cx));
-                }),
-        );
-        menu.item(
-            PopupMenuItem::new("Peer-to-peer link")
+            PopupMenuItem::new("Peer-to-peer")
                 .icon(Icon::new(super::super::sidebar::CondrIconName::Waypoints))
                 .on_click(move |_, window, cx| {
                     let _ = p2p_owner.update(cx, |this, cx| this.prompt_add_server_p2p(window, cx));
                 }),
-        )
+        );
+        menu.item(PopupMenuItem::new("TCP").icon(IconName::Network).on_click(
+            move |_, window, cx| {
+                let _ = tcp_owner.update(cx, |this, cx| this.prompt_add_server_tcp(window, cx));
+            },
+        ))
     }
 
     pub(in crate::app) fn prompt_add_server_p2p(

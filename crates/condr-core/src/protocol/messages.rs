@@ -818,6 +818,10 @@ pub enum ServerAdminResponse {
         clients: u32,
         /// Newest last; `warn` and `error` records the Server kept in memory.
         recent_errors: Vec<ServerLogRecord>,
+        /// What this Server process bound at startup; differs from `listen` and `p2p`
+        /// until a restart applies the saved values.
+        running_listen: Option<String>,
+        running_p2p: bool,
     },
     ListenSaved {
         listen: Option<String>,

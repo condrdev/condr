@@ -693,6 +693,10 @@ message ServerStatus {
   uint32 agents = 9;
   uint32 clients = 10;
   repeated ServerLogRecord recent_errors = 11;
+  // What this Server process bound at startup; `listen` and `p2p` are the saved
+  // values, which differ from these until a restart applies them.
+  optional string running_listen = 12;
+  bool running_p2p = 13;
 }
 
 message ServerClients {

@@ -390,6 +390,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 agents,
                 clients,
                 recent_errors,
+                running_listen,
+                running_p2p,
             } = status
             else {
                 unreachable!("server_status only returns Status");
@@ -406,6 +408,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         "protocol": condr_core::protocol::PROTOCOL_VERSION,
                         "listen": listen,
                         "p2p": p2p,
+                        "running_listen": running_listen,
+                        "running_p2p": running_p2p,
                         "connected_devices": connected,
                         "uptime_secs": uptime_secs,
                         "workspaces": workspaces,
@@ -430,11 +434,18 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 ),
             );
             field("Uptime", uptime_text(uptime_secs));
+            let pending = listen != running_listen || p2p != running_p2p;
             match listen {
                 Some(address) => field("Listen", format_args!("tcp://{address}")),
                 None => field("Listen", "off"),
             }
             field("Peer-to-peer", if p2p { "on" } else { "off" });
+            if pending {
+                field(
+                    "Pending",
+                    "restart to apply the Listen and Peer-to-peer changes",
+                );
+            }
             field("Workspaces", workspaces);
             field("Tabs", tabs);
             field("Panes", panes);

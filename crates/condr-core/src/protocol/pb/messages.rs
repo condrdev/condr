@@ -1252,9 +1252,13 @@ impl From<&ServerAdminResponse> for super::ServerAdminResponse {
                     agents,
                     clients,
                     recent_errors,
+                    running_listen,
+                    running_p2p,
                 } => Response::Status(ServerStatus {
                     listen: listen.clone(),
                     p2p: *p2p,
+                    running_listen: running_listen.clone(),
+                    running_p2p: *running_p2p,
                     connected: connected.clone(),
                     version: version.clone(),
                     uptime_secs: *uptime_secs,
@@ -1313,6 +1317,8 @@ impl TryFrom<super::ServerAdminResponse> for ServerAdminResponse {
             Response::Status(status) => Self::Status {
                 listen: status.listen,
                 p2p: status.p2p,
+                running_listen: status.running_listen,
+                running_p2p: status.running_p2p,
                 connected: status.connected,
                 version: status.version,
                 uptime_secs: status.uptime_secs,

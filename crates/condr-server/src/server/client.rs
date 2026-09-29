@@ -1492,6 +1492,8 @@ fn server_admin(
                 agents: state.agents.len() as u32,
                 clients: state.subscribers.len() as u32,
                 recent_errors: crate::logging::recent_errors(),
+                running_listen: state.running_listen.clone(),
+                running_p2p: state.p2p.as_ref().is_some_and(|p2p| p2p.enabled()),
             })
         }
         ServerAdminCommand::SaveListen { address } => {

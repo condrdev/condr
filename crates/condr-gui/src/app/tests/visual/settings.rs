@@ -654,7 +654,7 @@ fn hooks_reports_replace_their_agents_row_and_errors_clear_on_the_next_report() 
 }
 
 #[test]
-fn the_daemon_page_keeps_half_typed_addresses_local_and_invites_follow_the_listener() {
+fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_the_listener() {
     use condr_core::protocol::{ServerAdminResponse, ServerMessage};
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();

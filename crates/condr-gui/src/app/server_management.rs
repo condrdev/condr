@@ -19,7 +19,7 @@ impl Condr {
     }
 
     /// Asks the Server to restart and reconnects once it has stopped. The Server replies
-    /// with `ServerStopping` or an `Error`; either way the Daemon page shows the outcome.
+    /// with `ServerStopping` or an `Error`; either way the Remote access page shows the outcome.
     pub(in crate::app) fn restart_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         let Some(connection) = self.connection_mut(key) else {
             return;

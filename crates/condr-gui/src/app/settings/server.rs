@@ -83,13 +83,20 @@ pub(in crate::app) fn select_server_shell(
 const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
 
 /// Preferences a Server owns, edited for one connection at a time; the Server picker sits
-/// in the tab bar. Each page mirrors one `condr server` concern.
-pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> SettingPage {
-    SettingPage::new("Terminal")
-        .icon(IconName::SquareTerminal)
+/// in the tab bar. The first page is what the Server is and how it is doing, plus its
+/// terminal defaults. `this` is the window being rendered, so it must not go through
+/// `settings.read(cx)`.
+pub(super) fn server_general_page(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
+    SettingPage::new("General")
+        .icon(IconName::Settings2)
         .default_open(true)
+        .group(server_status_group(this, cx))
         .group(
-            SettingGroup::new().item(
+            SettingGroup::new().title("Terminal").item(
                 SettingItem::new(
                     "Shell",
                     text_field_row(settings, TextFieldId::Shell, "".into()),
@@ -99,15 +106,15 @@ pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> Setting
         )
 }
 
-/// `this` is the window being rendered, so it must not go through `settings.read(cx)`.
-pub(super) fn server_network_page(
+/// How other devices reach this Server: the TCP listener and Peer-to-peer, and the
+/// restart that applies them.
+pub(super) fn server_remote_access_page(
     this: &SettingsWindow,
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingPage {
-    SettingPage::new("Daemon")
-        .icon(IconName::Cpu)
-        .group(server_status_group(this, cx))
+    SettingPage::new("Remote access")
+        .icon(IconName::Globe)
         .group(server_network_group(this, settings, cx))
 }
 
@@ -185,55 +192,59 @@ impl SettingsWindow {
     }
 }
 
-/// Which Server this page describes and what it last reported about itself: the
-/// connection (a Server can run while this GUI is disconnected, so it never claims
-/// "running"), version, uptime, Session counts and the `warn`/`error` records it kept.
-/// Health is refreshed every `STATUS_REFRESH` while Settings is open.
-fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
-    let (status, kind, address) = this
+/// The strip under the tab bar that says which Server the Device tab edits: the picker,
+/// how this window reaches it (a Server can run while this GUI is disconnected, so it
+/// never claims "running") and the connection state. Only the transport: the address
+/// mostly repeats the name, and the Edit dialog has it in full.
+pub(super) fn server_header(
+    this: &SettingsWindow,
+    select: &Entity<ServerSelect>,
+    cx: &App,
+) -> impl IntoElement {
+    let (status, route) = this
         .selected_connection(cx, |c| {
-            let (kind, address) = match &c.endpoint {
-                Endpoint::Local(_) => ("Local", None),
-                Endpoint::Ssh(ssh) => ("SSH", Some(ssh.destination().to_owned())),
-                Endpoint::Tcp(tcp) => ("TCP", Some(tcp.authority())),
-                Endpoint::P2p(p2p) => ("Peer-to-peer", Some(p2p.device.to_string())),
+            let route = match &c.endpoint {
+                Endpoint::Local(_) => "Local",
+                Endpoint::Ssh(_) => "SSH",
+                Endpoint::Tcp(_) => "TCP",
+                Endpoint::P2p(_) => "Peer-to-peer",
             };
-            (c.status, kind, address)
+            (c.status, route)
         })
-        .unwrap_or((ConnectionStatus::Disconnected, "Local", None));
-    let state = match status {
-        ConnectionStatus::Connected => "Connected",
-        ConnectionStatus::Connecting => "Connecting",
-        ConnectionStatus::Disconnected => "Disconnected",
+        .unwrap_or((ConnectionStatus::Disconnected, "Local"));
+    let (tag, state) = match status {
+        ConnectionStatus::Connected => (Tag::success(), "Connected"),
+        ConnectionStatus::Connecting => (Tag::warning(), "Connecting"),
+        ConnectionStatus::Disconnected => (Tag::secondary(), "Disconnected"),
     };
-    let status_row = SettingItem::new(
-        "Status",
-        SettingField::render(move |_, _, _| {
-            match status {
-                ConnectionStatus::Connected => Tag::success(),
-                ConnectionStatus::Connecting => Tag::warning(),
-                ConnectionStatus::Disconnected => Tag::secondary(),
-            }
-            .outline()
-            .small()
-            .child(state)
-        }),
-    )
-    .keywords(["status", "connected"]);
-    let connection = SettingItem::new(
-        "Connection",
-        SettingField::render(move |_, _, _| div().text_sm().child(kind)),
-    )
-    .keywords(["connection", "local", "ssh", "tcp", "p2p"]);
-    let connection = match address {
-        Some(address) => connection.description(SharedString::from(address)),
-        None => connection,
-    };
-    let group = SettingGroup::new()
-        .title("Status")
-        .item(status_row)
-        .item(connection);
+    h_flex()
+        .gap_3()
+        .items_center()
+        .px_3()
+        .py_2()
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(
+            div()
+                .debug_selector(|| "settings-server".into())
+                .flex_none()
+                .w(rems(14.))
+                .child(Select::new(select).small()),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(route),
+        )
+        .child(tag.outline().small().child(state))
+}
 
+/// What the Server last reported about itself: version, uptime, Session counts and the
+/// `warn`/`error` records it kept. Refreshed every `STATUS_REFRESH` while Settings is
+/// open.
+fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
+    let group = SettingGroup::new().title("Status");
     let health = this.selected_connection(cx, |c| c.health.clone()).flatten();
     let Some(health) = health else {
         return group.item(SettingItem::render(|_, _, cx| {
@@ -315,8 +326,22 @@ fn count(n: u32, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
-fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
+/// The saved TCP listener or Peer-to-peer setting differs from what the Server process
+/// bound: only a restart applies it, so the row says so and the button steps forward.
+fn restart_pending(this: &SettingsWindow, cx: &App) -> bool {
+    this.selected_connection(cx, |c| {
+        c.listen != c.running_listen || c.p2p != c.running_p2p
+    })
+    .unwrap_or(false)
+}
+
+fn server_restart_row(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingItem {
     let restart = settings.clone();
+    let pending = restart_pending(this, cx);
     SettingItem::new(
         "Restart Condr",
         SettingField::render(move |_, _, cx| {
@@ -337,13 +362,22 @@ fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
                 })
                 .child(
                     Button::new("server-restart")
+                        .debug_selector(|| "server-restart".into())
                         .label(if restarting {
                             "Restarting…"
+                        } else if pending {
+                            "Restart to apply"
                         } else {
                             "Restart Condr"
                         })
                         .small()
-                        .outline()
+                        .map(|button| {
+                            if pending {
+                                button.primary()
+                            } else {
+                                button.outline()
+                            }
+                        })
                         .disabled(!allowed || restarting)
                         .on_click(move |_, window, cx| {
                             let (owner, key) = {
@@ -377,7 +411,12 @@ fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
                 )
         }),
     )
-    .description("Applies the changes above. Stops every pane and agent on this device.")
+    .description(if pending {
+        "The changes above are saved but not applied yet. Restarting stops every pane and \
+         agent on this device."
+    } else {
+        "Applies the changes above. Stops every pane and agent on this device."
+    })
     .keywords(["restart", "apply"])
 }
 
@@ -441,7 +480,7 @@ fn server_network_group(
             .description("Lets other devices reach this one by its key. No port to open.")
             .keywords(["p2p", "peer-to-peer", "relay"]),
         )
-        .item(server_restart_row(settings))
+        .item(server_restart_row(this, settings, cx))
 }
 
 fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
@@ -452,7 +491,9 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
             SettingItem::render(move |_, _, cx| {
                 let settings = invite_settings.clone();
                 let allowed = server_admin_allowed(&settings, cx);
-                let (listening, p2p, invite) = settings
+                // Whether a device could reach this one now: what the process bound, not
+                // what is saved for the next restart.
+                let (reachable, pending, invite) = settings
                     .read(cx)
                     .owner
                     .upgrade()
@@ -463,16 +504,24 @@ fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
                             .connections
                             .iter()
                             .find(|c| c.key == this.selected_server)
-                            .map(|c| (c.listen.is_some(), c.p2p, c.invite.clone()))
+                            .map(|c| {
+                                (
+                                    c.running_listen.is_some() || c.running_p2p,
+                                    c.listen != c.running_listen || c.p2p != c.running_p2p,
+                                    c.invite.clone(),
+                                )
+                            })
                     })
                     .unwrap_or_default();
-                let reachable = listening || p2p;
-                let hint = match (allowed, reachable) {
-                    (false, _) => "Only a local or SSH connection can invite devices.",
-                    (true, false) => {
+                let hint = match (allowed, reachable, pending) {
+                    (false, _, _) => "Only a local or SSH connection can invite devices.",
+                    (true, false, true) => {
+                        "Restart Condr to apply the Remote access changes first."
+                    }
+                    (true, false, false) => {
                         "Turn on the TCP listener or Peer-to-peer first: devices pair over either."
                     }
-                    (true, true) => {
+                    (true, true, _) => {
                         "A one-time address for Connect Remote Device on the new device."
                     }
                 };
@@ -782,7 +831,7 @@ pub(super) fn agents_page(
     settings: &Entity<SettingsWindow>,
     (reports, error): (Vec<HooksReport>, Option<String>),
 ) -> SettingPage {
-    let mut group = SettingGroup::new().title("Agent integration");
+    let mut group = SettingGroup::new();
     if let Some(error) = error {
         group = group.item(
             SettingItem::render(move |_, _, cx| {
@@ -818,7 +867,9 @@ pub(super) fn agents_page(
             .keywords([agent.label(), "hooks"]),
         );
     }
-    SettingPage::new("Agents").icon(IconName::Bot).group(group)
+    SettingPage::new("Agent integrations")
+        .icon(IconName::Bot)
+        .group(group)
 }
 
 /// One row's field: the state as a word, then the one or two actions that change it.

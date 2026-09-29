@@ -74,6 +74,10 @@ pub(super) struct ServerConnection {
     pub(super) listen: Option<String>,
     /// `[server.p2p] enabled` on the Server, as its last `Status` or `P2pSaved` said.
     pub(super) p2p: bool,
+    /// What the Server process actually bound, from `Status`; `listen` and `p2p` are
+    /// saved values that only a restart applies.
+    pub(super) running_listen: Option<String>,
+    pub(super) running_p2p: bool,
     /// The Server's last `Status` report; `None` until the first one arrives.
     pub(super) health: Option<ServerHealth>,
     pub(super) clients: Vec<ServerClientInfo>,
@@ -204,6 +208,8 @@ impl ServerConnection {
             hooks_error: None,
             listen: None,
             p2p: false,
+            running_listen: None,
+            running_p2p: false,
             health: None,
             clients: Vec::new(),
             connected_devices: Vec::new(),
@@ -583,7 +589,7 @@ pub(super) struct ServerInvite {
     pub(super) expires_in_secs: u64,
 }
 
-/// Runtime figures from the Server's `Status` reply, shown on the Daemon settings page.
+/// Runtime figures from the Server's `Status` reply, shown on the General settings page.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ServerHealth {
     pub(super) version: String,

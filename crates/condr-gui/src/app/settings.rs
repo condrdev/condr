@@ -150,11 +150,11 @@ pub(super) struct SettingsWindow {
     /// for a plain text element.
     licenses: Entity<EditorState>,
     /// Re-asks the selected Server for its `Status` while this window is open, so uptime
-    /// and recent errors on the Daemon page stay current. Dropped with the window.
+    /// and recent errors on the General page stay current. Dropped with the window.
     _status_refresh: Task<()>,
 }
 
-/// How often the Daemon page's health figures are refreshed while Settings is open.
+/// How often the General page's health figures are refreshed while Settings is open.
 const STATUS_REFRESH: Duration = Duration::from_secs(5);
 
 /// The two halves of Settings: this Client's own preferences and one Server's.
@@ -165,7 +165,7 @@ pub(super) enum SettingsTab {
     Server,
 }
 
-type ServerSelect = SelectState<SearchableVec<SharedString>>;
+pub(super) type ServerSelect = SelectState<SearchableVec<SharedString>>;
 
 /// Connection keys and labels in sidebar order, for the Server picker.
 /// The picker identifies a Server by its label, so two Servers sharing a name get the
@@ -442,8 +442,8 @@ impl Render for SettingsWindow {
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .default_selected_index(self.server_page)
-                .page(server_terminal_page(&settings))
-                .page(server_network_page(self, &settings, cx))
+                .page(server_general_page(self, &settings, cx))
+                .page(server_remote_access_page(self, &settings, cx))
                 .page(server_clients_page(&settings))
                 .page(agents_page(&settings, self.connection_hooks(cx))),
         };
@@ -464,18 +464,11 @@ impl Render for SettingsWindow {
                 });
             })
             .prefix(div().w_3())
-            .children([Tab::new().label("Application"), Tab::new().label("Device")])
-            .when(tab == SettingsTab::Server, |this| {
-                this.suffix(
-                    div()
-                        .debug_selector(|| "settings-server".into())
-                        .flex_none()
-                        .w(rems(14.))
-                        .pr_3()
-                        .py_1()
-                        .child(Select::new(&self.server_select).small()),
-                )
-            });
+            .children([Tab::new().label("Application"), Tab::new().label("Device")]);
+        // Which Server the Device tab edits, above its pages rather than in the tab bar,
+        // so the tab bar keeps its shape and the pages sit under the device they describe.
+        let header =
+            (tab == SettingsTab::Server).then(|| server_header(self, &self.server_select, cx));
         // The dialog layer sits beside the page, not inside it, so Escape in a dialog
         // closes the dialog and not the window.
         div().size_full().relative().children(dialog_layer).child(
@@ -493,6 +486,7 @@ impl Render for SettingsWindow {
                 })
                 .child(title_bar(SETTINGS_WINDOW_TITLE, cx))
                 .child(tabs)
+                .children(header)
                 .child(div().flex_1().min_h_0().child(content)),
         )
     }
