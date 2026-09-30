@@ -771,6 +771,11 @@ fn the_title_bar_open_in_button_launches_and_remembers_the_editor() {
     );
 
     // The caret half lists every target; the second one launches and is remembered.
+    // The failure toast is still sliding in from above the title bar and would swallow
+    // the click on the caret, so it goes first.
+    window.update(|window, cx| window.clear_notifications(cx));
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
     let control = window.debug_bounds("open-in-control").unwrap();
     window.simulate_click(
         point(control.right() - px(12.), control.center().y),
