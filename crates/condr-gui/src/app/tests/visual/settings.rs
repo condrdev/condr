@@ -893,6 +893,85 @@ fn only_the_check_button_reports_a_failed_update_check() {
     assert!(found(window));
 }
 
+/// The sidebar's dot points at the update: Settings opens on About's Updates group, and
+/// the dot goes until a check finds a newer build again (ADR 0029).
+#[test]
+fn a_found_update_opens_settings_on_about_once() {
+    use crate::app::updates::{CHECK_INTERVAL, UpdateState};
+    use gpui_kit::http_client::{FakeHttpClient, Response};
+
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    let main_window = window.update(|window, _| window.window_handle());
+    window.update(|_, cx| {
+        cx.set_http_client(FakeHttpClient::create(|_| async {
+            Ok(Response::builder()
+                .status(200)
+                .body(r#"{"tag_name":"v99.0.0"}"#.into())
+                .unwrap())
+        }))
+    });
+    let pending =
+        |window: &mut VisualTestContext| window.read(|app| view.read(app).update_pending());
+    let open_settings = |window: &mut VisualTestContext| {
+        let button = window.debug_bounds("open-settings").unwrap();
+        window.simulate_click(button.center(), Modifiers::default());
+        window.run_until_parked();
+        let handle = window
+            .windows()
+            .into_iter()
+            .find(|handle| *handle != main_window)
+            .expect("the Settings button should open a second window");
+        let settings = VisualTestContext::from_window(handle, window).into_mut();
+        settings.update(|window, cx| _ = window.draw(cx));
+        settings
+    };
+    let close = |settings: &mut VisualTestContext| {
+        settings.update(|window, _| window.remove_window());
+        settings.run_until_parked();
+    };
+
+    // Without an update, Settings opens on its first page.
+    let settings = open_settings(window);
+    assert!(settings.debug_bounds("about-view-update").is_none());
+    close(settings);
+
+    window.update(|_, cx| view.update(cx, |this, cx| this.check_for_updates_now(cx)));
+    window.run_until_parked();
+    assert!(matches!(
+        window.read(|app| view.read(app).update_state.clone()),
+        UpdateState::Available(_)
+    ));
+    assert!(pending(window), "a found update shows the dot");
+    window.update(|window, cx| _ = window.draw(cx));
+
+    let settings = open_settings(window);
+    let row = settings
+        .debug_bounds("about-view-update")
+        .expect("Settings should open on the update");
+    let viewport = settings.update(|window, _| window.viewport_size());
+    assert!(
+        row.bottom() <= viewport.height && row.right() <= viewport.width,
+        "the update row should be in view: {row:?} in {viewport:?}"
+    );
+    assert!(!pending(window), "opening Settings clears the dot");
+    close(settings);
+
+    // Until a check finds it again, Settings opens as usual.
+    let settings = open_settings(window);
+    assert!(settings.debug_bounds("about-view-update").is_none());
+    close(settings);
+
+    window.executor().advance_clock(CHECK_INTERVAL);
+    window.run_until_parked();
+    assert!(pending(window), "the next check brings the dot back");
+}
+
 /// Settings renders `Condr` too, so GPUI took it for `Condr`'s window, and closing Settings
 /// left `Condr` with no window until the main one drew again. A Server message landing
 /// then stopped the task that applies them for good: the terminal froze while keys still

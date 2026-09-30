@@ -298,6 +298,9 @@ pub(crate) struct Condr {
     /// What the last check found; a newer build puts a dot on the Settings button and
     /// is named on the About page.
     update_state: UpdateState,
+    /// Settings has been opened since the last check found a newer build, which clears
+    /// the dot until a check finds one again. In memory only: a restart shows it anew.
+    update_seen: bool,
     /// The Check button's request is in flight.
     checking_updates: bool,
     /// The five-hourly checks while `auto_check_updates` is on.
@@ -527,6 +530,7 @@ impl Condr {
             auto_check_updates,
             update_channel,
             update_state: UpdateState::Unknown,
+            update_seen: false,
             checking_updates: false,
             _automatic_update_checks: Task::ready(()),
             _keep_awake: None,

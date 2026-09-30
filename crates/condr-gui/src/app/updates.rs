@@ -191,6 +191,12 @@ impl Condr {
         cx.notify();
     }
 
+    /// A newer build is known and Settings has not been opened since the check found
+    /// it: the sidebar's Settings button carries a dot and Settings opens on the update.
+    pub(in crate::app) fn update_pending(&self) -> bool {
+        matches!(self.update_state, UpdateState::Available(_)) && !self.update_seen
+    }
+
     /// The Check button: works whether or not automatic checks are on, and leaves their
     /// schedule alone.
     pub(in crate::app) fn check_for_updates_now(&mut self, cx: &mut Context<Self>) {
@@ -257,6 +263,7 @@ impl Condr {
         }
         match latest {
             Ok(latest) => {
+                self.update_seen = false;
                 self.update_state = available_update(
                     channel,
                     &latest,

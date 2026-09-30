@@ -653,10 +653,10 @@ impl Condr {
             .into_any_element()
     }
 
-    /// Carries a dot while the update check has found a newer build (ADR 0029); the
-    /// About page says which.
+    /// Carries a dot while the update check has found a newer build and Settings has not
+    /// been opened since (ADR 0029); the About page says which.
     fn settings_button(&self, owner: WeakEntity<Self>, cx: &App) -> AnyElement {
-        let update = matches!(self.update_state, UpdateState::Available(_));
+        let update = self.update_pending();
         let button = Button::new("open-settings")
             .debug_selector(|| "open-settings".into())
             .ghost()

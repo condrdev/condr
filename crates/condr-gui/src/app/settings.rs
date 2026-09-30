@@ -99,6 +99,8 @@ impl Condr {
             let _ = owner.update(cx, |this, cx| match opened {
                 Ok(handle) => {
                     this.settings_window = Some(handle);
+                    // The window opened on the update; the dot has done its job.
+                    this.update_seen = true;
                     // Closing the main window closes Settings too; otherwise it would
                     // keep the process alive with nothing left to configure.
                     this._settings_window_closed = Some(cx.on_window_closed(move |cx, _| {
@@ -141,6 +143,9 @@ pub(super) struct SettingsWindow {
     /// The page the Server tab opens on when it is first drawn; Kit keeps the selection
     /// from then on. Tests point it at a page they need to see.
     pub(super) server_page: SelectIndex,
+    /// The window opened while the sidebar's dot showed a newer build: the Application
+    /// tab first draws About's Updates group, where the dot was pointing.
+    open_on_update: bool,
     /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
     /// refreshed on render when the connection list changes.
     server_select: Entity<ServerSelect>,
@@ -204,6 +209,9 @@ impl SettingsWindow {
             .upgrade()
             .map(|owner| owner.read(cx).terminal_color_scheme.clone())
             .unwrap_or_default();
+        let open_on_update = owner
+            .upgrade()
+            .is_some_and(|owner| owner.read(cx).update_pending());
         let color_scheme = scheme_select(crate::color_scheme::names(), &current, window, cx);
         cx.subscribe(
             &color_scheme,
@@ -319,6 +327,7 @@ impl SettingsWindow {
             listen_refused: false,
             tab: SettingsTab::default(),
             server_page: SelectIndex::default(),
+            open_on_update,
             server_select,
             server_keys,
             server_labels,
@@ -425,20 +434,28 @@ impl Render for SettingsWindow {
         let settings = cx.entity();
         let tab = self.tab;
         let content = match tab {
-            SettingsTab::Application => Settings::new("condr-settings-application")
-                .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(appearance_page(
-                    &self.owner,
-                    &settings,
-                    &self.color_scheme,
-                    &self.code_theme,
-                ))
-                .page(notifications_page(&self.owner))
-                .page(power_page(&self.owner))
-                .page(shortcuts_page())
-                .page(developer_page(&self.owner))
-                .page(licenses_page(&self.licenses))
-                .page(about_page(&self.owner, cx)),
+            SettingsTab::Application => {
+                let pages = [
+                    appearance_page(&self.owner, &settings, &self.color_scheme, &self.code_theme),
+                    notifications_page(&self.owner),
+                    power_page(&self.owner),
+                    shortcuts_page(),
+                    developer_page(&self.owner),
+                    licenses_page(&self.licenses),
+                    about_page(&self.owner, self.open_on_update, cx),
+                ];
+                // About is the last page and Updates its second group.
+                let about_updates = SelectIndex {
+                    page_ix: pages.len() - 1,
+                    group_ix: Some(1),
+                };
+                Settings::new("condr-settings-application")
+                    .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
+                    .when(self.open_on_update, |this| {
+                        this.default_selected_index(about_updates)
+                    })
+                    .pages(pages)
+            }
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .default_selected_index(self.server_page)
@@ -645,8 +662,9 @@ fn location_row(
 }
 
 /// Built on every render like the other pages, so a found update or a changed channel
-/// shows as soon as the owner notifies.
-fn about_page(owner: &WeakEntity<Condr>, cx: &App) -> SettingPage {
+/// shows as soon as the owner notifies. `open_on_update` unfolds its Updates entry in
+/// the page list, where the window's first draw selects it.
+fn about_page(owner: &WeakEntity<Condr>, open_on_update: bool, cx: &App) -> SettingPage {
     let link_row = |label: &'static str, button: &'static str, url: &'static str| {
         SettingItem::new(
             label,
@@ -662,6 +680,7 @@ fn about_page(owner: &WeakEntity<Condr>, cx: &App) -> SettingPage {
     };
     SettingPage::new("About")
         .icon(IconName::Info)
+        .default_open(open_on_update)
         .group(
             SettingGroup::new()
                 .item(
