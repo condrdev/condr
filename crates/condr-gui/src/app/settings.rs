@@ -428,9 +428,6 @@ fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_server_choices(window, cx);
-        // Root does not draw dialogs itself; without this the Restart and Revoke
-        // confirmations open invisibly.
-        let dialog_layer = Root::render_dialog_layer(window, cx);
         let settings = cx.entity();
         let tab = self.tab;
         let content = match tab {
@@ -488,7 +485,7 @@ impl Render for SettingsWindow {
             (tab == SettingsTab::Server).then(|| server_header(self, &self.server_select, cx));
         // The dialog layer sits beside the page, not inside it, so Escape in a dialog
         // closes the dialog and not the window.
-        div().size_full().relative().children(dialog_layer).child(
+        div().size_full().relative().child(
             v_flex()
                 .id("condr-settings-window")
                 .debug_selector(|| "settings-content".into())

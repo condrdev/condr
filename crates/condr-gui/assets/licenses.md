@@ -4276,8 +4276,8 @@ https://www.jetbrains.com/idea/
 
 ## Overview of licenses
 
-* Apache License 2.0 (709)
-* MIT License (210)
+* Apache License 2.0 (708)
+* MIT License (209)
 * Unicode License v3 (19)
 * BSD 3-Clause "New" or "Revised" License (13)
 * ISC License (8)
@@ -13977,9 +13977,7 @@ limitations under the License.
 
 Used by:
 
-* [bit-set 0.8.0](https://github.com/contain-rs/bit-set)
 * [bit-set 0.9.1](https://github.com/contain-rs/bit-set)
-* [bit-vec 0.8.0](https://github.com/contain-rs/bit-vec)
 * [bit-vec 0.9.1](https://github.com/contain-rs/bit-vec)
 * [downcast-rs 1.2.1](https://github.com/marcianx/downcast-rs)
 * [minimal-lexical 0.2.1](https://github.com/Alexhuszagh/minimal-lexical)
@@ -18812,8 +18810,8 @@ Used by:
 * [gpu-descriptor-types 0.2.0](https://github.com/zakarumych/gpu-descriptor)
 * [gpu-descriptor 0.3.2](https://github.com/zakarumych/gpu-descriptor)
 * [gpui-fps 0.6.0](https://github.com/longbridge/gpui-kit/tree/main/crates/fps)
-* [gpui-kit-assets 0.6.0](https://github.com/longbridge/gpui-kit)
-* [gpui-kit 0.6.0](https://github.com/longbridge/gpui-kit)
+* [gpui-kit-assets 0.7.0](https://github.com/longbridge/gpui-kit)
+* [gpui-kit 0.7.0](https://github.com/longbridge/gpui-kit)
 * [granit-parser 0.0.7](https://github.com/bourumir-wyngs/granit-parser)
 * [half 2.7.1](https://github.com/VoidStarKat/half-rs)
 * [ident_case 1.0.1](https://github.com/TedDriggs/ident_case)
@@ -18856,12 +18854,14 @@ Used by:
 * [objc2-core-graphics 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-image 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-location 0.3.2](https://github.com/madsmtm/objc2)
+* [objc2-core-media 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-text 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-video 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-wlan 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-io-kit 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-metal 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-quartz-core 0.3.2](https://github.com/madsmtm/objc2)
+* [objc2-screen-capture-kit 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-security-foundation 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-security 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-system-configuration 0.3.2](https://github.com/madsmtm/objc2)
@@ -19019,30 +19019,29 @@ limitations under the License.
 
 Used by:
 
-* [gpui-pre-apple 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-collections 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-derive-refineable 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client-tls 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-linux 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-macos 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-macros 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-media 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-perf 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-platform 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-refineable 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-reqwest-client 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-scheduler 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-shared-string 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-sum-tree 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-util-macros 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-util 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-wgpu 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-windows 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-zlog 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing-macro 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing 0.3.3](https://github.com/zed-industries/zed)
-* [gpui-pre 0.3.3](https://github.com/zed-industries/zed)
+* [gpui-pre-apple 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-collections 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-derive-refineable 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client-tls 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-linux 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-macos 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-macros 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-perf 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-platform 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-refineable 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-reqwest-client 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-scheduler 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-shared-string 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-sum-tree 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-util-macros 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-util 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-wgpu 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-windows 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-zlog 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing-macro 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre 0.3.7](https://github.com/zed-industries/zed)
 
 Copyright 2022 - 2025 Zed Industries, Inc.
 
@@ -19274,9 +19273,9 @@ Apache License
 
 Used by:
 
-* [gpui-base 0.6.0](https://github.com/longbridge/gpui-kit)
-* [gpui-component-macros 0.6.0](https://crates.io/crates/gpui-component-macros)
-* [gpui-component 0.6.0](https://github.com/longbridge/gpui-kit)
+* [gpui-base 0.7.0](https://github.com/longbridge/gpui-kit)
+* [gpui-component-macros 0.7.0](https://crates.io/crates/gpui-component-macros)
+* [gpui-component 0.7.0](https://github.com/longbridge/gpui-kit)
 
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
 
@@ -23260,37 +23259,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
---------------------------------------------------------------------------------
-
-### MIT License
-
-Used by:
-
-* [fancy-regex 0.16.2](https://github.com/fancy-regex/fancy-regex)
-
-The MIT License
-
-Copyright 2015 The Fancy Regex Authors.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------

@@ -743,7 +743,6 @@ impl Condr {
 
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dialog_layer = Root::render_dialog_layer(window, cx);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
         let WorkspaceChrome {
@@ -919,7 +918,6 @@ impl Render for Condr {
                         )
                     }),
             )
-            .children(dialog_layer)
             .when(self.fps_monitor, |this| this.child(fps_monitor(window, cx)))
     }
 }

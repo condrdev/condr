@@ -28,7 +28,7 @@ filedescriptor = "0.8.3"
 interprocess = "2.4.2"
 nix = { version = "0.28.0", features = ["fs", "hostname", "poll", "process"] }
 # GPUI Kit owns the matching GPUI, component, platform, and asset dependencies.
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 # The one Kit-managed crate declared directly: Kit builds it but does not re-export it,
 # and the GUI's update check (ADR 0029) is its only user. Keep it on Kit's gpui-pre line.
 gpui-pre-reqwest-client = "0.3"
