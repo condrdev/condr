@@ -49,7 +49,7 @@
 | `windows-registry` | `src/app/startup.rs:320-335` | GPUI 注册通知 AUMID 时只写 `DisplayName`，我们补 `IconUri`；`SystemNotification` 没有图标字段 |
 | Settings `TextField` | `src/app/settings/text_field.rs` | Kit `SettingField::input` 每次按键就保存，我们要失焦/回车才提交（commit ffc4d0e） |
 | 字号步进器 | Settings 外观页 | Kit 数字输入会改写打一半的值 |
-| 侧边栏条目 `CondrSidebarTreeItem` / `CondrSidebarSection` | `src/app/sidebar/item.rs`，约 600 行 | Kit `SidebarMenuItem` 缺：任意元素作图标、详情行、外部受控的展开状态、拖放、悬停操作菜单、双击切换。适合回馈给 Kit |
+| 侧边栏条目 `CondrSidebarTreeItem` / `CondrSidebarSection` | `src/app/sidebar/item.rs`，约 600 行 | Kit `SidebarMenuItem` 缺：任意元素作图标、详情行、外部受控的展开状态、拖放、悬停操作菜单、单击整行切换展开。适合回馈给 Kit |
 | 方形头像、Agent 状态角标 | `src/app/sidebar/icon.rs:342-376` | Kit `Avatar` 是圆形、两个字母、按首字母取色；我们按根路径取色，改名不变 |
 | 侧边栏调宽手柄、Dock 落点指示、拖拽排序辅助 | — | Kit resizable 会按比例缩放且 `resize_handle` 是 `#[doc(hidden)]`；落点指示是 crate 私有；Dock 外没有可排序列表 |
 | `apca.rs`、`terminal_element/colors.rs` | 对比度计算 | Kit `Colorize` 只有 lighten/darken/mix，没有对比度或可读前景色 |

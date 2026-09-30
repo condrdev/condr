@@ -372,17 +372,15 @@ impl CondrSidebarTreeItem {
                 this.text_color(cx.theme().muted_foreground)
             })
             .when(!disabled, |this| {
-                // A double click on a parent toggles it; a single click keeps selecting.
+                // A click on a parent toggles it as well as selecting it, as a folder row
+                // does in a file tree.
                 let toggle_state = open_state.clone();
                 this.on_click(move |event, window, cx| {
-                    if event.click_count() == 2
-                        && let Some(open_state) = &toggle_state
-                    {
+                    if let Some(open_state) = &toggle_state {
                         open_state.update(cx, |open, cx| {
                             *open = !*open;
                             cx.notify();
                         });
-                        return;
                     }
                     handler(event, window, cx)
                 })
