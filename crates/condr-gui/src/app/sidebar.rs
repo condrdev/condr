@@ -676,7 +676,7 @@ impl Condr {
         }
         Badge::new()
             .dot()
-            .color(cx.theme().info)
+            .color(cx.theme().danger)
             .child(button)
             .into_any_element()
     }
