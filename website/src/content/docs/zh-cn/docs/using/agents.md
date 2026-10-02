@@ -1,5 +1,5 @@
 ---
-title: Agent 集成与状态
+title: Agent 集成
 description: 在 Condr 中使用并查看命令行 Agent 的运行状态。
 ---
 

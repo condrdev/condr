@@ -1,73 +1,58 @@
 ---
 title: Getting started
-description: Install Condr, run your first Agent, and connect a remote Device in ten minutes.
+description: Install Condr and run and manage multiple Agent instances from one workspace.
 ---
 
-Install Condr, run one Agent, and connect a second Device by following these steps.
+Condr is a workbench for managing and orchestrating Agent command-line tools such as Claude Code and Codex in one place. Whether an Agent runs locally or on a remote server, Condr lets you monitor it and work with it from a single view.
 
-Condr has two parts:
-
-- **Server**: the `condr` command. It runs your Agents and keeps working after you close the window.
-- **Window**: the `condr-gui` app. It is the interface you use. One window can show several Devices.
+Condr comes in two forms: the **desktop app** and the **Headless Server**.
 
 :::caution
-Condr 0.1 is a public preview, and things may still change between versions. Update the window and the Server together.
+Condr 0.1 is currently in Public Preview. Features and configuration options may keep changing in later releases.
 :::
 
-## 1. Install the desktop app
+## Desktop app (recommended)
 
-Download the installer for your platform from the [download page](/download/) and install it on the computer you work at. It includes the Server.
+Go to the [download page](/download/) to get the package for your platform, then unpack or install it and launch it.
 
-| Platform | Package |
-| --- | --- |
-| Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.dmg` |
-| Windows x86_64 | `.exe` |
+The desktop app bundles the Server component and starts it with the app by default, so no extra setup is needed:
 
-Windows may show SmartScreen, because the preview installer is not signed yet. See [Install](/docs/start/install/) for platform notes, install script options, and the headless Server.
+1. **Create a Workspace**: click **Open Project** and choose a local project directory. Condr creates a Workspace and opens a terminal automatically.
+2. **Install Agent integrations**: go to **Settings › Device › Agent integrations** and click **Install** next to each Agent you want supported, so that Condr can capture and track its state.
+3. **Run an Agent**: run the Agent command (for example `claude`) directly in the built-in terminal.
 
-## 2. Run your first Agent
+## Headless Server
 
-1. Install the Agent CLI you want and sign in, for example Claude Code or Codex. Condr does not provide models or accounts.
-2. Open Condr. It starts the local Server.
-3. Click **Open Project**, choose a project folder, and let Condr open a Workspace with a shell.
-4. Let Condr read the Agent's state. In that shell, run this command once:
+For cloud hosts, GUI-less dev machines or remote servers, only the core `condr` CLI needs to be installed:
 
-   ```sh
-   condr agent hooks install claude
-   ```
+**Linux / macOS:**
+```sh
+curl -fsSL https://condr.dev/install.sh | sh
+```
 
-   Replace `claude` with your Agent. Install hooks once for each Agent.
-5. In the same shell, run the Agent as usual, for example `claude`. The sidebar shows its state: amber while it works and red when it waits for your approval.
-6. Give it a task, then close the window. The Server and the Agent keep running.
-7. Open Condr again. Your Workspace is where you left it. If the Agent finished, the sidebar marks it green.
+**Windows:**
+```powershell
+irm https://condr.dev/install.ps1 | iex
+```
 
-You can now use Condr. To run several Agents, choose **Split Right** in the Pane menu. You can also right-click the Workspace and choose **Create Worktree** to give each Agent its own branch. See [Workspaces, Tabs, and Panes](/docs/using/workspaces/).
+After installation, **reopen your terminal window** to pick up the updated environment variables, then start the service:
 
-## 3. Connect a remote Device
+```sh
+condr server start
+```
 
-Run Agents on another machine and watch them in the same window:
+:::note
+- The Server keeps running in the background; closing the terminal does not stop it.
+- To connect to this machine, see [Remote connections](/docs/using/remote/).
+- The current preview does not register a system startup service yet, so after a reboot you need to run the start command above again by hand.
+:::
 
-1. Install the headless Server on that machine:
+## Dig deeper
 
-   ```sh
-   curl -fsSL https://condr.dev/install.sh | sh
-   ```
-
-   On Windows, use `irm https://condr.dev/install.ps1 | iex`.
-2. On your computer, open Condr and click **Connect Remote Device** at the bottom of the sidebar. Choose **SSH address**, then enter the address you use to log in with SSH:
-
-   ```text
-   user@build-box
-   ```
-
-3. The machine appears in the sidebar. Click **New Workspace**. From there, it works like the local Device.
-
-SSH uses your existing OpenSSH configuration and keys. For a machine without SSH, connect over TCP or Peer-to-peer. See [Remote devices](/docs/using/remote/).
-
-## Next steps
-
-- [Agents](/docs/using/agents/): read each state and see which Agents are supported.
-- [Agent automation](/docs/using/automation/): let one Agent direct others.
-- [Keyboard shortcuts](/docs/reference/keybindings/).
-- [Troubleshooting](/docs/help/troubleshooting/): find the first checks when something goes wrong.
+- [Core concepts](/docs/start/concepts/): learn the architecture model of Device, Server, Workspace, Pane and Agent.
+- [Workspaces, Tabs and Panes](/docs/using/workspaces/): set up split-Pane layouts and give each Agent its own branch environment with Git Worktree.
+- [Agent integrations](/docs/using/agents/): see the list of compatible Agents, lifecycle Hooks and the state-tracking definitions.
+- [Remote connections](/docs/using/remote/): reach remote devices over SSH, TCP or P2P.
+- [Agent automation](/docs/using/automation/): coordinate Agents with each other through the `condr` CLI.
+- [CLI reference](/docs/reference/cli/): the complete manual of commands and options.
+- [Troubleshooting](/docs/help/troubleshooting/): common connection drops, state drift and how to diagnose them.

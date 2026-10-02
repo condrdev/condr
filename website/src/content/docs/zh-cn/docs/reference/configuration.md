@@ -164,7 +164,7 @@ command = ["hx"]
 
 Server 继承启动它的进程环境。因此 `CONDR_LOG=debug condr server restart` 有效，但修改 `.zshrc` 后要重启 Server 才会生效。
 
-Pane 中自动设置的变量见 [Agent 自动化与协同](/zh-cn/docs/using/automation/)。
+Pane 中自动设置的变量见 [Agent 自动化](/zh-cn/docs/using/automation/)。
 
 ## 查看 Server 的其他文件
 

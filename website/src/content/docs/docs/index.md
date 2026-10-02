@@ -1,11 +1,11 @@
 ---
-title: Condr documentation
-description: Install Condr, connect remote devices, and learn how it works.
+title: Condr Docs
+description: Install Condr, connect to remote Devices, and learn how it works.
 template: splash
 hero:
-  tagline: Keep every agent running in one window, on your machine or a remote Device.
+  tagline: Keep every Agent running in one window, on this machine and on remote Devices alike.
   actions:
-    - text: Get started
+    - text: Getting started
       link: /docs/start/getting-started/
       icon: right-arrow
     - text: Core concepts
@@ -13,4 +13,4 @@ hero:
       icon: open-book
 ---
 
-Condr runs Claude Code, Codex, and other CLI agents in one window. Close the window, and the Server keeps them running, on this device or a remote one.
+Condr is a workbench for managing and orchestrating Agent command-line tools such as Claude Code and Codex in one place. Whether an Agent runs locally or on a remote server, Condr lets you monitor it and work with it from a single view.

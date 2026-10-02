@@ -1,109 +1,172 @@
 ---
 title: Install
-description: Install the desktop app or headless Server, then upgrade or uninstall Condr.
+description: Install the Condr desktop app or the Headless Server, and learn how to start it, manage versions, upgrade smoothly and uninstall.
 ---
 
-Choose the package for each machine, install it, and keep Condr updated or remove it later.
+Condr ships in two deployment forms:
+
+| Form | Best for | Components |
+| :--- | :--- | :--- |
+| **Desktop app** (recommended) | Everyday local development and interaction | GUI + bundled Server |
+| **Headless Server** | Remote servers, cloud hosts, GUI-less containers and dev machines | `condr` CLI and Server only |
 
 :::caution
-Condr 0.1 is a public preview, and things may still change between versions. Update the window and the Server together.
+Condr 0.1 is currently in Public Preview. Features and configuration options may keep changing in later releases.
 :::
 
-## Choose what to install
+---
 
-| This machine | Install | Includes |
-| --- | --- | --- |
-| The computer you work at | Desktop app | The window and the Server |
-| A machine that only runs agents, with no window | Headless Server | Only the `condr` command |
+## Desktop app
 
-The desktop app includes the Server, so local use needs no headless Server. To reach this computer from another one, treat it as a remote Device. See [Remote devices](/docs/using/remote/).
+The desktop app bundles the Server and starts it automatically when the app opens, so there is no background service to configure separately. To connect to this device remotely, see [Remote connections](/docs/using/remote/).
 
-## Install the desktop app
+Get the package for your platform from the [download center](/download/):
 
-Download the installer for your platform from the [download page](/download/):
+| Platform | Architecture | Package |
+| :--- | :--- | :--- |
+| macOS | x86_64 / Apple Silicon | `.dmg` |
+| Windows | x86_64 | `.exe` |
+| Linux | x86_64 / arm64 | `.AppImage` |
 
-| Platform | Package |
-| --- | --- |
-| Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.dmg` |
-| Windows x86_64 | `.exe` |
+### Platform notes
 
-The Windows installer goes to `%LOCALAPPDATA%\Programs\Condr`, needs no administrator rights, and requires Windows 10 1809 or later. On first launch, the macOS app and the Linux AppImage copy the `condr` command to `~/.local/opt/condr`. The window uses that copy to start the Server.
+**Windows**
+The installer is not code-signed yet. If SmartScreen blocks it, click **More info → Run anyway**.
 
-### Windows shows SmartScreen
+**Linux**
+After downloading, make the AppImage executable and launch it:
 
-The preview installer isn't signed. When SmartScreen blocks it, click **More info**, then **Run anyway**.
+```sh
+chmod +x condr-*-linux-*.AppImage
+./condr-*-linux-*.AppImage
+```
 
-### The Linux AppImage won't open
+> **Tip**: if your environment lacks FUSE support, add this flag to extract and run it directly:
+> ```sh
+> ./condr-*-linux-*.AppImage --appimage-extract-and-run
+> ```
 
-AppImage needs FUSE. Install your distribution's `libfuse2` package, or run it after unpacking with `--appimage-extract`.
+---
 
-## Install the headless Server
+## Headless Server
 
-On the machine that will run agents, run the command for its platform:
+In environments without a graphical interface, only the `condr` CLI needs to be installed.
 
-| Platform | Install command |
-| --- | --- |
-| Linux x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
-| macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
-| Windows x86_64 | `irm https://condr.dev/install.ps1 \| iex` |
+### 1. One-line install
 
-The script downloads the headless build, checks it against `SHA256SUMS`, runs `condr server install`, and adds `condr` to your PATH. It installs the command at `~/.local/opt/condr`, or at `%LOCALAPPDATA%\Programs\Condr` on Windows.
+**Linux / macOS**:
+```sh
+curl -fsSL https://condr.dev/install.sh | sh
+```
 
-The script adds PATH in `~/.zprofile` on macOS or `~/.profile` on Linux. On Windows, it updates the user's environment variables. To verify the install, open a new terminal and run:
+**Windows (PowerShell)**:
+```powershell
+irm https://condr.dev/install.ps1 | iex
+```
 
+The install script places the binary in the directory below and adds it to your `PATH` automatically:
+- **Linux / macOS**: `~/.local/opt/condr`
+- **Windows**: `%LOCALAPPDATA%\Programs\Condr`
+
+Reopen your terminal and verify the installation:
 ```sh
 condr --version
 ```
 
-Non-interactive SSH shells usually don't read those files. If another machine reports `condr: not found` over SSH, name the path in the link. See [Remote devices](/docs/using/remote/#connect-over-ssh).
-
-### Choose install script options
-
-Running the script again does nothing when the latest version is already installed. Use these commands to install a version, start the Server after installation, or reinstall:
+### 2. Start the service
 
 ```sh
-CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh   # the nightly (default: the latest release)
-CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh    # one versioned release
-curl -fsSL https://condr.dev/install.sh | sh -s -- --start            # also start the Server
-curl -fsSL https://condr.dev/install.sh | sh -s -- --force            # reinstall even when up to date
+condr server start
 ```
 
+The Server runs as a daemon; closing the current terminal does not affect it.
+
+*Note: no system startup service is registered yet, so after a host reboot you need to run this command again by hand.*
+
+### 3. Advanced install and environment options
+
+Environment variables let you switch release channels, pin a version or force a reinstall:
+
+**Linux / macOS**:
+```sh
+# Switch to the daily Nightly build
+CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh
+
+# Install a specific version
+CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
+
+# Force-reinstall the current version
+curl -fsSL https://condr.dev/install.sh | sh -s -- --force
+```
+
+**Windows (PowerShell)**:
 ```powershell
+# Switch to the daily Nightly build
 $env:CONDR_VERSION = 'nightly'; irm https://condr.dev/install.ps1 | iex
+
+# Install a specific version
 $env:CONDR_VERSION = 'v0.1.0'; irm https://condr.dev/install.ps1 | iex
-$env:CONDR_INSTALL_ARGS = '--start'; irm https://condr.dev/install.ps1 | iex
+
+# Force-reinstall the current version
 $env:CONDR_INSTALL_ARGS = '--force'; irm https://condr.dev/install.ps1 | iex
 ```
 
-To install somewhere else, set `CONDR_INSTALL_DIR`.
+---
 
-## Choose Release or Nightly
+## Release channels
 
-| Channel | What it is | Who it's for |
-| --- | --- | --- |
-| Release | A tagged, versioned release | Most people |
-| Nightly | Built from `main` once a day | People who want the latest changes and accept occasional breakage |
+By default, Condr checks its channel for updates in the background every 5 hours. You can see the version status in the client under **Settings › About › Updates**.
 
-The window checks the channel you installed 5 seconds after launch, then every 5 hours. When a newer build is available, **Settings › About** shows a notice and the settings icon in the sidebar gets a dot. Condr only tells you. It never installs anything. Change the channel in **Settings › About**.
+| Channel | What it is | Who it is for |
+| :--- | :--- | :--- |
+| **Stable** | Tested, standard stable releases (default) | Most production and everyday use |
+| **Nightly** | Built automatically from the `main` branch every day, with the latest features | Early adopters, feature testing and bug verification |
 
-## Upgrade both parts
+---
 
-Update the window and the Server together. A compatible protocol lets different versions connect and shows a yellow triangle in the sidebar. An incompatible protocol refuses the connection.
+## Upgrading
 
-- **Desktop app**: download the new installer and install over the old one. After the window restarts, the local Server is still the old version. Run `condr server restart`, or click **Restart Condr** in **Settings › Device › Daemon**, so the new version takes over.
-- **Headless Server**: run the install script again. If the Server is running, the script asks whether to restart it. If you do not restart it, connected windows show a version mismatch until you do.
+> **Compatibility note**: the client and Server versions need to match. If the two sides differ in version but the protocol is compatible, the sidebar shows a yellow warning icon; if the protocol is incompatible, the connection is refused.
 
-Restarting the Server ends every program in every Pane, then restores the structure from the snapshot. Agents with hooks installed resume their sessions on their own. See [Workspaces, Tabs, and Panes](/docs/using/workspaces/#what-survives-a-server-restart).
+### Upgrading the desktop app
 
-## Uninstall Condr
+Download the new version and install it over the old one. The old Server is handled as follows:
 
-Headless Server:
+- **Windows**: the installer stops the old Server automatically, and the new Server is started when you launch the new client.
+- **macOS / Linux**: the old Server keeps running after installation. The new client prompts you to restart the service when it launches; you can also do it later by clicking **Restart Condr** under **Settings › Device › General**.
+
+### Upgrading the Headless Server
+
+Run the matching install script again; it detects the current install and updates it in place.
+
+If it finds a Server running, the script asks whether to restart it now:
+- **Restart now**: the new version takes effect immediately.
+- **Restart later**: the current process keeps running, and the switch completes once you restart it by hand.
+
+> **About the impact of a restart**: restarting the Server interrupts every running Pane process. Afterwards, Condr restores the Workspaces, Tabs and Pane layout from the snapshot. Agents with Hooks configured resume their sessions automatically; see [Workspaces, Tabs and Panes](/docs/using/workspaces/).
+
+---
+
+## Uninstall
+
+Uninstalling removes only the application itself and its executables. **It does not delete your configuration, runtime state or local logs.** To remove the remaining data completely, see [Configuration and settings](/docs/reference/configuration/#where-the-files-are) and clean up the directories by hand.
+
+### Step 1: remove the main application
+
+| Install type | How to uninstall |
+| :--- | :--- |
+| **Windows desktop app** | Uninstall it under **Settings › Apps › Installed apps**. The installer stops the background service and cleans up the environment variables automatically. |
+| **macOS desktop app** | Move `Condr.app` to the Trash, then run the cleanup command below. |
+| **Linux desktop app** | Delete the `.AppImage` file, then run the cleanup command below. |
+| **Headless Server** | Run the cleanup command directly. |
+
+### Step 2: remove the CLI and background service
+
+In a regular system terminal, **not a terminal inside Condr**, run:
 
 ```sh
 condr server uninstall
 ```
 
-This stops the Server and removes the installed `condr`, its symlink, and its PATH entry. It keeps the config, state, and log directories and tells you where they are. To remove those directories, see [Configuration and settings](/docs/reference/configuration/#where-the-files-are).
-
-Desktop app: on macOS, drag `Condr.app` to the Trash. On Windows, uninstall from **Apps & features**. On Linux, delete the AppImage. To remove the `condr` command copied to `~/.local/opt/condr`, run the `uninstall` command above.
+After confirmation, this command stops the running Server process and deletes the `condr` binary together with its `PATH` entry.
+*In scripted environments, add `--yes` to skip the interactive confirmation: `condr server uninstall --yes`*

@@ -1,103 +1,120 @@
 ---
 title: Agent automation
-description: Let one Agent open Panes, read output, delegate work, and wait for results.
+description: Install the Skill, set up the environment variables and use the condr CLI for multi-Agent task dispatch, automated control and cross-Device scheduling.
 ---
 
-Use these commands to let one Agent direct other Agents or to control Condr from a script. See the [CLI reference](/docs/reference/cli/) for parameters and JSON fields.
+In Condr, an Agent does more than answer questions and edit code. Through the built-in `condr` command-line tool it can also drive the terminal interface in the other direction, which enables multi-Agent collaboration across Panes and automated task orchestration.
 
-## See how automation works
+## How it works
 
-Every Pane shell has the `condr` command and these environment variables:
+When an Agent runs in a Condr terminal Pane, the system automatically injects the following environment variables so that Agents and scripts can recognize the Condr environment and call `condr` commands directly:
 
-| Variable | Meaning |
-| --- | --- |
-| `CONDR_ENV=1` | This shell runs in a Condr Pane |
-| `CONDR_PANE_ID` | This Pane's id |
-| `CONDR_SOCKET_PATH` | How to reach the Server |
-| `CONDR_BIN_PATH` | The absolute `condr` path when PATH was reset |
+- `CONDR_ENV=1`: marks that the process is running inside a Condr Pane.
+- `CONDR_PANE_ID`: the id of the current Pane.
+- `CONDR_SOCKET_PATH`: the socket path used to connect to the Condr Server.
+- `CONDR_BIN_PATH`: the absolute path of the `condr` executable.
 
-A `condr` command run in a Pane targets that Pane's Workspace and Tab by default. For example, `condr pane split --direction right` splits the current Pane without an id.
+Running a `condr` command directly in a Pane (such as `condr pane split`) acts on the current Workspace and Tab by default. Apart from `pane read`, which prints plain text, every command prints a JSON structure by default so that Agents can parse it easily.
 
-Every command prints JSON except `pane read`, which prints text. On failure, the command writes `{"error":{"code","message"}}` to stderr and exits with 1. Agents can read the output, and scripts can process it.
+## Install the Condr Skill
 
-An Agent in a Pane can use these commands to open Panes, start Agents, send prompts, wait for completion, and read output. You can watch the work in the sidebar.
+To help an Agent (such as Claude Code) understand how to use Condr's control commands, install the Condr Skill for it:
 
-## Give an Agent the Condr skill
+### One-command install
 
-Condr includes a skill that documents every command and its caveats. Print it:
+Run the following command in a terminal to install the Condr Skill globally in one step:
+
+```sh
+npx -y skills add condrdev/condr -g
+```
+
+### Export the Skill text (fallback)
+
+If your network is isolated, or you need to inject the prompt by hand, run the following command in a terminal to print the full Skill content:
 
 ```sh
 condr --skill
 ```
 
-Save the output and place it where your Agent reads skills or custom instructions. For Claude Code, use `.claude/skills/condr/SKILL.md` in the project. Generate the file again after each Condr upgrade because the skill follows the version.
+> **Tip**: If you run an Agent in a sandboxed environment, make sure the sandbox allows access to the socket path named by `CONDR_SOCKET_PATH`.
 
-When an Agent runs in a Pane, `CONDR_ENV=1` tells it that `condr` commands are available. Its command sandbox must allow access to the socket named by `CONDR_SOCKET_PATH`, or the commands cannot reach the Server.
+## Core control commands
 
-## Run common actions
+### Prepare space and start an Agent
+- **Create a split or a Tab**:
+  ```sh
+  condr pane split --direction right
+  condr tab create
+  ```
+- **Start a specific Agent and name it**: start an Agent in an idle Pane and give it a name so you can address it later:
+  ```sh
+  condr agent start reviewer --kind claude --pane 12
+  ```
 
-**Make room.** `pane split` opens a shell beside the current one. `tab create` opens a Tab. `workspace create` opens another project. Each command returns the new object's id for later commands.
+### Send prompts and wait for responses
+- **Send a prompt and wait for completion**: with the `--wait` flag, the command blocks until the Agent becomes Idle or Blocked (waiting for approval):
+  ```sh
+  condr agent prompt reviewer "Review the changes in src/auth.rs and list potential issues" --wait
+  ```
+- **Wait for a state only**:
+  ```sh
+  condr agent wait reviewer
+  ```
 
-**Start an Agent.** `agent start` starts an Agent in an idle shell, gives it a name, and waits until it is ready:
+### Read and drive terminals
+- **Read the output of a Pane**: after the Agent finishes its task, read that Pane's terminal output:
+  ```sh
+  condr pane read 12 --lines 50
+  ```
+- **Send keys and text directly**:
+  ```sh
+  condr pane run 12 "npm test"        # paste the command and press Enter
+  condr pane send-keys 12 enter       # send specific keys (such as enter, esc, ctrl+c)
+  ```
 
-```sh
-condr agent start reviewer --kind claude --pane 12
-```
+> **Note**: Before using `agent start` and `--wait`, the Hook must be installed on the target Agent (see [Agent integrations](/docs/using/agents/)). An Agent without the Hook cannot report its state accurately, so the command times out or never returns.
 
-Use the name instead of the Pane id in later commands. Put the Agent's own arguments after `--`.
-
-**Send a prompt.** `agent prompt` sends text to an idle Agent. Add `--wait` to return only after it reaches Idle or Blocked:
-
-```sh
-condr agent prompt reviewer "Review the changes in src/auth.rs and list the problems" --wait
-```
-
-**Wait without sending.** `agent wait` waits for an Agent to reach a state. It returns the state, not the output.
-
-**Read output.** `pane read` prints the last few dozen terminal lines, including scrollback. Use it after waiting to collect the result.
-
-**Drive the terminal.** `pane run` pastes a command and presses Enter. `pane send-text` types without Enter. `pane send-keys` presses keys such as `enter`, `esc`, or `ctrl+c`.
-
-Agent states come from hooks. Without hooks, an Agent stays Unknown, so `agent start` waits until it times out and `--wait` never returns. Install hooks first as described on the [Agents](/docs/using/agents/) page. Agents such as Codex that report nothing before their first prompt let `agent start` return when Condr recognizes the process. The first `agent prompt` is accepted in Unknown.
-
-When an Agent waits for approval, `agent wait` returns `blocked`, and `blocked_on` says what it needs. Let the orchestrating Agent report that to you instead of approving for you.
-
-## Paste these prompts
-
-Use these prompts with your main Agent. Change the task and paths before you run them.
-
-**Investigate in parallel, then combine:**
-
-```text
-Use condr to open three Panes in this Workspace and start a claude in each.
-Have one trace the request path, one check test coverage, and one look for related past regressions.
-None of them may edit files. When all three finish, read their output and merge it into one report for me.
-```
-
-**One writes, one reviews:**
-
-```text
-Use condr to open a Pane next to this one and start codex, named reviewer.
-Each time I ask you to finish a change, send the diff to reviewer, wait for it to finish, and summarize its feedback for me.
-```
-
-**Hand work to another machine:**
-
-```text
-Use condr --device build-box to open a Workspace in ~/code/app on that machine,
-start claude, and have it run the full test suite and fix the failures. When it finishes, read the result back.
-```
-
-## Run commands across Devices
-
-Saved remote Devices are also available on the command line:
+### Cross-Device control
+Add the `--device` flag on the command line to control a saved remote Device on another machine:
 
 ```sh
+# List the saved remote Devices
 condr device list
+
+# List the Workspaces on the remote Device named build-box
 condr --device build-box workspace list
+
+# Show the Workspaces on every Device
 condr workspace list --all-devices
 ```
 
-Put `--device` before the command group and follow it with the Device name from the sidebar. Set the default with `CONDR_DEVICE`. Each call opens its own connection, so result ids belong to that Device. Use the same `--device` for follow-up commands. Defaults such as `CONDR_PANE_ID` do not apply there, so give explicit targets.
+`--device` goes before the command group and is followed by the Device name shown in the sidebar; once the `CONDR_DEVICE` environment variable is set, you can omit it. `server` and `agent hooks` act on this machine only and do not accept `--device`.
 
-`server` and `agent hooks` act only on this machine and do not accept `--device`.
+## Typical collaboration scenarios and prompt templates
+
+Copy the following prompts and send them to your lead Agent to run common automated collaboration flows:
+
+### Scenario 1: investigate in parallel, then compile a report
+```text
+In this Workspace, use condr to open three Panes and start a claude in each.
+One traces the request's handling path, one checks test coverage, one looks for related past regressions.
+None of them may modify files. Once all three Agents finish, read their output and merge it into one complete report for me.
+```
+
+### Scenario 2: write code with live review (one writes, one reviews)
+```text
+Use condr to open a Pane next to this one and start codex in it, named reviewer.
+From now on, whenever I ask you to complete a code change, send the code diff to reviewer for review, and once it finishes, summarize its review comments and report them to me.
+```
+
+### Scenario 3: dispatch a task to a remote machine
+```text
+Use condr --device build-box to open a Workspace in the ~/code/app directory on that remote machine,
+start claude and have it run the full test suite and fix the failures. Once it finishes, read the final result and return it.
+```
+
+### Scenario 4: automated build monitoring and response
+```text
+Use condr to run npm run dev in the left Pane, and monitor the left Pane's log from the right Pane with condr pane read.
+As soon as a compile error is detected, extract the error message and start fixing the code.
+```

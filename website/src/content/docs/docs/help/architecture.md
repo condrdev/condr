@@ -1,14 +1,14 @@
 ---
 title: Architecture
-description: Learn how Condr is built if you want to read or change the code.
+description: Learn how Condr is put together, so you can read or change its code.
 ---
 
-Use this page to find the three crates and the protocol boundary when you contribute to Condr.
+If you want to contribute code to Condr, start reading from these three crates and the protocol boundary.
 
-Condr has three Rust crates:
+Condr is made of three Rust crates:
 
-- `condr-core`: domain types, protocol, PTY and terminal emulation, Agent detection, and Git. It has no GUI dependencies, so you can test it without a display.
-- `condr-server`: builds the `condr` command. It owns the Session, terminal runtime, persistence, and connections.
-- `condr-gui`: builds the `condr-gui` app. It is a Server Client and renders with GPUI.
+- `condr-core`: domain types, the protocol, the PTY and terminal emulation, Agent detection, and Git. It does not depend on the GUI, so it can be tested without a display.
+- `condr-server`: builds the `condr` command. It owns the Session, the terminal runtime, persistence and connections.
+- `condr-gui`: builds the `condr-gui` app. It is one Client of the Server and renders with GPUI.
 
-Local and remote Clients use the same protocol to speak to the Server. The design decisions are recorded in the [ADRs](https://github.com/condrdev/condr/tree/main/docs/adr).
+Local and remote Clients talk to the Server over the same protocol. Design decisions are recorded in the [ADRs](https://github.com/condrdev/condr/tree/main/docs/adr).

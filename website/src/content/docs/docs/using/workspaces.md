@@ -1,96 +1,57 @@
 ---
-title: Workspaces, Tabs, and Panes
-description: Open projects, give Agents separate branches, and arrange terminals.
+title: Workspaces, Tabs and Panes
+description: Open projects, give Agents isolated branches with Git worktrees, and arrange your terminal layout.
 ---
 
-Open a project, run several Agents on separate branches, and learn what closing or restarting does.
+A Workspace is the basic unit Condr uses to manage a project. Each Workspace maps to one project folder, where you can run several terminals or Agents in split Panes and multiple Tabs.
 
-## Open a project
+## Open a project (Workspace)
 
-Click **New Workspace** beside a Device in the sidebar, or click **Open Project** on the Welcome page. Choose a folder. The local Device opens the system folder picker. A remote Device asks for an absolute path on that machine and lists directories below it for checking.
+- **From the interface**: click **New Workspace** in the sidebar, or **Open Project** on the Welcome page.
+  - **Local project**: pick the folder directly.
+  - **Project on a remote server**: enter the absolute path of the folder on the remote server.
+- **From the command line**: run `condr workspace create --cwd ~/code/my-app` in a terminal.
 
-Condr opens the Workspace and starts a shell in its first Tab. The Workspace name comes from the folder. Right-click it and choose **Rename Workspace** to change the name.
+### Read the project status
 
-A Workspace is a folder and the terminals you open there. Its root stays fixed when you run `cd` in a shell. For a Git repository, the sidebar shows the current branch and the commits ahead of and behind upstream on a second line.
+The project list in the sidebar shows each project's status directly:
 
-You can also create one from a terminal:
+- **Project name**: the folder name by default. Right-click → **Rename Workspace** to rename it.
+- **Git status**: the second line shows the current branch and how many commits it is ahead of and behind its upstream, for example `main ↑1 ↓2`. Outside a Git repository it shows `no git`.
 
-```sh
-condr workspace create --cwd ~/code/app --label app
-```
+## Split and organize the terminal view
 
-## Give each Agent its own branch
+### Tabs
 
-Two Agents that edit one working directory can overwrite each other. A Git worktree gives each Agent another directory on its own branch.
+- **New**: click the **+** at the top to open a new Tab. Each Tab inherits the current working directory.
+- **Organize**: right-click a Tab → **Rename Tab** to rename it, or press and hold a Tab to **drag it into a new order**.
 
-Right-click a Git repository Workspace, choose **Create Worktree**, and enter a branch name. The default is `worktree/` followed by the Workspace name. If the branch does not exist, Condr creates it from the current HEAD. If it exists, Condr checks it out.
+### Split layout (Panes)
 
-Condr places the new directory at `<repo>.worktrees/<branch>` beside the repository and adds it as a Workspace in the sidebar. Set `[server] worktree_root` in the Server configuration to use another location. See [Configuration and settings](/docs/reference/configuration/).
+Click the menu in the top-right corner of a Pane:
 
-Choose **Open Existing Worktree** to use a worktree you already have. Condr never deletes one opened this way.
+- **Split**: choose **Split Right** (side by side) or **Split Down** (one above the other).
+- **Zoom to focus (Zoom)**: choose **Toggle Zoom** to let the current Pane fill the whole window for a while, and choose it again to restore the layout (handy for reading long logs).
+- **Rearrange**: press and hold a Pane's title bar and **drag** it to swap places with a neighboring Pane or regroup the layout.
 
-To delete a worktree Condr created, right-click it and choose **Remove Worktree**. Condr deletes the directory and keeps the branch. If the directory has uncommitted or untracked files, Condr refuses. Clean it up first.
+## Tips for working efficiently
 
-The command line cannot create worktrees yet. `condr workspace list` reports which Workspace is a worktree of which.
+### Send a screenshot to a remote Agent
 
-## Use Tabs to separate work
+When you run an Agent on a remote server, copy a screenshot locally and press the shortcut directly in the remote terminal:
 
-A Tab is one screen in a Workspace. Click **+** in the tab strip to add one. Its shell starts in the directory of the Pane you are viewing. Drag Tabs to reorder them. Right-click a Tab for **Rename Tab** or **Close Tab**. An unnamed Tab shows only its number.
+- macOS: Option+V
+- Windows / Linux: Alt+V
 
-Closing the last Tab closes the Workspace, so Condr asks you to confirm.
+Condr uploads the image to the server automatically and pastes its remote path into the command line, ready for the Agent to read.
 
-## Split and arrange Panes
+### Open links in the terminal
 
-A Pane is one terminal. Open its **⋮** menu to choose:
+Hold the key and click a URL in the terminal to open it in your default browser:
 
-- **Split Right** and **Split Down**: open a shell in the same directory at a 50/50 split.
-- **Swap**: exchange places with the neighbor in a direction.
-- **Toggle Zoom**: fill the Tab with this Pane. Click again to restore it. The header also has a zoom button.
-- **Close Pane**.
+- **macOS**: `Cmd + left click`
+- **Windows / Linux**: `Ctrl + left click`
 
-Drag a Pane header onto another Pane. Drop on an edge to move it there, or in the center to swap the two. Drag the divider between Panes to resize them. These actions do not work while a Pane is zoomed.
+### Force text selection
 
-The active Pane has a blue border. See [Keyboard shortcuts](/docs/reference/keybindings/) for shortcuts.
-
-## Use terminal features
-
-Every Pane is a real terminal built on the alacritty core. `TERM` is `xterm-256color` with true color. Scrollback holds 10,000 lines.
-
-**Select and copy.** Drag to select. Double-click a word or triple-click a line. When a program enables mouse mode, hold Shift while dragging. The Server keeps the selection, so it follows output and clears when you resize the window or switch screens. Copying ends the selection. Condr does not copy when you select.
-
-**Open links.** Hold Cmd on macOS or Ctrl elsewhere and click a URL. The URL opens in your browser. Hover to see its full address.
-
-**Paste images.** With a remote Device, press Alt+V, or Option+V on macOS, to upload a clipboard image to that machine. Paste the file path into the terminal to give the image to a remote Agent. PNG, JPEG, GIF, WebP, and BMP work, up to 16 MiB. The image stays in the Server runtime directory and is deleted when you disconnect. You do not need this on a local Device. Drag the file into the terminal instead.
-
-**Set terminal properties.** A program can set the window title, write the clipboard with OSC 52, send OSC 8 hyperlinks, and change foreground, background, and palette colors. Condr sends OSC 52 clipboard content to every connected window.
-
-**Not supported yet.** Condr does not support terminal search, block selection, the kitty keyboard protocol, Sixel, kitty graphics, or reading the clipboard through OSC 52.
-
-## What happens when you close something
-
-Closing a Pane ends every program it started. Condr sends SIGHUP, then SIGTERM, then SIGKILL. On Windows, each Pane has its own Job Object, and closing it ends the whole Job. Processes started with `setsid` or `nohup` on Unix, or with `CREATE_BREAKAWAY_FROM_JOB` on Windows, survive because they detached on purpose.
-
-Closing the last Pane in a Tab closes that Tab. Closing the last Tab in a Workspace closes that Workspace. Condr asks for confirmation only when the close would also close the Workspace. Closing a Workspace stops its terminals and never deletes files.
-
-When a shell exits on its own, the Pane keeps its last screen and is marked as exited. Condr ends the other programs it started in the same way.
-
-## Keep two windows independent
-
-Each window chooses its own Workspace and Tab. Switching in one window does not switch the other, even when both use the same Server.
-
-`condr workspace focus` and `tab focus` are one-time “look here” commands. They switch every connected window, but do not create shared state.
-
-A Server accepts control from one window at a time. When a second window connects, its tab strip shows “Viewing only”. It can watch and copy, but cannot type. When the first window disconnects, the second takes control.
-
-## What survives a Server restart
-
-After each change, the Server saves the structure to a snapshot file. A restart restores:
-
-- **Kept**: every Workspace, Tab, and Pane, plus each Pane's directory, split ratios, focus, and worktree links.
-- **Lost**: terminal contents and scrollback, running programs, and Agent state.
-
-A restart ends the programs in every Pane. Condr opens a fresh shell in each Pane's previous directory. If that directory is gone, it uses the Workspace root. If the root is also gone, it removes the Pane.
-
-Agents with hooks installed resume. Condr records their native session id and types the Agent's own resume command in the same Pane after the restart, such as `claude --resume <id>`. The conversation continues where it stopped. If resume fails, the command stays in the terminal for you to retry.
-
-Run `condr server restart` in a terminal outside Condr, or click **Restart Condr** in **Settings › Device › Daemon**, to restart the Server. When the window restarts, it also restores its position, sidebar widths, and the Tab shown in each Workspace.
+While `vim` or another terminal program that captures the mouse is running, hold `Shift` and drag with the mouse to force a selection and copy the terminal text.

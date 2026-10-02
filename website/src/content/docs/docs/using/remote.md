@@ -1,151 +1,136 @@
 ---
-title: Connect a remote Device
-description: Choose SSH, TCP, or Peer-to-peer, then connect and manage another machine.
+title: Remote connections
+description: Learn how to set up a Headless Server and connect securely to remote devices over SSH, TCP or P2P, keeping your Agents running steadily.
 ---
 
-Add another machine to the sidebar, choose its connection type, and recover when it disconnects or versions differ. For trust rules, read the [security model](/docs/help/security/). For connection checks, read [troubleshooting](/docs/help/troubleshooting/).
+Condr lets you manage Agent tasks across machines from a single desktop window. With the work running on a remote device, your Agents keep working without interruption, unaffected by restarts or network drops on your local workstation.
 
-A **Device key** identifies one Device and has 43 characters. An **invite** is a one-time invitation. Keep it secret. It expires after 10 minutes.
+## Persistent background operation
 
-## Choose a connection
+Condr uses a split Client/Server architecture:
 
-Install `condr` on the remote Device first. See [Install](/docs/start/install/). Then choose the connection that matches your setup:
+- **Server**: the `condr` command-line program. It runs on the target device, manages terminal processes and keeps Agents running in the background.
+- **Client**: the `condr-gui` desktop app. It connects to one or more Servers and provides the graphical interface.
 
-| Your situation | Pick | Link form |
-| --- | --- | --- |
-| You can already log in to the Device with SSH | SSH | `ssh://user@host` |
-| The Device has an IP you can reach, such as a server on your network | TCP | `tcp://<device key>.<invite>@host:port` |
-| Both machines sit behind routers and neither has a public address | Peer-to-peer | `p2p://<device key>.<invite>` |
+In persistent background mode:
 
-For all three, click **Connect Remote Device** in the sidebar and paste the link. A connected remote Device works like your own machine with the same window, Workspaces, and Agent states.
+- Closing the desktop Client window does not stop the remote Server or the Agent tasks that are running.
+- During a brief network outage, the Server keeps its current state and continues running tasks in the background.
+- When you reopen the Client and reconnect, Condr automatically syncs the latest terminal output and Agent states.
 
-## Connect over SSH
+## Prerequisite: install the Headless Server
+
+Before connecting to a remote device, install the Headless Server (the `condr` command-line tool, with no graphical interface) on that device.
+
+If that device already has the desktop app installed, you don't need to install anything else: the desktop app ships with a Server that starts automatically when you open the app and keeps running after you close the window. Only machines without a graphical interface need the commands below.
+
+### Install commands
+
+In a terminal, run the install command for the remote device's operating system:
+
+| Operating system | Install command |
+| :--- | :--- |
+| **Linux** (x86_64 / arm64) | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| **macOS** (Apple Silicon / Intel) | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| **Windows** (x86_64) | `irm https://condr.dev/install.ps1 \| iex` |
+
+After installation, run `condr --version` in the remote terminal to confirm it succeeded.
+
+## Ways to connect to a remote device
+
+Condr supports three connection protocols to fit different network topologies. Click **Connect Remote Device** in the Client sidebar to start connecting.
+
+### SSH connection
+
+For remote servers or cloud hosts you can already reach with OpenSSH.
+
+- **When to use**: servers you can already log in to over SSH, with a key pair set up.
+- **Steps**:
+  1. In the Client, click **Connect Remote Device** → **SSH**.
+  2. Enter an address that starts with `ssh://`, for example:
+     - `ssh://user@192.168.1.100`
+     - `ssh://my-cloud-server` (host aliases in your local `~/.ssh/config` are read automatically)
+  3. Confirm the connection. Condr uses your local OpenSSH configuration to set up an encrypted channel, and automatically starts or reuses the remote `condr` Server.
+
+### P2P connection
+
+For networks where both sides sit behind NAT or a firewall and have no fixed public IP.
+
+- **When to use**: office computers on different networks, home development machines, or complex network setups.
+- **Full procedure**:
+  1. **Start P2P mode**: On the remote device, start the Server in Peer-to-peer mode; this setting is written to the config. If the Server is already running, replace `start` with `restart`:
+
+     ```sh
+     condr server start --p2p
+     ```
+
+  2. **Get a P2P link**: Run `condr server invite`. It prints a link that starts with `p2p://` and needs no address. The link is valid for 10 minutes and can be used only once.
+  3. **Connect from the Client**: In the Client, click **Connect Remote Device** → **Peer-to-peer** and paste the `p2p://` link.
+  4. **Establish the connection**: Condr tries a direct peer-to-peer connection first. If the network prevents a direct connection, it automatically forwards data through an encrypted relay.
+
+### TCP connection
+
+For servers with a fixed IP address, or ones directly reachable on an internal LAN. All traffic is protected end to end with `Noise_IKpsk2` encryption.
+
+- **When to use**: devices with a static IP or on the same LAN, in environments that don't rely on an SSH service.
+- **Full procedure**:
+  1. **Enable listening**: By default the Server listens only on the local machine. On the remote device, start it with a listen address. The address is written to the config, so later starts don't need it again. If the Server is already running, replace `start` with `restart`:
+
+     ```sh
+     condr server start --listen 0.0.0.0:2637
+     ```
+
+  2. **Generate a pairing invite**: On the remote device, run the following command to generate a one-time pairing link:
+
+     ```sh
+     condr server invite
+     ```
+
+  3. **Copy the pairing link**: The console prints a link in the form `tcp://<device key>.<invite>@<host>:<port>`. Replace `<host>` with this device's IP. The link is valid for 10 minutes and can be used only once.
+  4. **Connect from the Client**: In the Condr Client, click **Connect Remote Device** → **TCP**, paste the link and confirm.
+  5. **Complete the key handshake**: The Client and Server set up a secure point-to-point channel using the pre-shared key. Once pairing completes, Condr stores only the Device key and the address, not the invite.
+
+## Troubleshooting
+
+### SSH reports condr: not found
+
+**Symptom**: When connecting over SSH, the Client shows the error `bash: condr: not found` or `command not found`.
+
+**Cause**: The install script puts `condr` in `~/.local/opt/condr`, creates a symlink in `~/.local/bin`, and writes the PATH setting for that directory into `~/.profile` or `~/.zprofile`. Non-interactive SSH sessions usually don't load either file, so the system can't find the `condr` executable.
+
+**Solutions**:
+
+**Option 1: Specify the path in the connection address (recommended)**. Without changing anything on the remote device, tell Condr where the executable is right in the SSH address:
 
 ```text
-ssh://user@build-box
+ssh://user@host?bin=/home/user/.local/bin/condr
 ```
 
-Condr passes this address unchanged to OpenSSH on your machine. Aliases, ports, keys, and jump hosts in `~/.ssh/config` therefore apply. Add a port with `ssh://user@host:2222`.
+**Option 2: Set the environment variable at the top of the shell startup file**:
 
-When connecting, Condr runs `condr server bridge` on the remote Device. If no Server runs there, Condr starts one.
-
-Prepare these items:
-
-- **Passwordless login.** Condr connects with `BatchMode`, so it never prompts for a password. Set up keys, ssh-agent, and host trust in your terminal first.
-- **`condr` on the remote PATH.** A non-interactive SSH shell usually does not read `~/.profile` or `~/.zprofile`, where the install script adds PATH. If the connection reports `condr: not found`, put the path in the link:
-
-  ```text
-  ssh://user@host?bin=/home/user/.local/bin/condr
-  ```
-
-- **Hosts with a second factor.** Log in once by hand in a terminal and keep that session open. Condr reuses it.
-
-On macOS and Linux, Condr reuses SSH connections automatically with `ControlMaster`, so later calls do not authenticate again. If your SSH config already sets `ControlPath`, Condr uses it and adds nothing. Windows has no connection sharing, so every call opens a new SSH connection. A Windows machine as the remote Device is not supported yet.
-
-## Connect over TCP
-
-```text
-tcp://<device key>.<invite>@<host>:<port>
-```
-
-The Server listens only on the local machine until you enable a listener. On the remote Device:
-
-1. Start the Server with a listen address. Use an IP and port, not a host name. Condr writes the address to the configuration, so later starts use it. If the Server already runs, use `restart` instead of `start`:
+1. Log in to the remote device and check where `condr` is installed:
 
    ```sh
-   condr server start --listen 0.0.0.0:2637
+   which condr
    ```
 
-2. Create an invite:
+2. Edit `~/.bashrc` or `~/.zshenv` on the remote device.
+3. Put the PATH setting at the very top of the file (it must come before the code that returns early for non-interactive shells):
 
    ```sh
-   condr server invite
+   export PATH="$HOME/.local/bin:$PATH"
    ```
 
-   The command prints a TCP link. Replace its `<host>` placeholder with this Device's IP.
-
-3. Within 10 minutes, open Condr on your work computer, click **Connect Remote Device**, and paste the link. Repeat step 2 if it expires.
-
-An invite works once. The first Device that finishes pairing uses it. Creating another invite replaces the old one. After pairing, Condr saves only the Device key and address, not the invite.
-
-## Connect over Peer-to-peer
-
-```text
-p2p://<device key>.<invite>
-```
-
-Use this for two machines behind routers, such as a home desktop and a work laptop. You need no fixed IP or VPN.
-
-1. Start the Server with Peer-to-peer enabled. Condr writes this setting to the configuration. If the Server already runs, use `restart`:
-
-   ```sh
-   condr server start --p2p
-   ```
-
-2. Run `condr server invite`. It prints a Peer-to-peer link without a placeholder.
-3. Paste the link into Condr within 10 minutes.
-
-The Devices connect directly when possible and use Condr's relay when not. Their own keys encrypt traffic end to end, so the relay cannot read it. If the relay or DNS service is down, only Peer-to-peer connections fail. SSH and TCP continue to work. Read the [security model](/docs/help/security/) for what the relay can see.
-
-A Peer-to-peer Device's default sidebar name is `p2p` plus the first 8 characters of its Device key. Right-click the Device and choose **Edit Remote Device** to rename it.
-
-## Switch between Devices
-
-The sidebar groups Workspaces under each Device. Click a Workspace to switch to it.
-
-The mark on a Device heading shows its connection state:
-
-- Spinner: connecting.
-- Red alert: cannot connect. Hover for the reason, then click to reconnect.
-- Yellow triangle: connected, but the Condr builds differ. Hover to see which side to update, then click to dismiss.
-
-When a connection drops, Condr waits 2 seconds before showing anything. It then shows "Reconnecting to …" above the Workspace and retries every half second for 45 seconds. It stops after that and shows **Disconnected**. Click **Connect** to reconnect by hand. When the computer wakes from sleep, Condr probes every Device and starts reconnecting to one that does not answer within 10 seconds.
-
-A Device that fails to connect when Condr starts is not retried automatically. Click **Connect** on that Device's page.
-
-## Manage paired Devices
-
-The Server records Devices paired over TCP and Peer-to-peer. On the Server machine, list or revoke them:
+**Option 3: Create a system-wide symlink**. On the remote device, symlink `condr` into a standard system executable path:
 
 ```sh
-condr server clients
-condr server revoke <fingerprint or a prefix of it>
+sudo ln -s ~/.local/bin/condr /usr/local/bin/condr
 ```
 
-`clients` lists each Device's name, last connection time, and Device key. `revoke` disconnects the Device immediately, and it needs a new invite to pair again. The prefix is case-sensitive and must match exactly one Device.
+### TCP connection times out or fails to handshake
 
-In Condr, use **Settings › Device › Paired devices** for the same actions. **Generate invite** creates and copies a link. Each row has **Revoke**.
+If a TCP connection keeps timing out, check the following:
 
-Only local and SSH connections can manage the Server. They can create invites, turn listening and Peer-to-peer on or off, revoke Devices, and restart the Server. A window connected over TCP or Peer-to-peer can use Workspaces and Agents, but these settings are read-only.
-
-## Resolve version differences
-
-During connection, Condr exchanges protocol versions and build numbers:
-
-- **Compatible protocol, different build.** Everything works and the sidebar shows a yellow triangle. Update both sides to the same version and restart the Server to remove the mark.
-- **Incompatible protocol.** The connection is refused and the window says "speak different protocol versions". Update both sides to the same version and connect again.
-
-After updating a remote Device, restart its Server. Run `condr server restart` there, or click **Restart Condr** in **Settings › Device › Daemon**.
-
-## Can't connect
-
-| Message | Most likely cause |
-| --- | --- |
-| SSH could not reach the device | SSH itself cannot connect, or the remote has no `condr` |
-| SSH reached the device, but Condr is not running there | The remote Server is not running and could not be started |
-| this device is not authorized | The invite expired, was used, or this Device was revoked |
-| speak different protocol versions | The versions are too far apart |
-
-See [troubleshooting](/docs/help/troubleshooting/) for each check.
-
-## Reach a remote Device from the command line
-
-Saved Devices are available on the command line:
-
-```sh
-condr device list
-condr --device build-box workspace list
-condr workspace list --all-devices
-```
-
-`--device` takes the Device name shown in the sidebar. Set the default with `CONDR_DEVICE`. `server` and `agent hooks` act only on this machine and do not accept `--device`. See [Agent automation](/docs/using/automation/) for details.
+1. **Check that the port is open**: Make sure the remote device's firewall and your cloud provider's security group allow the TCP listening port.
+2. **Check that the invite is still valid**: A pairing link generated by `condr server invite` expires after 10 minutes, and it also stops working after one use. If it has expired, generate a new one and enter the new link in the Client.
+3. **Check the background service**: On the remote device, run `condr server status` and confirm that the Server process is running and that the Listen line shows the listen address.

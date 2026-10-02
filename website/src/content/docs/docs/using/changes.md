@@ -1,71 +1,40 @@
 ---
-title: Changes and files
-description: See an Agent's file changes and project files inside Condr.
+title: Changes and file preview
+description: Quickly see which files an Agent changed, compare code diffs (Diff) and preview project files in Condr.
 ---
 
-Open the right sidebar to review an Agent's changed files, diffs, and project files without leaving Condr.
+When an Agent modifies or refactors your code, you need to confirm quickly which files it changed and whether the changes are right. Condr has built-in read-only views for file changes and previews, so you can review the work without opening an external IDE.
 
-## Find the four views
+## Open the changes panel (Changes)
 
-| Place | Where | Shows | Open it by |
-| --- | --- | --- | --- |
-| **Changes** | Right sidebar | Which files changed | The sidebar button in the title bar, or its shortcut |
-| **Files** | Right sidebar | What's in the project | The same, then the Files tab |
-| **Diff** Tab | Tab strip | What changed in one file | Clicking a file in Changes |
-| **Preview** Tab | Tab strip | The contents of one file | Clicking a file in Files |
+- **Shortcut**: press `Cmd + Option + B` (macOS) or `Ctrl + Alt + B` (Windows/Linux).
+- **From the interface**: click the sidebar button in the title bar of the right sidebar.
 
-All four views are read-only and work for remote Workspaces.
+The Changes view sorts modified files into three groups by Git status:
+- **Conflicts**: files with merge conflicts.
+- **Tracked**: tracked files that have been modified.
+- **Untracked**: files the Agent created that Git does not track yet.
 
-Open the right sidebar with the **Show Changes & Files** button in the title bar, or press Cmd+Alt+B on macOS or Ctrl+Alt+B. A Git repository opens on Changes. Any other folder opens on Files. Each Workspace remembers whether the sidebar is open. Drag its left edge to resize it.
+Each file shows how many lines were added and deleted, and the top sums up the total number of changed lines.
 
-## Review changed files
+## View code diffs (Diff)
 
-Changes lists every working-directory difference from HEAD in three groups: **Conflicts**, **Tracked**, and **Untracked**. Staged and unstaged changes are not separate. Each file has one status.
+1. Click any file in the **Changes** list, and a **Diff** Tab opens in the center area automatically.
+2. The page highlights exactly how the file differs from `HEAD` on the current branch.
+3. Click **Show File** in the title bar to jump straight to a preview of the file's full content.
 
-Files appear in a directory tree. A chain of single directories folds into one row. Each file shows its status and added and removed lines. Deleted files are struck through. The tab number counts changed files. The end of the tab shows total added and removed lines.
+> **Tip**: For very large binary files, or any single file over 1 MiB, the detailed comparison is hidden automatically to protect performance.
 
-When there are more than 1000 changes, Condr lists only the first 1000. This usually means build output is not ignored. Add a `.gitignore`.
+## Browse and preview project files (Files & Preview)
 
-## Review a file diff
+- **Switch to the file tree**: switch the tab at the top of the right sidebar to **Files** to expand and browse project folders as you would in a file manager.
+- **Change markers**: a folder with changes carries a dot, and files ignored by `.gitignore` are grayed out automatically.
+- **Click to preview**: click any text file to open a read-only preview in the **Preview** Tab. The syntax highlighting and scroll position refresh automatically when the file changes on disk.
 
-Click a file in Changes to open a **Diff** Tab in the Workspace. Clicking another file reuses that Tab. The diff compares with HEAD, uses the terminal font, shows line numbers, and supports search.
+## Right-click menu
 
-The **Show File** button in the header opens Preview at the line under the cursor. Deleted files do not have this button.
+Right-click a file in the Changes or Files list to choose one of these common actions:
 
-A file larger than 1 MiB on either side has no diff. A binary file shows "Binary file".
-
-## Browse and preview files
-
-Files loads the directory tree as you open it. A directory with changes below it has a dot. Ignored files are dimmed. Changed files use their status color.
-
-Click a file to open it in the **Preview** Tab. Preview shows text files only, highlights them by extension, and supports files up to 1 MiB. When a file changes on disk, Preview refreshes and keeps its scroll position. Images and other binary files show "Binary file".
-
-Right-click a file in either view for:
-
-- **Show File**: available only in Changes and opens Preview.
-- **Copy Relative Path** and **Copy Path**: copy the relative path or the absolute path on that Device.
-- **Open in …**: open the file in an external editor. Local Devices only.
-- **Insert Path into Terminal**: paste the relative path and a space into the terminal this Workspace last used. Condr quotes it when needed.
-
-## Open a file in an external editor
-
-The **Open in** button in the title bar opens the Workspace root. Condr finds installed Zed, VS Code, Cursor, and IntelliJ IDEA copies. It always offers Finder, Explorer, or your file manager last. Condr remembers the choice per repository, and its worktrees share the choice.
-
-Add another editor in the configuration file:
-
-```toml
-[[client.editors]]
-name = "Helix"
-command = ["hx"]
-```
-
-The path is appended as the last argument. See [Configuration and settings](/docs/reference/configuration/).
-
-The button works only for local Devices. Remote Workspace files stay on the remote machine, so your local editor cannot open them.
-
-## Know the limits
-
-- Condr cannot edit files. Use an external editor, or ask the Agent.
-- Diff compares only with HEAD, not another branch.
-- Condr cannot stage, commit, or discard changes.
-- Preview cannot show images.
+- **Open in ...**: open the current file or project in a locally installed VS Code, Zed, Cursor or IntelliJ IDEA.
+- **Insert Path into Terminal**: paste the file's relative path into the most recently used terminal Pane, ready to pass to a command-line tool.
+- **Copy Relative Path / Copy Path**: copy the file's relative or absolute path in one click.

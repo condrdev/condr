@@ -1,21 +1,21 @@
 ---
 title: Troubleshooting
-description: Find the first checks, fix common problems, and report the details that help.
+description: Find where to look first, fix common problems, and gather the details for an issue.
 ---
 
-Start with the Server status and logs, then follow the section that matches your problem.
+Check the Server status and logs first, then follow the steps for your kind of problem.
 
-## Check status and logs first
+## Check the status and logs first
 
-**Server status.** On the machine that runs the Server:
+**Server status.** On the machine that runs the Server, run:
 
 ```sh
 condr server status
 ```
 
-The command shows whether the Server is running, its version, listen address, Workspace and Agent counts, connected clients, and the last 20 warnings and errors. Add `--json` to get one object for an issue. For a remote Device, see **Settings › Device › Daemon**.
+The command shows whether the Server is running, its version, its listen address, the number of Workspaces and Agents, the number of connected clients, and the 20 most recent warnings and errors. When a saved listen address or Peer-to-peer setting has not taken effect yet, an extra Pending line appears. Add `--json` to get a single object you can attach to an issue. A remote Device's status also appears in **Settings › Device › General**.
 
-**Logs.** Logs roll daily and stay for 7 days. Find their location in [Configuration and settings](/docs/reference/configuration/). **Settings › Developer › Locations** has **Open** to open the log folder. The Server log is `condr-server-<id>.<date>.log`. The window log is `condr-gui.<date>.log`. When a background Server crashes, its output is in the nearby `.stderr` file.
+**Logs.** Logs roll over daily and are kept for 7 days. For their location, see [Configuration and settings](/docs/reference/configuration/). **Settings › Developer › Locations** → **Open** opens the log directory. The Server log is `condr-server-<id>.<date>.log`, and the window log is `condr-gui.<date>.log`. When a background Server crashes, its output is in the `.stderr` file next to it.
 
 For more detail, restart the Server with `CONDR_LOG`:
 
@@ -23,89 +23,89 @@ For more detail, restart the Server with `CONDR_LOG`:
 CONDR_LOG=debug condr server restart
 ```
 
-`CONDR_LOG` uses `tracing` filter syntax, such as `condr_server=trace`. The window reads the same variable. Start it from a terminal.
+`CONDR_LOG` uses the `tracing` filter syntax, for example `condr_server=trace`. The window reads this variable too, so start the window from a terminal.
 
 ## The window cannot connect to the local Server
 
-Each local connection starts a Server when none runs and waits 1.5 seconds. On timeout, the window says "condr-server did not become ready" and shows the last lines of the `.stderr` file.
+Each time the window connects locally and finds no Server running, it starts one and waits 1.5 seconds. If that times out, it shows "condr-server did not become ready" along with the last few lines of the `.stderr` file.
 
-Check these causes:
+Check for these causes:
 
-- **The port is taken.** If the `listen` address in the configuration cannot bind, the whole Server fails to start. The log says "failed to listen on tcp://…". Change the port or remove `listen` from `config.toml`.
-- **`condr` is missing.** The message is "condr is not installed beside condr-gui". The desktop app ships with `condr`, so this usually means a self-build omitted `condr`.
-- **Versions are incompatible.** The window and the running Server speak different protocols, and the message is "speak different protocol versions". Run `condr server restart` so the new version takes over.
+- **The port is in use.** When the `listen` address in the config cannot be bound, the whole Server fails to start. The log shows "failed to listen on tcp://…". Change the port, or remove `listen` from `config.toml`.
+- **`condr` is not found.** The message is "condr is not installed beside condr-gui". The desktop app ships with `condr`, so this usually means your own build did not build `condr`.
+- **The versions are incompatible.** The window and the running Server use different protocols, and the message says "speak different protocol versions". Run `condr server restart` so the new version takes over.
 
-If you stop the local Server while the window is open, the window starts a new one within 45 seconds.
+If you stop the local Server while the window is open, the window starts a new Server within 45 seconds.
 
-## An Agent state stays Unknown
+## Agent state stays Unknown
 
-State comes only from Agent hooks. Check these items in order:
+State comes only from the Agent hook. Check in this order:
 
-1. **Are hooks installed?** Run `condr agent hooks status claude` with your Agent. Install hooks for `missing` and reinstall for `outdated`. For a remote Device, open **Settings › Device › Agents**.
-2. **Does the Agent run in a Condr Pane?** Hooks work only in a shell with `CONDR_ENV=1`. Condr cannot see an Agent in another terminal.
-3. **Does the Agent report state?** Codex, Copilot, Cursor, and Antigravity report nothing before the first prompt. Kimi is not supported. See the support table in [Agents](/docs/using/agents/).
-4. **Did Codex trust the hooks?** Run `/hooks` in Codex after installation.
-5. **Did hooks use another folder?** Hooks find the Agent config folder from environment variables at install time, such as `CLAUDE_CONFIG_DIR`. The window and a terminal can have different environments.
+1. **Is the hook installed?** Run `condr agent hooks status claude`, with your own Agent in place of `claude`. `missing` means you need to install it, and `outdated` means you need to reinstall it. For a remote Device, check **Settings › Device › Agent integrations**.
+2. **Is the Agent running in a Condr Pane?** The hook works only in a shell where `CONDR_ENV=1` is set. Condr cannot see Agents in other terminals.
+3. **Does the Agent report state?** Codex, Copilot, Cursor and Antigravity report nothing before the first prompt. Kimi is not supported. See the support table in [Agent integrations](/docs/using/agents/).
+4. **Does Codex trust the hook?** After installing, run `/hooks` in Codex.
+5. **Did the hook go to another directory?** At install time, the hook finds the Agent's config directory from environment variables such as `CLAUDE_CONFIG_DIR`. The window's environment may differ from the terminal's.
 
-## An Agent is not found in a Pane
+## A Pane cannot find the Agent
 
-The Server finds Agents on its own PATH. The program that starts the Server supplies that PATH. A window launched from the Dock or Start menu gets a minimal system PATH and does not read `.zshrc`.
+The Server looks up Agents with its own PATH, which comes from the program that started the Server. A window launched from the Dock or the Start menu gets the system's minimal PATH and does not read `.zshrc`.
 
-Try one of these fixes:
+Try the following:
 
-- Start the Server once from a terminal with `condr server restart`. It inherits that terminal's PATH, and the window connects to it afterward.
-- Install the Agent on the system PATH, such as `/usr/local/bin`.
+- Run `condr server restart` from a terminal to start the Server once. It inherits the terminal's PATH, and the window then connects to it.
+- Install the Agent on the system PATH, for example in `/usr/local/bin`.
 
-A Pane shell is non-login. On macOS it does not read `~/.zprofile`, only `~/.zshrc`.
+The shell in a Pane is a non-login shell. On macOS it does not read `~/.zprofile`, only `~/.zshrc`.
 
 ## A remote Device shows a different version
 
-A yellow triangle on a Device heading means its Condr build differs. Hover to see which side to update. Install the same version on both, then run `condr server restart` on the remote Device or click **Restart Condr** in **Settings › Device › Daemon**.
+A yellow triangle on a Device's title means the two sides run different Condr builds. Hover over it to see which side to update. Once both sides have the same version installed, run `condr server restart` on the remote Device, or use **Settings › Device › General** → **Restart Condr**.
 
-A red warning that says "speak different protocol versions" means the versions are too far apart. Update both sides to the same version before connecting.
+The red warning "speak different protocol versions" means the versions are too far apart. You must update both sides to the same version before you can connect.
 
-## A remote Device will not connect
+## A remote Device cannot connect
 
-Start with the hint on the Device heading or open the Device and click **Details**.
+First check the hint on the Device's title, or open the Device and click **Details**.
 
-**SSH could not reach the device.** SSH did not connect, or the remote has no `condr`. Run `ssh user@host` in a terminal. After login works, run `ssh user@host condr --version`. If it says `command not found`, the install script's PATH line does not apply to a non-interactive shell. Put the path in the link:
+**SSH could not reach the device.** SSH did not connect, or the remote machine has no `condr`. Run `ssh user@host` in a terminal, and once that logs in, run `ssh user@host condr --version`. If it says `command not found`, the PATH the install script added does not apply to non-interactive shells, so give the path in the link:
 
 ```text
 ssh://user@host?bin=/home/user/.local/bin/condr
 ```
 
-Condr never shows a password prompt. Configure keys, ssh-agent, and host trust in a terminal first.
+Condr does not prompt for a password. Set up keys, ssh-agent and host trust in a terminal first.
 
-**SSH reached the device, but Condr is not running there.** The remote Server is not running, and automatic startup failed. Run `condr server start` on the remote and read its output.
+**SSH reached the device, but Condr is not running there.** The remote Server is not running, and starting it automatically also failed. Run `condr server start` on the remote machine and read its output.
 
-**this device is not authorized.** The invite expired, was used, or this Device was revoked. Run `condr server invite` on the remote and paste the link within 10 minutes.
+**this device is not authorized.** The invite has expired or been used, or the Device has been revoked. Run `condr server invite` again on the remote machine and paste the link within 10 minutes.
 
-**Peer-to-peer will not connect, but TCP and SSH work.** The remote did not enable `--p2p`, or the relay and DNS services are down. Run `condr server status` on the remote and check that Peer-to-peer is on.
+**Peer-to-peer cannot connect, but TCP and SSH work.** The remote machine has not enabled `--p2p`, or the relay and DNS services are temporarily unavailable. Run `condr server status` on the remote machine to confirm that Peer-to-peer is on.
 
-**Connecting spins for more than 10 seconds.** TCP times out after 10 seconds and SSH after 15 seconds. Check the address, port, and firewall.
+**Connecting spins for more than 10 seconds.** The TCP timeout is 10 seconds and the SSH timeout is 15 seconds. Check the address, the port and the firewall.
 
-A connection that fails when Condr starts is not retried automatically. Click **Connect** on the Device page.
+A connection that fails on its first attempt when Condr starts is not retried automatically. Click **Connect** on the Device page.
 
 ## Condr will not install or open
 
-- **Windows SmartScreen blocks it.** Click **More info**, then **Run anyway**. Preview installers are unsigned.
-- **The Linux AppImage will not open.** It needs FUSE. Install your distribution's `libfuse2` package, or unpack it with `--appimage-extract` and run it.
-- **Another Condr is already running.** The window allows one instance. A second one exits immediately.
+- **Windows SmartScreen blocks it.** Click **More info** → **Run anyway**. Preview installers are not signed.
+- **The Linux AppImage does not open.** It needs FUSE. Install your distribution's `libfuse2` package, or unpack it with `--appimage-extract` and run it.
+- **Another Condr is already running.** The window allows only one instance, and a second one exits immediately.
 
-## A configuration change has no effect
+## A config change does not take effect
 
-- A hand edit to a `[client]` key in `config.toml` needs a window restart. A `[server]` key needs a Server restart. Window changes take effect immediately.
-- A malformed file makes every key use its default. The window says "Failed to load" at startup and disables Device-list editing.
-- On Windows, when an editor locks the file, Condr overwrites it in place. The editor may report that the file changed.
+- After you edit `[client]` keys in `config.toml` by hand, restart the window. After you edit `[server]` keys, restart the Server. Changes made in the interface take effect immediately.
+- When the file is malformed, every key uses its default value. The window shows "Failed to load" at startup and disables editing of the Device list.
+- On Windows, when an editor has the file locked, Condr overwrites it in place, and the editor may warn that the file has changed.
 
-## Include these details in an issue
+## Include this when you open an issue
 
-Open an issue at [GitHub Issues](https://github.com/condrdev/condr/issues) and include:
+Open an issue in [GitHub Issues](https://github.com/condrdev/condr/issues) and include:
 
-1. The Condr version and platform. Find the window version in **Settings › About** and the Server version with `condr --version`.
+1. Your Condr version and platform. The window version is in **Settings › About**. For the Server version, run `condr --version`.
 2. The output of `condr server status --json`.
-3. Log lines around the problem. Reproduce it once with `CONDR_LOG=debug` when possible.
-4. Short reproduction steps.
-5. For a remote Device, both versions and the connection type.
+3. Log excerpts from before and after the problem. If you can, reproduce it once with `CONDR_LOG=debug`.
+4. Short steps to reproduce.
+5. For a remote Device, the version on each side and the connection type.
 
 Do not report security problems publicly. See [Security model](/docs/help/security/#report-a-security-problem).

@@ -7,35 +7,36 @@ description: Change window and Server settings, and find Condr's files on each p
 This page is still being written. Content will follow.
 :::
 
-Use this page to find a setting, know when it takes effect, and locate Condr's files.
+Use this page to find a setting, learn when it takes effect and locate the files Condr saves.
 
-## Change settings in the window
+## Change settings in the interface
 
-Press Cmd+, on macOS or Ctrl+, to open Settings. The window has two tabs. **Application** contains this window's settings. **Device** contains one Device's Server settings. Select the Device in the tab bar.
+Press Cmd+, on macOS or Ctrl+, on other platforms to open settings. The window has two tabs. **Application** holds the window's own settings, and **Device** holds the Server settings of one Device. A bar at the top of the Device tab's pages shows which Device you are editing, how it is connected and its connection status; switch Devices there.
 
-Each change takes effect immediately and is written to the configuration file. Text fields save when you leave them, press Enter, or click Save.
+Every change takes effect immediately and is written to the configuration file. A text field saves when you leave it, press Enter or click Save.
 
 **Application**
 
 | Page | Settings |
 | --- | --- |
-| Appearance | Theme (system, light, dark), terminal font, font size, color scheme |
+| Appearance | Theme (follow system, light, dark), terminal font, font size and color scheme, highlight theme and font size for Preview and Diff |
 | Notifications | Turn system notifications on or off, send a test notification |
-| Power | Keep the screen awake. The coffee cup in the sidebar footer is the same switch |
+| Power | Keep the screen awake. The coffee cup at the bottom of the sidebar uses the same switch |
 | Shortcuts | The list of shortcuts, read-only |
-| Developer | FPS monitor, buttons that open the application, config, state, and log folders |
-| About | Version, update channel, automatic update checks, check now |
+| Developer | Frame rate monitor, buttons that open the app, config, state and log directories |
+| Licenses | Third-party components Condr uses and their licenses |
+| About | Version, update channel, automatic update checks, check now; when a new version is available, the Updates group shows its version number and a **View** button |
 
 **Device**
 
 | Page | Settings |
 | --- | --- |
-| Terminal | The shell for new Panes. Leave it empty to use the system default |
-| Daemon | Status, connection kind, version, uptime, counts, recent errors, TCP listener switch and address, Peer-to-peer switch, restart the Server |
-| Paired devices | Generate an invite, the list of paired Devices, with Revoke |
-| Agents | Hook status for each Agent, with install, update, and uninstall |
+| General | The Status group shows the connection method, version, uptime, counts, the most recent error, the listen address the Server actually bound and the Peer-to-peer status, and has a **Restart Condr** button. The Terminal group sets the shell new Panes use; leave it empty to use the system default |
+| Remote access | TCP listener switch and Listen address, Peer-to-peer switch. Changes take effect only after the Server restarts, and the button on the General page becomes **Restart to apply** |
+| Paired devices | **Generate invite** creates a one-time invite and lists one link each for Peer-to-peer and TCP to copy. The list of paired Devices puts connected ones first with a green dot, and each row has **Revoke** |
+| Agent integrations | Each Agent's hook status, plus install, update and uninstall |
 
-You can change the Network settings in Daemon and the Paired devices page only over a local or SSH connection. TCP and Peer-to-peer connections show them as read-only.
+The Remote access and Paired devices pages can be changed only over a local or SSH connection. Over a TCP or Peer-to-peer connection, the top of the Device tab shows "Viewing only" and these controls are unavailable.
 
 ## Where the files are
 
@@ -45,13 +46,13 @@ You can change the Network settings in Daemon and the Paired devices page only o
 | State: snapshot, window state | `~/.local/state/condr` | `~/Library/Application Support/condr` | `%LOCALAPPDATA%\condr` |
 | Logs | `~/.local/state/condr` | `~/Library/Logs/condr` | `%LOCALAPPDATA%\condr` |
 | Runtime: socket, temporary files | `$XDG_RUNTIME_DIR/condr` | `$TMPDIR/condr` | `%LOCALAPPDATA%\condr\runtime` |
-| The installed `condr` command | `~/.local/opt/condr` | `~/.local/opt/condr` | `%LOCALAPPDATA%\Programs\Condr` |
+| Installed `condr` command | `~/.local/opt/condr` | `~/.local/opt/condr` | `%LOCALAPPDATA%\Programs\Condr` |
 
-On Linux, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` apply as usual. **Settings › Developer › Locations** has buttons that open these folders.
+On Linux, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` apply as usual. **Settings › Developer › Locations** has buttons that open these directories.
 
-The window and the command line share `config.toml`, which you can edit by hand. Condr preserves comments when it writes and uses a lock so two processes never write at once. If the file is malformed, every key falls back to its default.
+The window and the command line share `config.toml`, and you can edit it by hand. Condr keeps comments when it writes and uses a lock so two processes never write at the same time. If the file is malformed, every key falls back to its default.
 
-A hand edit to a `[client]` key needs a window restart. A hand edit to a `[server]` key needs a Server restart. Changes made in the window take effect immediately.
+After editing `[client]` keys by hand, restart the window; after editing `[server]` keys by hand, restart the Server. Changes made in the interface take effect immediately.
 
 ## Configure `[server]`
 
@@ -63,8 +64,8 @@ worktree_root = "~/worktrees"
 
 | Key | Meaning | Takes effect |
 | --- | --- | --- |
-| `listen` | An extra TCP address to listen on, as IP and port only. Unset means no listener. `condr server start --listen` writes it. | Server restart |
-| `worktree_root` | Where Condr puts the worktrees it creates. Unset means beside the repository in `<repo>.worktrees/`. Absolute or `~`: `<root>/<repo>/<branch>`. Relative: `<repo>/<root>/<branch>`. | Server restart |
+| `listen` | An extra TCP address to listen on, given only as an IP and port. When unset, there is no TCP listener. `condr server start --listen` writes it. | After a Server restart |
+| `worktree_root` | Where the worktrees Condr creates are stored. When unset, they go in `<repo>.worktrees/` next to the repository. Absolute path or `~`: `<root>/<repo>/<branch>`. Relative path: `<repo>/<root>/<branch>`. | After a Server restart |
 
 ## Configure `[server.p2p]`
 
@@ -73,7 +74,7 @@ worktree_root = "~/worktrees"
 enabled = true
 ```
 
-`enabled` lets the Server accept Peer-to-peer connections. It is off by default. `condr server start --p2p` writes it. The change takes effect after a Server restart.
+`enabled` lets the Server accept Peer-to-peer connections and is off by default. `condr server start --p2p` writes it, and it takes effect after the Server restarts.
 
 ## Configure `[server.terminal]`
 
@@ -82,7 +83,7 @@ enabled = true
 shell = "/opt/homebrew/bin/fish"
 ```
 
-`shell` is the program a new Pane starts. When empty, Unix uses `$SHELL`. Windows looks for `pwsh.exe`, then `powershell.exe`, then `%ComSpec%`. A change made in the window applies to the next new Pane. A hand edit needs a Server restart.
+`shell` is the program a new Pane starts. When it is empty, Unix uses `$SHELL`, and Windows looks for `pwsh.exe`, `powershell.exe` and `%ComSpec%` in that order. A change made in the interface applies from the next new Pane. A hand edit requires a Server restart.
 
 ## Configure `[client]`
 
@@ -97,11 +98,11 @@ editor = "zed"
 
 | Key | Meaning | Default |
 | --- | --- | --- |
-| `appearance` | `system`, `light`, or `dark` | `system` |
+| `appearance` | `system`, `light` or `dark` | `system` |
 | `notifications` | Send a system notification when an Agent finishes or needs you | `true` |
 | `keep_awake` | Keep the screen from sleeping | `false` |
 | `fps_monitor` | Show the frame rate | `false` |
-| `editor` | The last "Open in" target you used | none |
+| `editor` | The last "Open in" target used | None |
 
 ## Configure `[client.terminal]`
 
@@ -112,7 +113,7 @@ font_size = 13
 color_scheme = "Dracula"
 ```
 
-`font_size` accepts values from 6 to 72. `color_scheme` is the name of a built-in iTerm2 scheme. Leave it empty for the default palette.
+`font_size` ranges from 6 to 72. `color_scheme` is the name of a built-in iTerm2 color scheme. Leave it empty to use the default palette.
 
 ## Configure `[client.updates]`
 
@@ -122,7 +123,7 @@ auto_check = true
 channel = "stable"
 ```
 
-`channel` is `stable` or `nightly`. When unset, it follows the build you installed. Automatic checks run 5 seconds after launch and every 5 hours after that. Condr only tells you. It never installs anything.
+`channel` is `stable` or `nightly`. When unset, it follows the build you installed. The automatic check runs once 5 seconds after launch and then every 5 hours. Condr only tells you about an update; it never installs one automatically.
 
 ## Save remote Devices in `[[client.servers]]`
 
@@ -136,9 +137,9 @@ name = "home"
 address = "tcp://<device key>@192.168.1.20:2637"
 ```
 
-These are the saved remote Devices. `name` is the sidebar name and the argument to `--device`. `address` is an `ssh://`, `tcp://`, or `p2p://` address without the invite. The window writes this list when you connect, edit, or delete a Device. The command line only reads it.
+This list saves remote Devices. `name` is the name shown in the sidebar and also the argument to `--device`. `address` is an `ssh://`, `tcp://` or `p2p://` address without the invite. The interface writes the list when you connect, edit or remove a Device; the command line only reads it.
 
-## Add editors with `[[client.editors]]`
+## Add editors in `[[client.editors]]`
 
 ```toml
 [[client.editors]]
@@ -146,35 +147,35 @@ name = "Helix"
 command = ["hx"]
 ```
 
-This adds an editor to “Open in”. Condr appends the path to open as the last argument. Restart the window after a hand edit. Condr stores its per-repository choice in `[[client.workspace_editors]]`. Do not edit that table by hand.
+This adds the editor to "Open in". The path to open is appended as the last argument. Restart the window after editing by hand. The choice Condr remembers for each repository is written to `[[client.workspace_editors]]`; do not edit it by hand.
 
 ## Set environment variables
 
-| Variable | What it does |
+| Variable | Purpose |
 | --- | --- |
-| `CONDR_LOG` | The log filter in `tracing` EnvFilter syntax, such as `debug` or `condr_server=trace`. Default: `warn,condr_core=info,condr_server=info,condr_gui=info` |
-| `CONDR_LOG_DIR` | The log folder |
-| `CONDR_CONFIG_DIR` | The config folder |
-| `CONDR_SOCKET_PATH` | The socket path of the local Server |
-| `CONDR_DEVICE` | The default for `--device` |
-| `CONDR_VERSION` | Which version the install script installs: `nightly` or `v0.1.0` |
+| `CONDR_LOG` | Log filter in `tracing` EnvFilter syntax, for example `debug` or `condr_server=trace`. Default: `warn,condr_core=info,condr_server=info,condr_gui=info` |
+| `CONDR_LOG_DIR` | Log directory |
+| `CONDR_CONFIG_DIR` | Config directory |
+| `CONDR_SOCKET_PATH` | Socket path of the local Server |
+| `CONDR_DEVICE` | Default value of `--device` |
+| `CONDR_VERSION` | Version the install script installs: `nightly` or `v0.1.0` |
 | `CONDR_INSTALL_DIR` | Where the install script and `server install` put the command |
 | `CONDR_INSTALL_ARGS` | Arguments the Windows install script passes to `server install` |
 
-The Server inherits its environment from the process that starts it. Therefore `CONDR_LOG=debug condr server restart` works, but a change to `.zshrc` needs a Server restart before it appears.
+The Server inherits the environment of the process that starts it. So `CONDR_LOG=debug condr server restart` works, but after changing `.zshrc` you must restart the Server for the change to take effect.
 
-See [Agent automation](/docs/using/automation/) for variables set automatically inside a Pane.
+For the variables set automatically in a Pane, see [Agent automation](/docs/using/automation/).
 
-## Find other Server files
+## Check the Server's other files
 
-| File | Location | What it is | If you delete it |
+| File | Location | Purpose | If deleted |
 | --- | --- | --- | --- |
-| `device-key` | Config folder | This Device's key | A new key is created, the authorized list is cleared, and every pairing must be redone |
-| `authorized-clients` | Config folder | The paired Devices, one per line | Every paired Device is refused on its next connection |
-| `pending-invite` | Config folder | The invite that is currently valid | That invite stops working |
-| `condr-server-<id>.snapshot` | State folder | The Session structure | Deleted while the Server is stopped, the next start is empty. Worktrees stay on disk |
-| `condr-gui.state` | State folder | Window position, sidebars, and the Tab each Workspace showed | The window opens at its default size |
-| `condr-server-<id>.<date>.log` | Log folder | Server logs, rolled daily and kept for 7 days | No effect |
-| `condr-gui.<date>.log` | Log folder | Window logs | No effect |
+| `device-key` | Config directory | This Device's key | A new key is generated, the authorized list is cleared, and every pairing must be redone |
+| `authorized-clients` | Config directory | Paired Devices, one per line | Every paired Device is refused on its next connection |
+| `pending-invite` | Config directory | The currently valid invite | That invite stops working |
+| `condr-server-<id>.snapshot` | State directory | Session structure | Delete it while the Server is stopped, and the next start is empty. Worktrees stay on disk |
+| `condr-gui.state` | State directory | Window position, sidebar and the Tab shown in each Workspace | The window opens at the default size |
+| `condr-server-<id>.<date>.log` | Log directory | Server log, rolled daily and kept for 7 days | No effect |
+| `condr-gui.<date>.log` | Log directory | Window log | No effect |
 
-The key and invite files must have mode 0600. Condr refuses to use them when other users can read them.
+Key and invite files must have permissions 0600. If other users can read them, Condr refuses to use them.

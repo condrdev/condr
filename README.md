@@ -76,7 +76,7 @@ In the sidebar, click **Connect Remote Device** and enter the link to the remote
 - **TCP** (`tcp://`): when the remote device has a fixed address. Paired with a one-time invite and encrypted with `Noise_IKpsk2`.
 - **Peer-to-peer** (`p2p://`): when both machines are behind NAT. End-to-end encrypted, direct when possible, relayed when not.
 
-See [Connect to a Remote Device](https://condr.dev/docs/start/getting-started/#connect-to-a-remote-device) in the docs for the setup steps.
+See [Remote connections](https://condr.dev/docs/using/remote/) in the docs for the setup steps.
 
 ## Development
 
