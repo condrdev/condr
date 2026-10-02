@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <b>Keep your agents running</b>
+  <b>Agents that never hang up</b>
   <br />
-  One window for all your agents. Local or remote, step away and pick up where you left off.
+  One window for every agent, local and remote. Disconnect anytime, pick up where you left off.
 </p>
 
 <p align="center">
@@ -23,30 +23,35 @@
   <img src="assets/screenshots/hero.png" alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" />
 </p>
 
-Condr is a small desktop app. It runs Claude Code, Codex, and other CLI agents in one window, along with any other terminal program.
+Condr is a lightweight app built for running many agents together and managing their terminals. Run Claude Code, Codex and any command-line program side by side in one window, on your own machine or on a remote server.
 
 Condr has two parts:
 
-- **Server**: the `condr` command. It runs all your agents and keeps working in the background.
-- **Client**: the `condr-gui` app. It's the window you see, and it can connect to more than one Server.
+- **Server**: a service that stays running in the background. It hosts every terminal process and every agent's state, so background work never hangs up, even when you close the window or the network drops.
+- **Client**: a fast, native desktop app. It's a view you can attach at any time, and it connects to and manages several Servers from one place.
 
 ## Features
 
-- **Always on.** Close the window or disconnect. The Server and your agents keep working.
-- **Remote access.** Manage local and remote devices in one window, over SSH, TCP or Peer-to-peer.
-- **Agent status.** The sidebar shows what each agent is doing. Condr notifies you when an agent finishes.
-- **Agent driven.** Agents can use Condr too: create panes, read output, assign tasks, and talk to other agents.
-- **Real terminals.** Every pane is a real terminal built on the `alacritty` core. Run any CLI agent or terminal program.
-- **Fast.** Written entirely in Rust, with no Electron. Small and responsive, even while agents are busy.
+- **Stays running.** Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.
+- **Remote access.** No more switching windows: see every local and remote agent in one place. SSH, TCP and zero-config P2P with NAT traversal are built in.
+- **Agent status.** The sidebar shows what each agent is doing. Condr notifies you when an agent finishes a task.
+- **Agent driven.** Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.
+- **Real terminals.** Real terminals built on the `alacritty` core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
+- **Smooth.** Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.
 
 ## Install
 
+Pick what to install for where you'll use it:
+
+- **Your everyday dev machine**: install the **Desktop App** (Server included, works out of the box).
+- **A remote server or cloud host**: install the **Headless Server** (command line only, no graphical interface).
+
 > [!WARNING]
-> Condr 0.1 is a public preview, and things may still change between versions. Update the Client and the Server together; Condr marks a Device whose Server is another build, and tells you when a new version is out. For the latest changes, a [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build is published every day.
+> Condr 0.1 is a public preview; features and the protocol may change between versions. Keep the Client and the Server on the same version. For the latest features, download the [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build, published automatically every day.
 
 ### Desktop App
 
-Install it on the computer you work at. It includes the Server, so local use needs nothing else.
+Install it on the computer you work at (Server included, nothing else to set up).
 
 Download the installer for your platform from the [latest release](https://github.com/condrdev/condr/releases/latest):
 
@@ -58,9 +63,9 @@ Download the installer for your platform from the [latest release](https://githu
 
 ### Headless Server
 
-Install it on the device where you want to run agents remotely. It includes only the `condr` command, with no graphical interface.
+Install it on the device where you want to run agents remotely (only the `condr` command-line tool, no graphical interface).
 
-On that device, run the command for its platform:
+Run the install command in a terminal:
 
 | Platform             | Install command                                 |
 | -------------------- | ----------------------------------------------- |
@@ -68,13 +73,23 @@ On that device, run the command for its platform:
 | macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
 
+## Quick Start
+
+Try Condr's core workflow in 30 seconds:
+
+1. **Create a Workspace**: open Condr, click **New Workspace** in the sidebar and choose your project folder.
+2. **Start an agent**: in a terminal pane, run the command-line agent you usually use (such as `claude` or `codex`).
+3. **Turn on agent status**: install the agent integration in Settings, and the sidebar shows live whether each agent is thinking, done, or waiting on a question or a permission.
+
+**More guides**: see the [Condr docs](https://condr.dev/docs/start/getting-started/) for remote connections, agent automation, keyboard shortcuts and everything else.
+
 ## Connect to a Remote Device
 
-In the sidebar, click **Connect Remote Device** and enter the link to the remote device. Three kinds of link are supported:
+Condr manages every agent task, local and remote, across machines from a single window. Running the work on a remote server frees your agents from the limits of your local workstation, so they keep going through reboots and network drops.
 
-- **SSH** (`ssh://`): when you already have SSH access. Uses your existing OpenSSH configuration.
-- **TCP** (`tcp://`): when the remote device has a fixed address. Paired with a one-time invite and encrypted with `Noise_IKpsk2`.
-- **Peer-to-peer** (`p2p://`): when both machines are behind NAT. End-to-end encrypted, direct when possible, relayed when not.
+- **SSH**: for remote servers or cloud hosts you already reach with OpenSSH. Reuses your existing configuration as is.
+- **P2P**: for networks where both sides sit behind NAT or a firewall with no public IP. Connects directly through hole punching when it can, or through an encrypted relay when it can't.
+- **TCP**: for servers with a fixed IP or reachable directly on the LAN. All traffic is end-to-end encrypted with `Noise_IKpsk2`.
 
 See [Remote connections](https://condr.dev/docs/using/remote/) in the docs for the setup steps.
 
@@ -84,7 +99,7 @@ See [Remote connections](https://condr.dev/docs/using/remote/) in the docs for t
 git clone https://github.com/condrdev/condr
 cd condr
 cargo build
-cargo run -p condr-gui                   # needs a display (Windows / macOS / Linux desktop)
+cargo run -p condr-gui
 
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --features condr-gui/test-support -- -D warnings
