@@ -13,4 +13,4 @@ hero:
       icon: open-book
 ---
 
-Condr 在一个窗口里运行 Claude Code、Codex 和其他命令行 Agent。关掉窗口，Server 让它们继续运行，无论在本机还是远程设备上。
+Condr 是一款用于集中管理与调度 Agent 命令行工具（如 Claude Code、Codex 等）的工作台。无论 Agent 运行于本地还是远程服务器，均可通过 Condr 实现统一监控与协同交互。
