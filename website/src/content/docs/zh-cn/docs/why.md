@@ -15,7 +15,7 @@ Condr 为打破这种割裂而生：**它是一个极致轻量、启动毫秒级
 
 ## 核心优势与设计
 
-### 1. 极致轻量与极速响应（Lightweight & Fast）
+### 极致轻量与极速响应（Lightweight & Fast）
 
 摒弃 Electron 与繁重的全功能远程开发环境，Condr 基于纯 Rust 全栈打造：
 
@@ -23,7 +23,7 @@ Condr 为打破这种割裂而生：**它是一个极致轻量、启动毫秒级
 - **毫秒级冷启动与 60Hz 渲染**：基于纯 Rust 虚拟终端内核，在 Agent 动态输出、批量刷屏或超长回滚缓冲区场景下依然保持帧率稳定，交互毫无粘滞感。
 - **即开即连**：无需在远端拉起庞大的语言服务器或守护集群，数秒内即可完成配对与终端就绪。
 
-### 2. 现代化的跨设备直连（Modern Remote Connectivity）
+### 现代化的跨设备直连（Modern Remote Connectivity）
 
 Condr 将“随时随地无缝连入任意机器”作为一等公民能力构建：
 
@@ -32,14 +32,14 @@ Condr 将“随时随地无缝连入任意机器”作为一等公民能力构�
 - **全通道兼容**：同时完整支持原生 SSH 套接字转发与本机 Unix Domain Socket / 命名管道，无缝融入既有运维体系。
 - **多端独立视角**：两台设备同时连入同一台远程 Server 时，各自独立浏览不同的工作区与标签页，配合主从只读保护（Viewing only），兼顾协作与输入安全。
 
-### 3. 服务端常驻运行时（Server-Owned Runtime）
+### 服务端常驻运行时（Server-Owned Runtime）
 
 彻底摆脱“关窗掉线、断网丢会话”的脆弱体验：
 
 - **进程与窗口彻底解耦**：所有终端会话、Agent 进程与长耗时任务均由常驻的 `condr-server` 托管。关闭桌面应用只是关闭画面投影，后台任务永不中断。
 - **拓扑结构平滑恢复**：Server 实时持久化布局快照。即便重启守护进程，也会自动重建工作区分屏结构，并重新接续已有上下文。
 
-### 4. 终端优先，100% 保留原生 Agent 生态（Terminal-First）
+### 终端优先，100% 保留原生 Agent 生态（Terminal-First）
 
 Condr 不做二手聊天界面，不接管对话循环，也不代发 API 请求：
 
@@ -65,5 +65,5 @@ Condr 不做二手聊天界面，不接管对话循环，也不代发 API 请求
 ## 接下来
 
 - [快速上手](/zh-cn/docs/getting-started/)：几分钟内完成安装并建立你的第一个远程连接。
-- [远程连接指南](/zh-cn/docs/remote/)：详细了解 SSH、Noise TCP 与 P2P 穿透的配置方式。
+- [远程连接](/zh-cn/docs/remote/)：详细了解 SSH、Noise TCP 与 P2P 穿透的配置方式。
 - [核心概念](/zh-cn/docs/concepts/)：深入理解 Device、Server、Workspace 与 Pane 的实体层级。

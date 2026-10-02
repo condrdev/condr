@@ -43,7 +43,7 @@ CONDR_LOG=debug condr server restart
 
 1. **安装 hook 了吗？** 用你的 Agent 运行 `condr agent hooks status claude`。`missing` 要安装，`outdated` 要重装。远程 Device 在 **Settings › Device › Agent integrations** 中查看。
 2. **Agent 在 Condr Pane 中运行吗？** hook 只在设置了 `CONDR_ENV=1` 的 shell 中生效。Condr 看不到其他终端中的 Agent。
-3. **Agent 会报告状态吗？** Codex、Copilot、Cursor 和 Antigravity 在第一次提示前不报告。Kimi 不支持。见 [Agent](/zh-cn/docs/agents/) 的支持表。
+3. **Agent 会报告状态吗？** Codex、Copilot、Cursor 和 Antigravity 在第一次提示前不报告。Kimi 不支持。见 [Agent 集成与状态](/zh-cn/docs/agents/) 的支持表。
 4. **Codex 信任 hook 了吗？** 安装后在 Codex 中运行 `/hooks`。
 5. **hook 写到了其他目录吗？** hook 在安装时根据环境变量寻找 Agent 配置目录，例如 `CLAUDE_CONFIG_DIR`。窗口与终端的环境可能不同。
 

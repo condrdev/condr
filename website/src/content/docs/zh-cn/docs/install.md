@@ -18,7 +18,7 @@ Condr 0.1 目前处于公开预览（Public Preview）阶段，功能与配置�
 
 ## 桌面应用
 
-桌面端内置 Server 并在打开时自动拉起，无需单独配置后台服务。若需远程连接该设备，请参阅[连接远程 Device](/zh-cn/docs/remote/)。
+桌面端内置 Server 并在打开时自动拉起，无需单独配置后台服务。若需远程连接该设备，请参阅[远程连接](/zh-cn/docs/remote/)。
 
 从[下载中心](/download/)获取对应平台的安装包：
 
@@ -143,7 +143,7 @@ Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户�
 - **立即重启**：直接生效新版本。
 - **稍后重启**：继续维持当前进程，待手动重启后完成版本过渡。
 
-> **关于重启影响**：重启 Server 将中断正在运行的所有 Pane 进程，随后系统会基于快照自动恢复工作区（Workspace）、标签页（Tab）与分屏布局（Pane）。配置了 Hook 的 Agent 将自动恢复会话，详见 [工作区状态持久化](/zh-cn/docs/workspaces/#server-重启后剩下什么)。
+> **关于重启影响**：重启 Server 将中断正在运行的所有 Pane 进程，随后系统会基于快照自动恢复工作区（Workspace）、标签页（Tab）与分屏布局（Pane）。配置了 Hook 的 Agent 将自动恢复会话，详见 [Workspace、Tab 与 Pane](/zh-cn/docs/workspaces/)。
 
 ---
 

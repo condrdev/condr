@@ -1,170 +1,136 @@
 ---
-title: 连接远程 Device
-description: 用 SSH、TCP 或 Peer-to-peer 连接另一台机器上的 Server。
+title: 远程连接
+description: 了解如何配置 Headless Server，并通过 SSH、TCP 及 P2P 三种方式安全连接远程设备，保持 Agent 持续稳定运行。
 ---
 
-你电脑上的 Condr 可以连接其他机器上的 Server。连上后，那台机器会作为一个 Device 出现在侧栏，Workspace 和 Agent 的用法和本机一样。
+Condr 允许你在单个桌面窗口中跨机器管理多个 Agent 任务。通过将计算任务运行在远程设备上，你的 Agent 可以不受本地工作站重启或断网的影响，实现不间断高效工作。
 
-Condr 提供三种连接方式：
+## 常驻后台机制
 
-| 你的情况 | 连接方式 |
-| --- | --- |
-| 已经能用 SSH 登录那台机器 | [SSH](#用-ssh-连接) |
-| 那台机器有你能访问的 IP，例如局域网或 VPN 中的服务器 | [TCP](#用-tcp-连接) |
-| 两台机器都在路由器后，没有公网地址 | [Peer-to-peer](#用-peer-to-peer-连接) |
+Condr 采用客户端与服务端分离（Client/Server）的架构设计：
 
-开始之前，先在那台机器上安装 Condr。服务器和开发机装 Headless Server，你的另一台电脑装桌面应用。见[安装](/zh-cn/docs/install/)。
+- **服务端（Server）**：即 `condr` 命令行程序，运行在目标设备上，负责管理终端进程并让 Agent 在后台持续运行。
+- **客户端（Client）**：即 `condr-gui` 桌面应用，用于连接一个或多个服务端并提供图形界面交互。
 
-## 用 SSH 连接
+在常驻后台模式下：
 
-Condr 用你电脑上的 OpenSSH 连接那台机器，并自动启动那台机器上的 Server。
+- 关闭桌面客户端窗口不会终止远程服务与正在运行的 Agent 任务。
+- 网络短暂中断时，Server 将保持当前状态并在后台继续执行任务。
+- 重新打开客户端并建立连接后，系统会自动同步最新的终端输出与 Agent 状态。
 
-连接之前：
+## 前置准备：安装 Headless Server
 
-1. 在那台机器上安装 Headless Server。
-2. 在终端运行 `ssh user@host`，确认不需要输入密码。Condr 使用非交互 SSH，不会提示密码。请先配置好密钥或 ssh-agent，并信任主机密钥。
+在连接远程设备前，需要在该设备上安装无图形界面的 Headless Server（即 `condr` 命令工具）。
 
-连接：
+如果那台设备已经安装了桌面应用，就不用再装：桌面应用自带 Server，打开应用时会自动启动，关闭窗口后 Server 也继续运行。只有没有图形界面的机器才需要按下面的命令安装。
 
-1. 点侧栏底部的 **Connect Remote Device → SSH**。
-2. 输入你平时 SSH 登录用的地址，例如 `user@build-box`。要指定端口，写 `user@build-box:2222`。
+### 安装命令
 
-Condr 把地址原样交给 OpenSSH，所以 `~/.ssh/config` 中的别名、端口、密钥和跳板都会生效。
+请根据远程设备的操作系统，在终端中执行对应的安装命令：
 
-macOS 和 Linux 上，Condr 会复用 SSH 连接，之后不用重新认证。如果你的 SSH 配置已经设置了 `ControlPath`，Condr 改用你的设置。需要二次验证的主机，可以在 `~/.ssh/config` 中为它设置 `ControlMaster auto` 和 `ControlPath`，先在终端登录一次并保持会话，Condr 就会复用这条连接。Windows 上不复用，每次都新建 SSH 连接。
+| 操作系统 | 安装命令 |
+| :--- | :--- |
+| **Linux**（x86_64 / arm64） | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| **macOS**（Apple Silicon / Intel） | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| **Windows**（x86_64） | `irm https://condr.dev/install.ps1 \| iex` |
 
-暂不支持用 SSH 连接 Windows 机器，请改用 TCP 或 Peer-to-peer。
+安装完成后，可以在远程终端运行 `condr --version` 确认安装是否成功。
 
-## 用 TCP 连接
+## 连接远程设备的方式
 
-Server 默认只接受本机连接。要用 TCP 连接，先让那台机器上的 Server 监听一个网络地址，再用一次性 invite 配对。
+Condr 支持三种连接协议，以适应不同的网络拓扑环境。在客户端侧栏中点击 **Connect Remote Device** 即可开始连接。
 
-在那台机器上：
+### SSH 连接
 
-1. 用监听地址启动 Server。地址必须是 IP 加端口，不能是主机名。Condr 会把地址写入配置，以后启动时自动使用。Server 已经在运行时，把 `start` 换成 `restart`：
+适用于已配置 OpenSSH 访问权限的远程服务器或云主机。
 
-   ```sh
-   condr server start --listen 0.0.0.0:2637
-   ```
+- **适用场景**：已有 SSH 登录权限且配置了密钥对的服务器。
+- **连接步骤**：
+  1. 在客户端点击 **Connect Remote Device** → **SSH**。
+  2. 输入以 `ssh://` 开头的地址，例如：
+     - `ssh://user@192.168.1.100`
+     - `ssh://my-cloud-server`（会自动读取本地 `~/.ssh/config` 中的主机别名）
+  3. 确认连接。Condr 将利用本地 OpenSSH 配置建立加密通道，并自动启动或复用远程 `condr` 服务。
 
-2. 创建 invite：
+### P2P 连接
 
-   ```sh
-   condr server invite
-   ```
+适用于双方均处于 NAT 或防火墙之后、无固定公网 IP 的网络环境。
 
-   命令会打印一个 TCP 链接：
+- **适用场景**：跨网段的办公电脑、家庭开发机或复杂网络环境。
+- **完整流程**：
+  1. **启动 P2P 模式**：在远程设备上以 Peer-to-peer 模式启动服务，这个设置会写入配置。Server 已在运行时，把 `start` 换成 `restart`：
 
-   ```text
-   tcp://<device key>.<invite>@<host>:2637
-   ```
+     ```sh
+     condr server start --p2p
+     ```
 
-   把其中的 `<host>` 换成这台机器的 IP。
+  2. **获取 P2P 链接**：运行 `condr server invite`，它会输出以 `p2p://` 开头、无需填写地址的链接。链接 10 分钟内有效，且只能使用一次。
+  3. **客户端连接**：在客户端点击 **Connect Remote Device** → **Peer-to-peer**，粘贴 `p2p://` 链接。
+  4. **建立连接**：Condr 将优先尝试点对点直连；若网络受限无法直连，则会自动通过加密中继节点转发数据。
 
-在你的电脑上：
+### TCP 连接
 
-1. 点侧栏底部的 **Connect Remote Device** → **TCP**。
-2. 在 10 分钟内粘贴链接。过期后，回到那台机器重新运行 `condr server invite`。
+适用于具有固定 IP 地址或可直接访问的内部局域网服务器。通信全程采用 `Noise_IKpsk2` 端到端加密算法保护。
 
-那台机器装的是桌面应用时，也可以在它的 Condr 里操作：**Settings › Device › Remote access** → 打开 **TCP listener** 并填写 **Listen address** → **General** → **Restart to apply** → **Paired devices** → **Generate invite**。Server 重启前无法生成 invite。
+- **适用场景**：拥有静态 IP 或在同一局域网下的设备，且不依赖 SSH 服务的环境。
+- **完整流程**：
+  1. **开启监听**：Server 默认只监听本机。在远程设备上带监听地址启动它，这个地址会写入配置，之后启动无需再传。Server 已在运行时，把 `start` 换成 `restart`：
 
-## 用 Peer-to-peer 连接
+     ```sh
+     condr server start --listen 0.0.0.0:2637
+     ```
 
-适合两台都在路由器后的机器，例如家里的台式机和工作用的笔记本。不需要固定 IP、端口转发或 VPN。
+  2. **生成配对邀请**：在远程设备上运行以下命令，生成一次性配对链接：
 
-在那台机器上：
+     ```sh
+     condr server invite
+     ```
 
-1. 开启 Peer-to-peer 并启动 Server。Condr 会把这个设置写入配置。Server 已经在运行时，把 `start` 换成 `restart`：
+  3. **复制配对链接**：控制台将输出格式为 `tcp://<device key>.<invite>@<host>:<port>` 的链接，把其中的 `<host>` 换成这台设备的 IP。链接 10 分钟内有效，且只能使用一次。
+  4. **客户端连接**：在 Condr 客户端点击 **Connect Remote Device** → **TCP**，粘贴该链接并确认。
+  5. **完成密钥握手**：客户端与服务端通过预共享密钥建立点对点安全信道。配对完成后，Condr 只保存 Device key 和地址，不保存 invite。
 
-   ```sh
-   condr server start --p2p
-   ```
+## 常见问题排查
 
-2. 运行 `condr server invite`。它会打印一个可以直接使用的链接：
+### SSH 提示 condr: not found
 
-   ```text
-   p2p://<device key>.<invite>
-   ```
+**问题现象**：通过 SSH 连接时，客户端提示错误信息 `bash: condr: not found` 或 `command not found`。
 
-在你的电脑上：
+**原因分析**：安装脚本把 `condr` 装在 `~/.local/opt/condr`，并在 `~/.local/bin` 建立软链接，再把这个目录的 PATH 配置写进 `~/.profile` 或 `~/.zprofile`。非交互式 SSH 连接通常不会加载这两个文件，导致系统找不到 `condr` 可执行程序。
 
-1. 点侧栏底部的 **Connect Remote Device** → **Peer-to-peer**。
-2. 在 10 分钟内粘贴链接。
+**解决方法**：
 
-那台机器装的是桌面应用时，也可以在它的 Condr 里操作：**Settings › Device › Remote access** → 打开 **Peer-to-peer** → **General** → **Restart to apply** → **Paired devices** → **Generate invite**。
+**方法一：在连接地址中指定路径（推荐）**。不改动远程设备，直接在 SSH 地址里告诉 Condr 可执行文件在哪：
 
-两台机器能直连时直接连接，否则通过 Condr 中继。流量用两台 Device 的密钥端到端加密，中继无法读取。中继或 DNS 服务不可用时，只有 Peer-to-peer 连接会失败，SSH 和 TCP 不受影响。中继能看到什么，见[安全模型](/zh-cn/docs/security/)。
-
-Peer-to-peer Device 在侧栏的默认名称是 `p2p` 加 Device key 的前 8 个字符。要重命名，右键 Device → **Edit Remote Device**。
-
-## 了解 invite
-
-- **Device key** 标识一台 Device，共 43 个字符。
-- **invite** 是一次性的配对凭据，10 分钟后过期。请像密码一样保密。
-- 第一台用它完成配对的 Device 会用掉它。重新生成会替换旧的 invite。
-- 配对后，Condr 只保存 Device key 和地址，不保存 invite。
-
-## 在 Device 之间切换
-
-侧栏按 Device 分组显示 Workspace。点 Workspace 会切换到它，同时展开或收起它下面的 Agent 列表。
-
-Device 标题上的标记表示连接状态：
-
-- **转圈**：正在连接。
-- **红色警告**：无法连接。悬停查看原因，点击重新连接。
-- **黄色三角**：已连接，但两边的 Condr 构建不同。悬停查看该更新哪一边，点击关闭提示。
-
-连接断开 2 秒后，Workspace 上方会显示「Reconnecting to …」。Condr 每半秒重试一次，持续 45 秒，之后停止重试并显示 **Disconnected**。点 **Connect** 可以手动重连。电脑从睡眠中唤醒时，Condr 会探测每个 Device，10 秒没有回应就开始重连。
-
-Condr 启动时第一次就连不上的 Device 不会自动重试。请在那个 Device 的页面点 **Connect**。
-
-## 管理已配对的 Device
-
-Server 会记录通过 TCP 和 Peer-to-peer 配对的 Device。在 Server 所在的机器上查看或撤销：
-
-```sh
-condr server clients
-condr server revoke <fingerprint 或它的前缀>
+```text
+ssh://user@host?bin=/home/user/.local/bin/condr
 ```
 
-`clients` 列出每个 Device 的名称、最近连接时间和 Device key。`revoke` 会立即断开那个 Device，它要用新的 invite 才能再次配对。前缀区分大小写，而且只能匹配一个 Device。
+**方法二：配置环境变量至 Shell 初始化文件头部**：
 
-在 Condr 中，**Settings › Device › Paired devices** 可以做同样的事：**Generate invite** 生成一个 invite 并复制到剪贴板，页面按 Peer-to-peer 和 TCP 各列出一条链接，每条都有 **Copy**。已配对的 Device 每行显示名称和指纹，已连接的排在前面并带绿点，行尾有 **Revoke**。
+1. 登录远程设备，确认 `condr` 的安装路径：
 
-只有本机和 SSH 连接可以管理 Server，包括生成 invite、开关监听、开关 Peer-to-peer、撤销 Device 和重启 Server。通过 TCP 或 Peer-to-peer 连接时，你可以使用 Workspace 和 Agent，但 Device 标签顶部会显示「Viewing only」，这些设置不能修改。
+   ```sh
+   which condr
+   ```
 
-## 处理版本不一致
+2. 编辑远程设备上的 `~/.bashrc` 或 `~/.zshenv` 文件。
+3. 将 PATH 变量设置放置在文件最顶部（必须位于非交互式 Shell 提前返回代码之前）：
 
-连接时，Condr 会交换两边的协议版本和构建号：
+   ```sh
+   export PATH="$HOME/.local/bin:$PATH"
+   ```
 
-- **协议兼容，构建不同**：功能照常，侧栏显示黄色三角。把两边升级到同一版本并重启 Server 后，标记会消失。
-- **协议不兼容**：连接被拒绝，窗口提示「speak different protocol versions」。把两边升级到同一版本后重新连接。
-
-升级远程 Device 后，要重启它的 Server。运行 `condr server restart`，或 **Settings › Device › General** → **Restart Condr**。
-
-## 在命令行访问远程 Device
-
-Condr 保存的 Device 也能在命令行中使用：
+**方法三：创建系统级软链接**。在远程设备上将 `condr` 软链接至系统标准可执行路径中：
 
 ```sh
-condr device list
-condr --device build-box workspace list
-condr workspace list --all-devices
+sudo ln -s ~/.local/bin/condr /usr/local/bin/condr
 ```
 
-`--device` 后面写侧栏中的 Device 名称。用 `CONDR_DEVICE` 设置默认值。`server` 和 `agent hooks` 只作用于本机，不接受 `--device`。详见 [Agent 驱动 Condr](/zh-cn/docs/automation/)。
+### TCP 连接超时或无法握手
 
-## 连不上时
+如果使用 TCP 连接时一直处于连接超时状态，请按以下步骤排查：
 
-- **SSH could not reach the device**：在终端运行 `ssh user@host`，在那里解决密钥、ssh-agent、主机密钥或 `~/.ssh/config` 的问题。Condr 不会提示输入密码。
-- **报 `condr: not found`**：SSH 的非交互 shell 通常不读 `~/.profile` 或 `~/.zprofile`，而安装脚本正是在这些文件里加入 PATH。在地址里写出 `condr` 的完整路径：
-
-  ```text
-  user@build-box?bin=/home/user/.local/bin/condr
-  ```
-
-- **SSH reached the device, but Condr is not running there**：那台机器上的 Server 没有运行，也无法启动。在那台机器上运行 `condr server start`，看它报什么错。
-- **this device is not authorized**：invite 已过期、已被使用，或者这个 Device 已被撤销。在那台机器上重新运行 `condr server invite`。
-- **speak different protocol versions**：两边版本差距过大。见[处理版本不一致](#处理版本不一致)。
-
-更多检查方法见[故障排查](/zh-cn/docs/troubleshooting/)。
+1. **检查端口开放**：确保远程设备的防火墙及云服务商安全组已放行对应的 TCP 监听端口。
+2. **校验 invite 时效**：`condr server invite` 生成的配对链接 10 分钟后过期，使用一次后也会失效。若已过期，请重新生成并在客户端输入新的链接。
+3. **检查后台服务**：在远程设备上运行 `condr server status`，确认服务端进程处于运行状态，且 Listen 一行显示了监听地址。

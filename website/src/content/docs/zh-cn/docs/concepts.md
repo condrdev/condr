@@ -46,21 +46,21 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 
 ## 关键机制解析
 
-### 1. 会话快照与重启恢复
+### 会话快照与重启恢复
 请区分 **Condr Session**（服务端维护的窗口/分屏拓扑结构）与 **Agent Conversation**（Agent 自身在磁盘存储的对话上下文）：
 - **快照记录**：Server 实时保存工作区树形结构、窗格拆分比例及正在运行的 Agent 原生会话 ID。
 - **平滑接续**：重启 Server 后，Condr 自动重建分屏并恢复工作目录；对支持 Hook 的 Agent 自动执行 resume 指令重连上下文。*(注：不保存终端历史输出屏幕字符与进程内存状态)*。
 
-### 2. Managed Worktree（隔离分支）
+### Managed Worktree（隔离分支）
 多 Agent 并发修改同一项目时极易产生代码与 Git 冲突：
 - Condr 允许为仓库创建 **Managed Worktree**，在独立的 `<repo>.worktrees/<branch>` 目录检出新分支并作为独立 Workspace 打开。
 - 移除工作区时强制校验 Clean 状态，仅安全清理独立工作树目录，保留 Git 分支与提交。
 
-### 3. Client 独立视图与多端协作
+### Client 独立视图与多端协作
 - **视图独立**：每个连入的 Client 独立记录自己正在查看的 Workspace 与 Tab。多设备接入同一 Server 时，切换视角互不干扰。
 - **主从保护**：同一终端 Pane 在同一时刻仅允许一个主控端输入按键；并发接入的第二台设备自动进入 **Viewing only**（只读观察）状态，防止输入冲突。
 
-### 4. Agent 状态指示灯
+### Agent 状态指示灯
 
 | 状态 | 含义 | 侧边栏图标 |
 | :--- | :--- | :--- |
@@ -74,7 +74,7 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 
 ## 快速查阅
 
-- [工作区与分屏操作](/zh-cn/docs/workspaces/)：分屏切分、快捷键及 Managed Worktree 使用。
-- [Agent 适配与 Hook](/zh-cn/docs/agents/)：受支持的 Agent 列表与状态上报配置。
-- [代码审查与改动对比](/zh-cn/docs/changes/)：使用 Diff Tab 和 Preview Tab 审查文件。
-- [远程连接指南](/zh-cn/docs/remote/)：配置 SSH、TCP 局域网配对或 P2P 穿透直连。
+- [Workspace、Tab 与 Pane](/zh-cn/docs/workspaces/)：分屏切分、快捷键及 Managed Worktree 使用。
+- [Agent 集成与状态](/zh-cn/docs/agents/)：受支持的 Agent 列表与状态上报配置。
+- [改动与文件预览](/zh-cn/docs/changes/)：使用 Diff Tab 和 Preview Tab 审查文件。
+- [远程连接](/zh-cn/docs/remote/)：配置 SSH、TCP 局域网配对或 P2P 穿透直连。

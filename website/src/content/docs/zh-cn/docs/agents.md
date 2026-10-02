@@ -1,140 +1,39 @@
 ---
-title: Agent
-description: 查看支持的 Agent，安装 hook，并读懂每种状态。
+title: Agent 集成与状态
+description: 在 Condr 中使用并查看命令行 Agent 的运行状态。
 ---
 
-安装 Agent 的 hook，让侧栏显示状态和等待内容。编排命令见 [Agent 驱动 Condr](/zh-cn/docs/automation/)，命令选项见 [CLI 参考](/zh-cn/docs/cli/)。
+在多 Agent 并发协同开发时，了解各个命令行 Agent（如 Claude Code、Codex 等）是否在后台完成任务或正在等待授权是保持高效流程的关键。Condr 提供了直观的状态监控与通知机制。
 
-## 准备 Agent
+## 准备与检查 Agent
 
-Condr 不提供模型或账号。先在运行 Server 的机器上安装 Agent CLI 并登录。
+在 Condr 中运行 Agent 前，需要确认 Condr 服务端能够识别对应的命令行工具。
 
-确认 Server 能找到哪些 Agent：
+- **检查可用 Agent**：在终端中运行 `condr agent available` 命令， Condr 会列出当前在环境变量 `PATH` 中找到的所有支持的 Agent 工具。
+- **PATH 继承机制**：Condr 服务端在启动时继承系统 `PATH`，但不会读取 Shell 配置文件（如 `.zshrc`）中的 Alias 或自定义路径。
+- **排查找不到命令**：请将 Agent 安装至系统全局 `PATH`（如 `/usr/local/bin`），或在终端环境中执行 `condr server restart` 重启服务端。
 
-```sh
-condr agent available
-```
+## 安装 Hook 监听精准状态
 
-命令列出 Server 的 PATH 上找到的 Agent。启动 Server 的程序决定这个 PATH，Server 不会再次读取 shell 配置。因此，只写在 `.zshrc` 中的别名或路径对 Server 不可见。
+传统的终端管理工具依赖屏幕文本正则匹配，容易因输出变动导致误判。Condr 采用原生的 Hook 机制，由 Agent 主动上报，实现 100% 准确的状态感知。
 
-## 查看支持的 Agent
+- **一键安装 Hook**：执行命令 `condr agent hooks install <agent>`（例如 `condr agent hooks install claude`）。
+- **图形化管理界面**：前往 **Settings › Device › Agent integrations** 直接安装。
+- **查看与卸载**：使用 `condr agent hooks status <agent>` 查看状态；如需移除，执行 `condr agent hooks uninstall <agent>`。
 
-| Agent | 命令 | 报告状态 | 说明等待内容 | `agent start` 返回时机 |
-| --- | --- | --- | --- | --- |
-| Claude Code | `claude` | 是 | 权限和问题 | 报告 Idle 后 |
-| Codex | `codex` | 是 | 权限 | 认出进程后 |
-| OpenCode | `opencode` | 是 | 权限和问题 | 报告 Idle 后 |
-| Pi | `pi` | 是 | 问题 | 报告 Idle 后 |
-| Oh My Pi | `omp` | 是 | 问题 | 报告 Idle 后 |
-| Antigravity | `agy` | 是 | 否 | 认出进程后 |
-| Grok Build | `grok` | 是 | 权限 | 报告 Idle 后 |
-| Cursor CLI | `cursor-agent` | 是 | 否 | 认出进程后 |
-| GitHub Copilot | `copilot` | 是 | 权限 | 认出进程后 |
-| Kimi Code | `kimi` | 否 | 否 | 认出进程后 |
+## 侧边栏状态指示灯
 
-标为「认出进程后」的 Agent 在第一次提示前不报告状态，启动后会显示 Unknown。这是它们 hook 的行为，不是 Condr 的问题。
+安装 Hook 后，侧边栏会自动显示各个窗格（Pane）中 Agent 的实时运行状态：
 
-Condr 按进程名识别 Agent。通过 node、bun、python 或 shell 启动的 Agent 也能识别，符号链接会跟到真实目标。包装器隐藏名称时，例如 `mise exec -- claude`，Agent 自己的 hook 事件会报告身份。
+- 🟢 **绿灯 (Idle)**：已处理完提示词，处于待命状态或任务已完成。
+- 🟡 **黄灯 (Working)**：正在思考、执行工具或生成代码。
+- 🔴 **红灯 (Blocked)**：遇到了需要人工确认的授权或提问，等待用户回应。
+- ⚪ **灰灯 (Unknown)**：未安装 Hook，或 Agent 启动初期尚未上报状态。
 
-## 安装 hook
+当您处于其他应用窗口时，若 Agent 需要人工授权，Condr 会发送桌面通知，点击通知即可一键唤起并定位至对应窗格。
 
-hook 是 Agent 在开始、完成或等待时调用的一小段命令。Condr 只信这些报告。不装 hook，Agent 会一直是 Unknown。
+## 常见 Agent 配置须知
 
-在运行 Server 的机器上，为每个 Agent 安装一次：
-
-```sh
-condr agent hooks install claude
-```
-
-也可以 **Settings › Device › Agent integrations** → **Install**，对选中的 Device 安装。远程 Device 也在那里安装，因为命令行的 `agent hooks` 不接受 `--device`。
-
-命令只修改 Agent 自己的配置文件，并把 Condr 条目合并到已有条目旁边。文件损坏或超过 4 MiB 时，命令报错且不写入。
-
-| Agent | 修改的文件 |
-| --- | --- |
-| Claude Code | `~/.claude/settings.json` |
-| Codex | `~/.codex/hooks.json`，并运行 `codex features enable hooks` |
-| OpenCode | `~/.config/opencode/condr-tui.js`，并加入 `tui.json` 的 `plugin` 列表 |
-| Pi | `~/.pi/agent/extensions/condr-pi.ts` |
-| Oh My Pi | `~/.omp/agent/extensions/condr-omp.ts` |
-| Antigravity | `~/.gemini/antigravity-cli/plugins/condr/` |
-| Grok Build | `~/.grok/hooks/condr.json` |
-| Cursor CLI | `~/.cursor/hooks.json` |
-| GitHub Copilot | `~/.copilot/hooks/condr.json` |
-| Kimi Code | 不支持，见下文 |
-
-Agent 自己的环境变量仍然生效。例如，`CLAUDE_CONFIG_DIR` 和 `CODEX_HOME` 会改变文件位置。
-
-用 `status` 查看，用 `uninstall` 移除：
-
-```sh
-condr agent hooks status claude
-condr agent hooks uninstall claude
-```
-
-hook 有四种状态：`installed`、`outdated`（升级 Condr 后重装）、`missing` 和 `unsupported`。
-
-几个 Agent 需要额外一步：
-
-- **Codex**：安装后在 Codex 内运行 `/hooks`，信任新 hook。
-- **Antigravity**：在其设置中打开 Condr 插件。第一次调用工具前一直是 Unknown。
-- **Pi** 需要 0.85.1 或更新版本。**Oh My Pi** 需要 18.1.17 或更新版本，每个 profile 安装一次。
-
-hook 只在 Condr Pane 中生效。在其他终端运行 Agent 时，hook 不会工作。
-
-## 读懂每种状态
-
-| 状态 | 含义 | 侧栏标记 |
-| --- | --- | --- |
-| Unknown | 普通 shell，或 Agent 还没有报告 | 灰色信息图标 |
-| Idle | 这一轮完成，等待下一条提示 | 空心圆 |
-| Working | 正在工作 | 琥珀色 |
-| Blocked | 需要你处理 | 红色 |
-| Done | 你离开时已经完成 | 绿色 |
-
-Done 只存在于窗口中。Agent 从 Working 或 Blocked 变为 Idle，且其 Pane 没有焦点时，侧栏会显示 Done，直到你点进该 Pane。
-
-Workspace 行会汇总 Agent 状态，按响铃、Blocked、Done、Working 的顺序各显示一个计数。Unknown 和 Idle 不计数。
-
-## 查看 Agent 在等什么
-
-Agent 等待权限或回答时会变成 Blocked。能说明原因的 Agent 会在侧栏 Agent 行第二行显示工具名和命令第一行，例如：
-
-```text
-Bash: cargo test
-```
-
-这一行也可能显示问题文本，长度截断为 200 个字符。
-
-你可以在三个位置看到：
-
-- 侧栏 Agent 行的第二行。
-- 系统通知正文。
-- 侧栏顶部的 **Needs you** 列表。它汇总所有已连接 Device 上的 Blocked Agent，没有时消失。点击一行可跳到对应 Pane。
-
-Cursor CLI 和 Antigravity 没有权限事件，因此等待时不会变成 Blocked。
-
-## 接收通知
-
-Pane 没有焦点时，以下两种变化会发送系统通知：
-
-- Agent 完成：「Claude finished」。
-- Agent 需要你：「Claude needs your input」。
-
-通知正文包含等待内容、Workspace 名称和终端标题。点击通知会切换到该 Pane。Blocked 期间等待内容变化时，Condr 会替换通知，而不会叠加。
-
-要关闭通知，**Settings › Notifications** → 关闭 **Enable notifications**。这里还有发送测试通知的按钮。
-
-## 了解 Agent 检测方式
-
-Server 读取进程表，识别 Pane 中运行的 Agent。已安装的 hook 为每个事件运行 `condr agent-hook`，把事件写入 Pane 的终端。Server 在终端解析前截取事件，所以状态直接从 Agent 到 Server，不经过屏幕文字。
-
-嵌套 Agent 不计入。一个 Agent 以子进程启动另一个 Agent 时，Condr 只跟踪外层 Agent。
-
-## 了解限制
-
-- **Kimi Code** 能被识别，但 hook 无法区分主任务和子任务的结束。Condr 不安装 hook，所以状态保持 Unknown。
-- **OpenCode** 使用 TUI 插件，仍缺少真机测试。安装前删除旧的开发版 `plugins/condr.js`。
-- **Grok Build** 在其他 Stop hook 阻塞时可能提前显示完成。
-- **GitHub Copilot** 在 API 出错后可能保持 Working。
-- Condr 无法识别的程序是普通终端，状态为 Unknown。这与识别到但未安装 hook 的 Agent 看起来一样。运行 `condr agent list` 区分它们，无法识别的程序不在列表中。
+- **Codex**：完成 Hook 安装后，需在 Codex 内部运行 `/hooks` 命令并确认信任。
+- **Antigravity**：安装后需在其设置中打开 Condr 插件。
+- **Pi / Oh My Pi**：若使用了多个 Profile，每个 Profile 均需独立安装一次 Hook。
