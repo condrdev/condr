@@ -32,12 +32,12 @@ Condr has two parts:
 
 ## Features
 
-- **Stays running.** Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.
-- **Remote access.** No more switching windows: see every local and remote agent in one place. SSH, TCP and zero-config P2P with NAT traversal are built in.
-- **Agent status.** The sidebar shows what each agent is doing. Condr notifies you when an agent finishes a task.
-- **Agent driven.** Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.
-- **Real terminals.** Real terminals built on the `alacritty` core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
-- **Smooth.** Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.
+- **Stays running** — Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.
+- **Remote access** — No more switching windows: see every local and remote agent in one place. SSH, TCP and zero-config P2P with NAT traversal are built in.
+- **Agent status** — The sidebar shows what each agent is doing. Condr notifies you when an agent finishes a task.
+- **Agent driven** — Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.
+- **Real terminals** — Real terminals built on the `alacritty` core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
+- **Smooth** — Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.
 
 ## Install
 
