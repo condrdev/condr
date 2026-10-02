@@ -40,6 +40,7 @@ export default defineConfig({
             { slug: 'docs/changes' },
             { slug: 'docs/remote' },
             { slug: 'docs/automation' },
+            { slug: 'docs/preferences' },
           ],
         },
         {
