@@ -16,9 +16,7 @@ test-support = ["gpui-kit/test-support"]
 
 [dependencies]
 async-channel.workspace = true
-# Every grammar GPUI Kit ships except SQL: tree-sitter-sequel pins cc 1.2, which the
-# Windows resource embedding already needs newer.
-gpui-kit = { workspace = true, features = ["tree-sitter-astro", "tree-sitter-bash", "tree-sitter-c", "tree-sitter-cmake", "tree-sitter-cpp", "tree-sitter-csharp", "tree-sitter-css", "tree-sitter-diff", "tree-sitter-ejs", "tree-sitter-elixir", "tree-sitter-erb", "tree-sitter-go", "tree-sitter-graphql", "tree-sitter-html", "tree-sitter-java", "tree-sitter-javascript", "tree-sitter-jsdoc", "tree-sitter-kotlin", "tree-sitter-lua", "tree-sitter-make", "tree-sitter-markdown", "tree-sitter-markdown-inline", "tree-sitter-php", "tree-sitter-proto", "tree-sitter-python", "tree-sitter-ruby", "tree-sitter-rust", "tree-sitter-scala", "tree-sitter-svelte", "tree-sitter-swift", "tree-sitter-toml", "tree-sitter-tsx", "tree-sitter-typescript", "tree-sitter-yaml", "tree-sitter-zig"] }
+gpui-kit.workspace = true
 gpui-fps.workspace = true
 gpui-pre-reqwest-client.workspace = true
 futures-lite.workspace = true
@@ -26,6 +24,8 @@ image.workspace = true
 condr-core = { path = "../condr-core" }
 condr-server = { path = "../condr-server" }
 relative-path.workspace = true
+syntect.workspace = true
+two-face.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 prost.workspace = true

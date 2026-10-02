@@ -83,13 +83,20 @@ pub(in crate::app) fn select_server_shell(
 const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
 
 /// Preferences a Server owns, edited for one connection at a time; the Server picker sits
-/// in the tab bar. Each page mirrors one `condr server` concern.
-pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> SettingPage {
-    SettingPage::new("Terminal")
-        .icon(IconName::SquareTerminal)
+/// in the tab bar. The first page is what the Server is and how it is doing, plus its
+/// terminal defaults. `this` is the window being rendered, so it must not go through
+/// `settings.read(cx)`.
+pub(super) fn server_general_page(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
+    SettingPage::new("General")
+        .icon(IconName::Settings2)
         .default_open(true)
+        .group(server_status_group(this, cx))
         .group(
-            SettingGroup::new().item(
+            SettingGroup::new().title("Terminal").item(
                 SettingItem::new(
                     "Shell",
                     text_field_row(settings, TextFieldId::Shell, "".into()),
@@ -99,23 +106,27 @@ pub(super) fn server_terminal_page(settings: &Entity<SettingsWindow>) -> Setting
         )
 }
 
-/// `this` is the window being rendered, so it must not go through `settings.read(cx)`.
-pub(super) fn server_network_page(
+/// How other devices reach this Server: the TCP listener and Peer-to-peer, and the
+/// restart that applies them.
+pub(super) fn server_remote_access_page(
     this: &SettingsWindow,
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingPage {
-    SettingPage::new("Daemon")
-        .icon(IconName::Cpu)
-        .group(server_status_group(this, cx))
+    SettingPage::new("Remote access")
+        .icon(IconName::Globe)
         .group(server_network_group(this, settings, cx))
 }
 
-pub(super) fn server_clients_page(settings: &Entity<SettingsWindow>) -> SettingPage {
+pub(super) fn server_clients_page(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
     SettingPage::new("Paired devices")
         .icon(IconName::Network)
-        .default_open(true)
-        .group(server_clients_group(settings))
+        .group(server_invite_group(this, settings, cx))
+        .group(server_devices_group(this, settings, cx))
 }
 
 /// Whether this Client may change the selected Server: only a local or SSH connection
@@ -185,55 +196,70 @@ impl SettingsWindow {
     }
 }
 
-/// Which Server this page describes and what it last reported about itself: the
-/// connection (a Server can run while this GUI is disconnected, so it never claims
-/// "running"), version, uptime, Session counts and the `warn`/`error` records it kept.
-/// Health is refreshed every `STATUS_REFRESH` while Settings is open.
-fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
-    let (status, kind, address) = this
+/// The strip under the tab bar that says which Server the Device tab edits: the picker,
+/// how this window reaches it (a Server can run while this GUI is disconnected, so it
+/// never claims "running") and the connection state. Only the transport: the address
+/// mostly repeats the name, and the Edit dialog has it in full.
+pub(super) fn server_header(
+    this: &SettingsWindow,
+    select: &Entity<ServerSelect>,
+    cx: &App,
+) -> impl IntoElement {
+    let (status, route, remote) = this
         .selected_connection(cx, |c| {
-            let (kind, address) = match &c.endpoint {
-                Endpoint::Local(_) => ("Local", None),
-                Endpoint::Ssh(ssh) => ("SSH", Some(ssh.destination().to_owned())),
-                Endpoint::Tcp(tcp) => ("TCP", Some(tcp.authority())),
-                Endpoint::P2p(p2p) => ("Peer-to-peer", Some(p2p.device.to_string())),
+            let route = match &c.endpoint {
+                Endpoint::Local(_) => "Local",
+                Endpoint::Ssh(_) => "SSH",
+                Endpoint::Tcp(_) => "TCP",
+                Endpoint::P2p(_) => "Peer-to-peer",
             };
-            (c.status, kind, address)
+            let remote = matches!(c.endpoint, Endpoint::Tcp(_) | Endpoint::P2p(_));
+            (c.status, route, remote)
         })
-        .unwrap_or((ConnectionStatus::Disconnected, "Local", None));
-    let state = match status {
-        ConnectionStatus::Connected => "Connected",
-        ConnectionStatus::Connecting => "Connecting",
-        ConnectionStatus::Disconnected => "Disconnected",
+        .unwrap_or((ConnectionStatus::Disconnected, "Local", false));
+    let (tag, state) = match status {
+        ConnectionStatus::Connected => (Tag::success(), "Connected"),
+        ConnectionStatus::Connecting => (Tag::warning(), "Connecting"),
+        ConnectionStatus::Disconnected => (Tag::secondary(), "Disconnected"),
     };
-    let status_row = SettingItem::new(
-        "Status",
-        SettingField::render(move |_, _, _| {
-            match status {
-                ConnectionStatus::Connected => Tag::success(),
-                ConnectionStatus::Connecting => Tag::warning(),
-                ConnectionStatus::Disconnected => Tag::secondary(),
-            }
-            .outline()
-            .small()
-            .child(state)
-        }),
-    )
-    .keywords(["status", "connected"]);
-    let connection = SettingItem::new(
-        "Connection",
-        SettingField::render(move |_, _, _| div().text_sm().child(kind)),
-    )
-    .keywords(["connection", "local", "ssh", "tcp", "p2p"]);
-    let connection = match address {
-        Some(address) => connection.description(SharedString::from(address)),
-        None => connection,
-    };
-    let group = SettingGroup::new()
-        .title("Status")
-        .item(status_row)
-        .item(connection);
+    h_flex()
+        .gap_3()
+        .items_center()
+        .px_3()
+        .py_2()
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(
+            div()
+                .debug_selector(|| "settings-server".into())
+                .flex_none()
+                .w(rems(14.))
+                .child(Select::new(select).small()),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(route),
+        )
+        .child(tag.outline().small().child(state))
+        // The Server refuses admin commands over TCP and Peer-to-peer (ADR 0015): a mode,
+        // said once here in muted text (ADR 0020), with the controls below disabled.
+        .when(remote, |this| {
+            this.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Viewing only. Connect locally or over SSH to change settings."),
+            )
+        })
+}
 
+/// What the Server last reported about itself: version, uptime, Session counts and the
+/// `warn`/`error` records it kept. Refreshed every `STATUS_REFRESH` while Settings is
+/// open.
+fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
+    let group = SettingGroup::new().title("Status");
     let health = this.selected_connection(cx, |c| c.health.clone()).flatten();
     let Some(health) = health else {
         return group.item(SettingItem::render(|_, _, cx| {
@@ -260,7 +286,7 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
     .keywords(["version"]);
     let version = if mismatch {
         version.description(SharedString::from(format!(
-            "This window is {this_version}."
+            "Differs from this window, which is {this_version}."
         )))
     } else {
         version
@@ -315,8 +341,22 @@ fn count(n: u32, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
-fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
+/// The saved TCP listener or Peer-to-peer setting differs from what the Server process
+/// bound: only a restart applies it, so the row says so and the button steps forward.
+fn restart_pending(this: &SettingsWindow, cx: &App) -> bool {
+    this.selected_connection(cx, |c| {
+        c.listen != c.running_listen || c.p2p != c.running_p2p
+    })
+    .unwrap_or(false)
+}
+
+fn server_restart_row(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingItem {
     let restart = settings.clone();
+    let pending = restart_pending(this, cx);
     SettingItem::new(
         "Restart Condr",
         SettingField::render(move |_, _, cx| {
@@ -337,13 +377,22 @@ fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
                 })
                 .child(
                     Button::new("server-restart")
+                        .debug_selector(|| "server-restart".into())
                         .label(if restarting {
                             "Restarting…"
+                        } else if pending {
+                            "Restart to apply"
                         } else {
                             "Restart Condr"
                         })
                         .small()
-                        .outline()
+                        .map(|button| {
+                            if pending {
+                                button.primary()
+                            } else {
+                                button.outline()
+                            }
+                        })
                         .disabled(!allowed || restarting)
                         .on_click(move |_, window, cx| {
                             let (owner, key) = {
@@ -377,7 +426,12 @@ fn server_restart_row(settings: &Entity<SettingsWindow>) -> SettingItem {
                 )
         }),
     )
-    .description("Applies the changes above. Stops every pane and agent on this device.")
+    .description(if pending {
+        "The changes above are saved but not applied yet. Restarting stops every pane and \
+         agent on this device."
+    } else {
+        "Applies the changes above. Stops every pane and agent on this device."
+    })
     .keywords(["restart", "apply"])
 }
 
@@ -386,22 +440,8 @@ fn server_network_group(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingGroup {
-    let remote = this
-        .selected_connection(cx, |c| {
-            matches!(c.endpoint, Endpoint::Tcp(_) | Endpoint::P2p(_))
-        })
-        .unwrap_or(false);
-    let group = SettingGroup::new().title("Network");
-    // The Server refuses admin commands over TCP and p2p (ADR 0015); say so only when it
-    // applies.
-    let group = if remote {
-        group.description(
-            "Read-only over TCP and Peer-to-peer. Connect locally or over SSH to change these.",
-        )
-    } else {
-        group
-    };
-    group
+    SettingGroup::new()
+        .title("Network")
         .item(SettingItem::new(
             "TCP listener",
             SettingField::switch(
@@ -441,239 +481,261 @@ fn server_network_group(
             .description("Lets other devices reach this one by its key. No port to open.")
             .keywords(["p2p", "peer-to-peer", "relay"]),
         )
-        .item(server_restart_row(settings))
+        .item(server_restart_row(this, settings, cx))
 }
 
-fn server_clients_group(settings: &Entity<SettingsWindow>) -> SettingGroup {
-    let invite_settings = settings.clone();
-    let list_settings = settings.clone();
-    SettingGroup::new()
-        .item(
-            SettingItem::render(move |_, _, cx| {
-                let settings = invite_settings.clone();
-                let allowed = server_admin_allowed(&settings, cx);
-                let (listening, p2p, invite) = settings
-                    .read(cx)
-                    .owner
-                    .upgrade()
-                    .and_then(|owner| {
-                        let this = settings.read(cx);
-                        owner
-                            .read(cx)
-                            .connections
-                            .iter()
-                            .find(|c| c.key == this.selected_server)
-                            .map(|c| (c.listen.is_some(), c.p2p, c.invite.clone()))
-                    })
-                    .unwrap_or_default();
-                let reachable = listening || p2p;
-                let hint = match (allowed, reachable) {
-                    (false, _) => "Only a local or SSH connection can invite devices.",
-                    (true, false) => {
-                        "Turn on the TCP listener or Peer-to-peer first: devices pair over either."
-                    }
-                    (true, true) => {
-                        "A one-time address for Connect Remote Device on the new device."
-                    }
-                };
-                let mut column = v_flex().gap_2().child(
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(
-                            Button::new("server-invite")
-                                .label(if invite.is_some() {
-                                    "New invite"
-                                } else {
-                                    "Generate invite"
-                                })
-                                .small()
-                                .outline()
-                                .disabled(!(allowed && reachable))
-                                .on_click({
-                                    let settings = settings.clone();
-                                    move |_, _, cx| {
-                                        settings.update(cx, |this, cx| {
-                                            let key = this.selected_server;
-                                            let _ = this.owner.update(cx, |owner, _| {
-                                                owner.server_admin(key, ServerAdminCommand::Invite)
-                                            });
-                                        });
-                                    }
-                                }),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(hint),
-                        ),
-                );
-                if let Some(invite) = invite {
-                    // One line per enabled transport, each with its own Copy.
-                    let link = |id: &'static str, address: String| {
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .debug_selector(move || id.into())
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_sm()
-                                    .font_family("monospace")
-                                    .child(address.clone()),
-                            )
-                            .child(
-                                Clipboard::new(format!("{id}-copy"))
-                                    .value(address)
-                                    .tooltip("Copy invite"),
-                            )
-                    };
-                    let has_tcp = invite.tcp.is_some();
-                    column = column.child(
-                        v_flex()
-                            .gap_1()
-                            .children(invite.p2p.map(|address| link("server-invite-p2p", address)))
-                            .children(invite.tcp.map(|address| link("server-invite-tcp", address)))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!(
-                                        "Copied. Valid for {} minutes{}",
-                                        invite.expires_in_secs.div_ceil(60),
-                                        if has_tcp {
-                                            "; in the TCP address, replace <host> with one the \
-                                             new device can reach."
-                                        } else {
-                                            "."
-                                        }
-                                    )),
-                            ),
-                    );
-                }
-                column.into_any_element()
-            })
+/// The invite a new device pairs with. Its rows are the Kit's, one per transport link,
+/// so the page reads like the rest of Settings rather than a block of prose.
+fn server_invite_group(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingGroup {
+    let allowed = admin_allowed(this, cx);
+    // Whether a device could reach this one now: what the process bound, not what is
+    // saved for the next restart.
+    let (reachable, pending, invite) = this
+        .selected_connection(cx, |c| {
+            (
+                c.running_listen.is_some() || c.running_p2p,
+                c.listen != c.running_listen || c.p2p != c.running_p2p,
+                c.invite.clone(),
+            )
+        })
+        .unwrap_or_default();
+    // Why the button is off is the header's business when this window is remote; the
+    // description only covers the Server's own state. The clipboard got the p2p link,
+    // or the TCP one without it (see the `Invite` reply).
+    let description: SharedString = match (&invite, reachable, pending) {
+        (Some(invite), _, _) => format!(
+            "The {} link is on the clipboard. Valid for {} minutes.",
+            if invite.p2p.is_some() {
+                "Peer-to-peer"
+            } else {
+                "TCP"
+            },
+            invite.expires_in_secs.div_ceil(60)
+        )
+        .into(),
+        (None, false, true) => "Restart Condr to apply the Remote access changes first.".into(),
+        (None, false, false) => {
+            "Turn on the TCP listener or Peer-to-peer under Remote access first.".into()
+        }
+        (None, true, _) => "A one-time address for Connect Remote Device on the new device.".into(),
+    };
+    let has_invite = invite.is_some();
+    let button = {
+        let settings = settings.clone();
+        SettingField::render(move |_, _, _| {
+            let settings = settings.clone();
+            Button::new("server-invite")
+                .label(if has_invite {
+                    "New invite"
+                } else {
+                    "Generate invite"
+                })
+                .small()
+                .outline()
+                .disabled(!(allowed && reachable))
+                .on_click(move |_, _, cx| {
+                    settings.update(cx, |this, cx| {
+                        let key = this.selected_server;
+                        let _ = this.owner.update(cx, |owner, _| {
+                            owner.server_admin(key, ServerAdminCommand::Invite)
+                        });
+                    });
+                })
+        })
+    };
+    let mut group = SettingGroup::new().title("Invite").item(
+        SettingItem::new("Invite a device", button)
+            .description(description)
             .keywords(["invite", "pair"]),
-        )
-        .item(
-            SettingItem::render(move |_, _, cx| {
-                let settings = list_settings.clone();
-                let allowed = server_admin_allowed(&settings, cx);
-                let (clients, connected) = settings
-                    .read(cx)
-                    .owner
-                    .upgrade()
-                    .and_then(|owner| {
-                        let this = settings.read(cx);
-                        owner
-                            .read(cx)
-                            .connections
-                            .iter()
-                            .find(|c| c.key == this.selected_server)
-                            .map(|c| (c.clients.clone(), c.connected_devices.clone()))
-                    })
-                    .unwrap_or_default();
-                if clients.is_empty() {
-                    return div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No paired devices.")
-                        .into_any_element();
-                }
-                // The same columns as `condr server clients`.
-                let header = |text: &'static str| {
+    );
+    if let Some(invite) = invite {
+        if let Some(address) = invite.p2p {
+            group = group.item(invite_link_row(
+                "Peer-to-peer",
+                "server-invite-p2p",
+                address,
+                None,
+            ));
+        }
+        if let Some(address) = invite.tcp {
+            group = group.item(invite_link_row(
+                "TCP",
+                "server-invite-tcp",
+                address,
+                Some("Replace <host> with an address the new device can reach."),
+            ));
+        }
+    }
+    group
+}
+
+/// One transport's link under its name with its own Copy: too long for the field slot
+/// beside a title, so the row stacks.
+fn invite_link_row(
+    title: &'static str,
+    id: &'static str,
+    address: String,
+    description: Option<&'static str>,
+) -> SettingItem {
+    let item = SettingItem::new(
+        title,
+        SettingField::render(move |_, _, _| {
+            h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(text)
-                };
-                let mut table = v_flex().gap_2().child(
+                        .debug_selector(move || id.into())
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .font_family("monospace")
+                        .child(address.clone()),
+                )
+                .child(
+                    Clipboard::new(format!("{id}-copy"))
+                        .value(address.clone())
+                        .tooltip("Copy invite"),
+                )
+        }),
+    )
+    .layout(Axis::Vertical)
+    .keywords(["invite"]);
+    match description {
+        Some(description) => item.description(description),
+        None => item,
+    }
+}
+
+/// One row per paired device, connected ones first: the name over its fingerprint (the
+/// same one `condr server clients` prints), when it was last seen, and Revoke.
+fn server_devices_group(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingGroup {
+    let allowed = admin_allowed(this, cx);
+    let (mut clients, connected) = this
+        .selected_connection(cx, |c| (c.clients.clone(), c.connected_devices.clone()))
+        .unwrap_or_default();
+    let mut group = SettingGroup::new().title("Devices");
+    if clients.is_empty() {
+        return group.item(
+            SettingItem::render(|_, _, cx| {
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No paired devices yet.")
+            })
+            .keywords(["clients", "devices"]),
+        );
+    }
+    // Connected devices first; the Server's order (pairing order) otherwise.
+    clients.sort_by_key(|client| !connected.contains(&client.fingerprint));
+    for client in clients {
+        let is_connected = connected.contains(&client.fingerprint);
+        let settings = settings.clone();
+        let keywords = [SharedString::from(client.name.clone()), "revoke".into()];
+        group = group.item(
+            SettingItem::render(move |_, _, cx| {
+                let seen: AnyElement = if is_connected {
                     h_flex()
-                        .gap_4()
+                        .gap_1()
                         .items_center()
-                        .child(div().w(rems(10.)).child(header("NAME")))
-                        .child(div().w(rems(8.)).child(header("LAST SEEN")))
-                        .child(div().flex_1().child(header("FINGERPRINT"))),
-                );
-                for client in clients {
-                    let seen = if connected.contains(&client.fingerprint) {
-                        "connected".to_owned()
-                    } else {
-                        relative_age(client.last_seen)
-                    };
-                    let key = client.fingerprint.clone();
-                    let name = client.name.clone();
-                    let settings = settings.clone();
-                    table = table.child(
-                        h_flex()
-                            .gap_4()
-                            .items_center()
-                            .text_sm()
-                            .child(div().w(rems(10.)).truncate().child(client.name))
-                            .child(div().w(rems(8.)).whitespace_nowrap().child(seen))
+                        .child(
+                            Icon::new(super::sidebar::CondrIconName::CircleFilled)
+                                .size_2()
+                                .text_color(cx.theme().success),
+                        )
+                        .child("Connected")
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(relative_age(client.last_seen))
+                        .into_any_element()
+                };
+                h_flex()
+                    .w_full()
+                    .gap_4()
+                    .items_center()
+                    .text_sm()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(client.name.clone())
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
                                     .font_family("monospace")
-                                    .child(client.fingerprint),
-                            )
-                            .when(allowed, |this| {
-                                this.child(
-                                    Button::new(format!("revoke-{key}"))
-                                        .label("Revoke")
-                                        .small()
-                                        .outline()
-                                        .on_click(move |_, window, cx| {
-                                            let (owner, selected) = {
-                                                let this = settings.read(cx);
-                                                (this.owner.clone(), this.selected_server)
-                                            };
-                                            let key = key.clone();
-                                            let name = name.clone();
-                                            window.defer(cx, move |window, cx| {
-                                                window.open_alert_dialog(cx, move |alert, _, _| {
-                                                    let owner = owner.clone();
-                                                    let key = key.clone();
-                                                    alert
-                                                        .confirm()
-                                                        .title(format!(
-                                                            "Revoke \u{201c}{name}\u{201d}?"
-                                                        ))
-                                                        .description(
-                                                            "Its connections close now, and it \
-                                                             needs a new invite to pair again.",
-                                                        )
-                                                        .button_props(
-                                                            DialogButtonProps::default()
-                                                                .ok_text("Revoke")
-                                                                .ok_variant(ButtonVariant::Danger),
-                                                        )
-                                                        .on_ok(move |_, _, cx| {
-                                                            let _ = owner.update(cx, |owner, _| {
-                                                                owner.server_admin(
-                                                                    selected,
-                                                                    ServerAdminCommand::Revoke {
-                                                                        key: key.clone(),
-                                                                    },
-                                                                )
-                                                            });
-                                                            true
-                                                        })
-                                                });
-                                            });
-                                        }),
-                                )
-                            }),
-                    );
-                }
-                table.into_any_element()
+                                    .truncate()
+                                    .child(client.fingerprint.clone()),
+                            ),
+                    )
+                    .child(div().whitespace_nowrap().child(seen))
+                    .child(revoke_button(&settings, &client, allowed))
             })
-            .keywords(["clients", "devices", "revoke"]),
-        )
+            .keywords(keywords),
+        );
+    }
+    group
+}
+
+fn revoke_button(
+    settings: &Entity<SettingsWindow>,
+    client: &ServerClientInfo,
+    allowed: bool,
+) -> Button {
+    let settings = settings.clone();
+    let key = client.fingerprint.clone();
+    let name = client.name.clone();
+    Button::new(format!("revoke-{key}"))
+        .label("Revoke")
+        .small()
+        .ghost()
+        .disabled(!allowed)
+        .on_click(move |_, window, cx| {
+            let (owner, selected) = {
+                let this = settings.read(cx);
+                (this.owner.clone(), this.selected_server)
+            };
+            let key = key.clone();
+            let name = name.clone();
+            window.defer(cx, move |window, cx| {
+                window.open_alert_dialog(cx, move |alert, _, _| {
+                    let owner = owner.clone();
+                    let key = key.clone();
+                    alert
+                        .confirm()
+                        .title(format!("Revoke \u{201c}{name}\u{201d}?"))
+                        .description(
+                            "Its connections close now, and it needs a new invite to pair again.",
+                        )
+                        .button_props(
+                            DialogButtonProps::default()
+                                .ok_text("Revoke")
+                                .ok_variant(ButtonVariant::Danger),
+                        )
+                        .on_ok(move |_, _, cx| {
+                            let _ = owner.update(cx, |owner, _| {
+                                owner.server_admin(
+                                    selected,
+                                    ServerAdminCommand::Revoke { key: key.clone() },
+                                )
+                            });
+                            true
+                        })
+                });
+            });
+        })
 }
 
 /// The listen address a Server stores, or the default when it has none.
@@ -782,7 +844,7 @@ pub(super) fn agents_page(
     settings: &Entity<SettingsWindow>,
     (reports, error): (Vec<HooksReport>, Option<String>),
 ) -> SettingPage {
-    let mut group = SettingGroup::new().title("Agent integration");
+    let mut group = SettingGroup::new();
     if let Some(error) = error {
         group = group.item(
             SettingItem::render(move |_, _, cx| {
@@ -818,7 +880,9 @@ pub(super) fn agents_page(
             .keywords([agent.label(), "hooks"]),
         );
     }
-    SettingPage::new("Agents").icon(IconName::Bot).group(group)
+    SettingPage::new("Agent integrations")
+        .icon(IconName::Bot)
+        .group(group)
 }
 
 /// One row's field: the state as a word, then the one or two actions that change it.

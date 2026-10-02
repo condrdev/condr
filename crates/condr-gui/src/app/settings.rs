@@ -99,6 +99,8 @@ impl Condr {
             let _ = owner.update(cx, |this, cx| match opened {
                 Ok(handle) => {
                     this.settings_window = Some(handle);
+                    // The window opened on the update; the dot has done its job.
+                    this.update_seen = true;
                     // Closing the main window closes Settings too; otherwise it would
                     // keep the process alive with nothing left to configure.
                     this._settings_window_closed = Some(cx.on_window_closed(move |cx, _| {
@@ -119,6 +121,8 @@ pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
     pub(super) color_scheme: Entity<ColorSchemeSelect>,
+    /// The Preview and Diff Tabs' theme, the same kind of Select.
+    pub(super) code_theme: Entity<ColorSchemeSelect>,
     /// The font as last committed from this window. `Condr` only ever holds the
     /// normalized form, so a half-edited value never reaches the theme or the config
     /// file, and reopening Settings starts from what is actually in use.
@@ -139,6 +143,9 @@ pub(super) struct SettingsWindow {
     /// The page the Server tab opens on when it is first drawn; Kit keeps the selection
     /// from then on. Tests point it at a page they need to see.
     pub(super) server_page: SelectIndex,
+    /// The window opened while the sidebar's dot showed a newer build: the Application
+    /// tab first draws About's Updates group, where the dot was pointing.
+    open_on_update: bool,
     /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
     /// refreshed on render when the connection list changes.
     server_select: Entity<ServerSelect>,
@@ -148,11 +155,11 @@ pub(super) struct SettingsWindow {
     /// for a plain text element.
     licenses: Entity<EditorState>,
     /// Re-asks the selected Server for its `Status` while this window is open, so uptime
-    /// and recent errors on the Daemon page stay current. Dropped with the window.
+    /// and recent errors on the General page stay current. Dropped with the window.
     _status_refresh: Task<()>,
 }
 
-/// How often the Daemon page's health figures are refreshed while Settings is open.
+/// How often the General page's health figures are refreshed while Settings is open.
 const STATUS_REFRESH: Duration = Duration::from_secs(5);
 
 /// The two halves of Settings: this Client's own preferences and one Server's.
@@ -163,7 +170,7 @@ pub(super) enum SettingsTab {
     Server,
 }
 
-type ServerSelect = SelectState<SearchableVec<SharedString>>;
+pub(super) type ServerSelect = SelectState<SearchableVec<SharedString>>;
 
 /// Connection keys and labels in sidebar order, for the Server picker.
 /// The picker identifies a Server by its label, so two Servers sharing a name get the
@@ -198,20 +205,14 @@ const LICENSES: &str = include_str!("../../assets/licenses.md");
 
 impl SettingsWindow {
     fn new(owner: WeakEntity<Condr>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let labels = std::iter::once(DEFAULT_COLOR_SCHEME_LABEL.into())
-            .chain(crate::color_scheme::names().map(SharedString::from))
-            .collect::<Vec<SharedString>>();
         let current = owner
             .upgrade()
             .map(|owner| owner.read(cx).terminal_color_scheme.clone())
             .unwrap_or_default();
-        let selected = labels
-            .iter()
-            .position(|label| color_scheme_name(label) == current)
-            .map(IndexPath::new);
-        let color_scheme = cx.new(|cx| {
-            SelectState::new(SearchableVec::new(labels), selected, window, cx).searchable(true)
-        });
+        let open_on_update = owner
+            .upgrade()
+            .is_some_and(|owner| owner.read(cx).update_pending());
+        let color_scheme = scheme_select(crate::color_scheme::names(), &current, window, cx);
         cx.subscribe(
             &color_scheme,
             |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
@@ -222,6 +223,17 @@ impl SettingsWindow {
                 let _ = this
                     .owner
                     .update(cx, |owner, cx| owner.set_terminal_color_scheme(name, cx));
+            },
+        )
+        .detach();
+        let current = selected_code_theme(cx);
+        let code_theme = scheme_select(crate::app::syntax::theme_names(), &current, window, cx);
+        cx.subscribe(
+            &code_theme,
+            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+                if let SelectEvent::Confirm(Some(label)) = event {
+                    select_code_theme(&this.owner, color_scheme_name(label), cx);
+                }
             },
         )
         .detach();
@@ -304,6 +316,7 @@ impl SettingsWindow {
             owner,
             focus_handle: cx.focus_handle(),
             color_scheme,
+            code_theme,
             font_draft,
             selected_server,
             font_family,
@@ -314,6 +327,7 @@ impl SettingsWindow {
             listen_refused: false,
             tab: SettingsTab::default(),
             server_page: SelectIndex::default(),
+            open_on_update,
             server_select,
             server_keys,
             server_labels,
@@ -414,27 +428,37 @@ fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_server_choices(window, cx);
-        // Root does not draw dialogs itself; without this the Restart and Revoke
-        // confirmations open invisibly.
-        let dialog_layer = Root::render_dialog_layer(window, cx);
         let settings = cx.entity();
         let tab = self.tab;
         let content = match tab {
-            SettingsTab::Application => Settings::new("condr-settings-application")
-                .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .page(appearance_page(&self.owner, &settings, &self.color_scheme))
-                .page(notifications_page(&self.owner))
-                .page(power_page(&self.owner))
-                .page(shortcuts_page())
-                .page(developer_page(&self.owner))
-                .page(licenses_page(&self.licenses))
-                .page(about_page(&self.owner, cx)),
+            SettingsTab::Application => {
+                let pages = [
+                    appearance_page(&self.owner, &settings, &self.color_scheme, &self.code_theme),
+                    notifications_page(&self.owner),
+                    power_page(&self.owner),
+                    shortcuts_page(),
+                    developer_page(&self.owner),
+                    licenses_page(&self.licenses),
+                    about_page(&self.owner, self.open_on_update, cx),
+                ];
+                // About is the last page and Updates its second group.
+                let about_updates = SelectIndex {
+                    page_ix: pages.len() - 1,
+                    group_ix: Some(1),
+                };
+                Settings::new("condr-settings-application")
+                    .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
+                    .when(self.open_on_update, |this| {
+                        this.default_selected_index(about_updates)
+                    })
+                    .pages(pages)
+            }
             SettingsTab::Server => Settings::new("condr-settings-server")
                 .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
                 .default_selected_index(self.server_page)
-                .page(server_terminal_page(&settings))
-                .page(server_network_page(self, &settings, cx))
-                .page(server_clients_page(&settings))
+                .page(server_general_page(self, &settings, cx))
+                .page(server_remote_access_page(self, &settings, cx))
+                .page(server_clients_page(self, &settings, cx))
                 .page(agents_page(&settings, self.connection_hooks(cx))),
         };
         let tabs = TabBar::new("condr-settings-tabs")
@@ -454,21 +478,14 @@ impl Render for SettingsWindow {
                 });
             })
             .prefix(div().w_3())
-            .children([Tab::new().label("Application"), Tab::new().label("Device")])
-            .when(tab == SettingsTab::Server, |this| {
-                this.suffix(
-                    div()
-                        .debug_selector(|| "settings-server".into())
-                        .flex_none()
-                        .w(rems(14.))
-                        .pr_3()
-                        .py_1()
-                        .child(Select::new(&self.server_select).small()),
-                )
-            });
+            .children([Tab::new().label("Application"), Tab::new().label("Device")]);
+        // Which Server the Device tab edits, above its pages rather than in the tab bar,
+        // so the tab bar keeps its shape and the pages sit under the device they describe.
+        let header =
+            (tab == SettingsTab::Server).then(|| server_header(self, &self.server_select, cx));
         // The dialog layer sits beside the page, not inside it, so Escape in a dialog
         // closes the dialog and not the window.
-        div().size_full().relative().children(dialog_layer).child(
+        div().size_full().relative().child(
             v_flex()
                 .id("condr-settings-window")
                 .debug_selector(|| "settings-content".into())
@@ -483,6 +500,7 @@ impl Render for SettingsWindow {
                 })
                 .child(title_bar(SETTINGS_WINDOW_TITLE, cx))
                 .child(tabs)
+                .children(header)
                 .child(div().flex_1().min_h_0().child(content)),
         )
     }
@@ -641,8 +659,9 @@ fn location_row(
 }
 
 /// Built on every render like the other pages, so a found update or a changed channel
-/// shows as soon as the owner notifies.
-fn about_page(owner: &WeakEntity<Condr>, cx: &App) -> SettingPage {
+/// shows as soon as the owner notifies. `open_on_update` unfolds its Updates entry in
+/// the page list, where the window's first draw selects it.
+fn about_page(owner: &WeakEntity<Condr>, open_on_update: bool, cx: &App) -> SettingPage {
     let link_row = |label: &'static str, button: &'static str, url: &'static str| {
         SettingItem::new(
             label,
@@ -658,6 +677,7 @@ fn about_page(owner: &WeakEntity<Condr>, cx: &App) -> SettingPage {
     };
     SettingPage::new("About")
         .icon(IconName::Info)
+        .default_open(open_on_update)
         .group(
             SettingGroup::new()
                 .item(
@@ -816,6 +836,23 @@ impl SettingsWindow {
             })
             .unwrap_or_default()
     }
+}
+
+/// A searchable Select over Default and `names`, open on `current` (empty for Default).
+fn scheme_select<'a>(
+    names: impl Iterator<Item = &'a str>,
+    current: &SharedString,
+    window: &mut Window,
+    cx: &mut Context<SettingsWindow>,
+) -> Entity<ColorSchemeSelect> {
+    let labels = std::iter::once(DEFAULT_COLOR_SCHEME_LABEL.into())
+        .chain(names.map(|name| SharedString::from(name.to_owned())))
+        .collect::<Vec<SharedString>>();
+    let selected = labels
+        .iter()
+        .position(|label| color_scheme_name(label) == *current)
+        .map(IndexPath::new);
+    cx.new(|cx| SelectState::new(SearchableVec::new(labels), selected, window, cx).searchable(true))
 }
 
 #[cfg(test)]

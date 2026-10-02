@@ -340,15 +340,20 @@ impl CondrSidebarIcon {
     }
 
     pub(in crate::app) fn render(self, cx: &mut App) -> AnyElement {
+        // An avatar fills the row's icon slot; a mark keeps icon size.
+        let side = match self.graphic {
+            SidebarIconGraphic::Avatar { .. } => rems(1.25),
+            SidebarIconGraphic::Agent { .. } => rems(1.),
+        };
         let graphic = match self.graphic {
             SidebarIconGraphic::Avatar { initial, color } => div()
-                .size_4()
+                .size(side)
                 .rounded_sm()
                 .bg(color)
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_xs()
+                .text_sm()
                 .font_medium()
                 .text_color(gpui_kit::white())
                 .child(initial)
@@ -381,7 +386,7 @@ impl CondrSidebarIcon {
         div()
             .id(id)
             .debug_selector(move || debug_selector.to_string())
-            .size_4()
+            .size(side)
             .flex_none()
             .flex()
             .items_center()

@@ -66,8 +66,8 @@ use workspace_git::*;
 pub use config::{ServerConfig, load_listen, load_p2p, save_listen, save_p2p};
 pub use local::{
     connected_devices, ensure_local_server, ensure_server, ensure_server_from, probe_server,
-    restart_server, restart_server_from, revoke_devices, server_status, stop_server,
-    wait_for_shutdown,
+    restart_server, restart_server_from, revoke_devices, server_status, set_server_executable,
+    stop_server, wait_for_shutdown,
 };
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
@@ -200,10 +200,11 @@ impl BoundServer {
             }
         };
         let state = Arc::new(Mutex::new(state));
-        state
-            .lock()
-            .expect("server state lock poisoned")
-            .start_git_watcher(Arc::downgrade(&state));
+        {
+            let mut runtime = state.lock().expect("server state lock poisoned");
+            runtime.running_listen = config.listen.map(|address| address.to_string());
+            runtime.start_git_watcher(Arc::downgrade(&state));
+        }
         Ok(Self {
             local,
             tcp,
@@ -527,6 +528,9 @@ struct RuntimeState {
     config_path: Option<PathBuf>,
     /// This Server's endpoint as Panes see it in `CONDR_SOCKET_PATH`.
     socket_path: String,
+    /// The TCP address this process bound at startup, reported by `Status` beside the
+    /// saved one: a change to `[server] listen` waits for a restart.
+    running_listen: Option<String>,
     started_at: Instant,
 }
 
@@ -668,6 +672,7 @@ impl RuntimeState {
             settings,
             config_path,
             socket_path: socket_path.to_string_lossy().into_owned(),
+            running_listen: None,
             started_at: Instant::now(),
         }
     }

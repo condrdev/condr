@@ -26,7 +26,7 @@ pub(super) fn terminal_path_text(relative: &str) -> String {
     }
 }
 
-/// The highlighter name for a file: its extension, which GPUI Kit's registry resolves
+/// The highlighter name for a file: its extension, which `syntax::highlighter_factory` resolves
 /// (`rs` → Rust); an unknown one leaves the text plain.
 fn language_for(path: &RelativePath) -> SharedString {
     path.extension()
@@ -570,7 +570,7 @@ impl Condr {
         else {
             return;
         };
-        cx.spawn_in(window, async move |this, cx| {
+        cx.spawn_in(window, async move |_, cx| {
             let result = cx
                 .background_spawn({
                     let (target, path) = (target.clone(), path.clone());
@@ -578,7 +578,7 @@ impl Condr {
                 })
                 .await;
             if let Err(error) = result {
-                let _ = this.update_in(cx, |_, window, cx| {
+                let _ = cx.update(|window, cx| {
                     window.push_notification(
                         Notification::error(format!(
                             "Couldn't open {} in {}: {error}",
@@ -690,13 +690,18 @@ impl Condr {
                 .flex_1()
                 .min_h_0()
                 .w_full()
+                // The code theme's background: the Editor draws none of its own.
+                .when_some(
+                    theme.highlight_theme.style.editor_background,
+                    |this, background| this.bg(background),
+                )
                 .child(
                     Editor::new(&editor.state)
                         .readonly(true)
                         .appearance(false)
                         .bordered(false)
                         .font_family(self.terminal_font.family.clone())
-                        .text_size(px(self.terminal_font.size))
+                        .text_size(px(self.code_font_size))
                         .h(relative(1.)),
                 )
                 .into_any_element(),
@@ -746,7 +751,7 @@ impl Condr {
 
         let editor = self.file_editors.entry((key, tab_id)).or_insert_with(|| {
             let state = cx.new(|cx| {
-                EditorState::new(window, cx)
+                let mut state = EditorState::new(window, cx)
                     // Any language puts the Editor in code mode; the real one is set per
                     // file below, since one Tab shows many files over its life.
                     .language("text")
@@ -754,7 +759,9 @@ impl Condr {
                     .soft_wrap(false)
                     .indent_guides(false)
                     .folding(false)
-                    .searchable(true)
+                    .searchable(true);
+                state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
+                state
             });
             FileEditor {
                 state,

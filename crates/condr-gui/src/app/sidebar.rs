@@ -8,13 +8,12 @@ use item::*;
 pub(super) use drag_drop::*;
 pub(super) use icon::*;
 
-/// The Workspace row's trailing column: its agents' states beside the name and, on a
-/// repository row, `↑ ↓` beside the branch. The two boxes take `DETAIL_LINE_HEIGHTS` so
-/// they sit level with the row's own two lines.
+/// The Workspace row's trailing column: its agents' states beside the name and `↑ ↓`
+/// beside the branch. The two boxes take `DETAIL_LINE_HEIGHTS` so they sit level with
+/// the row's own two lines.
 fn workspace_suffix(
     summary: &[(SidebarStatusVisual, usize)],
     upstream: Option<&str>,
-    two_lines: bool,
     cx: &App,
 ) -> AnyElement {
     let states = h_flex()
@@ -29,9 +28,6 @@ fn workspace_suffix(
                 .children(status_badge(status.glyph, status.tone, cx))
                 .child(count.to_string())
         }));
-    if !two_lines {
-        return states.into_any_element();
-    }
     v_flex()
         .items_end()
         .justify_center()
@@ -157,11 +153,12 @@ impl Condr {
                             let workspace_id = workspace.id();
                             let workspace_name = workspace.name().to_owned();
                             let git = connection.workspace_git.get(&workspace_id);
-                            // A repository always gets its second line, `detached` included,
-                            // so Workspaces of one Server keep one row height.
-                            let detail = git.map(|git| {
-                                git.branch.clone().unwrap_or_else(|| "detached".to_owned())
-                            });
+                            // Every Workspace gets its second line, `detached` and no
+                            // repository included, so the rows keep one height.
+                            let detail = git.map_or_else(
+                                || "no git".to_owned(),
+                                |git| git.branch.clone().unwrap_or_else(|| "detached".to_owned()),
+                            );
                             let upstream =
                                 git.and_then(|git| git.upstream).and_then(upstream_label);
                             let mut statuses = Vec::new();
@@ -410,11 +407,10 @@ impl Condr {
                                         }),
                                 )
                             })
-                            .when_some(detail.clone(), |item, detail| item.detail(detail))
+                            .detail(detail)
                             .when(!summary.is_empty() || upstream.is_some(), |item| {
-                                let two_lines = detail.is_some();
                                 item.suffix(move |_, cx| {
-                                    workspace_suffix(&summary, upstream.as_deref(), two_lines, cx)
+                                    workspace_suffix(&summary, upstream.as_deref(), cx)
                                 })
                             })
                             .on_click(move |_, window, cx| {
@@ -653,10 +649,10 @@ impl Condr {
             .into_any_element()
     }
 
-    /// Carries a dot while the update check has found a newer build (ADR 0029); the
-    /// About page says which.
+    /// Carries a dot while the update check has found a newer build and Settings has not
+    /// been opened since (ADR 0029); the About page says which.
     fn settings_button(&self, owner: WeakEntity<Self>, cx: &App) -> AnyElement {
-        let update = matches!(self.update_state, UpdateState::Available(_));
+        let update = self.update_pending();
         let button = Button::new("open-settings")
             .debug_selector(|| "open-settings".into())
             .ghost()
@@ -676,7 +672,7 @@ impl Condr {
         }
         Badge::new()
             .dot()
-            .color(cx.theme().info)
+            .color(cx.theme().danger)
             .child(button)
             .into_any_element()
     }

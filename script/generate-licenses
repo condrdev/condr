@@ -48,6 +48,12 @@ trap 'rm -f "$TMP" "$ABOUT"' EXIT
     echo
     cat crates/condr-gui/assets/icons/NOTICE-FILE-ICONS
     echo
+    echo "## Syntax definitions and themes"
+    echo
+    cat crates/condr-gui/assets/NOTICE-HIGHLIGHTING
+    echo
+    cat crates/condr-gui/assets/code_themes/NOTICE
+    echo
     echo "## Rust crates"
     echo
 } > "$TMP"

@@ -139,8 +139,8 @@ impl Condr {
                     Ok(Err(error)) => Err(error.to_string()),
                     Err(_) => Err("The folder picker closed without a result".to_string()),
                 };
-                owner
-                    .update_in(cx, |this, window, cx| match picked {
+                cx.update(|window, cx| {
+                    owner.update(cx, |this, cx| match picked {
                         Ok(Some(paths)) => {
                             if let Some(path) = paths.into_iter().next() {
                                 apply(this, path, window, cx);
@@ -163,7 +163,9 @@ impl Condr {
                             );
                         }
                     })
-                    .ok()?;
+                })
+                .ok()?
+                .ok()?;
                 Some(())
             })
             .detach();

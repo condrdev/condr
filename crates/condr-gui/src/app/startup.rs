@@ -258,9 +258,48 @@ pub(super) fn lock_exclusively(path: &std::path::Path) -> io::Result<File> {
     Ok(file)
 }
 
+/// A drag-and-drop DMG has no installer step, so the GUI inside `Condr.app` registers
+/// the `condr` beside it on every start (`condr server install` is idempotent; ADR 0016)
+/// and starts the Server from that installed copy, as the AppImage's `AppRun` does, so
+/// the Server outlives a replaced bundle. The GUI is the bundle's main executable
+/// rather than a script launcher because the notarization ticket lists only Mach-O
+/// code, so Gatekeeper would block a script. Outside a bundle nothing happens.
+fn install_bundled_cli() -> io::Result<()> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let executable = std::env::current_exe()?;
+    let Some(directory) = executable
+        .parent()
+        .filter(|directory| directory.ends_with("Contents/MacOS"))
+    else {
+        return Ok(());
+    };
+    let output = std::process::Command::new(directory.join("condr"))
+        .args(["server", "install", "--json"])
+        .stdin(std::process::Stdio::null())
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let path = report["install_path"]
+        .as_str()
+        .ok_or_else(|| io::Error::other("the install report names no install_path"))?;
+    condr_server::set_server_executable(path.into());
+    Ok(())
+}
+
 pub(crate) fn run() {
     // Both held until `run` returns, which is when the GUI exits.
     let _log_guard = condr_server::logging::init("condr-gui");
+    if let Err(error) = install_bundled_cli() {
+        tracing::warn!(
+            "the bundled condr was not installed, so the Server starts from the bundle: {error}"
+        );
+    }
     let _instance_lock = match acquire_single_instance_lock() {
         Ok(lock) => lock,
         Err(error) => {

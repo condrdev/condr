@@ -54,7 +54,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Flags: preservestringtype; Tasks: addtopath; Check: NeedsAddPath
 
 [Run]
-Filename: "{app}\condr-gui.exe"; Description: "Launch Condr"; Flags: nowait postinstall skipifsilent
+; Through the shell, not as Setup's child: Setup's process mitigations, redirection trust
+; among them, would pass to the GUI and to everything it starts (ADR 0031).
+Filename: "{win}\explorer.exe"; Parameters: """{app}\condr-gui.exe"""; Description: "Launch Condr"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{app}\condr.exe"; Parameters: "server stop"; Flags: runhidden; RunOnceId: "StopServer"

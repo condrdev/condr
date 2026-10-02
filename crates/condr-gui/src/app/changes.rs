@@ -792,13 +792,18 @@ impl Condr {
                 .flex_1()
                 .min_h_0()
                 .w_full()
+                // The code theme's background: the Editor draws none of its own.
+                .when_some(
+                    theme.highlight_theme.style.editor_background,
+                    |this, background| this.bg(background),
+                )
                 .child(
                     Editor::new(&editor.state)
                         .readonly(true)
                         .appearance(false)
                         .bordered(false)
                         .font_family(self.terminal_font.family.clone())
-                        .text_size(px(self.terminal_font.size))
+                        .text_size(px(self.code_font_size))
                         .h(relative(1.)),
                 )
                 .into_any_element(),
@@ -890,13 +895,15 @@ impl Condr {
 
         let editor = self.diff_editors.entry((key, tab_id)).or_insert_with(|| {
             let state = cx.new(|cx| {
-                EditorState::new(window, cx)
+                let mut state = EditorState::new(window, cx)
                     .language("diff")
                     .line_number(true)
                     .soft_wrap(false)
                     .indent_guides(false)
                     .folding(false)
-                    .searchable(true)
+                    .searchable(true);
+                state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
+                state
             });
             let decorations = state.update(cx, |state, cx| {
                 state.create_decorations_collection(Vec::new(), cx)

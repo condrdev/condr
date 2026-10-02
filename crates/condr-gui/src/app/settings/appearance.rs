@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::syntax::{self, CodeTheme};
 
 /// How long after the last font change the config file is written, so a run of
 /// stepper clicks rewrites it once.
@@ -127,11 +128,13 @@ pub(in crate::app) fn apply_appearance(
             Theme::change(ThemeMode::Dark, window, cx);
         }
     }
+    syntax::apply_code_theme(cx);
 }
 
 /// Re-resolves `System` after the operating system changed its appearance.
 pub(in crate::app) fn sync_theme_with_system(window: &mut Window, cx: &mut App) {
     Theme::sync_system_appearance(Some(window), cx);
+    syntax::apply_code_theme(cx);
 }
 
 /// The Colors entry standing for the built-in palette, stored as an empty name.
@@ -244,6 +247,7 @@ pub(super) fn appearance_page(
     owner: &WeakEntity<Condr>,
     settings: &Entity<SettingsWindow>,
     color_scheme: &Entity<ColorSchemeSelect>,
+    code_theme: &Entity<ColorSchemeSelect>,
 ) -> SettingPage {
     let reset_select = color_scheme.clone();
     let dirty_owner = owner.clone();
@@ -261,6 +265,7 @@ pub(super) fn appearance_page(
     let scheme_select = color_scheme.clone();
     SettingPage::new("Appearance")
         .icon(IconName::Palette)
+        .default_open(true)
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
@@ -292,51 +297,13 @@ pub(super) fn appearance_page(
                 .item(
                     SettingItem::new(
                         "Font size",
-                        // A stepper rather than a text field: the number widget rewrites
-                        // half-typed values that leave its range, and one pixel at a time
-                        // is how a font size gets tuned anyway.
                         SettingField::render(move |_, _, cx| {
-                            let size = terminal_font_size(&size_get, cx);
-                            let step = |id: &'static str, icon, delta: f32, enabled: bool| {
-                                let settings = size_get.clone();
-                                let label = format!("{id} font size");
-                                let label = format!("{}{}", label[..1].to_uppercase(), &label[1..]);
-                                div()
-                                    .debug_selector(move || format!("terminal-font-size-{id}"))
-                                    .child(
-                                        Button::new(format!("terminal-font-size-{id}"))
-                                            .icon(icon)
-                                            .small()
-                                            .outline()
-                                            .tooltip(label.clone())
-                                            .accessibility_label(label)
-                                            .disabled(!enabled)
-                                            .on_click(move |_, _, cx| {
-                                                step_terminal_font_size(&settings, delta, cx)
-                                            }),
-                                    )
-                            };
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(step(
-                                    "decrease",
-                                    IconName::Minus,
-                                    -1.,
-                                    size > f64::from(TerminalFont::MIN_SIZE),
-                                ))
-                                .child(
-                                    div()
-                                        .min_w(rems(2.))
-                                        .text_center()
-                                        .child(format!("{size:.0}")),
-                                )
-                                .child(step(
-                                    "increase",
-                                    IconName::Plus,
-                                    1.,
-                                    size < f64::from(TerminalFont::MAX_SIZE),
-                                ))
+                            let settings = size_get.clone();
+                            font_size_stepper(
+                                "terminal-font-size",
+                                terminal_font_size(&size_get, cx) as f32,
+                                move |delta, cx| step_terminal_font_size(&settings, delta, cx),
+                            )
                         })
                         .on_reset(
                             move |cx| {
@@ -352,21 +319,8 @@ pub(super) fn appearance_page(
                 .item(
                     SettingItem::new(
                         "Colors",
-                        // A searchable Select: the list needs filtering, and it opens
-                        // scrolled to the current choice.
                         SettingField::render(move |_, _, _| {
-                            // The field slot shrinks to content, so the trigger and the
-                            // menu need a width that fits the longest scheme name. Rems,
-                            // like the window itself; the window's minimum width leaves
-                            // room for this beside the page sidebar.
-                            div()
-                                .debug_selector(|| "terminal-color-scheme".into())
-                                .child(
-                                    Select::new(&scheme_select)
-                                        .w(rems(17.5))
-                                        .menu_width(rems(20.))
-                                        .menu_max_h(rems(22.5)),
-                                )
+                            scheme_select_field("terminal-color-scheme", &scheme_select)
                         })
                         .on_reset(
                             move |cx| color_scheme_is_dirty(&dirty_owner, cx),
@@ -378,6 +332,106 @@ pub(super) fn appearance_page(
                     .description("Terminal color schemes."),
                 ),
         )
+        .group(
+            SettingGroup::new()
+                .title("Syntax")
+                .item(code_font_size_item(owner))
+                .item(code_theme_item(owner, code_theme)),
+        )
+}
+
+/// A stepper rather than a text field: the number widget rewrites half-typed values that
+/// leave its range, and one pixel at a time is how a font size gets tuned anyway. `id`
+/// names the buttons and their test selectors.
+fn font_size_stepper(
+    id: &'static str,
+    size: f32,
+    step: impl Fn(f32, &mut App) + Clone + 'static,
+) -> Div {
+    let button = |direction: &'static str, icon, delta: f32, enabled: bool| {
+        let step = step.clone();
+        let label = if delta < 0. {
+            "Decrease font size"
+        } else {
+            "Increase font size"
+        };
+        div()
+            .debug_selector(move || format!("{id}-{direction}"))
+            .child(
+                Button::new(format!("{id}-{direction}"))
+                    .icon(icon)
+                    .small()
+                    .outline()
+                    .tooltip(label)
+                    .accessibility_label(label)
+                    .disabled(!enabled)
+                    .on_click(move |_, _, cx| step(delta, cx)),
+            )
+    };
+    h_flex()
+        .gap_2()
+        .items_center()
+        .child(button(
+            "decrease",
+            IconName::Minus,
+            -1.,
+            size > TerminalFont::MIN_SIZE,
+        ))
+        .child(
+            div()
+                .min_w(rems(2.))
+                .text_center()
+                .child(format!("{size:.0}")),
+        )
+        .child(button(
+            "increase",
+            IconName::Plus,
+            1.,
+            size < TerminalFont::MAX_SIZE,
+        ))
+}
+
+/// The Preview and Diff Tabs' font size, apart from the terminal's; both start at the
+/// theme's mono font size.
+fn code_font_size_item(owner: &WeakEntity<Condr>) -> SettingItem {
+    let get = owner.clone();
+    let dirty = owner.clone();
+    let reset = owner.clone();
+    let default_size = TerminalFont::default().size;
+    SettingItem::new(
+        "Font size",
+        SettingField::render(move |_, _, cx| {
+            let owner = get.clone();
+            font_size_stepper(
+                "code-font-size",
+                code_font_size(&get, cx),
+                move |delta, cx| step_code_font_size(&owner, delta, cx),
+            )
+        })
+        .on_reset(
+            move |cx| code_font_size(&dirty, cx) != default_size,
+            move |_, cx| {
+                let _ = reset.update(cx, |this, cx| this.set_code_font_size(default_size, cx));
+            },
+        ),
+    )
+    .description("In pixels.")
+}
+
+/// What the Syntax Font size stepper shows.
+pub(in crate::app) fn code_font_size(owner: &WeakEntity<Condr>, cx: &App) -> f32 {
+    owner
+        .upgrade()
+        .map_or(TerminalFont::default().size, |owner| {
+            owner.read(cx).code_font_size
+        })
+}
+
+/// What the Syntax Font size stepper buttons do: one pixel at a time.
+pub(in crate::app) fn step_code_font_size(owner: &WeakEntity<Condr>, delta: f32, cx: &mut App) {
+    let _ = owner.update(cx, |this, cx| {
+        this.set_code_font_size(this.code_font_size + delta, cx)
+    });
 }
 
 impl Condr {
@@ -449,4 +503,98 @@ impl Condr {
         self.save_terminal_color_scheme(cx);
         apply_terminal_color_scheme(&self.terminal_color_scheme, cx);
     }
+
+    /// Clamped like the terminal's; saving is debounced so a run of stepper clicks
+    /// rewrites the file once.
+    pub(in crate::app) fn set_code_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let size = TerminalFont::clamp_size(size);
+        if self.code_font_size == size {
+            return;
+        }
+        self.code_font_size = size;
+        cx.notify();
+        // The Settings window shows the new size too.
+        cx.refresh_windows();
+        self._code_font_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FONT_SAVE_DEBOUNCE).await;
+            let _ = this.update(cx, |this, cx| {
+                this.save_code_font_size(cx);
+                cx.notify();
+            });
+        }));
+    }
+
+    /// An empty name is Default: GitHub Light in a light GUI, GitHub Dark in a dark one.
+    pub(in crate::app) fn set_code_theme(&mut self, name: SharedString, cx: &mut Context<Self>) {
+        if cx.global::<CodeTheme>().name == name {
+            return;
+        }
+        syntax::set_code_theme(name, cx);
+        self.save_code_theme(cx);
+    }
+}
+
+/// A searchable Select, as a scheme list needs filtering, which opens scrolled to the
+/// current choice.
+fn scheme_select_field(selector: &'static str, select: &Entity<ColorSchemeSelect>) -> Div {
+    // The field slot shrinks to content, so the trigger and the menu need a width that
+    // fits the longest scheme name. Rems, like the window itself; the window's minimum
+    // width leaves room for this beside the page sidebar.
+    div().debug_selector(move || selector.into()).child(
+        Select::new(select)
+            .w(rems(17.5))
+            .menu_width(rems(20.))
+            .menu_max_h(rems(22.5)),
+    )
+}
+
+/// The code themes. Default, stored as an empty name, is GitHub Light in a light GUI and
+/// GitHub Dark in a dark one; a named theme holds in both.
+fn code_theme_item(owner: &WeakEntity<Condr>, select: &Entity<ColorSchemeSelect>) -> SettingItem {
+    let shown = select.clone();
+    let reset_select = select.clone();
+    let reset_owner = owner.clone();
+    SettingItem::new(
+        "Highlight theme",
+        SettingField::render(move |_, _, _| scheme_select_field("code-theme", &shown))
+            .on_reset(code_theme_is_dirty, move |window, cx| {
+                reset_code_theme(&reset_owner, &reset_select, window, cx)
+            }),
+    )
+    .description("Syntax themes for files and diffs.")
+}
+
+/// Whether Reset All has anything to do for the code theme.
+pub(in crate::app) fn code_theme_is_dirty(cx: &App) -> bool {
+    !selected_code_theme(cx).is_empty()
+}
+
+/// What Reset All does for the code theme: back to Default, in both the preference
+/// and the Select.
+pub(in crate::app) fn reset_code_theme(
+    owner: &WeakEntity<Condr>,
+    select: &Entity<ColorSchemeSelect>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    select_code_theme(owner, SharedString::default(), cx);
+    select.update(cx, |select, cx| {
+        select.set_selected_value(&DEFAULT_COLOR_SCHEME_LABEL.into(), window, cx);
+    });
+}
+
+/// What the code theme Select shows.
+pub(in crate::app) fn selected_code_theme(cx: &App) -> SharedString {
+    cx.try_global::<CodeTheme>()
+        .map(|code| code.name.clone())
+        .unwrap_or_default()
+}
+
+/// What confirming a code theme does.
+pub(in crate::app) fn select_code_theme(
+    owner: &WeakEntity<Condr>,
+    value: SharedString,
+    cx: &mut App,
+) {
+    let _ = owner.update(cx, |this, cx| this.set_code_theme(value, cx));
 }

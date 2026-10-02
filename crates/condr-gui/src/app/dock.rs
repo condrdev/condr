@@ -92,10 +92,6 @@ impl DockAreaRenderer for CondrDockRenderer {
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
         Rc::new(CondrTabGroupRenderer)
     }
-
-    fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
-        Rc::new(CondrTilesRenderer)
-    }
 }
 
 pub(super) struct CondrTabGroupRenderer;
@@ -167,23 +163,6 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
     fn render_tab_bar(
         &self,
         _: &gpui_kit::component::dock::TabGroupContext,
-        _: &mut Window,
-        _: &mut App,
-    ) -> AnyElement {
-        Empty.into_any_element()
-    }
-}
-
-pub(super) struct CondrTilesRenderer;
-
-impl TilesRenderer for CondrTilesRenderer {
-    fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
-        div().id("condr-tiles").size_full().overflow_hidden()
-    }
-
-    fn render_drag_bar(
-        &self,
-        _: &gpui_kit::component::dock::TileContext,
         _: &mut Window,
         _: &mut App,
     ) -> AnyElement {
@@ -483,14 +462,13 @@ impl Condr {
         let Some(dragged) = item.value().downcast_ref::<DraggedPane>() else {
             return;
         };
-        let DockDropTarget::Group { node, placement } = target else {
-            return;
-        };
+        let node = target.node();
+        let placement = target.placement();
         let key = surface_key.connection_key;
         if dragged.key != key {
             return;
         }
-        let Some(target_pane) = self.dock_group_pane(key, dock, *node, cx) else {
+        let Some(target_pane) = self.dock_group_pane(key, dock, node, cx) else {
             return;
         };
         let pane_id = dragged.pane_id;

@@ -21,6 +21,7 @@ mod server_management;
 mod settings;
 mod sidebar;
 mod startup;
+mod syntax;
 mod terminal_input;
 mod terminal_panel;
 mod updates;
@@ -70,7 +71,7 @@ use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFoot
 use gpui_kit::component::dock::{
     AnyDrag, BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, DockPlacement,
     DropTarget as DockDropTarget, PaneRef, PanelEvent, PanelId, PanelInfo, PanelState,
-    TabGroupRenderer, TilesRenderer,
+    TabGroupRenderer,
 };
 use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
@@ -100,18 +101,19 @@ use settings::{
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
-    SettingsTab, color_scheme_is_dirty, reset_color_scheme, select_appearance, select_server_shell,
+    SettingsTab, code_font_size, code_theme_is_dirty, color_scheme_is_dirty, reset_code_theme,
+    reset_color_scheme, select_appearance, select_code_theme, select_server_shell,
     select_settings_server, select_settings_server_page, select_settings_tab,
-    select_terminal_font_family, select_terminal_font_size, selected_appearance, server_listen,
-    server_shell, set_server_listen, step_terminal_font_size, terminal_font_family,
-    terminal_font_size,
+    select_terminal_font_family, select_terminal_font_size, selected_appearance,
+    selected_code_theme, server_listen, server_shell, set_server_listen, step_code_font_size,
+    step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
 #[cfg(test)]
 use sidebar::*;
 use startup::{connect_to_server, fixed_shortcut};
 #[cfg(test)]
 use startup::{connect_to_server_with, lock_exclusively, single_instance_lock_path};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -296,6 +298,9 @@ pub(crate) struct Condr {
     /// What the last check found; a newer build puts a dot on the Settings button and
     /// is named on the About page.
     update_state: UpdateState,
+    /// Settings has been opened since the last check found a newer build, which clears
+    /// the dot until a check finds one again. In memory only: a restart shows it anew.
+    update_seen: bool,
     /// The Check button's request is in flight.
     checking_updates: bool,
     /// The five-hourly checks while `auto_check_updates` is on.
@@ -343,6 +348,8 @@ pub(crate) struct Condr {
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
+    /// The Preview and Diff Tabs' font size; they share the terminal's font family.
+    code_font_size: f32,
     /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
     open_targets: Option<Vec<open_in::OpenTarget>>,
     /// The Workspace whose "Open in" launch is in flight; its button shows a spinner.
@@ -357,9 +364,15 @@ pub(crate) struct Condr {
     _settings_window_closed: Option<Subscription>,
     /// The pending debounced font save; replacing it cancels the previous one.
     _font_save: Option<Task<()>>,
+    /// The same for the Preview and Diff font size.
+    _code_font_save: Option<Task<()>>,
     /// The Shell value waiting for its debounce, and the Server it belongs to.
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
+    /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
+    /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
+    tab_strip_scroll: ScrollHandle,
+    last_scrolled_tab: Cell<Option<TabId>>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     /// The most recent failure given to `report_error`, kept so tests can check it.
@@ -422,6 +435,8 @@ impl Condr {
             update_channel,
             terminal_font,
             terminal_color_scheme,
+            code_theme,
+            code_font_size,
             default_editor,
             custom_editors,
             workspace_editors,
@@ -447,6 +462,7 @@ impl Condr {
         apply_appearance(appearance, Some(window), cx);
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
+        syntax::set_code_theme(code_theme, cx);
         let window_bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
             this.window_state = Some(window.window_bounds().into());
             this.schedule_state_save(cx);
@@ -459,6 +475,9 @@ impl Condr {
             // A change made less than a debounce before quitting is still saved.
             if this._font_save.is_some() {
                 this.save_terminal_font(cx);
+            }
+            if this._code_font_save.is_some() {
+                this.save_code_font_size(cx);
             }
             let pending = this.config_save.take();
             this.save_state_now(cx);
@@ -511,6 +530,7 @@ impl Condr {
             auto_check_updates,
             update_channel,
             update_state: UpdateState::Unknown,
+            update_seen: false,
             checking_updates: false,
             _automatic_update_checks: Task::ready(()),
             _keep_awake: None,
@@ -541,6 +561,7 @@ impl Condr {
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
             terminal_color_scheme,
+            code_font_size,
             open_targets: None,
             opening_workspace: None,
             default_editor,
@@ -550,7 +571,10 @@ impl Condr {
             settings_view: None,
             _settings_window_closed: None,
             _font_save: None,
+            _code_font_save: None,
             drop_target: None,
+            tab_strip_scroll: ScrollHandle::new(),
+            last_scrolled_tab: Cell::new(None),
             _quit_subscription: quit_subscription,
             last_error: None,
             _window_activation_subscription: window_activation_subscription,
@@ -579,15 +603,17 @@ impl Condr {
             this.start_automatic_update_checks(updates::FIRST_CHECK_DELAY, cx);
         }
 
+        // In the main window by its handle, like each connection's incoming task.
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {
             while let Ok(result) = connect_results_rx.recv().await {
-                if owner
-                    .update_in(cx, |this, window, cx| {
+                let handled = cx.update(|window, cx| {
+                    owner.update(cx, |this, cx| {
                         this.handle_connection_result(result, window, cx);
                         cx.notify();
                     })
-                    .is_err()
-                {
+                });
+                if let Err(error) = handled.and_then(|handled| handled) {
+                    tracing::warn!("stopped taking connection results: {error:#}");
                     break;
                 }
             }

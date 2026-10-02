@@ -63,8 +63,16 @@ pub fn init(file_stem: &str) -> Guard {
             .boxed()
     };
     let (file_layer, file_guard, file_error) = match open_log_file(file_stem) {
+        // The file is what gets sent in with a report: `file:line` places a line the
+        // target cannot, such as GPUI's own `log_err`, which logs with no target.
         Ok((writer, guard)) => (
-            Some(fmt::layer().with_writer(writer).with_ansi(false)),
+            Some(
+                fmt::layer()
+                    .with_writer(writer)
+                    .with_ansi(false)
+                    .with_file(true)
+                    .with_line_number(true),
+            ),
             Some(guard),
             None,
         ),

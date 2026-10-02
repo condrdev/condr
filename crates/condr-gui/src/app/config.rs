@@ -9,6 +9,7 @@ use serde::Deserialize;
 use condr_server::{DeviceKey, SavedServer, load_saved_servers, save_saved_servers};
 
 use super::open_in::CustomEditor;
+use super::syntax::CodeTheme;
 use super::{Appearance, Condr, Endpoint, TerminalFont, UpdateChannel};
 use std::collections::BTreeMap;
 
@@ -32,6 +33,9 @@ const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
+// The Preview and Diff Tabs' bat theme (ADR 0032).
+const CODE_TABLE: [&str; 2] = ["client", "code"];
+const CODE_THEME_KEY: &str = "theme";
 
 /// One `[[client.workspace_editors]]` entry.
 #[derive(Deserialize)]
@@ -54,6 +58,8 @@ pub(super) struct LoadedConfig {
     pub update_channel: UpdateChannel,
     pub terminal_font: TerminalFont,
     pub terminal_color_scheme: SharedString,
+    pub code_theme: SharedString,
+    pub code_font_size: f32,
     pub default_editor: Option<String>,
     pub custom_editors: Vec<CustomEditor>,
     pub workspace_editors: BTreeMap<PathBuf, String>,
@@ -159,6 +165,14 @@ impl LoadedConfig {
                 .as_deref()
                 .and_then(|path| load_terminal_color_scheme(path).ok())
                 .unwrap_or_default(),
+            code_theme: path
+                .as_deref()
+                .and_then(|path| load_code_theme(path).ok())
+                .unwrap_or_default(),
+            code_font_size: path
+                .as_deref()
+                .and_then(|path| load_code_font_size(path).ok())
+                .unwrap_or_else(|| TerminalFont::default().size),
             default_editor: path
                 .as_deref()
                 .and_then(|path| load_default_editor(path).ok())
@@ -259,6 +273,33 @@ pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
 pub(super) fn load_terminal_color_scheme(path: &Path) -> io::Result<SharedString> {
     Ok(
         condr_core::read_config_value(path, &TERMINAL_TABLE, COLOR_SCHEME_KEY)?
+            .as_ref()
+            .and_then(toml::Value::as_str)
+            .map(|name| name.trim().to_string().into())
+            .unwrap_or_default(),
+    )
+}
+
+/// The theme's mono font size when unset or malformed, clamped like the terminal's.
+pub(super) fn load_code_font_size(path: &Path) -> io::Result<f32> {
+    Ok(
+        condr_core::read_config_value(path, &CODE_TABLE, FONT_SIZE_KEY)?
+            .and_then(|value| {
+                value
+                    .as_float()
+                    .or_else(|| value.as_integer().map(|size| size as f64))
+            })
+            .map_or_else(
+                || TerminalFont::default().size,
+                |size| TerminalFont::clamp_size(size as f32),
+            ),
+    )
+}
+
+/// Empty when unset, which is Default; the caller resolves an unknown name to Default too.
+pub(super) fn load_code_theme(path: &Path) -> io::Result<SharedString> {
+    Ok(
+        condr_core::read_config_value(path, &CODE_TABLE, CODE_THEME_KEY)?
             .as_ref()
             .and_then(toml::Value::as_str)
             .map(|name| name.trim().to_string().into())
@@ -424,6 +465,25 @@ impl Condr {
                 path,
                 &TERMINAL_TABLE,
                 COLOR_SCHEME_KEY,
+                toml_edit::value(name.as_ref()),
+            )
+        });
+    }
+
+    pub(super) fn save_code_font_size(&mut self, cx: &mut Context<Self>) {
+        let size = f64::from(self.code_font_size);
+        self.save_config(cx, move |path| {
+            write_value(path, &CODE_TABLE, FONT_SIZE_KEY, toml_edit::value(size))
+        });
+    }
+
+    pub(super) fn save_code_theme(&mut self, cx: &mut Context<Self>) {
+        let name = cx.global::<CodeTheme>().name.clone();
+        self.save_config(cx, move |path| {
+            write_value(
+                path,
+                &CODE_TABLE,
+                CODE_THEME_KEY,
                 toml_edit::value(name.as_ref()),
             )
         });
@@ -622,6 +682,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load_terminal_color_scheme(&path).unwrap(), "Gruvbox Dark");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn code_theme_and_font_size_round_trip_and_default() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-code-theme-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert_eq!(load_code_theme(&path).unwrap(), "");
+        write_value(&path, &CODE_TABLE, CODE_THEME_KEY, "Dracula".into()).unwrap();
+        assert_eq!(load_code_theme(&path).unwrap(), "Dracula");
+
+        assert_eq!(
+            load_code_font_size(&path).unwrap(),
+            TerminalFont::default().size
+        );
+        write_value(&path, &CODE_TABLE, FONT_SIZE_KEY, 17.into()).unwrap();
+        assert_eq!(load_code_font_size(&path).unwrap(), 17.);
+        write_value(&path, &CODE_TABLE, FONT_SIZE_KEY, 500.0.into()).unwrap();
+        assert_eq!(load_code_font_size(&path).unwrap(), TerminalFont::MAX_SIZE);
         fs::remove_dir_all(directory).unwrap();
     }
 

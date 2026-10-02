@@ -151,16 +151,15 @@ impl SshEndpoint {
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output();
-        let user_has_control_path = match effective {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout).lines().any(|line| {
-                    line.strip_prefix("controlpath ")
-                        .is_some_and(|path| path != "none")
-                })
-            }
+        let effective = match effective {
+            Ok(output) if output.status.success() => output.stdout,
             // `ssh -G` failing means the connection fails too, with its own message.
             _ => return Vec::new(),
         };
+        let user_has_control_path = String::from_utf8_lossy(&effective).lines().any(|line| {
+            line.strip_prefix("controlpath ")
+                .is_some_and(|path| path != "none")
+        });
         if user_has_control_path {
             return Vec::new();
         }
@@ -170,13 +169,22 @@ impl SshEndpoint {
         if std::fs::create_dir_all(&directory).is_err() {
             return Vec::new();
         }
-        // `%C` hashes host, port and user into one short name, keeping the socket path
-        // well under the `sun_path` limit.
+        // Condr names the master itself rather than with `%C`: that token is 40 hex
+        // characters, and a new master first binds `<path>.<16 random>`, which under
+        // macOS's `$TMPDIR` overflows the 104-byte `sun_path`. Sixteen hex characters
+        // of a hash of the effective configuration name one master per destination,
+        // the same for the GUI and every CLI call.
+        use sha2::Digest as _;
+        let hash = sha2::Sha256::digest(&effective);
+        let name: String = hash[..8].iter().map(|byte| format!("{byte:02x}")).collect();
         vec![
             "-o".into(),
             "ControlMaster=auto".into(),
             "-o".into(),
-            format!("ControlPath={}", directory.join("ssh-%C").display()),
+            format!(
+                "ControlPath={}",
+                directory.join(format!("ssh-{name}")).display()
+            ),
             "-o".into(),
             "ControlPersist=60".into(),
         ]
@@ -324,11 +332,15 @@ mod tests {
 
         std::fs::write(&path, "Host mux-target\n User someone\n").unwrap();
         let options = endpoint.multiplexing_options(&["-F", config]);
+        assert_eq!(endpoint.multiplexing_options(&["-F", config]), options);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(options.len(), 6, "{options:?}");
         assert_eq!(options[1], "ControlMaster=auto");
-        assert!(options[3].starts_with("ControlPath="), "{options:?}");
-        assert!(options[3].ends_with("ssh-%C"), "{options:?}");
+        let control_path = options[3].strip_prefix("ControlPath=").unwrap();
+        let name = control_path.rsplit('/').next().unwrap();
+        assert!(name.starts_with("ssh-") && name.len() == 20, "{options:?}");
+        // OpenSSH binds `<path>.<16 random>` before renaming; it must fit macOS `sun_path`.
+        assert!(control_path.len() + 17 < 104, "{options:?}");
         assert_eq!(options[5], "ControlPersist=60");
     }
 

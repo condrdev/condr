@@ -4,8 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "macos")]
 use condr_core::CommandBuilder;
-#[cfg(target_os = "windows")]
-use condr_core::TerminalUpdate;
 #[cfg(target_os = "linux")]
 use condr_core::{
     AgentEvent, AgentEventKind, AgentKind, AgentSnapshot, AgentState, TerminalAgentProbe,
@@ -15,6 +13,8 @@ use condr_core::{
 };
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use condr_core::{CommandBuilder, PaneEnvironment, PaneId, TerminalCommand};
+#[cfg(target_os = "windows")]
+use condr_core::{TerminalKey, TerminalModifiers, TerminalUpdate};
 use condr_core::{TerminalRuntime, TerminalSize};
 #[cfg(target_os = "windows")]
 use sysinfo::{Pid, System};
@@ -1007,6 +1007,38 @@ fn conpty_round_trip_resizes_unicode_and_eof() {
     assert!(runtime.wait().unwrap().success());
     assert!(runtime.agent_probe().is_none());
     assert!(runtime.visible_text().contains("final-before-exit"));
+}
+
+/// A Server started by a process that ignores Ctrl+C (an agent's shell tool, a new process
+/// group) must not hand that on: Ctrl+C in a Pane still interrupts an ordinary program.
+#[cfg(target_os = "windows")]
+#[test]
+fn conpty_ctrl_c_interrupts_a_program_when_the_server_ignores_it() {
+    #[allow(unsafe_code)]
+    // SAFETY: a null handler only sets this process's flag, which children inherit.
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 1);
+    }
+    let mut command = CommandBuilder::new("ping");
+    command.args(["-n", "30", "127.0.0.1"]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
+    wait_for_terminal_output(&runtime);
+
+    let pressed = Instant::now();
+    runtime
+        .execute(TerminalCommand::Key {
+            key: TerminalKey::Character("c".into()),
+            modifiers: TerminalModifiers {
+                control: true,
+                ..TerminalModifiers::default()
+            },
+        })
+        .unwrap();
+    runtime.wait().unwrap();
+    assert!(
+        pressed.elapsed() < Duration::from_secs(10),
+        "ping ignored Ctrl+C and ran to the end"
+    );
 }
 
 #[cfg(target_os = "windows")]

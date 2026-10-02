@@ -8,7 +8,7 @@ use condr_core::{TerminalMouseButton, TerminalMouseEvent};
 
 #[cfg(unix)]
 #[test]
-fn terminal_tab_and_backtab_keys_reach_the_pty() {
+fn terminal_tab_backtab_and_ctrl_c_reach_the_pty() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(|cx| {
@@ -63,7 +63,7 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
                 1,
                 pane_id,
                 TerminalCommand::Text(
-                    "stty -echo -icanon min 1 time 0; printf 'CONDR_TAB_READY\\n'; bytes=$(dd bs=1 count=4 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_TAB_BYTES_%s\\n' \"$bytes\"\r"
+                    "stty -echo -icanon -isig min 1 time 0; printf 'CONDR_TAB_%s\\n' READY; bytes=$(dd bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_TAB_BYTES_%s\\n' \"$bytes\"\r"
                         .into(),
                 ),
             );
@@ -80,13 +80,14 @@ fn terminal_tab_and_backtab_keys_reach_the_pty() {
     });
     assert!(focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window))));
 
-    window.simulate_keystrokes("tab shift-tab");
+    // Kit binds each of these in its Root: Tab to focus navigation, Ctrl+C (off macOS) to Copy.
+    window.simulate_keystrokes("tab shift-tab ctrl-c");
 
     assert!(
         wait_until_event_driven(window, |window| {
-            terminal_contains(window, &view, 1, pane_id, "CONDR_TAB_BYTES_091b5b5a")
+            terminal_contains(window, &view, 1, pane_id, "CONDR_TAB_BYTES_091b5b5a03")
         }),
-        "Tab or BackTab was handled as GUI focus navigation instead of terminal input"
+        "Tab, BackTab or Ctrl+C was handled as a GUI action instead of terminal input"
     );
 }
 
@@ -701,8 +702,11 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
             connection.bootstrap_resync_session_id = connection.session_id;
         });
     });
+    // Windows copies a selection with plain Ctrl+C, which Kit's Root also binds.
     let copy_shortcut = if cfg!(target_os = "macos") {
         "cmd-c"
+    } else if cfg!(windows) {
+        "ctrl-c"
     } else {
         "ctrl-shift-c"
     };

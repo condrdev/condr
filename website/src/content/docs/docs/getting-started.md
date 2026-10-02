@@ -24,7 +24,7 @@ Download the installer for your platform from the [download page](/download/) an
 | macOS x86_64 / arm64 | `.dmg` |
 | Windows x86_64 | `.exe` |
 
-macOS may say that the app cannot be verified, and Windows may show SmartScreen. Preview builds are not signed yet. See [Install](/docs/install/) for opening the app, install script options, and the headless Server.
+Windows may show SmartScreen, because the preview installer is not signed yet. See [Install](/docs/install/) for platform notes, install script options, and the headless Server.
 
 ## 2. Run your first Agent
 

@@ -2,6 +2,7 @@ use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target,
 use super::*;
 use gpui_fps::fps_monitor;
 use gpui_kit::component::Colorize as _;
+use gpui_kit::component::InteractiveElementExt as _;
 
 #[derive(Clone)]
 struct DraggedTab {
@@ -10,6 +11,15 @@ struct DraggedTab {
     tab_id: TabId,
     name: SharedString,
 }
+
+/// A Tab wider than this truncates its name; the tooltip keeps it.
+const TAB_MAX_WIDTH: Rems = rems(8.);
+/// No Tab is narrower than this, so a one-digit name is still a target.
+const TAB_MIN_WIDTH: Rems = rems(6.);
+/// The hairline between two idle Tabs: shorter than the Tab, as Chrome draws it.
+const TAB_SEPARATOR_HEIGHT: Rems = rems(1.);
+/// The viewing-only note after the Tabs truncates past this instead of pushing them.
+const VIEWING_ONLY_MAX_WIDTH: Rems = rems(16.);
 
 pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
     let number = tab_index + 1;
@@ -77,6 +87,57 @@ impl Condr {
                 })
             }
         });
+        let strip = self.render_tab_strip(
+            key,
+            workspace_id,
+            workspace,
+            active_tab,
+            can_mutate,
+            viewing_only,
+            cx,
+        );
+        // The pill floats over the Panes rather than reflowing them: the dock keeps
+        // its geometry, and the frozen output under it is what the user is waiting on.
+        let body = div()
+            .size_full()
+            .relative()
+            .when_some(dock_area, |view, dock_area| view.child(dock_area))
+            .children(viewer)
+            .when_some(status, |view, status| {
+                view.child(
+                    h_flex()
+                        .absolute()
+                        .top_2()
+                        .left_0()
+                        .right_0()
+                        .justify_center()
+                        .child(status),
+                )
+            })
+            .into_any_element();
+        WorkspaceChrome {
+            tab_strip: Some(strip),
+            open_in: self.render_open_in(connection, workspace, cx),
+            body,
+        }
+    }
+
+    /// The Workspace's Tabs: a row that scrolls when it outgrows its slot, the way the
+    /// Kit's `TabBar` scrolls its own, and brings a newly active Tab into view. "New Tab"
+    /// follows the last Tab and scrolls with it; the viewing-only note keeps its place
+    /// after the row. The Tabs themselves keep Condr's ghost-button look, which none of
+    /// the Kit `Tab` variants draw.
+    #[allow(clippy::too_many_arguments)]
+    fn render_tab_strip(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        workspace: &Workspace,
+        active_tab: TabId,
+        can_mutate: bool,
+        viewing_only: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let closes_workspace = workspace.tabs().len() == 1;
         // Drop handlers need the source index of the dragged Tab.
         let tab_ids = Rc::new(
@@ -86,6 +147,24 @@ impl Condr {
                 .map(|tab| tab.id())
                 .collect::<Vec<_>>(),
         );
+        let active_index = tab_ids.iter().position(|id| *id == active_tab);
+        // A newly active Tab may sit past the row's edge; scroll it into view once. The
+        // row's children alternate Tab and separator, so Tab `i` is child `2i`. For the
+        // last Tab, scroll to "New Tab" right behind it, so a just-created Tab does not
+        // leave the button it came from half hidden.
+        if self.last_scrolled_tab.replace(Some(active_tab)) != Some(active_tab)
+            && let Some(index) = active_index
+        {
+            let item = if index + 1 == tab_ids.len() {
+                2 * index + 1
+            } else {
+                2 * index
+            };
+            self.tab_strip_scroll.scroll_to_item(item);
+        }
+        let tab_count = tab_ids.len();
+        let separator_color = cx.theme().border;
+        let transparent = cx.theme().transparent;
         let tab_buttons = workspace.tabs().iter().enumerate().map(|(tab_index, tab)| {
             let tab_id = tab.id();
             let tab_name = tab.name().to_owned();
@@ -180,8 +259,8 @@ impl Condr {
                         .debug_selector(move || format!("tab-{}", tab_id.as_u64()))
                         .ghost()
                         .small()
-                        .min_w(rems(6.))
-                        .max_w(rems(8.))
+                        .min_w(TAB_MIN_WIDTH)
+                        .max_w(TAB_MAX_WIDTH)
                         .selected(tab_id == active_tab)
                         .label(tab_label.clone())
                         .tooltip_with_action(
@@ -277,69 +356,92 @@ impl Condr {
                 })
         });
         let new_tab_owner = cx.weak_entity();
-
-        let strip = h_flex()
-            .id("workspace-tabs")
+        h_flex()
             .debug_selector(|| "workspace-tabs".into())
-            .h_full()
-            .w_full()
+            .flex_1()
             .min_w_0()
-            .gap_1()
-            .px_2()
-            .items_center()
-            .children(tab_buttons)
+            .h_full()
             .child(
-                Button::new("new-tab")
-                    .debug_selector(|| "new-tab".into())
-                    .ghost()
-                    .small()
-                    .icon(IconName::Plus)
-                    .tooltip_with_action("New Tab", &NewTab, Some(SHORTCUT_CONTEXT))
-                    .disabled(!can_mutate)
-                    // Like the Tab rows: inside the title bar an unclaimed press starts a
-                    // window move on Windows, and the move swallows the click.
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(move |_, window, cx| {
-                        let _ = new_tab_owner.update(cx, |this, cx| {
-                            this.new_tab_on(key, workspace_id, window, cx)
-                        });
-                    }),
+                // The Kit TabBar's structure: a clipping row around the scrolling row, so
+                // the wheel moves the Tabs and nothing after the row is pushed out.
+                // Not `flex_1`: its `0%` basis is unresolvable while the title bar sizes
+                // itself to its content, and Taffy then reports the whole row of Tabs
+                // as this clip's width. An absolute zero basis reports nothing.
+                h_flex()
+                    .id("workspace-tabs-clip")
+                    .flex_grow(1.)
+                    .flex_shrink(1.)
+                    .flex_basis(px(0.))
+                    .min_w_0()
+                    .h_full()
+                    .overflow_x_hidden()
+                    .child(
+                        h_flex()
+                            .id("workspace-tabs-scroll")
+                            .h_full()
+                            .gap_1()
+                            .px_2()
+                            .items_center()
+                            .overflow_x_scroll()
+                            .lock_scroll_axis()
+                            .track_scroll(&self.tab_strip_scroll)
+                            // Chrome's cue between two idle Tabs: a hairline in the gap.
+                            // Beside the active Tab it is drawn transparent rather than
+                            // left out, so the child indices `scroll_to_item` counts on
+                            // hold, and the active Tab reads as one raised piece.
+                            .children(tab_buttons.enumerate().flat_map(|(tab_index, row)| {
+                                let separator = (tab_index + 1 < tab_count).then(|| {
+                                    let beside_active = active_index.is_some_and(|active| {
+                                        active == tab_index || active == tab_index + 1
+                                    });
+                                    div()
+                                        .flex_none()
+                                        .w(px(1.))
+                                        .h(TAB_SEPARATOR_HEIGHT)
+                                        .bg(if beside_active {
+                                            transparent
+                                        } else {
+                                            separator_color
+                                        })
+                                        .into_any_element()
+                                });
+                                std::iter::once(row.into_any_element()).chain(separator)
+                            }))
+                            .child(
+                                Button::new("new-tab")
+                                    .debug_selector(|| "new-tab".into())
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Plus)
+                                    .tooltip_with_action("New Tab", &NewTab, Some(SHORTCUT_CONTEXT))
+                                    .disabled(!can_mutate)
+                                    // Like the Tab rows: inside the title bar an unclaimed
+                                    // press starts a window move on Windows, and the move
+                                    // swallows the click.
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(move |_, window, cx| {
+                                        let _ = new_tab_owner.update(cx, |this, cx| {
+                                            this.new_tab_on(key, workspace_id, window, cx)
+                                        });
+                                    }),
+                            ),
+                    ),
             )
             .when_some(viewing_only, |row, text| {
                 row.child(
                     div()
-                        .ml_auto()
-                        .min_w_0()
+                        .flex_none()
+                        .max_w(VIEWING_ONLY_MAX_WIDTH)
+                        .pr_2()
                         .truncate()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(text),
                 )
-            });
-        // The pill floats over the Panes rather than reflowing them: the dock keeps
-        // its geometry, and the frozen output under it is what the user is waiting on.
-        let body = div()
-            .size_full()
-            .relative()
-            .when_some(dock_area, |view, dock_area| view.child(dock_area))
-            .children(viewer)
-            .when_some(status, |view, status| {
-                view.child(
-                    h_flex()
-                        .absolute()
-                        .top_2()
-                        .left_0()
-                        .right_0()
-                        .justify_center()
-                        .child(status),
-                )
             })
-            .into_any_element();
-        WorkspaceChrome {
-            tab_strip: Some(strip.into_any_element()),
-            open_in: self.render_open_in(connection, workspace, cx),
-            body,
-        }
+            .into_any_element()
     }
 }
 
@@ -641,7 +743,6 @@ impl Condr {
 
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dialog_layer = Root::render_dialog_layer(window, cx);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
         let WorkspaceChrome {
@@ -817,7 +918,6 @@ impl Render for Condr {
                         )
                     }),
             )
-            .children(dialog_layer)
             .when(self.fps_monitor, |this| this.child(fps_monitor(window, cx)))
     }
 }

@@ -41,6 +41,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.build == 'true'
     uses: ./.github/workflows/build.yml
+    secrets: inherit
     with:
       release: false
 

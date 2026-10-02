@@ -630,9 +630,13 @@ impl Condr {
                         agents,
                         clients,
                         recent_errors,
+                        running_listen,
+                        running_p2p,
                     } => {
                         connection.listen = listen;
                         connection.p2p = p2p;
+                        connection.running_listen = running_listen;
+                        connection.running_p2p = running_p2p;
                         connection.connected_devices = connected;
                         connection.health = Some(ServerHealth {
                             version,
