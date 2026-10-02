@@ -46,7 +46,7 @@ hook 是 Agent 在开始、完成或等待时调用的一小段命令。Condr �
 condr agent hooks install claude
 ```
 
-也可以打开 **Settings › Agents**，对选中的 Device 点 **Install**。远程 Device 也在那里安装，因为命令行的 `agent hooks` 不接受 `--device`。
+也可以打开 **Settings › Device › Agent integrations**，对选中的 Device 点 **Install**。远程 Device 也在那里安装，因为命令行的 `agent hooks` 不接受 `--device`。
 
 命令只修改 Agent 自己的配置文件，并把 Condr 条目合并到已有条目旁边。文件损坏或超过 4 MiB 时，命令报错且不写入。
 

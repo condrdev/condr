@@ -18,7 +18,7 @@ Condr 0.1 是公开预览版，版本之间仍可能有变化。
 桌面应用自带 Server 并自动启动，无须单独安装。第一次打开后：
 
 1. 点 **Open Project**，选择项目文件夹。Condr 会打开一个 Workspace 并提供 shell。
-2. 安装 Agent 集成, 请打开 **Settings › Device › Agents**，在你用的 Agent 旁边点 **Install**。这样 Condr 才能追踪 Agent 的状态。
+2. 安装 Agent 集成：打开 **Settings › Device › Agent integrations**，在你用的 Agent 旁边点 **Install**。这样 Condr 才能追踪 Agent 的状态。
 3. 在 shell 里像平时一样运行 Agent，例如 `claude`。
 
 ## Headless Server

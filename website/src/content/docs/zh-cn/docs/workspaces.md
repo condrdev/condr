@@ -11,7 +11,7 @@ description: 打开项目、给每个 Agent 分配独立分支，并整理终端
 
 Condr 打开 Workspace，在第一个 Tab 里于该文件夹启动 shell。Workspace 默认使用文件夹名。右键它，选 **Rename Workspace** 可改名。
 
-Workspace 由一个文件夹和其中的终端组成。在 shell 里运行 `cd` 不会改变 Workspace 根目录。Git 仓库的 Workspace 会在侧栏第二行显示当前分支，以及相对上游领先和落后的提交数。
+Workspace 由一个文件夹和其中的终端组成。在 shell 里运行 `cd` 不会改变 Workspace 根目录。侧栏里每个 Workspace 占两行。第一行是名称，第二行是当前分支，以及相对上游领先和落后的提交数。不在 Git 仓库里时，第二行显示「no git」。
 
 你也可以在终端里创建：
 
@@ -35,7 +35,7 @@ Condr 把新目录放到仓库旁的 `<repo>.worktrees/<branch>`，并在侧栏�
 
 ## 用 Tab 分开工作
 
-Tab 是 Workspace 中的一屏。点 Tab 栏的 **+** 新建 Tab。新 shell 在你当前查看的 Pane 目录中启动。拖动 Tab 可排序。右键 Tab 可选 **Rename Tab** 或 **Close Tab**。未命名的 Tab 只显示序号。
+Tab 是 Workspace 中的一屏。点 Tab 栏的 **+** 新建 Tab。新 shell 在你当前查看的 Pane 目录中启动。拖动 Tab 可排序。Tab 放不下时，Tab 栏会横向滚动，新激活的 Tab 会滚进可见范围。右键 Tab 可选 **Rename Tab** 或 **Close Tab**。未命名的 Tab 只显示序号。
 
 关闭最后一个 Tab 会关闭 Workspace，所以 Condr 会先请求确认。
 
@@ -93,4 +93,4 @@ Server 每次改动后都会把结构保存到快照文件。重启时恢复：
 
 装有 hook 的 Agent 会恢复。Condr 记录原生会话号，重启后在同一 Pane 中输入 Agent 自己的恢复命令，例如 `claude --resume <id>`。对话会从中断处继续。恢复失败时，命令会留在终端中，供你重试。
 
-要重启 Server，请在 Condr 外的终端运行 `condr server restart`，或在 **Settings › Device › Daemon** 中点 **Restart Condr**。窗口重启后也会恢复窗口位置、侧栏宽度，以及每个 Workspace 正在显示的 Tab。
+要重启 Server，请在 Condr 外的终端运行 `condr server restart`，或在 **Settings › Device › General** 中点 **Restart Condr**。窗口重启后也会恢复窗口位置、侧栏宽度，以及每个 Workspace 正在显示的 Tab。

@@ -7,7 +7,7 @@ description: 修改窗口和 Server 设置，并查找各平台上的 Condr 文�
 
 ## 在界面里修改设置
 
-在 macOS 上按 Cmd+,，其他平台按 Ctrl+,，打开设置。窗口有两个标签。**Application** 包含窗口自己的设置，**Device** 包含某台 Device 的 Server 设置。请在标签栏选择 Device。
+在 macOS 上按 Cmd+,，其他平台按 Ctrl+,，打开设置。窗口有两个标签。**Application** 包含窗口自己的设置，**Device** 包含某台 Device 的 Server 设置。Device 标签的页面上方有一栏，显示当前编辑的是哪台 Device、它的连接方式和连接状态，在那里切换 Device。
 
 每项修改立即生效并写入配置文件。文本框会在你离开、按 Enter 或点 Save 时保存。
 
@@ -15,23 +15,24 @@ description: 修改窗口和 Server 设置，并查找各平台上的 Condr 文�
 
 | 页面 | 设置 |
 | --- | --- |
-| Appearance | 主题（跟随系统、浅色、深色），终端字体、字号、配色方案 |
+| Appearance | 主题（跟随系统、浅色、深色），终端字体、字号、配色方案，Preview 和 Diff 的高亮主题和字号 |
 | Notifications | 开关系统通知，发送测试通知 |
 | Power | 保持屏幕唤醒。侧栏底部的咖啡杯使用同一个开关 |
 | Shortcuts | 快捷键列表，只读 |
 | Developer | 帧率监视器，打开应用、配置、状态和日志目录的按钮 |
-| About | 版本、更新渠道、自动检查更新、立即检查 |
+| Licenses | Condr 用到的第三方组件及其许可证 |
+| About | 版本、更新渠道、自动检查更新、立即检查，有新版本时 Updates 组显示版本号和 **View** 按钮 |
 
 **Device**
 
 | 页面 | 设置 |
 | --- | --- |
-| Terminal | 新 Pane 使用的 shell。留空则使用系统默认值 |
-| Daemon | 状态、连接方式、版本、运行时长、计数、最近错误，TCP 监听开关和地址，Peer-to-peer 开关，重启 Server |
-| Paired devices | 生成 invite，已配对 Device 列表和 Revoke |
-| Agents | 每个 Agent 的 hook 状态，以及安装、更新和卸载 |
+| General | Status 组显示连接方式、版本、运行时长、计数、最近错误，以及 Server 实际绑定的监听地址和 Peer-to-peer 状态，并有 **Restart Condr** 按钮。Terminal 组设置新 Pane 使用的 shell，留空则使用系统默认值 |
+| Remote access | TCP listener 开关和 Listen address，Peer-to-peer 开关。改动要重启 Server 才生效，General 页的按钮会变成 **Restart to apply** |
+| Paired devices | **Generate invite** 生成一次性 invite，并按 Peer-to-peer 和 TCP 各列出一条链接供复制。已配对 Device 列表，已连接的排在前面并带绿点，每行有 **Revoke** |
+| Agent integrations | 每个 Agent 的 hook 状态，以及安装、更新和卸载 |
 
-Daemon 的 Network 设置和 Paired devices 页面只能通过本机或 SSH 连接修改。TCP 或 Peer-to-peer 连接会将它们显示为只读。
+Remote access 和 Paired devices 页面只能通过本机或 SSH 连接修改。通过 TCP 或 Peer-to-peer 连接时，Device 标签顶部显示「Viewing only」，这些控件不可用。
 
 ## 文件在哪
 

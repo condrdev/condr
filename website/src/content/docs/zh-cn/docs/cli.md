@@ -26,7 +26,7 @@ condr [--device <名字>] <组> <命令> [参数]
 | `restart` | 停止再启动，结束所有 Pane 中的程序，并按快照恢复结构。不能在 Condr Pane 中运行。 |
 | `stop` | 请求 Server 关闭。即使没有运行也返回 0。 |
 | `run` | 在前台运行。`--listen` 和 `--p2p` 只对本次运行生效，不写入配置。 |
-| `status` | 显示运行状态、运行时长、Workspace/Tab/Pane/Agent 数量、连接客户端数量和最近错误。`--json` 输出一个对象。 |
+| `status` | 显示运行状态、运行时长、Workspace/Tab/Pane/Agent 数量、连接客户端数量和最近错误。保存的监听地址或 Peer-to-peer 设置要等重启才生效时，多一行 Pending。`--json` 输出一个对象。 |
 | `install` | 把当前可执行文件复制到用户目录并加入 PATH。`--start` 在安装后启动，`--restart` 让新版本接管。 |
 | `uninstall` | 停止 Server，删除安装的 `condr` 和 PATH 项，保留配置、数据和日志。 |
 | `invite` | 打印一次性配对链接，有效期 10 分钟。先打开 TCP 监听或 Peer-to-peer。 |
