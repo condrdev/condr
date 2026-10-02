@@ -38,6 +38,33 @@ impl Condr {
         copied
     }
 
+    /// Cmd+C and the Edit menu's Copy. With nothing of Condr's to copy, the key goes on
+    /// to the program: one that negotiated the kitty keyboard protocol receives Cmd+C
+    /// itself, which Claude Code answers by copying its own selection, and any other
+    /// receives nothing, as in Terminal.app and Ghostty.
+    pub(in crate::app) fn copy_terminal_selection_or_forward_cmd_c(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.copy_terminal_selection(key, pane_id, cx) {
+            return;
+        }
+        self.restart_cursor_blink(key, pane_id, cx);
+        self.terminal_command(
+            key,
+            pane_id,
+            TerminalCommand::Key {
+                key: TerminalKey::Character("c".into()),
+                modifiers: TerminalModifiers {
+                    platform: true,
+                    ..TerminalModifiers::default()
+                },
+            },
+        );
+    }
+
     pub(in crate::app) fn paste_into_terminal(
         &mut self,
         key: ConnectionKey,

@@ -279,6 +279,19 @@ fn legacy_keys_cover_cursor_modes_modifiers_and_controls() {
     }
 
     assert!(encode_key(&TerminalKey::Function(21), none, false).is_err());
+    assert!(
+        encode_key(
+            &TerminalKey::Character("c".into()),
+            TerminalModifiers {
+                platform: true,
+                ..none
+            },
+            false,
+        )
+        .unwrap()
+        .is_empty(),
+        "Cmd never types text"
+    );
 }
 
 #[test]
@@ -293,6 +306,10 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         ..none
     };
     let alt = TerminalModifiers { alt: true, ..none };
+    let platform = TerminalModifiers {
+        platform: true,
+        ..none
+    };
     let control_shift = TerminalModifiers {
         control: true,
         shift: true,
@@ -315,6 +332,9 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
         (ch("a"), control_shift, disambiguate, b"\x1b[97;6u"),
         (ch("L"), control_shift, disambiguate, b"\x1b[108;6u"),
         (ch("c"), control, disambiguate, b"\x1b[99;5u"),
+        // Cmd+C reaches a kitty program as super+c; legacy encoding drops it entirely.
+        (ch("c"), platform, disambiguate, b"\x1b[99;9u"),
+        (ch("c"), platform, TermMode::empty(), b""),
         (ch("L"), shift, disambiguate, b"L"),
         (ch("a"), none, disambiguate, b"a"),
         (TerminalKey::Enter, none, disambiguate, b"\r"),

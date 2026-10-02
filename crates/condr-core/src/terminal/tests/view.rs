@@ -572,3 +572,17 @@ fn a_status_line_burst_coalesces_into_sparse_frames_and_keeps_the_last_revision(
         "burst: {CHUNKS} chunks -> {frames} frames, {delta_cells} delta cells, {elapsed:.2?}"
     );
 }
+
+#[test]
+fn programs_negotiate_the_kitty_keyboard_protocol() {
+    let size = TerminalSize::new(2, 8);
+    let (event_proxy, _pending_replies, _notices) =
+        TerminalEventProxy::new(Arc::new(Mutex::new(size)));
+    let mut terminal = Term::new(terminal_config(), &size, event_proxy);
+    let mut parser: Processor = Processor::new();
+
+    parser.advance(&mut terminal, b"\x1b[>1u");
+    assert!(terminal.mode().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+    parser.advance(&mut terminal, b"\x1b[<u");
+    assert!(!terminal.mode().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+}

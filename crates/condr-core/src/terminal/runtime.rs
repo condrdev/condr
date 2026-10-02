@@ -728,6 +728,9 @@ pub(super) fn terminal_config() -> Config {
         osc52: Osc52::OnlyCopy,
         // alacritty's set without `:`, so a double-click keeps URLs and Windows paths whole.
         semantic_escape_chars: ",│`|\"' ()[]{}<>\t".into(),
+        // Answer the kitty keyboard protocol query and honour pushed flags; without this
+        // alacritty ignores them and `encode_key_in_mode` never sees a negotiated mode.
+        kitty_keyboard: true,
         ..Config::default()
     }
 }

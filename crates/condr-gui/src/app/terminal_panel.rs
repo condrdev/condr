@@ -221,13 +221,14 @@ impl Render for TerminalPanel {
             .debug_selector(move || format!("terminal-pane-{}", pane_id.as_u64()))
             .key_context("CondrTerminal")
             .track_focus(&self.focus_handle)
-            // The macOS Edit menu's items; the keys themselves go through `Condr::key_down`.
-            // Elsewhere there is no menu, and Kit binds Ctrl+C to Copy: answering it here
-            // would swallow the key before the terminal could send ETX.
+            // The macOS Edit menu's items, and Kit's Cmd+C and Cmd+V bindings, which
+            // dispatch before `Condr::key_down` sees the keys. Elsewhere there is no
+            // menu, and Kit binds Ctrl+C to Copy: answering it here would swallow the
+            // key before the terminal could send ETX.
             .when(cfg!(target_os = "macos"), |body| {
                 body.on_action(move |_: &gpui_kit::component::input::Copy, _, cx| {
                     let _ = copy_owner.update(cx, |app, cx| {
-                        app.copy_terminal_selection(key, pane_id, cx);
+                        app.copy_terminal_selection_or_forward_cmd_c(key, pane_id, cx);
                     });
                 })
                 .on_action(move |_: &gpui_kit::component::input::Paste, _, cx| {

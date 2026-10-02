@@ -1665,3 +1665,110 @@ fn selected_block_elements_stay_visible_in_the_selection_text_color() {
         "a linked block glyph must be shaped so its underline is visible"
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn cmd_c_without_a_selection_reaches_a_kitty_program_as_itself_and_others_not_at_all() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            view.read(app)
+                .active_session()?
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
+        });
+        let Some(pane_id) = pane_id else {
+            return false;
+        };
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        window.debug_bounds(terminal_selector(pane_id)).is_some()
+            && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+    }));
+    let pane_id = pane_id.unwrap();
+    assert!(window.read(|app| view.read(app).selection_for(1, pane_id).is_none()));
+
+    // Without the kitty keyboard protocol the program gets nothing from Cmd+C: the
+    // Ctrl+C that follows is the first byte it reads.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(
+                    "stty -echo -icanon -isig min 1 time 0; printf 'CONDR_LEGACY_%s\\n' READY; bytes=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); stty sane; printf 'CONDR_LEGACY_BYTES_%s\\n' \"$bytes\"\r"
+                        .into(),
+                ),
+            );
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_LEGACY_READY")
+    }));
+    window.simulate_keystrokes("cmd-c ctrl-c");
+    assert!(
+        wait_until_event_driven(window, |window| {
+            terminal_contains(window, &view, 1, pane_id, "CONDR_LEGACY_BYTES_03")
+        }),
+        "Cmd+C must type nothing into a program without the kitty keyboard protocol"
+    );
+
+    // A program that pushed kitty flags receives Cmd+C as super+c, CSI 99;9u.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(
+                    "stty -echo -icanon -isig min 1 time 0; printf '\\033[>1uCONDR_KITTY_%s\\n' READY; bytes=$(dd bs=1 count=7 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); printf '\\033[<u'; stty sane; printf 'CONDR_KITTY_BYTES_%s\\n' \"$bytes\"\r"
+                        .into(),
+                ),
+            );
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, &view, 1, pane_id, "CONDR_KITTY_READY")
+    }));
+    window.simulate_keystrokes("cmd-c");
+    assert!(
+        wait_until_event_driven(window, |window| {
+            terminal_contains(
+                window,
+                &view,
+                1,
+                pane_id,
+                "CONDR_KITTY_BYTES_1b5b39393b3975",
+            )
+        }),
+        "Cmd+C with nothing selected must reach a kitty program as super+c"
+    );
+}

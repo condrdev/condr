@@ -54,7 +54,7 @@ Workspace 按侧栏中每个 Device 的顺序切换，到末尾后回到开头�
 
 | 动作 | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| 复制 | Cmd+C | Ctrl+Shift+C，或有选区时 Ctrl+C | Ctrl+Shift+C |
+| 复制 | Cmd+C；没有选区时交给程序 | Ctrl+Shift+C，或有选区时 Ctrl+C | Ctrl+Shift+C |
 | 粘贴 | Cmd+V | Ctrl+Shift+V 或 Ctrl+V | Ctrl+Shift+V |
 | 粘贴图片到远程 Device | Option+V | Alt+V | Alt+V |
 | 打开链接 | Cmd+点击 | Ctrl+点击 | Ctrl+点击 |
@@ -63,4 +63,4 @@ Workspace 按侧栏中每个 Device 的顺序切换，到末尾后回到开头�
 
 Ctrl+Insert 在三个平台复制，Shift+Insert 粘贴。Linux 上 Ctrl+C 和 Ctrl+V 总是交给终端。Tab 和 Shift+Tab 也交给终端，不会移动窗口焦点。
 
-复制会结束选区。没有清屏快捷键，请在 shell 中使用 `clear` 或 Ctrl+L。
+复制会结束选区。macOS 上没有选区时，Cmd+C 会交给程序：使用 kitty 键盘协议的程序会收到 Cmd+C 本身，Claude Code 据此复制它自己的鼠标选区；shell 和其他程序什么都收不到。没有清屏快捷键，请在 shell 中使用 `clear` 或 Ctrl+L。

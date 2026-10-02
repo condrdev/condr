@@ -194,6 +194,11 @@ pub(super) fn encode_key(
     application_cursor: bool,
 ) -> io::Result<Vec<u8>> {
     if let TerminalKey::Character(text) = key {
+        // Cmd never types text, as in Terminal.app and Ghostty; only the kitty keyboard
+        // protocol can carry it, so a program without the protocol receives nothing.
+        if modifiers.platform {
+            return Ok(Vec::new());
+        }
         let mut bytes = if modifiers.control {
             control_character(text).map_or_else(|| text.as_bytes().to_vec(), |byte| vec![byte])
         } else {

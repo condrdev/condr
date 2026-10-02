@@ -230,6 +230,9 @@ impl Condr {
         }
         if let Some(shortcut) = terminal_clipboard_shortcut(stroke, has_selection) {
             match shortcut {
+                TerminalClipboardShortcut::Copy if modifiers.platform => {
+                    self.copy_terminal_selection_or_forward_cmd_c(key, pane_id, cx);
+                }
                 TerminalClipboardShortcut::Copy => {
                     self.copy_terminal_selection(key, pane_id, cx);
                 }

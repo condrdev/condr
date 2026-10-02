@@ -54,7 +54,7 @@ Each press resizes by 5%. Swapping Panes has no shortcut; use the Pane menu or d
 
 | Action | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Copy | Cmd+C | Ctrl+Shift+C, or Ctrl+C when there is a selection | Ctrl+Shift+C |
+| Copy | Cmd+C; with nothing selected it passes to the program | Ctrl+Shift+C, or Ctrl+C when there is a selection | Ctrl+Shift+C |
 | Paste | Cmd+V | Ctrl+Shift+V or Ctrl+V | Ctrl+Shift+V |
 | Paste an image to a remote Device | Option+V | Alt+V | Alt+V |
 | Open a link | Cmd+click | Ctrl+click | Ctrl+click |
@@ -63,4 +63,4 @@ Each press resizes by 5%. Swapping Panes has no shortcut; use the Pane menu or d
 
 Ctrl+Insert copies and Shift+Insert pastes on all three platforms. On Linux, Ctrl+C and Ctrl+V always go to the terminal. Tab and Shift+Tab also go to the terminal and never move window focus.
 
-Copying ends the selection. There is no clear-screen shortcut; use `clear` or Ctrl+L in the shell.
+Copying ends the selection. On macOS, Cmd+C with nothing selected passes to the program: one that uses the kitty keyboard protocol receives it as Cmd+C, which Claude Code answers by copying its own mouse selection, and a shell or any other program receives nothing. There is no clear-screen shortcut; use `clear` or Ctrl+L in the shell.
