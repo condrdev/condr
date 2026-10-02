@@ -3,6 +3,10 @@ title: 键盘快捷键
 description: 查找 macOS、Windows 和 Linux 上的全部 Condr 快捷键。
 ---
 
+:::caution[施工中]
+这一页还在编写中，内容会陆续补齐。
+:::
+
 需要快捷键时查这页。Condr 也会在 **Settings › Shortcuts** 显示同一份列表。
 
 ## 了解哪些按键由 Condr 处理

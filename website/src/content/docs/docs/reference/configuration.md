@@ -3,6 +3,10 @@ title: Configuration and settings
 description: Change window and Server settings, and find Condr's files on each platform.
 ---
 
+:::caution[Under construction]
+This page is still being written. Content will follow.
+:::
+
 Use this page to find a setting, know when it takes effect, and locate Condr's files.
 
 ## Change settings in the window

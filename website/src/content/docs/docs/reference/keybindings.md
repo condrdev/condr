@@ -3,6 +3,10 @@ title: Keyboard shortcuts
 description: Look up every Condr shortcut for macOS, Windows, and Linux.
 ---
 
+:::caution[Under construction]
+This page is still being written. Content will follow.
+:::
+
 Use this page to find a shortcut. Condr shows the same list in **Settings › Shortcuts**.
 
 ## Know which keys reach Condr
