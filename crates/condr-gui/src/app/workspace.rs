@@ -773,6 +773,7 @@ impl Render for Condr {
             .relative()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
+            .on_key_up(cx.listener(Self::key_up))
             .on_action(cx.listener(Self::action_terminal_tab))
             .on_action(cx.listener(Self::action_terminal_back_tab))
             .on_action(cx.listener(Self::action_add_server))

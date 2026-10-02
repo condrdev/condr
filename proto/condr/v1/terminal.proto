@@ -215,9 +215,18 @@ enum TerminalSelectionUnit {
   TERMINAL_SELECTION_UNIT_LINE = 2;
 }
 
+// Unspecified and unknown decode to PRESS.
+enum TerminalKeyEventKind {
+  TERMINAL_KEY_EVENT_KIND_UNSPECIFIED = 0;
+  TERMINAL_KEY_EVENT_KIND_PRESS = 1;
+  TERMINAL_KEY_EVENT_KIND_REPEAT = 2;
+  TERMINAL_KEY_EVENT_KIND_RELEASE = 3;
+}
+
 message TerminalKeyCommand {
   TerminalKey key = 1;
   TerminalModifiers modifiers = 2;
+  TerminalKeyEventKind kind = 3;
 }
 
 // An unset selection clears or copies the Server-tracked one.

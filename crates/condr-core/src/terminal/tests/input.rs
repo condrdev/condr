@@ -390,9 +390,64 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
     ];
     for (key, modifiers, modes, expected) in cases {
         assert_eq!(
-            encode_key_in_mode(key, *modifiers, *modes).unwrap(),
+            encode_key_in_mode(key, *modifiers, TerminalKeyEventKind::Press, *modes).unwrap(),
             *expected,
             "{key:?} {modifiers:?} {modes:?}"
+        );
+    }
+
+    use TerminalKeyEventKind::{Release, Repeat};
+    let report_text = events | TermMode::REPORT_ALL_KEYS_AS_ESC | TermMode::REPORT_ASSOCIATED_TEXT;
+    let event_cases: &[(
+        TerminalKey,
+        TerminalModifiers,
+        TerminalKeyEventKind,
+        TermMode,
+        &[u8],
+    )] = &[
+        // Event types number a repeat 2 and a release 3.
+        (ch("c"), control, Repeat, events, b"\x1b[99;5:2u"),
+        (ch("c"), control, Release, events, b"\x1b[99;5:3u"),
+        (TerminalKey::Left, none, Repeat, events, b"\x1b[1;1:2D"),
+        (TerminalKey::Left, none, Release, events, b"\x1b[1;1:3D"),
+        (TerminalKey::Escape, none, Release, events, b"\x1b[27;1:3u"),
+        (ch("c"), platform, Release, events, b"\x1b[99;9:3u"),
+        // Enter, Tab and Backspace keep their legacy bytes and have no release until
+        // every key is an escape code.
+        (TerminalKey::Enter, none, Repeat, events, b"\r"),
+        (TerminalKey::Enter, none, Release, events, b""),
+        (TerminalKey::Enter, shift, Release, events, b""),
+        (TerminalKey::BackTab, none, Release, events, b""),
+        (
+            TerminalKey::Enter,
+            none,
+            Release,
+            report_text,
+            b"\x1b[13;1:3u",
+        ),
+        // A release carries no associated text.
+        (ch("a"), none, Repeat, report_text, b"\x1b[97;1:2;97u"),
+        (ch("a"), none, Release, report_text, b"\x1b[97;1:3u"),
+        // Without event types a repeat is a press and a release is nothing.
+        (ch("c"), control, Repeat, disambiguate, b"\x1b[99;5u"),
+        (ch("c"), control, Release, disambiguate, b""),
+        (TerminalKey::Escape, none, Release, disambiguate, b""),
+        (ch("c"), control, Repeat, TermMode::empty(), b"\x03"),
+        (ch("c"), control, Release, TermMode::empty(), b""),
+        (
+            TerminalKey::Left,
+            none,
+            Repeat,
+            TermMode::empty(),
+            b"\x1b[D",
+        ),
+        (TerminalKey::Left, none, Release, TermMode::empty(), b""),
+    ];
+    for (key, modifiers, kind, modes, expected) in event_cases {
+        assert_eq!(
+            encode_key_in_mode(key, *modifiers, *kind, *modes).unwrap(),
+            *expected,
+            "{key:?} {modifiers:?} {kind:?} {modes:?}"
         );
     }
 

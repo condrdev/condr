@@ -1032,6 +1032,7 @@ fn conpty_ctrl_c_interrupts_a_program_when_the_server_ignores_it() {
                 control: true,
                 ..TerminalModifiers::default()
             },
+            kind: condr_core::TerminalKeyEventKind::Press,
         })
         .unwrap();
     runtime.wait().unwrap();

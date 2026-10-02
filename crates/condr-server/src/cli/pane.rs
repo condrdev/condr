@@ -306,7 +306,11 @@ fn parse_key(spec: &str) -> Result<TerminalCommand, CliError> {
             }
         }
     };
-    Ok(TerminalCommand::Key { key, modifiers })
+    Ok(TerminalCommand::Key {
+        key,
+        modifiers,
+        kind: TerminalKeyEventKind::Press,
+    })
 }
 
 fn pane(
@@ -561,6 +565,7 @@ fn pane(
                     TerminalCommand::Key {
                         key: TerminalKey::Enter,
                         modifiers: TerminalModifiers::default(),
+                        kind: TerminalKeyEventKind::Press,
                     },
                 ],
             )?;

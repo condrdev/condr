@@ -115,6 +115,35 @@ fn layout_command_round_trip_preserves_creation_options() {
 }
 
 #[test]
+fn terminal_key_round_trip_preserves_its_event_kind() {
+    for kind in [
+        condr_core::TerminalKeyEventKind::Press,
+        condr_core::TerminalKeyEventKind::Repeat,
+        condr_core::TerminalKeyEventKind::Release,
+    ] {
+        let message = ClientMessage::Terminal {
+            server_id: ServerId(4),
+            session_id: SessionId(1),
+            pane_id: PaneId::from_u64(3),
+            command: condr_core::TerminalCommand::Key {
+                key: condr_core::TerminalKey::Character("c".into()),
+                modifiers: condr_core::TerminalModifiers {
+                    control: true,
+                    ..condr_core::TerminalModifiers::default()
+                },
+                kind,
+            },
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ClientMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+    }
+}
+
+#[test]
 fn worktree_command_round_trip_preserves_its_target() {
     let mut session = condr_core::Session::new();
     let parent_workspace_id = session

@@ -736,6 +736,7 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
             TerminalCommand::Key {
                 key: condr_core::TerminalKey::Enter,
                 modifiers: condr_core::TerminalModifiers::default(),
+                kind: condr_core::TerminalKeyEventKind::Press,
             },
         );
     }
@@ -760,6 +761,7 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
             TerminalCommand::Key {
                 key: condr_core::TerminalKey::Enter,
                 modifiers: condr_core::TerminalModifiers::default(),
+                kind: condr_core::TerminalKeyEventKind::Press,
             },
         );
 
@@ -802,6 +804,7 @@ fn terminal_tail_cwd_survives_exit_and_shutdown() {
             TerminalCommand::Key {
                 key: condr_core::TerminalKey::Enter,
                 modifiers: condr_core::TerminalModifiers::default(),
+                kind: condr_core::TerminalKeyEventKind::Press,
             },
         );
     }

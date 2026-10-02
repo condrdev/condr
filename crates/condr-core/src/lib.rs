@@ -41,11 +41,11 @@ pub use terminal::{
     DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneEnvironment,
     TerminalAgentProbe, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
     TerminalCursor, TerminalCursorShape, TerminalCwdProbe, TerminalFrameError,
-    TerminalHyperlinkBudget, TerminalKey, TerminalLaunchProbe, TerminalModifiers,
-    TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition, TerminalMouseTracking,
-    TerminalMouseWheel, TerminalNoticeBatch, TerminalNoticeProbe, TerminalPosition,
-    TerminalRuntime, TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide,
-    TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
+    TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind, TerminalLaunchProbe,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
+    TerminalMouseTracking, TerminalMouseWheel, TerminalNoticeBatch, TerminalNoticeProbe,
+    TerminalPosition, TerminalRuntime, TerminalScroll, TerminalSelection, TerminalSelectionUnit,
+    TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
     TerminalViewSource, default_indexed_color, default_shell_program,
 };
 

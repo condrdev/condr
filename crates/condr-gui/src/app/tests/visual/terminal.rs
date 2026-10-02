@@ -963,7 +963,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         window.write_to_clipboard(clipboard);
         window.simulate_keystrokes("alt-v");
         assert!(received.try_iter().any(|message| matches!(message,
-            ClientMessage::Terminal { pane_id: target, command: TerminalCommand::Key { key: condr_core::TerminalKey::Character(text), modifiers }, .. }
+            ClientMessage::Terminal { pane_id: target, command: TerminalCommand::Key { key: condr_core::TerminalKey::Character(text), modifiers, .. }, .. }
                 if target == pane_id && text == "v" && modifiers.alt)));
     }
     window.update(|_, cx| {
@@ -1771,4 +1771,160 @@ fn cmd_c_without_a_selection_reaches_a_kitty_program_as_itself_and_others_not_at
         }),
         "Cmd+C with nothing selected must reach a kitty program as super+c"
     );
+}
+
+/// Has the shell push kitty flags, read `count` raw bytes and print them as hex after
+/// `{marker}_BYTES_`.
+#[cfg(unix)]
+fn read_key_bytes(
+    window: &mut VisualTestContext,
+    view: &Entity<Condr>,
+    pane_id: PaneId,
+    marker: &str,
+    flags: u8,
+    count: usize,
+) {
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_command(
+                1,
+                pane_id,
+                TerminalCommand::Text(format!(
+                    "stty -echo -icanon -isig min 1 time 0; printf '\\033[>{flags}u{marker}_%s\\n' READY; bytes=$(dd bs=1 count={count} 2>/dev/null | od -An -tx1 | tr -d '[:space:]'); printf '\\033[<u'; stty sane; printf '{marker}_BYTES_%s\\n' \"$bytes\"\r"
+                )),
+            );
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        terminal_contains(window, view, 1, pane_id, &format!("{marker}_READY"))
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
+    use gpui_kit::{KeyDownEvent, KeyUpEvent, Keystroke};
+
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            view.read(app)
+                .active_session()?
+                .workspaces()
+                .first()
+                .map(|workspace| {
+                    workspace
+                        .tabs()
+                        .first()
+                        .unwrap()
+                        .focused_pane()
+                        .unwrap()
+                        .id()
+                })
+        });
+        let Some(pane_id) = pane_id else {
+            return false;
+        };
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        window.debug_bounds(terminal_selector(pane_id)).is_some()
+            && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+    }));
+    let pane_id = pane_id.unwrap();
+    let stroke = |text: &str| Keystroke::parse(text).unwrap();
+
+    // Disambiguation and event types (3): Ctrl+C pressed, held and let go is
+    // CSI 99;5:1u, CSI 99;5:2u, CSI 99;5:3u.
+    read_key_bytes(window, &view, pane_id, "CONDR_EVENTS", 3, 27);
+    window.simulate_keystrokes("ctrl-c");
+    window.simulate_event(KeyDownEvent {
+        keystroke: stroke("ctrl-c"),
+        is_held: true,
+        prefer_character_input: false,
+    });
+    window.simulate_event(KeyUpEvent {
+        keystroke: stroke("ctrl-c"),
+    });
+    assert!(
+        wait_until_event_driven(window, |window| {
+            terminal_contains(
+                window,
+                &view,
+                1,
+                pane_id,
+                "CONDR_EVENTS_BYTES_1b5b39393b353a31751b5b39393b353a32751b5b39393b353a3375",
+            )
+        }),
+        "a program with kitty event types must receive the press, the repeat and the release"
+    );
+
+    // Disambiguation alone (1): the release adds nothing between Ctrl+C, CSI 99;5u, and
+    // the Ctrl+Left that follows, CSI 1;5D.
+    read_key_bytes(window, &view, pane_id, "CONDR_PRESSES", 1, 13);
+    window.simulate_keystrokes("ctrl-c");
+    window.simulate_event(KeyUpEvent {
+        keystroke: stroke("ctrl-c"),
+    });
+    window.simulate_keystrokes("ctrl-left");
+    assert!(
+        wait_until_event_driven(window, |window| {
+            terminal_contains(
+                window,
+                &view,
+                1,
+                pane_id,
+                "CONDR_PRESSES_BYTES_1b5b39393b35751b5b313b3544",
+            )
+        }),
+        "without kitty event types a release must reach the program as nothing"
+    );
+
+    // Cmd+C forwarded with nothing selected is released through the same record, and a
+    // release whose press Condr kept (Cmd+1 picks the first Tab) reaches nothing: the
+    // Ctrl+Left after it is the next byte.
+    #[cfg(target_os = "macos")]
+    {
+        read_key_bytes(window, &view, pane_id, "CONDR_CMD", 3, 26);
+        window.simulate_keystrokes("cmd-c");
+        window.simulate_event(KeyUpEvent {
+            keystroke: stroke("cmd-c"),
+        });
+        window.simulate_keystrokes("cmd-1");
+        window.simulate_event(KeyUpEvent {
+            keystroke: stroke("cmd-1"),
+        });
+        window.simulate_keystrokes("ctrl-left");
+        assert!(
+            wait_until_event_driven(window, |window| {
+                terminal_contains(
+                    window,
+                    &view,
+                    1,
+                    pane_id,
+                    "CONDR_CMD_BYTES_1b5b39393b393a31751b5b39393b393a33751b5b313b353a3144",
+                )
+            }),
+            "Cmd+C's release must follow its press, and a kept press must have no release"
+        );
+    }
 }

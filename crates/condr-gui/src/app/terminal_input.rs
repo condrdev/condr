@@ -95,6 +95,8 @@ impl Condr {
             .flatten();
         if focused != self.focused_terminal {
             self.focused_terminal = focused;
+            // A key let go of elsewhere is never released here.
+            self.forwarded_key_presses.clear();
             if let Some((key, pane_id)) = focused {
                 // Returning to the window shows this Pane: its completion has been seen.
                 self.mark_pane_seen(key, pane_id);
@@ -130,7 +132,13 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.send_terminal_action_key(TerminalKey::Tab, TerminalModifiers::default(), window, cx);
+        self.send_terminal_action_key(
+            "tab",
+            TerminalKey::Tab,
+            TerminalModifiers::default(),
+            window,
+            cx,
+        );
     }
 
     pub(super) fn action_terminal_back_tab(
@@ -140,6 +148,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.send_terminal_action_key(
+            "tab",
             TerminalKey::BackTab,
             TerminalModifiers {
                 shift: true,
@@ -152,6 +161,7 @@ impl Condr {
 
     fn send_terminal_action_key(
         &mut self,
+        stroke_key: &str,
         terminal_key: TerminalKey,
         modifiers: TerminalModifiers,
         window: &mut Window,
@@ -167,14 +177,36 @@ impl Condr {
         }
 
         self.clear_selection(cx);
-        self.terminal_command(
+        self.forward_key(
             key,
             pane_id,
-            TerminalCommand::Key {
-                key: terminal_key,
-                modifiers,
-            },
+            stroke_key,
+            terminal_key,
+            modifiers,
+            TerminalKeyEventKind::Press,
         );
+    }
+
+    /// Sends a key the user pressed or holds to a Pane's program and remembers it, so
+    /// that its release follows; a key Condr keeps for itself never gets one.
+    pub(super) fn forward_key(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        stroke_key: &str,
+        terminal_key: TerminalKey,
+        modifiers: TerminalModifiers,
+        kind: TerminalKeyEventKind,
+    ) {
+        let command = TerminalCommand::Key {
+            key: terminal_key.clone(),
+            modifiers,
+            kind,
+        };
+        if self.terminal_command(key, pane_id, command) {
+            self.forwarded_key_presses
+                .insert(stroke_key.to_owned(), (key, pane_id, terminal_key));
+        }
     }
 
     fn terminal_is_focused(
@@ -257,21 +289,58 @@ impl Condr {
         if let Some(key_code) = key_code {
             self.clear_selection(cx);
             self.restart_cursor_blink(key, pane_id, cx);
-            self.terminal_command(
+            self.forward_key(
                 key,
                 pane_id,
-                TerminalCommand::Key {
-                    key: key_code,
-                    modifiers: TerminalModifiers {
-                        shift: modifiers.shift,
-                        alt: modifiers.alt,
-                        control: modifiers.control,
-                        platform: modifiers.platform,
-                    },
+                &stroke.key,
+                key_code,
+                terminal_modifiers(modifiers),
+                if event.is_held {
+                    TerminalKeyEventKind::Repeat
+                } else {
+                    TerminalKeyEventKind::Press
                 },
             );
             cx.stop_propagation();
         }
+    }
+
+    /// A release goes only where its press went, with the modifiers held now (Shift may
+    /// already be up). A chord whose modifier went first still releases the key pressed.
+    pub(super) fn key_up(
+        &mut self,
+        event: &KeyUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let stroke = &event.keystroke;
+        let Some((key, pane_id, pressed)) = self.forwarded_key_presses.remove(&stroke.key) else {
+            return;
+        };
+        if self.target_pane != Some((key, pane_id))
+            || !self.terminal_is_focused(key, pane_id, window, cx)
+        {
+            return;
+        }
+        self.terminal_command(
+            key,
+            pane_id,
+            TerminalCommand::Key {
+                key: terminal_key_for(stroke).unwrap_or(pressed),
+                modifiers: terminal_modifiers(stroke.modifiers),
+                kind: TerminalKeyEventKind::Release,
+            },
+        );
+        cx.stop_propagation();
+    }
+}
+
+fn terminal_modifiers(modifiers: Modifiers) -> TerminalModifiers {
+    TerminalModifiers {
+        shift: modifiers.shift,
+        alt: modifiers.alt,
+        control: modifiers.control,
+        platform: modifiers.platform,
     }
 }
 

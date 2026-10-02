@@ -40,7 +40,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - Windows 代码签名（SmartScreen）；自动安装更新（现在只提示）；故障排查、支持的 Agent、CLI 与配置参考文档。
 - 终端内搜索、命令面板、Diff 对 base 分支比较（`GitDiff.against` 已预留）。
 
-**已知限制**（原 Issue #23/#26/#28/#36 已随仓库公开被删除，暂记于此，出现摩擦再立新 Issue）：终端颜色查询（OSC 4/10/11）未回应；kitty keyboard 协议已可协商（Claude Code 请求标志 5，Codex 请求 7），但只上报按下事件，不上报松开/重复、单独的修饰键和小键盘键，也不支持 xterm modifyOtherKeys；OpenCode 集成缺真机验证；OSC 支持范围没有对照表。
+**已知限制**（原 Issue #23/#26/#28/#36 已随仓库公开被删除，暂记于此，出现摩擦再立新 Issue）：终端颜色查询（OSC 4/10/11）未回应；kitty keyboard 协议已可协商（Claude Code 请求标志 5，Codex 请求 7），按下、重复与松开都会上报，但不上报单独的修饰键、小键盘键和标志 8 下普通文字键的松开，也不支持 xterm modifyOtherKeys；OpenCode 集成缺真机验证；OSC 支持范围没有对照表。
 
 ## 环境判断
 

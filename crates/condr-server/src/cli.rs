@@ -12,8 +12,8 @@ use clap::{Subcommand, ValueEnum};
 use condr_core::protocol::{LayoutCommand, LayoutResult, Refusal};
 use condr_core::{
     AgentKind, AgentState, PaneDirection, PaneEnvironment, PaneId, PaneLayout, Session,
-    SplitDirection, Tab, TabId, TerminalCommand, TerminalKey, TerminalModifiers, Workspace,
-    WorkspaceId,
+    SplitDirection, Tab, TabId, TerminalCommand, TerminalKey, TerminalKeyEventKind,
+    TerminalModifiers, Workspace, WorkspaceId,
 };
 use condr_server::{ClientConnection, Endpoint, SavedServer, default_socket_path};
 use pane::pane_info;

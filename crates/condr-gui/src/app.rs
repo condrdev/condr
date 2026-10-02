@@ -51,10 +51,10 @@ use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, BrowsedDirectory,
     DirectoryListing, FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, Session,
     SessionSnapshot, SplitDirection, Tab, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
-    TerminalHyperlinkBudget, TerminalKey, TerminalModifiers, TerminalMouseButton,
-    TerminalMouseEvent, TerminalMouseTracking, TerminalPosition, TerminalSelection,
-    TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame, Workspace,
-    WorkspaceId,
+    TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
+    TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
+    TerminalSelection, TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame,
+    Workspace, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
@@ -281,6 +281,9 @@ pub(crate) struct Condr {
     last_terminal_mouse_motion: Option<ReportedTerminalMouseMotion>,
     focused_terminal: Option<(ConnectionKey, PaneId)>,
     reported_terminal_focus: Option<(ConnectionKey, PaneId)>,
+    /// Key presses that reached a Pane's program, by GPUI key name, so only their
+    /// releases follow them there. Emptied whenever the focused terminal changes.
+    forwarded_key_presses: HashMap<String, (ConnectionKey, PaneId, TerminalKey)>,
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
     terminal_composition: Option<TerminalComposition>,
@@ -519,6 +522,7 @@ impl Condr {
             last_terminal_mouse_motion: None,
             focused_terminal: None,
             reported_terminal_focus: None,
+            forwarded_key_presses: HashMap::new(),
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
             terminal_composition: None,

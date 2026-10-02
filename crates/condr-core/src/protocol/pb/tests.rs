@@ -141,6 +141,29 @@ fn unknown_enum_values_decode_to_their_fallback() {
     };
     assert_eq!(agent.kind, AgentKind::Other);
     assert_eq!(agent.state, crate::AgentState::Unknown);
+
+    // A key from a peer that predates event kinds, or that names a newer one, is a press.
+    for kind in [0, 99] {
+        let key = super::TerminalCommand {
+            command: Some(terminal_command::Command::Key(TerminalKeyCommand {
+                key: Some(super::TerminalKey {
+                    key: Some(terminal_key::Key::Function(5)),
+                }),
+                modifiers: None,
+                kind,
+            })),
+        };
+        assert!(
+            matches!(
+                crate::TerminalCommand::try_from(key).unwrap(),
+                crate::TerminalCommand::Key {
+                    kind: crate::TerminalKeyEventKind::Press,
+                    ..
+                }
+            ),
+            "{kind}"
+        );
+    }
 }
 
 #[test]

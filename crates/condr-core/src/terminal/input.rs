@@ -10,24 +10,30 @@ pub(super) fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
     }
 }
 
-/// Encodes a key press for the live terminal modes: the kitty keyboard protocol when
-/// the application negotiated it, otherwise the legacy xterm sequences.
+/// Encodes a key event for the live terminal modes: the kitty keyboard protocol when
+/// the application negotiated it, otherwise the legacy xterm sequences. Without kitty
+/// event types a repeat is another press and a release is nothing.
 pub(super) fn encode_key_in_mode(
     key: &TerminalKey,
     modifiers: TerminalModifiers,
+    kind: TerminalKeyEventKind,
     modes: TermMode,
 ) -> io::Result<Vec<u8>> {
-    if let Some(bytes) = encode_kitty_key(key, modifiers, modes) {
+    if let Some(bytes) = encode_kitty_key(key, modifiers, kind, modes) {
         return Ok(bytes);
+    }
+    if kind == TerminalKeyEventKind::Release {
+        return Ok(Vec::new());
     }
     encode_key(key, modifiers, modes.contains(TermMode::APP_CURSOR))
 }
 
-/// Kitty keyboard protocol, press events only. Functional keys use the specification's
-/// canonical CSI forms when disambiguation, event types or report-all is enabled.
+/// Kitty keyboard protocol. Functional keys use the specification's canonical CSI forms
+/// when disambiguation, event types or report-all is enabled.
 fn encode_kitty_key(
     key: &TerminalKey,
     modifiers: TerminalModifiers,
+    kind: TerminalKeyEventKind,
     modes: TermMode,
 ) -> Option<Vec<u8>> {
     if !modes.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL) {
@@ -35,6 +41,22 @@ fn encode_kitty_key(
     }
     let report_all = modes.contains(TermMode::REPORT_ALL_KEYS_AS_ESC);
     let event_types = modes.contains(TermMode::REPORT_EVENT_TYPES);
+    let release = kind == TerminalKeyEventKind::Release;
+    // Enter, Tab and Backspace have no release unless every key is an escape code, so
+    // `reset` stays typeable after a program crashes in this mode (kitty specification).
+    if release
+        && (!event_types
+            || !report_all
+                && matches!(
+                    key,
+                    TerminalKey::Enter
+                        | TerminalKey::Tab
+                        | TerminalKey::BackTab
+                        | TerminalKey::Backspace
+                ))
+    {
+        return None;
+    }
     let text_only = !modifiers.control && !modifiers.alt && !modifiers.platform;
     let modified = !text_only || modifiers.shift;
     let escape_only = !report_all && !event_types;
@@ -80,7 +102,7 @@ fn encode_kitty_key(
         + 2 * u8::from(modifiers.alt)
         + 4 * u8::from(modifiers.control)
         + 8 * u8::from(modifiers.platform);
-    let mods = kitty_modifier_field(modifier, event_types);
+    let mods = kitty_modifier_field(modifier, event_types.then_some(kind));
     // Keys with legacy CSI forms keep them; without a modifier field the plain legacy
     // sequence is the only valid one (`CSI 1;A` is not).
     let legacy_form = |prefix: u8, final_byte: char| {
@@ -123,7 +145,8 @@ fn encode_kitty_key(
             if chars.next().is_some() {
                 return None;
             }
-            kitty_character(ch, modifiers.shift, &mods, text_only, modes)
+            // A release carries no text, associated text included.
+            kitty_character(ch, modifiers.shift, &mods, text_only && !release, modes)
         }
     };
     Some(sequence.into_bytes())
@@ -152,13 +175,20 @@ fn kitty_character(ch: char, shift: bool, mods: &str, text_only: bool, modes: Te
     sequence
 }
 
-/// The kitty modifier field; empty when it would be the default `1` without an event
-/// type, which the protocol lets the terminal omit.
-fn kitty_modifier_field(modifier: u8, event_types: bool) -> String {
-    match (modifier, event_types) {
-        (1, false) => String::new(),
-        (_, true) => format!("{modifier}:1"),
-        (_, false) => modifier.to_string(),
+/// The kitty modifier field, with the event type when event types are reported; empty
+/// when it would be the default `1` without one, which the protocol lets the terminal omit.
+fn kitty_modifier_field(modifier: u8, event: Option<TerminalKeyEventKind>) -> String {
+    match event {
+        None if modifier == 1 => String::new(),
+        None => modifier.to_string(),
+        Some(kind) => {
+            let event = match kind {
+                TerminalKeyEventKind::Press => 1,
+                TerminalKeyEventKind::Repeat => 2,
+                TerminalKeyEventKind::Release => 3,
+            };
+            format!("{modifier}:{event}")
+        }
     }
 }
 
@@ -180,7 +210,9 @@ pub(super) fn encode_text_in_mode(text: &str, modes: TermMode) -> Vec<u8> {
             let shift = ch.is_ascii_uppercase();
             let mods = kitty_modifier_field(
                 if shift { 2 } else { 1 },
-                modes.contains(TermMode::REPORT_EVENT_TYPES),
+                modes
+                    .contains(TermMode::REPORT_EVENT_TYPES)
+                    .then_some(TerminalKeyEventKind::Press),
             );
             kitty_character(ch, shift, &mods, true, modes).into_bytes()
         }
@@ -398,6 +430,15 @@ pub enum TerminalKey {
     Function(u8),
 }
 
+/// What happened to a key. Only a program that asked for kitty event types tells a
+/// repeat from a press or sees a release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TerminalKeyEventKind {
+    Press,
+    Repeat,
+    Release,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TerminalScroll {
     Lines(i32),
@@ -412,6 +453,7 @@ pub enum TerminalCommand {
     Key {
         key: TerminalKey,
         modifiers: TerminalModifiers,
+        kind: TerminalKeyEventKind,
     },
     Text(String),
     Paste(String),

@@ -6,9 +6,9 @@ use crate::terminal::{
     decode_position, decode_selection, decode_size, encode_position, encode_selection,
 };
 use crate::{
-    TerminalCommand, TerminalKey, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMousePosition, TerminalMouseWheel, TerminalScroll, TerminalSelectionUnit, TerminalView,
-    TerminalViewDelta, TerminalViewFrame,
+    TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton,
+    TerminalMouseEvent, TerminalMousePosition, TerminalMouseWheel, TerminalScroll,
+    TerminalSelectionUnit, TerminalView, TerminalViewDelta, TerminalViewFrame,
 };
 
 impl From<&TerminalViewFrame> for super::TerminalViewFrame {
@@ -213,6 +213,25 @@ fn decode_key(key: super::TerminalKey) -> WireResult<TerminalKey> {
     })
 }
 
+fn encode_key_event_kind(kind: TerminalKeyEventKind) -> i32 {
+    (match kind {
+        TerminalKeyEventKind::Press => super::TerminalKeyEventKind::Press,
+        TerminalKeyEventKind::Repeat => super::TerminalKeyEventKind::Repeat,
+        TerminalKeyEventKind::Release => super::TerminalKeyEventKind::Release,
+    }) as i32
+}
+
+/// A peer from before event kinds leaves the field unset; both it and an unknown kind
+/// are a press.
+fn decode_key_event_kind(raw: i32) -> TerminalKeyEventKind {
+    use super::TerminalKeyEventKind as Wire;
+    match Wire::try_from(raw).unwrap_or(Wire::Press) {
+        Wire::Unspecified | Wire::Press => TerminalKeyEventKind::Press,
+        Wire::Repeat => TerminalKeyEventKind::Repeat,
+        Wire::Release => TerminalKeyEventKind::Release,
+    }
+}
+
 fn encode_scroll(scroll: TerminalScroll) -> super::TerminalScroll {
     use super::TerminalScrollTarget as Target;
     use terminal_scroll::Scroll;
@@ -250,9 +269,14 @@ impl From<&TerminalCommand> for super::TerminalCommand {
             selection: selection.map(encode_selection),
         };
         let command = match command {
-            TerminalCommand::Key { key, modifiers } => Command::Key(TerminalKeyCommand {
+            TerminalCommand::Key {
+                key,
+                modifiers,
+                kind,
+            } => Command::Key(TerminalKeyCommand {
                 key: Some(encode_key(key)),
                 modifiers: Some(encode_modifiers(*modifiers)),
+                kind: encode_key_event_kind(*kind),
             }),
             TerminalCommand::Text(text) => Command::Text(text.clone()),
             TerminalCommand::Paste(text) => Command::Paste(text.clone()),
@@ -295,6 +319,7 @@ impl TryFrom<super::TerminalCommand> for TerminalCommand {
             Command::Key(key) => Self::Key {
                 key: decode_key(required(key.key, "key")?)?,
                 modifiers: decode_modifiers(key.modifiers),
+                kind: decode_key_event_kind(key.kind),
             },
             Command::Text(text) => Self::Text(text),
             Command::Paste(text) => Self::Paste(text),

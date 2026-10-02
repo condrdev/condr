@@ -317,7 +317,12 @@ impl TerminalRuntime {
             .expect("terminal state lock poisoned")
             .mode();
         let bytes = encode_paste(text, modes.contains(TermMode::BRACKETED_PASTE));
-        let enter = encode_key_in_mode(&TerminalKey::Enter, TerminalModifiers::default(), modes)?;
+        let enter = encode_key_in_mode(
+            &TerminalKey::Enter,
+            TerminalModifiers::default(),
+            TerminalKeyEventKind::Press,
+            modes,
+        )?;
         self.scroll_to_bottom();
         self.clear_selection();
         self.input.try_submit(bytes, enter)
@@ -357,7 +362,11 @@ impl TerminalRuntime {
 
     pub fn execute(&self, command: TerminalCommand) -> io::Result<Option<String>> {
         match command {
-            TerminalCommand::Key { key, modifiers } => {
+            TerminalCommand::Key {
+                key,
+                modifiers,
+                kind,
+            } => {
                 let modes = *self
                     .terminal
                     .lock()
@@ -372,13 +381,24 @@ impl TerminalRuntime {
                     && !modes.contains(TermMode::ALT_SCREEN)
                     && matches!(key, TerminalKey::PageUp | TerminalKey::PageDown)
                 {
-                    self.scroll(match key {
-                        TerminalKey::PageUp => TerminalScroll::PageUp,
-                        TerminalKey::PageDown => TerminalScroll::PageDown,
-                        _ => unreachable!(),
-                    });
+                    // The press scrolled, so the program never saw it or its release.
+                    if kind != TerminalKeyEventKind::Release {
+                        self.scroll(match key {
+                            TerminalKey::PageUp => TerminalScroll::PageUp,
+                            TerminalKey::PageDown => TerminalScroll::PageDown,
+                            _ => unreachable!(),
+                        });
+                    }
                 } else {
-                    self.write(encode_key_in_mode(&key, modifiers, modes)?)?;
+                    let bytes = encode_key_in_mode(&key, modifiers, kind, modes)?;
+                    // Letting go of a key is not input: it neither scrolls to the bottom
+                    // nor clears the selection. A key that encodes to nothing (an
+                    // unreported release, Cmd without kitty) does nothing at all.
+                    if kind == TerminalKeyEventKind::Release {
+                        self.input.try_write(bytes)?;
+                    } else if !bytes.is_empty() {
+                        self.write(bytes)?;
+                    }
                 }
                 Ok(None)
             }

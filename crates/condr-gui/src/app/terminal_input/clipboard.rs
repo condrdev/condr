@@ -52,16 +52,16 @@ impl Condr {
             return;
         }
         self.restart_cursor_blink(key, pane_id, cx);
-        self.terminal_command(
+        self.forward_key(
             key,
             pane_id,
-            TerminalCommand::Key {
-                key: TerminalKey::Character("c".into()),
-                modifiers: TerminalModifiers {
-                    platform: true,
-                    ..TerminalModifiers::default()
-                },
+            "c",
+            TerminalKey::Character("c".into()),
+            TerminalModifiers {
+                platform: true,
+                ..TerminalModifiers::default()
             },
+            TerminalKeyEventKind::Press,
         );
     }
 
