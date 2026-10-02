@@ -88,7 +88,6 @@ A connection that fails when Condr starts is not retried automatically. Click **
 
 ## Condr will not install or open
 
-- **macOS says the app can't be verified.** The app is not notarized yet. Open **System Settings › Privacy & Security**, scroll down, and click **Open Anyway**. Or run `xattr -cr /Applications/Condr.app`.
 - **Windows SmartScreen blocks it.** Click **More info**, then **Run anyway**. Preview installers are unsigned.
 - **The Linux AppImage will not open.** It needs FUSE. Install your distribution's `libfuse2` package, or unpack it with `--appimage-extract` and run it.
 - **Another Condr is already running.** The window allows one instance. A second one exits immediately.

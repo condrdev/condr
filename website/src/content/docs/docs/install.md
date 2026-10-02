@@ -30,17 +30,6 @@ Download the installer for your platform from the [download page](/download/):
 
 The Windows installer goes to `%LOCALAPPDATA%\Programs\Condr`, needs no administrator rights, and requires Windows 10 1809 or later. On first launch, the macOS app and the Linux AppImage copy the `condr` command to `~/.local/opt/condr`. The window uses that copy to start the Server.
 
-### macOS says the app can't be verified
-
-The app isn't notarized by Apple yet, so the first launch says it can't be verified. Open it in either of these ways:
-
-- Click **Done**, open **System Settings › Privacy & Security**, scroll down, and click **Open Anyway**.
-- Or clear the download flag once in a terminal:
-
-  ```sh
-  xattr -cr /Applications/Condr.app
-  ```
-
 ### Windows shows SmartScreen
 
 The preview installer isn't signed. When SmartScreen blocks it, click **More info**, then **Run anyway**.

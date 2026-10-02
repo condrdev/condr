@@ -21,16 +21,6 @@ Condr 0.1 是公开预览版，版本之间仍可能有变化。
 2. 安装 Agent 集成, 请打开 **Settings › Device › Agents**，在你用的 Agent 旁边点 **Install**。这样 Condr 才能追踪 Agent 的状态。
 3. 在 shell 里像平时一样运行 Agent，例如 `claude`。
 
-### macOS
-
-由于我们还未完成 Apple 的相关认证工作, 所以首次启动时会提示无法验证。你可以通过以下两种方式解决:
-
-- 打开 **系统设置 › 隐私与安全性**，滚到底部，点 **仍要打开**。
-- 在 Terminal 运行以下命令:
-  ```sh
-  xattr -cr /Applications/Condr.app
-  ```
-
 ## Headless Server
 
 如果你需要在服务器、开发机和其他不需要窗口的机器中使用，只需要安装 `condr` 命令：

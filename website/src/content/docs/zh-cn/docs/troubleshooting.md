@@ -88,7 +88,6 @@ Condr 启动时第一次失败的连接不会自动重试。请在 Device 页面
 
 ## Condr 无法安装或打开
 
-- **macOS 提示应用无法验证。** 应用还没有公证。打开 **系统设置 › 隐私与安全性**，滚到底部点 **仍要打开**。或运行 `xattr -cr /Applications/Condr.app`。
 - **Windows SmartScreen 拦截。** 点 **更多信息**，再点 **仍要运行**。预览安装包没有签名。
 - **Linux AppImage 打不开。** 需要 FUSE。安装发行版的 `libfuse2` 包，或用 `--appimage-extract` 解开后运行。
 - **另一个 Condr 已在运行。** 窗口只允许一个实例，第二个会立即退出。
