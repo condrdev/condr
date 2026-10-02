@@ -64,7 +64,7 @@ command = ["code-insiders", "--reuse-window"]
 | Select text while a program has mouse mode on | Shift+drag | Shift+drag |
 | Open a link in the terminal | Cmd+click | Ctrl+click |
 
-See [Keyboard shortcuts](/docs/keybindings/) for the full list.
+See [Keyboard shortcuts](/docs/reference/keybindings/) for the full list.
 
 ## Set the default shell
 

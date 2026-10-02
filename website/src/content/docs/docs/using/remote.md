@@ -3,13 +3,13 @@ title: Connect a remote Device
 description: Choose SSH, TCP, or Peer-to-peer, then connect and manage another machine.
 ---
 
-Add another machine to the sidebar, choose its connection type, and recover when it disconnects or versions differ. For trust rules, read the [security model](/docs/security/). For connection checks, read [troubleshooting](/docs/troubleshooting/).
+Add another machine to the sidebar, choose its connection type, and recover when it disconnects or versions differ. For trust rules, read the [security model](/docs/help/security/). For connection checks, read [troubleshooting](/docs/help/troubleshooting/).
 
 A **Device key** identifies one Device and has 43 characters. An **invite** is a one-time invitation. Keep it secret. It expires after 10 minutes.
 
 ## Choose a connection
 
-Install `condr` on the remote Device first. See [Install](/docs/install/). Then choose the connection that matches your setup:
+Install `condr` on the remote Device first. See [Install](/docs/start/install/). Then choose the connection that matches your setup:
 
 | Your situation | Pick | Link form |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ Use this for two machines behind routers, such as a home desktop and a work lapt
 2. Run `condr server invite`. It prints a Peer-to-peer link without a placeholder.
 3. Paste the link into Condr within 10 minutes.
 
-The Devices connect directly when possible and use Condr's relay when not. Their own keys encrypt traffic end to end, so the relay cannot read it. If the relay or DNS service is down, only Peer-to-peer connections fail. SSH and TCP continue to work. Read the [security model](/docs/security/) for what the relay can see.
+The Devices connect directly when possible and use Condr's relay when not. Their own keys encrypt traffic end to end, so the relay cannot read it. If the relay or DNS service is down, only Peer-to-peer connections fail. SSH and TCP continue to work. Read the [security model](/docs/help/security/) for what the relay can see.
 
 A Peer-to-peer Device's default sidebar name is `p2p` plus the first 8 characters of its Device key. Right-click the Device and choose **Edit Remote Device** to rename it.
 
@@ -136,7 +136,7 @@ After updating a remote Device, restart its Server. Run `condr server restart` t
 | this device is not authorized | The invite expired, was used, or this Device was revoked |
 | speak different protocol versions | The versions are too far apart |
 
-See [troubleshooting](/docs/troubleshooting/) for each check.
+See [troubleshooting](/docs/help/troubleshooting/) for each check.
 
 ## Reach a remote Device from the command line
 
@@ -148,4 +148,4 @@ condr --device build-box workspace list
 condr workspace list --all-devices
 ```
 
-`--device` takes the Device name shown in the sidebar. Set the default with `CONDR_DEVICE`. `server` and `agent hooks` act only on this machine and do not accept `--device`. See [Agent automation](/docs/automation/) for details.
+`--device` takes the Device name shown in the sidebar. Set the default with `CONDR_DEVICE`. `server` and `agent hooks` act only on this machine and do not accept `--device`. See [Agent automation](/docs/using/automation/) for details.

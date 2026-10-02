@@ -72,7 +72,7 @@ condr --skill
   condr pane send-keys 12 enter       # 发送指定按键（如 enter, esc, ctrl+c）
   ```
 
-> **注意**：使用 `agent start` 和 `--wait` 之前，必须先在目标 Agent 上安装 Hook（见 [Agent 集成与状态](/zh-cn/docs/agents/)）。未安装 Hook 的 Agent 无法精准上报状态，会导致命令超时或无法返回。
+> **注意**：使用 `agent start` 和 `--wait` 之前，必须先在目标 Agent 上安装 Hook（见 [Agent 集成与状态](/zh-cn/docs/using/agents/)）。未安装 Hook 的 Agent 无法精准上报状态，会导致命令超时或无法返回。
 
 ### 跨设备（Device）控制
 在命令行中加上 `--device` 参数，可以跨机器控制已保存的远程设备：

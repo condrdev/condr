@@ -16,7 +16,7 @@ Condr 0.1 is a public preview, and things may still change between versions. Upd
 | The computer you work at | Desktop app | The window and the Server |
 | A machine that only runs agents, with no window | Headless Server | Only the `condr` command |
 
-The desktop app includes the Server, so local use needs no headless Server. To reach this computer from another one, treat it as a remote Device. See [Remote devices](/docs/remote/).
+The desktop app includes the Server, so local use needs no headless Server. To reach this computer from another one, treat it as a remote Device. See [Remote devices](/docs/using/remote/).
 
 ## Install the desktop app
 
@@ -56,7 +56,7 @@ The script adds PATH in `~/.zprofile` on macOS or `~/.profile` on Linux. On Wind
 condr --version
 ```
 
-Non-interactive SSH shells usually don't read those files. If another machine reports `condr: not found` over SSH, name the path in the link. See [Remote devices](/docs/remote/#connect-over-ssh).
+Non-interactive SSH shells usually don't read those files. If another machine reports `condr: not found` over SSH, name the path in the link. See [Remote devices](/docs/using/remote/#connect-over-ssh).
 
 ### Choose install script options
 
@@ -94,7 +94,7 @@ Update the window and the Server together. A compatible protocol lets different 
 - **Desktop app**: download the new installer and install over the old one. After the window restarts, the local Server is still the old version. Run `condr server restart`, or click **Restart Condr** in **Settings › Device › Daemon**, so the new version takes over.
 - **Headless Server**: run the install script again. If the Server is running, the script asks whether to restart it. If you do not restart it, connected windows show a version mismatch until you do.
 
-Restarting the Server ends every program in every Pane, then restores the structure from the snapshot. Agents with hooks installed resume their sessions on their own. See [Workspaces, Tabs, and Panes](/docs/workspaces/#what-survives-a-server-restart).
+Restarting the Server ends every program in every Pane, then restores the structure from the snapshot. Agents with hooks installed resume their sessions on their own. See [Workspaces, Tabs, and Panes](/docs/using/workspaces/#what-survives-a-server-restart).
 
 ## Uninstall Condr
 
@@ -104,6 +104,6 @@ Headless Server:
 condr server uninstall
 ```
 
-This stops the Server and removes the installed `condr`, its symlink, and its PATH entry. It keeps the config, state, and log directories and tells you where they are. To remove those directories, see [Configuration and settings](/docs/configuration/#where-the-files-are).
+This stops the Server and removes the installed `condr`, its symlink, and its PATH entry. It keeps the config, state, and log directories and tells you where they are. To remove those directories, see [Configuration and settings](/docs/reference/configuration/#where-the-files-are).
 
 Desktop app: on macOS, drag `Condr.app` to the Trash. On Windows, uninstall from **Apps & features**. On Linux, delete the AppImage. To remove the `condr` command copied to `~/.local/opt/condr`, run the `uninstall` command above.

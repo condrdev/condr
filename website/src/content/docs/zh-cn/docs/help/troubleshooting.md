@@ -15,7 +15,7 @@ condr server status
 
 命令显示 Server 是否运行、版本、监听地址、Workspace 和 Agent 数量、连接客户端数，以及最近 20 条警告和错误。保存的监听地址或 Peer-to-peer 设置还没生效时，会多一行 Pending。加上 `--json` 可得到一个对象，用于 Issue。远程 Device 的状态也在 **Settings › Device › General** 中显示。
 
-**日志。** 日志每天滚动，保留 7 天。位置见[配置与设置](/zh-cn/docs/configuration/)。**Settings › Developer › Locations** → **Open** 会打开日志目录。Server 日志是 `condr-server-<id>.<date>.log`，窗口日志是 `condr-gui.<date>.log`。后台 Server 崩溃时，输出在旁边的 `.stderr` 文件中。
+**日志。** 日志每天滚动，保留 7 天。位置见[配置与设置](/zh-cn/docs/reference/configuration/)。**Settings › Developer › Locations** → **Open** 会打开日志目录。Server 日志是 `condr-server-<id>.<date>.log`，窗口日志是 `condr-gui.<date>.log`。后台 Server 崩溃时，输出在旁边的 `.stderr` 文件中。
 
 要获取更多细节，用 `CONDR_LOG` 重启 Server：
 
@@ -43,7 +43,7 @@ CONDR_LOG=debug condr server restart
 
 1. **安装 hook 了吗？** 用你的 Agent 运行 `condr agent hooks status claude`。`missing` 要安装，`outdated` 要重装。远程 Device 在 **Settings › Device › Agent integrations** 中查看。
 2. **Agent 在 Condr Pane 中运行吗？** hook 只在设置了 `CONDR_ENV=1` 的 shell 中生效。Condr 看不到其他终端中的 Agent。
-3. **Agent 会报告状态吗？** Codex、Copilot、Cursor 和 Antigravity 在第一次提示前不报告。Kimi 不支持。见 [Agent 集成与状态](/zh-cn/docs/agents/) 的支持表。
+3. **Agent 会报告状态吗？** Codex、Copilot、Cursor 和 Antigravity 在第一次提示前不报告。Kimi 不支持。见 [Agent 集成与状态](/zh-cn/docs/using/agents/) 的支持表。
 4. **Codex 信任 hook 了吗？** 安装后在 Codex 中运行 `/hooks`。
 5. **hook 写到了其他目录吗？** hook 在安装时根据环境变量寻找 Agent 配置目录，例如 `CLAUDE_CONFIG_DIR`。窗口与终端的环境可能不同。
 
@@ -108,4 +108,4 @@ Condr 启动时第一次失败的连接不会自动重试。请在 Device 页面
 4. 简短的复现步骤。
 5. 涉及远程 Device 时，两边版本和连接类型。
 
-不要公开报告安全问题。见[安全模型](/zh-cn/docs/security/#报告安全问题)。
+不要公开报告安全问题。见[安全模型](/zh-cn/docs/help/security/#报告安全问题)。

@@ -159,7 +159,7 @@ This adds an editor to “Open in”. Condr appends the path to open as the last
 
 The Server inherits its environment from the process that starts it. Therefore `CONDR_LOG=debug condr server restart` works, but a change to `.zshrc` needs a Server restart before it appears.
 
-See [Agent automation](/docs/automation/) for variables set automatically inside a Pane.
+See [Agent automation](/docs/using/automation/) for variables set automatically inside a Pane.
 
 ## Find other Server files
 

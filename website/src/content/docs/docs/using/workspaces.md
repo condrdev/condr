@@ -25,7 +25,7 @@ Two Agents that edit one working directory can overwrite each other. A Git workt
 
 Right-click a Git repository Workspace, choose **Create Worktree**, and enter a branch name. The default is `worktree/` followed by the Workspace name. If the branch does not exist, Condr creates it from the current HEAD. If it exists, Condr checks it out.
 
-Condr places the new directory at `<repo>.worktrees/<branch>` beside the repository and adds it as a Workspace in the sidebar. Set `[server] worktree_root` in the Server configuration to use another location. See [Configuration and settings](/docs/configuration/).
+Condr places the new directory at `<repo>.worktrees/<branch>` beside the repository and adds it as a Workspace in the sidebar. Set `[server] worktree_root` in the Server configuration to use another location. See [Configuration and settings](/docs/reference/configuration/).
 
 Choose **Open Existing Worktree** to use a worktree you already have. Condr never deletes one opened this way.
 
@@ -50,7 +50,7 @@ A Pane is one terminal. Open its **⋮** menu to choose:
 
 Drag a Pane header onto another Pane. Drop on an edge to move it there, or in the center to swap the two. Drag the divider between Panes to resize them. These actions do not work while a Pane is zoomed.
 
-The active Pane has a blue border. See [Keyboard shortcuts](/docs/keybindings/) for shortcuts.
+The active Pane has a blue border. See [Keyboard shortcuts](/docs/reference/keybindings/) for shortcuts.
 
 ## Use terminal features
 

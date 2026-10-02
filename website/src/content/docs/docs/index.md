@@ -6,10 +6,10 @@ hero:
   tagline: Keep every agent running in one window, on your machine or a remote Device.
   actions:
     - text: Get started
-      link: /docs/getting-started/
+      link: /docs/start/getting-started/
       icon: right-arrow
     - text: Core concepts
-      link: /docs/concepts/
+      link: /docs/start/concepts/
       icon: open-book
 ---
 

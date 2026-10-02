@@ -6,10 +6,10 @@ hero:
   tagline: 让每个 Agent 在一个窗口里持续运行，本机和远程 Device 都能看。
   actions:
     - text: 快速上手
-      link: /zh-cn/docs/getting-started/
+      link: /zh-cn/docs/start/getting-started/
       icon: right-arrow
     - text: 核心概念
-      link: /zh-cn/docs/concepts/
+      link: /zh-cn/docs/start/concepts/
       icon: open-book
 ---
 

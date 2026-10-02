@@ -15,7 +15,7 @@ condr server status
 
 The command shows whether the Server is running, its version, listen address, Workspace and Agent counts, connected clients, and the last 20 warnings and errors. Add `--json` to get one object for an issue. For a remote Device, see **Settings › Device › Daemon**.
 
-**Logs.** Logs roll daily and stay for 7 days. Find their location in [Configuration and settings](/docs/configuration/). **Settings › Developer › Locations** has **Open** to open the log folder. The Server log is `condr-server-<id>.<date>.log`. The window log is `condr-gui.<date>.log`. When a background Server crashes, its output is in the nearby `.stderr` file.
+**Logs.** Logs roll daily and stay for 7 days. Find their location in [Configuration and settings](/docs/reference/configuration/). **Settings › Developer › Locations** has **Open** to open the log folder. The Server log is `condr-server-<id>.<date>.log`. The window log is `condr-gui.<date>.log`. When a background Server crashes, its output is in the nearby `.stderr` file.
 
 For more detail, restart the Server with `CONDR_LOG`:
 
@@ -43,7 +43,7 @@ State comes only from Agent hooks. Check these items in order:
 
 1. **Are hooks installed?** Run `condr agent hooks status claude` with your Agent. Install hooks for `missing` and reinstall for `outdated`. For a remote Device, open **Settings › Device › Agents**.
 2. **Does the Agent run in a Condr Pane?** Hooks work only in a shell with `CONDR_ENV=1`. Condr cannot see an Agent in another terminal.
-3. **Does the Agent report state?** Codex, Copilot, Cursor, and Antigravity report nothing before the first prompt. Kimi is not supported. See the support table in [Agents](/docs/agents/).
+3. **Does the Agent report state?** Codex, Copilot, Cursor, and Antigravity report nothing before the first prompt. Kimi is not supported. See the support table in [Agents](/docs/using/agents/).
 4. **Did Codex trust the hooks?** Run `/hooks` in Codex after installation.
 5. **Did hooks use another folder?** Hooks find the Agent config folder from environment variables at install time, such as `CLAUDE_CONFIG_DIR`. The window and a terminal can have different environments.
 
@@ -108,4 +108,4 @@ Open an issue at [GitHub Issues](https://github.com/condrdev/condr/issues) and i
 4. Short reproduction steps.
 5. For a remote Device, both versions and the connection type.
 
-Do not report security problems publicly. See [Security model](/docs/security/#report-a-security-problem).
+Do not report security problems publicly. See [Security model](/docs/help/security/#report-a-security-problem).

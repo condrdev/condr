@@ -43,16 +43,16 @@ condr server start
 
 :::note
 - Server 会常驻后台运行，关闭终端不会中断进程。
-- 如需连接此机器，请参阅[远程连接](/zh-cn/docs/remote/)。
+- 如需连接此机器，请参阅[远程连接](/zh-cn/docs/using/remote/)。
 - 当前预览版本尚未配置系统自启服务，机器重启后需手动执行上述启动命令。
 :::
 
 ## 深入探索
 
-- [核心概念](/zh-cn/docs/concepts/)：了解 Device、Server、Workspace、Pane 与 Agent 的架构模型。
-- [Workspace、Tab 与 Pane](/zh-cn/docs/workspaces/)：配置多窗口分屏，结合 Git Worktree 为各 Agent 分配独立分支工作环境。
-- [Agent 集成与状态](/zh-cn/docs/agents/)：查看兼容 Agent 列表、生命周期 Hook 及状态监听定义。
-- [远程连接](/zh-cn/docs/remote/)：通过 SSH、TCP 或 P2P 方式接入远程设备。
-- [Agent 自动化与协同](/zh-cn/docs/automation/)：通过 `condr` CLI 实现 Agent 间的协同调度。
-- [CLI 参考](/zh-cn/docs/cli/)：查看完整的指令与参数手册。
-- [故障排查](/zh-cn/docs/troubleshooting/)：常见连接中断、状态脱轨及诊断排错方案。
+- [核心概念](/zh-cn/docs/start/concepts/)：了解 Device、Server、Workspace、Pane 与 Agent 的架构模型。
+- [Workspace、Tab 与 Pane](/zh-cn/docs/using/workspaces/)：配置多窗口分屏，结合 Git Worktree 为各 Agent 分配独立分支工作环境。
+- [Agent 集成与状态](/zh-cn/docs/using/agents/)：查看兼容 Agent 列表、生命周期 Hook 及状态监听定义。
+- [远程连接](/zh-cn/docs/using/remote/)：通过 SSH、TCP 或 P2P 方式接入远程设备。
+- [Agent 自动化与协同](/zh-cn/docs/using/automation/)：通过 `condr` CLI 实现 Agent 间的协同调度。
+- [CLI 参考](/zh-cn/docs/reference/cli/)：查看完整的指令与参数手册。
+- [故障排查](/zh-cn/docs/help/troubleshooting/)：常见连接中断、状态脱轨及诊断排错方案。

@@ -59,7 +59,7 @@ name = "Helix"
 command = ["hx"]
 ```
 
-The path is appended as the last argument. See [Configuration and settings](/docs/configuration/).
+The path is appended as the last argument. See [Configuration and settings](/docs/reference/configuration/).
 
 The button works only for local Devices. Remote Workspace files stay on the remote machine, so your local editor cannot open them.
 

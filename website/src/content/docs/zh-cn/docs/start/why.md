@@ -64,6 +64,6 @@ Condr 不做二手聊天界面，不接管对话循环，也不代发 API 请求
 
 ## 接下来
 
-- [快速上手](/zh-cn/docs/getting-started/)：几分钟内完成安装并建立你的第一个远程连接。
-- [远程连接](/zh-cn/docs/remote/)：详细了解 SSH、Noise TCP 与 P2P 穿透的配置方式。
-- [核心概念](/zh-cn/docs/concepts/)：深入理解 Device、Server、Workspace 与 Pane 的实体层级。
+- [快速上手](/zh-cn/docs/start/getting-started/)：几分钟内完成安装并建立你的第一个远程连接。
+- [远程连接](/zh-cn/docs/using/remote/)：详细了解 SSH、Noise TCP 与 P2P 穿透的配置方式。
+- [核心概念](/zh-cn/docs/start/concepts/)：深入理解 Device、Server、Workspace 与 Pane 的实体层级。

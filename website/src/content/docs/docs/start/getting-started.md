@@ -24,7 +24,7 @@ Download the installer for your platform from the [download page](/download/) an
 | macOS x86_64 / arm64 | `.dmg` |
 | Windows x86_64 | `.exe` |
 
-Windows may show SmartScreen, because the preview installer is not signed yet. See [Install](/docs/install/) for platform notes, install script options, and the headless Server.
+Windows may show SmartScreen, because the preview installer is not signed yet. See [Install](/docs/start/install/) for platform notes, install script options, and the headless Server.
 
 ## 2. Run your first Agent
 
@@ -42,7 +42,7 @@ Windows may show SmartScreen, because the preview installer is not signed yet. S
 6. Give it a task, then close the window. The Server and the Agent keep running.
 7. Open Condr again. Your Workspace is where you left it. If the Agent finished, the sidebar marks it green.
 
-You can now use Condr. To run several Agents, choose **Split Right** in the Pane menu. You can also right-click the Workspace and choose **Create Worktree** to give each Agent its own branch. See [Workspaces, Tabs, and Panes](/docs/workspaces/).
+You can now use Condr. To run several Agents, choose **Split Right** in the Pane menu. You can also right-click the Workspace and choose **Create Worktree** to give each Agent its own branch. See [Workspaces, Tabs, and Panes](/docs/using/workspaces/).
 
 ## 3. Connect a remote Device
 
@@ -63,11 +63,11 @@ Run Agents on another machine and watch them in the same window:
 
 3. The machine appears in the sidebar. Click **New Workspace**. From there, it works like the local Device.
 
-SSH uses your existing OpenSSH configuration and keys. For a machine without SSH, connect over TCP or Peer-to-peer. See [Remote devices](/docs/remote/).
+SSH uses your existing OpenSSH configuration and keys. For a machine without SSH, connect over TCP or Peer-to-peer. See [Remote devices](/docs/using/remote/).
 
 ## Next steps
 
-- [Agents](/docs/agents/): read each state and see which Agents are supported.
-- [Agent automation](/docs/automation/): let one Agent direct others.
-- [Keyboard shortcuts](/docs/keybindings/).
-- [Troubleshooting](/docs/troubleshooting/): find the first checks when something goes wrong.
+- [Agents](/docs/using/agents/): read each state and see which Agents are supported.
+- [Agent automation](/docs/using/automation/): let one Agent direct others.
+- [Keyboard shortcuts](/docs/reference/keybindings/).
+- [Troubleshooting](/docs/help/troubleshooting/): find the first checks when something goes wrong.

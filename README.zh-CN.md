@@ -76,7 +76,7 @@ Condr 由两部分组成：
 - **TCP**（`tcp://`）：远程设备有固定地址时使用，一次性邀请配对，`Noise_IKpsk2` 加密。
 - **Peer-to-peer**（`p2p://`）：两台机器都在 NAT 后面时使用，端到端加密，能直连就直连，不能直连时经中继转发。
 
-具体设置步骤见文档站的 [Connect to a Remote Device](https://condr.dev/docs/getting-started/#connect-to-a-remote-device)。
+具体设置步骤见文档站的 [Connect to a Remote Device](https://condr.dev/docs/start/getting-started/#connect-to-a-remote-device)。
 
 ## 开发
 

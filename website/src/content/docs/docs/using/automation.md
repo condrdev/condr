@@ -3,7 +3,7 @@ title: Agent automation
 description: Let one Agent open Panes, read output, delegate work, and wait for results.
 ---
 
-Use these commands to let one Agent direct other Agents or to control Condr from a script. See the [CLI reference](/docs/cli/) for parameters and JSON fields.
+Use these commands to let one Agent direct other Agents or to control Condr from a script. See the [CLI reference](/docs/reference/cli/) for parameters and JSON fields.
 
 ## See how automation works
 
@@ -58,7 +58,7 @@ condr agent prompt reviewer "Review the changes in src/auth.rs and list the prob
 
 **Drive the terminal.** `pane run` pastes a command and presses Enter. `pane send-text` types without Enter. `pane send-keys` presses keys such as `enter`, `esc`, or `ctrl+c`.
 
-Agent states come from hooks. Without hooks, an Agent stays Unknown, so `agent start` waits until it times out and `--wait` never returns. Install hooks first as described on the [Agents](/docs/agents/) page. Agents such as Codex that report nothing before their first prompt let `agent start` return when Condr recognizes the process. The first `agent prompt` is accepted in Unknown.
+Agent states come from hooks. Without hooks, an Agent stays Unknown, so `agent start` waits until it times out and `--wait` never returns. Install hooks first as described on the [Agents](/docs/using/agents/) page. Agents such as Codex that report nothing before their first prompt let `agent start` return when Condr recognizes the process. The first `agent prompt` is accepted in Unknown.
 
 When an Agent waits for approval, `agent wait` returns `blocked`, and `blocked_on` says what it needs. Let the orchestrating Agent report that to you instead of approving for you.
 

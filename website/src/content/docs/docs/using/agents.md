@@ -3,7 +3,7 @@ title: Agents
 description: See supported Agents, install their hooks, and understand each state.
 ---
 
-Install an Agent's hooks so the sidebar can show its state and what it needs from you. For orchestration commands, see [Agent automation](/docs/automation/). For command options, see the [CLI reference](/docs/cli/).
+Install an Agent's hooks so the sidebar can show its state and what it needs from you. For orchestration commands, see [Agent automation](/docs/using/automation/). For command options, see the [CLI reference](/docs/reference/cli/).
 
 ## Prepare an Agent
 

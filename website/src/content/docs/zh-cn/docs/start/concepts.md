@@ -74,7 +74,7 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 
 ## 快速查阅
 
-- [Workspace、Tab 与 Pane](/zh-cn/docs/workspaces/)：分屏切分、快捷键及 Managed Worktree 使用。
-- [Agent 集成与状态](/zh-cn/docs/agents/)：受支持的 Agent 列表与状态上报配置。
-- [改动与文件预览](/zh-cn/docs/changes/)：使用 Diff Tab 和 Preview Tab 审查文件。
-- [远程连接](/zh-cn/docs/remote/)：配置 SSH、TCP 局域网配对或 P2P 穿透直连。
+- [Workspace、Tab 与 Pane](/zh-cn/docs/using/workspaces/)：分屏切分、快捷键及 Managed Worktree 使用。
+- [Agent 集成与状态](/zh-cn/docs/using/agents/)：受支持的 Agent 列表与状态上报配置。
+- [改动与文件预览](/zh-cn/docs/using/changes/)：使用 Diff Tab 和 Preview Tab 审查文件。
+- [远程连接](/zh-cn/docs/using/remote/)：配置 SSH、TCP 局域网配对或 P2P 穿透直连。
