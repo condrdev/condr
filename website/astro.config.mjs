@@ -6,13 +6,15 @@ export default defineConfig({
   site: 'https://condr.dev',
   // The hero screenshot is imported from ../assets, outside the Vite root.
   vite: { server: { fs: { allow: ['..'] } } },
-  // Only the docs have a Chinese version; its site title links to the locale root.
-  redirects: { '/zh-cn': '/' },
+  // Only the docs have a Chinese version, so its locale root goes to its docs landing page.
+  redirects: { '/zh-cn': '/zh-cn/docs/' },
 
   integrations: [
     starlight({
       title: { en: 'Condr Docs', 'zh-CN': 'Condr 文档' },
       favicon: '/condr.svg',
+      // The site title links to /docs/ (or /zh-cn/docs/), not the marketing home page.
+      routeMiddleware: './src/routeData.ts',
       description: 'Keep your agents running. One window for all your agents, local or remote.',
       // English docs at /docs/, Chinese at /zh-cn/docs/.
       defaultLocale: 'root',
