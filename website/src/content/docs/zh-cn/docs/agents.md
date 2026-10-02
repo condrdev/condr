@@ -46,7 +46,7 @@ hook 是 Agent 在开始、完成或等待时调用的一小段命令。Condr �
 condr agent hooks install claude
 ```
 
-也可以打开 **Settings › Device › Agent integrations**，对选中的 Device 点 **Install**。远程 Device 也在那里安装，因为命令行的 `agent hooks` 不接受 `--device`。
+也可以 **Settings › Device › Agent integrations** → **Install**，对选中的 Device 安装。远程 Device 也在那里安装，因为命令行的 `agent hooks` 不接受 `--device`。
 
 命令只修改 Agent 自己的配置文件，并把 Condr 条目合并到已有条目旁边。文件损坏或超过 4 MiB 时，命令报错且不写入。
 
@@ -123,7 +123,7 @@ Pane 没有焦点时，以下两种变化会发送系统通知：
 
 通知正文包含等待内容、Workspace 名称和终端标题。点击通知会切换到该 Pane。Blocked 期间等待内容变化时，Condr 会替换通知，而不会叠加。
 
-要关闭通知，打开 **Settings › Notifications** 并关闭 **Enable notifications**。这里还有发送测试通知的按钮。
+要关闭通知，**Settings › Notifications** → 关闭 **Enable notifications**。这里还有发送测试通知的按钮。
 
 ## 了解 Agent 检测方式
 

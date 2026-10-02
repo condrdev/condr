@@ -15,7 +15,7 @@ condr server status
 
 命令显示 Server 是否运行、版本、监听地址、Workspace 和 Agent 数量、连接客户端数，以及最近 20 条警告和错误。保存的监听地址或 Peer-to-peer 设置还没生效时，会多一行 Pending。加上 `--json` 可得到一个对象，用于 Issue。远程 Device 的状态也在 **Settings › Device › General** 中显示。
 
-**日志。** 日志每天滚动，保留 7 天。位置见[配置与设置](/zh-cn/docs/configuration/)。**Settings › Developer › Locations** 中的 **Open** 会打开日志目录。Server 日志是 `condr-server-<id>.<date>.log`，窗口日志是 `condr-gui.<date>.log`。后台 Server 崩溃时，输出在旁边的 `.stderr` 文件中。
+**日志。** 日志每天滚动，保留 7 天。位置见[配置与设置](/zh-cn/docs/configuration/)。**Settings › Developer › Locations** → **Open** 会打开日志目录。Server 日志是 `condr-server-<id>.<date>.log`，窗口日志是 `condr-gui.<date>.log`。后台 Server 崩溃时，输出在旁边的 `.stderr` 文件中。
 
 要获取更多细节，用 `CONDR_LOG` 重启 Server：
 
@@ -60,7 +60,7 @@ Pane 中的 shell 是非登录 shell。macOS 不读取 `~/.zprofile`，只读取
 
 ## 远程 Device 显示版本不同
 
-Device 标题上的黄色三角表示两边 Condr 构建不同。悬停查看应更新哪边。两边安装同一版本后，在远程 Device 上运行 `condr server restart`，或在 **Settings › Device › General** 中点 **Restart Condr**。
+Device 标题上的黄色三角表示两边 Condr 构建不同。悬停查看应更新哪边。两边安装同一版本后，在远程 Device 上运行 `condr server restart`，或 **Settings › Device › General** → **Restart Condr**。
 
 红色警告「speak different protocol versions」表示版本差距太大。连接前必须把两边更新到同一版本。
 
@@ -88,7 +88,7 @@ Condr 启动时第一次失败的连接不会自动重试。请在 Device 页面
 
 ## Condr 无法安装或打开
 
-- **Windows SmartScreen 拦截。** 点 **更多信息**，再点 **仍要运行**。预览安装包没有签名。
+- **Windows SmartScreen 拦截。** 点 **更多信息** → **仍要运行**。预览安装包没有签名。
 - **Linux AppImage 打不开。** 需要 FUSE。安装发行版的 `libfuse2` 包，或用 `--appimage-extract` 解开后运行。
 - **另一个 Condr 已在运行。** 窗口只允许一个实例，第二个会立即退出。
 

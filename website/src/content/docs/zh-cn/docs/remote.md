@@ -26,7 +26,7 @@ Condr 用你电脑上的 OpenSSH 连接那台机器，并自动启动那台机�
 
 连接：
 
-1. 点侧栏底部的 **Connect Remote Device**，选 **SSH**。
+1. 点侧栏底部的 **Connect Remote Device → SSH**。
 2. 输入你平时 SSH 登录用的地址，例如 `user@build-box`。要指定端口，写 `user@build-box:2222`。
 
 Condr 把地址原样交给 OpenSSH，所以 `~/.ssh/config` 中的别名、端口、密钥和跳板都会生效。
@@ -63,10 +63,10 @@ Server 默认只接受本机连接。要用 TCP 连接，先让那台机器上�
 
 在你的电脑上：
 
-1. 点侧栏底部的 **Connect Remote Device**，选 **TCP**。
+1. 点侧栏底部的 **Connect Remote Device** → **TCP**。
 2. 在 10 分钟内粘贴链接。过期后，回到那台机器重新运行 `condr server invite`。
 
-那台机器装的是桌面应用时，也可以在它的 Condr 里操作：在 **Settings › Device › Remote access** 中打开 **TCP listener** 并填写 **Listen address**，回到 **General** 页点 **Restart to apply**，再到 **Settings › Device › Paired devices** 点 **Generate invite**。Server 重启前无法生成 invite。
+那台机器装的是桌面应用时，也可以在它的 Condr 里操作：**Settings › Device › Remote access** → 打开 **TCP listener** 并填写 **Listen address** → **General** → **Restart to apply** → **Paired devices** → **Generate invite**。Server 重启前无法生成 invite。
 
 ## 用 Peer-to-peer 连接
 
@@ -88,14 +88,14 @@ Server 默认只接受本机连接。要用 TCP 连接，先让那台机器上�
 
 在你的电脑上：
 
-1. 点侧栏底部的 **Connect Remote Device**，选 **Peer-to-peer**。
+1. 点侧栏底部的 **Connect Remote Device** → **Peer-to-peer**。
 2. 在 10 分钟内粘贴链接。
 
-那台机器装的是桌面应用时，也可以在 **Settings › Device › Remote access** 中打开 **Peer-to-peer**，回到 **General** 页点 **Restart to apply**，再到 **Settings › Device › Paired devices** 点 **Generate invite**。
+那台机器装的是桌面应用时，也可以在它的 Condr 里操作：**Settings › Device › Remote access** → 打开 **Peer-to-peer** → **General** → **Restart to apply** → **Paired devices** → **Generate invite**。
 
 两台机器能直连时直接连接，否则通过 Condr 中继。流量用两台 Device 的密钥端到端加密，中继无法读取。中继或 DNS 服务不可用时，只有 Peer-to-peer 连接会失败，SSH 和 TCP 不受影响。中继能看到什么，见[安全模型](/zh-cn/docs/security/)。
 
-Peer-to-peer Device 在侧栏的默认名称是 `p2p` 加 Device key 的前 8 个字符。要重命名，右键 Device，选 **Edit Remote Device**。
+Peer-to-peer Device 在侧栏的默认名称是 `p2p` 加 Device key 的前 8 个字符。要重命名，右键 Device → **Edit Remote Device**。
 
 ## 了解 invite
 
@@ -140,7 +140,7 @@ condr server revoke <fingerprint 或它的前缀>
 - **协议兼容，构建不同**：功能照常，侧栏显示黄色三角。把两边升级到同一版本并重启 Server 后，标记会消失。
 - **协议不兼容**：连接被拒绝，窗口提示「speak different protocol versions」。把两边升级到同一版本后重新连接。
 
-升级远程 Device 后，要重启它的 Server。运行 `condr server restart`，或在 **Settings › Device › General** 中点 **Restart Condr**。
+升级远程 Device 后，要重启它的 Server。运行 `condr server restart`，或 **Settings › Device › General** → **Restart Condr**。
 
 ## 在命令行访问远程 Device
 

@@ -9,7 +9,7 @@ description: 打开项目、给每个 Agent 分配独立分支，并整理终端
 
 点侧栏 Device 旁的 **New Workspace**，或在欢迎页点 **Open Project**，再选一个文件夹。本机 Device 打开系统文件夹选择器。远程 Device 要求你输入那台机器上的绝对路径，并列出下面的目录供你确认。
 
-Condr 打开 Workspace，在第一个 Tab 里于该文件夹启动 shell。Workspace 默认使用文件夹名。右键它，选 **Rename Workspace** 可改名。
+Condr 打开 Workspace，在第一个 Tab 里于该文件夹启动 shell。Workspace 默认使用文件夹名。右键它 → **Rename Workspace** 可改名。
 
 Workspace 由一个文件夹和其中的终端组成。在 shell 里运行 `cd` 不会改变 Workspace 根目录。侧栏里每个 Workspace 占两行。第一行是名称，第二行是当前分支，以及相对上游领先和落后的提交数。不在 Git 仓库里时，第二行显示「no git」。
 
@@ -23,13 +23,13 @@ condr workspace create --cwd ~/code/app --label app
 
 两个 Agent 改同一个工作目录时可能互相覆盖。Git worktree 为每个 Agent 提供同一仓库的另一个目录和独立分支。
 
-右键 Git 仓库的 Workspace，选 **Create Worktree**，输入分支名。默认名称是 `worktree/` 加 Workspace 名。分支不存在时，Condr 从当前 HEAD 创建它。分支存在时，Condr 直接检出。
+右键 Git 仓库的 Workspace → **Create Worktree**，输入分支名。默认名称是 `worktree/` 加 Workspace 名。分支不存在时，Condr 从当前 HEAD 创建它。分支存在时，Condr 直接检出。
 
 Condr 把新目录放到仓库旁的 `<repo>.worktrees/<branch>`，并在侧栏添加一个 Workspace。要换位置，在 Server 配置中设置 `[server] worktree_root`。见[配置与设置](/zh-cn/docs/configuration/)。
 
 要使用已有的 worktree，选 **Open Existing Worktree**。Condr 不会删除用这种方式打开的 worktree。
 
-要删除 Condr 创建的 worktree，右键它并选 **Remove Worktree**。Condr 删除工作目录，但保留分支。目录有未提交或未跟踪文件时，Condr 会拒绝删除。先清理目录。
+要删除 Condr 创建的 worktree，右键它 → **Remove Worktree**。Condr 删除工作目录，但保留分支。目录有未提交或未跟踪文件时，Condr 会拒绝删除。先清理目录。
 
 命令行目前不能创建 worktree。运行 `condr workspace list` 可查看每个 Workspace 对应哪个 worktree。
 
@@ -93,4 +93,4 @@ Server 每次改动后都会把结构保存到快照文件。重启时恢复：
 
 装有 hook 的 Agent 会恢复。Condr 记录原生会话号，重启后在同一 Pane 中输入 Agent 自己的恢复命令，例如 `claude --resume <id>`。对话会从中断处继续。恢复失败时，命令会留在终端中，供你重试。
 
-要重启 Server，请在 Condr 外的终端运行 `condr server restart`，或在 **Settings › Device › General** 中点 **Restart Condr**。窗口重启后也会恢复窗口位置、侧栏宽度，以及每个 Workspace 正在显示的 Tab。
+要重启 Server，请在 Condr 外的终端运行 `condr server restart`，或 **Settings › Device › General** → **Restart Condr**。窗口重启后也会恢复窗口位置、侧栏宽度，以及每个 Workspace 正在显示的 Tab。
