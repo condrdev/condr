@@ -47,6 +47,9 @@ code { font-family: var(--mono); font-size: .875em; }
 .hero-lede { font-size: 1.25rem; line-height: 1.4; }
 .hero-meta { margin-top: 12px; color: var(--grey); font-size: .9375rem; }
 .actions { margin-top: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; }
+/* The dot-matrix logo fills the space the headline's first line leaves on the right, from the hero's top
+   padding to 24px above the lede's rule, which centres the C on that line. */
+.hero-mark { grid-column: 9 / 13; grid-row: 1; width: 100%; height: calc(var(--display) * 1.562 + 32px); margin-top: -56px; }
 .hero-shot { grid-column: 1 / -1; margin-top: 96px; }
 .hero-shot img { display: block; width: 100%; height: auto; }
 @media (max-width: 1180px) {
@@ -145,6 +148,7 @@ code { font-family: var(--mono); font-size: .875em; }
   .site-header nav a[href="/docs/"], .site-header nav a[href^="https://github"] { display: none; }
   .hero { padding-top: 40px; }
   .hero h1 { font-size: clamp(3rem, 16vw, 5.5rem); }
+  .hero-mark { display: none; }
   .hero-side { margin-top: 40px; }
   .hero-shot { margin-top: 40px; }
   .row { padding-top: 88px; }

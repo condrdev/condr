@@ -34,6 +34,7 @@ const methods = [
 
 <Site title="Condr — Agents that never hang up" description="Agents that never hang up. One window for every agent, local and remote. Disconnect anytime, pick up where you left off.">
   <section class="hero shell">
+    <canvas class="hero-mark" aria-hidden="true"></canvas>
     <h1>Agents that<br />never<br />hang up.</h1>
     <div class="hero-side">
       <p class="hero-lede">One window for every agent, local and remote. Disconnect anytime, pick up where you left off.</p>
@@ -88,6 +89,207 @@ const methods = [
     {
       const name = { macos: "macOS", windows: "Windows", linux: "Linux" }[document.documentElement.dataset.os];
       if (name) for (const a of document.querySelectorAll("[data-download]")) a.textContent = `Download for ${name}`;
+    }
+  </script>
+
+  <script>
+    // The logo on a dot matrix. On load the C's dots light up along its stroke and merge once into the
+    // three bars of assets/brand/condr.svg. The lit C then rests while stray dots twinkle around it, and
+    // every 10 seconds plays the next of a few transitions. Dots near the pointer light up in the accent
+    // blue. Coordinates are that SVG's 128-unit viewBox with a dot every 4 units, so each 12-unit bar is
+    // exactly 3 dots thick.
+    const BARS = [
+      { x: 48, y: 24, w: 42, h: 12 },
+      { x: 35.5, y: 36, w: 12, h: 56 },
+      { x: 48, y: 92, w: 42, h: 12 },
+    ];
+    const R_OFF = 0.9;
+    const R_ON = 1.5;
+    const INTRO = 5.2; // seconds
+    const PERIOD = 10;
+    const REST = 6; // seconds of each period before its transition
+    // "merge" closes the dots up into the bars and opens them again; the others send a wave through the
+    // C that turns each dot off and back on, in the order the name says.
+    const TRANSITIONS = ["scan", "merge", "ripple", "random", "merge", "trace"] as const;
+
+    // Each dot of the C, how far along the stroke it lies (top right, left, bottom right) and the slice
+    // of its bar it grows into.
+    const dots = BARS.flatMap((b, i) => {
+      const centres = (from: number, size: number) =>
+        Array.from({ length: 32 }, (_, k) => 2 + 4 * k).filter((v) => v > from && v < from + size);
+      const xs = centres(b.x, b.w);
+      const ys = centres(b.y, b.h);
+      const w = b.w / xs.length;
+      const h = b.h / ys.length;
+      return xs.flatMap((cx, ix) =>
+        ys.map((cy, iy) => ({
+          cx,
+          cy,
+          trace: (i === 0 ? 90 - cx : i === 1 ? 48.5 + cy - 36 : 63 + cx) / 153,
+          tile: { x: b.x + ix * w, y: b.y + iy * h, w, h },
+        })),
+      );
+    });
+    type Dot = (typeof dots)[number];
+    const inBars = (x: number, y: number) => BARS.some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h);
+
+    const clamp = (v: number) => Math.min(Math.max(v, 0), 1);
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    const ease = (t: number) => ((t = clamp(t)) < 0.5 ? 4 * t ** 3 : 1 - (2 - 2 * t) ** 3 / 2);
+    // A damped spring (stiffness 170, damping 11) that overshoots by about a fifth.
+    const spring = (t: number) => (t <= 0 ? 0 : 1 - Math.exp(-5.5 * t) * (Math.cos(11.8 * t) + 0.465 * Math.sin(11.8 * t)));
+    // A repeatable pseudo-random number in [0, 1).
+    const hash = (n: number) => {
+      const x = Math.sin(n) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    // Each transition's wave order, from 0 to 1. Period `c` reshuffles the random one.
+    const order = {
+      scan: (d: Dot) => (d.cy - 24) / 80,
+      ripple: (d: Dot) => Math.hypot(d.cx - 62.75, d.cy - 64) / 45,
+      random: (d: Dot, c: number) => hash(d.cx * 131 + d.cy + c * 7919),
+      trace: (d: Dot) => d.trace,
+    };
+
+    const canvas = document.querySelector<HTMLCanvasElement>(".hero-mark")!;
+    const ctx = canvas.getContext("2d")!;
+    const grid = document.createElement("canvas");
+    const ink = getComputedStyle(canvas).color;
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const hover = { x: 0, y: 0, tx: 0, ty: 0, inside: false, a: 0 };
+    let sparks: { x: number; y: number; a: number }[] = [];
+    let twinklers: typeof sparks = [];
+    let W = 0;
+    let H = 0;
+    let u = 0;
+    let bars = new Path2D();
+    let t0: number | undefined;
+    // Seconds since the first frame.
+    const time = (now: number) => (now - (t0 ??= now)) / 1000;
+    // Logo units to canvas pixels, with the C in the middle.
+    const X = (x: number) => W / 2 + (x - 62.75) * u;
+    const Y = (y: number) => H / 2 + (y - 64) * u;
+    const dot = (c: CanvasRenderingContext2D, x: number, y: number, r: number) => {
+      c.beginPath();
+      c.arc(x, y, r, 0, 2 * Math.PI);
+      c.fill();
+    };
+
+    const draw = (T: number) => {
+      if (!u) return;
+      let merge = 0;
+      let on: (d: Dot) => number = () => 1;
+      if (T < INTRO) {
+        merge = ease((T - 3) / 0.6) - ease((T - 4.6) / 0.6);
+        on = (d) => spring(T - 0.3 - d.trace * 1.2);
+      } else {
+        const c = Math.floor((T - INTRO) / PERIOD);
+        const s = ((T - INTRO) % PERIOD) - REST;
+        const kind = TRANSITIONS[c % TRANSITIONS.length];
+        if (kind === "merge") merge = ease(s / 0.6) - ease((s - 1.6) / 0.6);
+        else
+          on = (d) => {
+            const t = s - order[kind](d, c) * 1.2;
+            return 1 - ease(t / 0.25) + spring(t - 0.45);
+          };
+      }
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+      ctx.drawImage(grid, 0, 0, W, H);
+      // A stray dot starts to twinkle every 0.4 seconds and fades out over 1.8, so four or five are lit at once.
+      ctx.fillStyle = ink;
+      for (let k = Math.floor((T - 1.8) / 0.4) - 1; k * 0.4 <= T; k++) {
+        const age = T - (k + hash(k)) * 0.4;
+        if (age < 0 || age > 1.8) continue;
+        const f = twinklers[Math.floor(hash(k + 0.5) * twinklers.length)];
+        ctx.globalAlpha = 0.7 * f.a * Math.min(age / 0.3, (1.8 - age) / 1.5);
+        dot(ctx, f.x, f.y, R_OFF * u);
+      }
+      if (hover.a > 0.01) {
+        ctx.fillStyle = accent;
+        for (const f of sparks) {
+          const k = 1 - Math.hypot(f.x - hover.x, f.y - hover.y) / (28 * u);
+          if (k <= 0) continue;
+          ctx.globalAlpha = 0.8 * hover.a * f.a * k * k;
+          dot(ctx, f.x, f.y, R_OFF * u * (1 + 0.5 * k));
+        }
+      }
+      ctx.fillStyle = ink;
+      // The solid bars come in under the tiles as they close up, hiding the seams between them.
+      ctx.globalAlpha = clamp((merge - 0.85) / 0.15);
+      ctx.fill(bars);
+      ctx.save();
+      ctx.clip(bars);
+      for (const d of dots) {
+        const o = on(d);
+        const r = lerp(R_OFF, R_ON, o);
+        ctx.globalAlpha = clamp(o);
+        ctx.beginPath();
+        ctx.roundRect(
+          X(lerp(d.cx - r, d.tile.x, merge)),
+          Y(lerp(d.cy - r, d.tile.y, merge)),
+          lerp(2 * r, d.tile.w, merge) * u,
+          lerp(2 * r, d.tile.h, merge) * u,
+          lerp(r, 0, merge) * u,
+        );
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
+    new ResizeObserver(() => {
+      W = canvas.clientWidth;
+      H = canvas.clientHeight;
+      if (!W || !H) return;
+      for (const c of [canvas, grid]) {
+        c.width = Math.round(W * devicePixelRatio);
+        c.height = Math.round(H * devicePixelRatio);
+        c.getContext("2d")!.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      }
+      // The C takes 70% of the height.
+      u = (0.7 * H) / 80;
+      bars = new Path2D();
+      for (const b of BARS) bars.roundRect(X(b.x), Y(b.y), b.w * u, b.h * u, 2 * u);
+      // The unlit matrix, fading out towards the edges. Every dot outside the C can light up on its own.
+      const g = grid.getContext("2d")!;
+      g.fillStyle = "rgb(177 198 255)";
+      sparks = [];
+      for (let x = 2 + 4 * Math.ceil((60.75 - W / 2 / u) / 4); X(x) < W; x += 4) {
+        for (let y = 2 + 4 * Math.ceil((62 - H / 2 / u) / 4); Y(y) < H; y += 4) {
+          const a = clamp((1 - Math.hypot((X(x) / W) * 2 - 1, (Y(y) / H) * 2 - 1)) / 0.4);
+          g.globalAlpha = 0.16 * a;
+          dot(g, X(x), Y(y), R_OFF * u);
+          if (!inBars(x, y)) sparks.push({ x: X(x), y: Y(y), a });
+        }
+      }
+      // Twinkles stay where the matrix is clearly visible, so none is lost in the faded edge.
+      twinklers = sparks.filter((f) => f.a > 0.5);
+      draw(still ? INTRO + 1 : time(performance.now()));
+    }).observe(canvas);
+
+    // Animate only while the canvas is on screen; with reduced motion it stays on the lit C.
+    let raf = 0;
+    const loop = (now: number) => {
+      hover.a = lerp(hover.a, hover.inside ? 1 : 0, 0.08);
+      hover.x = lerp(hover.x, hover.tx, 0.25);
+      hover.y = lerp(hover.y, hover.ty, 0.25);
+      draw(time(now));
+      raf = requestAnimationFrame(loop);
+    };
+    if (!still) {
+      addEventListener("pointermove", (e) => {
+        const r = canvas.getBoundingClientRect();
+        hover.tx = e.clientX - r.left;
+        hover.ty = e.clientY - r.top;
+        hover.inside = hover.tx >= 0 && hover.ty >= 0 && hover.tx <= W && hover.ty <= H;
+      });
+      document.documentElement.addEventListener("pointerleave", () => (hover.inside = false));
+      new IntersectionObserver(([entry]) => {
+        cancelAnimationFrame(raf);
+        if (entry.isIntersecting) raf = requestAnimationFrame(loop);
+      }).observe(canvas);
     }
   </script>
 </Site>
