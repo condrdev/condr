@@ -18,7 +18,7 @@ const platforms = [
     {
         os: "windows",
         name: "Windows",
-        builds: [{ label: "Installer", href: app("windows-x86_64.exe") }],
+        builds: [{ label: "x86_64", href: app("windows-x86_64.exe") }],
     },
     {
         os: "linux",
@@ -39,12 +39,11 @@ const commands = [
 
 <Site title="Condr — Download" description={`Download Condr ${version} for macOS, Windows and Linux.`}>
     <section class="download shell">
-        <div class="download-main">
+        <div class="download-intro">
             <h1>Download Condr</h1>
-            <div class="download-sub">
-                <span>Version {version} · Public preview</span>
-                <a href={release}>What's new →</a>
-            </div>
+            <p>Version {version}, public preview.</p>
+        </div>
+        <div class="download-main">
 
             {platforms.map((platform) => (
                 <div class="download-platform" data-os={platform.os}>
@@ -87,17 +86,8 @@ const commands = [
             <script is:inline>
                 // Inline so the visitor's platform moves to the top before the first paint.
                 {
-                    const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
-                    const os = /android/i.test(navigator.userAgent)
-                        ? ""
-                        : platform.startsWith("mac")
-                          ? "macos"
-                          : platform.startsWith("win")
-                            ? "windows"
-                            : platform.startsWith("linux")
-                              ? "linux"
-                              : "";
-                    const current = os && document.querySelector(`[data-os="${os}"]`);
+                    const os = document.documentElement.dataset.os;
+                    const current = os && document.querySelector(`.download-platform[data-os="${os}"]`);
                     if (current) {
                         current.classList.add("is-current");
                         document.querySelector(".download-platform").before(current);
@@ -106,9 +96,7 @@ const commands = [
             </script>
             <hr />
 
-            <div class="download-head">
-                <span>Headless Server</span>
-            </div>
+            <h2>Headless Server</h2>
             <p class="download-note">To run agents on a remote device, run this on it:</p>
             {commands.map((row) => (
                 <div class="download-command">
@@ -116,8 +104,8 @@ const commands = [
                     <code>{row.command}</code>
                     <button type="button" data-copy={row.command} aria-label={`Copy the ${row.platform} command`}>
                         <svg viewBox="0 0 16 16" aria-hidden="true">
-                            <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
-                            <path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" />
+                            <rect x="5.5" y="5.5" width="8" height="8" />
+                            <path d="M10.5 5.5V2h-8v8h3" />
                         </svg>
                     </button>
                 </div>
@@ -125,13 +113,13 @@ const commands = [
             <p class="download-note">
                 Or download an archive from the <a href={release}>release page</a>.
             </p>
-
-            <hr />
-
-            <p class="download-note">
-                Want the newest changes? <a href={`${repo}/releases/tag/nightly`}>Try Nightly →</a>
-            </p>
         </div>
+        <ul class="download-links">
+            <li><a class="download-link" href={release}>What's new in {version}</a></li>
+            <li><a class="download-link" href={`${repo}/releases`}>All releases</a></li>
+            <li><a class="download-link" href={`${repo}/releases/download/v${version}/SHA256SUMS`}>SHA-256 checksums</a></li>
+            <li><a class="download-link" href={`${repo}/releases/tag/nightly`}>Nightly builds</a><span>The newest changes, published every day.</span></li>
+        </ul>
     </section>
 </Site>
 

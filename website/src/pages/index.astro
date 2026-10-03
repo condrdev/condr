@@ -4,12 +4,12 @@ import hero from '../../../assets/screenshots/hero.png';
 import Site from '../layouts/Site.astro';
 
 const features = [
-  { title: 'Always on', copy: 'Close the window or disconnect. The Server and your agents keep working.' },
-  { title: 'Remote access', copy: 'Manage local and remote devices in one window, over SSH, TCP or Peer-to-peer.' },
-  { title: 'Agent status', copy: 'The sidebar shows what each agent is doing. Condr notifies you when an agent finishes.' },
-  { title: 'Agent driven', copy: 'Agents can use Condr too: create panes, read output, assign tasks, and talk to other agents.' },
-  { title: 'Real terminals', copy: 'Every pane is a real terminal built on the alacritty core. Run any CLI agent or terminal program.' },
-  { title: 'Fast', copy: 'Written entirely in Rust, with no Electron. Small and responsive, even while agents are busy.' },
+  { title: 'Stays running', copy: 'Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.' },
+  { title: 'Remote access', copy: 'No more switching windows: see every local and remote agent in one place. SSH, TCP and zero-config P2P with NAT traversal are built in.' },
+  { title: 'Agent status', copy: 'The sidebar shows what each agent is doing. Condr notifies you when an agent finishes a task.' },
+  { title: 'Agent driven', copy: 'Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.' },
+  { title: 'Real terminals', copy: 'Real terminals built on the alacritty core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.' },
+  { title: 'Smooth', copy: 'Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.' },
 ];
 
 const agents = [
@@ -24,63 +24,70 @@ const agents = [
   { name: 'Copilot', icon: 'copilot' },
   { name: 'Kimi', icon: 'kimi' },
 ];
+
+const methods = [
+  { name: 'SSH', copy: 'For remote servers or cloud hosts you already reach with OpenSSH. Reuses your existing configuration as is.', address: 'ssh://user@192.168.1.100' },
+  { name: 'P2P', copy: "For networks where both sides sit behind NAT or a firewall with no public IP. Connects directly through hole punching when it can, or through an encrypted relay when it can't.", address: 'p2p://<device key>.<invite>' },
+  { name: 'TCP', copy: 'For servers with a fixed IP or reachable directly on the LAN. All traffic is end-to-end encrypted with <code>Noise_IKpsk2</code>.', address: 'tcp://<device key>.<invite>@<host>:<port>' },
+];
 ---
 
-<Site title="Condr — Keep your agents running" description="Condr keeps your agents running. One window for all your agents, local or remote.">
-      <section class="hero shell">
-        <h1>Keep your agents<br /><span>running.</span></h1>
-        <p class="hero-lede">One window for all your agents.<br />Local or remote, step away and pick up where you left off.</p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="/download/">Download</a>
-          <a class="button button-secondary" href="/docs/start/getting-started/">Get started <span>→</span></a>
-        </div>
-        <div class="hero-meta"><span>Windows</span><i></i><span>macOS</span><i></i><span>Linux</span><i></i><span>Built in Rust</span></div>
-      </section>
+<Site title="Condr — Agents that never hang up" description="Agents that never hang up. One window for every agent, local and remote. Disconnect anytime, pick up where you left off.">
+  <section class="hero shell">
+    <h1>Agents that<br />never<br />hang up.</h1>
+    <div class="hero-side">
+      <p class="hero-lede">One window for every agent, local and remote. Disconnect anytime, pick up where you left off.</p>
+      <p class="hero-meta">Windows, macOS and Linux. Built in Rust.</p>
+      <div class="actions">
+        <a class="button" href="/download/" data-download>Download</a>
+        <a class="text-link" href="/docs/start/getting-started/">Get started</a>
+      </div>
+    </div>
+    <figure class="hero-shot">
+      <Image src={hero} alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" />
+    </figure>
+  </section>
 
-      <section class="product-shot shell" aria-label="Condr workspace screenshot">
-        <div class="shot-halo" aria-hidden="true"></div>
-        <figure><Image src={hero} alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" /><figcaption><span>One workspace</span><span>Claude Code · Codex · any CLI</span></figcaption></figure>
-        <div class="agent-strip" aria-label="Supported agent CLIs">
-          {agents.map((agent) => <span class="agent-item"><img src={`/agents/${agent.icon}.svg`} alt="" aria-hidden="true" />{agent.name}</span>)}
-          <span class="agent-more">and more</span>
-        </div>
-      </section>
+  <section class="row shell" aria-labelledby="agents-title">
+    <h2 class="row-title" id="agents-title">Runs any CLI agent</h2>
+    <ul class="agents">
+      {agents.map((agent) => <li><img src={`/agents/${agent.icon}.svg`} alt="" />{agent.name}</li>)}
+      <li class="agents-more">and any other terminal program</li>
+    </ul>
+  </section>
 
-      <section class="features shell" id="features">
-        <div class="statement">
-          <p class="section-label">Everything in one window</p>
-          <h2>Give every agent a place<br /><span>to work.</span></h2>
-          <p class="statement-copy">Condr is a small desktop app. It runs Claude Code, Codex, and other CLI agents in one window, along with any other terminal program. Each agent gets a real terminal. You get one clear view.</p>
-        </div>
-        <div class="feature-grid">
-          {features.map((feature) => (
-            <article class="feature-card"><h3>{feature.title}</h3><p>{feature.copy}</p></article>
-          ))}
-        </div>
-      </section>
+  <section class="row shell" aria-labelledby="features-title">
+    <h2 id="features-title">Give every agent a place to work.</h2>
+    <p class="row-copy">Condr is a lightweight app built for running many agents together and managing their terminals. Run Claude Code, Codex and any command-line program side by side in one window, on your own machine or on a remote server.</p>
+    <div class="features">
+      {features.map((feature) => <article><h3>{feature.title}</h3><p>{feature.copy}</p></article>)}
+    </div>
+  </section>
 
-      <section class="remote shell" id="remote">
-        <div class="remote-copy"><div class="section-label">Local or remote</div><h2>Leave the machine.<br /><span>Keep the work.</span></h2><p>Install the headless Server on any device, then connect from your desktop over SSH, pair over TCP with a one-time link, or go Peer-to-peer when both machines sit behind NAT: no fixed IP needed, no VPN to install. Every way gives you the same window and the same workspaces.</p><a class="text-link" href="/docs/using/remote/">How to connect a remote device <span>→</span></a></div>
-        <div class="connection-card">
-          <div class="connection-head"><span class="connection-live"></span><span>Remote connections</span><span class="connection-count">SSH · TCP · P2P</span></div>
-          <div class="remote-method">
-            <div class="method-icon">↗</div>
-            <strong>SSH</strong>
-            <small class="method-description">Uses your OpenSSH configuration and ssh-agent.</small>
-          </div>
-          <code class="remote-code">ssh://user@build-box</code>
-          <div class="remote-method">
-            <div class="method-icon method-tcp">⌁</div>
-            <strong>TCP pairing</strong>
-            <small class="method-description">Pairing link from <code>condr server invite</code>.</small>
-          </div>
-          <code class="remote-code">tcp://&lt;server key&gt;.&lt;invite&gt;@&lt;host&gt;:&lt;port&gt;</code>
-          <div class="remote-method">
-            <div class="method-icon method-p2p">⟷</div>
-            <strong>Peer-to-peer</strong>
-            <small class="method-description">Both behind NAT. End-to-end encrypted over <a href="https://www.iroh.computer/">iroh</a>; the relay never sees what you send.</small>
-          </div>
-          <code class="remote-code">p2p://&lt;server key&gt;.&lt;invite&gt;</code>
-        </div>
-      </section>
+  <section class="row shell" aria-labelledby="remote-title">
+    <h2 id="remote-title">Leave the machine. Keep the work.</h2>
+    <div class="row-copy">
+      <p>Condr manages every agent task, local and remote, across machines from a single window. Running the work on a remote server frees your agents from the limits of your local workstation, so they keep going through reboots and network drops.</p>
+      <a class="text-link" href="/docs/using/remote/">Set up a remote connection</a>
+    </div>
+    <dl class="methods">
+      {methods.map((method) => <div><dt>{method.name}</dt><dd set:html={method.copy} /><dd><code>{method.address}</code></dd></div>)}
+    </dl>
+  </section>
+
+  <section class="row closing shell" aria-labelledby="start-title">
+    <h2 id="start-title">Try it in 30 seconds.</h2>
+    <div class="actions">
+      <a class="button" href="/download/" data-download>Download</a>
+      <a class="text-link" href="/docs/start/getting-started/">Get started</a>
+    </div>
+  </section>
+
+  <script is:inline>
+    // Inline so the buttons name the visitor's platform before the first paint.
+    {
+      const name = { macos: "macOS", windows: "Windows", linux: "Linux" }[document.documentElement.dataset.os];
+      if (name) for (const a of document.querySelectorAll("[data-download]")) a.textContent = `Download for ${name}`;
+    }
+  </script>
 </Site>

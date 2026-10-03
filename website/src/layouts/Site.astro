@@ -16,19 +16,37 @@ const github = 'https://github.com/condrdev/condr';
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
     <link rel="icon" href="/condr.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" />
     <title>{title}</title>
+    <script is:inline>
+      // The visitor's platform, for the pages that name or reorder downloads by it. iPadOS reports
+      // itself as a Mac, so a Mac with touch points is an iPad.
+      {
+        const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+        const os = /android/i.test(navigator.userAgent)
+          ? ""
+          : platform.startsWith("mac")
+            ? navigator.maxTouchPoints > 1 ? "" : "macos"
+            : platform.startsWith("win")
+              ? "windows"
+              : platform.startsWith("linux")
+                ? "linux"
+                : "";
+        if (os) document.documentElement.dataset.os = os;
+      }
+    </script>
   </head>
   <body>
-    <div class="ambient ambient-one" aria-hidden="true"></div>
-    <div class="ambient ambient-two" aria-hidden="true"></div>
-    <header class="site-header shell">
-      <a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a>
-      <div class="header-actions">
+    <header class="site-header">
+      <div class="shell">
+        <a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a>
         <nav aria-label="Main navigation">
           <a href="/docs/">Docs</a>
           <a href={github}>GitHub</a>
+          <a href="/download/">Download</a>
         </nav>
-        <a class="header-button" href="/download/">Download</a>
       </div>
     </header>
 
@@ -36,6 +54,11 @@ const github = 'https://github.com/condrdev/condr';
       <slot />
     </main>
 
-    <footer class="site-footer shell"><a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a><span>Keep your agents running.</span><div><a href="/docs/">Docs</a> <a href={github}>GitHub</a></div></footer>
+    <footer class="site-footer">
+      <div class="shell">
+        <a class="brand" href="/" aria-label="Condr home"><img src="/condr.svg" alt="" /><span>Condr</span></a>
+        <nav aria-label="Footer navigation"><a href="/docs/">Docs</a><a href={github}>GitHub</a><a href="/download/">Download</a></nav>
+      </div>
+    </footer>
   </body>
 </html>
