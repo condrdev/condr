@@ -530,7 +530,7 @@ impl Condr {
                                     .text_sm()
                                     .italic()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Keep your agents running"),
+                                    .child("Agents that never hang up"),
                             ),
                     ),
             )
