@@ -3,7 +3,7 @@ title: Condr Docs
 description: Install Condr, connect to remote Devices, and learn how it works.
 template: splash
 hero:
-  tagline: Keep every Agent running in one window, on this machine and on remote Devices alike.
+  tagline: One window for every Agent, local and remote. Disconnect anytime, pick up where you left off.
   actions:
     - text: Getting started
       link: /docs/start/getting-started/

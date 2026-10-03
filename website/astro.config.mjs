@@ -15,7 +15,7 @@ export default defineConfig({
       favicon: '/condr.svg',
       // The site title links to /docs/ (or /zh-cn/docs/), not the marketing home page.
       routeMiddleware: './src/routeData.ts',
-      description: 'Keep your agents running. One window for all your agents, local or remote.',
+      description: 'Agents that never hang up. One window for every agent, local and remote. Disconnect anytime, pick up where you left off.',
       // English docs at /docs/, Chinese at /zh-cn/docs/.
       defaultLocale: 'root',
       locales: {

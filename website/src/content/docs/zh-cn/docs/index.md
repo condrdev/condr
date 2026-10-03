@@ -3,7 +3,7 @@ title: Condr 文档
 description: 安装 Condr、连接远程设备，并了解它的工作方式。
 template: splash
 hero:
-  tagline: 让每个 Agent 在一个窗口里持续运行，本机和远程 Device 都能看。
+  tagline: 一个窗口管理本地与远程所有 Agent。随时断开，随时接续。
   actions:
     - text: 快速上手
       link: /zh-cn/docs/start/getting-started/
