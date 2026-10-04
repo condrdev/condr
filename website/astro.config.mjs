@@ -37,7 +37,7 @@ export default defineConfig({
           label: 'Using Condr',
           translations: { 'zh-CN': '使用 Condr' },
           items: [
-            { slug: 'docs/using/overview', badge: { text: { en: 'WIP', 'zh-CN': '施工中' }, variant: 'caution' } },
+            { slug: 'docs/using/overview' },
             { slug: 'docs/using/workspaces' },
             { slug: 'docs/using/agents' },
             { slug: 'docs/using/changes' },
