@@ -63,7 +63,7 @@ command = ["code-insiders", "--reuse-window"]
 | 程序开启鼠标模式时选择文本 | Shift+拖动 | Shift+拖动 |
 | 打开终端里的链接 | Cmd+点击 | Ctrl+点击 |
 
-完整列表见[键盘快捷键](/zh-cn/docs/reference/keybindings/)。
+完整列表见[快捷键速查](/zh-cn/docs/reference/keybindings/)。
 
 ## 设置终端默认 Shell
 

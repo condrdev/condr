@@ -1,66 +1,132 @@
 ---
-title: 键盘快捷键
-description: 查找 macOS、Windows 和 Linux 上的全部 Condr 快捷键。
+title: 快捷键速查
+description: Condr 在 macOS、Windows 与 Linux 平台的全量按键映射，以及终端复制粘贴、滚动与鼠标交互行为规范。
 ---
 
-:::caution[施工中]
-这一页还在编写中，内容会陆续补齐。
-:::
+Condr 的快捷键分为两层逻辑：
+* **窗口级快捷键**：用于调度 Window、Workspace、Tab 与 Pane。由客户端直接拦截消费，不向终端前台进程透传。
+* **终端级快捷键**：覆盖文本/媒体剪贴板、缓冲区滚动及鼠标交互，仅在当前终端 Pane 处于聚焦状态时生效。
 
-需要快捷键时查这页。Condr 也会在 **Settings › Shortcuts** 显示同一份列表。
+未在本页声明的按键组合将全部透传至当前 Pane 内运行的子进程。
 
-## 了解哪些按键由 Condr 处理
+> **macOS 平台说明**：macOS 环境下 `Option` 键产生特殊字符（如 `Option + S` 输出 `ß`），不映射为终端 `Meta` 键。因此 Shell 中基于单词步进的快捷键（如 `Option + B`、`Option + F`）不生效。
 
-Condr 只截获表格中的快捷键。其他按键都交给 Pane 中的程序，包括 macOS 上除 Ctrl+Tab 外的所有 Ctrl 组合。没有绑定的 Cmd 或 Win 组合会被丢弃，不会到达终端。对话框打开时没有快捷键生效。
+---
 
-Windows 和 Linux 上 Ctrl+B 留给 tmux 和 readline，因此侧栏使用 Ctrl+Shift+B。macOS 上 Option 加字母会输入该字符，Option 不作为 Meta 键。
+## 窗口与侧边栏
 
-## 操作窗口和侧栏
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 打开设置 | `Cmd + ,` | `Ctrl + ,` |
+| 关闭设置 | `Esc` | `Esc` |
+| 切换左侧栏显示状态 | `Cmd + B` | `Ctrl + Shift + B` |
+| 切换右侧栏（Changes & Files） | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
-| 动作 | macOS | Windows / Linux |
-| --- | --- | --- |
-| 打开设置 | Cmd+, | Ctrl+, |
-| 开关左侧栏 | Cmd+B | Ctrl+Shift+B |
-| 开关右侧栏（Changes & Files） | Cmd+Alt+B | Ctrl+Alt+B |
-| 关闭设置窗口 | Esc | Esc |
+---
 
-## 切换 Workspace 和 Tab
+## Workspace
 
-| 动作 | macOS | Windows / Linux |
-| --- | --- | --- |
-| 上一个 Workspace | Cmd+Shift+↑ | Ctrl+Shift+↑ |
-| 下一个 Workspace | Cmd+Shift+↓ | Ctrl+Shift+↓ |
-| 新建 Tab | Cmd+T | Ctrl+Shift+T |
-| 下一个 Tab | Cmd+} 或 Ctrl+Tab | Ctrl+Tab |
-| 上一个 Tab | Cmd+{ 或 Ctrl+Shift+Tab | Ctrl+Shift+Tab |
-| 跳到第 1 到 9 个 Tab | Cmd+1 到 Cmd+9 | Alt+1 到 Alt+9 |
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 切换至上一个 Workspace | `Cmd + Shift + ↑` | `Ctrl + Shift + ↑` |
+| 切换至下一个 Workspace | `Cmd + Shift + ↓` | `Ctrl + Shift + ↓` |
 
-Workspace 按侧栏中每个 Device 的顺序切换，到末尾后回到开头。重命名或关闭 Workspace、关闭 Tab 时使用右键菜单，这些操作没有快捷键。
+* **轮转逻辑**：遵循侧边栏顺序，跨设备遍历所有 Workspace，到达边界后自动循环。
+* **初始行为**：当前未显示任何 Workspace 时，`↓` 跳到首个 Workspace，`↑` 跳到最后一个。
 
-## 操作 Pane
+---
 
-| 动作 | macOS | Windows / Linux |
-| --- | --- | --- |
-| 向右分割 | Cmd+D | Alt+Shift+= |
-| 向下分割 | Cmd+Shift+D | Alt+Shift+- |
-| 关闭 Pane | Cmd+W | Ctrl+Shift+W |
-| 放大或还原 | Cmd+Shift+Enter | Alt+Shift+Enter |
-| 移动焦点 | Cmd+Alt+方向键 | Alt+方向键 |
-| 调整大小 | Cmd+Ctrl+方向键 | Alt+Shift+方向键 |
+## Tab
 
-每按一次调整 5%。交换 Pane 没有快捷键，请使用 Pane 菜单或拖动。
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 新建 Tab | `Cmd + T` | `Ctrl + Shift + T` |
+| 切换至下一个 Tab | `Cmd + }` 或 `Ctrl + Tab` | `Ctrl + Tab` |
+| 切换至上一个 Tab | `Cmd + {` 或 `Ctrl + Shift + Tab` | `Ctrl + Shift + Tab` |
+| 直达指定 Tab（1~9） | `Cmd + 1` ~ `Cmd + 9` | `Alt + 1` ~ `Alt + 9` |
 
-## 操作终端
+* **物理按键**：`Cmd + }` / `Cmd + {` 对应 `Cmd + Shift + ]` / `Cmd + Shift + [`。
+* **轮转逻辑**：Tab 切换到达边界后自动循环。
 
-| 动作 | macOS | Windows | Linux |
-| --- | --- | --- | --- |
-| 复制 | Cmd+C；没有选区时交给程序 | Ctrl+Shift+C，或有选区时 Ctrl+C | Ctrl+Shift+C |
-| 粘贴 | Cmd+V | Ctrl+Shift+V 或 Ctrl+V | Ctrl+Shift+V |
-| 粘贴图片到远程 Device | Option+V | Alt+V | Alt+V |
-| 打开链接 | Cmd+点击 | Ctrl+点击 | Ctrl+点击 |
-| 在鼠标模式下选择 | Shift+拖动 | Shift+拖动 | Shift+拖动 |
-| 滚动历史 | Shift+PageUp / PageDown，或滚轮 | 同左 | 同左 |
+---
 
-Ctrl+Insert 在三个平台复制，Shift+Insert 粘贴。Linux 上 Ctrl+C 和 Ctrl+V 总是交给终端。Tab 和 Shift+Tab 也交给终端，不会移动窗口焦点。
+## Pane 分屏与调度
 
-复制会结束选区。macOS 上没有选区时，Cmd+C 会交给程序：使用 kitty 键盘协议的程序会收到 Cmd+C 本身，Claude Code 据此复制它自己的鼠标选区；shell 和其他程序什么都收不到。没有清屏快捷键，请在 shell 中使用 `clear` 或 Ctrl+L。
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 水平拆分（向右新建） | `Cmd + D` | `Alt + Shift + =` |
+| 垂直拆分（向下新建） | `Cmd + Shift + D` | `Alt + Shift + -` |
+| 关闭当前 Pane | `Cmd + W` | `Ctrl + Shift + W` |
+| 最大化 / 还原焦点 Pane | `Cmd + Shift + Enter` | `Alt + Shift + Enter` |
+| 切换焦点方向 | `Cmd + Option + 方向键` | `Alt + 方向键` |
+| 调整分屏占比 | `Cmd + Ctrl + 方向键` | `Alt + Shift + 方向键` |
+
+* **微调步进**：快捷键每次调整分屏占比 5%。
+* **拖拽调度**：
+  * **交换位置**：拖拽 Pane 标题栏并释放于目标中央。
+  * **拆分并置**：拖拽至目标边缘，将目标 Pane 朝对应方向拆分并嵌入。
+
+---
+
+## 终端：文本复制与粘贴
+
+| 操作 | macOS | Windows | Linux |
+| :--- | :--- | :--- | :--- |
+| 复制选区 | `Cmd + C` | `Ctrl + C` / `Ctrl + Shift + C` | `Ctrl + Shift + C` |
+| 粘贴文本 | `Cmd + V` | `Ctrl + Shift + V` / `Ctrl + V` | `Ctrl + Shift + V` |
+| 复制选区（通用） | `Ctrl + Insert` | `Ctrl + Insert` | `Ctrl + Insert` |
+| 粘贴文本（通用） | `Shift + Insert` | `Shift + Insert` | `Shift + Insert` |
+
+### 按键透传机制
+
+* **选区生命周期**：复制动作触发后自动清空当前选中高亮。
+* **macOS 无选区场景下的 `Cmd + C`**：透传至前台进程。启用 Kitty 键盘协议的交互式程序（如 Claude Code）将捕获此按键并复制自身选区；Shell 等其他程序收不到任何输入。
+* **Windows 平台的冲突处理**：
+  * 无选区时按 `Ctrl + C`，按键透传至前台应用，通常用于中断当前命令。
+  * `Ctrl + V` 始终由 Condr 拦截并执行粘贴，不向子进程发送原始按键。
+* **Linux 平台**：`Ctrl + C` 与 `Ctrl + V` 始终无条件透传至当前子进程。
+
+---
+
+## 终端：远程设备图片投递
+
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 粘贴剪贴板图片 | `Option + V` | `Alt + V` |
+
+* **投递逻辑**：仅针对运行在远程设备的 Pane 生效。Condr 会将本地剪贴板图片异步上传至该设备的临时目录，并将远程绝对路径自动回填至命令行光标处，供 CLI Agent 等程序读取。
+* **回退行为**：若剪贴板无图像资产，或当前 Pane 位于本机设备，该按键直接透传至前台程序。
+* **配额与生命周期**：
+  * 单张图片最大支持 **16 MiB**。
+  * 远程暂存文件在当前客户端断开连接或远程 Server 进程终止时自动销毁。
+
+---
+
+## 终端：滚动与缓冲区浏览
+
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 缓冲区向上翻页 | `Shift + PageUp` | `Shift + PageUp` |
+| 缓冲区向下翻页 | `Shift + PageDown` | `Shift + PageDown` |
+| 逐行滚动 | 鼠标滚轮 | 鼠标滚轮 |
+
+* **自动沉底**：浏览历史缓冲区时，向终端输入任意按键均会立即复位滚动条至最新行。
+* **Alt Screen 模式（vim / less 等）**：`Shift + PageUp / PageDown` 透传至 TUI 程序内部处理；鼠标滚轮将自动转义为 `↑` / `↓` 方向键事件分发。
+* **鼠标报告模式（Mouse Reporting）**：前台程序显式开启鼠标追踪时，滚轮事件由其内部事件循环接管。
+
+---
+
+## 终端：鼠标交互
+
+| 操作 | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| 访问 URL 链接 | `Cmd + 点击` | `Ctrl + 点击` |
+| 强制选择文本（程序接管鼠标时） | `Shift + 拖动` | `Shift + 拖动` |
+
+---
+
+## 延伸阅读
+
+* [快捷键与偏好设置](/zh-cn/docs/using/preferences/)：常用快捷键与外部编辑器绑定
+* [Workspace、Tab 与 Pane](/zh-cn/docs/using/workspaces/)：分屏布局与多任务工作流管理
+* [配置与设置](/zh-cn/docs/reference/configuration/)：设置界面参数及 `config.toml` 配置规范

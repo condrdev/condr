@@ -1,66 +1,132 @@
 ---
 title: Keyboard shortcuts
-description: Look up every Condr shortcut on macOS, Windows and Linux.
+description: Every Condr key mapping on macOS, Windows and Linux, plus how copy and paste, scrolling and mouse interaction behave in the terminal.
 ---
 
-:::caution[Under construction]
-This page is still being written. Content will follow.
-:::
+Condr's shortcuts work on two levels:
+* **Window-level shortcuts**: drive the window, Workspaces, Tabs and Panes. The client intercepts and consumes them, and never passes them through to the terminal's foreground process.
+* **Terminal-level shortcuts**: cover the text and image clipboard, scrollback and mouse interaction, and work only while the current terminal Pane has focus.
 
-Check this page when you need a shortcut. Condr also shows the same list under **Settings › Shortcuts**.
+Every key combination not declared on this page passes through to the child process running in the current Pane.
 
-## Know which keys Condr handles
+> **macOS note**: on macOS the `Option` key produces special characters (`Option + S` types `ß`) and is not mapped to the terminal's `Meta` key. So word-movement shortcuts in the shell, such as `Option + B` and `Option + F`, do not work.
 
-Condr only intercepts the shortcuts in the tables. Every other key goes to the program in the Pane, including every Ctrl combination on macOS except Ctrl+Tab. An unbound Cmd or Win combination is discarded and never reaches the terminal. No shortcut works while a dialog is open.
+---
 
-On Windows and Linux, Ctrl+B is left to tmux and readline, so the sidebar uses Ctrl+Shift+B. On macOS, Option plus a letter types that character; Option does not act as a Meta key.
-
-## Work with the window and sidebars
+## Window and sidebars
 
 | Action | macOS | Windows / Linux |
-| --- | --- | --- |
-| Open Settings | Cmd+, | Ctrl+, |
-| Toggle the left sidebar | Cmd+B | Ctrl+Shift+B |
-| Toggle the right sidebar (Changes & Files) | Cmd+Alt+B | Ctrl+Alt+B |
-| Close the Settings window | Esc | Esc |
+| :--- | :--- | :--- |
+| Open Settings | `Cmd + ,` | `Ctrl + ,` |
+| Close Settings | `Esc` | `Esc` |
+| Toggle the left sidebar | `Cmd + B` | `Ctrl + Shift + B` |
+| Toggle the right sidebar (Changes & Files) | `Cmd + Option + B` | `Ctrl + Alt + B` |
 
-## Switch Workspaces and Tabs
+---
 
-| Action | macOS | Windows / Linux |
-| --- | --- | --- |
-| Previous Workspace | Cmd+Shift+↑ | Ctrl+Shift+↑ |
-| Next Workspace | Cmd+Shift+↓ | Ctrl+Shift+↓ |
-| New Tab | Cmd+T | Ctrl+Shift+T |
-| Next Tab | Cmd+} or Ctrl+Tab | Ctrl+Tab |
-| Previous Tab | Cmd+{ or Ctrl+Shift+Tab | Ctrl+Shift+Tab |
-| Jump to Tab 1 to 9 | Cmd+1 to Cmd+9 | Alt+1 to Alt+9 |
-
-Workspaces cycle in the order of each Device in the sidebar and wrap around at the end. Use the context menu to rename or close a Workspace or to close a Tab; these actions have no shortcut.
-
-## Work with Panes
+## Workspaces
 
 | Action | macOS | Windows / Linux |
-| --- | --- | --- |
-| Split right | Cmd+D | Alt+Shift+= |
-| Split down | Cmd+Shift+D | Alt+Shift+- |
-| Close the Pane | Cmd+W | Ctrl+Shift+W |
-| Zoom or restore | Cmd+Shift+Enter | Alt+Shift+Enter |
-| Move focus | Cmd+Alt+Arrow | Alt+Arrow |
-| Resize | Cmd+Ctrl+Arrow | Alt+Shift+Arrow |
+| :--- | :--- | :--- |
+| Previous Workspace | `Cmd + Shift + ↑` | `Ctrl + Shift + ↑` |
+| Next Workspace | `Cmd + Shift + ↓` | `Ctrl + Shift + ↓` |
 
-Each press resizes by 5%. Swapping Panes has no shortcut; use the Pane menu or drag instead.
+* **Cycling**: follows the sidebar order through the Workspaces of every Device, and wraps around at either end.
+* **Starting point**: when no Workspace is shown, `↓` goes to the first Workspace and `↑` to the last.
 
-## Work with the terminal
+---
+
+## Tabs
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| New Tab | `Cmd + T` | `Ctrl + Shift + T` |
+| Next Tab | `Cmd + }` or `Ctrl + Tab` | `Ctrl + Tab` |
+| Previous Tab | `Cmd + {` or `Ctrl + Shift + Tab` | `Ctrl + Shift + Tab` |
+| Go to Tab 1~9 | `Cmd + 1` ~ `Cmd + 9` | `Alt + 1` ~ `Alt + 9` |
+
+* **Physical keys**: `Cmd + }` / `Cmd + {` are pressed as `Cmd + Shift + ]` / `Cmd + Shift + [`.
+* **Cycling**: switching Tabs wraps around at either end.
+
+---
+
+## Pane splits and layout
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Split horizontally (new Pane to the right) | `Cmd + D` | `Alt + Shift + =` |
+| Split vertically (new Pane below) | `Cmd + Shift + D` | `Alt + Shift + -` |
+| Close the current Pane | `Cmd + W` | `Ctrl + Shift + W` |
+| Maximize / restore the focused Pane | `Cmd + Shift + Enter` | `Alt + Shift + Enter` |
+| Move focus | `Cmd + Option + Arrow` | `Alt + Arrow` |
+| Resize the split | `Cmd + Ctrl + Arrow` | `Alt + Shift + Arrow` |
+
+* **Resize step**: each shortcut press changes the split by 5%.
+* **Drag and drop**:
+  * **Swap places**: drag a Pane's title bar and release it on the center of the target.
+  * **Split and dock**: drag it to the target's edge to split the target Pane in that direction and dock there.
+
+---
+
+## Terminal: copy and paste text
 
 | Action | macOS | Windows | Linux |
-| --- | --- | --- | --- |
-| Copy | Cmd+C; with nothing selected it passes to the program | Ctrl+Shift+C, or Ctrl+C when there is a selection | Ctrl+Shift+C |
-| Paste | Cmd+V | Ctrl+Shift+V or Ctrl+V | Ctrl+Shift+V |
-| Paste an image to a remote Device | Option+V | Alt+V | Alt+V |
-| Open a link | Cmd+click | Ctrl+click | Ctrl+click |
-| Select in mouse mode | Shift+drag | Shift+drag | Shift+drag |
-| Scroll the history | Shift+PageUp / PageDown, or the mouse wheel | Same as macOS | Same as macOS |
+| :--- | :--- | :--- | :--- |
+| Copy the selection | `Cmd + C` | `Ctrl + C` / `Ctrl + Shift + C` | `Ctrl + Shift + C` |
+| Paste text | `Cmd + V` | `Ctrl + Shift + V` / `Ctrl + V` | `Ctrl + Shift + V` |
+| Copy the selection (everywhere) | `Ctrl + Insert` | `Ctrl + Insert` | `Ctrl + Insert` |
+| Paste text (everywhere) | `Shift + Insert` | `Shift + Insert` | `Shift + Insert` |
 
-Ctrl+Insert copies and Shift+Insert pastes on all three platforms. On Linux, Ctrl+C and Ctrl+V always go to the terminal. Tab and Shift+Tab also go to the terminal and never move window focus.
+### Pass-through rules
 
-Copying ends the selection. On macOS, Cmd+C with nothing selected passes to the program: one that uses the kitty keyboard protocol receives it as Cmd+C, which Claude Code answers by copying its own mouse selection, and a shell or any other program receives nothing. There is no clear-screen shortcut; use `clear` or Ctrl+L in the shell.
+* **Selection lifetime**: copying clears the current selection highlight.
+* **`Cmd + C` with nothing selected on macOS**: passes through to the foreground process. An interactive program that enabled the kitty keyboard protocol (such as Claude Code) captures it and copies its own selection; the shell and other programs receive nothing.
+* **Conflicts on Windows**:
+  * `Ctrl + C` with nothing selected passes through to the foreground application, usually to interrupt the current command.
+  * `Ctrl + V` is always intercepted by Condr to paste, and the raw key is never sent to the child process.
+* **Linux**: `Ctrl + C` and `Ctrl + V` always pass through to the current child process.
+
+---
+
+## Terminal: send an image to a remote Device
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Paste the clipboard image | `Option + V` | `Alt + V` |
+
+* **How it works**: only in Panes running on a remote Device. Condr uploads the local clipboard image to a temporary directory on that Device in the background, and fills its absolute remote path in at the command-line cursor for a CLI Agent or another program to read.
+* **Fallback**: with no image on the clipboard, or when the current Pane is on the local Device, the key passes straight through to the foreground program.
+* **Limits and lifetime**:
+  * One image can be at most **16 MiB**.
+  * The staged file on the remote Device is removed when this client disconnects or the remote Server process stops.
+
+---
+
+## Terminal: scrolling and scrollback
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Page up through scrollback | `Shift + PageUp` | `Shift + PageUp` |
+| Page down through scrollback | `Shift + PageDown` | `Shift + PageDown` |
+| Scroll line by line | Mouse wheel | Mouse wheel |
+
+* **Snap to bottom**: while you browse the scrollback, any key typed into the terminal jumps straight back to the newest line.
+* **Alt screen mode (vim, less and the like)**: `Shift + PageUp / PageDown` pass through to the TUI program; the mouse wheel is translated into `↑` / `↓` arrow key events.
+* **Mouse reporting**: when the foreground program explicitly turns on mouse tracking, its own event loop takes over wheel events.
+
+---
+
+## Terminal: mouse interaction
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Open a URL | `Cmd + click` | `Ctrl + click` |
+| Force text selection (when a program owns the mouse) | `Shift + drag` | `Shift + drag` |
+
+---
+
+## Further reading
+
+* [Shortcuts and preferences](/docs/using/preferences/): everyday shortcuts and external editor setup
+* [Workspaces, Tabs and Panes](/docs/using/workspaces/): split layouts and multitasking workflows
+* [Configuration and settings](/docs/reference/configuration/): Settings options and the `config.toml` reference
