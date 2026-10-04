@@ -15,7 +15,14 @@ impl Condr {
 
     pub(in crate::app) fn request_server_admin(&mut self, key: ConnectionKey) {
         self.server_admin(key, ServerAdminCommand::Status);
-        self.server_admin(key, ServerAdminCommand::Clients);
+        // The Server lists paired devices only to a local or SSH connection (ADR 0015);
+        // asking over TCP or p2p would only earn an error toast.
+        if self
+            .connection_mut(key)
+            .is_some_and(|c| matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_)))
+        {
+            self.server_admin(key, ServerAdminCommand::Clients);
+        }
     }
 
     /// Asks the Server to restart and reconnects once it has stopped. The Server replies
