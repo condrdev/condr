@@ -149,7 +149,7 @@ If it finds a Server running, the script asks whether to restart it now:
 
 ## Uninstall
 
-Uninstalling removes only the application itself and its executables. **It does not delete your configuration, runtime state or local logs.** To remove the remaining data completely, see [Configuration and settings](/docs/reference/configuration/#where-the-files-are) and clean up the directories by hand.
+Uninstalling removes only the application itself and its executables. **It does not delete your configuration, runtime state or local logs.** To remove the remaining data completely, see [Configuration and settings](/docs/reference/configuration/#storage-directories-and-files) and clean up the directories by hand.
 
 ### Step 1: remove the main application
 
