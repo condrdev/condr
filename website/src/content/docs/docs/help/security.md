@@ -15,7 +15,7 @@ Condr has no accounts and no telemetry. Its only hosted service is the Peer-to-p
 
 ## One key per Device
 
-Every machine that runs Condr has one Ed25519 key, stored in the `device-key` file in the data directory with permissions 0600. If other users can read it, Condr refuses to start and tells you to fix the permissions.
+Every machine that runs Condr has one Ed25519 key, stored in the `device-key` file in the data directory with permissions 0600. If other users can read it, Condr refuses to start and tells you to fix the permissions. On Windows the file admits only its owner and SYSTEM and inherits nothing from its folder; a file written by an older version is given that permission the first time it is read.
 
 The same key is used when this machine's Server accepts connections and when its window and command line connect out. So a Device has exactly one fingerprint and appears only once in an authorized list. The fingerprint is 43 characters of base64url, and it is also the Device key in a link.
 

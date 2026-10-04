@@ -89,6 +89,39 @@ fn the_identity_files_move_out_of_the_legacy_directory_once() {
     fs::remove_dir_all(root).unwrap();
 }
 
+/// `icacls` on `path`: one `account:(flags)` entry per line, `(I)` marking inherited ones.
+#[cfg(windows)]
+fn icacls(path: &Path) -> String {
+    let output = std::process::Command::new("icacls")
+        .arg(path)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[cfg(windows)]
+#[test]
+fn secret_files_admit_only_their_owner_on_windows() {
+    let directory =
+        std::env::temp_dir().join(format!("condr-noise-dacl-{}-{}", std::process::id(), now()));
+    write_secret_file(&directory.join("fresh"), "secret").unwrap();
+    // A file from an older release inherits its directory's entries until it is read.
+    fs::write(directory.join("old"), "secret\n").unwrap();
+    assert!(icacls(&directory.join("old")).contains("(I)"));
+    assert_eq!(
+        read_secret_file(&directory.join("old")).unwrap().as_deref(),
+        Some("secret\n")
+    );
+    for name in ["fresh", "old"] {
+        let acl = icacls(&directory.join(name));
+        let entries: Vec<&str> = acl.lines().filter(|line| line.contains(":(")).collect();
+        assert_eq!(entries.len(), 2, "{acl}");
+        assert!(entries.iter().all(|entry| !entry.contains("(I)")), "{acl}");
+        assert!(entries.iter().all(|entry| entry.ends_with(":(F)")), "{acl}");
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
 /// Runs `f` on the Server side of a pair once its connection is accepted.
 fn serve<T: Send + 'static>(
     server: thread::JoinHandle<io::Result<NoiseStream>>,

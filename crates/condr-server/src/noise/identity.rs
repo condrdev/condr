@@ -398,7 +398,9 @@ fn with_store_lock<T>(directory: &Path, f: impl FnOnce() -> io::Result<T>) -> io
 }
 
 /// Reads a secret file, `None` when absent. On Unix a file readable by others is refused
-/// rather than trusted, since a leaked key must be replaced, not reused.
+/// rather than trusted, since a leaked key must be replaced, not reused. On Windows the
+/// file is given the owner-only DACL instead: a file from a release before 0.1.7 carries
+/// whatever its directory handed down, and that is every updated machine, not a leak.
 pub(super) fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
     match fs::read_to_string(path) {
         Ok(text) => {
@@ -417,6 +419,8 @@ pub(super) fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
                     ));
                 }
             }
+            #[cfg(windows)]
+            windows::restrict_to_owner(path)?;
             Ok(Some(text))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -424,19 +428,23 @@ pub(super) fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
     }
 }
 
-/// Creates `path` owner-only and refuses to overwrite an existing file.
+/// Creates `path` owner-only and refuses to overwrite an existing file. The permissions
+/// are set at creation, so no one can open the file before they apply.
 pub(super) fn write_secret_file(path: &Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
     #[cfg(unix)]
-    {
+    let mut file: File = {
         use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file: File = options.open(path)?;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?
+    };
+    #[cfg(windows)]
+    let mut file: File = windows::create_owner_only(path)?;
     file.write_all(text.as_bytes())?;
     file.write_all(b"\n")?;
     file.sync_all()
@@ -447,6 +455,107 @@ pub(super) fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// The DACL of the secret files on Windows: the one the local endpoint uses, generic all
+/// for the owner and LocalSystem, protected so the directory's entries are not inherited.
+/// A directory under the profile hands down more than the user (an installer's sandbox
+/// group, for instance), and a key readable by another account is a key to every paired
+/// Server.
+#[cfg(windows)]
+#[allow(unsafe_code)] // Setting a file's DACL has no safe wrapper.
+mod windows {
+    use super::*;
+    use interprocess::os::windows::security_descriptor::{
+        AsSecurityDescriptor as _, SecurityDescriptor,
+    };
+    use std::os::windows::io::FromRawHandle as _;
+    use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Security::Authorization::{SE_FILE_OBJECT, SetNamedSecurityInfoW};
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
+        SECURITY_ATTRIBUTES,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL};
+
+    fn owner_only() -> io::Result<SecurityDescriptor> {
+        let sddl = widestring::U16CString::from_str("D:P(A;;GA;;;OW)(A;;GA;;;SY)")
+            .map_err(io::Error::other)?;
+        SecurityDescriptor::deserialize(&sddl)
+    }
+
+    fn wide(path: &Path) -> io::Result<widestring::U16CString> {
+        widestring::U16CString::from_os_str(path.as_os_str()).map_err(io::Error::other)
+    }
+
+    /// Creates `path` for writing with the owner-only DACL, failing with `AlreadyExists`
+    /// when it is there, as `OpenOptions::create_new` does. `std` cannot pass security
+    /// attributes to `CreateFileW`, and setting them after creation would leave a moment
+    /// in which another account can open the file.
+    pub(super) fn create_owner_only(path: &Path) -> io::Result<File> {
+        let descriptor = owner_only()?;
+        let mut attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.as_sd().cast_mut(),
+            bInheritHandle: 0,
+        };
+        let name = wide(path)?;
+        // SAFETY: `name` is NUL-terminated and `attributes` points at `descriptor`; all
+        // three outlive the call, which copies what it needs.
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                &raw mut attributes,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: a fresh handle this process owns and nothing else closes.
+        Ok(unsafe { File::from_raw_handle(handle) })
+    }
+
+    /// Replaces the DACL of the file at `path` with the owner-only one, inheritance off.
+    pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
+        let descriptor = owner_only()?;
+        let (mut present, mut defaulted, mut dacl) = (0, 0, std::ptr::null_mut());
+        // SAFETY: `descriptor` is a valid security descriptor and the out-pointers are
+        // live locals for the duration of the call.
+        let found = unsafe {
+            GetSecurityDescriptorDacl(
+                descriptor.as_sd().cast_mut(),
+                &raw mut present,
+                &raw mut dacl,
+                &raw mut defaulted,
+            )
+        };
+        if found == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let name = wide(path)?;
+        // SAFETY: `name` is NUL-terminated and `dacl` points into `descriptor`; both live
+        // until the call returns.
+        let status = unsafe {
+            SetNamedSecurityInfoW(
+                name.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                dacl,
+                std::ptr::null(),
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
