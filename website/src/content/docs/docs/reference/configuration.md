@@ -36,9 +36,9 @@ The top of each page always shows which Device you are editing, its connection p
 
 | Page | Description |
 | :--- | :--- |
-| **General › Status** | The connection type, version, uptime, session metrics (Workspace / Pane counts), recent errors, listen address and P2P status, with a **Restart Condr** button. |
+| **General › Status** | The connection type, version, uptime, session metrics (Workspace / Pane counts), recent errors, listen address and P2P status. |
 | **General › Terminal** | The default shell new Panes start (empty falls back to the system environment). |
-| **Remote access** | The TCP listener switch and listen address, and the Peer-to-peer switch. Changes take effect after a restart (the button on the General page turns into **Restart to apply**). |
+| **Remote access** | The TCP listener switch and listen address, the Peer-to-peer switch, and the **Restart Condr** button that restarts the Server. Changes take effect after a restart, and the button then turns into **Restart to apply**. |
 | **Paired devices** | **Generate invite** creates a one-time pairing invite (as both a P2P and a TCP link). The list shows paired Devices with online ones first, and each row has **Revoke**, which withdraws that pairing. |
 | **Agent integrations** | Each Agent's hook status, with one-click install, update and uninstall. |
 

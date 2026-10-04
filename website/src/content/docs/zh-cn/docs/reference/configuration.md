@@ -36,9 +36,9 @@ Condr 采用分层配置架构：
 
 | 页面 | 说明 |
 | :--- | :--- |
-| **General › Status** | 查看连接方式、版本、运行时间、活跃会话指标（Workspace / Pane 数量）、最近错误日志、监听地址与 P2P 状态，提供 **Restart Condr** 入口。 |
+| **General › Status** | 查看连接方式、版本、运行时间、活跃会话指标（Workspace / Pane 数量）、最近错误日志、监听地址与 P2P 状态。 |
 | **General › Terminal** | 指定新 Pane 启动的默认 Shell（留空则回退至系统环境配置）。 |
-| **Remote access** | TCP 监听开关与监听地址、Peer-to-peer 开关。修改需重启生效（General 页面按钮将变为 **Restart to apply**）。 |
+| **Remote access** | TCP 监听开关与监听地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需重启生效，此时按钮变为 **Restart to apply**。 |
 | **Paired devices** | 点击 **Generate invite** 生成单次配对邀请（分别提供 P2P 与 TCP 格式链接）。列表按在线状态降序展示已配对设备，支持单项 **Revoke**（吊销配对凭证）。 |
 | **Agent integrations** | 各 Agent Hook 状态及一键安装、更新、卸载操作。 |
 

@@ -133,7 +133,7 @@ By default, Condr checks its channel for updates in the background every 5 hours
 Download the new version and install it over the old one. The old Server is handled as follows:
 
 - **Windows**: the installer stops the old Server automatically, and the new Server is started when you launch the new client.
-- **macOS / Linux**: the old Server keeps running after installation. The new client prompts you to restart the service when it launches; you can also do it later by clicking **Restart Condr** under **Settings › Device › General**.
+- **macOS / Linux**: the old Server keeps running after installation. The new client prompts you to restart the service when it launches; you can also do it later by clicking **Restart Condr** under **Settings › Device › Remote access**.
 
 ### Upgrading the Headless Server
 

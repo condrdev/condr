@@ -133,7 +133,7 @@ Condr 默认每 5 小时在后台自动检测一次通道更新。可在客户�
 直接下载新版本覆盖安装。旧 Server 的迁移策略如下：
 
 - **Windows**：安装程序自动停止旧版 Server，并在启动新版客户端时同步升级启动新 Server。
-- **macOS / Linux**：安装后旧版 Server 仍维持运行，新版客户端启动时会提示重启服务；亦可稍后在 **Settings › Device › General** 中手动点击 **Restart Condr**。
+- **macOS / Linux**：安装后旧版 Server 仍维持运行，新版客户端启动时会提示重启服务；亦可稍后在 **Settings › Device › Remote access** 中手动点击 **Restart Condr**。
 
 ### Headless Server 升级
 
