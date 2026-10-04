@@ -1,72 +1,151 @@
 ---
 title: Security model
-description: See what Condr exposes by default, whom each kind of connection trusts, and what the relay can see.
+description: What Condr opens to the outside by default, whom each connection type trusts, what a paired Device can do, and which network services Condr contacts.
 ---
 
-Use this page to decide whether a machine is a good fit for Condr, and to learn what each kind of connection allows.
+Use this page to judge whether a Device is suitable for running Condr, and to see exactly what each connection type grants.
 
-## Closed by default
+---
 
-A newly installed Server listens only on a private socket on this machine. On macOS and Linux the socket's permissions are 0600, so only your user can connect. On Windows the named pipe allows only you and SYSTEM.
+## Local only by default
 
-The Server does not go on the public internet, opens no TCP port, and does not contact any Condr service. Until you run `--listen` or `--p2p`, it is invisible to the network.
+* **Local socket**: a fresh Server listens only on a private local socket. On macOS and Linux the socket's permissions are `0600`, so only your user can connect; on Windows the named pipe admits only your user and SYSTEM.
+* **TCP port**: until `[server] listen` is configured, the Server opens no TCP port. That setting is written by `condr server start --listen` or under **Settings › Device › Remote access**.
+* **Peer-to-peer access**: until Peer-to-peer is turned on, other Devices cannot connect to this Server over P2P.
+* **Local connections have full rights**: any program running as your user can connect to the local socket and do everything, including managing the Server. Programs and Agents running in a Pane have the same rights, and they can use this Device's key to connect to paired remote Devices.
 
-Condr has no accounts and no telemetry. Its only hosted service is the Peer-to-peer relay, and only Devices with Peer-to-peer turned on contact it.
+---
 
-## One key per Device
+## Network services Condr contacts
 
-Every machine that runs Condr has one Ed25519 key, stored in the `device-key` file in the data directory with permissions 0600. If other users can read it, Condr refuses to start and tells you to fix the permissions. On Windows the file admits only its owner and SYSTEM and inherits nothing from its folder; a file written by an older version is given that permission the first time it is read.
+Condr has no user accounts and collects no telemetry. It contacts only these three external services:
 
-The same key is used when this machine's Server accepts connections and when its window and command line connect out. So a Device has exactly one fingerprint and appears only once in an authorized list. The fingerprint is 43 characters of base64url, and it is also the Device key in a link.
+| Service | When | Purpose |
+| :--- | :--- | :--- |
+| `api.github.com` | 5 seconds after the window starts, then every 5 hours | Checks for updates. Turn automatic checks off under **Settings › Application › About**, or set `[client.updates] auto_check = false` |
+| `relay.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Helps with NAT hole punching, and relays encrypted traffic when a direct connection cannot be established |
+| `dns.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Publishes and looks up the relay address each Device currently uses |
 
-Deleting `device-key` generates a new key and clears this machine's list of authorized Devices. Every pairing has to be redone.
+---
 
-## Who an SSH connection trusts
+## Device key
 
-Condr does not handle authentication or encryption for SSH connections. It leaves both to OpenSSH on this machine. Condr runs `condr server bridge` on the remote machine and forwards the remote Server's private socket to this machine.
+* **One key per Device**: every Device running Condr holds one unique Ed25519 key pair, stored in the `device-key` file in the data directory.
+* **Shared by incoming and outgoing connections**: the Server accepting connections and the local window and command line connecting out all use this one key. So each Device has a single fingerprint and takes a single line in the other side's authorized list.
+* **Fingerprint format**: the fingerprint is a 43-character base64url string. It appears as the Device key in connection links and as Fingerprint in `condr server status`.
+* **Permissions on Linux and macOS**: the file's permissions must be `0600`. If other users have access to it, Condr refuses to load the key and reports `… is readable by other users (mode …); make it 0600 or delete it`, and TCP and Peer-to-peer connections cannot start.
+* **Permissions on Windows**: the file admits only its owner and SYSTEM and does not inherit its parent folder's permissions. Condr checks and resets this ACL every time it reads the file.
+* **No isolation from your own user**: the key is stored as a plain text file, not in the operating system's keychain. Any local process running as your user can read it.
 
-The remote Server treats this connection as a local one. So a window connected over SSH can do everything a local window can, including managing the Server. Anyone who can log in to a machine over SSH can already do anything there, so Condr grants no new privileges.
+### Replacing the key
 
-## Who a TCP connection trusts
+Stop the Server, delete both `device-key` and `authorized-clients` from the data directory, then restart the Server. Condr generates a brand-new key, and every earlier pairing has to be set up again.
 
-A TCP connection uses the `Noise_IKpsk2` handshake, which belongs to the same family as WireGuard. Each side authenticates with its own static key, and the connection is encrypted throughout.
+If you delete only `device-key`, the window may generate a new key before the Server does, leaving the old authorized list behind.
 
-Trust starts with an invite. The link carries the Server's Device key, and this machine encrypts its first message only to that key, so there is no "confirm the fingerprint on first connect" step. A paired Device goes straight into the handshake, while an unpaired Device must also present a valid invite.
+---
 
-An invite holds 32 random bytes, expires after 10 minutes, and can be used only once. The Server keeps it in the `pending-invite` file in the data directory with permissions 0600. The first Device to finish pairing uses it up. Anyone holding the invite can pair, so send it only over a channel you trust.
+## SSH connections
 
-After pairing:
+* **Authentication and encryption**: handled entirely by the local OpenSSH; Condr takes no part in that security logic.
+* **Non-interactive mode**: Condr calls the system `ssh` with `BatchMode=yes`, so it never prompts for a password and never asks you to confirm an unknown host key fingerprint. Host key verification follows your existing OpenSSH configuration.
+* **Tunnelling**: Condr runs `condr server bridge` on the remote Device, tunnelling the remote Server's private socket to this machine. If the remote Server is not running, `bridge` starts it.
+* **Equivalent rights**: the remote Server treats a connection arriving over SSH as a local connection, so a window connected over SSH has every right a local window has, including managing the Server. Being able to log in over SSH already means being able to run any command on that Device, so Condr adds no extra privilege.
+* **Connection sharing**: on macOS and Linux, Condr turns on OpenSSH connection sharing by default, keeps the control socket in the runtime directory, and closes it after 60 idle seconds. If your SSH configuration already sets `ControlPath`, Condr leaves it as it is.
 
-- The Server adds a line to `authorized-clients` that records the Device's key, pairing time, last connection time and name.
-- This machine records the Server's Device key and address in its config file and does not keep the invite.
+---
 
-Revoking a Device removes its line from `authorized-clients`. Its existing connections close immediately, and its next handshake fails.
+## TCP connections
 
-## Who a Peer-to-peer connection trusts
+* **Handshake protocol**: TCP connections complete a `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s` handshake (the same family of handshake pattern as WireGuard). Both ends authenticate each other with static keys, and the whole connection is encrypted.
+* **How trust is established**: the connection link carries the Server's Device key, and the client starts the handshake only toward that key, so there is no manual fingerprint check on first connection.
+* **Paired Devices**: complete the handshake directly and get an encrypted channel.
+* **Unpaired Devices**: must present a valid invite. The invite acts as the handshake's pre-shared key (PSK); without it, the client cannot decrypt the Server's handshake reply, and the Server drops the connection.
 
-Peer-to-peer uses the same keys, invites and authorized list as TCP. Revoking a Device applies to both kinds of connection.
+---
 
-The two Devices encrypt data end to end with their own keys. Two Condr services take part in setting up the connection, but they cannot see its contents:
+## Invites and pairing
 
-- **The relay (`relay.condr.dev`)** helps Devices punch holes through NAT. When a direct connection fails, it forwards the encrypted bytes, and once a direct connection succeeds, it leaves the data path. It can see which Device connects to which Device, when, and from which IP. It stores no data on disk and has no accounts.
-- **DNS (`dns.condr.dev`)** lets other Devices find the relay a Server uses. A Server with Peer-to-peer turned on publishes a signed record under its own Device key. The record holds only the relay address, not an IP. Anyone who holds the Device key can look up which relay it is on.
+* **The invite**: 32 random bytes, valid for 10 minutes, usable once. Only one invite is valid at any time, and generating a new one invalidates the previous one. It is stored in the `pending-invite` file in the data directory, with the same access permissions as the Device key.
+* **Who can use it**: the first Device to complete the handshake uses up the invite. Anyone holding the invite can pair, so share it only through trusted channels.
+* **What pairing records**: after pairing, the Server appends a line to the `authorized-clients` file with the other side's Device key, the pairing time, the last-seen time and its host name.
+* **What the client keeps**: the client stores only the Server's Device key and network address in `config.toml`, never the invite.
 
-The Server contacts these two services only when its config turns Peer-to-peer on, or while this machine is dialing out a `p2p://` connection. It disconnects one minute after the last outgoing connection closes. A Device that only dials out publishes no record.
+---
+
+## Peer-to-peer connections
+
+* **Shared credentials and authorization**: Peer-to-peer and TCP share the same Device key, invite mechanism and authorized-client list. Revoking a Device applies to both connection types.
+* **Encryption**: the two ends connect over QUIC through `iroh` and authenticate each other with TLS 1.3 using their Device keys, so data is end-to-end encrypted. The invite is sent only after the encrypted channel is up.
+* **The handshake is open to anyone**: anyone who has this Device's key can complete the basic QUIC handshake, and is only then turned away for not being authorized. Before disconnecting, the refused side can read the Server's build version. There is currently no connection rate limit.
+* **Relay service `relay.condr.dev`**: helps the two ends punch through NAT, relays end-to-end encrypted data when a direct connection fails, and leaves the data path once the direct connection works. The relay can see both ends' Device key identities, when the connection was made and the source IP address, but cannot decrypt the traffic. It is operated by Condr, runs the open-source `iroh-relay` without modification, writes nothing to disk and keeps no user accounts.
+* **DNS service `dns.condr.dev`**: every 5 minutes, a Server with Peer-to-peer turned on signs its current relay address with its own Device private key and publishes it as a DNS record (the record contains only the relay address, not the Device's real IP). Anyone holding that Device key can look the record up.
+* **When these services are contacted**: a Server with Peer-to-peer turned on keeps a long-lived connection to the relay server. A Device that only dials out `p2p://` connections publishes no DNS record, and closes its relay connection 60 seconds after its last active P2P connection ends.
+
+---
+
+## Revoking a Device
+
+Run `condr server revoke <fingerprint or prefix>`, or open **Settings › Device › Paired devices** and click **Revoke**.
+
+* **Takes effect at once**: Condr immediately removes the Device's line from `authorized-clients` and cuts all of its active connections.
+* **Later attempts**: a later TCP connection is stopped during the Noise handshake; a Peer-to-peer connection is refused after the QUIC handshake completes.
+
+---
 
 ## What a paired Device can do
 
-Pairing currently grants the whole Session. A Device connected over TCP or Peer-to-peer can:
+Pairing currently grants access to the whole Session. A Device connected over TCP or Peer-to-peer can:
 
-- Create, change and close Workspaces, Tabs and Panes.
-- Type, paste and copy in terminals.
-- Read Pane contents and Git changes, and browse any directory or file on the Server's machine.
-- Start Agents and install Agent hooks.
-- Stop the Server.
+* Create, change and close Workspaces, Tabs, Panes and their worktrees.
+* Type, paste and copy in terminals (which means running any command as the user the Server runs as).
+* Read Pane contents, Git changes and the files in a Workspace, and list the subdirectories of any directory on this Device.
+* Start Agent processes, and install Agent hooks through Settings.
+* Change the Server's default shell.
+* Read the Server's status, including its listen configuration, the fingerprints of connected Devices and recent errors.
+* Stop the Server process. Neither the window nor the command line offers a remote stop button, but the protocol allows it.
 
-It cannot manage the Server, which covers turning listening and Peer-to-peer on or off, creating invites, listing and revoking Devices, and restarting the Server. These operations accept only local and SSH connections.
+These administrative operations are accepted only from local and SSH connections:
 
-So pair only your own Devices with a Server. Read-only and control permissions are not separated yet, and sharing a Server with other people has to wait for that feature.
+* Turning the TCP listener and Peer-to-peer on or off.
+* Generating invites, and listing and revoking paired Devices.
+* Restarting the Server.
+* Using this Device as a relay hop for Peer-to-peer connections.
 
-## Report a security problem
+So pair only your own Devices with the Server. Read-only and control permissions are not separated yet; sharing one Server among several people has to wait for that feature.
 
-Do not open a public issue. Report it privately on GitHub through **Security › Report a vulnerability**, and include your Condr version, operating system and steps to reproduce. You will get a reply within 7 days. See [SECURITY.md](https://github.com/condrdev/condr/blob/main/SECURITY.md) for details.
+**Viewing only** is not a permission boundary: when several windows connect at once, it only switches the windows that did not get control to a read-only view in their interface.
+
+---
+
+## What programs in a terminal can do
+
+* **Writing the clipboard**: a program running in a Pane can silently overwrite this machine's clipboard with an OSC 52 escape sequence, and so can a program on a remote Device. Every connected window applies the write, with no confirmation prompt. Programs cannot read the system clipboard back.
+* **Links**: when you hold Cmd or Ctrl and click a link in the terminal, Condr opens it with the operating system's default handler, with no allowlist of URL schemes. A program can use an OSC 8 escape sequence to print a link whose visible text differs from its real target, so check the target URL before clicking.
+* **Agent state can be forged**: any process inside a Pane can construct a fake Agent state event. Agent state is only for display in the interface and must not be used for authentication or security decisions.
+* **Images pasted to a remote Device**: when you paste an image on a remote Device, the file is written to a private directory on that Device. On Linux and macOS the directory's permissions are `0700` and the file's are `0600`. The files are removed when the window disconnects or the Server process exits, and leftovers are deleted after 24 hours. On Windows that temporary directory inherits its parent folder's permissions.
+
+---
+
+## File permissions
+
+| File | Linux and macOS | Windows |
+| :--- | :--- | :--- |
+| `device-key`, `pending-invite` | `0600`; refused when permissions are too broad | Only the owner and SYSTEM |
+| `config.toml`, the Session snapshot, the Server's `.stderr` file | `0600` | Inherits the parent folder's ACL |
+| `authorized-clients`, log files | Created with the system default umask | Inherits the parent folder's ACL |
+
+For where these files live, see [Configuration and settings](/docs/reference/configuration/).
+
+---
+
+## Reporting security issues
+
+Do not report security flaws in a public Issue. Use GitHub's [Security › Report a vulnerability](https://github.com/condrdev/condr/security/advisories/new) for private disclosure, and include:
+
+* The exact Condr version (a release tag or Git commit hash).
+* The operating system.
+* Clear steps to reproduce the vulnerability.
+* An assessment of its impact.
+
+You will get a reply within 7 days. See [SECURITY.md](https://github.com/condrdev/condr/blob/main/SECURITY.md) for the full disclosure guidelines.
