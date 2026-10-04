@@ -52,8 +52,8 @@ export default defineConfig({
           items: [{ slug: 'docs/reference/cli' }, { slug: 'docs/reference/configuration' }, { slug: 'docs/reference/keybindings' }],
         },
         {
-          label: 'Understanding and help',
-          translations: { 'zh-CN': '理解与排障' },
+          label: 'Help',
+          translations: { 'zh-CN': '帮助' },
           items: [{ slug: 'docs/help/troubleshooting' }, { slug: 'docs/help/security' }, { slug: 'docs/help/architecture' }],
         },
       ],
