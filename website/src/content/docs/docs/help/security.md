@@ -15,7 +15,7 @@ Condr has no accounts and no telemetry. Its only hosted service is the Peer-to-p
 
 ## One key per Device
 
-Every machine that runs Condr has one Ed25519 key, stored in the `device-key` file in the config directory with permissions 0600. If other users can read it, Condr refuses to start and tells you to fix the permissions.
+Every machine that runs Condr has one Ed25519 key, stored in the `device-key` file in the data directory with permissions 0600. If other users can read it, Condr refuses to start and tells you to fix the permissions.
 
 The same key is used when this machine's Server accepts connections and when its window and command line connect out. So a Device has exactly one fingerprint and appears only once in an authorized list. The fingerprint is 43 characters of base64url, and it is also the Device key in a link.
 
@@ -33,7 +33,7 @@ A TCP connection uses the `Noise_IKpsk2` handshake, which belongs to the same fa
 
 Trust starts with an invite. The link carries the Server's Device key, and this machine encrypts its first message only to that key, so there is no "confirm the fingerprint on first connect" step. A paired Device goes straight into the handshake, while an unpaired Device must also present a valid invite.
 
-An invite holds 32 random bytes, expires after 10 minutes, and can be used only once. The Server keeps it in the `pending-invite` file in the config directory with permissions 0600. The first Device to finish pairing uses it up. Anyone holding the invite can pair, so send it only over a channel you trust.
+An invite holds 32 random bytes, expires after 10 minutes, and can be used only once. The Server keeps it in the `pending-invite` file in the data directory with permissions 0600. The first Device to finish pairing uses it up. Anyone holding the invite can pair, so send it only over a channel you trust.
 
 After pairing:
 

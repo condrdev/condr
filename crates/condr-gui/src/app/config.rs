@@ -68,10 +68,8 @@ pub(super) struct LoadedConfig {
 impl LoadedConfig {
     /// Read before starting the GUI event loop: the config and identity locks may wait.
     pub(super) fn read(path: Option<PathBuf>) -> Self {
-        let (device_key, key_error) = match path
-            .as_deref()
-            .and_then(Path::parent)
-            .map_or_else(DeviceKey::generate, condr_server::noise::load_device_key)
+        let (device_key, key_error) = match condr_server::noise::identity_directory()
+            .and_then(|directory| condr_server::noise::load_device_key(&directory))
         {
             Ok(key) => (Some(key), None),
             Err(error) => (

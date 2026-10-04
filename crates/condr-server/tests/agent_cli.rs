@@ -96,6 +96,7 @@ done
             .arg("--snapshot")
             .arg(root.join("session.bin"))
             .env("CONDR_CONFIG_DIR", &config)
+            .env("CONDR_DATA_DIR", &config)
             .env("CONDR_LOG_DIR", &config)
             .env("PATH", path)
             .env("CONDR_TEST_STARTS", root.join("starts"))

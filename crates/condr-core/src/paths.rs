@@ -3,7 +3,7 @@ use std::path::PathBuf;
 const DIRECTORY_NAME: &str = "condr";
 
 /// Condr's configuration directory: `CONDR_CONFIG_DIR` when set, else the platform's.
-/// It also holds the Server identity and the device key of this host.
+/// It holds `config.toml`, the one file a person edits and may sync between machines.
 pub fn config_directory() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("CONDR_CONFIG_DIR") {
         return Some(PathBuf::from(path));
@@ -11,7 +11,13 @@ pub fn config_directory() -> Option<PathBuf> {
     dirs::config_dir().map(|root| root.join(DIRECTORY_NAME))
 }
 
+/// Condr's data directory: `CONDR_DATA_DIR` when set, else the platform's local (never
+/// roaming) one. It holds what belongs to this machine alone: the device key and the
+/// paired devices (ADR 0033), managed worktrees, and on Windows the runtime files.
 pub fn data_directory() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("CONDR_DATA_DIR") {
+        return Some(PathBuf::from(path));
+    }
     dirs::data_local_dir().map(|root| root.join(DIRECTORY_NAME))
 }
 

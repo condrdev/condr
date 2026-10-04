@@ -63,10 +63,8 @@ pub(super) fn device_endpoint(devices: &[SavedServer], name: &str) -> Result<End
     let key = device
         .is_tcp()
         .then(|| {
-            let directory = condr_core::config_directory().ok_or_else(|| {
-                CliError::new("no_config_directory", "cannot locate the config directory")
-            })?;
-            condr_server::noise::load_device_key(&directory)
+            condr_server::noise::identity_directory()
+                .and_then(|directory| condr_server::noise::load_device_key(&directory))
                 .map_err(|error| CliError::new("device_key", error.to_string()))
         })
         .transpose()?;

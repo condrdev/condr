@@ -38,6 +38,7 @@ impl Home {
             .env("CONDR_INSTALL_DIR", self.install_dir())
             .env("CONDR_PROFILE", self.profile())
             .env("CONDR_CONFIG_DIR", self.root.join("config"))
+            .env("CONDR_DATA_DIR", self.root.join("config"))
             .env("CONDR_SOCKET_PATH", self.root.join("absent.sock"))
             .env_remove("CONDR_PANE_ID")
             .output()

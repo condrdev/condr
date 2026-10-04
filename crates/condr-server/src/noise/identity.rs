@@ -198,14 +198,53 @@ impl fmt::Debug for ServerIdentity {
     }
 }
 
-/// Where this host keeps `device-key`, the authorized list and the invite.
+/// Where this host keeps `device-key`, the authorized list and the invite: the data
+/// directory, which no dotfiles repository or roaming profile carries off (ADR 0033).
+/// Releases up to 0.1.6 kept them beside `config.toml`; a store still there is moved
+/// here the first time anything asks, so pairings survive the update.
 pub fn identity_directory() -> io::Result<PathBuf> {
-    condr_core::config_directory().ok_or_else(|| {
+    let directory = condr_core::data_directory().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "no configuration directory is available; set CONDR_CONFIG_DIR",
+            "no data directory is available; set CONDR_DATA_DIR",
         )
+    })?;
+    if let Some(legacy) = condr_core::config_directory().filter(|legacy| *legacy != directory) {
+        adopt_legacy_store(&legacy, &directory)?;
+    }
+    Ok(directory)
+}
+
+/// Moves the identity files from `legacy` into `directory` unless `directory` already has
+/// a key. `device-key` goes last, so a process that sees it also sees the list beside it.
+fn adopt_legacy_store(legacy: &Path, directory: &Path) -> io::Result<()> {
+    if !legacy.join(DEVICE_KEY_FILE).exists() || directory.join(DEVICE_KEY_FILE).exists() {
+        return Ok(());
+    }
+    with_store_lock(directory, || {
+        if directory.join(DEVICE_KEY_FILE).exists() {
+            return Ok(());
+        }
+        for name in [AUTHORIZED_FILE, INVITE_FILE, DEVICE_KEY_FILE] {
+            move_file(&legacy.join(name), &directory.join(name))?;
+        }
+        let _ = fs::remove_file(legacy.join(LOCK_FILE));
+        tracing::info!(
+            from = %legacy.display(),
+            to = %directory.display(),
+            "moved the device key and paired devices to the data directory"
+        );
+        Ok(())
     })
+}
+
+/// Renames `from` to `to`, copying across file systems; a missing `from` is nothing to move.
+fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    match fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(_) => fs::copy(from, to).and_then(|_| fs::remove_file(from)),
+    }
 }
 
 /// How a GUI introduces itself in `Hello`, and so how a paired device is listed: the

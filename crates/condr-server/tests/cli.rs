@@ -45,6 +45,7 @@ fn skill_prints_the_bundled_document_without_a_server() {
         .arg("--skill")
         .env("CONDR_SOCKET_PATH", root.join("absent.sock"))
         .env("CONDR_CONFIG_DIR", &root)
+        .env("CONDR_DATA_DIR", &root)
         .env("CONDR_SERVER_EXECUTABLE", root.join("absent-server"))
         .env_remove("CONDR_ENV")
         .env_remove("CONDR_PANE_ID")
@@ -393,7 +394,7 @@ fn device_commands_reach_saved_devices_and_report_the_unreachable() {
     let local_socket = std::env::temp_dir().join(format!("condr-dev-l-{suffix}.sock"));
     let remote_socket = std::env::temp_dir().join(format!("condr-dev-r-{suffix}.sock"));
 
-    // The CLI speaks TCP with the device key under CONDR_CONFIG_DIR, so the remote
+    // The CLI speaks TCP with the device key under CONDR_DATA_DIR, so the remote
     // Server must authorize that key.
     let device_key = condr_server::noise::load_device_key(&config_dir).unwrap();
     let identity = ServerIdentity::ephemeral()
@@ -429,6 +430,7 @@ fn device_commands_reach_saved_devices_and_report_the_unreachable() {
             .args(args)
             .env("CONDR_SOCKET_PATH", &local_socket)
             .env("CONDR_CONFIG_DIR", &config_dir)
+            .env("CONDR_DATA_DIR", &config_dir)
             .env_remove("CONDR_PANE_ID")
             .env_remove("CONDR_DEVICE");
         if let Some(device) = device_env {

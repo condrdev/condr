@@ -614,6 +614,7 @@ pub fn uninstall(options: UninstallOptions) -> io::Result<i32> {
     } else {
         let mut kept: Vec<PathBuf> = [
             condr_core::config_directory(),
+            condr_core::data_directory(),
             condr_core::state_directory(),
             condr_core::log_directory(),
         ]

@@ -58,6 +58,37 @@ fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() 
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+fn the_identity_files_move_out_of_the_legacy_directory_once() {
+    let root = std::env::temp_dir().join(format!(
+        "condr-noise-adopt-{}-{}",
+        std::process::id(),
+        now()
+    ));
+    let (legacy, directory) = (root.join("config"), root.join("data"));
+    let key = load_device_key(&legacy).unwrap();
+    let client = AuthorizedClient {
+        key: DeviceKey::generate().unwrap().public(),
+        paired_at: 1,
+        last_seen: 2,
+        name: "laptop".into(),
+    };
+    write_authorized(&legacy, std::slice::from_ref(&client)).unwrap();
+
+    adopt_legacy_store(&legacy, &directory).unwrap();
+    assert_eq!(load_device_key(&directory).unwrap(), key);
+    assert_eq!(read_authorized(&directory).unwrap(), vec![client]);
+    assert!(!legacy.join(DEVICE_KEY_FILE).exists());
+    assert!(!legacy.join(AUTHORIZED_FILE).exists());
+
+    // A key already in place is kept; a later file beside `config.toml` is left alone.
+    let later = load_device_key(&legacy).unwrap();
+    adopt_legacy_store(&legacy, &directory).unwrap();
+    assert_eq!(load_device_key(&directory).unwrap(), key);
+    assert_eq!(load_device_key(&legacy).unwrap(), later);
+    fs::remove_dir_all(root).unwrap();
+}
+
 /// Runs `f` on the Server side of a pair once its connection is accepted.
 fn serve<T: Send + 'static>(
     server: thread::JoinHandle<io::Result<NoiseStream>>,

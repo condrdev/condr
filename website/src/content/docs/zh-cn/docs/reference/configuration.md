@@ -42,13 +42,14 @@ Remote access 和 Paired devices 页面只能通过本机或 SSH 连接修改。
 
 | 内容 | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| 配置：`config.toml`、密钥 | `~/.config/condr` | `~/Library/Application Support/condr` | `%APPDATA%\condr` |
+| 配置：`config.toml` | `~/.config/condr` | `~/Library/Application Support/condr` | `%APPDATA%\condr` |
+| 数据：`device-key`、已配对 Device | `~/.local/share/condr` | `~/Library/Application Support/condr` | `%LOCALAPPDATA%\condr` |
 | 状态：快照、窗口状态 | `~/.local/state/condr` | `~/Library/Application Support/condr` | `%LOCALAPPDATA%\condr` |
 | 日志 | `~/.local/state/condr` | `~/Library/Logs/condr` | `%LOCALAPPDATA%\condr` |
 | 运行时：socket、临时文件 | `$XDG_RUNTIME_DIR/condr` | `$TMPDIR/condr` | `%LOCALAPPDATA%\condr\runtime` |
 | 安装的 `condr` 命令 | `~/.local/opt/condr` | `~/.local/opt/condr` | `%LOCALAPPDATA%\Programs\Condr` |
 
-Linux 上 `XDG_CONFIG_HOME` 和 `XDG_STATE_HOME` 照常生效。**Settings › Developer › Locations** 提供打开这些目录的按钮。
+Linux 上 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 和 `XDG_STATE_HOME` 照常生效。**Settings › Developer › Locations** 提供打开这些目录的按钮。
 
 窗口和命令行共用 `config.toml`，你可以手动编辑。Condr 写入时保留注释，并用锁避免两个进程同时写入。文件格式错误时，所有键都会回退为默认值。
 
@@ -156,6 +157,7 @@ command = ["hx"]
 | `CONDR_LOG` | `tracing` EnvFilter 语法的日志过滤器，例如 `debug` 或 `condr_server=trace`。默认：`warn,condr_core=info,condr_server=info,condr_gui=info` |
 | `CONDR_LOG_DIR` | 日志目录 |
 | `CONDR_CONFIG_DIR` | 配置目录 |
+| `CONDR_DATA_DIR` | 数据目录 |
 | `CONDR_SOCKET_PATH` | 本机 Server 的 socket 路径 |
 | `CONDR_DEVICE` | `--device` 的默认值 |
 | `CONDR_VERSION` | 安装脚本安装的版本：`nightly` 或 `v0.1.0` |
@@ -170,12 +172,14 @@ Pane 中自动设置的变量见 [Agent 自动化](/zh-cn/docs/using/automation/
 
 | 文件 | 位置 | 作用 | 删除后 |
 | --- | --- | --- | --- |
-| `device-key` | 配置目录 | 这台 Device 的密钥 | 生成新密钥，清空授权列表，所有配对必须重做 |
-| `authorized-clients` | 配置目录 | 已配对 Device，每行一个 | 每个已配对 Device 下次连接都会被拒绝 |
-| `pending-invite` | 配置目录 | 当前有效的 invite | 该 invite 失效 |
+| `device-key` | 数据目录 | 这台 Device 的密钥 | 生成新密钥，清空授权列表，所有配对必须重做 |
+| `authorized-clients` | 数据目录 | 已配对 Device，每行一个 | 每个已配对 Device 下次连接都会被拒绝 |
+| `pending-invite` | 数据目录 | 当前有效的 invite | 该 invite 失效 |
 | `condr-server-<id>.snapshot` | 状态目录 | Session 结构 | Server 停止时删除，下次启动为空。worktree 仍在磁盘上 |
 | `condr-gui.state` | 状态目录 | 窗口位置、侧栏和每个 Workspace 显示的 Tab | 窗口用默认大小打开 |
 | `condr-server-<id>.<date>.log` | 日志目录 | Server 日志，每天滚动并保留 7 天 | 无影响 |
 | `condr-gui.<date>.log` | 日志目录 | 窗口日志 | 无影响 |
+
+0.1.6 及更早版本把 `device-key`、`authorized-clients` 和 `pending-invite` 放在配置目录。更新后第一次启动会把它们移到数据目录，密钥和所有配对都保留。
 
 密钥和 invite 文件的权限必须是 0600。其他用户能读取时，Condr 会拒绝使用它们。

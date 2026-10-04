@@ -41,6 +41,7 @@ fn ensure_local_server_reuses_a_live_standalone_process() {
         .env("CONDR_SOCKET_PATH", &endpoint_path)
         // The host's own config.toml may name a TCP listener that is already in use.
         .env("CONDR_CONFIG_DIR", endpoint_path.with_extension("config"))
+        .env("CONDR_DATA_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_LOG_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
@@ -277,6 +278,7 @@ fn auto_started_server_survives_launcher_exit() {
         .env("CONDR_SOCKET_PATH", &endpoint_path)
         // The host's own config.toml may name a TCP listener that is already in use.
         .env("CONDR_CONFIG_DIR", endpoint_path.with_extension("config"))
+        .env("CONDR_DATA_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_LOG_DIR", endpoint_path.with_extension("config"))
         .env("CONDR_SNAPSHOT_PATH", &snapshot_path)
         .env("CONDR_SERVER_EXECUTABLE", env!("CARGO_BIN_EXE_condr"))
@@ -336,6 +338,7 @@ fn lifecycle_commands_manage_a_detached_server() {
         command
             .args(args)
             .env("CONDR_CONFIG_DIR", &data_directory)
+            .env("CONDR_DATA_DIR", &data_directory)
             .env("CONDR_LOG_DIR", &data_directory)
             .env("CONDR_SOCKET_PATH", &socket_path)
             .env("CONDR_SNAPSHOT_PATH", &snapshot_path)

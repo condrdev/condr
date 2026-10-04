@@ -641,7 +641,12 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
 }
 
 fn config_path() -> io::Result<PathBuf> {
-    identity_directory().map(|directory| directory.join("config.toml"))
+    condr_core::config_path().ok_or_else(|| {
+        failure(
+            "no directory to keep config.toml in",
+            ["set CONDR_CONFIG_DIR to a writable directory".to_owned()],
+        )
+    })
 }
 
 fn identity_directory() -> io::Result<PathBuf> {
@@ -650,7 +655,7 @@ fn identity_directory() -> io::Result<PathBuf> {
             "no directory to keep this host's keys in",
             [
                 error.to_string(),
-                "set CONDR_CONFIG_DIR to a private directory".to_owned(),
+                "set CONDR_DATA_DIR to a private directory".to_owned(),
             ],
         )
     })

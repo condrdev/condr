@@ -42,13 +42,14 @@ The Remote access and Paired devices pages can be changed only over a local or S
 
 | Contents | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| Config: `config.toml`, keys | `~/.config/condr` | `~/Library/Application Support/condr` | `%APPDATA%\condr` |
+| Config: `config.toml` | `~/.config/condr` | `~/Library/Application Support/condr` | `%APPDATA%\condr` |
+| Data: `device-key`, paired Devices | `~/.local/share/condr` | `~/Library/Application Support/condr` | `%LOCALAPPDATA%\condr` |
 | State: snapshot, window state | `~/.local/state/condr` | `~/Library/Application Support/condr` | `%LOCALAPPDATA%\condr` |
 | Logs | `~/.local/state/condr` | `~/Library/Logs/condr` | `%LOCALAPPDATA%\condr` |
 | Runtime: socket, temporary files | `$XDG_RUNTIME_DIR/condr` | `$TMPDIR/condr` | `%LOCALAPPDATA%\condr\runtime` |
 | Installed `condr` command | `~/.local/opt/condr` | `~/.local/opt/condr` | `%LOCALAPPDATA%\Programs\Condr` |
 
-On Linux, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` apply as usual. **Settings › Developer › Locations** has buttons that open these directories.
+On Linux, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` apply as usual. **Settings › Developer › Locations** has buttons that open these directories.
 
 The window and the command line share `config.toml`, and you can edit it by hand. Condr keeps comments when it writes and uses a lock so two processes never write at the same time. If the file is malformed, every key falls back to its default.
 
@@ -156,6 +157,7 @@ This adds the editor to "Open in". The path to open is appended as the last argu
 | `CONDR_LOG` | Log filter in `tracing` EnvFilter syntax, for example `debug` or `condr_server=trace`. Default: `warn,condr_core=info,condr_server=info,condr_gui=info` |
 | `CONDR_LOG_DIR` | Log directory |
 | `CONDR_CONFIG_DIR` | Config directory |
+| `CONDR_DATA_DIR` | Data directory |
 | `CONDR_SOCKET_PATH` | Socket path of the local Server |
 | `CONDR_DEVICE` | Default value of `--device` |
 | `CONDR_VERSION` | Version the install script installs: `nightly` or `v0.1.0` |
@@ -170,12 +172,14 @@ For the variables set automatically in a Pane, see [Agent automation](/docs/usin
 
 | File | Location | Purpose | If deleted |
 | --- | --- | --- | --- |
-| `device-key` | Config directory | This Device's key | A new key is generated, the authorized list is cleared, and every pairing must be redone |
-| `authorized-clients` | Config directory | Paired Devices, one per line | Every paired Device is refused on its next connection |
-| `pending-invite` | Config directory | The currently valid invite | That invite stops working |
+| `device-key` | Data directory | This Device's key | A new key is generated, the authorized list is cleared, and every pairing must be redone |
+| `authorized-clients` | Data directory | Paired Devices, one per line | Every paired Device is refused on its next connection |
+| `pending-invite` | Data directory | The currently valid invite | That invite stops working |
 | `condr-server-<id>.snapshot` | State directory | Session structure | Delete it while the Server is stopped, and the next start is empty. Worktrees stay on disk |
 | `condr-gui.state` | State directory | Window position, sidebar and the Tab shown in each Workspace | The window opens at the default size |
 | `condr-server-<id>.<date>.log` | Log directory | Server log, rolled daily and kept for 7 days | No effect |
 | `condr-gui.<date>.log` | Log directory | Window log | No effect |
+
+Versions up to 0.1.6 kept `device-key`, `authorized-clients` and `pending-invite` in the config directory. The first start after updating moves them to the data directory, so the key and every pairing are kept.
 
 Key and invite files must have permissions 0600. If other users can read them, Condr refuses to use them.

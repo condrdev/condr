@@ -617,6 +617,7 @@ fn developer_page(owner: &WeakEntity<Condr>) -> SettingPage {
                     "Config",
                     condr_core::config_directory(),
                 ))
+                .item(location_row(owner, "Data", condr_core::data_directory()))
                 .item(location_row(owner, "State", condr_core::state_directory()))
                 .item(location_row(owner, "Logs", condr_core::log_directory())),
         )

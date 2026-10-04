@@ -19,6 +19,7 @@ Condr 按数据用途遵循 XDG 和各平台目录规范：
 | 用途 | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | `config.toml` | `$XDG_CONFIG_HOME/condr`，默认 `~/.config/condr` | `%APPDATA%\condr` | `~/Library/Application Support/condr` |
+| `device-key`、`authorized-clients`、`pending-invite` | `$XDG_DATA_HOME/condr`，默认 `~/.local/share/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
 | Managed Worktree | `$XDG_DATA_HOME/condr/worktrees`，默认 `~/.local/share/condr/worktrees` | `%LOCALAPPDATA%\condr\worktrees` | `~/Library/Application Support/condr/worktrees` |
 | Snapshot | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
 | Log | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Logs/condr` |
@@ -26,7 +27,7 @@ Condr 按数据用途遵循 XDG 和各平台目录规范：
 
 Log 目录里每个进程一组按天滚动的文件，保留最近 7 天：Server 写 `condr-server-<endpoint id>.<日期>.log`，GUI 写 `condr-gui.<日期>.log`；由 GUI 或 CLI 拉起的 detached Server 另有一个 `condr-server-<endpoint id>.stderr`，那是父进程重定向的 stderr，只收 `error` 级别和绕过日志器的崩溃输出（后缀不是 `.log`，否则会被按天清理当成旧文件删掉）。级别由 `CONDR_LOG` 控制，语法同 `RUST_LOG`（如 `CONDR_LOG=debug` 或 `CONDR_LOG=condr_server::server=trace,warn`），默认 `warn,condr_core=info,condr_server=info,condr_gui=info`；设置后整体替换默认值。stderr 是终端时同一份日志也打到终端：前台 `condr server run` 各平台都如此，`cargo run -p condr-gui` 只在 Linux/macOS 如此，Windows 的 GUI 是无控制台的子系统程序，只能看 `condr-gui.<日期>.log`。`CONDR_LOG_DIR` 覆盖日志目录，测试用它把辅助 Server 的日志指到临时目录。设计见 [ADR 0019](adr/0019-logging-uses-tracing-off-the-hot-path.md)。
 
-Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下的 `runtime/`。`CONDR_SOCKET_PATH` 和 `CONDR_SNAPSHOT_PATH` 仍可覆盖 Server 的默认路径。仅解压普通归档不会修改 PATH；使用对应平台的安装包或安装脚本注册全局命令。
+Linux 未提供 `XDG_RUNTIME_DIR` 时，本地 endpoint 回退到 data 目录下的 `runtime/`。`CONDR_CONFIG_DIR` 和 `CONDR_DATA_DIR` 分别覆盖配置目录和数据目录；0.1.6 及更早版本把密钥文件放在配置目录，更新后第一次用到密钥时会把它们移到数据目录（[ADR 0033](adr/0033-the-device-key-lives-in-the-data-directory.md)）。`CONDR_SOCKET_PATH` 和 `CONDR_SNAPSHOT_PATH` 仍可覆盖 Server 的默认路径。仅解压普通归档不会修改 PATH；使用对应平台的安装包或安装脚本注册全局命令。
 
 ### 安装 CLI
 
