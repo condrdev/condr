@@ -103,13 +103,12 @@ Pairing currently grants access to the whole Session. A Device connected over TC
 * Start Agent processes, and install Agent hooks through Settings.
 * Change the Server's default shell.
 * Read the Server's status, including its listen configuration, the fingerprints of connected Devices and recent errors.
-* Stop the Server process. Neither the window nor the command line offers a remote stop button, but the protocol allows it.
 
 These administrative operations are accepted only from local and SSH connections:
 
 * Turning the TCP listener and Peer-to-peer on or off.
 * Generating invites, and listing and revoking paired Devices.
-* Restarting the Server.
+* Restarting or stopping the Server.
 * Using this Device as a relay hop for Peer-to-peer connections.
 
 So pair only your own Devices with the Server. Read-only and control permissions are not separated yet; sharing one Server among several people has to wait for that feature.

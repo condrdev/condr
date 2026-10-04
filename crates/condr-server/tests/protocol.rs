@@ -361,6 +361,20 @@ fn tcp_endpoint_uses_the_same_handshake_and_bootstrap() {
     let handle = server.handle();
     let endpoint = server.endpoint().clone();
     let thread = thread::spawn(move || server.run());
+    let stream = connect_and_bootstrap(&endpoint);
+    handle.stop();
+    drop(stream);
+    thread.join().unwrap().unwrap();
+}
+
+#[test]
+fn a_tcp_client_may_not_stop_the_server() {
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let handle = server.handle();
+    let endpoint = server.endpoint().clone();
+    let thread = thread::spawn(move || server.run());
     let mut stream = connect_and_bootstrap(&endpoint);
     condr_core::protocol::write_message(
         &mut stream,
@@ -369,10 +383,14 @@ fn tcp_endpoint_uses_the_same_handshake_and_bootstrap() {
         },
     )
     .unwrap();
-    assert_eq!(
+    assert!(matches!(
         condr_core::protocol::read_message::<_, ServerMessage>(&mut stream).unwrap(),
-        ServerMessage::ServerStopping
-    );
+        ServerMessage::Error { message } if message.contains("may stop the Server")
+    ));
+    // The refused request leaves the Server running for this and every other client.
+    let second = connect_and_bootstrap(&endpoint);
+    handle.stop();
+    drop(second);
     drop(stream);
     thread.join().unwrap().unwrap();
 }

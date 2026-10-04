@@ -1280,7 +1280,15 @@ pub(super) fn handle_client(
             }
             ClientMessage::StopServer { server_id } => {
                 let known_server = state.lock().expect("server state lock poisoned").server_id;
-                if server_id != known_server {
+                // A paired Device that stopped the Server could not start it again.
+                if !stream.get_ref().may_administer() {
+                    queue_message(
+                        &outbound,
+                        ServerMessage::Error {
+                            message: "only a local or SSH connection may stop the Server".into(),
+                        },
+                    )
+                } else if server_id != known_server {
                     queue_message(
                         &outbound,
                         ServerMessage::Error {
