@@ -21,16 +21,20 @@ description: 在 Condr 中使用并查看命令行 Agent 的运行状态。
 - **图形化管理界面**：前往 **Settings › Device › Agent integrations** 直接安装。
 - **查看与卸载**：使用 `condr agent hooks status <agent>` 查看状态；如需移除，执行 `condr agent hooks uninstall <agent>`。
 
-## 侧边栏状态指示灯
+## Agent 状态指示
 
 安装 Hook 后，侧边栏会自动显示各个窗格（Pane）中 Agent 的实时运行状态：
 
-- 🟢 **绿灯 (Idle)**：已处理完提示词，处于待命状态或任务已完成。
-- 🟡 **黄灯 (Working)**：正在思考、执行工具或生成代码。
-- 🔴 **红灯 (Blocked)**：遇到了需要人工确认的授权或提问，等待用户回应。
-- ⚪ **灰灯 (Unknown)**：未安装 Hook，或 Agent 启动初期尚未上报状态。
+| 状态标识 | 状态说明 |
+| :--- | :--- |
+| **Working** | 正在执行任务（推理思考、生成文本或调用工具）。 |
+| **Blocked** | 阻塞状态，等待用户输入或授权（在 Needs you 中列出）。 |
+| **Done** | 后台执行完毕。当焦点切回该 Pane 时自动重置为 Idle。 |
+| **Idle** | 空闲状态，当前轮次完成，等待新指令。 |
+| **Unknown** | 原生 Shell 会话，或未接入 Condr Hook 的 Agent。 |
+| **Bell** | 终端发出响铃提醒（Bell 优先级高于常规生命周期状态）。 |
 
-当您处于其他应用窗口时，若 Agent 需要人工授权，Condr 会发送桌面通知，点击通知即可一键唤起并定位至对应窗格。
+> **提示**：当处于后台的 Agent 完成任务或触发阻塞时，Condr 会推送系统原生通知，点击直接定位至相应窗格。
 
 ## 常见 Agent 配置须知
 

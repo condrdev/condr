@@ -70,14 +70,14 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
 
 Agent state shows in the **badges in the left sidebar**, the **Workspace counters** and the **Needs you** list.
 
-| State | Icon | Meaning |
-| :--- | :--- | :--- |
-| **Working** | Amber dot | Running a task (thinking, generating text or calling tools). |
-| **Blocked** | Red dot | Waiting for your input or approval (listed in Needs you). |
-| **Done** | Green dot | Finished in the background. Resets to Idle once focus returns to its Pane. |
-| **Idle** | Grey dot | Idle: the turn is over and it waits for the next instruction. |
-| **Unknown** | No icon | A plain shell session, or an Agent without Condr hooks. |
-| **Bell** | Amber exclamation mark | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
+| State | Meaning |
+| :--- | :--- |
+| **Working** | Running a task (thinking, generating text or calling tools). |
+| **Blocked** | Waiting for your input or approval (listed in Needs you). |
+| **Done** | Finished in the background. Resets to Idle once focus returns to its Pane. |
+| **Idle** | Idle: the turn is over and it waits for the next instruction. |
+| **Unknown** | A plain shell session, or an Agent without Condr hooks. |
+| **Bell** | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
 
 > **Tip**: when an Agent in the background finishes or becomes blocked, Condr sends a native system notification; clicking it goes straight to that Pane. To turn on state tracking, see [Agent integrations](/docs/using/agents/).
 

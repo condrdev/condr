@@ -62,13 +62,14 @@ When several Agents change the same project at once, code and Git conflicts are 
 
 ### Agent state indicators
 
-| State | Meaning | Sidebar icon |
-| :--- | :--- | :--- |
-| **Unknown** | A plain terminal shell, or an Agent without Hooks configured | Gray icon |
-| **Idle** | The current turn is finished and the Agent is waiting for your next instruction | Hollow ring |
-| **Working** | Generating, thinking or running a local tool command | Solid amber |
-| **Blocked** | Blocked on something (such as waiting for you to approve a Bash command or answer a question), with the reason attached | Red alert |
-| **Done** | A background task finished while you were in another window | Green check |
+| State | Meaning |
+| :--- | :--- |
+| **Working** | Running a task (thinking, generating text or calling tools). |
+| **Blocked** | Waiting for your input or approval (listed in Needs you). |
+| **Done** | Finished in the background. Resets to Idle once focus returns to its Pane. |
+| **Idle** | Idle: the turn is over and it waits for the next instruction. |
+| **Unknown** | A plain shell session, or an Agent without Condr hooks. |
+| **Bell** | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
 
 ---
 

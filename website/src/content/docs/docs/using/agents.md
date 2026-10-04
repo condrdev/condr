@@ -21,16 +21,20 @@ Traditional terminal managers match screen text against regular expressions, so 
 - **Manage Hooks in the GUI**: go to **Settings › Device › Agent integrations** and install them there.
 - **Check and uninstall**: run `condr agent hooks status <agent>` to see the status. To remove a Hook, run `condr agent hooks uninstall <agent>`.
 
-## Sidebar state lights
+## Agent state indicators
 
 Once the Hook is installed, the sidebar automatically shows the live state of the Agent in each Pane:
 
-- 🟢 **Green (Idle)**: the Agent has finished the prompt and is standing by, or its task is done.
-- 🟡 **Yellow (Working)**: the Agent is thinking, running tools or generating code.
-- 🔴 **Red (Blocked)**: the Agent has hit a permission request or a question that needs a person, and is waiting for your reply.
-- ⚪ **Gray (Unknown)**: no Hook is installed, or the Agent has just started and has not reported a state yet.
+| State | Meaning |
+| :--- | :--- |
+| **Working** | Running a task (thinking, generating text or calling tools). |
+| **Blocked** | Waiting for your input or approval (listed in Needs you). |
+| **Done** | Finished in the background. Resets to Idle once focus returns to its Pane. |
+| **Idle** | Idle: the turn is over and it waits for the next instruction. |
+| **Unknown** | A plain shell session, or an Agent without Condr hooks. |
+| **Bell** | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
 
-When you are in another app's window and an Agent needs your approval, Condr sends a desktop notification. Click the notification to bring Condr forward and jump straight to that Pane.
+> **Tip**: when an Agent in the background finishes or becomes blocked, Condr sends a native system notification; clicking it goes straight to that Pane.
 
 ## Notes on configuring common Agents
 
