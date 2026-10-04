@@ -58,6 +58,7 @@ Closing the GUI only disconnects. The server, PTYs, agents and Session keep runn
 - The project is unreleased. Breaking changes are allowed; backward compatibility is not required.
 - Prefer the simplest final design with clear boundaries. Do not keep compatibility layers, migration paths or deprecated APIs just for old implementations.
 - When breaking something, update in-repo callers, tests and source docs in the same change. Implement migrations only when the task explicitly asks for them.
+- The few accommodations for installed releases that do exist are marked `compat(<version>):` in code, comments and tests, `<version>` being the last release that needs them, each naming what to delete and the ADR that introduced it; `rg "compat\("` lists them all. Delete each once that release no longer updates in place.
 
 ### Commit subjects are release notes
 

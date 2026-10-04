@@ -50,7 +50,7 @@ widestring.workspace = true
 windows-spawn.workspace = true
 windows-sys = { workspace = true, features = [
     "Win32_Security",
-    "Win32_Security_Authorization",
+    "Win32_Security_Authorization", # compat(0.1.6): only `restrict_to_owner` needs it
     "Win32_Storage_FileSystem",
     "Win32_UI_WindowsAndMessaging",
 ] }

@@ -58,6 +58,7 @@ fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() 
     fs::remove_dir_all(directory).unwrap();
 }
 
+// compat(0.1.6): goes with `adopt_legacy_store`.
 #[test]
 fn the_identity_files_move_out_of_the_legacy_directory_once() {
     let root = std::env::temp_dir().join(format!(
@@ -105,7 +106,8 @@ fn secret_files_admit_only_their_owner_on_windows() {
     let directory =
         std::env::temp_dir().join(format!("condr-noise-dacl-{}-{}", std::process::id(), now()));
     write_secret_file(&directory.join("fresh"), "secret").unwrap();
-    // A file from an older release inherits its directory's entries until it is read.
+    // compat(0.1.6): the "old" file goes with `windows::restrict_to_owner`. A file from an
+    // older release inherits its directory's entries until it is read.
     fs::write(directory.join("old"), "secret\n").unwrap();
     assert!(icacls(&directory.join("old")).contains("(I)"));
     assert_eq!(

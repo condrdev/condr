@@ -209,12 +209,17 @@ pub fn identity_directory() -> io::Result<PathBuf> {
             "no data directory is available; set CONDR_DATA_DIR",
         )
     })?;
+    // compat(0.1.6): releases up to 0.1.6 kept the files beside `config.toml`. Delete this
+    // call, `adopt_legacy_store`, `move_file` and their test once those installs no longer
+    // update in place (ADR 0033).
     if let Some(legacy) = condr_core::config_directory().filter(|legacy| *legacy != directory) {
         adopt_legacy_store(&legacy, &directory)?;
     }
     Ok(directory)
 }
 
+/// compat(0.1.6): goes with the call in `identity_directory`.
+///
 /// Moves the identity files from `legacy` into `directory` unless `directory` already has
 /// a key. `device-key` goes last, so a process that sees it also sees the list beside it.
 fn adopt_legacy_store(legacy: &Path, directory: &Path) -> io::Result<()> {
@@ -238,6 +243,8 @@ fn adopt_legacy_store(legacy: &Path, directory: &Path) -> io::Result<()> {
     })
 }
 
+/// compat(0.1.6): goes with `adopt_legacy_store`.
+///
 /// Renames `from` to `to`, copying across file systems; a missing `from` is nothing to move.
 fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     match fs::rename(from, to) {
@@ -419,6 +426,10 @@ pub(super) fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
                     ));
                 }
             }
+            // compat(0.1.6): files written before 0.1.7 inherited their directory's ACL.
+            // Delete this call, `windows::restrict_to_owner`, the "old" half of its test and
+            // the `Win32_Security_Authorization` feature once those installs no longer update
+            // in place (ADR 0033).
             #[cfg(windows)]
             windows::restrict_to_owner(path)?;
             Ok(Some(text))
@@ -520,6 +531,8 @@ mod windows {
         Ok(unsafe { File::from_raw_handle(handle) })
     }
 
+    /// compat(0.1.6): goes with the call in `read_secret_file`.
+    ///
     /// Replaces the DACL of the file at `path` with the owner-only one, inheritance off.
     pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
         let descriptor = owner_only()?;
