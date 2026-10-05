@@ -116,9 +116,10 @@ const commands = [
         </div>
         <ul class="download-links">
             <li><a class="download-link" href={release}>What's new in {version}</a></li>
-            <li><a class="download-link" href={`${repo}/releases`}>All releases</a></li>
+            <li><a class="download-link" href="/docs/help/roadmap/">What's next</a><span>The roadmap of upcoming features.</span></li>
+            <li class="download-links-break"><a class="download-link" href={`${repo}/releases`}>All releases</a></li>
             <li><a class="download-link" href={`${repo}/releases/download/v${version}/SHA256SUMS`}>SHA-256 checksums</a></li>
-            <li><a class="download-link" href={`${repo}/releases/tag/nightly`}>Nightly builds</a><span>The newest changes, published every day.</span></li>
+            <li><a class="download-link" href={`${repo}/releases/tag/nightly`}>Nightly builds</a><span>Pre-release builds from the latest main branch.</span></li>
         </ul>
     </section>
 </Site>

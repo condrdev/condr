@@ -111,6 +111,8 @@ code { font-family: var(--mono); font-size: .875em; }
 /* Secondary to the downloads: small grey links, no rules. */
 .download-links { grid-column: 1 / 6; grid-row: 2; align-self: start; margin-top: 16px; list-style: none; font-size: .9375rem; }
 .download-links li + li { margin-top: 6px; }
+/* Release notes and the roadmap first, then the release downloads. */
+.download-links li.download-links-break { margin-top: 24px; }
 .download-link { color: var(--grey); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .download-link:hover { color: var(--accent); }
 .download-links span { display: block; color: var(--grey); font-size: .8125rem; }
