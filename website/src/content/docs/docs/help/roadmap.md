@@ -9,29 +9,25 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 
 ## Next
 
-### 1. Diff against the base branch
-
-The Changes sidebar and the Diff Tab compare only against `HEAD`, so once an Agent commits, its changes drop off the list. You will be able to switch to comparing against the base branch and see everything the branch changed since it forked, committed or not. Reviewing a Managed Worktree before you wrap it up no longer means going back to the command line.
-
-### 2. Search in the terminal
+### 1. Search in the terminal
 
 Search the current Pane's terminal, including what has scrolled off screen, with matches highlighted and scrolled into view.
 
-### 3. Agent Profiles
+### 2. Agent Profiles
 
 The Agent CLIs Condr supports today are all built in. You will be able to describe another Agent CLI in a configuration entry, with its executable name, the arguments that start and resume a session, and its icon, and Condr will recognise and launch it like a built-in Agent. State still comes only from hooks: if the CLI has a hook mechanism, configure it to call `condr agent-hook` as the docs describe and its state shows; a CLI without hooks shows Unknown.
 
-### 4. Mobile apps (iOS and Android)
+### 3. Mobile apps (iOS and Android)
 
 Away from your computer, see the Workspaces and Agent states on each of your Devices, the Needs you list, and a read-only view of each terminal on your phone. Your phone gets a push notification when an Agent finishes or needs you. The Server encrypts each notification end to end with your phone's public key, so neither the server that relays it nor Apple or Google can read it.
 
 The phone pairs by scanning a QR code and connects over Peer-to-peer or TCP; SSH connections are not supported. Which actions the phone can take is still being designed.
 
-### 5. Port detection and forwarding
+### 4. Port detection and forwarding
 
 When an Agent starts a dev server in a Workspace, Condr shows the ports it listens on, on the Workspace and the Pane. On a Device connected over SSH, clicking a port forwards it to this machine and opens it in your browser.
 
-### 6. GitHub integration
+### 5. GitHub integration
 
 A Workspace shows the GitHub PR for its current branch, with the PR's state and CI check results; clicking opens it in your browser. Enter a PR number or link to check that PR out as a Managed Worktree. Once a PR is merged, Condr suggests removing its worktree but never deletes it on its own.
 
@@ -45,7 +41,7 @@ These are under consideration but need more real use cases before they are sched
 
 - **Jump from a Diff Tab to your editor**: open the current file in an external editor straight from the Diff Tab.
 - **Scheduled tasks**: start an Agent on a schedule, or send a running Agent a prompt at set times.
-- **Port forwarding for TCP and Peer-to-peer Devices**: extend item 5's forwarding to Devices not connected over SSH.
+- **Port forwarding for TCP and Peer-to-peer Devices**: extend item 4's forwarding to Devices not connected over SSH.
 
 ---
 

@@ -54,15 +54,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
-### 1. Diff 对 base 分支比较
-
-**为什么**：并行跑多个 Agent 靠的是一个任务一个 worktree，收尾时要看的是这条分支相对 base 改了什么。现在 Changes 只对 HEAD 比较，Agent 一提交，改动就从侧栏消失，用户只能回命令行看。
-
-**做到哪**（落地前先写 ADR）：Changes 视图可以在对 HEAD 和对 base 之间切换。对 base 时显示从分叉点到工作区的全部改动，已提交和未提交的都在内；Diff Tab 同样支持。协议用已预留的 `GitDiff.against`。ADR 要回答 base 从哪来：创建 worktree 时记下的起点，还是远端的默认分支。Managed Worktree 现在不记录起点。
-
-**停在哪**：不做 worktree 的初始化与清理脚本，依赖和 `.env` 仍由用户或 Agent 自己准备。
-
-### 2. 终端内搜索
+### 1. 终端内搜索
 
 **为什么**：这一项原本在摩擦记录里等证据。Agent 的输出很长，要在里面找一段报错或一个路径，现在只能靠滚动。对外宣布后，新用户会拿 Condr 和他们用惯的终端比较，而这些终端都能搜索。
 
@@ -70,7 +62,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索。命令面板和文件快速打开不做。
 
-### 3. Agent Profile
+### 2. Agent Profile
 
 **为什么**：现在支持的 10 种 CLI（Claude Code、Codex、OpenCode、Pi、OMP、Antigravity、Grok、Cursor、Copilot、Kimi）都写在代码里，接一种新的就要发一个版本。用户手上的 CLI 不在列表里时，Condr 认不出它，也没有图标和会话恢复。
 
@@ -78,7 +70,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **停在哪**：不接入 ACP 或其他对话协议，Condr 不自建对话循环；不为没有 hook 的 CLI 猜状态；不做 Profile 市场，那在远期表里。
 
-### 4. 移动端 Companion（iOS 与 Android）
+### 3. 移动端 Companion（iOS 与 Android）
 
 **为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `blocked_on`，把它们带到手机上是这一层能做、单个厂商不会做的事。
 
@@ -107,7 +99,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **停在哪**：不把桌面 GUI 的全部功能搬到手机；`ssh://` 不在这一方向内，手机要内置 SSH 客户端，等有需求再议；不做 Web 客户端。
 
-### 5. 探测 Workspace 里的端口并转发到本机
+### 4. 探测 Workspace 里的端口并转发到本机
 
 **为什么**：Agent 在远端 Workspace 里起了前端 dev server，用户要在本机浏览器看效果，今天只能自己开 `ssh -L`。"看见 Agent 做出来的东西"是介入和收尾闭环的一部分；Server 已有按平台实现的进程表（Agent 检测用），加一步"该进程树在监听哪些端口"是同一条路。
 
@@ -119,7 +111,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **停在哪**：只做 SSH Device 的转发。TCP 与 Peer-to-peer Device 的转发要在协议里新增一种多路复用的字节流帧，改动大，放进摩擦记录等真实需求。不做反向转发、不做 UDP、不自动转发所有探测到的端口（默认只列出，点了才转）、不解析进程输出里的 URL。
 
-### 6. GitHub：PR 状态与检出 PR
+### 5. GitHub：PR 状态与检出 PR
 
 **为什么**：收尾的最后一步通常是推分支、开 PR、等 CI。现在用户要切到浏览器，才知道这个 Workspace 的分支有没有 PR、检查过没过；要在本机看别人的 PR，也得自己建 worktree 再检出。把这些状态放到 Workspace 上，收尾就不用离开 Condr。
 
@@ -137,13 +129,13 @@ ADR 要回答三个问题：
 
 **停在哪**：只做 GitHub，GitLab 和 Gitea 等真实需求。不在 Condr 里创建、合并或评审 PR，这些交给 Agent 和 `gh`。PR 合并后不自动删除 worktree，删除仍是用户的显式操作（ADR 0002）。不做从 Issue、PR 评论或聊天工具触发 Agent，那需要一个面向公网的服务。
 
-### 7. 公开预览收尾，拿到第一批外部用户
+### 6. 公开预览收尾，拿到第一批外部用户
 
-**为什么**：摩擦记录和远期表里几乎每一项的启动条件都是外部用户或真实需求。没有外部用户，这些条件不会满足，路线只能靠单人 dogfood 推进。但宣布带来的新用户会按宣布时的样子判断 Condr，所以先做完前六项再宣布，让他们第一次试用就能走完多 worktree 的完整流程，离开电脑也能在手机上看到 Agent 的状态。
+**为什么**：摩擦记录和远期表里几乎每一项的启动条件都是外部用户或真实需求。没有外部用户，这些条件不会满足，路线只能靠单人 dogfood 推进。但宣布带来的新用户会按宣布时的样子判断 Condr，所以先做完前五项再宣布，让他们第一次试用就能走完多 worktree 的完整流程，离开电脑也能在手机上看到 Agent 的状态。
 
 **做到哪**（按顺序）：
 
-1. 前六项完成后，对外宣布。
+1. 前五项完成后，对外宣布。
 2. 外部 Issue 按 [triage 标签](agents/triage-labels.md) 分流。缺陷直接修；功能请求进摩擦记录，同一件事出现两次以上再排。
 
 **停在哪**：Windows 安装包预览期仍不签名，文档已写明 SmartScreen 放行步骤。
@@ -168,7 +160,7 @@ ADR 要回答三个问题：
 | 事项 | 启动条件 | 前置 |
 | --- | --- | --- |
 | 遥测（opt-in） | 有外部用户，且本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
-| 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | Agent Profile（近期方向第 3 项） |
+| 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | Agent Profile（近期方向第 2 项） |
 | 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | observe/control capability（见摩擦记录）扩展为多用户；审计日志 |
 | 替用户批准 Agent 的权限请求（现在只做"看见并跳转"） | 厂商开放外部审批接口；Claude Code 的远程审批仍是 [open feature request](https://github.com/anthropics/claude-code/issues/38299)，Codex 的审批只在它自己的 app-server 客户端里 | `Blocked` 与 `blocked_on`（ADR 0024） |
 | 编辑器、内置浏览器、任务看板等 IDE 化能力 | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
