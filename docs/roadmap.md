@@ -1,6 +1,6 @@
 # Condr Roadmap
 
-> 最近核对：2026-10-03。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
+> 最近核对：2026-10-05。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
 
 ## 定位
 
@@ -18,9 +18,9 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 三问都过才排进近期；只过第一问的放到摩擦记录里等证据。
 
-## 现状（2026-10-03）
+## 现状（2026-10-05）
 
-单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭。0.1.0 于 2026-09-23 作为公开预览发布，到 2026-10-03 已发到 0.1.6。Windows 和 macOS 的新机器已经只看文档走通了安装、连接远程 Device、多 worktree 与多 Agent、断开 GUI 后重连和 Server 重启。官网文档有中英两版。仓库尚无外部用户反馈，Issue tracker 为空。
+单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭。0.1.0 于 2026-09-23 作为公开预览发布，到 2026-10-05 已发到 0.1.7。Windows 和 macOS 的新机器已经只看文档走通了安装、连接远程 Device、多 worktree 与多 Agent、断开 GUI 后重连和 Server 重启。官网文档有中英两版，已没有施工中的页面。仓库尚无外部用户反馈，Issue tracker 为空。
 
 **已具备**
 
@@ -34,7 +34,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备；新建 Workspace 时可浏览远程 Device 的目录；机器唤醒后 GUI 重新探测每条连接 |
 | 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、各类计数、订阅客户端数和最近的 warn/error；三个带负载的 `cargo test` 分别量 VT 增量合并、monitor 按显示节拍发布和 GUI shaping 缓存 |
 | 发布 | nightly 与 `v*` 正式版共用一条流水线，产出 Linux/macOS x86_64/arm64 与 Windows x86_64 的 desktop 与 headless 包、校验和、安装脚本；macOS 包以 Developer ID 签名并公证；release notes 由 git-cliff 从 `feat`/`fix` 提交生成；GUI 按渠道检查新版本并提示，不自动安装（ADR 0029），更新后提示重启本机旧版 Server；协议按字段号演进，CI 对 `proto/` 跑 `buf lint` 和 `buf breaking`（ADR 0027/0028） |
-| 文档 | condr.dev 中英双语：入门、使用、参考、帮助四组页面，含故障排查和 Windows SmartScreen 放行步骤；CLI 参考、配置参考、快捷键参考和「使用 Condr」概览四页仍标着施工中 |
+| 文档 | condr.dev 中英双语：入门、使用、参考、帮助四组页面，含 CLI、配置与快捷键参考，故障排查、安全模型、架构说明和 Windows SmartScreen 放行步骤 |
 
 **代码里确实没有的**
 
@@ -60,9 +60,8 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **做到哪**（按顺序）：
 
-1. 补完四个施工中的页面，中英文各一份。CLI 参考、配置参考和快捷键参考已有正文，对照 `--help`、配置读写代码和按键绑定逐条核实后去掉施工提示。「使用 Condr」概览目前只有提纲，按页面里写好的三部分从头写：窗口各区域、命令行能控制什么、下一步读哪页。
-2. 对外宣布。
-3. 外部 Issue 按 [triage 标签](agents/triage-labels.md) 分流。缺陷直接修；功能请求进摩擦记录，同一件事出现两次以上再排。
+1. 对外宣布。
+2. 外部 Issue 按 [triage 标签](agents/triage-labels.md) 分流。缺陷直接修；功能请求进摩擦记录，同一件事出现两次以上再排。
 
 **停在哪**：不为宣布赶新功能。Windows 安装包预览期仍不签名，文档已写明 SmartScreen 放行步骤。
 
