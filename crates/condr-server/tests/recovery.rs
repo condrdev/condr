@@ -92,6 +92,7 @@ fn restart_revalidates_worktree_authority_against_the_git_topology() {
         parent_workspace_id,
         parent_workspace_root,
         true,
+        None,
     ));
     session
         .close_workspace(parent_workspace_id)

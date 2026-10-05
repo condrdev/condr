@@ -33,6 +33,7 @@ fn invalid_snapshot_inputs_yield_an_empty_session() {
             parent_id,
             PathBuf::from("relative/parent"),
             false,
+            None,
         ));
         session.snapshot().to_bytes().unwrap()
     };
@@ -490,7 +491,8 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
             == Some(workspace_cwd.as_path())
         {
             // A cwd change is durable state, not an event; only the shell's own title
-            // reports (and bells) may have been published meanwhile.
+            // reports (and bells) and the watcher's first scan, which adds the base view
+            // (ADR 0034), may have been published meanwhile.
             assert!(
                 state
                     .events
@@ -499,6 +501,7 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
                     .all(|event| matches!(
                         event.event,
                         SessionEvent::TerminalTitleChanged { .. }
+                            | SessionEvent::WorkspaceGitChanged { .. }
                             | SessionEvent::WorkspaceFilesChanged { .. }
                             | SessionEvent::TerminalAttentionChanged { .. }
                     )),

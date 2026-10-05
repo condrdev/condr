@@ -225,3 +225,124 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
 
     let _ = std::fs::remove_dir_all(&repository);
 }
+
+/// The Changes header switches a Workspace between `HEAD` and its base, and the Diff Tab
+/// follows: a committed file is only in the base list (ADR 0034).
+#[test]
+fn the_changes_comparison_switches_between_head_and_the_base_branch() {
+    let _serial_guard = acquire_visual_test_lock();
+    let repository = std::env::temp_dir().join(format!(
+        "condr-gui-changes-base-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&repository);
+    std::fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, ["init", "-q", "-b", "main"]);
+    run_git(&repository, ["config", "user.email", "condr@example.com"]);
+    run_git(&repository, ["config", "user.name", "Condr"]);
+    run_git(&repository, ["config", "commit.gpgsign", "false"]);
+    std::fs::write(repository.join("notes.txt"), "alpha\n").unwrap();
+    run_git(&repository, ["add", "notes.txt"]);
+    run_git(&repository, ["commit", "-q", "-m", "notes"]);
+    run_git(&repository, ["switch", "-q", "-c", "feature"]);
+    std::fs::write(repository.join("committed.txt"), "agent\n").unwrap();
+    run_git(&repository, ["add", "committed.txt"]);
+    run_git(&repository, ["commit", "-q", "-m", "agent work"]);
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = repository.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+
+    // Against HEAD the commit left nothing; the base the Server found is local `main`.
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.read(|app| {
+                view.read(app)
+                    .active_connection()
+                    .and_then(|connection| connection.workspace_git.values().next())
+                    .and_then(|git| git.base.as_ref())
+                    .is_some_and(|base| base.branch == "main")
+            })
+        }),
+        "the Server should report the base branch"
+    );
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("changes-comparison").is_some());
+    assert!(window.debug_bounds("change-committed.txt").is_none());
+
+    // The menu item calls this; GPUI's test window cannot address a popup menu's rows.
+    let (key, workspace_id) = window.read(|app| {
+        let view = view.read(app);
+        let session = view.active_session().unwrap();
+        (
+            view.active_connection().unwrap().key,
+            session.workspaces()[0].id(),
+        )
+    });
+    let compare_view = view.clone();
+    let compare = move |window: &mut gpui_kit::Window, against, cx: &mut gpui_kit::App| {
+        compare_view.update(cx, |view, cx| {
+            view.compare_changes_against(key, workspace_id, against, window, cx);
+        });
+    };
+    window.update(|window, cx| compare(window, condr_core::protocol::DiffBase::MergeBase, cx));
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("change-committed.txt").is_some()
+        }),
+        "the committed file should be listed against the base"
+    );
+
+    // The Diff Tab asks for the same side.
+    let row = window.debug_bounds("change-committed.txt").unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.update(|_, cx| {
+                view.read(cx)
+                    .diff_editors
+                    .values()
+                    .any(|editor| editor.state.read(cx).value().contains("+agent"))
+            })
+        }),
+        "the Diff Tab should show the committed file against the base"
+    );
+    assert!(window.debug_bounds("diff-comparison").is_some());
+
+    // Back to HEAD: the file has no changes there.
+    window.update(|window, cx| compare(window, condr_core::protocol::DiffBase::Head, cx));
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("change-committed.txt").is_none()
+                && window.read(|app| {
+                    view.read(app)
+                        .diff_editors
+                        .values()
+                        .all(|editor| editor.content == crate::app::changes::DiffContent::Unchanged)
+                })
+        }),
+        "against HEAD the committed file is unchanged"
+    );
+
+    let _ = std::fs::remove_dir_all(&repository);
+}

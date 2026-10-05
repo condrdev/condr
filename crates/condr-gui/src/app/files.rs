@@ -966,6 +966,8 @@ impl Condr {
             .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
         self.collapsed_change_dirs
             .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
+        self.changes_against_base
+            .retain(|(connection_key, workspace_id)| live(*connection_key, *workspace_id));
         self.sidebar_views
             .retain(|(connection_key, workspace_id), _| live(*connection_key, *workspace_id));
         self.last_terminal_tabs
@@ -988,6 +990,8 @@ impl Condr {
             .retain(|(connection_key, _, _)| *connection_key != key);
         self.collapsed_change_dirs
             .retain(|(connection_key, _, _)| *connection_key != key);
+        self.changes_against_base
+            .retain(|(connection_key, _)| *connection_key != key);
         self.sidebar_views
             .retain(|(connection_key, _), _| *connection_key != key);
         self.last_terminal_tabs

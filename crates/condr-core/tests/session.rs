@@ -223,6 +223,7 @@ fn snapshot_round_trip_preserves_structural_domain_state() {
         first_workspace_id,
         root_directory.clone(),
         true,
+        None,
     ));
     session.move_workspace(second_workspace_id, 0);
 

@@ -299,16 +299,8 @@ impl Condr {
                         } else {
                             connection.workspace_git.remove(&workspace_id);
                         }
-                        // The working tree moved: every diff of it is stale, and a Diff Tab
-                        // showing one asks again on the rebuild.
-                        connection
-                            .diffs
-                            .retain(|(diff_workspace, _), _| *diff_workspace != workspace_id);
-                        connection.diffs_generation += 1;
-                        self.pending_diffs
-                            .retain(|(pending_key, pending_workspace, _)| {
-                                *pending_key != key || *pending_workspace != workspace_id
-                            });
+                        // The working tree moved: every diff of it is stale.
+                        self.forget_workspace_diffs(key, workspace_id);
                         git_changed = true;
                         notify = true;
                     }

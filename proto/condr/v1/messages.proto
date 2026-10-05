@@ -96,6 +96,8 @@ message ReadPane {
 enum DiffBase {
   DIFF_BASE_UNSPECIFIED = 0;
   DIFF_BASE_HEAD = 1;
+  // ADR 0034. Sent only to a Server whose WorkspaceGitSnapshot carries a base.
+  DIFF_BASE_MERGE_BASE = 2;
 }
 
 message GitDiffRequest {
@@ -443,6 +445,7 @@ message WorkspaceGitSnapshot {
   bool linked_worktree = 3;
   GitUpstream upstream = 4;
   GitChanges changes = 5;
+  GitBaseChanges base = 6;
 }
 
 // One chunked Bootstrap record. A record of a kind this build does not know is skipped.

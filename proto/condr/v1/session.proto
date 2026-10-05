@@ -23,6 +23,7 @@ message WorktreeAssociation {
   uint64 parent_workspace_id = 1;
   string parent_root_directory = 2;
   bool managed = 3;
+  optional string base_branch = 4;
 }
 
 message TabSnapshot {
@@ -181,6 +182,12 @@ message GitChangeEntry {
   optional string old_path = 2;
   GitChangeStatus status = 3;
   GitDiffStat stat = 4;
+}
+
+// The working tree against the merge base of HEAD and the base branch (ADR 0034).
+message GitBaseChanges {
+  string branch = 1;
+  GitChanges changes = 2;
 }
 
 message GitChanges {

@@ -25,7 +25,7 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
     └── Session（服务端维护的工作区拓扑与分屏布局快照）
         ├── Workspace 1（主工作区：绑定根目录，如 ~/code/my-app）
         │   ├── Tab 1（终端页：承载分屏 Pane，运行 Agent 或普通 Shell）
-        │   ├── Tab 2 Diff（代码审查：查看单文件相对 HEAD 的差异）
+        │   ├── Tab 2 Diff（代码审查：查看单文件相对 HEAD 或 base 分支的差异）
         │   └── Tab 3 Preview（源码预览：语法高亮浏览文件）
         │
         └── Workspace 2（托管工作树：基于 Git Worktree 的隔离分支环境）

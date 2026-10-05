@@ -6,7 +6,8 @@ use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::protocol::DiffBase;
 use condr_core::{
-    DiffLineKind, FileDiffContent, GitChangeEntry, GitChangeStatus, GitDiffStat, MAX_GIT_CHANGES,
+    DiffLineKind, FileDiffContent, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat,
+    MAX_GIT_CHANGES,
 };
 use gpui_kit::component::input::{TextDecoration, TextDecorationCollection};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -393,9 +394,13 @@ impl Condr {
                 .into_any_element();
         };
         let view = self.sidebar_view_for(key, workspace_id, git.is_some());
-        let count = git.as_ref().map(|git| git.changes.entries.len());
-        let total = git.as_ref().and_then(|git| {
-            git.changes
+        let against = git
+            .as_ref()
+            .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
+        let shown = git.as_ref().map(|git| shown_changes(git, against));
+        let count = shown.map(|changes| changes.entries.len());
+        let total = shown.and_then(|changes| {
+            changes
                 .entries
                 .iter()
                 .filter_map(|entry| entry.stat)
@@ -409,8 +414,20 @@ impl Condr {
             SidebarView::Files => {
                 self.render_files_list(key, workspace_id, shown_file.as_deref(), cx)
             }
-            SidebarView::Changes => match git {
-                Some(git) => self.render_changes_list(key, workspace_id, &git, shown_diff, cx),
+            SidebarView::Changes => match &git {
+                Some(git) => v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(self.render_changes_comparison(key, workspace_id, git, against, cx))
+                    .child(self.render_changes_list(
+                        key,
+                        workspace_id,
+                        shown_changes(git, against),
+                        shown_diff,
+                        cx,
+                    ))
+                    .into_any_element(),
                 None => empty_state(format!("{workspace_name} is not a Git repository"), cx),
             },
         };
@@ -465,12 +482,129 @@ impl Condr {
             .into_any_element()
     }
 
+    /// What a Workspace's Changes and Diff Tab compare against (ADR 0034): the base when
+    /// this Client chose it and the Server reports one, else `HEAD`.
+    pub(super) fn diff_base(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        git: &WorkspaceGitSnapshot,
+    ) -> DiffBase {
+        if git.base.is_some() && self.changes_against_base.contains(&(key, workspace_id)) {
+            DiffBase::MergeBase
+        } else {
+            DiffBase::Head
+        }
+    }
+
+    /// Switches what the Workspace's Changes compare against. The Diff Tab shows the other
+    /// side from now on, so its answers are dropped and asked for again on the rebuild.
+    pub(super) fn compare_changes_against(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        against: DiffBase,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let changed = match against {
+            DiffBase::MergeBase => self.changes_against_base.insert((key, workspace_id)),
+            DiffBase::Head => self.changes_against_base.remove(&(key, workspace_id)),
+        };
+        if !changed {
+            return;
+        }
+        self.forget_workspace_diffs(key, workspace_id);
+        self.schedule_state_save(cx);
+        self.rebuild_dock(window, cx);
+        cx.notify();
+    }
+
+    /// Every diff of the Workspace is stale: a Diff Tab showing one asks again on the
+    /// rebuild.
+    pub(super) fn forget_workspace_diffs(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
+        if let Some(connection) = self.connection_mut(key) {
+            connection
+                .diffs
+                .retain(|(diff_workspace, _), _| *diff_workspace != workspace_id);
+            connection.diffs_generation += 1;
+        }
+        self.pending_diffs
+            .retain(|(pending_key, pending_workspace, _)| {
+                *pending_key != key || *pending_workspace != workspace_id
+            });
+    }
+
+    /// What the Changes list compares against (ADR 0034), named on a button whose menu
+    /// offers `HEAD` and the base branch the Server names, the current one checked. Without
+    /// a base there is nothing to choose, so the button names `HEAD` and is disabled.
+    fn render_changes_comparison(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        git: &WorkspaceGitSnapshot,
+        against: DiffBase,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let button = Button::new("changes-comparison")
+            .debug_selector(|| "changes-comparison".into())
+            .ghost()
+            .xsmall()
+            .label(comparison_label(git, against));
+        let control = match git.base.as_ref().map(|base| base.branch.clone()) {
+            None => button
+                .disabled(true)
+                .tooltip("No base branch to compare with")
+                .into_any_element(),
+            Some(branch) => {
+                let owner = cx.weak_entity();
+                button
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        [
+                            (DiffBase::Head, "HEAD".to_owned()),
+                            (DiffBase::MergeBase, branch.clone()),
+                        ]
+                        .into_iter()
+                        .fold(menu, |menu, (choice, label)| {
+                            let owner = owner.clone();
+                            menu.item(
+                                PopupMenuItem::new(label)
+                                    .checked(choice == against)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = owner.update(cx, |this, cx| {
+                                            this.compare_changes_against(
+                                                key,
+                                                workspace_id,
+                                                choice,
+                                                window,
+                                                cx,
+                                            );
+                                        });
+                                    }),
+                            )
+                        })
+                    })
+                    .into_any_element()
+            }
+        };
+        h_flex()
+            .flex_none()
+            .w_full()
+            // The list's gutter: the hover box lines up with the rows', and the button's own
+            // padding puts its label where the section chevrons start.
+            .px_1()
+            .py_1()
+            .child(control)
+            .into_any_element()
+    }
+
     /// The Changes view's body: the sections and their trees, or why there are none.
     fn render_changes_list(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
-        git: &WorkspaceGitSnapshot,
+        changes: &GitChanges,
         shown: Option<RelativePathBuf>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -482,7 +616,7 @@ impl Condr {
             theme.muted_foreground,
             theme.warning,
         );
-        let entries = &git.changes.entries;
+        let entries = &changes.entries;
         if entries.is_empty() {
             return empty_state("No changes", cx);
         }
@@ -495,7 +629,7 @@ impl Condr {
             .px_1()
             .pb_1()
             .overflow_y_scrollbar();
-        if git.changes.truncated {
+        if changes.truncated {
             list = list.child(
                 div()
                     .px_2()
@@ -729,10 +863,20 @@ impl Condr {
     ) -> AnyElement {
         let theme = cx.theme();
         let path_text = path.to_string();
-        let entry = self
+        let git = self
             .connection(key)
-            .and_then(|connection| connection.workspace_git.get(&workspace_id))
-            .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path));
+            .and_then(|connection| connection.workspace_git.get(&workspace_id));
+        let against = git.map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
+        let entry = git.and_then(|git| {
+            shown_changes(git, against)
+                .entries
+                .iter()
+                .find(|entry| entry.path == path)
+        });
+        let comparison = git.map_or_else(
+            || "Against HEAD".to_owned(),
+            |git| comparison_label(git, against),
+        );
         let editor = self.diff_editors.get(&(key, tab_id));
         let content = editor.map_or(DiffContent::Loading, |editor| editor.content.clone());
         let header = h_flex()
@@ -756,6 +900,14 @@ impl Condr {
                     .text_sm()
                     .font_medium()
                     .child(path_text.clone()),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "diff-comparison".into())
+                    .flex_none()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(comparison),
             )
             .when_some(entry.and_then(|entry| entry.stat), |this, stat| {
                 this.child(diff_stat(stat, cx))
@@ -959,6 +1111,10 @@ impl Condr {
         workspace_id: WorkspaceId,
         path: RelativePathBuf,
     ) {
+        let against = self
+            .connection(key)
+            .and_then(|connection| connection.workspace_git.get(&workspace_id))
+            .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
@@ -977,7 +1133,7 @@ impl Condr {
             request_id,
             workspace_id,
             path: path.clone(),
-            against: DiffBase::Head,
+            against,
         });
         self.pending_diffs.insert((key, workspace_id, path));
     }
@@ -990,6 +1146,22 @@ impl Condr {
                 .get(key)
                 .is_some_and(|session| session.tab(*tab_id).is_some_and(|tab| tab.diff().is_some()))
         });
+    }
+}
+
+/// The change list a comparison shows; `HEAD`'s when the Server reports no base.
+fn shown_changes(git: &WorkspaceGitSnapshot, against: DiffBase) -> &GitChanges {
+    match (against, &git.base) {
+        (DiffBase::MergeBase, Some(base)) => &base.changes,
+        _ => &git.changes,
+    }
+}
+
+/// What the Changes header and the Diff Tab header say a comparison is against.
+fn comparison_label(git: &WorkspaceGitSnapshot, against: DiffBase) -> String {
+    match (against, &git.base) {
+        (DiffBase::MergeBase, Some(base)) => format!("Against {}", base.branch),
+        _ => "Against HEAD".to_owned(),
     }
 }
 

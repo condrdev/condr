@@ -49,6 +49,8 @@ pub(super) enum PreparedExternalLayout {
         parent_root: PathBuf,
         parent: GitRepository,
         child: GitRepository,
+        /// The parent's branch the new one forked from, the worktree's base (ADR 0034).
+        base_branch: Option<String>,
     },
     OpenWorktree {
         parent_workspace_id: WorkspaceId,
@@ -153,7 +155,7 @@ pub(super) fn prepare_external_layout(
             let parent = discover_repository(&parent_root)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "parent Workspace is not a Git repository".to_string())?;
-            let child = create_worktree(&parent, &branch, worktree_root.as_deref())
+            let (child, base_branch) = create_worktree(&parent, &branch, worktree_root.as_deref())
                 .map_err(|error| error.to_string())?;
             // The shell starts in `apply_prepared_external_layout`, once the Pane exists
             // and its id can go into the shell's environment.
@@ -162,6 +164,7 @@ pub(super) fn prepare_external_layout(
                 parent_root,
                 parent,
                 child,
+                base_branch,
             })
         }
         ExternalLayoutPlan::OpenWorktree {
@@ -789,6 +792,7 @@ pub(super) fn apply_prepared_external_layout(
             parent_root,
             parent,
             child,
+            base_branch,
         } => {
             let mut candidate = state.session.clone();
             if candidate
@@ -808,7 +812,13 @@ pub(super) fn apply_prepared_external_layout(
                     "Session Workspace limit reached".into(),
                 ));
             };
-            if !candidate.associate_worktree(workspace_id, parent_workspace_id, parent_root, true) {
+            if !candidate.associate_worktree(
+                workspace_id,
+                parent_workspace_id,
+                parent_root,
+                true,
+                base_branch,
+            ) {
                 return Err(prepared_worktree_failure(
                     &parent,
                     &child,
@@ -893,6 +903,7 @@ pub(super) fn apply_prepared_external_layout(
                         parent_workspace_id,
                         parent_root,
                         false,
+                        None,
                     );
                 }
                 (
@@ -904,7 +915,13 @@ pub(super) fn apply_prepared_external_layout(
                 let workspace_id = candidate
                     .create_workspace(child.root().to_path_buf())
                     .ok_or_else(|| "Session Workspace limit reached".to_string())?;
-                candidate.associate_worktree(workspace_id, parent_workspace_id, parent_root, false);
+                candidate.associate_worktree(
+                    workspace_id,
+                    parent_workspace_id,
+                    parent_root,
+                    false,
+                    None,
+                );
                 let tab_id = candidate
                     .workspace(workspace_id)
                     .expect("created Workspace exists")

@@ -181,6 +181,9 @@ pub struct WorktreeAssociation {
     pub(crate) parent_workspace_id: WorkspaceId,
     pub(crate) parent_root_directory: PathBuf,
     pub(crate) managed: bool,
+    /// The parent's branch the worktree's branch was made from (ADR 0034); `None` when
+    /// Condr did not create the branch.
+    pub(crate) base_branch: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -476,6 +479,10 @@ impl WorktreeAssociation {
 
     pub fn is_managed(&self) -> bool {
         self.managed
+    }
+
+    pub fn base_branch(&self) -> Option<&str> {
+        self.base_branch.as_deref()
     }
 }
 

@@ -16,7 +16,7 @@ use condr_core::protocol::{
 };
 
 /// The stated bound: peak decode memory over the input's own limit.
-/// Measured: 31x for a frame of empty metadata, 91x for a Snapshot of empty Workspaces,
+/// Measured: 31x for a frame of empty metadata, 67x for a Snapshot of empty Workspaces,
 /// 24x for a record of empty hyperlink strings.
 const MAX_DECODE_MULTIPLE: usize = 96;
 

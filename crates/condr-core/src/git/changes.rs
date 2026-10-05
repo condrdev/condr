@@ -1,5 +1,6 @@
 //! Working-tree changes and per-file diffs (ADR 0017): `git status` folded into one status per
-//! path, and one file's working tree against `HEAD` as structured hunks. Everything runs
+//! path, and one file's working tree as structured hunks, both against `HEAD` or against a
+//! base's merge base (ADR 0034). Everything runs
 //! through gix's attribute-aware diff pipeline, so text conversion, binary detection and
 //! `diff.algorithm` behave as they do for `git`.
 
@@ -17,7 +18,7 @@ use gix::object::tree::EntryKind;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::{Deserialize, Serialize};
 
-use super::{GitError, GitRepository, git_error};
+use super::{GitBase, GitError, GitRepository, git_error};
 
 /// How a path differs from `HEAD`, index and worktree differences folded together.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -52,7 +53,7 @@ pub struct GitChangeEntry {
     pub stat: Option<GitDiffStat>,
 }
 
-/// The working tree against `HEAD`, sorted by path.
+/// The working tree against `HEAD` or a base (ADR 0034), sorted by path.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitChanges {
     pub entries: Vec<GitChangeEntry>,
@@ -115,79 +116,81 @@ pub struct FileDiff {
 }
 
 impl GitRepository {
-    /// The working tree against `HEAD`: `git status` with index and worktree folded into one
-    /// status per path, untracked files listed one by one, renames tracked, and per-file line
-    /// counts unless the list is truncated.
-    pub fn changes(&self) -> Result<GitChanges, GitError> {
+    /// The working tree against `HEAD`, and against `base`'s merge base when there is one
+    /// (ADR 0034): `git status` with index and worktree folded into one status per path,
+    /// untracked files listed one by one, renames tracked, and per-file line counts unless
+    /// a list is truncated. Both lists share one walk of the working tree; only the
+    /// tree-to-index comparison runs again for the base.
+    pub fn changes(
+        &self,
+        base: Option<&GitBase>,
+    ) -> Result<(GitChanges, Option<GitChanges>), GitError> {
         let repo = self.open()?;
-        let mut folded = BTreeMap::<RelativePathBuf, GitChangeEntry>::new();
+        let index = repo.index_or_empty().map_err(git_error)?;
+        let mut head_index = Vec::new();
+        let mut worktree = Vec::new();
         let iter = repo
             .status(gix::progress::Discard)
             .map_err(git_error)?
+            .index(gix::worktree::IndexPersistedOrInMemory::Persisted(
+                index.clone(),
+            ))
             .untracked_files(gix::status::UntrackedFiles::Files)
             .into_iter(Vec::<BString>::new())
             .map_err(git_error)?;
         for item in iter {
             let item = item.map_err(git_error)?;
-            let Some((path, old_path, status)) = fold_status_item(item) else {
-                continue;
+            let side = if matches!(item, gix::status::Item::TreeIndex(_)) {
+                &mut head_index
+            } else {
+                &mut worktree
             };
-            let path = git_path(path.as_ref());
-            let old_path = old_path.map(|old| git_path(old.as_ref()));
-            match folded.entry(path.clone()) {
-                MapEntry::Vacant(slot) => {
-                    slot.insert(GitChangeEntry {
-                        path,
-                        old_path,
-                        status,
-                        stat: None,
-                    });
-                }
-                MapEntry::Occupied(mut slot) => {
-                    let entry = slot.get_mut();
-                    match (entry.status, status) {
-                        // Staged as new, then deleted again: nothing left against HEAD.
-                        (GitChangeStatus::Added, GitChangeStatus::Deleted)
-                        | (GitChangeStatus::Deleted, GitChangeStatus::Added) => {
-                            slot.remove();
-                        }
-                        (current, next) if status_rank(next) > status_rank(current) => {
-                            entry.status = next;
-                            if old_path.is_some() {
-                                entry.old_path = old_path;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            side.extend(fold_status_item(item));
         }
-        let truncated = folded.len() > MAX_GIT_CHANGES;
-        let mut entries: Vec<GitChangeEntry> = folded.into_values().take(MAX_GIT_CHANGES).collect();
-        if !truncated {
-            let mut differ = Differ::new(&repo)?;
-            for entry in &mut entries {
-                entry.stat = differ.stat(entry).ok().flatten();
-            }
-        }
-        Ok(GitChanges { entries, truncated })
+        let head = listed(
+            &repo,
+            None,
+            head_index.into_iter().chain(worktree.iter().cloned()),
+        )?;
+        let Some(base) = base else {
+            return Ok((head, None));
+        };
+        let tree = base_tree(&repo, base)?;
+        let mut base_index = Vec::new();
+        repo.tree_index_status(
+            &tree,
+            &index,
+            None,
+            gix::status::tree_index::TrackRenames::AsConfigured,
+            |change, _, _| {
+                base_index.extend(fold_status_item(gix::status::Item::TreeIndex(
+                    change.into_owned(),
+                )));
+                Ok::<_, std::convert::Infallible>(std::ops::ControlFlow::Continue(()))
+            },
+        )
+        .map_err(git_error)?;
+        let base = listed(&repo, Some(base), base_index.into_iter().chain(worktree))?;
+        Ok((head, Some(base)))
     }
 
-    /// `path`'s working-tree content against `HEAD`, as structured hunks. `old_path` is where
-    /// `HEAD` has a renamed file, as [`GitChangeEntry::old_path`] reports it; without it a
-    /// rename diffs as wholly added. A path in neither side is an error; a path in both with
-    /// identical content yields no hunks.
+    /// `path`'s working-tree content against `HEAD`, or against `base`'s merge base, as
+    /// structured hunks. `old_path` is where that side has a renamed file, as
+    /// [`GitChangeEntry::old_path`] reports it; without it a rename diffs as wholly added.
+    /// A path in neither side is an error; a path in both with identical content yields no
+    /// hunks.
     pub fn file_diff(
         &self,
         path: &RelativePath,
         old_path: Option<&RelativePath>,
+        base: Option<&GitBase>,
     ) -> Result<FileDiff, GitError> {
         if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
         {
             return Err(GitError("invalid path for a diff".into()));
         }
         let repo = self.open()?;
-        let mut differ = Differ::new(&repo)?;
+        let mut differ = Differ::new(&repo, base)?;
         let content = differ.diff(path, old_path, |diff, input| {
             let hunks = UnifiedDiff::new(
                 diff,
@@ -297,6 +300,65 @@ fn git_path(path: &BStr) -> RelativePathBuf {
 
 type FoldedStatus = (BString, Option<BString>, GitChangeStatus);
 
+/// Folds status items into one entry per path: the working tree against `base`'s merge
+/// base, or against `HEAD` without one. Line counts follow unless the list is truncated.
+fn listed(
+    repo: &gix::Repository,
+    base: Option<&GitBase>,
+    items: impl IntoIterator<Item = FoldedStatus>,
+) -> Result<GitChanges, GitError> {
+    let mut folded = BTreeMap::<RelativePathBuf, GitChangeEntry>::new();
+    for (path, old_path, status) in items {
+        let path = git_path(path.as_ref());
+        let old_path = old_path.map(|old| git_path(old.as_ref()));
+        match folded.entry(path.clone()) {
+            MapEntry::Vacant(slot) => {
+                slot.insert(GitChangeEntry {
+                    path,
+                    old_path,
+                    status,
+                    stat: None,
+                });
+            }
+            MapEntry::Occupied(mut slot) => {
+                let entry = slot.get_mut();
+                match (entry.status, status) {
+                    // Staged as new, then deleted again: nothing left against the tree.
+                    (GitChangeStatus::Added, GitChangeStatus::Deleted)
+                    | (GitChangeStatus::Deleted, GitChangeStatus::Added) => {
+                        slot.remove();
+                    }
+                    (current, next) if status_rank(next) > status_rank(current) => {
+                        entry.status = next;
+                        if old_path.is_some() {
+                            entry.old_path = old_path;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let truncated = folded.len() > MAX_GIT_CHANGES;
+    let mut entries: Vec<GitChangeEntry> = folded.into_values().take(MAX_GIT_CHANGES).collect();
+    if !truncated {
+        let mut differ = Differ::new(repo, base)?;
+        for entry in &mut entries {
+            entry.stat = differ.stat(entry).ok().flatten();
+        }
+    }
+    Ok(GitChanges { entries, truncated })
+}
+
+/// The tree a base view compares against: the merge base's.
+fn base_tree(repo: &gix::Repository, base: &GitBase) -> Result<gix::ObjectId, GitError> {
+    repo.find_commit(base.merge_base)
+        .map_err(git_error)?
+        .tree_id()
+        .map(gix::Id::detach)
+        .map_err(git_error)
+}
+
 fn fold_status_item(item: gix::status::Item) -> Option<FoldedStatus> {
     use gix::diff::index::Change as IndexChange;
     use gix::dir::entry::{Kind, Status};
@@ -365,7 +427,7 @@ fn fold_status_item(item: gix::status::Item) -> Option<FoldedStatus> {
     })
 }
 
-/// Diffs `HEAD` blobs against worktree files.
+/// Diffs the blobs of `HEAD`, or of a base's merge base, against worktree files.
 struct Differ<'repo> {
     repo: &'repo gix::Repository,
     /// `None` on an unborn branch: everything is new.
@@ -375,12 +437,15 @@ struct Differ<'repo> {
 }
 
 impl<'repo> Differ<'repo> {
-    fn new(repo: &'repo gix::Repository) -> Result<Self, GitError> {
+    fn new(repo: &'repo gix::Repository, base: Option<&GitBase>) -> Result<Self, GitError> {
         let workdir = repo
             .workdir()
             .ok_or_else(|| GitError("repository has no work tree".into()))?
             .to_path_buf();
-        let head_tree = repo.head_tree().ok();
+        let head_tree = match base {
+            Some(base) => Some(repo.find_tree(base_tree(repo, base)?).map_err(git_error)?),
+            None => repo.head_tree().ok(),
+        };
         let cache = repo
             .diff_resource_cache(
                 gix::diff::blob::pipeline::Mode::ToGit,

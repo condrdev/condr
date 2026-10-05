@@ -320,6 +320,9 @@ pub(crate) struct Condr {
     /// wide. Per Workspace like `sidebar_workspace_open`, and like it not persisted.
     changes_open: HashSet<(ConnectionKey, WorkspaceId)>,
     changes_width: Pixels,
+    /// The Workspaces whose Changes and Diff Tab compare against the base (ADR 0034); the
+    /// others compare against `HEAD`. This Client's view, remembered in the state file.
+    changes_against_base: HashSet<(ConnectionKey, WorkspaceId)>,
     collapsed_changes_sections: HashSet<ChangesSection>,
     /// Directories folded shut in the Changes tree, by connection, Workspace and
     /// repository path; Workspace ids repeat across Servers.
@@ -545,6 +548,7 @@ impl Condr {
                 }),
             sidebar_collapsed: restored_state.sidebar_collapsed,
             changes_open: HashSet::new(),
+            changes_against_base: HashSet::new(),
             changes_width: restored_state
                 .changes_width
                 .map_or(INITIAL_CHANGES_WIDTH, |width| {

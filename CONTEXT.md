@@ -75,13 +75,17 @@ A terminal location and layout leaf within a terminal Tab. It may show a shell o
 _Avoid_: Agent
 
 **Diff Tab**:
-The one viewer Tab a Workspace may have, showing one file's working-tree changes against `HEAD` as the Server computes them (ADR 0017). Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its header's "Show File" opens the same file in the Preview Tab at the line under the diff cursor. Its name starts as "Diff" and is display only.
+The one viewer Tab a Workspace may have, showing one file's working-tree changes as the Server computes them (ADR 0017), against whatever the Workspace's Changes view compares with: `HEAD` or its Base Branch (ADR 0034). Its header names which. Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its header's "Show File" opens the same file in the Preview Tab at the line under the diff cursor. Its name starts as "Diff" and is display only.
 
 **Preview Tab**:
 The one viewer Tab a Workspace may have for a file's content as it is on disk, read by the Server under the Root Directory (ADR 0018). Clicking a file in the Files view creates it or retargets it; it sits beside the Diff Tab and behaves like it. Its name starts as "Preview" and is display only.
 
 **Changes**:
-One of the two views of the right sidebar: the presented Workspace's working-tree changes against `HEAD`, index and worktree folded into one status per path, read-only (ADR 0017). The default view for a Workspace inside a repository.
+One of the two views of the right sidebar: the presented Workspace's working-tree changes, index and worktree folded into one status per path, read-only (ADR 0017). It compares against `HEAD` or against the merge base with the Workspace's Base Branch; the choice is each Client's own view per Workspace, and without a Base Branch only `HEAD` is offered (ADR 0034). The default view for a Workspace inside a repository.
+
+**Base Branch**:
+The branch a Workspace's work is reviewed against (ADR 0034). For a Managed Worktree whose branch Condr made, it is the parent Workspace's branch at that moment, recorded on the Worktree Association; otherwise the branch the default remote's `HEAD` names, else a local `main`, else `master`. Against it the Changes view shows everything since the merge base, committed or not. A Workspace on the Base Branch itself or on its upstream has none.
+_Avoid_: target branch, parent branch
 
 **Files**:
 The other view of the right sidebar: the presented Workspace's directory tree under its Root Directory, one level per Server answer, unfolded by the user, read-only (ADR 0018). `.git` is hidden, dotfiles are shown, ignored entries are dimmed but listed, rows carry JetBrains file-type icons, a changed file's name takes its status colour, and a directory holding a change carries a dot. The default view for a Workspace outside a repository. The Server's watcher refreshes it through `WorkspaceFilesChanged`. A file row's context menu copies its path, opens it in the "Open in" editor, or inserts its path into the Workspace's terminal.
@@ -98,7 +102,7 @@ A conversation owned and stored by a native Agent CLI, identified by that CLI’
 _Avoid_: Session, process snapshot
 
 **Managed Worktree**:
-A linked Git worktree created by Condr and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact. It lives in `<repo>.worktrees/<branch>` beside the repository, or where `[server] worktree_root` says: absolute or `~` paths group by repository, relative paths resolve against the repository (ADR 0002).
+A linked Git worktree created by Condr and explicitly associated with its parent repository Workspace. Only a Managed Worktree is eligible for the separate Remove Worktree action; opening an existing directory never grants deletion authority. Removal requires a clean checkout and leaves its Git branch intact. When Condr made the branch, the parent's branch is recorded as its Base Branch (ADR 0034). It lives in `<repo>.worktrees/<branch>` beside the repository, or where `[server] worktree_root` says: absolute or `~` paths group by repository, relative paths resolve against the repository (ADR 0002).
 _Avoid_: Git Workspace, any detected worktree
 
 **Session Snapshot**:

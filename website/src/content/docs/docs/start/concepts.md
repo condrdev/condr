@@ -25,7 +25,7 @@ Device (physical or virtual machine, holds a unique Ed25519 key)
     └── Session (the Workspace topology and split layout snapshot the server maintains)
         ├── Workspace 1 (main Workspace: bound to a root directory such as ~/code/my-app)
         │   ├── Tab 1 (terminal Tab: holds split Panes running Agents or plain shells)
-        │   ├── Tab 2 Diff (code review: view one file's diff against HEAD)
+        │   ├── Tab 2 Diff (code review: view one file's diff against HEAD or the base branch)
         │   └── Tab 3 Preview (source preview: browse a file with syntax highlighting)
         │
         └── Workspace 2 (managed worktree: an isolated branch environment based on Git Worktree)

@@ -208,17 +208,20 @@ fn probe_terminal(
                         git_scan_pending = None;
                         // Terminal output alone does not change the branch; only rediscover
                         // when the ref files moved since the Workspace was last discovered.
-                        let known = {
+                        let (known, recorded) = {
                             let state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
                                 break;
                             }
-                            state
-                                .workspace_git
-                                .get(&workspace_id)
-                                .map(|git| git.repository.clone())
+                            let known = state.workspace_git.get(&workspace_id).map(|git| {
+                                let base = git.base.as_ref().map(|(base, _)| base.clone());
+                                (git.repository.clone(), base)
+                            });
+                            (known, state.recorded_base(workspace_id))
                         };
-                        let fingerprint = known.as_ref().and_then(GitRepository::fingerprint);
+                        let fingerprint = known
+                            .as_ref()
+                            .and_then(|(repository, base)| repository.fingerprint(base.as_ref()));
                         {
                             let mut state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
@@ -240,7 +243,7 @@ fn probe_terminal(
                                 }
                             }
                         }
-                        if let Ok(next) = WorkspaceGit::scan(&root) {
+                        if let Ok(next) = WorkspaceGit::scan(&root, recorded.as_deref()) {
                             let mut state = state.lock().expect("server state lock poisoned");
                             if !state.terminal_is_current(pane_id, instance_id) {
                                 break;

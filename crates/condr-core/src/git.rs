@@ -32,6 +32,24 @@ pub struct GitUpstream {
     pub behind: u32,
 }
 
+/// What a Workspace's base view compares against (ADR 0034): the branch it forked from and
+/// the merge base of `HEAD` with it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitBase {
+    /// As a person reads it: `main`, `origin/main`.
+    name: String,
+    /// The full ref name, also the loose ref file a commit or fetch rewrites under the
+    /// common directory.
+    reference: PathBuf,
+    merge_base: gix::ObjectId,
+}
+
+impl GitBase {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitRepository {
     root: PathBuf,
@@ -69,8 +87,9 @@ impl GitRepository {
     }
 
     /// `None` only when a HEAD file is unreadable; the other files are optional and their
-    /// appearance or disappearance is itself a change.
-    pub fn fingerprint(&self) -> Option<GitFingerprint> {
+    /// appearance or disappearance is itself a change. `base` adds the ref the base view
+    /// follows, so a fetch or commit that moves it counts.
+    pub fn fingerprint(&self, base: Option<&GitBase>) -> Option<GitFingerprint> {
         let modified = |path: PathBuf| fs::metadata(path).and_then(|meta| meta.modified()).ok();
         let mut times = vec![
             Some(modified(self.git_directory.join("HEAD"))?),
@@ -93,7 +112,44 @@ impl GitRepository {
         if let Some(upstream) = &self.upstream_ref {
             times.push(modified(self.common_directory.join(upstream)));
         }
+        if let Some(base) = base {
+            times.push(modified(self.common_directory.join(&base.reference)));
+        }
         Some(GitFingerprint(times))
+    }
+
+    /// The Workspace's base (ADR 0034): `recorded`, the branch Condr forked a Managed
+    /// Worktree from, else the branch the default remote's `HEAD` names, else a local
+    /// `main`, else `master`. `None` on an unborn branch, when the base is the current
+    /// branch or its upstream, or when the two histories share no commit.
+    pub fn base(&self, recorded: Option<&str>) -> Result<Option<GitBase>, GitError> {
+        let repo = self.open()?;
+        let Ok(head) = repo.head_id() else {
+            return Ok(None);
+        };
+        let Some(reference) = base_reference(&repo, recorded)? else {
+            return Ok(None);
+        };
+        let full_name = PathBuf::from(reference.name().as_bstr().to_str_lossy().as_ref());
+        let current = self
+            .branch
+            .as_ref()
+            .map(|branch| PathBuf::from(format!("refs/heads/{branch}")));
+        if current.as_ref() == Some(&full_name) || self.upstream_ref.as_ref() == Some(&full_name) {
+            return Ok(None);
+        }
+        let name = reference.name().shorten().to_str_lossy().into_owned();
+        let tip = reference.into_fully_peeled_id().map_err(git_error)?;
+        let merge_base = match repo.merge_base(head, tip) {
+            Ok(merge_base) => merge_base.detach(),
+            Err(gix::repository::merge_base::Error::NotFound { .. }) => return Ok(None),
+            Err(error) => return Err(git_error(error)),
+        };
+        Ok(Some(GitBase {
+            name,
+            reference: full_name,
+            merge_base,
+        }))
     }
 
     fn open(&self) -> Result<gix::Repository, GitError> {
@@ -195,6 +251,41 @@ fn upstream_of(
     Ok((Some(upstream_ref), Some(counts)))
 }
 
+/// The first base candidate that exists, in [`GitRepository::base`]'s order. A remote's
+/// `HEAD` is symbolic; the branch it names is the base.
+fn base_reference<'repo>(
+    repo: &'repo gix::Repository,
+    recorded: Option<&str>,
+) -> Result<Option<gix::Reference<'repo>>, GitError> {
+    let mut candidates = Vec::new();
+    if let Some(recorded) = recorded {
+        candidates.push(format!("refs/heads/{recorded}"));
+    }
+    if let Some(remote) = repo.remote_default_name(gix::remote::Direction::Fetch) {
+        candidates.push(format!("refs/remotes/{remote}/HEAD"));
+    }
+    candidates.extend(["refs/heads/main".to_owned(), "refs/heads/master".to_owned()]);
+    for candidate in candidates {
+        let Some(reference) = repo
+            .try_find_reference(candidate.as_str())
+            .map_err(git_error)?
+        else {
+            continue;
+        };
+        let target = match reference.target() {
+            gix::refs::TargetRef::Symbolic(target) => target.to_owned(),
+            gix::refs::TargetRef::Object(_) => return Ok(Some(reference)),
+        };
+        if let Some(reference) = repo
+            .try_find_reference(target.as_ref())
+            .map_err(git_error)?
+        {
+            return Ok(Some(reference));
+        }
+    }
+    Ok(None)
+}
+
 /// Commits reachable from `tip` but not from `hidden`: `git rev-list --count tip ^hidden`.
 fn count_commits(
     repo: &gix::Repository,
@@ -251,12 +342,14 @@ pub fn worktree_destination(parent: &Path, branch: &str, worktree_root: Option<&
 
 /// `git worktree add`: registers the checkout under `<common>/worktrees/<id>`, creates the
 /// branch from HEAD when it does not exist yet, and checks its tree out into
-/// [`worktree_destination`].
+/// [`worktree_destination`]. Alongside the checkout comes the parent's branch when the new
+/// branch was made from it, which is the worktree's base (ADR 0034); a branch that already
+/// existed says nothing about where it forked.
 pub fn create_worktree(
     parent: &GitRepository,
     branch: &str,
     worktree_root: Option<&Path>,
-) -> Result<GitRepository, GitError> {
+) -> Result<(GitRepository, Option<String>), GitError> {
     if parent.is_linked_worktree() {
         return Err(GitError(
             "create a worktree from the main repository Workspace".into(),
@@ -278,11 +371,13 @@ pub fn create_worktree(
 
     let repo = parent.open()?;
     ensure_branch_not_checked_out(&repo, reference.as_ref())?;
+    let mut forked_from = None;
     if repo
         .try_find_reference(reference.as_ref())
         .map_err(git_error)?
         .is_none()
     {
+        forked_from = parent.branch.clone();
         let head = repo
             .head_id()
             .map_err(|_| GitError("cannot create a worktree from an unborn branch".into()))?;
@@ -306,7 +401,7 @@ pub fn create_worktree(
     let child = discover_repository(&destination)?
         .ok_or_else(|| GitError("created worktree is not a Git checkout".into()))?;
     ensure_same_repository(parent, &child)?;
-    Ok(child)
+    Ok((child, forked_from))
 }
 
 /// The `refs/heads/` name for a user-typed branch, rejected like `check-ref-format --branch`.

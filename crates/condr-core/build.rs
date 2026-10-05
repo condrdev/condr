@@ -8,6 +8,9 @@ fn main() {
         .map(|name| format!("{proto}/condr/v1/{name}.proto"));
     let descriptors = protox::compile(&files, [proto]).expect("proto/condr/v1 compiles");
     prost_build::Config::new()
+        // A frame of empty Workspaces decodes to one struct per two bytes, so the inline
+        // association would size every one of them past ADR 0028's decode bound.
+        .boxed(".condr.v1.WorkspaceSnapshot.worktree")
         .compile_fds(descriptors)
         .expect("generated protocol code is written");
 }

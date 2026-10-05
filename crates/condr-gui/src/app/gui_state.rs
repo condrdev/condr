@@ -55,6 +55,8 @@ pub(super) struct WorkspaceState {
     /// The right sidebar is open, and which view it shows when the user chose one.
     pub changes_open: bool,
     pub sidebar_view: Option<SidebarView>,
+    /// Changes compare against the base rather than `HEAD` (ADR 0034).
+    pub against_base: bool,
 }
 
 /// GPUI's `WindowBounds` with plain numbers, since it has no serde of its own.
@@ -274,6 +276,8 @@ mod wire {
         changes_open: bool,
         #[prost(uint32, optional, tag = "4")]
         sidebar_view: Option<u32>,
+        #[prost(bool, tag = "5")]
+        against_base: bool,
     }
 
     impl From<&super::GuiState> for GuiState {
@@ -313,6 +317,7 @@ mod wire {
                                         SidebarView::Changes => 1,
                                         SidebarView::Files => 2,
                                     }),
+                                    against_base: state.against_base,
                                 };
                                 (workspace.as_u64(), workspace_state)
                             })
@@ -366,6 +371,7 @@ mod wire {
                                         2 => Some(SidebarView::Files),
                                         _ => None,
                                     }),
+                                    against_base: state.against_base,
                                 };
                                 (WorkspaceId::from_u64(workspace), workspace_state)
                             })
@@ -432,6 +438,7 @@ impl Condr {
                             .is_some_and(|open| *open.read(cx)),
                         changes_open: self.changes_open.contains(&(key, workspace_id)),
                         sidebar_view: self.sidebar_views.get(&(key, workspace_id)).copied(),
+                        against_base: self.changes_against_base.contains(&(key, workspace_id)),
                     };
                     (workspace_id, state)
                 })
@@ -489,6 +496,9 @@ impl Condr {
                 self.changes_open.insert((key, workspace_id));
             } else {
                 self.changes_open.remove(&(key, workspace_id));
+            }
+            if state.against_base {
+                self.changes_against_base.insert((key, workspace_id));
             }
             if let Some(view) = state.sidebar_view {
                 self.sidebar_views.insert((key, workspace_id), view);
@@ -549,6 +559,7 @@ mod tests {
                 sidebar_open: true,
                 changes_open: true,
                 sidebar_view: Some(SidebarView::Files),
+                against_base: true,
             },
         );
         state.servers.insert(

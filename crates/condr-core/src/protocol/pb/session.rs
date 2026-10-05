@@ -60,11 +60,12 @@ impl TryFrom<&WorkspaceSnapshot> for super::WorkspaceSnapshot {
                 .worktree
                 .as_ref()
                 .map(|worktree| {
-                    Ok::<_, String>(super::WorktreeAssociation {
+                    Ok::<_, String>(Box::new(super::WorktreeAssociation {
                         parent_workspace_id: worktree.parent_workspace_id.as_u64(),
                         parent_root_directory: path_text(&worktree.parent_root_directory)?,
                         managed: worktree.managed,
-                    })
+                        base_branch: worktree.base_branch.clone(),
+                    }))
                 })
                 .transpose()?,
             tabs: workspace
@@ -85,10 +86,14 @@ impl TryFrom<super::WorkspaceSnapshot> for WorkspaceSnapshot {
             id: WorkspaceId::from_u64(workspace.id),
             name: workspace.name,
             root_directory: PathBuf::from(workspace.root_directory),
-            worktree: workspace.worktree.map(|worktree| WorktreeAssociation {
-                parent_workspace_id: WorkspaceId::from_u64(worktree.parent_workspace_id),
-                parent_root_directory: PathBuf::from(worktree.parent_root_directory),
-                managed: worktree.managed,
+            worktree: workspace.worktree.map(|worktree| {
+                let worktree = *worktree;
+                WorktreeAssociation {
+                    parent_workspace_id: WorkspaceId::from_u64(worktree.parent_workspace_id),
+                    parent_root_directory: PathBuf::from(worktree.parent_root_directory),
+                    managed: worktree.managed,
+                    base_branch: worktree.base_branch,
+                }
             }),
             tabs: workspace
                 .tabs

@@ -60,7 +60,9 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     assert!(!parent.is_linked_worktree());
 
     // Without a configured root the checkout lands beside the repository, on the same volume.
-    let beside = create_worktree(&parent, "feature/beside", None).unwrap();
+    let (beside, forked_from) = create_worktree(&parent, "feature/beside", None).unwrap();
+    // A branch Condr made remembers where it forked (ADR 0034).
+    assert_eq!(forked_from.as_deref(), Some("main"));
     assert_eq!(
         beside.root(),
         temp.path()
@@ -70,7 +72,12 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
     remove_worktree(&parent, &beside).unwrap();
 
     let worktree_root = temp.path().join("worktrees");
-    let existing = create_worktree(&parent, "existing", Some(&worktree_root)).unwrap();
+    let (existing, forked_from) =
+        create_worktree(&parent, "existing", Some(&worktree_root)).unwrap();
+    assert_eq!(
+        forked_from, None,
+        "a branch that existed says nothing about its fork"
+    );
     assert_eq!(
         existing.root(),
         worktree_root.join("repository").join("existing")
@@ -101,7 +108,7 @@ fn git_worktree_lifecycle_preserves_branches_and_refuses_dirty_removal() {
         ["show-ref", "--verify", "refs/heads/existing"]
     ));
 
-    let dirty = create_worktree(&parent, "feature/dirty", Some(&worktree_root)).unwrap();
+    let (dirty, _) = create_worktree(&parent, "feature/dirty", Some(&worktree_root)).unwrap();
     fs::write(dirty.root().join("untracked.txt"), "keep me\n").unwrap();
     let error = remove_worktree(&parent, &dirty).unwrap_err();
     assert!(error.to_string().contains("modified or untracked"));
@@ -124,13 +131,20 @@ fn worktree_association_survives_parent_workspace_close() {
     let child = session
         .create_workspace(PathBuf::from("/tmp/condr-child"))
         .expect("Workspace capacity");
-    assert!(session.associate_worktree(child, parent, parent_root.clone(), true));
+    assert!(session.associate_worktree(
+        child,
+        parent,
+        parent_root.clone(),
+        true,
+        Some("main".into())
+    ));
 
     let restored = Session::restore(session.snapshot()).unwrap();
     let association = restored.workspace(child).unwrap().worktree().unwrap();
     assert_eq!(association.parent_workspace_id(), parent);
     assert_eq!(association.parent_root_directory(), parent_root);
     assert!(association.is_managed());
+    assert_eq!(association.base_branch(), Some("main"));
 
     session.close_workspace(parent).unwrap();
     assert!(session.workspace(child).unwrap().worktree().is_some());
@@ -158,13 +172,13 @@ fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
     git(&repository, ["commit", "-m", "initial"]);
 
     let on_main = discover_repository(&repository).unwrap().unwrap();
-    let initial = on_main.fingerprint().unwrap();
-    assert_eq!(on_main.fingerprint().unwrap(), initial);
+    let initial = on_main.fingerprint(None).unwrap();
+    assert_eq!(on_main.fingerprint(None).unwrap(), initial);
     std::thread::sleep(std::time::Duration::from_millis(20));
     // Committing on the same branch does not rewrite HEAD, but it moves the head.
     fs::write(repository.join("README.md"), "again\n").unwrap();
     git(&repository, ["commit", "-am", "second"]);
-    let before = on_main.fingerprint().unwrap();
+    let before = on_main.fingerprint(None).unwrap();
     assert_ne!(before, initial);
 
     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -176,7 +190,7 @@ fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
     git(&repository, ["checkout", "--detach"]);
     let detached = discover_repository(&repository).unwrap().unwrap();
     assert_eq!(detached.branch(), None);
-    assert_ne!(detached.fingerprint().unwrap(), before);
+    assert_ne!(detached.fingerprint(None).unwrap(), before);
     assert!(
         discover_repository(repository.join(".git"))
             .unwrap()
@@ -221,7 +235,7 @@ fn discovery_counts_divergence_from_the_local_upstream_ref() {
             behind: 0
         })
     );
-    let synced = in_sync.fingerprint().unwrap();
+    let synced = in_sync.fingerprint(None).unwrap();
 
     // Two local commits, one of them also pushed elsewhere and fetched back as remote work.
     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -249,7 +263,7 @@ fn discovery_counts_divergence_from_the_local_upstream_ref() {
     // Fetching rewrites the remote-tracking ref, so the fingerprint moves without a checkout.
     std::thread::sleep(std::time::Duration::from_millis(20));
     git(&repository, ["fetch", "-q", "origin"]);
-    assert_ne!(in_sync.fingerprint().unwrap(), synced);
+    assert_ne!(in_sync.fingerprint(None).unwrap(), synced);
     assert_eq!(
         discover_repository(&repository)
             .unwrap()

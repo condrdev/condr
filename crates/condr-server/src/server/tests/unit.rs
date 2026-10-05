@@ -1057,6 +1057,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
             linked_worktree: false,
             upstream: None,
             changes: Default::default(),
+            base: None,
         }],
         zoomed_panes: vec![first_pane],
     };

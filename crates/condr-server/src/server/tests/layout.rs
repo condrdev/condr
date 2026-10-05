@@ -331,6 +331,39 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
             .and_then(|git| git.repository.branch()),
         Some("feature/server-flow")
     );
+    // The worktree remembers the branch it forked from, and its commits stay in the base
+    // view after they leave the HEAD one (ADR 0034).
+    let parent_branch = discover_repository(&repository)
+        .unwrap()
+        .unwrap()
+        .branch()
+        .map(str::to_owned);
+    assert!(parent_branch.is_some());
+    assert_eq!(
+        child.worktree().unwrap().base_branch(),
+        parent_branch.as_deref()
+    );
+    std::fs::write(child_root.join("agent.txt"), "work\n").unwrap();
+    run_git(&child_root, &["add", "agent.txt"]);
+    run_git(&child_root, &["commit", "-m", "agent work"]);
+    let recorded = state.recorded_base(child_workspace_id);
+    let next = WorkspaceGit::scan(&child_root, recorded.as_deref()).unwrap();
+    apply_workspace_git_refresh(&mut state, child_workspace_id, &child_root, next);
+    let snapshot = workspace_git_snapshot(
+        child_workspace_id,
+        &state.workspace_git[&child_workspace_id],
+    );
+    assert!(snapshot.changes.entries.is_empty());
+    let base = snapshot.base.expect("a forked worktree has a base");
+    assert_eq!(Some(base.branch.as_str()), parent_branch.as_deref());
+    assert_eq!(
+        base.changes
+            .entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        ["agent.txt"]
+    );
 
     assert_eq!(
         apply_for_test(
@@ -577,7 +610,7 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
     else {
         panic!("second Pane activity should reserve its Workspace Git scan");
     };
-    let next = WorkspaceGit::scan(&root).unwrap();
+    let next = WorkspaceGit::scan(&root, None).unwrap();
     apply_workspace_git_refresh(&mut state, workspace_id, &root, next);
     assert_eq!(
         state

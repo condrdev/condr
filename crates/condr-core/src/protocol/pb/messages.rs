@@ -8,11 +8,11 @@ use crate::agent_discovery::AgentInstallation;
 use crate::agent_hooks::HooksReport;
 use crate::protocol::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, LayoutCommand, LayoutResult,
-    PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch,
-    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
-    ServerMessage, ServerSettings, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
-    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
+    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
+    ServerLogRecord, ServerMessage, ServerSettings, SessionEvent, SessionId, SessionOverview,
+    TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
@@ -122,6 +122,10 @@ fn encode_git(git: &WorkspaceGitSnapshot) -> super::WorkspaceGitSnapshot {
         linked_worktree: git.linked_worktree,
         upstream: git.upstream.as_ref().map(Into::into),
         changes: Some((&git.changes).into()),
+        base: git.base.as_ref().map(|base| super::GitBaseChanges {
+            branch: base.branch.clone(),
+            changes: Some((&base.changes).into()),
+        }),
     }
 }
 
@@ -132,6 +136,15 @@ fn decode_git(git: super::WorkspaceGitSnapshot) -> WireResult<WorkspaceGitSnapsh
         linked_worktree: git.linked_worktree,
         upstream: git.upstream.map(Into::into),
         changes: required(git.changes, "Git changes")?.try_into()?,
+        base: git
+            .base
+            .map(|base| {
+                Ok::<_, WireError>(GitBaseChanges {
+                    branch: base.branch,
+                    changes: required(base.changes, "base changes")?.try_into()?,
+                })
+            })
+            .transpose()?,
     })
 }
 
@@ -242,14 +255,17 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 request_id,
                 workspace_id,
                 path,
-                against: DiffBase::Head,
+                against,
             } => Message::GitDiff(GitDiffRequest {
                 server_id: server_id.0,
                 session_id: session_id.0,
                 request_id: *request_id,
                 workspace_id: workspace_id.as_u64(),
                 path: path.to_string(),
-                against: super::DiffBase::Head as i32,
+                against: match against {
+                    DiffBase::Head => super::DiffBase::Head,
+                    DiffBase::MergeBase => super::DiffBase::MergeBase,
+                } as i32,
             }),
             ClientMessage::ListDirectory {
                 server_id,
@@ -404,6 +420,7 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 against: match enum_value(diff.against, "diff base")? {
                     super::DiffBase::Unspecified => unreachable!("enum_value rejects 0"),
                     super::DiffBase::Head => DiffBase::Head,
+                    super::DiffBase::MergeBase => DiffBase::MergeBase,
                 },
             },
             Message::ListDirectory(request) => ClientMessage::ListDirectory {

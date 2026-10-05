@@ -141,6 +141,9 @@ pub enum ClientMessage {
 pub enum DiffBase {
     #[default]
     Head,
+    /// The merge base of `HEAD` and the Workspace's base branch (ADR 0034). Only a Server
+    /// that reports [`WorkspaceGitSnapshot::base`] knows it.
+    MergeBase,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -538,6 +541,17 @@ pub struct WorkspaceGitSnapshot {
     pub linked_worktree: bool,
     pub upstream: Option<crate::GitUpstream>,
     /// The working tree against `HEAD` (ADR 0017), computed in the same pass as the rest.
+    pub changes: crate::GitChanges,
+    /// The working tree against the base (ADR 0034), from the same pass; `None` when the
+    /// Workspace has no base or the Server predates it.
+    pub base: Option<GitBaseChanges>,
+}
+
+/// The base view of a Workspace's changes (ADR 0034).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitBaseChanges {
+    /// The base branch as a person reads it: `main`, `origin/main`.
+    pub branch: String,
     pub changes: crate::GitChanges,
 }
 

@@ -1091,7 +1091,7 @@ pub(super) fn handle_client(
                 request_id,
                 workspace_id,
                 path,
-                against: DiffBase::Head,
+                against,
             } => {
                 let repository = {
                     let state = state.lock().expect("server state lock poisoned");
@@ -1105,23 +1105,31 @@ pub(super) fn handle_client(
                         state
                             .workspace_git
                             .get(&workspace_id)
-                            .map(|git| {
-                                // A renamed file diffs against where HEAD has it.
-                                let old_path = git
-                                    .changes
+                            .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
+                            .and_then(|git| {
+                                let (changes, base) = match (against, &git.base) {
+                                    (DiffBase::Head, _) => (&git.changes, None),
+                                    (DiffBase::MergeBase, Some((base, changes))) => {
+                                        (changes, Some(base.clone()))
+                                    }
+                                    (DiffBase::MergeBase, None) => {
+                                        return Err("the Workspace has no base branch".to_string());
+                                    }
+                                };
+                                // A renamed file diffs against where that side has it.
+                                let old_path = changes
                                     .entries
                                     .iter()
                                     .find(|entry| entry.path == path)
                                     .and_then(|entry| entry.old_path.clone());
-                                (git.repository.clone(), old_path)
+                                Ok((git.repository.clone(), old_path, base))
                             })
-                            .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
                     }
                 };
                 // The diff reads blobs and files: never under the state lock.
-                let result = repository.and_then(|(repository, old_path)| {
+                let result = repository.and_then(|(repository, old_path, base)| {
                     repository
-                        .file_diff(&path, old_path.as_deref())
+                        .file_diff(&path, old_path.as_deref(), base.as_ref())
                         .map_err(|error| error.to_string())
                 });
                 queue_message(

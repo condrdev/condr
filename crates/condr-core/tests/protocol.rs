@@ -309,6 +309,10 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
                 behind: 1,
             }),
             changes: Default::default(),
+            base: Some(condr_core::protocol::GitBaseChanges {
+                branch: "origin/main".into(),
+                changes: Default::default(),
+            }),
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];
@@ -484,6 +488,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
             linked_worktree: false,
             upstream: None,
             changes: Default::default(),
+            base: None,
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];

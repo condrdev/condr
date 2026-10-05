@@ -3,7 +3,8 @@
 //! file list never disagree, and the filesystem watcher that asks for those recomputations.
 
 use super::*;
-use condr_core::{GitChanges, GitError};
+use condr_core::protocol::GitBaseChanges;
+use condr_core::{GitBase, GitChanges, GitError};
 use notify::Watcher as _;
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,6 +15,8 @@ use std::sync::Weak;
 pub(super) struct WorkspaceGit {
     pub(super) repository: GitRepository,
     pub(super) changes: GitChanges,
+    /// The base and the working tree against it (ADR 0034).
+    pub(super) base: Option<(GitBase, GitChanges)>,
 }
 
 impl WorkspaceGit {
@@ -23,24 +26,45 @@ impl WorkspaceGit {
         Self {
             repository,
             changes: GitChanges::default(),
+            base: None,
         }
     }
 
     /// Everything the sidebar shows, computed in one pass. Runs unlocked: status walks the
-    /// whole work tree.
-    pub(super) fn scan(root: &Path) -> Result<Option<Self>, GitError> {
+    /// whole work tree. `recorded` is the Workspace's recorded base branch.
+    pub(super) fn scan(root: &Path, recorded: Option<&str>) -> Result<Option<Self>, GitError> {
         discover_repository(root)?
-            .map(Self::from_repository)
+            .map(|repository| Self::from_repository(repository, recorded))
             .transpose()
     }
 
-    /// The change list of a repository already discovered; the expensive half of `scan`.
-    pub(super) fn from_repository(repository: GitRepository) -> Result<Self, GitError> {
-        let changes = repository.changes()?;
+    /// The change lists of a repository already discovered; the expensive half of `scan`.
+    pub(super) fn from_repository(
+        repository: GitRepository,
+        recorded: Option<&str>,
+    ) -> Result<Self, GitError> {
+        // A base that cannot be resolved costs the base view, never the HEAD one.
+        let base = repository.base(recorded).unwrap_or_else(|error| {
+            tracing::warn!(
+                "cannot resolve the base of {}: {error}",
+                repository.root().display()
+            );
+            None
+        });
+        let (changes, base_changes) = repository.changes(base.as_ref())?;
         Ok(Self {
             repository,
             changes,
+            base: base.zip(base_changes),
         })
+    }
+}
+
+impl RuntimeState {
+    /// The branch Condr recorded as a Managed Worktree's base when it made the branch.
+    pub(super) fn recorded_base(&self, workspace_id: WorkspaceId) -> Option<String> {
+        let workspace = self.session.workspace(workspace_id)?;
+        workspace.worktree()?.base_branch().map(str::to_owned)
     }
 }
 
@@ -54,6 +78,10 @@ pub(super) fn workspace_git_snapshot(
         linked_worktree: git.repository.is_linked_worktree(),
         upstream: git.repository.upstream(),
         changes: git.changes.clone(),
+        base: git.base.as_ref().map(|(base, changes)| GitBaseChanges {
+            branch: base.name().to_owned(),
+            changes: changes.clone(),
+        }),
     }
 }
 
@@ -400,7 +428,14 @@ fn run_watcher(
                         watcher.as_mut(),
                         repository.git_directory().to_path_buf(),
                     );
-                    WorkspaceGit::from_repository(repository).map(Some)
+                    let Some(shared) = state.upgrade() else {
+                        return;
+                    };
+                    let recorded = shared
+                        .lock()
+                        .expect("server state lock poisoned")
+                        .recorded_base(workspace_id);
+                    WorkspaceGit::from_repository(repository, recorded.as_deref()).map(Some)
                 }
                 Err(error) => Err(error),
             };

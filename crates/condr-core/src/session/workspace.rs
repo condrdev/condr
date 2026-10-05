@@ -170,6 +170,7 @@ impl Session {
         parent_workspace_id: WorkspaceId,
         parent_root_directory: PathBuf,
         managed: bool,
+        base_branch: Option<String>,
     ) -> bool {
         if workspace_id == parent_workspace_id || parent_root_directory.as_os_str().is_empty() {
             return false;
@@ -185,6 +186,7 @@ impl Session {
             parent_workspace_id,
             parent_root_directory,
             managed,
+            base_branch,
         });
         true
     }

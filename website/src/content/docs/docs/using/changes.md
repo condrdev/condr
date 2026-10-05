@@ -17,10 +17,21 @@ The Changes view sorts modified files into three groups by Git status:
 
 Each file shows how many lines were added and deleted, and the top sums up the total number of changed lines.
 
+## Compare against HEAD or the base branch
+
+The button above the list names what the changes are compared against, such as `Against main`, and its menu switches it:
+
+- **HEAD**: only what is not committed yet. Once an Agent commits, those files drop off the list.
+- **The base branch**: the menu shows the branch name, such as `main`. The list holds everything this branch changed since it forked, committed or not, and none of the commits the base branch gained since.
+
+When Condr creates a Worktree, it records the branch the parent Workspace was on as the base branch. Other Workspaces use the remote's default branch (such as `origin/main`), then a local `main`, then `master`. When the current branch is the base branch itself or its upstream, only HEAD is available.
+
+Each Workspace remembers its own choice.
+
 ## View code diffs (Diff)
 
 1. Click any file in the **Changes** list, and a **Diff** Tab opens in the center area automatically.
-2. The page highlights exactly how the file differs from `HEAD` on the current branch.
+2. The page highlights exactly how the file differs from what you compare against, and the title bar names it, for example `Against main`.
 3. Click **Show File** in the title bar to jump straight to a preview of the file's full content.
 
 > **Tip**: For very large binary files, or any single file over 1 MiB, the detailed comparison is hidden automatically to protect performance.
