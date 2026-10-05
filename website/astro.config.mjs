@@ -54,7 +54,12 @@ export default defineConfig({
         {
           label: 'Help',
           translations: { 'zh-CN': '帮助' },
-          items: [{ slug: 'docs/help/troubleshooting' }, { slug: 'docs/help/security' }, { slug: 'docs/help/architecture' }],
+          items: [
+            { slug: 'docs/help/troubleshooting' },
+            { slug: 'docs/help/security' },
+            { slug: 'docs/help/architecture' },
+            { slug: 'docs/help/roadmap' },
+          ],
         },
       ],
     }),
