@@ -425,10 +425,8 @@ pub(super) fn launch(target: &OpenTarget, path: &Path) -> io::Result<()> {
             format!("{} does not exist", path.display()),
         ));
     }
-    let mut command = std::process::Command::new(&target.program);
+    let mut command = launch_command(target, path);
     command
-        .args(&target.args)
-        .arg(path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -444,6 +442,34 @@ pub(super) fn launch(target: &OpenTarget, path: &Path) -> io::Result<()> {
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// The program and arguments `launch` runs. Every file manager opens a file it is handed
+/// in that file's default program, so a file is shown selected in its folder instead.
+fn launch_command(target: &OpenTarget, path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(&target.program);
+    command.args(&target.args);
+    if target.icon != OpenTargetIcon::FileManager || path.is_dir() {
+        command.arg(path);
+        return command;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // Explorer parses its own command line: only the path after the comma is
+        // quoted, which std's quoting of the whole argument would break.
+        let mut select = OsString::from("/select,\"");
+        select.push(path);
+        select.push("\"");
+        command.raw_arg(select);
+    }
+    #[cfg(target_os = "macos")]
+    command.arg("-R").arg(path);
+    // ponytail: no portable "select" on Linux, so the folder opens; the FileManager1
+    // D-Bus ShowItems call selects the file where a file manager implements it.
+    #[cfg(not(any(windows, target_os = "macos")))]
+    command.arg(path.parent().unwrap_or(path));
+    command
 }
 
 /// The key a Workspace's editor choice is saved under: the repository, so every worktree
@@ -669,7 +695,7 @@ mod tests {
     // Named imports: a glob would pull in GPUI's `test` attribute over std's.
     use super::{
         CustomEditor, FILE_MANAGER_ID, InstallRoots, OpenTarget, OpenTargetIcon, Platform,
-        available_targets, launch, target,
+        available_targets, file_manager, launch, launch_command, target,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -877,6 +903,38 @@ mod tests {
         assert_eq!(targets[0].program, PathBuf::from("wezterm"));
         assert_eq!(targets[0].args, ["start", "hx"].map(OsString::from));
         assert_eq!(targets[1].program, PathBuf::from("code-insiders"));
+    }
+
+    #[test]
+    fn the_file_manager_selects_a_file_instead_of_opening_it() {
+        let sandbox = Sandbox::new("select");
+        let file = sandbox.file("src/main.rs");
+        let directory = sandbox.0.join("src");
+        let files = file_manager(Platform::current());
+        let args = |path: &std::path::Path| {
+            launch_command(&files, path)
+                .get_args()
+                .map(OsString::from)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(args(&directory), [OsString::from(&directory)]);
+        let expected = if cfg!(windows) {
+            vec![OsString::from(format!("/select,\"{}\"", file.display()))]
+        } else if cfg!(target_os = "macos") {
+            vec![OsString::from("-R"), OsString::from(&file)]
+        } else {
+            vec![OsString::from(&directory)]
+        };
+        assert_eq!(args(&file), expected);
+        // An editor still gets the file itself.
+        let editor = target("x", "X", OpenTargetIcon::Custom, PathBuf::from("x"), &[]);
+        assert_eq!(
+            launch_command(&editor, &file)
+                .get_args()
+                .collect::<Vec<_>>(),
+            [file.as_os_str()]
+        );
     }
 
     #[test]
