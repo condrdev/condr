@@ -280,7 +280,11 @@ fn every_agent_installs_exactly_its_snapshot() {
         };
         let expected_dir = snapshots.join(agent.id());
         if install(&target, agent).is_err() {
-            assert_eq!(agent, AgentKind::Kimi, "only Kimi installs nothing");
+            assert!(
+                agent.spec().hooks().is_none(),
+                "only an agent recognized only installs nothing, not {}",
+                agent.id()
+            );
             assert!(!expected_dir.exists());
             continue;
         }
