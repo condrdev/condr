@@ -654,6 +654,78 @@ fn hooks_reports_replace_their_agents_row_and_errors_clear_on_the_next_report() 
 }
 
 #[test]
+fn an_agents_note_shows_under_its_name_and_a_recognized_only_agent_says_why() {
+    use condr_core::agent_hooks::{HooksReport, HooksState};
+    use condr_core::protocol::AgentResponse;
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        super::super::super::startup::bind_keys(cx);
+    });
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            for (agent, state, note) in [
+                (AgentKind::Claude, HooksState::Installed, None),
+                (
+                    AgentKind::Kimi,
+                    HooksState::Unsupported,
+                    Some("hooks cannot tell a subagent's Stop apart"),
+                ),
+            ] {
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::AgentResult {
+                        result: Ok(AgentResponse::Hooks(HooksReport {
+                            agent,
+                            path: std::path::PathBuf::new(),
+                            state,
+                            note: note.map(str::to_owned),
+                            warning: None,
+                        })),
+                    }),
+                    cx,
+                );
+            }
+        });
+    });
+    let main_window = window.update(|window, _| window.window_handle());
+    let settings_button = window.debug_bounds("open-settings").unwrap();
+    window.simulate_click(settings_button.center(), Modifiers::default());
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    settings.update(|window, cx| _ = window.draw(cx));
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    // Agent integrations is the Server tab's fourth page.
+    settings.update(|_, cx| {
+        select_settings_server_page(&settings_view, 3, cx);
+        select_settings_tab(&settings_view, SettingsTab::Server, cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("agent-hooks-kimi-state").is_some());
+    assert!(
+        settings.debug_bounds("agent-hooks-kimi-note").is_some(),
+        "the reason shows under Kimi's name"
+    );
+    assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
+    assert!(settings.debug_bounds("agent-hooks-claude-note").is_none());
+}
+
+#[test]
 fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_the_listener() {
     use condr_core::protocol::{ServerAdminResponse, ServerMessage};
     let _serial_guard = acquire_visual_test_lock();

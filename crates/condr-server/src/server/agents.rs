@@ -384,6 +384,9 @@ impl RuntimeState {
                     ));
                 }
                 let info = self.resolve_agent(&target)?;
+                if until.is_some() {
+                    reports_state(info.agent.kind)?;
+                }
                 // An agent whose hooks are silent until its first turn is prompted blind
                 // once; from then on its state is reported.
                 let first_turn = info.agent.state == AgentState::Unknown
@@ -428,6 +431,7 @@ impl RuntimeState {
                 let deadline = deadline(timeout_ms)?;
                 validate_until(Some(&until))?;
                 let info = self.resolve_agent(&target)?;
+                reports_state(info.agent.kind)?;
                 self.add_agent_wait(
                     client_id,
                     outbound,
@@ -732,6 +736,18 @@ fn ready_states(kind: AgentKind) -> Vec<AgentState> {
         states.push(AgentState::Unknown);
     }
     states
+}
+
+/// A wait on an agent recognized only could end in nothing but its timeout: it stays
+/// `Unknown` (ADR 0035).
+fn reports_state(kind: AgentKind) -> Result<(), AgentError> {
+    if kind.spec().hooks().is_some() {
+        return Ok(());
+    }
+    Err(error(
+        "agent_reports_no_state",
+        format!("{} is recognized only and reports no state", kind.label()),
+    ))
 }
 
 fn valid_name(name: &str) -> bool {

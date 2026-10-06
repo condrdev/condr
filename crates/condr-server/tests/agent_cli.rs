@@ -40,9 +40,9 @@ impl Server {
             format!("[server.terminal]\nshell = '{shell}'\n"),
         )
         .unwrap();
-        // Two fixtures from one script: the agent slug is the executable's own name. The
+        // Fixtures from one script: the agent slug is the executable's own name. The
         // Windows fixture is this test executable copied under each name.
-        for kind in ["claude", "codex"] {
+        for kind in ["claude", "codex", "kimi"] {
             let executable = bin.join(if cfg!(windows) {
                 format!("{kind}.exe")
             } else {
@@ -234,7 +234,7 @@ fn windows_agent_fixture() {
     let Some(slug) = exe
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .filter(|stem| ["claude", "codex"].contains(stem))
+        .filter(|stem| ["claude", "codex", "kimi"].contains(stem))
         .map(str::to_owned)
     else {
         return;
@@ -654,6 +654,54 @@ fn a_codex_that_says_nothing_at_startup_is_ready_once_identified_and_takes_a_fir
         ]),
         "agent_timeout"
     );
+}
+
+#[test]
+fn a_recognized_only_agent_refuses_a_wait_at_once_but_takes_prompts() {
+    let server = Server::start();
+    let pane = server.pane();
+    // Kimi's hooks cannot report a state (ADR 0035), so it starts once identified.
+    let started = server.ok(&[
+        "agent", "start", "moon", "--kind", "kimi", "--pane", &pane, "--", "--silent",
+    ]);
+    assert_eq!(started["agent"]["agent_status"], "unknown");
+    let begun = Instant::now();
+    assert_eq!(
+        server.err(&[
+            "agent",
+            "wait",
+            "moon",
+            "--until",
+            "idle",
+            "--timeout",
+            "30000"
+        ]),
+        "agent_reports_no_state"
+    );
+    assert_eq!(
+        server.err(&[
+            "agent",
+            "prompt",
+            "moon",
+            "refused",
+            "--wait",
+            "--timeout",
+            "30000"
+        ]),
+        "agent_reports_no_state"
+    );
+    assert!(begun.elapsed() < Duration::from_secs(10), "neither waited");
+    // A prompt that does not wait is delivered, and the refused one never was.
+    server.ok(&["agent", "prompt", "moon", "delivered"]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let prompts = server.root.join("prompts");
+    while std::fs::read_to_string(&prompts).unwrap_or_default()
+        != "delivered
+"
+    {
+        assert!(Instant::now() < deadline, "{}", server.diagnostics());
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[cfg(unix)]

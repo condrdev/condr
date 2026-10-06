@@ -92,7 +92,7 @@ condr agent prompt worker "检查当前改动" --wait --timeout 120000
 condr agent wait worker --until idle --until blocked --timeout 120000
 ```
 
-`condr-core::agent_discovery` 独立于 Pane 的进程/状态检测，按 Server 当前 PATH 查找 10 种已知 agent 的原生 CLI，返回类型和可执行文件的绝对路径；命令名取自每种 Agent 规格里的 `executable`，例如 `cursor-agent` 和 `agy`。Unix 检查文件执行位，Windows 查找 `.exe` / `.cmd` / `.bat` / `.ps1`；保留 symlink/shim 路径。每次查询重新扫描，不运行 CLI、不调用 `--version`、不安装 hook，也不搜索 PATH 外的安装目录或 shell alias。通过 TCP 连接时探测的仍是目标 Server。找到文件不代表已登录或 hook 已配置。Pi、OMP、Antigravity CLI、官方 Grok Build、Cursor CLI、GitHub Copilot CLI 已有 hook 安装入口；Kimi 目前仅识别身份，hooks 显示 unavailable，原生事件无法区分主任务和子 agent 的完成。版本、配置与测试范围见 [新增 Agent hooks 调查](research/additional-agent-hooks.md)。
+`condr-core::agent_discovery` 独立于 Pane 的进程/状态检测，按 Server 当前 PATH 查找 10 种已知 agent 的原生 CLI，返回类型和可执行文件的绝对路径；命令名取自每种 Agent 规格里的 `executable`，例如 `cursor-agent` 和 `agy`。Unix 检查文件执行位，Windows 查找 `.exe` / `.cmd` / `.bat` / `.ps1`；保留 symlink/shim 路径。每次查询重新扫描，不运行 CLI、不调用 `--version`、不安装 hook，也不搜索 PATH 外的安装目录或 shell alias。通过 TCP 连接时探测的仍是目标 Server。找到文件不代表已登录或 hook 已配置。Pi、OMP、Antigravity CLI、官方 Grok Build、Cursor CLI、GitHub Copilot CLI 已有 hook 安装入口；Kimi 仅识别（ADR 0035），Settings 显示 Recognition only，原生事件无法区分主任务和子 agent 的完成。版本、配置与测试范围见 [新增 Agent hooks 调查](research/additional-agent-hooks.md)。
 
 `start` 只使用已有 Pane 的空闲 shell，保留 cwd 和环境，以探测到的绝对路径启动。支持 sh/bash/dash/zsh/ksh/mksh/csh/tcsh/fish/elvish/xonsh/nu、PowerShell 和 cmd.exe；其它 shell 报 `agent_start_failed` 并点名该 shell，可用 `[server.terminal] shell` 换一个。参数只在含特殊字符时才加引号（POSIX 单引号或 PowerShell 单引号）；Windows 上 PowerShell Pane 用 `Start-Process` 保住 argv，cmd.exe Pane 把同一段脚本以 `powershell.exe -EncodedCommand` 提交。编码后的整条启动命令最多 4094 字节，拒绝控制字符；Windows batch shim 的参数另外拒绝 shell 元字符。命令和回车一次入队，不会拆成两次 client 请求。Shell 尚在初始化时 CLI 最多重试 2 秒，只重试 Server 确认未发送输入的请求。
 
@@ -100,7 +100,7 @@ condr agent wait worker --until idle --until blocked --timeout 120000
 
 名字遵循 `[a-z][a-z0-9_-]{0,31}`，Server 内唯一；启动中即保留，GUI/CLI 断开不会释放，进程退出、Terminal 替换或 Server 重启时释放，不进入 Session Snapshot。`prompt` / `wait` 的目标是名字或数字 Pane id，不把 agent 类型当名字解析。`prompt` 只接受 idle agent；`--wait` 必须观察到提交后的状态变化，不能用提交前的 idle 立即成功。
 
-`start` 默认等待 30 秒，复用检测器的 3 秒启动宽限，确认预期类型的进程仍存活且进入 idle 才成功。Codex、Copilot 在第一轮才报启动，Cursor 恢复时不报启动，Antigravity 没有已确认的启动 hook；这些 CLI 识别为 Unknown 后也可返回，首次发送前先完成原生 CLI 的登录/初始化并确认输入框可用。blocked 返回 `agent_not_ready` 并保留名字；超时返回 `agent_timeout` 并释放尚在启动中的名字，进程继续留在 Pane 内供人工处理。启动超时范围为 `(3000, 300000]` 毫秒，普通等待范围为 `[0, 300000]`。等待登记在 Server，由检测事件和期限驱动；连接读取线程继续服务 Ping/Detach，断开取消等待，关闭 Pane 或停止 Server 会结束等待。GUI 的退出完成提示不算仍在运行的 idle agent。
+`start` 默认等待 30 秒，复用检测器的 3 秒启动宽限，确认预期类型的进程仍存活且进入 idle 才成功。Codex、Copilot 在第一轮才报启动，Cursor 恢复时不报启动，Antigravity 没有已确认的启动 hook；这些 CLI 识别为 Unknown 后也可返回，首次发送前先完成原生 CLI 的登录/初始化并确认输入框可用。blocked 返回 `agent_not_ready` 并保留名字。仅识别的 agent（Kimi）始终是 Unknown，`wait` 和 `prompt --wait` 立即返回 `agent_reports_no_state`，不登记等待；不带 `--wait` 的 `prompt` 照常发送。超时返回 `agent_timeout` 并释放尚在启动中的名字，进程继续留在 Pane 内供人工处理。启动超时范围为 `(3000, 300000]` 毫秒，普通等待范围为 `[0, 300000]`。等待登记在 Server，由检测事件和期限驱动；连接读取线程继续服务 Ping/Detach，断开取消等待，关闭 Pane 或停止 Server 会结束等待。GUI 的退出完成提示不算仍在运行的 idle agent。
 
 参考 Herdr 本地 commit `5158adab10b6dcfea9370782043392f80fa0643c` 的 `src/detect/mod.rs`、`src/integration/registry.rs`、`src/app/agents.rs` 和 `src/platform/windows.rs`；逐文件未发现额外许可证或 notice，适用 Apache-2.0。此轮协议变更仍保持开发版本号 1，更新二进制后须重启旧 Server。
 

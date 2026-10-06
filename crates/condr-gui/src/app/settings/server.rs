@@ -859,21 +859,40 @@ pub(super) fn agents_page(
         let report = reports.iter().find(|report| report.agent == agent).cloned();
         let settings = settings.clone();
         // A custom row rather than `SettingItem::new`: the title carries the agent's
-        // mark, which the standard title slot cannot.
+        // mark, which the standard title slot cannot. The note under it says what the
+        // agent's hooks cannot report, or why it is recognized only (ADR 0035).
         group = group.item(
             SettingItem::render(move |_, _, cx| {
+                let note = report.as_ref().and_then(|report| report.note.clone());
                 h_flex()
                     .w_full()
                     .items_center()
                     .gap_4()
                     .child(
-                        h_flex()
+                        v_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap_2()
-                            .items_center()
-                            .child(super::sidebar::agent_mark(agent, cx.theme().foreground).small())
-                            .child(agent.label()),
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        super::sidebar::agent_mark(agent, cx.theme().foreground)
+                                            .small(),
+                                    )
+                                    .child(agent.label()),
+                            )
+                            .when_some(note, |this, note| {
+                                this.child(
+                                    div()
+                                        .debug_selector(move || {
+                                            format!("agent-hooks-{}-note", agent.id())
+                                        })
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(note),
+                                )
+                            }),
                     )
                     .child(agent_hooks_field(&settings, agent, report.as_ref(), cx))
             })
@@ -899,7 +918,7 @@ pub(super) fn agent_hooks_field(
         Some(HooksState::Installed) => ("Installed", cx.theme().success),
         Some(HooksState::Outdated) => ("Outdated", cx.theme().warning),
         Some(HooksState::Missing) => ("Not installed", cx.theme().muted_foreground),
-        Some(HooksState::Unsupported) => ("Unavailable", cx.theme().muted_foreground),
+        Some(HooksState::Unsupported) => ("Recognition only", cx.theme().muted_foreground),
         None => ("Checking…", cx.theme().muted_foreground),
     };
     let install_label = if state == Some(HooksState::Outdated) {
