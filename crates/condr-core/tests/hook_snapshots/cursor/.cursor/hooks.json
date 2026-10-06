@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "condr agent-hook cursor session-start",
+        "timeout": 5
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "condr agent-hook cursor prompt-submit",
+        "timeout": 5
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "condr agent-hook cursor tool-start",
+        "timeout": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "condr agent-hook cursor tool-complete",
+        "timeout": 5
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "condr agent-hook cursor tool-complete",
+        "timeout": 5
+      }
+    ],
+    "stop": [
+      {
+        "command": "condr agent-hook cursor stop",
+        "timeout": 5
+      }
+    ]
+  }
+}

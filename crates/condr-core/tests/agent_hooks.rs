@@ -237,6 +237,76 @@ fn the_opencode_plugin_is_an_owned_file_that_never_replaces_a_foreign_one() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// Every file under `root`, by its `/`-separated path below it, with CRLF read as LF: a
+/// Windows checkout with `core.autocrlf` gives the embedded plugin templates CRLF, which
+/// is the checkout's doing, not the installer's.
+fn files_under(root: &Path) -> std::collections::BTreeMap<String, String> {
+    fn walk(root: &Path, dir: &Path, files: &mut std::collections::BTreeMap<String, String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(root, &path, files);
+            } else {
+                let relative = path.strip_prefix(root).unwrap().components();
+                let key = relative
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let text = std::fs::read_to_string(&path).unwrap();
+                files.insert(key, text.replace("\r\n", "\n"));
+            }
+        }
+    }
+    let mut files = std::collections::BTreeMap::new();
+    walk(root, root, &mut files);
+    files
+}
+
+/// Every file each agent's installation writes, compared with `tests/hook_snapshots/`.
+/// Settings reports `Installed` only for exactly what this `condr` would write, so any
+/// drift would show every existing installation as `Outdated`; a change here has to be
+/// meant. `CONDR_UPDATE_SNAPSHOTS=1` rewrites the snapshots. A bare `condr` keeps them
+/// alike on every platform: Windows adds `& ` only before a quoted path, which
+/// `quoted_hook_paths_follow_the_cli_shell` covers.
+#[test]
+fn every_agent_installs_exactly_its_snapshot() {
+    let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hook_snapshots");
+    let update = std::env::var_os("CONDR_UPDATE_SNAPSHOTS").is_some();
+    for agent in AgentKind::ALL {
+        let (target, root) = target();
+        let target = HookTarget {
+            command: "condr".into(),
+            ..target
+        };
+        let expected_dir = snapshots.join(agent.id());
+        if install(&target, agent).is_err() {
+            assert_eq!(agent, AgentKind::Kimi, "only Kimi installs nothing");
+            assert!(!expected_dir.exists());
+            continue;
+        }
+        let written = files_under(&root);
+        assert!(!written.is_empty(), "{} wrote nothing", agent.id());
+        if update {
+            let _ = std::fs::remove_dir_all(&expected_dir);
+            for (path, text) in &written {
+                let file = expected_dir.join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, text).unwrap();
+            }
+        }
+        assert_eq!(
+            written,
+            files_under(&expected_dir),
+            "{} installs something other than its snapshot; rerun with CONDR_UPDATE_SNAPSHOTS=1 if that is meant",
+            agent.id()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_symlinked_settings_file_is_written_through_and_an_unchanged_one_is_left_alone() {

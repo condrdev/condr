@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "session-start"
+        ],
+        "timeoutSec": 5
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "prompt-submit"
+        ],
+        "timeoutSec": 5
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "tool-start"
+        ],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "tool-complete"
+        ],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "tool-complete"
+        ],
+        "timeoutSec": 5
+      }
+    ],
+    "notification": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "permission-request"
+        ],
+        "timeoutSec": 5,
+        "matcher": "permission_prompt|elicitation_dialog"
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "exec": "condr",
+        "args": [
+          "agent-hook",
+          "copilot",
+          "stop"
+        ],
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
