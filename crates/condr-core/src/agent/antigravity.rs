@@ -15,6 +15,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--conversation", "{id}"],
     // Its documented contract has no session start.
     reports_at_startup: false,
+    reads_kitty_keys: false,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::Plugin { events: HOOKS },
         dir: |target: &HookTarget| target.home.join(".gemini/antigravity-cli"),

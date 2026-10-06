@@ -14,6 +14,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     packages: &["@oh-my-pi/pi-coding-agent"],
     resume: &["--session", "{id}"],
     reports_at_startup: true,
+    reads_kitty_keys: false,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::Script {
             template: super::pi::EXTENSION,

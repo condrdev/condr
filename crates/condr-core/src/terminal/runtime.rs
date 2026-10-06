@@ -19,6 +19,9 @@ pub struct TerminalRuntime {
     updates: Option<mpsc::Receiver<TerminalUpdate>>,
     input: TerminalInput,
     reported_mouse_press: Mutex<Option<ReportedMousePress>>,
+    /// Whether the program reads kitty key reports unasked; the Server sets it from the
+    /// detected agent.
+    reads_kitty_keys: AtomicBool,
     resize: Arc<ResizeControl>,
     child: SharedChild,
     process_shutdown: ProcessShutdownState,
@@ -289,6 +292,7 @@ impl TerminalRuntime {
             updates: Some(updates),
             input,
             reported_mouse_press: Mutex::new(None),
+            reads_kitty_keys: AtomicBool::new(false),
             resize,
             child,
             process_shutdown: ProcessShutdownState::default(),
@@ -322,10 +326,15 @@ impl TerminalRuntime {
             TerminalModifiers::default(),
             TerminalKeyEventKind::Press,
             modes,
+            false,
         )?;
         self.scroll_to_bottom();
         self.clear_selection();
         self.input.try_submit(bytes, enter)
+    }
+
+    pub fn set_reads_kitty_keys(&self, reads: bool) {
+        self.reads_kitty_keys.store(reads, Ordering::Relaxed);
     }
 
     fn clear_selection(&self) {
@@ -390,7 +399,13 @@ impl TerminalRuntime {
                         });
                     }
                 } else {
-                    let bytes = encode_key_in_mode(&key, modifiers, kind, modes)?;
+                    let bytes = encode_key_in_mode(
+                        &key,
+                        modifiers,
+                        kind,
+                        modes,
+                        self.reads_kitty_keys.load(Ordering::Relaxed),
+                    )?;
                     // Letting go of a key is not input: it neither scrolls to the bottom
                     // nor clears the selection. A key that encodes to nothing (an
                     // unreported release, Cmd without kitty) does nothing at all.

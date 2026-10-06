@@ -14,6 +14,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     packages: &["@anthropic-ai/claude-code"],
     resume: &["--resume", "{id}"],
     reports_at_startup: true,
+    reads_kitty_keys: true,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::NestedMap {
             events: HOOKS,

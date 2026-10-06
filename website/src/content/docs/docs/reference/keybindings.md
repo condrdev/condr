@@ -80,7 +80,7 @@ Every key combination not declared on this page passes through to the child proc
 ### Pass-through rules
 
 * **Selection lifetime**: copying clears the current selection highlight.
-* **`Cmd + C` with nothing selected on macOS**: passes through to the foreground process. An interactive program that enabled the kitty keyboard protocol (such as Claude Code) captures it and copies its own selection; the shell and other programs receive nothing.
+* **`Cmd + C` with nothing selected on macOS**: passes through to the foreground program. Supported programs, such as Claude Code, copy their own selection, while the shell and other programs receive nothing. On a Windows Device, `Cmd + C` reaches Claude Code too, as long as Condr has recognized it in the Pane.
 * **Conflicts on Windows**:
   * `Ctrl + C` with nothing selected passes through to the foreground application, usually to interrupt the current command.
   * `Ctrl + V` is always intercepted by Condr to paste, and the raw key is never sent to the child process.

@@ -14,6 +14,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["--resume", "{id}"],
     // A resumed session reports no start.
     reports_at_startup: false,
+    reads_kitty_keys: false,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::FlatList {
             events: HOOKS,

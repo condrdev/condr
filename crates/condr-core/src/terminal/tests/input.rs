@@ -390,7 +390,8 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
     ];
     for (key, modifiers, modes, expected) in cases {
         assert_eq!(
-            encode_key_in_mode(key, *modifiers, TerminalKeyEventKind::Press, *modes).unwrap(),
+            encode_key_in_mode(key, *modifiers, TerminalKeyEventKind::Press, *modes, false)
+                .unwrap(),
             *expected,
             "{key:?} {modifiers:?} {modes:?}"
         );
@@ -445,7 +446,7 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
     ];
     for (key, modifiers, kind, modes, expected) in event_cases {
         assert_eq!(
-            encode_key_in_mode(key, *modifiers, *kind, *modes).unwrap(),
+            encode_key_in_mode(key, *modifiers, *kind, *modes, false).unwrap(),
             *expected,
             "{key:?} {modifiers:?} {kind:?} {modes:?}"
         );
@@ -454,6 +455,46 @@ fn kitty_keyboard_protocol_follows_the_negotiated_flags() {
     assert_eq!(encode_text_in_mode("a", disambiguate), b"a");
     assert_eq!(encode_text_in_mode("A", all), b"\x1b[97:65;2;65u");
     assert_eq!(encode_text_in_mode("ab", all), b"ab");
+}
+
+#[test]
+fn cmd_c_reaches_a_program_that_reads_kitty_keys_unasked() {
+    use TerminalKeyEventKind::{Press, Release};
+    let ch = |text: &str| TerminalKey::Character(text.into());
+    let platform = TerminalModifiers {
+        platform: true,
+        ..TerminalModifiers::default()
+    };
+    let control = TerminalModifiers {
+        control: true,
+        ..TerminalModifiers::default()
+    };
+    let cmd_shift = TerminalModifiers {
+        shift: true,
+        ..platform
+    };
+    let legacy = TermMode::empty();
+    let encode = |key: &str, modifiers, kind, modes, reads| {
+        encode_key_in_mode(&ch(key), modifiers, kind, modes, reads).unwrap()
+    };
+    assert_eq!(encode("c", platform, Press, legacy, true), b"\x1b[99;9u");
+    assert_eq!(encode("c", platform, Press, legacy, false), b"");
+    // Only Cmd+C changes: other Cmd chords still send nothing, Ctrl+C stays ETX, a
+    // release stays nothing, and negotiated flags keep their own encoding.
+    assert_eq!(encode("x", platform, Press, legacy, true), b"");
+    assert_eq!(encode("c", cmd_shift, Press, legacy, true), b"");
+    assert_eq!(encode("c", control, Press, legacy, true), b"\x03");
+    assert_eq!(encode("c", platform, Release, legacy, true), b"");
+    assert_eq!(
+        encode(
+            "c",
+            platform,
+            Press,
+            TermMode::DISAMBIGUATE_ESC_CODES | TermMode::REPORT_EVENT_TYPES,
+            true
+        ),
+        b"\x1b[99;9:1u"
+    );
 }
 
 #[test]

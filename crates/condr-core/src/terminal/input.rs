@@ -12,13 +12,28 @@ pub(super) fn encode_paste(text: &str, bracketed: bool) -> Vec<u8> {
 
 /// Encodes a key event for the live terminal modes: the kitty keyboard protocol when
 /// the application negotiated it, otherwise the legacy xterm sequences. Without kitty
-/// event types a repeat is another press and a release is nothing.
+/// event types a repeat is another press and a release is nothing. A program that
+/// `reads_kitty_keys` unasked gets Cmd+C in kitty form anyway, since the legacy encoding
+/// would drop it.
 pub(super) fn encode_key_in_mode(
     key: &TerminalKey,
     modifiers: TerminalModifiers,
     kind: TerminalKeyEventKind,
     modes: TermMode,
+    reads_kitty_keys: bool,
 ) -> io::Result<Vec<u8>> {
+    let cmd_c = modifiers
+        == TerminalModifiers {
+            platform: true,
+            ..TerminalModifiers::default()
+        }
+        && matches!(key, TerminalKey::Character(text) if text == "c");
+    let modes = if cmd_c && reads_kitty_keys && !modes.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL)
+    {
+        modes | TermMode::DISAMBIGUATE_ESC_CODES
+    } else {
+        modes
+    };
     if let Some(bytes) = encode_kitty_key(key, modifiers, kind, modes) {
         return Ok(bytes);
     }

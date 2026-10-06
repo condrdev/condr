@@ -13,6 +13,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     packages: &["opencode-ai"],
     resume: &["--session", "{id}"],
     reports_at_startup: true,
+    reads_kitty_keys: false,
     support: AgentSupport::Full(HookSpec {
         // OpenCode's TUI owns the selected conversation; backend events may belong to
         // other roots or subagents. The plugin reads the current route and its native

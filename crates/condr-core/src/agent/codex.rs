@@ -14,6 +14,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     resume: &["resume", "{id}"],
     // SessionStart waits for the first prompt.
     reports_at_startup: false,
+    reads_kitty_keys: false,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::NestedMap {
             events: HOOKS,

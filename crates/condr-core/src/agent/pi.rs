@@ -19,6 +19,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     ],
     resume: &["--session", "{id}"],
     reports_at_startup: true,
+    reads_kitty_keys: false,
     support: AgentSupport::Full(HookSpec {
         format: HookFormat::Script {
             template: EXTENSION,

@@ -54,6 +54,13 @@ pub struct AgentSpec {
     /// Whether its hooks report before the first turn. One that does not is ready once
     /// its process is identified, and its first prompt goes in blind.
     pub reports_at_startup: bool,
+    /// Whether it reads kitty keyboard reports it never negotiated. On a Windows Server
+    /// such an agent still receives Cmd+C, which has no legacy encoding, when its probe
+    /// for the protocol failed: under ConPTY, conhost answers the probe's closing DA1
+    /// before Condr answers `CSI ? u`. The process table cannot tell when an editor the
+    /// agent started has the terminal, so that editor receives the report too; set it
+    /// only for an agent seen to decode one.
+    pub reads_kitty_keys: bool,
     pub support: AgentSupport,
 }
 
@@ -89,6 +96,7 @@ const OTHER: AgentSpec = AgentSpec {
     packages: &[],
     resume: &[],
     reports_at_startup: false,
+    reads_kitty_keys: false,
     support: AgentSupport::RecognitionOnly("this build does not know that agent"),
 };
 

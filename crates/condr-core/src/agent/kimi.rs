@@ -12,6 +12,7 @@ pub(super) const SPEC: AgentSpec = AgentSpec {
     packages: &[],
     resume: &["--session", "{id}"],
     reports_at_startup: false,
+    reads_kitty_keys: false,
     support: AgentSupport::RecognitionOnly(
         "Kimi 1.50 hooks cannot distinguish a subagent's Stop from the main agent's Stop; status integration is unavailable until native hooks identify their agent",
     ),

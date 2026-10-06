@@ -336,6 +336,16 @@ pub(super) fn apply_agent_refresh(
             state.agents.remove(&pane_id);
         }
     }
+    // Only ConPTY loses the agent's kitty probe. Elsewhere the agent negotiates, and no
+    // kitty mode means it handed the terminal to something else, such as its editor.
+    if let Some(terminal) = state.terminals.get(&pane_id) {
+        terminal.set_reads_kitty_keys(
+            cfg!(windows)
+                && next
+                    .as_ref()
+                    .is_some_and(|agent| agent.kind.spec().reads_kitty_keys),
+        );
+    }
     state.publish_background(SessionEvent::AgentChanged {
         pane_id,
         agent: next,
