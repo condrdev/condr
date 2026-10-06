@@ -9,13 +9,13 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 
 ## Next
 
-### 1. Search in the terminal
+### 1. More officially supported Agent CLIs
+
+Condr will officially support more of the common Agent CLIs. Settings and the docs will show how far each Agent is supported. A fully supported Agent shows Working and Idle reliably. A recognition-only Agent shows its icon in the sidebar but no state. If a CLI you use is not on the list yet, open an Issue or a pull request.
+
+### 2. Search in the terminal
 
 Search the current Pane's terminal, including what has scrolled off screen, with matches highlighted and scrolled into view.
-
-### 2. Agent Profiles
-
-The Agent CLIs Condr supports today are all built in. You will be able to describe another Agent CLI in a configuration entry, with its executable name, the arguments that start and resume a session, and its icon, and Condr will recognise and launch it like a built-in Agent. State still comes only from hooks: if the CLI has a hook mechanism, configure it to call `condr agent-hook` as the docs describe and its state shows; a CLI without hooks shows Unknown.
 
 ### 3. Mobile apps (iOS and Android)
 
@@ -40,6 +40,7 @@ Creating, merging and reviewing PRs stay with the Agent and `gh`.
 These are under consideration but need more real use cases before they are scheduled. If you need one of them, describe your use case in an Issue.
 
 - **Jump from a Diff Tab to your editor**: open the current file in an external editor straight from the Diff Tab.
+- **Start an Agent from the GUI**: list the Agents installed on a Device and start one in a Pane with a click.
 - **Scheduled tasks**: start an Agent on a schedule, or send a running Agent a prompt at set times.
 - **Port forwarding for TCP and Peer-to-peer Devices**: extend item 4's forwarding to Devices not connected over SSH.
 
@@ -51,7 +52,6 @@ These will happen, but after everything above, and each waits for its own trigge
 
 | Item | Starts when |
 | :--- | :--- |
-| A plugin SDK and an Agent Profile marketplace | The community starts contributing third-party Agent integrations or workflows |
 | Team collaboration and permissions | Several people really need to share one Server |
 | An editor | Reviewing changes often calls for quick code edits, and Open in cannot open a remote Device's files in a local editor |
 | A built-in browser | Once port forwarding ships, switching between the system browser and Condr is still a frequent annoyance |
@@ -63,3 +63,4 @@ These will happen, but after everything above, and each waits for its own trigge
 
 - **A web client**: Condr is a native app and does not move its control surface into a browser. Peer-to-peer connections and the mobile apps cover working away from your computer.
 - **A chat interface of its own**: Condr orchestrates native Agent CLIs. It does not rebuild the conversation loop or tie itself to one model vendor, and leaves the prompt box, model choice and voice to each CLI.
+- **Custom Agents**: Condr integrates only the Agent CLIs it officially supports, and offers no way to add another CLI through configuration or a plugin, because a CLI's state can only be trusted through a hook integration written and tested for it. To get a new CLI supported, open an Issue or a pull request.
