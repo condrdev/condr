@@ -191,8 +191,13 @@ impl AgentDetector {
     /// shows is dropped: it belongs to a nested or forged reporter, not to this Pane's
     /// agent. An event arriving while the table shows a foreground job Condr cannot
     /// name (`mise exec -- claude`, a wrapper script) names the agent instead; a bare
-    /// shell (`ShellOnly`) has no agent to name, and the event is dropped.
+    /// shell (`ShellOnly`) has no agent to name, and the event is dropped. So is every
+    /// event from an agent recognized only, whose hooks the person may have configured by
+    /// hand: they cannot report a state worth trusting, so it stays `Unknown` (ADR 0035).
     pub fn observe_event(&mut self, event: &AgentEvent) -> AgentPublish {
+        if event.agent.spec().hooks().is_none() {
+            return AgentPublish::Nothing;
+        }
         if self.agent.is_none() && self.last_probe == Some(ProcessProbeResult::Unidentified) {
             self.agent = Some(event.agent);
             self.seeded = true;

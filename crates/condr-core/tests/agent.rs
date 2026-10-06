@@ -348,6 +348,27 @@ fn a_blocked_agent_says_what_it_waits_for_until_it_moves_on() {
 }
 
 #[test]
+fn a_recognized_only_agent_stays_unknown_whatever_its_hooks_report() {
+    let mut detector = AgentDetector::new();
+    let now = Instant::now();
+    // Hooks configured by hand cannot tell a subagent's Stop from Kimi's own (ADR 0035).
+    let event = |kind| AgentEvent::new(AgentKind::Kimi, kind, None, Some("root".into()));
+    // Behind a launcher Condr cannot name, its events do not name it either.
+    detector.observe_process(ProcessProbeResult::Unidentified, now);
+    assert_eq!(
+        detector.observe_event(&event(AgentEventKind::Stop)),
+        AgentPublish::Nothing
+    );
+    assert_eq!(detector.agent(), None);
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Kimi), now);
+    for kind in [AgentEventKind::PromptSubmit, AgentEventKind::Stop] {
+        assert_eq!(detector.observe_event(&event(kind)), AgentPublish::Nothing);
+    }
+    assert_eq!(detector.agent(), Some(AgentKind::Kimi));
+    assert_eq!(detector.resume(), Some(None), "no session ID to resume");
+}
+
+#[test]
 fn events_only_count_for_the_agent_the_process_table_shows() {
     let mut detector = AgentDetector::new();
     let now = Instant::now();
