@@ -5,6 +5,24 @@ description: Use command-line Agents in Condr and see what state each one is in.
 
 When several Agents work on your code at the same time, the key to keeping the work flowing is knowing whether each command-line Agent (such as Claude Code or Codex) has finished its task in the background or is waiting for your approval. Condr gives you clear state monitoring and notifications.
 
+## Support levels
+
+Condr supports only the Agents it ships an integration for, in two levels. The level depends on what the Agent's Hooks can report. If a CLI you use is not on the list yet, open an [Issue](https://github.com/condrdev/condr/issues) or a pull request.
+
+### Fully supported
+
+A fully supported Agent's Hooks report a turn starting and the main Agent's turn ending, told apart from a subagent's, so its Working and Idle states can be trusted. Claude Code, Codex, OpenCode, Pi, Oh My Pi, Antigravity CLI, Grok Build, Cursor CLI and GitHub Copilot CLI are fully supported.
+
+Cursor CLI's and Antigravity CLI's Hooks have no event for a permission prompt, so they do not show Blocked while waiting for approval. Antigravity CLI still shows Blocked when it asks you a question.
+
+### Recognition only
+
+Condr recognizes a recognition-only Agent from its process: the sidebar shows its icon, the icon goes away when the process exits, and `condr agent start` can launch it. Its Hooks cannot report a state worth trusting, so Condr installs none and its state stays Unknown. Without a session ID from a Hook, its conversation is not resumed after a Server restart.
+
+`condr agent wait` and `condr agent prompt --wait` refuse a recognition-only Agent at once with `agent_reports_no_state` instead of waiting out their timeout. `condr agent prompt` without `--wait` still delivers the prompt.
+
+Kimi Code is the only one so far, because its Hooks cannot tell a subagent's Stop from the main Agent's. **Settings › Device › Agent integrations** shows it as Recognition only, with that reason.
+
 ## Prepare and check Agents
 
 Before you run an Agent in Condr, make sure the Condr Server can find the matching command-line tool.

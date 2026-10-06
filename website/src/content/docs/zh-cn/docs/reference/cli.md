@@ -268,10 +268,12 @@ condr agent wait <目标> [--until <状态>] [--timeout <毫秒>]
 
 *支持的种类 (`--kind`)*：`claude`、`codex`、`opencode`、`pi`、`omp`、`antigravity`、`grok`、`cursor`、`copilot`、`kimi`。
 
+`kimi` 仅识别，它的状态始终是 Unknown，因此 `agent wait` 和 `agent prompt --wait` 会立即以 `agent_reports_no_state` 拒绝它，见[支持级别](/zh-cn/docs/using/agents/#支持级别)。
+
 #### Hook 集成
 
 ```bash
-# 查看特定 Agent 的状态探测钩子：installed / outdated / missing / unsupported
+# 查看特定 Agent 的状态探测钩子：installed / outdated / missing / unsupported（仅识别的 Agent）
 condr agent hooks status <种类>
 
 # 为指定 Agent 自动配置或清理环境集成钩子；只修改本机配置

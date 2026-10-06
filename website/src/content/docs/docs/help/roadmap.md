@@ -11,7 +11,7 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 
 ### 1. More officially supported Agent CLIs
 
-Condr will officially support more of the common Agent CLIs. Settings and the docs will show how far each Agent is supported. A fully supported Agent shows Working and Idle reliably. A recognition-only Agent shows its icon in the sidebar but no state. If a CLI you use is not on the list yet, open an Issue or a pull request.
+Condr will officially support more of the common Agent CLIs, each marked fully supported or recognition only by its [support level](/docs/using/agents/#support-levels). If a CLI you use is not on the list yet, open an Issue or a pull request.
 
 ### 2. Search in the terminal
 

@@ -11,7 +11,7 @@ Condr 0.1 正处于公开预览阶段。本页列出后续准备开发的功能�
 
 ### 1. 更多官方支持的 Agent CLI
 
-Condr 将官方支持更多常见的 Agent CLI。设置页和文档会标明每个 Agent 的支持程度。完整支持的 Agent 能可靠显示 Working 和 Idle 状态。仅识别的 Agent 只在侧栏显示图标，不显示状态。如果你常用的 CLI 还不在列表中，欢迎提交 Issue 或 PR。
+Condr 将官方支持更多常见的 Agent CLI，每个 Agent 都按[支持级别](/zh-cn/docs/using/agents/#支持级别)标明完整支持还是仅识别。如果你常用的 CLI 还不在列表中，欢迎提交 Issue 或 PR。
 
 ### 2. 终端内搜索
 

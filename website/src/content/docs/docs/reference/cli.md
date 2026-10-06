@@ -268,10 +268,12 @@ condr agent wait <target> [--until <state>] [--timeout <ms>]
 
 *Supported kinds (`--kind`)*: `claude`, `codex`, `opencode`, `pi`, `omp`, `antigravity`, `grok`, `cursor`, `copilot`, `kimi`.
 
+`kimi` is recognition only and its state stays Unknown, so `agent wait` and `agent prompt --wait` refuse it at once with `agent_reports_no_state` (see [Support levels](/docs/using/agents/#support-levels)).
+
 #### Hook integration
 
 ```bash
-# View a given Agent's state-reporting hooks: installed / outdated / missing / unsupported
+# View a given Agent's state-reporting hooks: installed / outdated / missing / unsupported (recognition only)
 condr agent hooks status <kind>
 
 # Automatically configure or clean up the integration hooks for the given Agent; edits this machine only

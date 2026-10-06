@@ -5,6 +5,24 @@ description: 在 Condr 中使用并查看命令行 Agent 的运行状态。
 
 在多 Agent 并发协同开发时，了解各个命令行 Agent（如 Claude Code、Codex 等）是否在后台完成任务或正在等待授权是保持高效流程的关键。Condr 提供了直观的状态监控与通知机制。
 
+## 支持级别
+
+Condr 只支持官方集成的 Agent，分为两级。级别取决于 Agent 的 Hook 能报告什么。如果你常用的 CLI 还不在列表中，欢迎提交 [Issue](https://github.com/condrdev/condr/issues) 或 PR。
+
+### 完整支持
+
+完整支持的 Agent 的 Hook 能报告一轮开始，也能报告主 Agent 一轮结束，并且与子 Agent 的结束区分开，因此 Working 和 Idle 状态可信。Claude Code、Codex、OpenCode、Pi、Oh My Pi、Antigravity CLI、Grok Build、Cursor CLI 和 GitHub Copilot CLI 属于这一级。
+
+Cursor CLI 和 Antigravity CLI 的 Hook 没有等待权限的事件，因此等待授权时不会显示 Blocked。Antigravity CLI 向你提问时仍会显示 Blocked。
+
+### 仅识别
+
+仅识别的 Agent 能被 Condr 从进程中认出：侧栏显示它的图标，进程退出后图标消失，`condr agent start` 也能启动它。它的 Hook 无法报告可信的状态，因此 Condr 不为它安装 Hook，它的状态始终是 Unknown。由于没有 Hook 提供会话 ID，Server 重启后不会恢复它的会话。
+
+`condr agent wait` 和 `condr agent prompt --wait` 会立即以 `agent_reports_no_state` 拒绝仅识别的 Agent，不会等到超时。不带 `--wait` 的 `condr agent prompt` 照常发送。
+
+目前只有 Kimi Code 属于这一级，原因是它的 Hook 无法区分子 Agent 和主 Agent 的 Stop。**Settings › Device › Agent integrations** 中它显示为 Recognition only，并附上这个原因。
+
 ## 准备与检查 Agent
 
 在 Condr 中运行 Agent 前，需要确认 Condr 服务端能够识别对应的命令行工具。
