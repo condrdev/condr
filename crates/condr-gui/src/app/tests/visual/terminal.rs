@@ -715,6 +715,10 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         window.read(|app| view.read(app).selection_for(1, pane_id).is_some()),
         "a rejected Copy must preserve the selection"
     );
+    assert!(
+        window.update(|window, cx| window.notifications(cx).is_empty()),
+        "a rejected Copy must not claim to have copied"
+    );
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
@@ -729,10 +733,62 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
             .and_then(|item| item.text())
             .is_some_and(|text| text == word)
     }));
+    assert!(
+        wait_until_event_driven(window, |window| {
+            window.update(|window, cx| !window.notifications(cx).is_empty())
+        }),
+        "a copy that reached the clipboard says so"
+    );
     // A successful copy ends the selection, the Server-tracked one included.
     assert!(wait_until_event_driven(window, |window| {
         window.read(|app| view.read(app).selection_for(1, pane_id).is_none())
     }));
+}
+
+#[test]
+fn a_program_copying_says_so_and_clearing_the_clipboard_does_not() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let pane_id = crate::app::tests::pane_id();
+    let osc52 = |text: &str, window: &mut VisualTestContext| {
+        window.update(|_, cx| {
+            view.update(cx, |this, cx| {
+                let generation = this.connection(1).unwrap().connect_generation;
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::TerminalClipboard {
+                        pane_id,
+                        text: text.into(),
+                    }),
+                    cx,
+                );
+            });
+        });
+        window.run_until_parked();
+    };
+    let notes =
+        |window: &mut VisualTestContext| window.update(|window, cx| window.notifications(cx).len());
+
+    window.write_to_clipboard(ClipboardItem::new_string("before".into()));
+    osc52("", window);
+    assert_ne!(
+        window.read_from_clipboard().and_then(|item| item.text()),
+        Some("before".into()),
+        "a clear still reaches the clipboard"
+    );
+    assert_eq!(notes(window), 0, "a clear is not a copy");
+
+    osc52("from a program", window);
+    assert_eq!(
+        window.read_from_clipboard().and_then(|item| item.text()),
+        Some("from a program".into())
+    );
+    assert_eq!(notes(window), 1);
+    osc52("again", window);
+    assert_eq!(notes(window), 1, "repeated copies replace one note");
 }
 
 #[test]

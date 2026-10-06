@@ -135,13 +135,8 @@ impl Render for TerminalPanel {
                     });
                 let terminal = app.terminal(self.connection_key, self.pane_id).cloned();
                 let pane_title = connection
-                    .and_then(|connection| connection.terminal_titles.get(&self.pane_id).cloned())
+                    .and_then(|connection| connection.pane_title(self.pane_id))
                     .map(SharedString::from)
-                    .or_else(|| {
-                        connection
-                            .and_then(|connection| connection.agents.get(&self.pane_id))
-                            .map(|agent| SharedString::from(agent.kind.label()))
-                    })
                     .unwrap_or_else(|| SharedString::from("Terminal"));
                 (
                     terminal,

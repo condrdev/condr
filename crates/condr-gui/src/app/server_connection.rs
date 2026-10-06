@@ -264,6 +264,15 @@ impl ServerConnection {
         Session::restore(self.snapshot.clone()).ok()
     }
 
+    /// What a Pane is called: the title its program set, else its agent's name.
+    pub(super) fn pane_title(&self, pane_id: PaneId) -> Option<String> {
+        self.terminal_titles.get(&pane_id).cloned().or_else(|| {
+            self.agents
+                .get(&pane_id)
+                .map(|agent| agent.kind.label().to_owned())
+        })
+    }
+
     /// The Workspace this Client shows: its choice while that exists, else the first.
     pub(super) fn viewed_workspace_id(&self, session: &Session) -> Option<WorkspaceId> {
         self.view_workspace
