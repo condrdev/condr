@@ -99,9 +99,9 @@ Agent 状态变更完全依赖 Hook 上报机制。请按序核验以下环节�
 
 ## Pane 中找不到 Agent
 
-* **Server 进程的 PATH 继承源**：Condr 依赖 Server 自身的 PATH 检索系统中的 Agent，该变量由拉起 Server 的父进程传递。在 macOS 系统下，若直接通过 Dock 或 Finder 启动 GUI，由此派生启动的 Server 仅包含操作系统预置的默认 PATH 集合。可执行 `condr agent available` 打印 Server 实际可感知的 Agent 列表。
-* **PATH 作用域修正策略**：在 PATH 已包含该 Agent 的外部终端中执行 `condr server restart`，随后窗口将重新接入该 Server 实例。或选择将目标 Agent 的可执行文件软链/安装至系统全局标准路径（如 `/usr/local/bin`）。
-* **Pane 内 Shell 类型的配置文件差异**：macOS 默认的 zsh 会话仅加载 `~/.zshenv` 与 `~/.zshrc`，跳过 `~/.zprofile`；Linux 默认的非登录 bash 会话仅读取 `~/.bashrc`。配置于 `~/.zprofile` 或 `~/.profile` 内的 PATH 变更不会在 Pane 内部会话生效。
+* **Server 的环境从哪来**：从 Dock、Finder 或桌面菜单打开 Condr 时，它会在启动时读取一次登录 shell 的环境，所以它启动的 Server 和你的终端看到的 PATH 相同。在终端里用 `condr server start` 启动的 Server 则使用该终端的环境。执行 `condr agent available` 可列出 Server 能找到的 Agent。
+* **安装 Agent 或修改 PATH 之后**：Server 会沿用启动时的环境。请在已能看到改动的终端中执行 `condr server restart`。
+* **登录 shell 启动较慢时**：Condr 最多等待 5 秒，超时后沿用启动时的原始环境，并在 GUI 日志中记录。
 
 ---
 

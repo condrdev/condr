@@ -293,8 +293,15 @@ fn install_bundled_cli() -> io::Result<()> {
 }
 
 pub(crate) fn run() {
+    // First, while this is the only thread: the Server inherits what this adopts.
+    #[cfg(unix)]
+    let login_environment = super::login_environment::adopt();
     // Both held until `run` returns, which is when the GUI exits.
     let _log_guard = condr_server::logging::init("condr-gui");
+    #[cfg(unix)]
+    if let Err(error) = login_environment {
+        tracing::warn!("kept the launch environment, not the login shell's: {error}");
+    }
     if let Err(error) = install_bundled_cli() {
         tracing::warn!(
             "the bundled condr was not installed, so the Server starts from the bundle: {error}"

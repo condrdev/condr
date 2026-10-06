@@ -99,9 +99,9 @@ Agent state comes entirely from hooks. Check these in order:
 
 ## A Pane cannot find the Agent
 
-* **Where the Server's PATH comes from**: Condr looks up Agents on the Server's own PATH, inherited from the process that started the Server. On macOS, if you open the window from the Dock or Finder, the Server it starts has only the system's default PATH. Run `condr agent available` to list the Agents the Server can actually see.
-* **Fixing the PATH**: run `condr server restart` in a terminal outside Condr whose PATH already includes the Agent; the window then reconnects to that Server. Alternatively, link or install the Agent into a standard system directory such as `/usr/local/bin`.
-* **Which files the Pane's shell reads**: zsh on macOS loads only `~/.zshenv` and `~/.zshrc` and skips `~/.zprofile`; the non-login bash on Linux reads only `~/.bashrc`. PATH changes in `~/.zprofile` or `~/.profile` do not take effect inside a Pane.
+* **Where the Server's environment comes from**: when you open Condr from the Dock, Finder or a desktop menu, it reads your login shell's environment once at launch, so the Server it starts sees the same PATH as your terminal. A Server started with `condr server start` in a terminal uses that terminal's environment. Run `condr agent available` to list the Agents the Server can see.
+* **After installing an Agent or changing PATH**: the Server keeps the environment it started with. Run `condr server restart` in a terminal that already sees the change.
+* **If your login shell is slow**: Condr waits at most 5 seconds for it; past that, it keeps the bare launch environment and notes this in the GUI log.
 
 ---
 

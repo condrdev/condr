@@ -11,6 +11,8 @@ pub(crate) mod file_icons;
 mod files;
 mod gui_state;
 mod ime;
+#[cfg(unix)]
+mod login_environment;
 mod navigation;
 mod notifications;
 mod open_in;
