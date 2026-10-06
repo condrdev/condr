@@ -204,7 +204,7 @@ impl AgentDetector {
         if agent != event.agent {
             return AgentPublish::Nothing;
         }
-        if agent == AgentKind::Grok {
+        if agent.spec().hooks().is_some_and(|hooks| hooks.prompt_ids) {
             match event.event {
                 AgentEventKind::SessionStart => self.prompt_id = None,
                 AgentEventKind::PromptSubmit => self.prompt_id = event.prompt_id.clone(),

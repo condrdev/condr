@@ -135,11 +135,7 @@ fn a_broken_or_oversized_settings_file_is_never_overwritten() {
     assert!(install(&target, AgentKind::Claude).is_err());
 
     // Whitespace-only counts as absent; an install creates the directory too.
-    let fresh = root.join("fresh/.claude/settings.json");
-    let target = HookTarget {
-        claude_dir: fresh.parent().unwrap().to_path_buf(),
-        ..target
-    };
+    let target = HookTarget::in_home(&root.join("fresh"), target.command);
     install(&target, AgentKind::Claude).unwrap();
     assert_eq!(
         state(&target, AgentKind::Claude).unwrap(),
@@ -158,9 +154,10 @@ fn the_opencode_plugin_is_an_owned_file_that_never_replaces_a_foreign_one() {
         HooksState::Missing
     );
 
-    std::fs::create_dir_all(&target.opencode_dir).unwrap();
-    let config = target.opencode_dir.join("tui.json");
-    let jsonc = target.opencode_dir.join("tui.jsonc");
+    let dir = path.parent().unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    let config = dir.join("tui.json");
+    let jsonc = dir.join("tui.jsonc");
     let original_jsonc = "{ // user's settings\n  \"theme\": \"custom\"\n}\n";
     std::fs::write(&config, r#"{"plugin":["another-plugin"],"scroll_speed":4}"#).unwrap();
     std::fs::write(&jsonc, original_jsonc).unwrap();

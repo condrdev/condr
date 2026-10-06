@@ -4,10 +4,20 @@
 //! Condr never classifies the screen. Until an agent reports, it is [`AgentState::Unknown`],
 //! and it stays that way rather than being guessed at.
 
+mod antigravity;
+mod claude;
+mod codex;
+mod copilot;
+mod cursor;
 mod detector;
 mod event;
+mod grok;
 pub mod hook;
 pub mod hooks;
+mod kimi;
+mod omp;
+mod opencode;
+mod pi;
 mod process;
 
 use process::{normalized_lookup_name, path_basename};
@@ -18,6 +28,69 @@ pub use detector::{AgentDetector, AgentPublish, ProcessProbeResult};
 pub use event::{AGENT_EVENT_OSC_PREFIX, AgentEvent, AgentEventKind};
 pub(crate) use process::is_shell;
 pub use process::{ProcessInfo, identify_agent_among, identify_agent_process};
+
+/// Everything Condr knows about one supported agent CLI (ADR 0035). Each agent's module
+/// holds its one `SPEC`; no field has a default, so an agent added without a thought for
+/// one does not compile.
+#[derive(Debug)]
+pub struct AgentSpec {
+    /// The canonical id: the CLI `--kind` value and the hook slug.
+    pub id: &'static str,
+    /// What the GUI shows for the agent.
+    pub label: &'static str,
+    /// Its mark's file under the repository's `assets/agents/`.
+    pub mark: &'static str,
+    /// The colour its published mark carries; `None` follows the surrounding text.
+    pub brand_color: Option<u32>,
+    /// The interactive command Condr looks for on PATH and launches.
+    pub executable: &'static str,
+    /// Other names its process goes by, besides its id and executable.
+    pub aliases: &'static [&'static str],
+    /// The npm packages its node entry point lives under, for launchers that run
+    /// `node .../node_modules/<package>/...` without the agent's name in argv.
+    pub packages: &'static [&'static str],
+    /// The arguments that reopen a conversation, `{id}` standing for its session ID.
+    pub resume: &'static [&'static str],
+    /// Whether its hooks report before the first turn. One that does not is ready once
+    /// its process is identified, and its first prompt goes in blind.
+    pub reports_at_startup: bool,
+    pub support: AgentSupport,
+}
+
+impl AgentSpec {
+    /// Its hook integration; `None` for an agent recognized only.
+    pub fn hooks(&self) -> Option<&hooks::HookSpec> {
+        match &self.support {
+            AgentSupport::Full(hooks) => Some(hooks),
+            AgentSupport::RecognitionOnly(_) => None,
+        }
+    }
+}
+
+/// How far Condr supports an agent (ADR 0035).
+#[derive(Debug)]
+pub enum AgentSupport {
+    /// Its hooks report a turn starting and the main agent's turn ending, so its
+    /// `Working` and `Idle` can be trusted.
+    Full(hooks::HookSpec),
+    /// The process table names it, but its hooks cannot report a state worth trusting,
+    /// so none are installed and it stays `Unknown`. Carries the reason.
+    RecognitionOnly(&'static str),
+}
+
+/// A kind this build does not know (ADR 0028): nothing detects, launches or resumes it.
+const OTHER: AgentSpec = AgentSpec {
+    id: "other",
+    label: "Agent",
+    mark: "",
+    brand_color: None,
+    executable: "",
+    aliases: &[],
+    packages: &[],
+    resume: &[],
+    reports_at_startup: false,
+    support: AgentSupport::RecognitionOnly("this build does not know that agent"),
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -33,7 +106,8 @@ pub enum AgentKind {
     Copilot,
     Kimi,
     /// A kind a newer Server reported that this build does not know (ADR 0028): shown as
-    /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`].
+    /// a generic agent. Nothing detects or launches it, so it is not in [`Self::ALL`]. It
+    /// stays last, which the spec table's test relies on.
     Other,
 }
 
@@ -51,87 +125,40 @@ impl AgentKind {
         Self::Kimi,
     ];
 
+    /// The one `match` on the kind: everything else asks its spec.
+    pub const fn spec(self) -> &'static AgentSpec {
+        match self {
+            Self::Claude => &claude::SPEC,
+            Self::Codex => &codex::SPEC,
+            Self::OpenCode => &opencode::SPEC,
+            Self::Pi => &pi::SPEC,
+            Self::Omp => &omp::SPEC,
+            Self::Antigravity => &antigravity::SPEC,
+            Self::Grok => &grok::SPEC,
+            Self::Cursor => &cursor::SPEC,
+            Self::Copilot => &copilot::SPEC,
+            Self::Kimi => &kimi::SPEC,
+            Self::Other => &OTHER,
+        }
+    }
+
     /// The canonical id: the CLI `--kind` value and the hook slug.
     pub const fn id(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::OpenCode => "opencode",
-            Self::Pi => "pi",
-            Self::Omp => "omp",
-            Self::Antigravity => "antigravity",
-            Self::Grok => "grok",
-            Self::Cursor => "cursor",
-            Self::Copilot => "copilot",
-            Self::Kimi => "kimi",
-            Self::Other => "other",
-        }
+        self.spec().id
     }
 
     /// What the GUI shows for the agent.
     pub const fn label(self) -> &'static str {
-        match self {
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-            Self::OpenCode => "OpenCode",
-            Self::Pi => "Pi",
-            Self::Omp => "Oh My Pi",
-            Self::Antigravity => "Antigravity CLI",
-            Self::Grok => "Grok Build",
-            Self::Cursor => "Cursor CLI",
-            Self::Copilot => "GitHub Copilot",
-            Self::Kimi => "Kimi Code",
-            Self::Other => "Agent",
-        }
-    }
-
-    /// Whether native hooks report before the first turn. Codex and Copilot defer
-    /// SessionStart until prompted; Cursor omits it on resume; Antigravity has none
-    /// in its documented contract. Kimi has no reliable status adapter yet.
-    pub const fn reports_at_startup(self) -> bool {
-        !matches!(
-            self,
-            Self::Codex
-                | Self::Copilot
-                | Self::Cursor
-                | Self::Antigravity
-                | Self::Kimi
-                | Self::Other
-        )
+        self.spec().label
     }
 
     /// Resolves a program name, alias or path to an agent.
     pub fn parse_label(value: &str) -> Option<Self> {
-        match normalized_lookup_name(path_basename(value)).as_str() {
-            "claude" | "claude-code" => Some(Self::Claude),
-            "codex" => Some(Self::Codex),
-            "opencode" => Some(Self::OpenCode),
-            "pi" => Some(Self::Pi),
-            "omp" | "oh-my-pi" => Some(Self::Omp),
-            "agy" | "antigravity" => Some(Self::Antigravity),
-            "grok" | "grok-build" => Some(Self::Grok),
-            "cursor" | "cursor-agent" => Some(Self::Cursor),
-            "copilot" | "github-copilot" => Some(Self::Copilot),
-            "kimi" | "kimi-code" => Some(Self::Kimi),
-            _ => None,
-        }
-    }
-
-    /// The npm package the agent's node entry point lives under, for launchers that
-    /// run `node .../node_modules/<package>/...` without the agent's name in argv.
-    const fn package_paths(self) -> &'static [&'static str] {
-        match self {
-            Self::Claude => &["@anthropic-ai/claude-code"],
-            Self::Codex => &["@openai/codex"],
-            Self::OpenCode => &["opencode-ai"],
-            Self::Pi => &[
-                "@earendil-works/pi-coding-agent",
-                "@mariozechner/pi-coding-agent",
-            ],
-            Self::Omp => &["@oh-my-pi/pi-coding-agent"],
-            Self::Copilot => &["@github/copilot"],
-            Self::Antigravity | Self::Grok | Self::Cursor | Self::Kimi | Self::Other => &[],
-        }
+        let name = normalized_lookup_name(path_basename(value));
+        Self::ALL.into_iter().find(|kind| {
+            let spec = kind.spec();
+            name == spec.id || name == spec.executable || spec.aliases.contains(&name.as_str())
+        })
     }
 }
 
@@ -230,21 +257,12 @@ pub struct AgentResume {
 
 impl AgentResume {
     pub fn args(&self) -> Vec<String> {
-        if self.kind == AgentKind::Copilot {
-            return vec![format!("--resume={}", self.session_id)];
-        }
-        let flag = match self.kind {
-            AgentKind::Claude => "--resume",
-            AgentKind::Codex => "resume",
-            AgentKind::OpenCode => "--session",
-            AgentKind::Pi | AgentKind::Omp | AgentKind::Kimi => "--session",
-            AgentKind::Antigravity => "--conversation",
-            AgentKind::Grok | AgentKind::Cursor => "--resume",
-            AgentKind::Copilot => unreachable!("handled above"),
-            // The wire drops a resume for a kind this build does not know (ADR 0028).
-            AgentKind::Other => return Vec::new(),
-        };
-        vec![flag.into(), self.session_id.clone()]
+        self.kind
+            .spec()
+            .resume
+            .iter()
+            .map(|arg| arg.replace("{id}", &self.session_id))
+            .collect()
     }
 }
 
@@ -256,4 +274,37 @@ pub(crate) fn valid_session_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ALL` lists every kind but `Other`, in declaration order, and each spec names its
+    /// kind back and has a mark the GUI can draw.
+    #[test]
+    fn every_kind_has_a_spec_that_names_it() {
+        assert_eq!(AgentKind::ALL.len(), AgentKind::Other as usize);
+        let marks = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/agents");
+        let mut ids = std::collections::BTreeSet::new();
+        for (index, kind) in AgentKind::ALL.into_iter().enumerate() {
+            assert_eq!(kind as usize, index, "{kind:?} is out of order in ALL");
+            let spec = kind.spec();
+            assert!(ids.insert(spec.id), "{} names two kinds", spec.id);
+            for name in [spec.id, spec.executable].iter().chain(spec.aliases) {
+                assert_eq!(AgentKind::parse_label(name), Some(kind), "{name}");
+            }
+            assert!(marks.join(spec.mark).is_file(), "{} has no mark", spec.id);
+            assert_eq!(
+                spec.resume
+                    .iter()
+                    .filter(|arg| arg.contains("{id}"))
+                    .count(),
+                1,
+                "{} resumes without its session ID",
+                spec.id
+            );
+        }
+        assert_eq!(AgentKind::parse_label("other"), None);
+    }
 }

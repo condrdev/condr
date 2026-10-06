@@ -30,10 +30,9 @@ pub fn run(agent: &str, event: &str) -> bool {
     else {
         return false;
     };
-    if agent == AgentKind::Antigravity {
-        // Antigravity expects a JSON response even from a passive hook. The empty
-        // object changes no permissions; the status still travels only over OSC.
-        let _ = writeln!(std::io::stdout().lock(), "{{}}");
+    if let Some(reply) = agent.spec().hooks().and_then(|hooks| hooks.reply) {
+        // The status still travels only over OSC.
+        let _ = writeln!(std::io::stdout().lock(), "{reply}");
     }
     if std::env::var_os(crate::PaneEnvironment::ENV).is_none_or(|value| value != "1") {
         return false;
@@ -69,15 +68,16 @@ pub fn run(agent: &str, event: &str) -> bool {
         .is_ok()
 }
 
+/// What one hook invocation's JSON says, as far as Condr reads it.
 #[derive(Default)]
-struct HookInput {
+pub(super) struct HookInput {
     source: Option<String>,
     session_id: Option<String>,
     tool_name: Option<String>,
     subagent: bool,
-    initial_prompt: bool,
+    pub(super) initial_prompt: bool,
     prompt_id: Option<String>,
-    fully_idle: Option<bool>,
+    pub(super) fully_idle: Option<bool>,
     /// A ready-made detail from Condr's own OpenCode/Pi plugins.
     detail: Option<String>,
     /// The question a question tool asks.
@@ -114,30 +114,29 @@ impl HookInput {
         super::event::bound_detail(&raw)
     }
 
+    /// The event `agent`'s hooks report this invocation as, or none: a subagent's events
+    /// are not the Pane's.
     fn event(&self, agent: AgentKind, event: AgentEventKind) -> Option<AgentEventKind> {
-        if self.subagent
-            || (agent == AgentKind::Antigravity
-                && event == AgentEventKind::Stop
-                && self.fully_idle != Some(true))
-        {
+        if self.subagent {
             return None;
         }
-        Some(match event {
-            // Copilot may report sessionStart after its first prompt was submitted.
-            AgentEventKind::SessionStart if agent == AgentKind::Copilot && self.initial_prompt => {
-                AgentEventKind::PromptSubmit
-            }
-            AgentEventKind::ToolStart
-                if matches!(
-                    (agent, self.tool_name.as_deref()),
-                    (AgentKind::Claude, Some("AskUserQuestion"))
-                        | (AgentKind::Antigravity, Some("ask_question"))
-                ) =>
+        let Some(hooks) = agent.spec().hooks() else {
+            return Some(event);
+        };
+        let event = match hooks.adjust {
+            Some(adjust) => adjust(self, event)?,
+            None => event,
+        };
+        Some(
+            if event == AgentEventKind::ToolStart
+                && hooks.question_tool.is_some()
+                && self.tool_name.as_deref() == hooks.question_tool
             {
                 AgentEventKind::QuestionAsked
-            }
-            other => other,
-        })
+            } else {
+                event
+            },
+        )
     }
 
     /// Reads stdin to the end, parsing only its head.

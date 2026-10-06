@@ -1,35 +1,116 @@
 //! Installing Condr's hooks into an agent CLI's own configuration (ADR 0014).
 //!
-//! Every hook runs `condr agent-hook <agent> <event>`. Agents whose hooks live in a JSON
-//! map (`{"hooks": {"<Event>": [{"matcher": …, "hooks": [{"type": "command", …}]}]}}`)
-//! get Condr's entries merged in beside the user's, recognizable by the command they run,
-//! so they can be reported, refreshed and removed without touching anything else. OpenCode
-//! takes a plugin instead: a file Condr owns outright in its plugin directory, bridging
-//! OpenCode's event stream onto the same command.
+//! Every hook runs `condr agent-hook <agent> <event>`. Each fully supported agent's spec
+//! names one of four formats (ADR 0035), and this module is the code they share. A JSON
+//! hook map or flat list gets Condr's entries merged in beside the user's, recognizable by
+//! the command they run, so they can be reported, refreshed and removed without touching
+//! anything else. A plugin or a script is a file Condr owns outright.
 
-use super::{AgentEventKind, AgentKind};
+use super::hook::HookInput;
+use super::{AgentEventKind, AgentKind, AgentSupport};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// How one agent's hooks are written, and what its hook invocations need that only its
+/// own input says (ADR 0035).
+#[derive(Debug)]
+pub struct HookSpec {
+    pub(super) format: HookFormat,
+    /// The CLI's configuration directory on `target`'s machine.
+    pub(super) dir: fn(&HookTarget) -> PathBuf,
+    /// The file Condr's hooks live in, under `dir`.
+    pub(super) file: &'static str,
+    /// The tool whose start is the agent asking the person a question.
+    pub(super) question_tool: Option<&'static str>,
+    /// Renames or drops a native event for what only this agent's input says.
+    pub(super) adjust: Option<fn(&HookInput, AgentEventKind) -> Option<AgentEventKind>>,
+    /// Whether each event names the turn it belongs to, so a late event from an earlier
+    /// turn is dropped.
+    pub(super) prompt_ids: bool,
+    /// What the hook must print on stdout for the agent to accept it.
+    pub(super) reply: Option<&'static str>,
+    /// A step after writing the hooks without which the CLI ignores them; its error
+    /// becomes the report's warning.
+    pub(super) enable: Option<fn() -> Result<(), String>>,
+    /// Standing advice Settings shows.
+    pub(super) note: Option<&'static str>,
+}
+
+/// The four ways Condr writes an agent's hooks.
+#[derive(Debug)]
+pub(super) enum HookFormat {
+    /// `{"hooks": {"<Event>": [{"hooks": [{"type": "command", …}], "matcher": …}]}}`,
+    /// merged beside the person's own entries. `shell` runs the command on Windows.
+    NestedMap {
+        events: &'static [HookEntry],
+        shell: HookShell,
+    },
+    /// The same events as a plugin Condr owns, `{"condr": {"<Event>": […]}}` beside its
+    /// `plugin.json` manifest: an entry with a matcher is a group, one without a bare
+    /// command.
+    Plugin { events: &'static [HookEntry] },
+    /// A flat list of command entries under `"version": 1`, merged beside the person's
+    /// own. `exec` writes the executable and its arguments apart instead of a command line.
+    FlatList {
+        events: &'static [HookEntry],
+        exec: bool,
+    },
+    /// A script Condr owns outright, from a template that may name
+    /// `__CONDR_EXECUTABLE__`, `__CONDR_AGENT__` and `__CONDR_AGENT_MARKER__`. `registry`
+    /// is the JSON file in the configuration directory whose `plugin` list must name it.
+    Script {
+        template: &'static str,
+        registry: Option<&'static str>,
+    },
+}
+
+/// What runs a nested map's command line on Windows, which decides whether a quoted path
+/// needs PowerShell's call operator. The shells behind the other formats (Antigravity's
+/// cmd, Cursor's) run a quoted path as it is.
+#[derive(Debug)]
+pub(super) enum HookShell {
+    /// Git Bash or cmd.
+    Plain,
+    PowerShell,
+    /// PowerShell, unless this environment variable selects Git Bash or cmd.
+    PowerShellUnless(&'static str),
+}
+
+/// One native hook event and what it reports as.
+#[derive(Debug)]
+pub(super) struct HookEntry {
+    pub(super) native: &'static str,
+    pub(super) event: AgentEventKind,
+    /// The native matcher, for events that would otherwise report things that do not
+    /// block the user.
+    pub(super) matcher: Option<&'static str>,
+    /// Seconds the agent waits for the hook; it finishes in milliseconds.
+    pub(super) timeout_secs: u64,
+}
+
+pub(super) const fn entry(native: &'static str, event: AgentEventKind) -> HookEntry {
+    HookEntry {
+        native,
+        event,
+        matcher: None,
+        timeout_secs: HOOK_TIMEOUT_SECS,
+    }
+}
+
+/// Seconds Claude Code and Codex wait for the hook by default; it finishes in milliseconds.
+pub(super) const HOOK_TIMEOUT_SECS: u64 = 5;
+const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
+
 /// Where and how hooks are installed on one machine.
 #[derive(Clone, Debug)]
 pub struct HookTarget {
-    /// Claude Code's configuration directory (`CLAUDE_CONFIG_DIR` or `~/.claude`).
-    pub claude_dir: PathBuf,
-    /// Codex's configuration directory (`CODEX_HOME` or `~/.codex`).
-    pub codex_dir: PathBuf,
-    /// OpenCode's global configuration directory (`$XDG_CONFIG_HOME/opencode` or
-    /// `~/.config/opencode`, on every platform).
-    pub opencode_dir: PathBuf,
-    pub pi_dir: PathBuf,
-    pub omp_dir: PathBuf,
-    pub antigravity_dir: PathBuf,
-    pub grok_dir: PathBuf,
-    pub cursor_dir: PathBuf,
-    pub copilot_dir: PathBuf,
-    pub kimi_dir: PathBuf,
+    /// The home directory each CLI keeps its configuration under by default.
+    pub home: PathBuf,
+    /// Whether the environment variables that move a CLI's configuration apply, as they
+    /// do on this machine; an isolated installation under `home` ignores them.
+    pub env: bool,
     /// How a hook command names this `condr`: a bare name when PATH resolves it, otherwise
     /// the quoted absolute path.
     pub command: String,
@@ -39,16 +120,8 @@ impl HookTarget {
     /// Default locations under a home directory, also used for isolated installations.
     pub fn in_home(home: &Path, command: String) -> Self {
         Self {
-            claude_dir: home.join(".claude"),
-            codex_dir: home.join(".codex"),
-            opencode_dir: home.join(".config/opencode"),
-            pi_dir: home.join(".pi/agent"),
-            omp_dir: home.join(".omp/agent"),
-            antigravity_dir: home.join(".gemini/antigravity-cli"),
-            grok_dir: home.join(".grok"),
-            cursor_dir: home.join(".cursor"),
-            copilot_dir: home.join(".copilot"),
-            kimi_dir: home.join(".kimi"),
+            home: home.to_path_buf(),
+            env: false,
             command,
         }
     }
@@ -57,55 +130,33 @@ impl HookTarget {
     pub fn local() -> Option<Self> {
         let home = dirs::home_dir()?;
         let exe = std::env::current_exe().ok()?;
-        // OMP joins PI_CONFIG_DIR to home, even when it starts with a separator.
-        let mut omp_root = home.as_os_str().to_os_string();
-        omp_root.push(std::path::MAIN_SEPARATOR_STR);
-        omp_root.push(env_dir("PI_CONFIG_DIR", PathBuf::from(".omp")));
         Some(Self {
-            claude_dir: std::env::var_os("CLAUDE_CONFIG_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".claude")),
-            codex_dir: std::env::var_os("CODEX_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".codex")),
-            opencode_dir: std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|dir| !dir.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".config"))
-                .join("opencode"),
-            pi_dir: env_dir("PI_CODING_AGENT_DIR", home.join(".pi/agent")),
-            omp_dir: env_dir("PI_CODING_AGENT_DIR", PathBuf::from(omp_root).join("agent")),
-            grok_dir: env_dir("GROK_HOME", home.join(".grok")),
-            cursor_dir: env_dir(
-                "CURSOR_CONFIG_DIR",
-                std::env::var_os("XDG_CONFIG_HOME")
-                    .filter(|value| !value.is_empty())
-                    .map(PathBuf::from)
-                    .map_or_else(|| home.join(".cursor"), |dir| dir.join("cursor")),
-            ),
-            copilot_dir: env_dir("COPILOT_HOME", home.join(".copilot")),
-            kimi_dir: env_dir("KIMI_SHARE_DIR", home.join(".kimi")),
+            env: true,
             ..Self::in_home(&home, command_name(&exe))
         })
     }
 
-    /// The file Condr's hooks for `agent` live in.
+    /// An environment variable naming a directory, when it applies and is not empty.
+    pub(super) fn var(&self, name: &str) -> Option<PathBuf> {
+        self.env
+            .then(|| std::env::var_os(name))
+            .flatten()
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// `$name`, else `relative` under the home directory.
+    pub(super) fn env_dir(&self, name: &str, relative: &str) -> PathBuf {
+        self.var(name).unwrap_or_else(|| self.home.join(relative))
+    }
+
+    /// The file Condr's hooks for `agent` live in; empty for an agent recognized only,
+    /// which installs nothing.
     pub fn path(&self, agent: AgentKind) -> PathBuf {
-        match agent {
-            AgentKind::Claude => self.claude_dir.join("settings.json"),
-            AgentKind::Codex => self.codex_dir.join("hooks.json"),
-            AgentKind::OpenCode => self.opencode_dir.join("condr-tui.js"),
-            AgentKind::Pi => self.pi_dir.join("extensions/condr-pi.ts"),
-            AgentKind::Omp => self.omp_dir.join("extensions/condr-omp.ts"),
-            AgentKind::Antigravity => self.antigravity_dir.join("plugins/condr/hooks.json"),
-            AgentKind::Grok => self.grok_dir.join("hooks/condr.json"),
-            AgentKind::Cursor => self.cursor_dir.join("hooks.json"),
-            AgentKind::Copilot => self.copilot_dir.join("hooks/condr.json"),
-            AgentKind::Kimi => self.kimi_dir.join("config.toml"),
-            // Commands never carry `Other`: the wire refuses it (ADR 0028), and `run`
-            // turns it away before asking for a path.
-            AgentKind::Other => unreachable!("no hooks exist for an unknown agent"),
-        }
+        agent
+            .spec()
+            .hooks()
+            .map_or_else(PathBuf::new, |hooks| (hooks.dir)(self).join(hooks.file))
     }
 
     /// The executable as a single shell word, for a runtime that does its own quoting.
@@ -113,33 +164,34 @@ impl HookTarget {
         self.command.trim_matches('"')
     }
 
-    fn hook_command(&self, agent: AgentKind, event: AgentEventKind) -> String {
-        self.hook_command_for_shell(
-            agent,
-            event,
-            cfg!(windows),
-            std::env::var("GROK_SHELL").ok().as_deref(),
-        )
+    fn hook_command(&self, agent: AgentKind, event: AgentEventKind, shell: &HookShell) -> String {
+        let choice = match shell {
+            HookShell::PowerShellUnless(name) => std::env::var(name).ok(),
+            _ => None,
+        };
+        self.hook_command_for_shell(agent, event, shell, cfg!(windows), choice.as_deref())
     }
 
+    /// `choice` is the value of the variable a `PowerShellUnless` shell names.
     fn hook_command_for_shell(
         &self,
         agent: AgentKind,
         event: AgentEventKind,
+        shell: &HookShell,
         windows: bool,
-        grok_shell: Option<&str>,
+        choice: Option<&str>,
     ) -> String {
-        // PowerShell needs the call operator before a quoted path. Grok defaults
-        // to PowerShell on Windows, but also lets users select Git Bash or cmd.
-        // Claude's Git Bash and Antigravity's cmd must keep the plain form.
-        let powershell = agent == AgentKind::Codex
-            || (agent == AgentKind::Grok
-                && !matches!(
-                    grok_shell
-                        .map(|shell| shell.trim().to_ascii_lowercase())
-                        .as_deref(),
-                    Some("bash" | "gitbash" | "git-bash" | "cmd" | "cmd.exe")
-                ));
+        // PowerShell needs the call operator before a quoted path.
+        let powershell = match shell {
+            HookShell::Plain => false,
+            HookShell::PowerShell => true,
+            HookShell::PowerShellUnless(_) => !matches!(
+                choice
+                    .map(|shell| shell.trim().to_ascii_lowercase())
+                    .as_deref(),
+                Some("bash" | "gitbash" | "git-bash" | "cmd" | "cmd.exe")
+            ),
+        };
         let call = if windows && powershell && self.command.starts_with('"') {
             "& "
         } else {
@@ -152,13 +204,6 @@ impl HookTarget {
             event.name()
         )
     }
-}
-
-fn env_dir(name: &str, fallback: PathBuf) -> PathBuf {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or(fallback)
 }
 
 /// `condr` if that is what PATH resolves `exe` to, so the hook survives a moved install
@@ -186,7 +231,8 @@ pub enum HooksState {
     /// Condr hooks are present, but not the ones this `condr` would install.
     Outdated,
     Missing,
-    /// The native CLI cannot yet report a reliable main-agent state.
+    /// The agent is recognized only (ADR 0035): its hooks cannot report a state worth
+    /// trusting, so none are installed.
     Unsupported,
 }
 
@@ -210,8 +256,8 @@ pub enum HooksAction {
 }
 
 /// What one action left behind: the file the hooks live in and its state afterwards.
-/// `note` is standing advice for the agent; `warning` is a step the install could not
-/// finish on the user's behalf.
+/// `note` is standing advice for the agent, or why it is recognized only; `warning` is a
+/// step the install could not finish on the user's behalf.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HooksReport {
     pub agent: AgentKind,
@@ -221,25 +267,16 @@ pub struct HooksReport {
     pub warning: Option<String>,
 }
 
-const CODEX_NOTE: &str = "Codex runs hooks only with the hooks feature enabled and, unless managed, after they are trusted from /hooks inside Codex";
-const KIMI_NOTE: &str = "Kimi 1.50 hooks cannot distinguish a subagent's Stop from the main agent's Stop; status integration is unavailable until native hooks identify their agent";
-
 /// Performs `action` for `agent` on this machine and reports the resulting state. The
 /// CLI runs it locally; the Server runs it for a GUI, whose hooks files live where the
 /// agents run.
 pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Result<HooksReport> {
-    if agent == AgentKind::Other {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "this build does not know that agent",
-        ));
-    }
     let mut warning = None;
     let path = match action {
         HooksAction::Install => {
             let path = install(target, agent)?;
-            if agent == AgentKind::Codex {
-                warning = enable_codex_hooks().err();
+            if let Some(enable) = agent.spec().hooks().and_then(|hooks| hooks.enable) {
+                warning = enable().err();
             }
             path
         }
@@ -250,252 +287,182 @@ pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Re
         agent,
         path,
         state: state(target, agent)?,
-        note: match agent {
-            AgentKind::Codex => Some(CODEX_NOTE),
-            AgentKind::Pi => Some("Requires Pi 0.85.1 or newer for settled and UI prompt events"),
-            AgentKind::Omp => Some("Requires Oh My Pi 18.1.17 or newer; install into each profile's agent directory when using named profiles"),
-            AgentKind::Kimi => Some(KIMI_NOTE),
-            AgentKind::Cursor => Some("Cursor hooks report activity and completion, but expose no event for a permission prompt"),
-            AgentKind::Antigravity => Some("Enable the condr plugin in Antigravity CLI; hooks expose no permission-wait event, and startup stays Unknown until the first invocation"),
-            AgentKind::Grok => Some("Grok Stop hooks can request continuation; completion may appear early when other Stop hooks block. Native idle notifications repair missed completion reports"),
-            AgentKind::Copilot => Some("Copilot can omit its completion hook after an API error; status may stay Working until the next completion or process exit"),
-            _ => None,
-        }.map(str::to_owned),
+        note: match &agent.spec().support {
+            AgentSupport::Full(hooks) => hooks.note,
+            AgentSupport::RecognitionOnly(reason) => Some(*reason),
+        }
+        .map(str::to_owned),
         warning,
     })
 }
 
-/// Codex ignores hooks.json until its hooks feature is on; the user can also set
-/// `[features] hooks = true` in config.toml by hand, which the error text says.
-fn enable_codex_hooks() -> Result<(), String> {
-    // Discovery also finds `codex.cmd`, which a bare `Command::new("codex")` cannot on
-    // Windows.
-    let codex = crate::agent_discovery::discover()
-        .into_iter()
-        .find(|found| found.kind == AgentKind::Codex)
-        .map_or_else(
-            || AgentKind::Codex.executable().into(),
-            |found| found.executable,
-        );
-    let hint = "set [features] hooks = true in Codex's config.toml";
-    match std::process::Command::new(codex)
-        .args(["features", "enable", "hooks"])
-        .stdin(std::process::Stdio::null())
-        .output()
-    {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => Err(format!(
-            "codex features enable hooks failed ({}): {}; {hint}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )),
-        Err(error) => Err(format!(
-            "could not run codex to enable hooks: {error}; {hint}"
-        )),
-    }
-}
-
-/// One native hook event and what it reports as.
-struct HookEntry {
-    native: &'static str,
-    event: AgentEventKind,
-    /// The native matcher, for events that would otherwise report things that do not
-    /// block the user.
-    matcher: Option<&'static str>,
-    /// Seconds the agent waits for the hook; it finishes in milliseconds.
-    timeout_secs: u64,
-}
-
-const fn entry(native: &'static str, event: AgentEventKind) -> HookEntry {
-    HookEntry {
-        native,
-        event,
-        matcher: None,
-        timeout_secs: HOOK_TIMEOUT_SECS,
-    }
-}
-
-/// Claude Code. `Notification` is narrowed to the kinds that wait on the user; a user
-/// interrupt fires nothing, which ADR 0014 accepts.
-const CLAUDE_HOOKS: &[HookEntry] = &[
-    entry("SessionStart", AgentEventKind::SessionStart),
-    entry("UserPromptSubmit", AgentEventKind::PromptSubmit),
-    entry("PermissionRequest", AgentEventKind::PermissionRequest),
-    HookEntry {
-        native: "Notification",
-        event: AgentEventKind::PermissionRequest,
-        matcher: Some("permission_prompt|elicitation_dialog"),
-        timeout_secs: HOOK_TIMEOUT_SECS,
-    },
-    entry("PreToolUse", AgentEventKind::ToolStart),
-    entry("PostToolUse", AgentEventKind::ToolComplete),
-    entry("Stop", AgentEventKind::Stop),
-    entry("StopFailure", AgentEventKind::StopFailure),
-];
-
-/// Codex. Hooks must be enabled (`codex features enable hooks`) and, unless managed,
-/// trusted from `/hooks` inside Codex before they run.
-const CODEX_HOOKS: &[HookEntry] = &[
-    entry("SessionStart", AgentEventKind::SessionStart),
-    entry("UserPromptSubmit", AgentEventKind::PromptSubmit),
-    entry("PermissionRequest", AgentEventKind::PermissionRequest),
-    entry("PreToolUse", AgentEventKind::ToolStart),
-    entry("PostToolUse", AgentEventKind::ToolComplete),
-    entry("Stop", AgentEventKind::Stop),
-    // Codex clamps Interrupt hooks to 3 s and warns in the TUI about anything longer.
-    HookEntry {
-        native: "Interrupt",
-        event: AgentEventKind::Interrupt,
-        matcher: None,
-        timeout_secs: 3,
-    },
-];
-
-const GROK_HOOKS: &[HookEntry] = &[
-    entry("SessionStart", AgentEventKind::SessionStart),
-    entry("UserPromptSubmit", AgentEventKind::PromptSubmit),
-    entry("PreToolUse", AgentEventKind::ToolStart),
-    entry("PostToolUse", AgentEventKind::ToolComplete),
-    entry("PostToolUseFailure", AgentEventKind::ToolComplete),
-    HookEntry {
-        native: "Notification",
-        event: AgentEventKind::PermissionRequest,
-        matcher: Some("permission_prompt"),
-        timeout_secs: HOOK_TIMEOUT_SECS,
-    },
-    HookEntry {
-        native: "Notification",
-        event: AgentEventKind::Stop,
-        matcher: Some("idle_prompt"),
-        timeout_secs: HOOK_TIMEOUT_SECS,
-    },
-    entry("Stop", AgentEventKind::Stop),
-    entry("StopFailure", AgentEventKind::StopFailure),
-    entry("StopCancelled", AgentEventKind::Interrupt),
-];
-
-const CURSOR_HOOKS: &[HookEntry] = &[
-    entry("sessionStart", AgentEventKind::SessionStart),
-    entry("beforeSubmitPrompt", AgentEventKind::PromptSubmit),
-    entry("preToolUse", AgentEventKind::ToolStart),
-    entry("postToolUse", AgentEventKind::ToolComplete),
-    entry("postToolUseFailure", AgentEventKind::ToolComplete),
-    entry("stop", AgentEventKind::Stop),
-];
-
-const COPILOT_HOOKS: &[HookEntry] = &[
-    entry("sessionStart", AgentEventKind::SessionStart),
-    entry("userPromptSubmitted", AgentEventKind::PromptSubmit),
-    entry("preToolUse", AgentEventKind::ToolStart),
-    entry("postToolUse", AgentEventKind::ToolComplete),
-    entry("postToolUseFailure", AgentEventKind::ToolComplete),
-    HookEntry {
-        native: "notification",
-        event: AgentEventKind::PermissionRequest,
-        matcher: Some("permission_prompt|elicitation_dialog"),
-        timeout_secs: HOOK_TIMEOUT_SECS,
-    },
-    entry("agentStop", AgentEventKind::Stop),
-];
-
-/// Seconds Claude Code and Codex wait for the hook by default; it finishes in milliseconds.
-const HOOK_TIMEOUT_SECS: u64 = 5;
-const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
-
-fn entries(agent: AgentKind) -> &'static [HookEntry] {
-    match agent {
-        AgentKind::Claude => CLAUDE_HOOKS,
-        AgentKind::Codex => CODEX_HOOKS,
-        AgentKind::Grok => GROK_HOOKS,
-        AgentKind::Cursor => CURSOR_HOOKS,
-        AgentKind::Copilot => COPILOT_HOOKS,
-        _ => unreachable!("agent does not take a hook map"),
-    }
-}
-
-/// OpenCode's TUI owns the selected conversation; backend events may belong to other
-/// roots or subagents. This plugin reads the current route and its native status.
-fn opencode_plugin(target: &HookTarget) -> String {
-    include_str!("opencode.js").replace(
-        "__CONDR_EXECUTABLE__",
-        &serde_json::to_string(target.executable()).expect("string serializes"),
-    )
-}
-
-fn extension(target: &HookTarget, agent: AgentKind) -> String {
-    include_str!("pi-extension.js")
-        .replace(
-            "__CONDR_EXECUTABLE__",
-            &serde_json::to_string(target.executable()).expect("string serializes"),
-        )
-        .replace(
-            "__CONDR_AGENT__",
-            &serde_json::to_string(agent.id()).expect("string serializes"),
-        )
-        .replace("__CONDR_AGENT_MARKER__", agent.id())
-}
-
-fn owned_state(path: &Path, expected: &str, marker: &str) -> io::Result<HooksState> {
-    Ok(match std::fs::read_to_string(path) {
-        Ok(contents) if contents == expected => HooksState::Installed,
-        Ok(contents) if contents.contains(marker) => HooksState::Outdated,
-        Ok(_) => HooksState::Missing,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => HooksState::Missing,
-        Err(error) => return Err(error),
-    })
-}
-
-fn check_owned(path: &Path, marker: &str) -> io::Result<()> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) if !contents.contains(marker) => {
-            Err(invalid(path, "exists and was not written by condr"))
+pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
+    let Some(hooks) = agent.spec().hooks() else {
+        return Ok(HooksState::Unsupported);
+    };
+    let path = target.path(agent);
+    match &hooks.format {
+        HookFormat::NestedMap { .. } | HookFormat::FlatList { .. } => {
+            map_state(target, agent, hooks, &path)
         }
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
+        HookFormat::Plugin { .. } => {
+            let Some(config) = read_config(&path)? else {
+                return Ok(HooksState::Missing);
+            };
+            let manifest = read_config(&manifest_path(&path))?;
+            Ok(
+                if config == plugin(target, agent, hooks) && manifest == Some(plugin_manifest()) {
+                    HooksState::Installed
+                } else if config.to_string().contains(&marker(agent)) {
+                    HooksState::Outdated
+                } else {
+                    HooksState::Missing
+                },
+            )
+        }
+        HookFormat::Script { template, registry } => {
+            let registered = match registry {
+                Some(registry) => registry_config(target, hooks, registry)?.1["plugin"]
+                    .as_array()
+                    .expect("checked plugin list")
+                    .contains(&json!(registry_entry(hooks))),
+                None => true,
+            };
+            Ok(match std::fs::read_to_string(&path) {
+                Ok(contents) if registered && contents == script(target, agent, template) => {
+                    HooksState::Installed
+                }
+                Ok(contents) if contents.contains(&marker(agent)) => HooksState::Outdated,
+                Ok(_) => HooksState::Missing,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => HooksState::Missing,
+                Err(error) => return Err(error),
+            })
+        }
     }
 }
 
-fn antigravity_hooks(target: &HookTarget) -> Value {
-    let command = |event| json!({"type": "command", "command": target.hook_command(AgentKind::Antigravity, event), "timeout": HOOK_TIMEOUT_SECS});
-    json!({"condr": {
-        "PreInvocation": [command(AgentEventKind::PromptSubmit)],
-        "PreToolUse": [{"matcher": "*", "hooks": [command(AgentEventKind::ToolStart)]}],
-        "PostToolUse": [{"matcher": "*", "hooks": [command(AgentEventKind::ToolComplete)]}],
-        "Stop": [command(AgentEventKind::Stop)],
-    }})
-}
-
-fn antigravity_manifest() -> Value {
-    json!({"name": "condr", "description": "Condr agent status hooks (generated by condr)"})
-}
-
-fn check_manifest(path: &Path) -> io::Result<()> {
-    if read_config(path)?.is_some_and(|value| value != antigravity_manifest()) {
-        return Err(invalid(path, "exists and was not written by condr"));
+/// Writes this `condr`'s hooks, replacing any earlier Condr entries and leaving the
+/// user's alone. Returns the file written.
+pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
+    let hooks = match &agent.spec().support {
+        AgentSupport::Full(hooks) => hooks,
+        AgentSupport::RecognitionOnly(reason) => {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, *reason));
+        }
+    };
+    let path = target.path(agent);
+    match &hooks.format {
+        HookFormat::NestedMap { events, .. } | HookFormat::FlatList { events, .. } => {
+            let mut root = read_config(&path)?.unwrap_or_else(|| json!({}));
+            if matches!(hooks.format, HookFormat::FlatList { .. }) {
+                if root.get("version").is_some_and(|version| version != 1) {
+                    return Err(invalid(&path, "unsupported hooks configuration version"));
+                }
+                root["version"] = json!(1);
+            }
+            let map = hooks_map(&mut root)?;
+            strip_ours(map, agent);
+            for entry in *events {
+                let items = map
+                    .entry(entry.native)
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                let Some(items) = items.as_array_mut() else {
+                    return Err(invalid(
+                        &path,
+                        format!("hooks.{} is not an array", entry.native),
+                    ));
+                };
+                items.push(map_item(target, agent, hooks, entry));
+            }
+            write_config(&path, &root)?;
+        }
+        HookFormat::Plugin { .. } => {
+            let manifest = manifest_path(&path);
+            check_owned(&path, &marker(agent))?;
+            check_manifest(&manifest)?;
+            write_config(&manifest, &plugin_manifest())?;
+            write_config(&path, &plugin(target, agent, hooks))?;
+        }
+        HookFormat::Script { template, registry } => {
+            check_owned(&path, &marker(agent))?;
+            let registry = registry
+                .map(|registry| registry_config(target, hooks, registry))
+                .transpose()?;
+            write_file(&path, script(target, agent, template).as_bytes())?;
+            if let Some((registry_path, mut config)) = registry {
+                let plugins = config["plugin"]
+                    .as_array_mut()
+                    .expect("checked plugin list");
+                if !plugins.contains(&json!(registry_entry(hooks))) {
+                    plugins.push(json!(registry_entry(hooks)));
+                }
+                write_config(&registry_path, &config)?;
+            }
+        }
     }
-    Ok(())
+    Ok(path)
 }
 
-const OPENCODE_PLUGIN: &str = "./condr-tui.js";
-
-fn opencode_config(target: &HookTarget) -> io::Result<(PathBuf, Value)> {
-    let path = target.opencode_dir.join("tui.json");
-    let mut root = read_config(&path)?.unwrap_or_else(|| json!({}));
-    let plugins = root
-        .as_object_mut()
-        .expect("read_config checked")
-        .entry("plugin")
-        .or_insert_with(|| json!([]));
-    if !plugins.is_array() {
-        return Err(invalid(&path, "plugin is not an array"));
+/// Removes every Condr entry, leaving the rest of the file as it was.
+pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
+    let path = target.path(agent);
+    let Some(hooks) = agent.spec().hooks() else {
+        return Ok(path);
+    };
+    match &hooks.format {
+        HookFormat::NestedMap { .. } | HookFormat::FlatList { .. } => {
+            let Some(mut root) = read_config(&path)? else {
+                return Ok(path);
+            };
+            if let Some(map) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+                strip_ours(map, agent);
+                map.retain(|_, items| items.as_array().is_none_or(|items| !items.is_empty()));
+            }
+            if root
+                .get("hooks")
+                .and_then(Value::as_object)
+                .is_some_and(serde_json::Map::is_empty)
+            {
+                root.as_object_mut()
+                    .expect("read_config checked")
+                    .remove("hooks");
+            }
+            write_config(&path, &root)?;
+        }
+        HookFormat::Plugin { .. } => {
+            let manifest = manifest_path(&path);
+            check_owned(&path, &marker(agent))?;
+            check_manifest(&manifest)?;
+            // A disabled/enabled preference still belongs to the user, as do other files.
+            for file in [&path, &manifest] {
+                if file.exists() {
+                    std::fs::remove_file(file)?;
+                }
+            }
+        }
+        HookFormat::Script { registry, .. } => {
+            check_owned(&path, &marker(agent))?;
+            let registry = registry
+                .map(|registry| registry_config(target, hooks, registry))
+                .transpose()?;
+            if path.exists() {
+                std::fs::remove_file(&path)?;
+            }
+            if let Some((registry_path, mut config)) = registry {
+                config["plugin"]
+                    .as_array_mut()
+                    .expect("checked plugin list")
+                    .retain(|plugin| plugin != registry_entry(hooks).as_str());
+                if registry_path.exists() {
+                    write_config(&registry_path, &config)?;
+                }
+            }
+        }
     }
-    Ok((path, root))
+    Ok(path)
 }
 
-/// What marks the plugin file as Condr's, whichever `condr` wrote it.
-const OPENCODE_MARKER: &str = "condr agent-hook opencode";
-
-/// What marks a hook command as Condr's, whichever `condr` wrote it.
+/// What marks a hook command or an owned file as Condr's, whichever `condr` wrote it.
 fn marker(agent: AgentKind) -> String {
     format!(" agent-hook {} ", agent.id())
 }
@@ -509,84 +476,58 @@ fn is_ours(hook: &Value, agent: AgentKind) -> bool {
         })
 }
 
-/// The matcher group Condr installs for one entry.
-fn expected_group(target: &HookTarget, agent: AgentKind, entry: &HookEntry) -> Value {
-    if matches!(agent, AgentKind::Cursor | AgentKind::Copilot) {
-        let mut hook = if agent == AgentKind::Copilot {
-            json!({"type": "command", "exec": target.executable(),
-                "args": ["agent-hook", agent.id(), entry.event.name()], "timeoutSec": entry.timeout_secs})
-        } else {
-            json!({"command": target.hook_command(agent, entry.event), "timeout": entry.timeout_secs})
-        };
-        if let Some(matcher) = entry.matcher {
-            hook["matcher"] = json!(matcher);
-        }
-        return hook;
-    }
-    let mut group = json!({
-        "hooks": [{
+/// What Condr installs for one entry of a nested map or flat list.
+fn map_item(target: &HookTarget, agent: AgentKind, hooks: &HookSpec, entry: &HookEntry) -> Value {
+    let mut item = match hooks.format {
+        HookFormat::NestedMap { ref shell, .. } => json!({
+            "hooks": [{
+                "type": "command",
+                "command": target.hook_command(agent, entry.event, shell),
+                "timeout": entry.timeout_secs,
+            }]
+        }),
+        HookFormat::FlatList { exec: true, .. } => json!({
             "type": "command",
-            "command": target.hook_command(agent, entry.event),
+            "exec": target.executable(),
+            "args": ["agent-hook", agent.id(), entry.event.name()],
+            "timeoutSec": entry.timeout_secs,
+        }),
+        HookFormat::FlatList { exec: false, .. } => json!({
+            "command": target.hook_command(agent, entry.event, &HookShell::Plain),
             "timeout": entry.timeout_secs,
-        }]
-    });
+        }),
+        HookFormat::Plugin { .. } | HookFormat::Script { .. } => {
+            unreachable!("only a map holds items")
+        }
+    };
     if let Some(matcher) = entry.matcher {
-        group["matcher"] = Value::String(matcher.to_owned());
+        item["matcher"] = json!(matcher);
     }
-    group
+    item
 }
 
-pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
-    let path = target.path(agent);
-    if agent == AgentKind::Kimi {
-        return Ok(HooksState::Unsupported);
-    }
-    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
-        return owned_state(&path, &extension(target, agent), &marker(agent));
-    }
-    if agent == AgentKind::Antigravity {
-        let Some(config) = read_config(&path)? else {
-            return Ok(HooksState::Missing);
-        };
-        let manifest = read_config(&path.with_file_name("plugin.json"))?;
-        return Ok(
-            if config == antigravity_hooks(target) && manifest == Some(antigravity_manifest()) {
-                HooksState::Installed
-            } else if config.to_string().contains(&marker(agent)) {
-                HooksState::Outdated
-            } else {
-                HooksState::Missing
-            },
-        );
-    }
-    if agent == AgentKind::OpenCode {
-        let (_, config) = opencode_config(target)?;
-        let registered = config["plugin"]
-            .as_array()
-            .expect("checked plugin list")
-            .contains(&json!(OPENCODE_PLUGIN));
-        return Ok(match std::fs::read_to_string(&path) {
-            Ok(contents) if registered && contents == opencode_plugin(target) => {
-                HooksState::Installed
-            }
-            Ok(contents) if contents.contains(OPENCODE_MARKER) => HooksState::Outdated,
-            Ok(_) => HooksState::Missing,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => HooksState::Missing,
-            Err(error) => return Err(error),
-        });
-    }
-    let Some(root) = read_config(&path)? else {
+fn map_state(
+    target: &HookTarget,
+    agent: AgentKind,
+    hooks: &HookSpec,
+    path: &Path,
+) -> io::Result<HooksState> {
+    let (HookFormat::NestedMap { events, .. } | HookFormat::FlatList { events, .. }) = hooks.format
+    else {
+        unreachable!("only a map holds items");
+    };
+    let Some(root) = read_config(path)? else {
         return Ok(HooksState::Missing);
     };
     let mut found = Vec::new();
-    if let Some(events) = root.get("hooks").and_then(Value::as_object) {
-        for (native, groups) in events {
-            for group in groups.as_array().into_iter().flatten() {
-                let hooks = group.get("hooks").and_then(Value::as_array);
-                if is_ours(group, agent)
-                    || hooks.is_some_and(|hooks| hooks.iter().any(|hook| is_ours(hook, agent)))
+    if let Some(map) = root.get("hooks").and_then(Value::as_object) {
+        for (native, items) in map {
+            for item in items.as_array().into_iter().flatten() {
+                let nested = item.get("hooks").and_then(Value::as_array);
+                if is_ours(item, agent)
+                    || nested.is_some_and(|nested| nested.iter().any(|hook| is_ours(hook, agent)))
                 {
-                    found.push((native.clone(), group.clone()));
+                    found.push((native.clone(), item.clone()));
                 }
             }
         }
@@ -594,152 +535,23 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
     if found.is_empty() {
         return Ok(HooksState::Missing);
     }
-    let mut expected: Vec<(String, Value)> = entries(agent)
+    let mut expected: Vec<(String, Value)> = events
         .iter()
         .map(|entry| {
             (
                 entry.native.to_owned(),
-                expected_group(target, agent, entry),
+                map_item(target, agent, hooks, entry),
             )
         })
         .collect();
     expected.sort_by(|a, b| a.0.cmp(&b.0));
     found.sort_by(|a, b| a.0.cmp(&b.0));
-    let version_ok =
-        !matches!(agent, AgentKind::Cursor | AgentKind::Copilot) || root["version"] == 1;
+    let version_ok = !matches!(hooks.format, HookFormat::FlatList { .. }) || root["version"] == 1;
     Ok(if found == expected && version_ok {
         HooksState::Installed
     } else {
         HooksState::Outdated
     })
-}
-
-/// Writes this `condr`'s hooks, replacing any earlier Condr entries and leaving the
-/// user's alone. Returns the file written.
-pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
-    let path = target.path(agent);
-    if agent == AgentKind::Kimi {
-        return Err(io::Error::new(io::ErrorKind::Unsupported, KIMI_NOTE));
-    }
-    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
-        check_owned(&path, &marker(agent))?;
-        write_file(&path, extension(target, agent).as_bytes())?;
-        return Ok(path);
-    }
-    if agent == AgentKind::Antigravity {
-        let manifest = path.with_file_name("plugin.json");
-        check_owned(&path, &marker(agent))?;
-        check_manifest(&manifest)?;
-        write_config(&manifest, &antigravity_manifest())?;
-        write_config(&path, &antigravity_hooks(target))?;
-        return Ok(path);
-    }
-    if agent == AgentKind::OpenCode {
-        match std::fs::read_to_string(&path) {
-            // Someone else's file at our name is theirs to keep.
-            Ok(contents) if !contents.contains(OPENCODE_MARKER) => {
-                return Err(invalid(&path, "exists and was not written by condr"));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-            Err(_) => {}
-        }
-        let (config_path, mut config) = opencode_config(target)?;
-        let plugins = config["plugin"]
-            .as_array_mut()
-            .expect("checked plugin list");
-        if !plugins.contains(&json!(OPENCODE_PLUGIN)) {
-            plugins.push(json!(OPENCODE_PLUGIN));
-        }
-        write_file(&path, opencode_plugin(target).as_bytes())?;
-        write_config(&config_path, &config)?;
-        return Ok(path);
-    }
-    let mut root = read_config(&path)?.unwrap_or_else(|| json!({}));
-    if matches!(agent, AgentKind::Cursor | AgentKind::Copilot) {
-        if root.get("version").is_some_and(|version| version != 1) {
-            return Err(invalid(&path, "unsupported hooks configuration version"));
-        }
-        root["version"] = json!(1);
-    }
-    let hooks = hooks_map(&mut root)?;
-    strip_ours(hooks, agent);
-    for entry in entries(agent) {
-        let groups = hooks
-            .entry(entry.native)
-            .or_insert_with(|| Value::Array(Vec::new()));
-        let Some(groups) = groups.as_array_mut() else {
-            return Err(invalid(
-                &path,
-                format!("hooks.{} is not an array", entry.native),
-            ));
-        };
-        groups.push(expected_group(target, agent, entry));
-    }
-    write_config(&path, &root)?;
-    Ok(path)
-}
-
-/// Removes every Condr entry, leaving the rest of the file as it was.
-pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
-    let path = target.path(agent);
-    if agent == AgentKind::Kimi {
-        return Ok(path);
-    }
-    if matches!(agent, AgentKind::Pi | AgentKind::Omp) {
-        check_owned(&path, &marker(agent))?;
-        if path.exists() {
-            std::fs::remove_file(&path)?;
-        }
-        return Ok(path);
-    }
-    if agent == AgentKind::Antigravity {
-        let manifest = path.with_file_name("plugin.json");
-        check_owned(&path, &marker(agent))?;
-        check_manifest(&manifest)?;
-        for file in [&path, &manifest] {
-            if file.exists() {
-                std::fs::remove_file(file)?;
-            }
-        }
-        // A disabled/enabled preference still belongs to the user, as do other files.
-        return Ok(path);
-    }
-    if agent == AgentKind::OpenCode {
-        let (config_path, mut config) = opencode_config(target)?;
-        match std::fs::read_to_string(&path) {
-            Ok(contents) if contents.contains(OPENCODE_MARKER) => std::fs::remove_file(&path)?,
-            Ok(_) => return Err(invalid(&path, "exists and was not written by condr")),
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-            Err(_) => {}
-        }
-        config["plugin"]
-            .as_array_mut()
-            .expect("checked plugin list")
-            .retain(|plugin| plugin != OPENCODE_PLUGIN);
-        if config_path.exists() {
-            write_config(&config_path, &config)?;
-        }
-        return Ok(path);
-    }
-    let Some(mut root) = read_config(&path)? else {
-        return Ok(path);
-    };
-    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        strip_ours(hooks, agent);
-        hooks.retain(|_, groups| groups.as_array().is_none_or(|groups| !groups.is_empty()));
-    }
-    if root
-        .get("hooks")
-        .and_then(Value::as_object)
-        .is_some_and(serde_json::Map::is_empty)
-    {
-        root.as_object_mut()
-            .expect("read_config checked")
-            .remove("hooks");
-    }
-    write_config(&path, &root)?;
-    Ok(path)
 }
 
 fn hooks_map(root: &mut Value) -> io::Result<&mut serde_json::Map<String, Value>> {
@@ -754,23 +566,109 @@ fn hooks_map(root: &mut Value) -> io::Result<&mut serde_json::Map<String, Value>
 }
 
 /// Drops Condr's hooks from every group of every event, and the groups that emptied.
-fn strip_ours(hooks: &mut serde_json::Map<String, Value>, agent: AgentKind) {
-    for groups in hooks.values_mut() {
-        let Some(groups) = groups.as_array_mut() else {
+fn strip_ours(map: &mut serde_json::Map<String, Value>, agent: AgentKind) {
+    for items in map.values_mut() {
+        let Some(items) = items.as_array_mut() else {
             continue;
         };
-        for group in groups.iter_mut() {
-            if let Some(entries) = group.get_mut("hooks").and_then(Value::as_array_mut) {
-                entries.retain(|hook| !is_ours(hook, agent));
+        for item in items.iter_mut() {
+            if let Some(nested) = item.get_mut("hooks").and_then(Value::as_array_mut) {
+                nested.retain(|hook| !is_ours(hook, agent));
             }
         }
-        groups.retain(|group| {
-            !is_ours(group, agent)
-                && group
+        items.retain(|item| {
+            !is_ours(item, agent)
+                && item
                     .get("hooks")
                     .and_then(Value::as_array)
-                    .is_none_or(|entries| !entries.is_empty())
+                    .is_none_or(|nested| !nested.is_empty())
         });
+    }
+}
+
+fn plugin(target: &HookTarget, agent: AgentKind, hooks: &HookSpec) -> Value {
+    let HookFormat::Plugin { events } = hooks.format else {
+        unreachable!("only a plugin is built as one");
+    };
+    let mut map = serde_json::Map::new();
+    for entry in events {
+        let command = json!({
+            "type": "command",
+            "command": target.hook_command(agent, entry.event, &HookShell::Plain),
+            "timeout": entry.timeout_secs,
+        });
+        let item = match entry.matcher {
+            Some(matcher) => json!({"matcher": matcher, "hooks": [command]}),
+            None => command,
+        };
+        map.entry(entry.native)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .expect("built as an array")
+            .push(item);
+    }
+    json!({ "condr": map })
+}
+
+fn plugin_manifest() -> Value {
+    json!({"name": "condr", "description": "Condr agent status hooks (generated by condr)"})
+}
+
+fn manifest_path(hooks: &Path) -> PathBuf {
+    hooks.with_file_name("plugin.json")
+}
+
+fn check_manifest(path: &Path) -> io::Result<()> {
+    if read_config(path)?.is_some_and(|value| value != plugin_manifest()) {
+        return Err(invalid(path, "exists and was not written by condr"));
+    }
+    Ok(())
+}
+
+fn script(target: &HookTarget, agent: AgentKind, template: &str) -> String {
+    template
+        .replace(
+            "__CONDR_EXECUTABLE__",
+            &serde_json::to_string(target.executable()).expect("string serializes"),
+        )
+        .replace(
+            "__CONDR_AGENT__",
+            &serde_json::to_string(agent.id()).expect("string serializes"),
+        )
+        .replace("__CONDR_AGENT_MARKER__", agent.id())
+}
+
+/// How the registry's `plugin` list names the script, beside it in the same directory.
+fn registry_entry(hooks: &HookSpec) -> String {
+    format!("./{}", hooks.file)
+}
+
+fn registry_config(
+    target: &HookTarget,
+    hooks: &HookSpec,
+    registry: &str,
+) -> io::Result<(PathBuf, Value)> {
+    let path = (hooks.dir)(target).join(registry);
+    let mut root = read_config(&path)?.unwrap_or_else(|| json!({}));
+    let plugins = root
+        .as_object_mut()
+        .expect("read_config checked")
+        .entry("plugin")
+        .or_insert_with(|| json!([]));
+    if !plugins.is_array() {
+        return Err(invalid(&path, "plugin is not an array"));
+    }
+    Ok((path, root))
+}
+
+/// Someone else's file at our name is theirs to keep.
+fn check_owned(path: &Path, marker: &str) -> io::Result<()> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) if !contents.contains(marker) => {
+            Err(invalid(path, "exists and was not written by condr"))
+        }
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
     }
 }
 
@@ -850,25 +748,42 @@ mod tests {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
+    /// The shell a nested map's command runs under; every other format's is plain.
+    fn shell(agent: AgentKind) -> &'static HookShell {
+        match agent.spec().hooks() {
+            Some(HookSpec {
+                format: HookFormat::NestedMap { shell, .. },
+                ..
+            }) => shell,
+            _ => &HookShell::Plain,
+        }
+    }
+
     #[test]
     fn quoted_hook_paths_follow_the_cli_shell() {
         let (target, _) = target();
-        let command = |agent, windows, shell| {
-            target.hook_command_for_shell(agent, AgentEventKind::Stop, windows, shell)
+        let command = |agent, windows, choice| {
+            target.hook_command_for_shell(
+                agent,
+                AgentEventKind::Stop,
+                shell(agent),
+                windows,
+                choice,
+            )
         };
-        for shell in [None, Some("pwsh"), Some("PowerShell"), Some("unknown")] {
+        for choice in [None, Some("pwsh"), Some("PowerShell"), Some("unknown")] {
             assert_eq!(
-                command(AgentKind::Grok, true, shell),
+                command(AgentKind::Grok, true, choice),
                 "& \"/opt/condr bin/condr\" agent-hook grok stop"
             );
             assert_eq!(
-                command(AgentKind::Grok, false, shell),
+                command(AgentKind::Grok, false, choice),
                 "\"/opt/condr bin/condr\" agent-hook grok stop"
             );
         }
-        for shell in ["bash", "gitbash", "git-bash", "cmd", " CMD.EXE "] {
+        for choice in ["bash", "gitbash", "git-bash", "cmd", " CMD.EXE "] {
             assert_eq!(
-                command(AgentKind::Grok, true, Some(shell)),
+                command(AgentKind::Grok, true, Some(choice)),
                 "\"/opt/condr bin/condr\" agent-hook grok stop"
             );
         }
@@ -888,7 +803,13 @@ mod tests {
             ..target
         };
         assert_eq!(
-            target.hook_command_for_shell(AgentKind::Grok, AgentEventKind::Stop, true, None),
+            target.hook_command_for_shell(
+                AgentKind::Grok,
+                AgentEventKind::Stop,
+                shell(AgentKind::Grok),
+                true,
+                None
+            ),
             "condr agent-hook grok stop"
         );
     }
@@ -954,9 +875,16 @@ mod tests {
             "permission_prompt|elicitation_dialog"
         );
         assert!(once["hooks"]["SessionStart"][0].get("matcher").is_none());
+        let Some(HookSpec {
+            format: HookFormat::NestedMap { events, .. },
+            ..
+        }) = AgentKind::Claude.spec().hooks()
+        else {
+            unreachable!("Claude's hooks are a nested map");
+        };
         assert_eq!(
             once["hooks"].as_object().unwrap().len(),
-            CLAUDE_HOOKS
+            events
                 .iter()
                 .map(|entry| entry.native)
                 .collect::<std::collections::BTreeSet<_>>()

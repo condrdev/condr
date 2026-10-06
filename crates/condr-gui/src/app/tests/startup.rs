@@ -39,27 +39,22 @@ fn server_connection_preserves_start_error_and_final_concurrent_probe() {
 fn condr_assets_include_custom_and_kit_icons() {
     let assets = CondrAssets::new();
     let listed = assets.list("icons/").unwrap();
+    // Every agent's mark is drawn from the path its spec names (ADR 0035).
+    let marks = condr_core::AgentKind::ALL.map(|kind| format!("icons/{}", kind.spec().mark));
     for path in [
         "icons/circle.svg",
         "icons/circle-filled.svg",
         "icons/circle-alert.svg",
         "icons/server-plus.svg",
-        "icons/claude.svg",
-        "icons/codex.svg",
-        "icons/opencode.svg",
-        "icons/pi.svg",
-        "icons/omp.svg",
-        "icons/copilot.svg",
-        "icons/kimi.svg",
         "icons/kilo.svg",
         "icons/qoder.svg",
         "icons/qwen.svg",
-        "icons/cursor.svg",
-        "icons/grok.svg",
-        "icons/antigravity.svg",
         "icons/info.svg",
         "icons/settings.svg",
-    ] {
+    ]
+    .into_iter()
+    .chain(marks.iter().map(String::as_str))
+    {
         let bytes = assets
             .load(path)
             .unwrap()

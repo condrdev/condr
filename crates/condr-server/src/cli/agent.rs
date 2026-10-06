@@ -177,7 +177,7 @@ fn agent(client: &mut ClientConnection, command: AgentCommand) -> Result<Value, 
             "agents": agents.into_iter().map(|entry| json!({
                 "agent": entry.kind.id(),
                 "label": entry.kind.label(),
-                "command": entry.kind.executable(),
+                "command": entry.kind.spec().executable,
                 "executable": entry.executable,
             })).collect::<Vec<_>>()
         })),

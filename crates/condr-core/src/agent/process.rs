@@ -86,7 +86,8 @@ fn agent_from_path_token(token: &str) -> Option<AgentKind> {
     let lower = path.replace('\\', "/").to_ascii_lowercase();
     if let Some(agent) = AgentKind::ALL.into_iter().find(|agent| {
         agent
-            .package_paths()
+            .spec()
+            .packages
             .iter()
             .any(|package| lower.contains(&format!("/node_modules/{package}/")))
     }) {

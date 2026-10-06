@@ -99,7 +99,7 @@ pub(super) fn resume_agent(
         // Session validation bounds the ID to a plain token; the shell resolves the CLI.
         Ok(format!(
             "{} {}",
-            resume.resume.kind.executable(),
+            resume.resume.kind.spec().executable,
             resume.resume.args().join(" "),
         ))
     };
@@ -170,7 +170,7 @@ impl RuntimeState {
         let message = format!(
             "Could not resume {}: {reason}. Retry with: {} {}",
             resume.kind.label(),
-            resume.kind.executable(),
+            resume.kind.spec().executable,
             resume.args().join(" "),
         );
         tracing::info!("Pane {}: {message}", pane_id.as_u64());
@@ -318,7 +318,7 @@ impl RuntimeState {
                         "agent_unavailable",
                         format!(
                             "{} is not executable on the Server's PATH",
-                            kind.executable()
+                            kind.spec().executable
                         ),
                     )
                 })?;
@@ -387,7 +387,7 @@ impl RuntimeState {
                 // An agent whose hooks are silent until its first turn is prompted blind
                 // once; from then on its state is reported.
                 let first_turn = info.agent.state == AgentState::Unknown
-                    && !info.agent.kind.reports_at_startup();
+                    && !info.agent.kind.spec().reports_at_startup;
                 if info.launch_pending || (info.agent.state != AgentState::Idle && !first_turn) {
                     return Err(error(
                         "agent_not_ready",
@@ -728,7 +728,7 @@ impl RuntimeState {
 /// is one whose hooks say nothing until prompted and its process has been identified.
 fn ready_states(kind: AgentKind) -> Vec<AgentState> {
     let mut states = vec![AgentState::Idle, AgentState::Blocked];
-    if !kind.reports_at_startup() {
+    if !kind.spec().reports_at_startup {
         states.push(AgentState::Unknown);
     }
     states

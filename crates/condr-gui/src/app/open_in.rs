@@ -33,7 +33,7 @@ impl OpenTargetIcon {
         match self {
             Self::Zed => Icon::new(CondrIconName::Zed),
             Self::VsCode => Icon::new(CondrIconName::VsCode),
-            Self::Cursor => Icon::new(CondrIconName::Cursor),
+            Self::Cursor => Icon::new(CondrIconName::Agent(AgentKind::Cursor)),
             Self::IntellijIdea => Icon::new(CondrIconName::IntellijIdea),
             Self::Custom => Icon::new(IconName::ExternalLink),
             Self::FileManager => Icon::new(IconName::Folder),

@@ -14,17 +14,6 @@ pub struct AgentInstallation {
     pub executable: PathBuf,
 }
 
-impl AgentKind {
-    /// The native interactive CLI command.
-    pub const fn executable(self) -> &'static str {
-        match self {
-            Self::Antigravity => "agy",
-            Self::Cursor => "cursor-agent",
-            _ => self.id(),
-        }
-    }
-}
-
 /// Reads the caller's current PATH on every call. An absent PATH yields no agents.
 /// Shell aliases, shell profile changes and installations outside PATH are not searched.
 pub fn discover() -> Vec<AgentInstallation> {
@@ -42,7 +31,7 @@ fn discover_in(directories: &[PathBuf]) -> Vec<AgentInstallation> {
         .into_iter()
         .filter_map(|kind| {
             directories.iter().find_map(|directory| {
-                candidates(directory, kind.executable())
+                candidates(directory, kind.spec().executable)
                     .into_iter()
                     .find(|path| executable_file(path))
                     .map(|executable| AgentInstallation { kind, executable })
@@ -99,7 +88,7 @@ mod tests {
         std::fs::create_dir_all(&second).unwrap();
         let codex = candidates(&first, "codex")[0].clone();
         let fallback = candidates(&second, "codex")[0].clone();
-        let opencode = candidates(&first, AgentKind::OpenCode.executable())[0].clone();
+        let opencode = candidates(&first, AgentKind::OpenCode.spec().executable)[0].clone();
         for path in [&codex, &fallback, &opencode] {
             std::fs::write(path, "this must never be executed").unwrap();
             #[cfg(unix)]

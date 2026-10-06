@@ -16,7 +16,7 @@ fn args(values: &[&str]) -> Vec<String> {
 fn new_agents_are_identified_through_native_commands_and_npm_launchers() {
     for kind in AgentKind::ALL {
         assert_eq!(AgentKind::parse_label(kind.id()), Some(kind));
-        let executable = format!("C:\\tools\\{}.exe", kind.executable());
+        let executable = format!("C:\\tools\\{}.exe", kind.spec().executable);
         assert_eq!(
             identify_agent_process(info("runtime", &args(&[&executable]))),
             Some(kind)
@@ -47,8 +47,8 @@ fn new_agents_are_identified_through_native_commands_and_npm_launchers() {
         .args(),
         ["--resume=conversation"]
     );
-    assert!(!AgentKind::Copilot.reports_at_startup());
-    assert!(!AgentKind::Cursor.reports_at_startup());
+    assert!(!AgentKind::Copilot.spec().reports_at_startup);
+    assert!(!AgentKind::Cursor.spec().reports_at_startup);
 }
 
 #[test]

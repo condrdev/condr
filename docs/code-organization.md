@@ -8,7 +8,7 @@
 | --- | --- |
 | `crates/condr-core/src/session.rs` | Session 模型；`workspace` 管理 Workspace/Tab，`pane` 管理 Pane 操作，`layout` 处理布局几何，`snapshot` 校验和恢复结构 |
 | `crates/condr-core/src/protocol.rs` | 协议公共入口和限制；`messages` 定义消息，`framing` 编解码帧，`bootstrap` 组装分块快照 |
-| `crates/condr-core/src/agent/mod.rs` | Agent 领域类型；`process` 识别进程，`event` 定义 Hook 事件，`detector` 更新状态，`hook`/`hooks` 发送和安装 Hook |
+| `crates/condr-core/src/agent/mod.rs` | Agent 领域类型和 `AgentKind::spec()`；每种 Agent 一个模块（如 `claude.rs`）放它的 `AgentSpec`（ADR 0035），`process` 识别进程，`event` 定义 Hook 事件，`detector` 更新状态，`hook` 发送 Hook，`hooks` 是各 Agent 共用的四类 Hook 安装格式 |
 | `crates/condr-core/src/terminal.rs` | 终端公共入口；`runtime` 集中管理 PTY 启动、失败回滚与关闭，`input_queue`/`pty_io`/`resize` 处理 I/O，`osc`/`notices` 截获上报，`probes` 探测进程与 cwd，`shell` 配置 Shell，`view`/`view_source` 生成和传输视图 |
 | `crates/condr-server/src/client.rs` | 公共 `ClientConnection`，供 GUI 和 CLI 使用 |
 | `crates/condr-server/src/logging.rs` | `tracing` subscriber、按天滚动的非阻塞文件层、`CONDR_LOG` 过滤和 panic hook；`condr server run` 与 GUI 共用（ADR 0019） |

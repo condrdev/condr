@@ -44,51 +44,23 @@ pub(in crate::app) enum CondrIconName {
     SquareMinus,
     /// Lucide `file-text`: the Diff Tab's "Show File" button.
     FileText,
-    /// The agent CLIs' marks (assets/agents/NOTICE at the repository root), recolored to
-    /// `currentColor` so they follow the text like every other icon.
-    Claude,
-    Codex,
-    OpenCode,
-    Pi,
-    Omp,
-    Antigravity,
-    Grok,
-    Cursor,
-    Copilot,
-    Kimi,
+    /// An agent CLI's mark, the file its spec names (assets/agents/NOTICE at the
+    /// repository root), recolored to `currentColor` so it follows the text like every
+    /// other icon. A kind a newer Server reported (ADR 0028) is a plain mark, no brand.
+    Agent(AgentKind),
     /// The editor marks "Open in" launches with (same notice), recolored the same way.
     VsCode,
     Zed,
     IntellijIdea,
 }
 
-impl CondrIconName {
-    pub(in crate::app) fn agent(kind: AgentKind) -> Self {
-        match kind {
-            AgentKind::Claude => Self::Claude,
-            AgentKind::Codex => Self::Codex,
-            AgentKind::OpenCode => Self::OpenCode,
-            AgentKind::Pi => Self::Pi,
-            AgentKind::Omp => Self::Omp,
-            AgentKind::Antigravity => Self::Antigravity,
-            AgentKind::Grok => Self::Grok,
-            AgentKind::Cursor => Self::Cursor,
-            AgentKind::Copilot => Self::Copilot,
-            AgentKind::Kimi => Self::Kimi,
-            // A kind a newer Server reported (ADR 0028): a plain mark, no brand.
-            AgentKind::Other => Self::CircleFilled,
-        }
-    }
-}
-
-/// Claude's published brand color; other marks take the surrounding text color.
+/// The agent's mark in its published brand colour, or else the surrounding text colour.
 pub(in crate::app) fn agent_mark(kind: AgentKind, fallback: Hsla) -> Icon {
-    let color = match kind {
-        // Anthropic's terracotta, as the published mark carries it.
-        AgentKind::Claude => rgb(0xD97757).into(),
-        _ => fallback,
-    };
-    Icon::new(CondrIconName::agent(kind)).text_color(color)
+    let color = kind
+        .spec()
+        .brand_color
+        .map_or(fallback, |color| rgb(color).into());
+    Icon::new(CondrIconName::Agent(kind)).text_color(color)
 }
 
 impl IconNamed for CondrIconName {
@@ -108,16 +80,10 @@ impl IconNamed for CondrIconName {
             Self::SquareDot => "icons/square-dot.svg",
             Self::SquareMinus => "icons/square-minus.svg",
             Self::FileText => "icons/file-text.svg",
-            Self::Claude => "icons/claude.svg",
-            Self::Codex => "icons/codex.svg",
-            Self::OpenCode => "icons/opencode.svg",
-            Self::Pi => "icons/pi.svg",
-            Self::Omp => "icons/omp.svg",
-            Self::Antigravity => "icons/antigravity.svg",
-            Self::Grok => "icons/grok.svg",
-            Self::Cursor => "icons/cursor.svg",
-            Self::Copilot => "icons/copilot.svg",
-            Self::Kimi => "icons/kimi.svg",
+            Self::Agent(kind) => match kind.spec().mark {
+                "" => "icons/circle-filled.svg",
+                mark => return format!("icons/{mark}").into(),
+            },
             Self::VsCode => "icons/vscode.svg",
             Self::Zed => "icons/zed.svg",
             Self::IntellijIdea => "icons/intellij.svg",

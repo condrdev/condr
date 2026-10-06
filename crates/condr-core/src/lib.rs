@@ -12,8 +12,9 @@ pub mod uri;
 
 pub use agent::{
     AgentDetector, AgentDisplayState, AgentEvent, AgentEventKind, AgentKind, AgentPublish,
-    AgentResume, AgentSnapshot, AgentState, AgentTracker, ProcessInfo, ProcessProbeResult,
-    hook as agent_hook, hooks as agent_hooks, identify_agent_among, identify_agent_process,
+    AgentResume, AgentSnapshot, AgentSpec, AgentState, AgentSupport, AgentTracker, ProcessInfo,
+    ProcessProbeResult, hook as agent_hook, hooks as agent_hooks, identify_agent_among,
+    identify_agent_process,
 };
 pub use config::{config_path, read_config_text, read_config_value, update_config_values};
 pub use files::{
