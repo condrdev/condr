@@ -1,6 +1,6 @@
 # Condr Roadmap
 
-> 最近核对：2026-10-05。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
+> 最近核对：2026-10-06。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
 
 ## 定位
 
@@ -48,27 +48,33 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 - 终端颜色查询（OSC 4/10/11）回复的是 Server 内置的默认深色配色，不是 GUI 当前选的终端配色。因此选了浅色配色时，按背景色判断明暗的程序会判断成深色。
 - kitty keyboard 协议可协商（Claude Code 请求标志 5，Codex 请求 7），按下、重复与松开都会上报；但不上报单独的修饰键、小键盘键和标志 8 下普通文字键的松开，也不支持 xterm modifyOtherKeys。
-- OpenCode 集成缺真机验证；OSC 支持范围没有对照表。
+- OpenCode、Cursor 和 Antigravity 还没跑过真实会话；OMP、Grok 和 Copilot 只在 Linux 上验证过。OSC 支持范围没有对照表。
 
 ## 近期方向
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
-### 1. 终端内搜索
+### 1. Agent 集成收拢与扩充
+
+**为什么**：Condr 只做官方支持的 Agent，未支持的 CLI 通过 Issue 或 PR 加入（ADR 0035）。因此加一种 Agent 必须容易写、容易审。现在一种 Agent 的知识分散在 `condr-core`、协议和 GUI 的十来处，加一种要逐处修改。其中 `reports_at_startup()` 这类带默认分支的函数，漏改了也能编译通过。另外，Settings 里显示的 Unavailable 没有说清 Condr 对这个 Agent 承诺了什么。
+
+**做到哪**（按顺序，见 ADR 0035）：
+
+1. 给 10 种 Agent 生成的 hook 文件补快照测试，逐字固定下来。
+2. 重构：每种 Agent 一个模块，一份所有字段必填的规格。重构后快照必须一字不差。
+3. 两级支持：Settings 和文档区分“完整支持”和“仅识别”；CLI 对仅识别的 Agent 立即拒绝 `agent wait` 和 `agent prompt --wait`。级别只看 hooks 能报告什么，是否做过真机验证另行记录。
+4. 新增官方 Agent，按两级门槛逐个评估。候选来自 2026-10-06 对其他工具所支持 CLI 的调查。
+5. 在 `docs/agents/` 写一页贡献指南，说明加一种 Agent 要改哪几处，并加一个 Issue 模板。
+
+**停在哪**：不做用户自定义 Agent，GUI 启动菜单在摩擦记录里，不接入 ACP，也不为没有 hook 的 CLI 猜状态。
+
+### 2. 终端内搜索
 
 **为什么**：这一项原本在摩擦记录里等证据。Agent 的输出很长，要在里面找一段报错或一个路径，现在只能靠滚动。对外宣布后，新用户会拿 Condr 和他们用惯的终端比较，而这些终端都能搜索。
 
 **做到哪**：回滚内容只在 Server 的 VT 里，所以搜索是一个协议请求，由 Server 在 VT 上查找并返回匹配的位置，GUI 高亮并滚动过去。CLI 可以用同一个请求。
 
 **停在哪**：只在当前 Pane 里搜索，不做跨 Pane 或跨 Workspace 的搜索。命令面板和文件快速打开不做。
-
-### 2. Agent Profile
-
-**为什么**：现在支持的 10 种 CLI（Claude Code、Codex、OpenCode、Pi、OMP、Antigravity、Grok、Cursor、Copilot、Kimi）都写在代码里，接一种新的就要发一个版本。用户手上的 CLI 不在列表里时，Condr 认不出它，也没有图标和会话恢复。
-
-**做到哪**（落地前先写 ADR）：用户用一份声明式 manifest 描述一种 Agent CLI：可执行文件名（进程表据此识别）、启动和恢复会话的参数、图标。它和内置的 10 种并列出现在新建 Agent 的菜单、侧栏和 CLI 里。状态仍只来自 hooks（ADR 0014）：manifest 的文档要写明如何在这个 CLI 的 hook 配置里调用 `condr agent-hook`，没有 hook 的 CLI 状态就是 `Unknown`。manifest 放在 `config.toml` 里还是单独的目录，由 ADR 决定。
-
-**停在哪**：不接入 ACP 或其他对话协议，Condr 不自建对话循环；不为没有 hook 的 CLI 猜状态；不做 Profile 市场，那在远期表里。
 
 ### 3. 移动端 Companion（iOS 与 Android）
 
@@ -147,6 +153,7 @@ ADR 要回答三个问题：
 这些都通过了第一问，但还没有足够的使用证据；出现两次以上真实摩擦再排。外部用户的 Issue 和单人 dogfood 一样算数。
 
 - Diff Tab 内跳到编辑器。
+- GUI 里启动 Agent 的菜单：列出这台 Device 上装了哪些 Agent，点一下就在 Pane 里启动。现在在终端里输入命令已经够快。真要做时，用协议里现成的 `AgentCommand::Available` 和 `Start`。
 - 定时任务：按 cron 启动新的 Agent，或定时给已有的 Agent 发提示。现有的 `agent start`、`agent prompt` 和 `agent wait` 已经覆盖了大半。它会让 Condr 从看着 Agent 干活走向无人值守地派活，用户的期待也会跟着变，所以等有人提出需求再定。
 - TCP 与 Peer-to-peer Device 的端口转发：协议增加一种多路复用的字节流帧，把本机 listener 的连接经 Noise 或 iroh 连接接到远端 `localhost:<port>`。默认只有配对设备能开转发；若届时已有 observe/control capability，则只允许 `control`。
 - 颜色查询回复 GUI 当前的终端配色（见已知限制）。
@@ -160,12 +167,11 @@ ADR 要回答三个问题：
 | 事项 | 启动条件 | 前置 |
 | --- | --- | --- |
 | 遥测（opt-in） | 有外部用户，且本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
-| 插件 SDK / Agent Profile 市场 | 社区开始提交第三方 Agent 集成或工作流 | Agent Profile（近期方向第 2 项） |
 | 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | observe/control capability（见摩擦记录）扩展为多用户；审计日志 |
 | 替用户批准 Agent 的权限请求（现在只做"看见并跳转"） | 厂商开放外部审批接口；Claude Code 的远程审批仍是 [open feature request](https://github.com/anthropics/claude-code/issues/38299)，Codex 的审批只在它自己的 app-server 客户端里 | `Blocked` 与 `blocked_on`（ADR 0024） |
 | 编辑器、内置浏览器、任务看板等 IDE 化能力 | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
 
-不做的两件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Peer-to-peer 和移动端 Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它；因此也不在界面上另做输入框、模型选择或语音对话，这些交给各个 CLI 自己）。
+不做的三件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Peer-to-peer 和移动端 Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它；因此也不在界面上另做输入框、模型选择或语音对话，这些交给各个 CLI 自己）；**用户自定义 Agent 和插件 SDK**（ADR 0035：Agent 种类变化不频繁，官方支持常见的 CLI 就够了；每种集成都需要声明写不出来的 hook 代码和真实会话验证；未支持的 CLI 通过 Issue 或 PR 加入）。
 
 ## 节奏
 
