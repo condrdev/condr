@@ -1,0 +1,60 @@
+name: Agent CLI request
+description: Ask Condr to support an agent CLI it does not know yet
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Condr learns an agent's state only from the CLI's own hooks (ADR 0014). Whether it can be fully supported, or only recognized, depends on what those hooks report; see `docs/agents/adding-an-agent.md`.
+  - type: input
+    id: cli
+    attributes:
+      label: Agent CLI
+      description: Its name, the command you run, and where it is published.
+      placeholder: e.g. Example Code, `example`, npm @example/code
+    validations:
+      required: true
+  - type: input
+    id: hooks-docs
+    attributes:
+      label: Hook documentation
+      description: A link to the CLI's documentation for its hooks, plugins or extensions.
+    validations:
+      required: true
+  - type: textarea
+    id: events
+    attributes:
+      label: Hook events
+      description: |
+        The events its hooks offer, as the documentation names them. Say which one fires when:
+        - a turn starts (a prompt is submitted);
+        - the main agent's turn ends, and whether a subagent's end fires the same event;
+        - it waits on a permission prompt or asks a question;
+        - a session starts, and whether that happens before the first prompt.
+    validations:
+      required: true
+  - type: input
+    id: config
+    attributes:
+      label: Hook configuration
+      description: The file the hooks are configured in, and any environment variable that moves its directory.
+      placeholder: e.g. ~/.example/settings.json, moved by EXAMPLE_HOME
+  - type: input
+    id: resume
+    attributes:
+      label: Resume command
+      description: How the CLI reopens a conversation by its session ID.
+      placeholder: e.g. example --resume <id>
+  - type: input
+    id: version
+    attributes:
+      label: Version you use
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating systems you use it on
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Windows

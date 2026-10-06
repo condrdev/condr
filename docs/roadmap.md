@@ -54,17 +54,11 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 按优先级排列。每项写清为什么、做到哪、什么时候停。
 
-### 1. Agent 集成收拢与扩充
+### 1. 更多官方支持的 Agent CLI
 
-**为什么**：Condr 只做官方支持的 Agent，未支持的 CLI 通过 Issue 或 PR 加入（ADR 0035）。因此加一种 Agent 必须容易写、容易审。现在一种 Agent 的知识分散在 `condr-core`、协议和 GUI 的十来处，加一种要逐处修改。其中 `reports_at_startup()` 这类带默认分支的函数，漏改了也能编译通过。另外，Settings 里显示的 Unavailable 没有说清 Condr 对这个 Agent 承诺了什么。
+**为什么**：Condr 只做官方支持的 Agent，未支持的 CLI 通过 Issue 或 PR 加入（ADR 0035）。每种 Agent 已经收拢成一个所有字段必填的规格模块，Settings 和文档也已区分“完整支持”和“仅识别”。加一种 Agent 要改哪几处，写在 `docs/agents/adding-an-agent.md`。
 
-**做到哪**（按顺序，见 ADR 0035）：
-
-1. 给 10 种 Agent 生成的 hook 文件补快照测试，逐字固定下来。
-2. 重构：每种 Agent 一个模块，一份所有字段必填的规格。重构后快照必须一字不差。
-3. 两级支持：Settings 和文档区分“完整支持”和“仅识别”；CLI 对仅识别的 Agent 立即拒绝 `agent wait` 和 `agent prompt --wait`。级别只看 hooks 能报告什么，是否做过真机验证另行记录。
-4. 新增官方 Agent，按两级门槛逐个评估。候选来自 2026-10-06 对其他工具所支持 CLI 的调查。
-5. 在 `docs/agents/` 写一页贡献指南，说明加一种 Agent 要改哪几处，并加一个 Issue 模板。
+**做到哪**：按两级门槛逐个评估并加入新的官方 Agent。候选来自 2026-10-06 对其他工具所支持 CLI 的调查。级别只看 hooks 能报告什么，是否做过真机验证另行记录。
 
 **停在哪**：不做用户自定义 Agent，GUI 启动菜单在摩擦记录里，不接入 ACP，也不为没有 hook 的 CLI 猜状态。
 
