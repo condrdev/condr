@@ -347,7 +347,9 @@ fn layout_commands_create_and_remove_a_managed_worktree_without_deleting_its_bra
     run_git(&child_root, &["add", "agent.txt"]);
     run_git(&child_root, &["commit", "-m", "agent work"]);
     let recorded = state.recorded_base(child_workspace_id);
-    let next = WorkspaceGit::scan(&child_root, recorded.as_deref()).unwrap();
+    let next = discover_repository(&child_root)
+        .unwrap()
+        .map(|repository| WorkspaceGit::from_repository(repository, recorded.as_deref()).unwrap());
     apply_workspace_git_refresh(&mut state, child_workspace_id, &child_root, next);
     let snapshot = workspace_git_snapshot(
         child_workspace_id,

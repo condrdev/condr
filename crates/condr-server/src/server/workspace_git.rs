@@ -33,13 +33,6 @@ impl WorkspaceGit {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn scan(root: &Path, recorded: Option<&str>) -> Result<Option<Self>, GitError> {
-        discover_repository(root)?
-            .map(|repository| Self::from_repository(repository, recorded))
-            .transpose()
-    }
-
     /// Everything the sidebar shows, computed in one pass off the state lock.
     pub(super) fn from_repository(
         repository: GitRepository,

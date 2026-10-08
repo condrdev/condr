@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -152,6 +153,13 @@ fn worktree_association_survives_parent_workspace_close() {
 
 fn empty_repository(path: &Path, tree: Option<gix::ObjectId>) -> condr_core::GitRepository {
     let repo = gix::init(path).unwrap();
+    // Worktree creation reopens the repository and needs an identity for its reflog.
+    fs::OpenOptions::new()
+        .append(true)
+        .open(repo.git_dir().join("config"))
+        .unwrap()
+        .write_all(b"\n[user]\n\tname = Condr Tests\n\temail = condr@example.invalid\n")
+        .unwrap();
     let tree = tree.unwrap_or_else(|| {
         repo.write_object(gix::objs::Tree::empty())
             .unwrap()
@@ -211,7 +219,11 @@ fn failed_worktree_checkout_removes_its_registration_and_destination() {
         gix::ObjectId::from_hex(b"1111111111111111111111111111111111111111").unwrap();
     let parent = empty_repository(&temp.path().join("repository"), Some(missing_tree));
     let root = temp.path().join("worktrees");
-    assert!(create_worktree(&parent, "new-branch", Some(&root)).is_err());
+    let error = create_worktree(&parent, "new-branch", Some(&root)).unwrap_err();
+    assert!(
+        error.to_string().contains(&missing_tree.to_string()),
+        "{error}"
+    );
     assert!(!worktree_destination(parent.root(), "new-branch", Some(&root)).exists());
     assert_eq!(
         fs::read_dir(parent.git_directory().join("worktrees"))
