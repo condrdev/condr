@@ -648,6 +648,53 @@ fn clicking_a_pane_header_targets_the_pane() {
     );
 }
 
+/// Clicking a Workspace row that is not selected only switches to it; clicking the
+/// selected row folds or unfolds it.
+#[test]
+fn clicking_a_workspace_row_switches_before_it_toggles() {
+    let _serial_guard = acquire_visual_test_lock();
+    let first_root = TestDirectory::new("row-click-first");
+    let second_root = TestDirectory::new("row-click-second");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (first, _, _) = create_workspace(window, &view, &first_root);
+    create_workspace(window, &view, &second_root);
+    let open = |window: &mut VisualTestContext| {
+        window.read(|app| *view.read(app).sidebar_workspace_open[&(1, first)].read(app))
+    };
+    let open_before = open(window);
+
+    window.update(|window, cx| _ = window.draw(cx));
+    let row = window
+        .debug_bounds(sidebar_workspace_selector(first))
+        .unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            presented(window, &view).map(|(_, workspace_id, _)| workspace_id) == Some(first)
+        }),
+        "a click on another Workspace switches to it"
+    );
+    assert_eq!(
+        open(window),
+        open_before,
+        "switching never folds or unfolds"
+    );
+
+    window.update(|window, cx| _ = window.draw(cx));
+    let row = window
+        .debug_bounds(sidebar_workspace_selector(first))
+        .unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    window.run_until_parked();
+    assert_eq!(
+        open(window),
+        !open_before,
+        "a click on the selected row toggles it"
+    );
+}
+
 /// H(V(a, b), c) with b dropped left of c becomes H(a, H(b, c)); every Pane stays inside
 /// the Dock and the Server's ratios stay where the move put them.
 #[test]
