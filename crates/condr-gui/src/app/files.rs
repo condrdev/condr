@@ -1,7 +1,7 @@
 //! The Files sidebar and the Preview Tab (ADR 0018): the presented Workspace's directory
 //! tree, one level per Server answer, and one file's content in GPUI Kit's read-only
-//! Editor, or rendered when it is an image (ADR 0037). Like the Changes sidebar,
-//! everything shown is Server data.
+//! Editor, or rendered when it is Markdown or an image (ADR 0037). Like the Changes
+//! sidebar, everything shown is Server data.
 
 use super::changes::{empty_state, status_color, status_glyph, tree_indent};
 use super::preview::{
@@ -10,6 +10,7 @@ use super::preview::{
 };
 use super::*;
 use condr_core::{DirectoryEntry, FileKind};
+use gpui_kit::base::text::TextViewState;
 use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::input::{Position, RopeExt as _};
 use gpui_kit::component::notification::Notification;
@@ -156,6 +157,11 @@ pub(super) struct FileEditor {
     /// The path and the generation of the cached answer the Editor text was built from.
     shown: Option<(RelativePathBuf, u64)>,
     pub(super) content: FileViewContent,
+    /// The file rendered, while it is Markdown (ADR 0037).
+    pub(super) markdown: Option<Entity<TextViewState>>,
+    /// Where the rendered file was read, and its block count then, while an edit to it
+    /// may still reset Kit's list to the top; see `render_markdown`.
+    pub(super) markdown_scroll: Rc<Cell<Option<(usize, ListOffset)>>>,
     /// A file the Tab can render shows its text instead. Each file opens rendered, except
     /// one "Show File" opens at a line.
     pub(super) source: bool,
@@ -755,11 +761,17 @@ impl Condr {
             image.as_ref(),
             cx,
         );
-        let body = match (image, &content, editor) {
+        let markdown = editor
+            .and_then(|editor| Some((editor.markdown.clone()?, editor.markdown_scroll.clone())))
+            .filter(|_| rendering == Some(Rendering::Markdown) && !source);
+        let body = match (image, markdown, &content, editor) {
             (Some(None), ..) => empty_state("Loading image…", cx),
             (Some(Some(Ok(image))), ..) => render_image(image),
             (Some(Some(Err(reason))), ..) => empty_state(reason, cx),
-            (None, FileViewContent::Text, Some(editor)) => {
+            (None, Some((markdown, scroll)), ..) => {
+                self.render_markdown(key, workspace_id, path, &markdown, scroll, cx)
+            }
+            (None, None, FileViewContent::Text, Some(editor)) => {
                 let theme = cx.theme();
                 div()
                     .debug_selector(|| "file-body".into())
@@ -784,18 +796,19 @@ impl Condr {
             }
             (
                 None,
+                None,
                 FileViewContent::Loading | FileViewContent::Text | FileViewContent::Image,
                 _,
             ) => empty_state("Loading file…", cx),
-            (None, FileViewContent::Binary, _) => empty_state("Binary file", cx),
-            (None, FileViewContent::TooLarge { bytes }, _) => empty_state(
+            (None, None, FileViewContent::Binary, _) => empty_state("Binary file", cx),
+            (None, None, FileViewContent::TooLarge { bytes }, _) => empty_state(
                 format!(
                     "File too large to show ({:.1} MiB)",
                     *bytes as f64 / (1024. * 1024.)
                 ),
                 cx,
             ),
-            (None, FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
+            (None, None, FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
         };
         v_flex()
             .debug_selector(|| "file-tab".into())
@@ -959,6 +972,8 @@ impl Condr {
                     state,
                     shown: None,
                     content: FileViewContent::Loading,
+                    markdown: None,
+                    markdown_scroll: Rc::default(),
                     source: false,
                 }
             });
@@ -970,6 +985,7 @@ impl Condr {
             {
                 editor.content = FileViewContent::Loading;
                 editor.shown = None;
+                editor.markdown = None;
                 editor.source = false;
                 // The images of the file shown before go with it.
                 let shown = (key, workspace_id, path.clone());
@@ -1030,6 +1046,21 @@ impl Condr {
             editor.source = true;
         }
         let rendering = rendering_for(&shown_path).filter(|_| content == FileViewContent::Text);
+        match (&editor.markdown, rendering) {
+            // An agent editing the file the Tab shows: the view keeps where it was read.
+            (Some(markdown), Some(Rendering::Markdown)) if text_to_text => {
+                let list = markdown.read(cx).list_state();
+                editor
+                    .markdown_scroll
+                    .set(Some((list.item_count(), list.logical_scroll_top())));
+                markdown.update(cx, |state, cx| state.set_text(&text, cx));
+            }
+            (_, Some(Rendering::Markdown)) => {
+                editor.markdown_scroll.set(None);
+                editor.markdown = Some(cx.new(|cx| TextViewState::markdown(&text, cx)));
+            }
+            _ => editor.markdown = None,
+        }
         if content == FileViewContent::Image || rendering == Some(Rendering::Svg) {
             self.files_view
                 .images

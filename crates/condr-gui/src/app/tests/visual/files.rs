@@ -191,6 +191,17 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         }),
         "the retargeted Preview Tab should show the second file"
     );
+    // Markdown opens rendered (ADR 0037); the header switches it to its text and back.
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("file-markdown").is_some());
+    assert!(window.debug_bounds("file-body").is_none());
+    let source = window.debug_bounds("file-view-source").unwrap();
+    window.simulate_click(source.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("file-markdown").is_none());
+    assert!(window.debug_bounds("file-body").is_some());
+
     // The Server's watcher re-answers every cached file after a working-tree batch. An
     // answer with the same content must not count as a change: the Editor would drop its
     // highlighter and scroll back to the top on every refetch. Different content does land.
@@ -324,6 +335,54 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         scrolled,
         "an edit to the shown file must keep the viewport"
     );
+    let rendered = window.debug_bounds("file-view-rendered").unwrap();
+    window.simulate_click(rendered.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds("file-markdown").is_some(),
+        "an edit while the text shows keeps the choice, and Preview renders again"
+    );
+    // So does the rendered view: an edit that adds a block keeps where the reader was,
+    // though Kit resets its list whenever the block count changes.
+    let paragraphs = |count: usize| {
+        (0..count)
+            .map(|n| format!("Paragraph {n}.\n\n"))
+            .collect::<String>()
+    };
+    feed(window, paragraphs(200));
+    let markdown = window.read(|app| {
+        view.read(app)
+            .files_view
+            .file_editors
+            .values()
+            .next()
+            .unwrap()
+            .markdown
+            .clone()
+            .expect("README renders")
+    });
+    let list = window.read(|app| markdown.read(app).list_state().clone());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        list.item_count() == 200
+    }));
+    list.scroll_to(gpui_kit::ListOffset {
+        item_ix: 120,
+        offset_in_item: px(0.),
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    feed(window, paragraphs(201));
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        list.item_count() == 201
+    }));
+    assert_eq!(
+        list.logical_scroll_top().item_ix,
+        120,
+        "an edit to the rendered file must keep the viewport"
+    );
+
     // A reconnect while a listing is in flight: the old connection's answer never comes
     // and the Bootstrap empties the caches, so the request must be forgotten with it, or
     // the root would say "Loading…" forever. The same-authority Bootstrap is fed directly:
@@ -396,10 +455,12 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The Preview Tab renders images (ADR 0037): an image file scaled to fit with its size
-/// in the header, and an SVG that switches to its text.
+/// The Preview Tab renders what it can (ADR 0037): an image file scaled to fit with its
+/// size in the header, an SVG that switches to its text, and Markdown that fetches the
+/// images it draws from the Server, keeps them through a working-tree refresh without
+/// decoding them again, and lets them go once the Tab shows another file.
 #[test]
-fn preview_tab_renders_images() {
+fn preview_tab_renders_images_and_the_images_markdown_draws() {
     let _serial_guard = acquire_visual_test_lock();
     let root = std::env::temp_dir().join(format!(
         "condr-gui-preview-{}-{:?}",
@@ -407,7 +468,7 @@ fn preview_tab_renders_images() {
         std::thread::current().id()
     ));
     let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(root.join("docs")).unwrap();
     image::RgbaImage::new(3, 2)
         .save(root.join("shot.png"))
         .unwrap();
@@ -429,6 +490,12 @@ fn preview_tab_renders_images() {
     std::fs::write(
         root.join("logo.svg"),
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="5"><rect width="4" height="5"/></svg>"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("docs/guide.md"),
+        "# Guide\n\n![shot](../shot.png)\n\n![badge](https://example.com/badge.svg)\n\n\
+         ```rust\nfn main() {}\n```\n",
     )
     .unwrap();
 
@@ -484,8 +551,9 @@ fn preview_tab_renders_images() {
 
     show(window, "shot.png");
     assert!(
-        wait_until(window, |window| drawn(window, "file-image")
-            && drawn(window, "file-image-summary")),
+        wait_until(window, |window| {
+            drawn(window, "file-image") && drawn(window, "file-image-summary")
+        }),
         "an image file renders, its size in the header"
     );
     assert_eq!(image(window, "shot.png").unwrap().unwrap().size, size(3, 2));
@@ -513,6 +581,56 @@ fn preview_tab_renders_images() {
     window.simulate_click(source.center(), Modifiers::default());
     window.run_until_parked();
     assert!(drawn(window, "file-body") && !drawn(window, "file-image"));
+
+    // Markdown asks the Server for the images it draws, relative to its own directory;
+    // a badge on the web is left as its alt text and never asked for.
+    show(window, "docs/guide.md");
+    assert!(
+        wait_until(window, |window| drawn(window, "file-markdown")
+            && image(window, "shot.png").is_some_and(|image| image.is_ok())),
+        "a Markdown image is fetched and decoded"
+    );
+    assert!(
+        image(window, "logo.svg").is_none(),
+        "a new file starts rendered, and the last one's images go"
+    );
+    assert!(window.read(|app| {
+        let resources = &view.read(app).connection(1).unwrap().resources;
+        resources
+            .files
+            .keys()
+            .chain(resources.pending_files.keys())
+            .all(|(_, path)| !path.as_str().contains("badge"))
+    }));
+    let decoded = image(window, "shot.png").unwrap().unwrap();
+    let cached_generation = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .resources
+                .files
+                .get(&(workspace_id, "shot.png".into()))
+                .map(|(generation, _)| *generation)
+        })
+    };
+    let fetched = cached_generation(window).unwrap();
+
+    // A working-tree batch drops the cached bytes; drawing asks again, and the same
+    // picture keeps its decode on screen rather than flashing or decoding again.
+    std::fs::write(root.join("TOUCH.txt"), "touch\n").unwrap();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            cached_generation(window).is_some_and(|generation| generation != fetched)
+        }),
+        "the drawn image is asked for again after the refresh"
+    );
+    window.run_until_parked();
+    assert!(std::sync::Arc::ptr_eq(
+        &decoded,
+        &image(window, "shot.png").unwrap().unwrap()
+    ));
 
     let _ = std::fs::remove_dir_all(&root);
 }

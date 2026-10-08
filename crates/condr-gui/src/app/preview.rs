@@ -1,8 +1,14 @@
 //! What the Preview Tab renders besides text (ADR 0037): images, decoded here with their
-//! frames split so Condr rather than GPUI's `img` decides when an animation moves on. Every
+//! frames split so Condr rather than GPUI's `img` decides when an animation moves on, and
+//! Markdown, through GPUI Kit's TextView with Condr's images, links and highlighting. Every
 //! image comes from the Server through `ReadFile`, so a remote Workspace renders the same.
 
 use super::*;
+use gpui_kit::base::text::{
+    MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
+    TextViewState, TextViewStyle, markdown_ast,
+};
+use gpui_kit::component::text::FrontmatterPlugin;
 use image::AnimationDecoder as _;
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::io::Cursor;
@@ -13,15 +19,19 @@ const MAX_DECODED_BYTES: usize = 256 << 20;
 /// A frame asking for less shows for [`SHORT_FRAME_DELAY`], as browsers do.
 const MIN_FRAME_DELAY: Duration = Duration::from_millis(20);
 const SHORT_FRAME_DELAY: Duration = Duration::from_millis(100);
+/// The widest a rendered Markdown file's text runs, in rems, centred in the Tab.
+const MARKDOWN_MAX_WIDTH: f32 = 48.;
 
 /// A file the Preview Tab can render instead of showing its text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Rendering {
+    Markdown,
     Svg,
 }
 
 pub(super) fn rendering_for(path: &RelativePath) -> Option<Rendering> {
     match path.extension()?.to_ascii_lowercase().as_str() {
+        "md" | "markdown" => Some(Rendering::Markdown),
         "svg" => Some(Rendering::Svg),
         _ => None,
     }
@@ -188,7 +198,9 @@ fn animation(frames: image::Frames<'_>) -> Result<Vec<(Arc<RenderImage>, Duratio
 /// One file of one Workspace on one connection.
 pub(super) type ImageKey = (ConnectionKey, WorkspaceId, RelativePathBuf);
 
-/// The Preview Tab's images: the file it shows when that is one.
+/// The Preview Tab's images: the file it shows when that is one, and the ones its
+/// Markdown draws. Shared with the image loader Kit's TextView calls during layout,
+/// which cannot reach `Condr`.
 #[derive(Clone, Default)]
 pub(super) struct PreviewImages(Arc<Mutex<HashMap<ImageKey, ImageSlot>>>);
 
@@ -375,12 +387,162 @@ impl Condr {
                             .images
                             .land(&image_key, generation, Some(digest), shown);
                     release_images(replaced.into_iter().collect(), cx);
+                    // Kit keeps the size a Markdown image was first laid out at.
+                    for editor in this.files_view.file_editors.values() {
+                        if let Some(markdown) = &editor.markdown {
+                            markdown.update(cx, |state, cx| state.invalidate_inline_layout(cx));
+                        }
+                    }
                     cx.notify();
                 })
                 .ok();
             })
             .detach();
         }
+    }
+
+    /// A rendered Markdown file: GPUI Kit's TextView over the Tab's state, its text centred
+    /// at a readable width, its images and links resolved in the Workspace.
+    pub(super) fn render_markdown(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+        state: &Entity<TextViewState>,
+        scroll: Rc<Cell<Option<(usize, ListOffset)>>>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let list = state.read(cx).list_state().clone();
+        let theme = cx.theme();
+        let rem = theme.font_size;
+        // Padding rather than a narrower column keeps the scrollbar at the Tab's edge.
+        let gutter = ((self.workspace_size.width - rem * MARKDOWN_MAX_WIDTH) / 2.).max(rem * 1.5);
+        let base = path
+            .parent()
+            .unwrap_or(RelativePath::new(""))
+            .to_relative_path_buf();
+        let images = self.files_view.images.clone();
+        let owner = cx.weak_entity();
+        let image_base = base.clone();
+        let link_owner = cx.weak_entity();
+        div()
+            .debug_selector(|| "file-markdown".into())
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .relative()
+            // Kit resets its list to the top when an edit changes the block count, as it
+            // renders; the list lays out only in prepaint, so putting back where the
+            // reader was here, in between, keeps the viewport as the source view does.
+            // ponytail: restores the block index, so text added above shifts the view.
+            .child(
+                canvas(
+                    move |_, _, _| {
+                        if let Some((count, offset)) = scroll.get()
+                            && list.item_count() != count
+                        {
+                            list.scroll_to(offset);
+                            scroll.set(None);
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute(),
+            )
+            .child(
+                TextView::new(state)
+                    .scrollable(true)
+                    .style(markdown_style(
+                        theme,
+                        self.terminal_font.family.clone(),
+                        px(self.code_font_size),
+                    ))
+                    .shared_code_block_highlighter(syntax::code_block_highlighter(cx))
+                    .markdown_extensions(
+                        MarkdownExtensions::default()
+                            .frontmatter()
+                            .plugin(FrontmatterPlugin::new())
+                            .plugin(UnreachableImages)
+                            // The same parser every frame: the document is not parsed again.
+                            .parser_revision(1),
+                    )
+                    .image_source(move |uri| {
+                        let Some(path) = workspace_path(&image_base, uri) else {
+                            return ImageSource::Custom(Arc::new(|_, _| {
+                                Some(Err(ImageCacheError::Asset("not in the Workspace".into())))
+                            }));
+                        };
+                        let images = images.clone();
+                        let owner = owner.clone();
+                        ImageSource::Custom(Arc::new(move |window, cx| {
+                            let image_key = (key, workspace_id, path.clone());
+                            if images.want(image_key.clone()) {
+                                let owner = owner.clone();
+                                cx.defer(move |cx| {
+                                    owner
+                                        .update(cx, |this, cx| {
+                                            this.feed_images(key, workspace_id, cx)
+                                        })
+                                        .ok();
+                                });
+                            }
+                            images.get(&image_key).map(|shown| {
+                                shown
+                                    .map(|image| image.frame(window, cx))
+                                    .map_err(ImageCacheError::Asset)
+                            })
+                        }))
+                    })
+                    .on_link_click(move |url, event, window, cx| {
+                        if let ClickEvent::Mouse(click) = event
+                            && click.up.button == MouseButton::Right
+                        {
+                            return;
+                        }
+                        match link_target(&base, url) {
+                            LinkTarget::Browser => cx.open_url(url),
+                            LinkTarget::File(path) => {
+                                link_owner
+                                    .update(cx, |this, cx| {
+                                        if !this.is_listed_directory(key, workspace_id, &path) {
+                                            this.show_file_on(key, workspace_id, path, window, cx);
+                                        }
+                                    })
+                                    .ok();
+                            }
+                            LinkTarget::Nothing => {}
+                        }
+                    })
+                    .px(gutter)
+                    .pt_4(),
+            )
+            .into_any_element()
+    }
+
+    /// Whether a listing the Files view holds names `path` a directory.
+    fn is_listed_directory(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+    ) -> bool {
+        let (Some(connection), Some(name)) = (self.connection(key), path.file_name()) else {
+            return false;
+        };
+        let parent = path
+            .parent()
+            .unwrap_or(RelativePath::new(""))
+            .to_relative_path_buf();
+        connection
+            .resources
+            .directories
+            .get(&(workspace_id, parent))
+            .and_then(|listing| listing.as_ref().ok())
+            .is_some_and(|listing| {
+                listing.entries.iter().any(|entry| {
+                    entry.name == name && entry.kind == condr_core::FileKind::Directory
+                })
+            })
     }
 }
 
@@ -426,13 +588,199 @@ pub(super) fn file_size_text(bytes: usize) -> String {
     }
 }
 
+/// GPUI Kit's text colours, as Kit derives them for its own TextViews, with code blocks
+/// in the code font and the Highlight theme's colours like the Tab's source view.
+fn markdown_style(theme: &Theme, code_font: SharedString, code_size: Pixels) -> TextViewStyle {
+    let code = &theme.highlight_theme.style;
+    let mut code_block = StyleRefinement::default()
+        .font_family(code_font)
+        .text_size(code_size)
+        .rounded(theme.radius);
+    if let Some(background) = code.editor_background {
+        code_block = code_block.bg(background);
+    }
+    if let Some(foreground) = code.editor_foreground {
+        code_block = code_block.text_color(foreground);
+    }
+    TextViewStyle::default()
+        .with_foreground(theme.foreground)
+        .with_muted_foreground(theme.muted_foreground)
+        .with_link(theme.link)
+        .with_selection(theme.selection)
+        .with_code_background(theme.muted)
+        .with_border(theme.border)
+        .with_code_block(code_block)
+        .with_table(StyleRefinement::default().rounded(theme.radius))
+        .with_table_head(
+            StyleRefinement::default()
+                .bg(theme.table_head)
+                .text_color(theme.table_head_foreground),
+        )
+        .with_inline_code(HighlightStyle {
+            background_color: Some(theme.accent),
+            ..HighlightStyle::default()
+        })
+        .with_dark(theme.is_dark())
+}
+
+/// Shows an image the Workspace does not hold, such as a README's badges, as its alt
+/// text: the Preview Tab reaches nothing outside the Workspace.
+struct UnreachableImages;
+
+impl MarkdownPlugin for UnreachableImages {
+    fn name(&self) -> &str {
+        "unreachable-image"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        _: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::Image(image) = node else {
+            return None;
+        };
+        scheme(&image.url)
+            .is_some()
+            .then(|| MarkdownNode::new(self.name().to_owned(), ()).text(image.alt.clone()))
+    }
+}
+
+/// A URL's scheme, as RFC 3986 spells one.
+fn scheme(url: &str) -> Option<&str> {
+    let (scheme, _) = url.split_once(':')?;
+    (scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)))
+    .then_some(scheme)
+}
+
+/// A link or image reference in a Markdown file whose directory is `base`, as a path in
+/// the Workspace: `/` starts at the root as on GitHub, and a query or fragment is dropped.
+/// `None` for a URL with a scheme or one that leaves the Workspace.
+fn workspace_path(base: &RelativePath, url: &str) -> Option<RelativePathBuf> {
+    if scheme(url).is_some() {
+        return None;
+    }
+    let url = percent_decode(url.split(['#', '?']).next().unwrap_or_default());
+    // Only a fragment: a place in this same file.
+    if url.is_empty() {
+        return None;
+    }
+    let path = match url.strip_prefix('/') {
+        Some(rooted) => RelativePath::new(rooted).normalize(),
+        None => base.join_normalized(url.as_str()),
+    };
+    condr_core::valid_diff_path(&path).then_some(path)
+}
+
+/// `%XX` escapes decoded, as Markdown writes a space in a path; a malformed one stays.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let escaped = (bytes[at] == b'%')
+            .then(|| text.get(at + 1..at + 3))
+            .flatten()
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match escaped {
+            Some(byte) => {
+                decoded.push(byte);
+                at += 3;
+            }
+            None => {
+                decoded.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+#[derive(Debug, PartialEq)]
+enum LinkTarget {
+    Browser,
+    File(RelativePathBuf),
+    Nothing,
+}
+
+/// Where a click on a rendered Markdown link goes: the web and mail to the system, a
+/// file of the Workspace to the Preview Tab, anything else nowhere.
+fn link_target(base: &RelativePath, url: &str) -> LinkTarget {
+    match scheme(url) {
+        Some(scheme)
+            if ["http", "https", "mailto"]
+                .iter()
+                .any(|known| scheme.eq_ignore_ascii_case(known)) =>
+        {
+            LinkTarget::Browser
+        }
+        Some(_) => LinkTarget::Nothing,
+        // A directory, which the Preview Tab cannot show.
+        None if url
+            .split(['#', '?'])
+            .next()
+            .unwrap_or_default()
+            .ends_with('/') =>
+        {
+            LinkTarget::Nothing
+        }
+        None => workspace_path(base, url).map_or(LinkTarget::Nothing, LinkTarget::File),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: GPUI's own `test` attribute would shadow the standard one.
     use super::{
-        Arc, Cursor, Duration, RenderImage, SHORT_FRAME_DELAY, animation, file_size_text, frame_at,
+        Arc, Cursor, Duration, LinkTarget, RelativePath, RenderImage, SHORT_FRAME_DELAY, animation,
+        file_size_text, frame_at, link_target, workspace_path,
     };
     use image::AnimationDecoder as _;
+
+    #[test]
+    fn references_resolve_inside_the_workspace_only() {
+        let base = RelativePath::new("docs/guide");
+        let path = |url| workspace_path(base, url).map(|path| path.to_string());
+        assert_eq!(path("shot.png").as_deref(), Some("docs/guide/shot.png"));
+        assert_eq!(path("./img/a.png").as_deref(), Some("docs/guide/img/a.png"));
+        assert_eq!(
+            path("../../assets/logo.svg").as_deref(),
+            Some("assets/logo.svg")
+        );
+        assert_eq!(path("/assets/logo.svg").as_deref(), Some("assets/logo.svg"));
+        assert_eq!(
+            path("my%20notes.md#usage").as_deref(),
+            Some("docs/guide/my notes.md")
+        );
+        assert_eq!(path("../../../outside.png"), None);
+        assert_eq!(path("#usage"), None);
+        assert_eq!(path("https://example.com/badge.svg"), None);
+        assert_eq!(path("data:image/png;base64,AAAA"), None);
+    }
+
+    #[test]
+    fn links_open_the_web_or_a_workspace_file_and_nothing_else() {
+        let base = RelativePath::new("docs");
+        assert_eq!(link_target(base, "https://condr.dev"), LinkTarget::Browser);
+        assert_eq!(
+            link_target(base, "MAILTO:me@example.com"),
+            LinkTarget::Browser
+        );
+        assert_eq!(
+            link_target(base, "javascript:alert(1)"),
+            LinkTarget::Nothing
+        );
+        assert_eq!(link_target(base, "file:///etc/passwd"), LinkTarget::Nothing);
+        assert_eq!(
+            link_target(base, "adr/0018.md#L10"),
+            LinkTarget::File("docs/adr/0018.md".into())
+        );
+        assert_eq!(link_target(base, "adr/"), LinkTarget::Nothing);
+        assert_eq!(link_target(base, "#top"), LinkTarget::Nothing);
+    }
 
     #[test]
     fn an_animation_loops_through_its_frames_by_their_delays() {

@@ -1,6 +1,7 @@
-//! Syntax highlighting for the read-only Editors, the Preview and Diff Tabs (ADR 0032):
-//! the Sublime syntaxes `bat` curates, parsed by syntect on Oniguruma behind GPUI Kit's
-//! `InputHighlighter` seam, and coloured by the theme Settings picks.
+//! Syntax highlighting for the read-only Editors, the Preview and Diff Tabs (ADR 0032),
+//! and the code blocks of a rendered Markdown file (ADR 0037): the Sublime syntaxes `bat`
+//! curates, parsed by syntect on Oniguruma behind GPUI Kit's `InputHighlighter` and code
+//! block seams, and coloured by the theme Settings picks.
 
 use std::{
     cell::{Cell, RefCell},
@@ -13,6 +14,7 @@ use std::{
     },
 };
 
+use gpui_kit::base::text::CodeBlock;
 use gpui_kit::component::input::{
     EditorState, FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter,
     InputHighlighterFactory, Rope,
@@ -177,6 +179,49 @@ pub(crate) fn highlighter_factory(cx: &App) -> InputHighlighterFactory {
             syntax_for(language),
             painting.clone(),
         )) as Box<dyn InputHighlighter>)
+    })
+}
+
+/// Colours the fenced code blocks of a rendered Markdown file by their info string.
+pub(crate) type CodeBlockHighlighter =
+    Arc<dyn Fn(&CodeBlock) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync>;
+
+/// The code block highlighter for the theme painting now. Kit keeps a block's colours
+/// only while it is handed the same highlighter, so there is one per theme.
+pub(crate) fn code_block_highlighter(cx: &App) -> CodeBlockHighlighter {
+    thread_local! {
+        static SHARED: RefCell<Option<(&'static Theme, CodeBlockHighlighter)>> =
+            const { RefCell::new(None) };
+    }
+    let theme = painting(cx).get();
+    SHARED.with_borrow_mut(|shared| match shared {
+        Some((shared_theme, highlighter)) if std::ptr::eq(*shared_theme, theme) => {
+            highlighter.clone()
+        }
+        _ => {
+            let highlighter = block_highlighter(theme);
+            *shared = Some((theme, highlighter.clone()));
+            highlighter
+        }
+    })
+}
+
+// ponytail: a block parses on the UI thread the first time it paints; Markdown blocks are
+// short, move it off if a long one shows.
+fn block_highlighter(theme: &'static Theme) -> CodeBlockHighlighter {
+    Arc::new(move |block| {
+        let Some(syntax) = block.lang().and_then(|language| syntax_for(&language)) else {
+            return Vec::new();
+        };
+        let Some(parsed) = parse(&block.code(), syntax, &AtomicBool::new(false)) else {
+            return Vec::new();
+        };
+        let mut styles = StackStyles::new(theme, parsed.stacks.len());
+        parsed
+            .spans
+            .iter()
+            .map(|(range, stack)| (range.clone(), styles.get(*stack, &parsed.stacks)))
+            .collect()
     })
 }
 
@@ -585,6 +630,20 @@ mod tests {
         assert_eq!(runs.first().unwrap().0.start, 1);
         assert_eq!(runs.last().unwrap().0.end, text.len());
         assert!(runs.windows(2).all(|pair| pair[0].0.end == pair[1].0.start));
+    }
+
+    #[test]
+    fn code_blocks_are_coloured_by_their_info_string() {
+        let highlighter = block_highlighter(theme("GitHub Light", false));
+        let code = "fn main() {}\n";
+        let runs = highlighter(&CodeBlock::from_code(code, Some("rust")));
+        let keyword = runs.iter().find(|(range, _)| range.start == 0).unwrap().1;
+        let name = runs.iter().find(|(range, _)| range.start == 3).unwrap().1;
+        assert_ne!(keyword.color, name.color);
+        assert!(
+            highlighter(&CodeBlock::from_code(code, None::<&str>)).is_empty(),
+            "a block without a language stays plain"
+        );
     }
 
     #[test]
