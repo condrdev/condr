@@ -1,7 +1,7 @@
 use super::*;
 // Only the unix-only right-click test builds a reported motion by hand.
 #[cfg(unix)]
-use super::super::super::ReportedTerminalMouseMotion;
+use crate::app::terminal_input::ReportedTerminalMouseMotion;
 use condr_core::DETECTED_LINK_FLAG;
 #[cfg(unix)]
 use condr_core::{TerminalMouseButton, TerminalMouseEvent};
@@ -251,7 +251,7 @@ fn terminal_drag_selection_updates_locally() {
 
     window.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
     window.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
-    let dragging = window.read(|app| view.read(app).terminal_selection.unwrap());
+    let dragging = window.read(|app| view.read(app).terminal_input.selection.unwrap());
     assert!(dragging.dragging);
     assert_eq!((dragging.connection_key, dragging.pane_id), (1, pane_id));
     assert_ne!(dragging.range.start, dragging.range.end);
@@ -286,7 +286,7 @@ fn terminal_drag_selection_updates_locally() {
         })
     }));
     assert!(
-        window.read(|app| view.read(app).terminal_selection.is_none()),
+        window.read(|app| view.read(app).terminal_input.selection.is_none()),
         "the local bridge is released once the Server's frame carries the selection"
     );
 
@@ -374,7 +374,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                 },
                 display_offset: 3,
             };
-            this.terminal_selection = Some(LocalTerminalSelection {
+            this.terminal_input.selection = Some(LocalTerminalSelection {
                 connection_key: 1,
                 pane_id,
                 range,
@@ -411,11 +411,11 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                 cx,
             );
 
-            let updated = this.terminal_selection.unwrap().range;
+            let updated = this.terminal_input.selection.unwrap().range;
             assert_eq!((updated.start, updated.end), (range.start, range.end));
             assert_eq!(updated.display_offset, 7);
             assert!(this.copy_terminal_selection(1, pane_id, cx));
-            assert!(this.terminal_selection.is_none());
+            assert!(this.terminal_input.selection.is_none());
         });
     });
 
@@ -472,11 +472,13 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
     let pane_id = pane_id.unwrap();
     window.update(|_, cx| {
         view.update(cx, |this, _| {
+            // Only the output can contain the full marker, and it follows both modes.
+            // Waiting for Drag alone can still observe the VT before SGR is enabled.
             this.terminal_command(
                 1,
                 pane_id,
                 TerminalCommand::Text(
-                    "stty raw -echo; printf 'CONDR_MOUSE_READY\\r\\n\\033[?1002h\\033[?1006h'; bytes=$(dd bs=1 count=18 2>/dev/null | od -An -tx1 | tr -d ' \\n'); stty sane; printf '\\r\\nCONDR_MOUSE_BYTES_%s\\r\\n' \"$bytes\"\r"
+                    "stty raw -echo; printf '\\033[?1002h\\033[?1006hCONDR_MOUSE_%s\\r\\n' READY; bytes=$(dd bs=1 count=18 2>/dev/null | od -An -tx1 | tr -d ' \\n'); stty sane; printf '\\r\\nCONDR_MOUSE_BYTES_%s\\r\\n' \"$bytes\"\r"
                         .into(),
                 ),
             );
@@ -505,16 +507,29 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
     );
     window.simulate_mouse_down(click, MouseButton::Right, Modifiers::default());
     window.simulate_mouse_up(click, MouseButton::Right, Modifiers::default());
-    assert!(wait_until_event_driven(window, |window| {
-        terminal_contains(
-            window,
-            &view,
-            1,
-            pane_id,
-            "CONDR_MOUSE_BYTES_1b5b3c323b333b334d1b5b3c323b333b336d",
-        )
-    }));
-    assert!(window.read(|app| view.read(app).terminal_selection.is_none()));
+    assert!(
+        wait_until_event_driven(window, |window| {
+            terminal_contains(
+                window,
+                &view,
+                1,
+                pane_id,
+                "CONDR_MOUSE_BYTES_1b5b3c323b333b334d1b5b3c323b333b336d",
+            )
+        }),
+        "expected the SGR right-click bytes; terminal contents: {:?}",
+        window.read(|app| {
+            view.read(app).terminal(1, pane_id).map(|terminal| {
+                terminal
+                    .view
+                    .cells
+                    .iter()
+                    .map(|cell| cell.text.as_str())
+                    .collect::<String>()
+            })
+        })
+    );
+    assert!(window.read(|app| view.read(app).terminal_input.selection.is_none()));
 
     let end = point(
         click.x + geometry.cell_size.width * 4.,
@@ -546,7 +561,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
                     connection.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
-            this.last_terminal_mouse_motion = Some(ReportedTerminalMouseMotion {
+            this.terminal_input.mouse_motion = Some(ReportedTerminalMouseMotion {
                 connection_key: 1,
                 pane_id,
                 mouse_tracking: terminal_view.mouse_tracking,
@@ -571,7 +586,7 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
                 })),
                 cx,
             );
-            assert!(this.last_terminal_mouse_motion.is_none());
+            assert!(this.terminal_input.mouse_motion.is_none());
         });
     });
 }
@@ -955,7 +970,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
     });
     let mut target = None;
     assert!(wait_until(window, |window| {
-        target = window.read(|app| view.read(app).target_pane);
+        target = window.read(|app| view.read(app).terminal_input.target);
         let Some((key, pane_id)) = target else {
             return false;
         };
@@ -1046,7 +1061,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         window.debug_bounds(pasting).is_none(),
         "the indicator comes down once the image left the writer"
     );
-    window.update(|_, cx| view.update(cx, |this, _| this.target_pane = None));
+    window.update(|_, cx| view.update(cx, |this, _| this.terminal_input.target = None));
     let messages: Vec<_> = received.try_iter().collect();
     assert!(matches!(messages.as_slice(), [ClientMessage::PasteImage {
         server_id, session_id, pane_id: target, bytes, ..
@@ -1055,7 +1070,11 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         Some(*server_id) == connection.server_id && Some(*session_id) == connection.session_id
     })));
 
-    window.update(|_, cx| view.update(cx, |this, _| this.target_pane = Some((key, pane_id))));
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.terminal_input.target = Some((key, pane_id))
+        })
+    });
     let oversized = gpui_kit::Image::from_bytes(
         gpui_kit::ImageFormat::Png,
         vec![0; condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES + 1],
@@ -1205,6 +1224,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
     assert_eq!(
         window.read(|app| {
             view.read(app)
+                .terminal_input
                 .hovered_link
                 .as_ref()
                 .map(|(_, _, link)| (link.uri.to_string(), link.position))
@@ -1238,7 +1258,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         None,
         "pressing a link must wait for a matching release"
     );
-    assert!(window.read(|app| view.read(app).pressed_terminal_link.is_some()));
+    assert!(window.read(|app| view.read(app).terminal_input.pressed_link.is_some()));
     window.simulate_mouse_move(off_link_cell, MouseButton::Left, secondary);
     window.simulate_mouse_up(off_link_cell, MouseButton::Left, secondary);
     assert_eq!(
@@ -1246,7 +1266,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         None,
         "releasing away from the pressed link must cancel activation"
     );
-    assert!(window.read(|app| view.read(app).pressed_terminal_link.is_none()));
+    assert!(window.read(|app| view.read(app).terminal_input.pressed_link.is_none()));
 
     window.simulate_mouse_move(link_cell, None, secondary);
     window.simulate_mouse_down(link_cell, MouseButton::Left, secondary);
@@ -1254,7 +1274,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
     window.simulate_mouse_up(link_cell, MouseButton::Left, secondary);
     assert_eq!(window.opened_url().as_deref(), Some(uri));
 
-    assert!(window.read(|app| view.read(app).hovered_link.is_some()));
+    assert!(window.read(|app| view.read(app).terminal_input.hovered_link.is_some()));
 
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
@@ -1291,7 +1311,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         });
     });
     assert!(
-        window.read(|app| view.read(app).hovered_link.is_none()),
+        window.read(|app| view.read(app).terminal_input.hovered_link.is_none()),
         "a terminal frame must invalidate a link no longer under the pointer"
     );
 }
@@ -1350,7 +1370,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         "the test window must be active for terminal focus to be reported"
     );
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         Some((1, pane_id)),
         "activating the window should report terminal focus to the PTY"
     );
@@ -1370,7 +1390,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         });
     });
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         Some((1, pane_id)),
         "Bootstrap resync alone must not report a focused terminal as unfocused"
     );
@@ -1378,12 +1398,12 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         None,
         "a blur during Bootstrap resync must still be reported"
     );
     assert_eq!(
-        window.read(|app| view.read(app).focused_terminal),
+        window.read(|app| view.read(app).terminal_input.focused),
         None,
         "the GUI must also consider the terminal locally unfocused"
     );
@@ -1481,12 +1501,12 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         None,
         "moving focus out of a Pane should report the terminal as unfocused"
     );
     assert_eq!(
-        window.read(|app| view.read(app).target_pane),
+        window.read(|app| view.read(app).terminal_input.target),
         Some((1, pane_id)),
         "blurring the terminal does not change the selected Pane"
     );
@@ -1506,7 +1526,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         Some((1, pane_id))
     );
     assert!(
@@ -1554,11 +1574,11 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
     assert_eq!(
-        window.read(|app| view.read(app).focused_terminal),
+        window.read(|app| view.read(app).terminal_input.focused),
         Some((1, pane_id))
     );
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         None,
         "a viewer tracks local focus even though it cannot report Focus(true)"
     );
@@ -1570,7 +1590,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         });
     });
     assert_eq!(
-        window.read(|app| view.read(app).reported_terminal_focus),
+        window.read(|app| view.read(app).terminal_input.reported_focus),
         Some((1, pane_id)),
         "control reacquisition must report existing local focus without a new focus event"
     );
@@ -1983,4 +2003,82 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
             "Cmd+C's release must follow its press, and a kept press must have no release"
         );
     }
+}
+
+#[test]
+fn closing_a_preedit_owner_discards_its_late_commit_before_accepting_new_input() {
+    use gpui_kit::EntityInputHandler as _;
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let mut session = Session::new();
+            session.create_workspace(std::env::temp_dir()).unwrap();
+            let old_pane = session.workspaces()[0].tabs()[0]
+                .focused_pane()
+                .unwrap()
+                .id();
+            let next_pane = session
+                .split_pane(old_pane, SplitDirection::Horizontal, 0.5)
+                .unwrap();
+            let connection = this.connection_mut(1).unwrap();
+            connection
+                .apply_layout(session.snapshot(), Vec::new())
+                .unwrap();
+            let (outgoing, received) = std::sync::mpsc::channel();
+            connection.io.as_mut().unwrap().outgoing = outgoing;
+            this.sync_sidebar_workspace_open(cx);
+            this.terminal_input.target = Some((1, old_pane));
+            this.replace_and_mark_text_in_range(None, "old preedit", None, window, cx);
+            assert_eq!(
+                this.marked_text_for(1, old_pane).as_deref(),
+                Some("old preedit")
+            );
+
+            session.close_pane(old_pane).unwrap();
+            this.connection_mut(1)
+                .unwrap()
+                .apply_layout(session.snapshot(), Vec::new())
+                .unwrap();
+            this.prune_dock_cache(1);
+            this.refresh_target_pane(1);
+            assert_eq!(this.terminal_input.target, Some((1, next_pane)));
+            assert!(
+                this.terminal_input.composition.is_none(),
+                "preedit text is released"
+            );
+            this.replace_text_in_range(None, "late old commit", window, cx);
+            assert!(
+                received.try_recv().is_err(),
+                "the old IME must not write to the new Pane"
+            );
+            this.replace_text_in_range(None, "fresh input", window, cx);
+            assert!(
+                matches!(received.try_recv().unwrap(), ClientMessage::Terminal {
+                pane_id, command: TerminalCommand::Text(text), ..
+            } if pane_id == next_pane && text == "fresh input")
+            );
+
+            // A fresh preedit or an OS unmark also ends cancellation, including when
+            // a replacement Device reuses the same Pane ID.
+            for starts_preedit in [true, false] {
+                this.replace_and_mark_text_in_range(None, "old device preedit", None, window, cx);
+                this.clear_connection_gui_state(1);
+                this.terminal_input.target = Some((1, next_pane));
+                if starts_preedit {
+                    this.replace_and_mark_text_in_range(None, "new preedit", None, window, cx);
+                } else {
+                    this.unmark_text(window, cx);
+                }
+                this.replace_text_in_range(None, "new commit", window, cx);
+                assert!(
+                    matches!(received.try_recv().unwrap(), ClientMessage::Terminal {
+                    pane_id, command: TerminalCommand::Text(text), ..
+                } if pane_id == next_pane && text == "new commit")
+                );
+            }
+        });
+    });
 }

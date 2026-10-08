@@ -121,7 +121,7 @@ impl Render for TerminalPanel {
             .as_ref()
             .map(|owner| {
                 let app = owner.read(cx);
-                let active = app.target_pane == Some((self.connection_key, self.pane_id));
+                let active = app.terminal_input.target == Some((self.connection_key, self.pane_id));
                 let connection = app.connection(self.connection_key);
                 let zoomed = connection
                     .is_some_and(|connection| connection.zoomed_panes.contains(&self.pane_id));

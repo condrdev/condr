@@ -393,7 +393,7 @@ impl Condr {
     }
 
     pub(super) fn save_auto_check_updates(&mut self, cx: &mut Context<Self>) {
-        let enabled = self.auto_check_updates;
+        let enabled = self.updates.automatic();
         self.save_config(cx, move |path| {
             write_value(
                 path,
@@ -405,7 +405,7 @@ impl Condr {
     }
 
     pub(super) fn save_update_channel(&mut self, cx: &mut Context<Self>) {
-        let channel = self.update_channel;
+        let channel = self.updates.channel();
         self.save_config(cx, move |path| {
             write_value(
                 path,

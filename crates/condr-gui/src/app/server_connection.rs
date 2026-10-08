@@ -31,7 +31,8 @@ pub(super) struct ServerConnection {
     pub(super) runtime_epoch: Option<RuntimeEpoch>,
     pub(super) session_id: Option<SessionId>,
     pub(super) sequence: u64,
-    pub(super) snapshot: SessionSnapshot,
+    /// The last validated Server model; absent until the first Bootstrap.
+    session: Option<Session>,
     /// This Client's own view of the Session (ADR 0021): the Workspace it shows and, per
     /// Workspace, the Tab. Never sent to the Server. A choice that no longer exists falls
     /// back to the first Workspace or Tab; `reconcile_view` moves it to a neighbour first.
@@ -47,22 +48,7 @@ pub(super) struct ServerConnection {
     /// Panes with a clipboard image still on its way to the Server; the header says so.
     pub(super) pasting_images: HashSet<PaneId>,
     pub(super) workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
-    /// File diffs the Server answered, by Workspace and path (ADR 0017). Cleared for a
-    /// Workspace whenever its Git state changes, so a shown diff is refetched.
-    pub(super) diffs: HashMap<(WorkspaceId, RelativePathBuf), Result<FileDiff, String>>,
-    /// Bumped whenever `diffs` changes, so a Diff Tab knows its text is stale.
-    pub(super) diffs_generation: u64,
-    /// Directory listings the Server answered for the Files sidebar (ADR 0018), by
-    /// Workspace and root-relative path; a Git change asks for every cached one again.
-    pub(super) directories:
-        HashMap<(WorkspaceId, RelativePathBuf), Result<DirectoryListing, String>>,
-    /// File contents the Server answered for Preview Tabs, refreshed the same way, each
-    /// with the `files_generation` it landed at. A refetch that returns the same content
-    /// keeps its generation, so the Preview Tab's Editor is left alone (no re-highlight,
-    /// no scroll reset).
-    pub(super) files: HashMap<(WorkspaceId, RelativePathBuf), (u64, Result<FileContent, String>)>,
-    /// Bumped whenever an entry of `files` changes.
-    pub(super) files_generation: u64,
+    pub(super) resources: WorkspaceResources,
     pub(super) zoomed_panes: HashSet<PaneId>,
     /// Server-owned preferences from the Bootstrap, kept current by events.
     pub(super) settings: ServerSettings,
@@ -107,7 +93,7 @@ pub(super) struct ServerConnection {
     pub(super) refusal: Option<condr_core::protocol::Refusal>,
     /// The Server's reason for not granting this Client control, while it stands. Not an
     /// error: the Session is still viewable, and the busy case retries on its own.
-    pub(super) control_denied: Option<String>,
+    pub(super) control_denied: Option<(ControlDenialReason, String)>,
     /// Set while the GUI reconnects on its own, after a restart it asked for or a
     /// connection that ended without it; cleared on success or at the deadline.
     pub(super) reconnect_deadline: Option<Instant>,
@@ -186,7 +172,7 @@ impl ServerConnection {
             runtime_epoch: None,
             session_id: None,
             sequence: 0,
-            snapshot: Session::new().snapshot(),
+            session: None,
             view_workspace: None,
             view_tabs: HashMap::new(),
             terminals: HashMap::new(),
@@ -197,11 +183,7 @@ impl ServerConnection {
             attention: HashSet::new(),
             pasting_images: HashSet::new(),
             workspace_git: HashMap::new(),
-            diffs: HashMap::new(),
-            diffs_generation: 0,
-            directories: HashMap::new(),
-            files: HashMap::new(),
-            files_generation: 0,
+            resources: WorkspaceResources::default(),
             zoomed_panes: HashSet::new(),
             settings: ServerSettings::default(),
             hooks: Vec::new(),
@@ -260,8 +242,15 @@ impl ServerConnection {
             && self.bootstrap_resync_session_id.is_none()
     }
 
-    pub(super) fn session(&self) -> Option<Session> {
-        Session::restore(self.snapshot.clone()).ok()
+    pub(super) fn session(&self) -> Option<&Session> {
+        self.session.as_ref()
+    }
+
+    fn replace_session(&mut self, session: Session) {
+        if let Some(before) = self.session.take() {
+            self.reconcile_view(&before, &session);
+        }
+        self.session = Some(session);
     }
 
     /// What a Pane is called: the title its program set, else its agent's name.
@@ -303,10 +292,10 @@ impl ServerConnection {
     /// Shows `workspace_id`, and `tab_id` in it when given; an unknown id is ignored.
     /// Returns whether the view changed.
     pub(super) fn set_view(&mut self, workspace_id: WorkspaceId, tab_id: Option<TabId>) -> bool {
-        let Some(session) = self.session() else {
+        let Some(session) = self.session.as_ref() else {
             return false;
         };
-        let before = self.viewed(&session);
+        let before = self.viewed(session);
         if session.workspace(workspace_id).is_none() {
             return false;
         }
@@ -318,7 +307,7 @@ impl ServerConnection {
         {
             self.view_tabs.insert(workspace_id, tab_id);
         }
-        self.viewed(&session) != before
+        self.viewed(session) != before
     }
 
     /// The structure changed: a shown Workspace or Tab that closed gives way to the one
@@ -351,9 +340,14 @@ impl ServerConnection {
         }
     }
 
-    pub(super) fn apply_bootstrap(&mut self, bootstrap: SessionBootstrap) -> BootstrapApplication {
+    pub(super) fn apply_bootstrap(
+        &mut self,
+        bootstrap: SessionBootstrap,
+    ) -> Result<BootstrapApplication, String> {
+        // Validate before replacing any identity, cursor, terminal or view state.
+        let session = Session::restore(bootstrap.snapshot)
+            .map_err(|error| format!("invalid Session snapshot: {error}"))?;
         let previous_layout = self.dock_projection();
-        let before = self.session();
         let authority_changed = self.server_id != Some(bootstrap.server_id)
             || self.runtime_epoch != Some(bootstrap.runtime_epoch)
             || self.session_id != Some(bootstrap.session_id);
@@ -372,10 +366,7 @@ impl ServerConnection {
         self.runtime_epoch = Some(bootstrap.runtime_epoch);
         self.session_id = Some(bootstrap.session_id);
         self.sequence = bootstrap.sequence;
-        self.snapshot = bootstrap.snapshot;
-        if let (Some(before), Some(after)) = (before, self.session()) {
-            self.reconcile_view(&before, &after);
-        }
+        self.replace_session(session);
         // Server-authoritative; the Bootstrap usually lands before ControlGranted, so keep it
         // regardless of `controlling` and let presentation gate on control instead.
         self.attention = bootstrap
@@ -408,11 +399,7 @@ impl ServerConnection {
                 .and_modify(|tracker| tracker.update(agent.state, false))
                 .or_insert_with(|| AgentTracker::new(agent.state));
         }
-        self.diffs.clear();
-        self.diffs_generation += 1;
-        self.directories.clear();
-        self.files.clear();
-        self.files_generation += 1;
+        self.resources.reset();
         self.workspace_git = bootstrap
             .workspace_git
             .into_iter()
@@ -424,19 +411,47 @@ impl ServerConnection {
         self.bootstrap_resync_session_id = None;
         self.error = None;
         self.disconnected_at = None;
-        BootstrapApplication {
+        Ok(BootstrapApplication {
             rebuild: previous_layout != self.dock_projection(),
             resubscribe: resubscribe || authority_changed,
             reacquire_control: authority_changed || rejected_recovery,
             authority_changed,
-        }
+        })
+    }
+
+    /// Replaces structure atomically while preserving live terminals and the Client's view.
+    pub(super) fn apply_layout(
+        &mut self,
+        snapshot: SessionSnapshot,
+        zoomed_panes: Vec<PaneId>,
+    ) -> Result<bool, String> {
+        let session = Session::restore(snapshot)
+            .map_err(|error| format!("invalid Session snapshot: {error}"))?;
+        let previous_layout = self.dock_projection();
+        let previous_viewer = self.presented_viewer();
+        let live: HashSet<PaneId> = session
+            .workspaces()
+            .iter()
+            .flat_map(|workspace| workspace.tabs())
+            .flat_map(|tab| tab.panes())
+            .map(|pane| pane.id())
+            .collect();
+        self.replace_session(session);
+        self.zoomed_panes = zoomed_panes.into_iter().collect();
+        self.terminals.retain(|pane_id, _| live.contains(pane_id));
+        self.terminal_hyperlinks
+            .retain(|pane_id, _| live.contains(pane_id));
+        self.terminal_titles
+            .retain(|pane_id, _| live.contains(pane_id));
+        // Retargeting a viewer also needs to refresh its Editor, even without a Dock.
+        Ok(self.dock_projection() != previous_layout || self.presented_viewer() != previous_viewer)
     }
 
     /// The viewer Tab this Client shows, if the shown Tab is one: its identity and file.
     /// A retarget changes the file and nothing the Dock projection sees.
     pub(super) fn presented_viewer(&self) -> Option<(TabId, RelativePathBuf)> {
         let session = self.session()?;
-        let (_, tab_id) = self.viewed(&session)?;
+        let (_, tab_id) = self.viewed(session)?;
         let tab = session.tab(tab_id)?;
         let path = tab
             .diff()
@@ -447,7 +462,7 @@ impl ServerConnection {
 
     pub(super) fn dock_projection(&self) -> Option<PaneLayout> {
         let session = self.session()?;
-        let (_, tab_id) = self.viewed(&session)?;
+        let (_, tab_id) = self.viewed(session)?;
         let tab = session.tab(tab_id)?;
         self.zoomed_panes
             .iter()
@@ -470,22 +485,12 @@ impl ServerConnection {
         });
     }
 
-    pub(super) fn send(&mut self, message: ClientMessage) {
-        let failed = self
-            .io
+    /// Enqueues a message without changing lifecycle state. The incoming task owns
+    /// disconnect delivery, including when its writer has already closed this queue.
+    pub(super) fn send(&self, message: ClientMessage) -> bool {
+        self.io
             .as_ref()
-            .is_none_or(|io| io.outgoing.send(message).is_err());
-        if failed {
-            self.status = ConnectionStatus::Disconnected;
-            self.controlling = false;
-            self.attention.clear();
-            self.subscribed = false;
-            self.subscription_pending = false;
-            self.bootstrap_resync_session_id = None;
-            self.reacquire_after_bootstrap = false;
-            self.error = Some("Disconnected from the device".into());
-            self.io = None;
-        }
+            .is_some_and(|io| io.outgoing.send(message).is_ok())
     }
 
     pub(super) fn subscribe(&mut self) {
@@ -495,12 +500,13 @@ impl ServerConnection {
         let Some(session_id) = self.session_id else {
             return;
         };
-        self.subscribed = false;
-        self.subscription_pending = true;
-        self.send(ClientMessage::Subscribe {
+        if self.send(ClientMessage::Subscribe {
             session_id,
             after_sequence: self.sequence,
-        });
+        }) {
+            self.subscribed = false;
+            self.subscription_pending = true;
+        }
     }
 
     pub(super) fn request_snapshot(&mut self) -> bool {
@@ -514,8 +520,10 @@ impl ServerConnection {
         if self.bootstrap_resync_session_id == Some(session_id) {
             return false;
         }
+        if !self.send(ClientMessage::SnapshotRequest { session_id }) {
+            return false;
+        }
         self.bootstrap_resync_session_id = Some(session_id);
-        self.send(ClientMessage::SnapshotRequest { session_id });
         true
     }
 

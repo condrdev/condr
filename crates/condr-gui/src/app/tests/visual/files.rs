@@ -1,9 +1,16 @@
 use super::*;
 
 /// A Server answer for `README.md` of `workspace_id`, fed the way the connection task does.
-fn readme_answer(workspace_id: WorkspaceId, text: &str) -> Incoming {
+fn readme_answer(this: &mut Condr, workspace_id: WorkspaceId, text: &str) -> Incoming {
+    let connection = this.connection_mut(1).unwrap();
+    let request_id = connection.next_layout_request_id;
+    connection.next_layout_request_id += 1;
+    connection
+        .resources
+        .pending_files
+        .insert((workspace_id, "README.md".into()), request_id);
     Incoming::Message(condr_core::protocol::ServerMessage::FileContent {
-        request_id: 0,
+        request_id,
         workspace_id,
         path: relative_path::RelativePathBuf::from("README.md"),
         result: Ok(condr_core::FileContent::Text {
@@ -134,6 +141,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.debug_bounds("file-body").is_some()
                 && window.update(|_, cx| {
                     view.read(cx)
+                        .files_view
                         .file_editors
                         .values()
                         .any(|editor| editor.state.read(cx).value().contains("fn main()"))
@@ -171,10 +179,14 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
-                view.read(cx).file_editors.values().any(|editor| {
-                    let text = editor.state.read(cx).value();
-                    text.contains("# Files") && !text.contains("fn main()")
-                })
+                view.read(cx)
+                    .files_view
+                    .file_editors
+                    .values()
+                    .any(|editor| {
+                        let text = editor.state.read(cx).value();
+                        text.contains("# Files") && !text.contains("fn main()")
+                    })
             })
         }),
         "the retargeted Preview Tab should show the second file"
@@ -186,21 +198,23 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
             let connection = this.connection(1).unwrap();
-            let generation = connection.files_generation;
+            let generation = connection.resources.files_generation;
             let connect_generation = connection.connect_generation;
-            let answer = |text| readme_answer(workspace_id, text);
+
             // Applied the way the connection task applies an answer: a rebuild.
-            this.handle_incoming(1, connect_generation, answer("# Files\n"), cx);
+            let answer = readme_answer(this, workspace_id, "# Files\n");
+            this.handle_incoming(1, connect_generation, answer, cx);
             this.rebuild_dock(window, cx);
             assert_eq!(
-                this.connection(1).unwrap().files_generation,
+                this.connection(1).unwrap().resources.files_generation,
                 generation,
                 "identical content is not a change"
             );
-            this.handle_incoming(1, connect_generation, answer("# Files\n\nMore.\n"), cx);
+            let answer = readme_answer(this, workspace_id, "# Files\n\nMore.\n");
+            this.handle_incoming(1, connect_generation, answer, cx);
             this.rebuild_dock(window, cx);
             assert_eq!(
-                this.connection(1).unwrap().files_generation,
+                this.connection(1).unwrap().resources.files_generation,
                 generation + 1,
                 "new content is a change"
             );
@@ -211,6 +225,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
+                    .files_view
                     .file_editors
                     .values()
                     .any(|editor| editor.state.read(cx).value().contains("More."))
@@ -227,6 +242,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
                 .read(app)
                 .connection(1)
                 .unwrap()
+                .resources
                 .files
                 .keys()
                 .filter(|(cached_workspace, _)| *cached_workspace == workspace_id)
@@ -244,10 +260,14 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             window.update(|window, cx| _ = window.draw(cx));
             cached_files(window) == ["README.md"]
                 && window.update(|_, cx| {
-                    view.read(cx).file_editors.values().any(|editor| {
-                        let text = editor.state.read(cx).value();
-                        text.contains("# Files") && !text.contains("More.")
-                    })
+                    view.read(cx)
+                        .files_view
+                        .file_editors
+                        .values()
+                        .any(|editor| {
+                            let text = editor.state.read(cx).value();
+                            text.contains("# Files") && !text.contains("More.")
+                        })
                 })
         }),
         "a working-tree change should refetch the shown file and drop the other cached one"
@@ -266,12 +286,8 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         window.update(|window, cx| {
             view.update(cx, |this, cx| {
                 let connect_generation = this.connection(1).unwrap().connect_generation;
-                this.handle_incoming(
-                    1,
-                    connect_generation,
-                    readme_answer(workspace_id, &text),
-                    cx,
-                );
+                let answer = readme_answer(this, workspace_id, &text);
+                this.handle_incoming(1, connect_generation, answer, cx);
                 this.rebuild_dock(window, cx);
             });
             _ = window.draw(cx);
@@ -280,6 +296,7 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     feed(window, long_readme(300));
     let editor = window.read(|app| {
         view.read(app)
+            .files_view
             .file_editors
             .values()
             .next()
@@ -315,18 +332,18 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     // a real reconnect ends in exactly this message, and nothing else may run in between.
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
-            this.pending_directories.insert((
-                1,
-                workspace_id,
-                relative_path::RelativePathBuf::new(),
-            ));
+            this.connection_mut(1)
+                .unwrap()
+                .resources
+                .pending_directories
+                .insert((workspace_id, relative_path::RelativePathBuf::new()), 42);
             let connection = this.connection(1).unwrap();
             let bootstrap = SessionBootstrap {
                 server_id: connection.server_id.unwrap(),
                 runtime_epoch: connection.runtime_epoch.unwrap(),
                 session_id: connection.session_id.unwrap(),
                 sequence: connection.sequence,
-                snapshot: connection.snapshot.clone(),
+                snapshot: connection.session().unwrap().snapshot(),
                 settings: connection.settings.clone(),
                 terminals: Vec::new(),
                 agents: Vec::new(),
@@ -336,11 +353,21 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             let generation = connection.connect_generation;
             this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);
             assert!(
-                this.pending_directories.is_empty() && this.pending_files.is_empty(),
+                this.connection(1)
+                    .unwrap()
+                    .resources
+                    .pending_directories
+                    .is_empty()
+                    && this
+                        .connection(1)
+                        .unwrap()
+                        .resources
+                        .pending_files
+                        .is_empty(),
                 "a request from before the Bootstrap must be forgotten with it"
             );
             assert!(
-                this.connection(1).unwrap().directories.is_empty(),
+                this.connection(1).unwrap().resources.directories.is_empty(),
                 "the Bootstrap replaces every listing"
             );
         });

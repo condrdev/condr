@@ -132,7 +132,7 @@ fn local_server_helper() {
         }
     };
     assert!(matches!(
-        read_server(&mut first_stream),
+        read_layout_response(&mut first_stream),
         ServerMessage::LayoutApplied {
             server_id: actual_server,
             session_id: actual_session,
@@ -229,7 +229,7 @@ fn local_server_helper() {
         }
     };
     assert_eq!(
-        read_server(&mut restarted_stream),
+        read_layout_response(&mut restarted_stream),
         ServerMessage::LayoutApplied {
             server_id,
             session_id: restarted_session_id,
@@ -542,6 +542,18 @@ fn wait_for_stop(endpoint: &Endpoint) {
         thread::sleep(Duration::from_millis(10));
     }
     panic!("standalone server did not stop");
+}
+
+fn read_layout_response(stream: &mut condr_server::EndpointStream) -> ServerMessage {
+    loop {
+        let message = read_server(stream);
+        if !matches!(
+            message,
+            ServerMessage::Event { .. } | ServerMessage::TerminalFrame(_)
+        ) {
+            return message;
+        }
+    }
 }
 
 fn read_server(stream: &mut condr_server::EndpointStream) -> ServerMessage {

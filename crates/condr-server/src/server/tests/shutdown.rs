@@ -141,8 +141,34 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-#[test]
-fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
+struct InflightWorktree {
+    temp: PathBuf,
+    release: PathBuf,
+    handle: ServerHandle,
+    endpoint: Endpoint,
+    server_thread: Option<thread::JoinHandle<io::Result<()>>>,
+    controller: Option<EndpointStream>,
+    server_id: ServerId,
+    session_id: SessionId,
+    parent_workspace_id: WorkspaceId,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl Drop for InflightWorktree {
+    fn drop(&mut self) {
+        // Release the child even after an assertion fails, so a regression cannot
+        // leave the smudge process and Server running indefinitely in the test suite.
+        let _ = std::fs::write(&self.release, "release\n");
+        self.handle.stop();
+        if let Some(thread) = self.server_thread.take() {
+            let _ = thread.join();
+        }
+        let _ = std::fs::remove_dir_all(&self.temp);
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn inflight_worktree() -> InflightWorktree {
     let temp = std::env::temp_dir().join(format!(
         "condr-server-stop-worktree-{}-{}",
         std::process::id(),
@@ -189,6 +215,9 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
     let mut controller = connect_and_bootstrap(&endpoint);
+    controller
+        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     acquire_control(&mut controller, session_id);
     condr_core::protocol::write_message(
         &mut controller,
@@ -243,17 +272,44 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
         }
         thread::sleep(Duration::from_millis(10));
     };
-    assert!(checkout_started, "the smudge filter did not start");
+    if !checkout_started {
+        std::fs::write(&release, "release\n").unwrap();
+        handle.stop();
+        thread.join().unwrap().unwrap();
+        panic!("the smudge filter did not start");
+    }
 
-    let mut stopper = connect_and_bootstrap(&endpoint);
-    condr_core::protocol::write_message(&mut stopper, &ClientMessage::StopServer { server_id })
-        .unwrap();
+    InflightWorktree {
+        temp,
+        release,
+        handle,
+        endpoint,
+        server_thread: Some(thread),
+        controller: Some(controller),
+        server_id,
+        session_id,
+        parent_workspace_id,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
+    let mut test = inflight_worktree();
+    // Stop on the same connection that owns the checkout: it must not sit behind Git.
+    condr_core::protocol::write_message(
+        test.controller.as_mut().unwrap(),
+        &ClientMessage::StopServer {
+            server_id: test.server_id,
+        },
+    )
+    .unwrap();
     assert_eq!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut stopper).unwrap(),
+        read_server(test.controller.as_mut().unwrap()),
         ServerMessage::ServerStopping
     );
     let stop_signalled = (0..100).any(|_| {
-        if handle.stop.load(Ordering::Acquire) {
+        if test.handle.stop.load(Ordering::Acquire) {
             true
         } else {
             thread::sleep(Duration::from_millis(5));
@@ -262,17 +318,265 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
     });
     assert!(stop_signalled);
     thread::sleep(Duration::from_millis(50));
-    assert!(!thread.is_finished());
-    std::fs::write(&release, "release\n").unwrap();
-    drop(controller);
-    drop(stopper);
-    thread.join().unwrap().unwrap();
+    assert!(!test.server_thread.as_ref().unwrap().is_finished());
+    std::fs::write(&test.release, "release\n").unwrap();
+    test.server_thread.take().unwrap().join().unwrap().unwrap();
 
-    let child_root = temp
+    let child_root = test
+        .temp
         .join("worktrees")
         .join("repository")
         .join("feature-stopping");
     assert!(!child_root.exists());
-    assert_eq!(handle.state.lock().unwrap().session.workspaces().len(), 1);
-    let _ = std::fs::remove_dir_all(temp);
+    assert_eq!(
+        test.handle.state.lock().unwrap().session.workspaces().len(),
+        1
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
+    let mut test = inflight_worktree();
+    condr_core::protocol::write_message(
+        test.controller.as_mut().unwrap(),
+        &ClientMessage::Ping {
+            server_id: test.server_id,
+            nonce: 41,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        read_server(test.controller.as_mut().unwrap()),
+        ServerMessage::Pong { nonce: 41, .. }
+    ));
+
+    let (pane_id, sequence) = {
+        let state = test.handle.state.lock().unwrap();
+        (
+            state.session.workspaces()[0].tabs()[0]
+                .focused_pane()
+                .unwrap()
+                .id(),
+            state.sequence,
+        )
+    };
+    subscribe(test.controller.as_mut().unwrap(), test.session_id, sequence);
+    let mut views = std::collections::HashMap::new();
+    // Start consuming the Full baseline before any test helper skips visual messages.
+    send_terminal(
+        test.controller.as_mut().unwrap(),
+        test.server_id,
+        test.session_id,
+        pane_id,
+        TerminalCommand::Text("echo condr-checkout-responsive\r".into()),
+    );
+    wait_for_terminal_text(
+        test.controller.as_mut().unwrap(),
+        &mut views,
+        pane_id,
+        "condr-checkout-responsive",
+    );
+
+    for (request_id, command) in [
+        (
+            3,
+            LayoutCommand::CloseWorkspace {
+                workspace_id: test.parent_workspace_id,
+            },
+        ),
+        (
+            4,
+            LayoutCommand::CreateWorktree {
+                parent_workspace_id: test.parent_workspace_id,
+                branch: "feature/rejected".into(),
+            },
+        ),
+    ] {
+        condr_core::protocol::write_message(
+            test.controller.as_mut().unwrap(),
+            &ClientMessage::Layout {
+                server_id: test.server_id,
+                session_id: test.session_id,
+                request_id,
+                command,
+            },
+        )
+        .unwrap();
+        let response = wait_for_message(test.controller.as_mut().unwrap(), |message| {
+            matches!(message, ServerMessage::LayoutRejected { .. })
+        });
+        assert!(
+            matches!(response, ServerMessage::LayoutRejected { request_id: actual, reason, .. }
+            if actual == request_id && reason.contains("in progress"))
+        );
+    }
+    assert!(!test.release.exists());
+    assert_eq!(
+        test.handle.state.lock().unwrap().session.workspaces().len(),
+        1
+    );
+
+    std::fs::write(&test.release, "release\n").unwrap();
+    let event = wait_for_message(test.controller.as_mut().unwrap(), |message| {
+        matches!(
+            message,
+            ServerMessage::Event {
+                event: SessionEvent::LayoutChanged { .. },
+                ..
+            }
+        )
+    });
+    let ServerMessage::Event { sequence, .. } = event else {
+        unreachable!()
+    };
+    assert_layout_applied(
+        test.controller.as_mut().unwrap(),
+        test.server_id,
+        test.session_id,
+        2,
+        sequence,
+    );
+    // Receiving success releases the connection's slot; no retry or extra Ping needed.
+    condr_core::protocol::write_message(
+        test.controller.as_mut().unwrap(),
+        &ClientMessage::Layout {
+            server_id: test.server_id,
+            session_id: test.session_id,
+            request_id: 5,
+            command: LayoutCommand::RenameWorkspace {
+                workspace_id: test.parent_workspace_id,
+                name: "after-checkout".into(),
+            },
+        },
+    )
+    .unwrap();
+    let event = wait_for_message(test.controller.as_mut().unwrap(), |message| {
+        matches!(
+            message,
+            ServerMessage::Event {
+                event: SessionEvent::LayoutChanged { .. },
+                ..
+            }
+        )
+    });
+    let ServerMessage::Event { sequence, .. } = event else {
+        unreachable!()
+    };
+    assert_layout_applied(
+        test.controller.as_mut().unwrap(),
+        test.server_id,
+        test.session_id,
+        5,
+        sequence,
+    );
+    assert_eq!(
+        test.handle.state.lock().unwrap().session.workspaces().len(),
+        2
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn failed_worktree_terminal_start_rolls_back_checkout_and_registration() {
+    let mut test = inflight_worktree();
+    test.handle.state.lock().unwrap().settings.shell = test
+        .temp
+        .join("missing-shell")
+        .to_string_lossy()
+        .into_owned();
+    std::fs::write(&test.release, "release\n").unwrap();
+    let response = read_layout_response(test.controller.as_mut().unwrap());
+    assert!(matches!(
+        response,
+        ServerMessage::LayoutRejected { request_id: 2, reason, .. }
+            if reason.contains("failed to start terminal")
+    ));
+    let state = test.handle.state.lock().unwrap();
+    assert_eq!(state.session.workspaces().len(), 1);
+    assert_eq!(state.terminals.len(), 1);
+    drop(state);
+    assert!(
+        !test
+            .temp
+            .join("worktrees/repository/feature-stopping")
+            .exists()
+    );
+    let registrations = test.temp.join("repository/.git/worktrees");
+    if registrations.exists() {
+        assert_eq!(std::fs::read_dir(registrations).unwrap().count(), 0);
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[test]
+fn disconnect_during_worktree_creation_releases_control_and_starts_its_terminal() {
+    let mut test = inflight_worktree();
+    // Local sockets close on drop; shutdown() only closes TCP/SSH/Peer-to-peer.
+    drop(test.controller.take());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while test
+        .handle
+        .state
+        .lock()
+        .unwrap()
+        .active_controller
+        .is_some()
+        && Instant::now() < deadline
+    {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        test.handle
+            .state
+            .lock()
+            .unwrap()
+            .active_controller
+            .is_none()
+    );
+    assert!(!test.release.exists());
+    std::fs::write(&test.release, "release\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while test.handle.lifecycle.state.lock().unwrap().operations != 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(test.handle.lifecycle.state.lock().unwrap().operations, 0);
+    let pane_id = {
+        let state = test.handle.state.lock().unwrap();
+        assert_eq!(state.session.workspaces().len(), 2);
+        state.session.workspaces()[1].tabs()[0]
+            .focused_pane()
+            .unwrap()
+            .id()
+    };
+    let connection = ClientConnection::connect(&test.endpoint, "checkout-observer").unwrap();
+    let bootstrap = connection.bootstrap().unwrap();
+    let sequence = bootstrap.sequence;
+    let mut views = bootstrap
+        .terminals
+        .iter()
+        .map(|terminal| (terminal.pane_id, terminal.view.clone()))
+        .collect();
+    let mut observer = connection.into_stream();
+    observer
+        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    acquire_control(&mut observer, test.session_id);
+    subscribe(&mut observer, test.session_id, sequence);
+    send_terminal(
+        &mut observer,
+        test.server_id,
+        test.session_id,
+        pane_id,
+        TerminalCommand::Text("echo condr-disconnected-checkout\r".into()),
+    );
+    wait_for_terminal_text(
+        &mut observer,
+        &mut views,
+        pane_id,
+        "condr-disconnected-checkout",
+    );
+    test.handle.stop();
+    test.server_thread.take().unwrap().join().unwrap().unwrap();
+    assert_eq!(test.handle.lifecycle.state.lock().unwrap().operations, 0);
 }

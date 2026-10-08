@@ -120,7 +120,10 @@ fn controller_is_exclusive_and_released_on_disconnect() {
         .unwrap();
     assert!(matches!(
         condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
-        ServerMessage::ControlDenied { .. }
+        ServerMessage::ControlDenied {
+            cause: condr_core::protocol::ControlDenialReason::Busy,
+            ..
+        }
     ));
     condr_core::protocol::write_message(
         &mut second,
@@ -138,11 +141,7 @@ fn controller_is_exclusive_and_released_on_disconnect() {
     // Control is exclusive, but layout is not gated on it: the denied client still
     // changes structure, as the CLI in a Pane does while the GUI holds control.
     // The response follows the events the change raised on this subscribed stream.
-    let applied = std::iter::from_fn(|| {
-        Some(condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap())
-    })
-    .find(|message| !matches!(message, ServerMessage::Event { .. }))
-    .unwrap();
+    let applied = read_layout_response(&mut second);
     assert!(
         matches!(
             applied,

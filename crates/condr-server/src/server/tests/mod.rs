@@ -260,6 +260,20 @@ fn read_server(stream: &mut EndpointStream) -> ServerMessage {
     condr_core::protocol::read_message(stream).unwrap()
 }
 
+/// LayoutChanged is published at commit; monitor startup and terminal cleanup finish
+/// before LayoutApplied. Visual frames and unrelated events may arrive between them.
+fn read_layout_response(stream: &mut EndpointStream) -> ServerMessage {
+    loop {
+        let message = read_server(stream);
+        if !matches!(
+            message,
+            ServerMessage::Event { .. } | ServerMessage::TerminalFrame(_)
+        ) {
+            return message;
+        }
+    }
+}
+
 fn assert_layout_applied(
     stream: &mut EndpointStream,
     server_id: ServerId,
@@ -268,7 +282,7 @@ fn assert_layout_applied(
     sequence: u64,
 ) {
     assert!(matches!(
-        read_server(stream),
+        read_layout_response(stream),
         ServerMessage::LayoutApplied {
             server_id: applied_server,
             session_id: applied_session,

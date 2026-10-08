@@ -160,7 +160,7 @@ impl Condr {
                     .push(ServerConnection::new(key, label, endpoint));
                 self.save_servers(cx);
                 self.active_connection = key;
-                self.target_pane = None;
+                self.terminal_input.target = None;
                 _ = self.start_connect(key);
                 Ok(())
             }

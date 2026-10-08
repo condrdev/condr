@@ -100,7 +100,7 @@ impl Condr {
                 Ok(handle) => {
                     this.settings_window = Some(handle);
                     // The window opened on the update; the dot has done its job.
-                    this.update_seen = true;
+                    this.updates.mark_seen();
                     // Closing the main window closes Settings too; otherwise it would
                     // keep the process alive with nothing left to configure.
                     this._settings_window_closed = Some(cx.on_window_closed(move |cx, _| {
@@ -211,7 +211,7 @@ impl SettingsWindow {
             .unwrap_or_default();
         let open_on_update = owner
             .upgrade()
-            .is_some_and(|owner| owner.read(cx).update_pending());
+            .is_some_and(|owner| owner.read(cx).updates.pending());
         let color_scheme = scheme_select(crate::color_scheme::names(), &current, window, cx);
         cx.subscribe(
             &color_scheme,
@@ -717,7 +717,7 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
         .upgrade()
         .map(|owner| {
             let owner = owner.read(cx);
-            (owner.update_state.clone(), owner.checking_updates)
+            (owner.updates.state().clone(), owner.updates.checking())
         })
         .unwrap_or_default();
     let check_value_owner = owner.clone();
@@ -762,7 +762,7 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
                     move |cx| {
                         check_value_owner
                             .upgrade()
-                            .is_none_or(|owner| owner.read(cx).auto_check_updates)
+                            .is_none_or(|owner| owner.read(cx).updates.automatic())
                     },
                     move |enabled, cx| {
                         let _ = check_set_owner
@@ -783,7 +783,7 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
                         selected_owner
                             .upgrade()
                             .map_or_else(UpdateChannel::of_this_build, |owner| {
-                                owner.read(cx).update_channel
+                                owner.read(cx).updates.channel()
                             })
                             .as_str()
                             .into()

@@ -1,5 +1,6 @@
 mod connection;
 mod input;
+mod session_model;
 mod sidebar;
 mod startup;
 mod terminal_frames;

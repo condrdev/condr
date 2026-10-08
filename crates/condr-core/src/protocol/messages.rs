@@ -671,6 +671,16 @@ impl ClientMessage {
     }
 }
 
+/// Why control was denied, independently of the display text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlDenialReason {
+    /// Non-retryable, absent or unknown reasons. An older Server's untyped denial
+    /// is displayed without automatically retrying (ADR 0028).
+    Other,
+    /// Another Client holds control; retrying later may succeed.
+    Busy,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerMessage {
     Bootstrap(BootstrapHeader),
@@ -721,6 +731,7 @@ pub enum ServerMessage {
     ControlDenied {
         server_id: ServerId,
         session_id: SessionId,
+        cause: ControlDenialReason,
         reason: String,
     },
     LayoutRejected {

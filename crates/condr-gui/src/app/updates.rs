@@ -156,68 +156,97 @@ async fn fetch_latest(
         .ok_or_else(|| format!("no {field} in GitHub's answer"))
 }
 
-impl Condr {
-    pub(in crate::app) fn set_auto_check_updates(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if self.auto_check_updates == enabled {
-            return;
+/// Owns the update preferences, result, acknowledgement and repeating check task.
+/// The root keeps this value; Settings only reads it or invokes its commands.
+pub(super) struct UpdateCheck {
+    automatic: bool,
+    channel: UpdateChannel,
+    state: UpdateState,
+    /// Opening Settings clears the dot until a check finds a newer build again.
+    seen: bool,
+    /// Only a manual check makes the Check button spin.
+    checking: bool,
+    _automatic_task: Task<()>,
+}
+
+impl UpdateCheck {
+    pub(super) fn new(automatic: bool, channel: UpdateChannel) -> Self {
+        Self {
+            automatic,
+            channel,
+            state: UpdateState::Unknown,
+            seen: false,
+            checking: false,
+            _automatic_task: Task::ready(()),
         }
-        self.auto_check_updates = enabled;
-        self.save_auto_check_updates(cx);
-        if enabled {
-            self.start_automatic_update_checks(Duration::ZERO, cx);
-        } else {
-            self._automatic_update_checks = Task::ready(());
-            self.update_state = UpdateState::Unknown;
-        }
-        cx.notify();
     }
 
-    /// What the last channel's check found no longer applies; with automatic checks on,
-    /// the new channel is checked right away, outside the five-hour schedule.
-    pub(in crate::app) fn set_update_channel(
-        &mut self,
-        channel: UpdateChannel,
-        cx: &mut Context<Self>,
-    ) {
-        if self.update_channel == channel {
-            return;
-        }
-        self.update_channel = channel;
-        self.save_update_channel(cx);
-        self.update_state = UpdateState::Unknown;
-        if self.auto_check_updates {
-            self.check_for_updates(false, cx).detach();
-        }
-        cx.notify();
+    pub(super) fn automatic(&self) -> bool {
+        self.automatic
+    }
+
+    pub(super) fn channel(&self) -> UpdateChannel {
+        self.channel
+    }
+
+    pub(super) fn state(&self) -> &UpdateState {
+        &self.state
+    }
+
+    pub(super) fn checking(&self) -> bool {
+        self.checking
     }
 
     /// A newer build is known and Settings has not been opened since the check found
     /// it: the sidebar's Settings button carries a dot and Settings opens on the update.
-    pub(in crate::app) fn update_pending(&self) -> bool {
-        matches!(self.update_state, UpdateState::Available(_)) && !self.update_seen
+    pub(super) fn pending(&self) -> bool {
+        matches!(self.state, UpdateState::Available(_)) && !self.seen
     }
 
-    /// The Check button: works whether or not automatic checks are on, and leaves their
-    /// schedule alone.
-    pub(in crate::app) fn check_for_updates_now(&mut self, cx: &mut Context<Self>) {
-        self.check_for_updates(true, cx).detach();
-        cx.notify();
+    pub(super) fn mark_seen(&mut self) {
+        self.seen = true;
+    }
+
+    fn set_automatic(&mut self, enabled: bool, cx: &mut Context<Condr>) -> bool {
+        if self.automatic == enabled {
+            return false;
+        }
+        self.automatic = enabled;
+        if enabled {
+            self.start_automatic(Duration::ZERO, cx);
+        } else {
+            self._automatic_task = Task::ready(());
+            self.state = UpdateState::Unknown;
+        }
+        true
+    }
+
+    /// A channel change forgets the old result and checks immediately, outside the
+    /// five-hour schedule, when automatic checks are enabled.
+    fn set_channel(&mut self, channel: UpdateChannel, cx: &mut Context<Condr>) -> bool {
+        if self.channel == channel {
+            return false;
+        }
+        self.channel = channel;
+        self.state = UpdateState::Unknown;
+        if self.automatic {
+            self.check(false, cx).detach();
+        }
+        true
     }
 
     /// The first automatic check after `delay`, then one every five hours; replacing the
     /// task stops them. Each checks the channel current when it runs.
-    pub(super) fn start_automatic_update_checks(
-        &mut self,
-        delay: Duration,
-        cx: &mut Context<Self>,
-    ) {
-        self._automatic_update_checks = cx.spawn(async move |this, cx| {
+    pub(super) fn start_automatic(&mut self, delay: Duration, cx: &mut Context<Condr>) {
+        if !self.automatic {
+            return;
+        }
+        self._automatic_task = cx.spawn(async move |this, cx| {
             let mut delay = delay;
             loop {
                 cx.background_executor().timer(delay).await;
                 delay = CHECK_INTERVAL;
-                let Ok(check) = this.update(cx, |this, cx| this.check_for_updates(false, cx))
-                else {
+                let Ok(check) = this.update(cx, |this, cx| this.updates.check(false, cx)) else {
                     break;
                 };
                 check.await;
@@ -226,13 +255,13 @@ impl Condr {
     }
 
     /// One check of the current channel. `manual` is the Check button: its spinner turns
-    /// while the request runs and a failure is reported. An automatic check nobody asked
-    /// for only logs its failure, and the next one retries.
-    fn check_for_updates(&mut self, manual: bool, cx: &mut Context<Self>) -> Task<()> {
-        let channel = self.update_channel;
+    /// while the request runs and a failure is reported. An automatic check only logs
+    /// its failure, and the next one retries.
+    fn check(&mut self, manual: bool, cx: &mut Context<Condr>) -> Task<()> {
+        let channel = self.channel;
         let (path, field) = channel.latest_source();
         if manual {
-            self.checking_updates = true;
+            self.checking = true;
         }
         cx.spawn(async move |this, cx| {
             let client = cx.update(|cx| cx.http_client());
@@ -241,30 +270,31 @@ impl Condr {
                 .spawn(fetch_latest(client, path, field))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_update_check(channel, latest, manual, cx);
+                if let Err(error) = this.updates.finish(channel, latest, manual) {
+                    this.report_error(error, cx);
+                }
+                cx.notify();
             });
         })
     }
 
-    fn finish_update_check(
+    fn finish(
         &mut self,
         channel: UpdateChannel,
         latest: Result<String, String>,
         manual: bool,
-        cx: &mut Context<Self>,
-    ) {
+    ) -> Result<(), String> {
         if manual {
-            self.checking_updates = false;
+            self.checking = false;
         }
-        cx.notify();
         // The channel changed while the request ran: its answer is about the old one.
-        if channel != self.update_channel {
-            return;
+        if channel != self.channel {
+            return Ok(());
         }
         match latest {
             Ok(latest) => {
-                self.update_seen = false;
-                self.update_state = available_update(
+                self.seen = false;
+                self.state = available_update(
                     channel,
                     &latest,
                     condr_core::build_identity(),
@@ -273,13 +303,40 @@ impl Condr {
                 .map_or(UpdateState::UpToDate, UpdateState::Available);
             }
             Err(error) if manual => {
-                self.report_error(format!("Failed to check for updates: {error}"), cx);
+                return Err(format!("Failed to check for updates: {error}"));
             }
             Err(error) => tracing::warn!(
                 "Update check on the {} channel failed: {error}",
                 channel.as_str()
             ),
         }
+        Ok(())
+    }
+}
+
+impl Condr {
+    pub(in crate::app) fn set_auto_check_updates(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.updates.set_automatic(enabled, cx) {
+            self.save_auto_check_updates(cx);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::app) fn set_update_channel(
+        &mut self,
+        channel: UpdateChannel,
+        cx: &mut Context<Self>,
+    ) {
+        if self.updates.set_channel(channel, cx) {
+            self.save_update_channel(cx);
+            cx.notify();
+        }
+    }
+
+    /// The Check button works with automatic checks off, and leaves their schedule alone.
+    pub(in crate::app) fn check_for_updates_now(&mut self, cx: &mut Context<Self>) {
+        self.updates.check(true, cx).detach();
+        cx.notify();
     }
 }
 

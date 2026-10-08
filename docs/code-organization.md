@@ -18,14 +18,22 @@
 | `crates/condr-server/src/server.rs` | Server 生命周期和权威 RuntimeState；`config` 配置，`recovery` 恢复，`client` 分发请求，`layout`/`agents` 执行操作，`subscriptions` 发布可靠事件，`terminal_stream` 集中处理视觉帧准备、分块与基线提交 |
 | `crates/condr-server/src/persistence.rs` | Session 快照写入与关闭时刷盘；`config` 提供跨进程 TOML 配置事务 |
 | `crates/condr-server/src/cli.rs` | CLI 连接与错误输出；`workspace`、`pane`、`agent` 各自定义参数、执行命令并组织结果 |
-| `crates/condr-gui/src/app.rs` | GUI 状态与初始化；`server_connection` 保存连接状态，`server_management` 管理连接，`connection` 处理 I/O，`events` 消费事件，`presentation` 同步布局呈现 |
+| `crates/condr-gui/src/app.rs` | GUI 根实体与初始化；持有连接、Dock 和功能状态，协调窗口与呈现；`server_management` 管理连接生命周期，`connection` 处理 I/O，`events` 消费事件，`presentation` 同步布局呈现 |
+| `crates/condr-gui/src/app/server_connection.rs` | 一条连接的状态与最后一份已校验的 Session 读取模型；Bootstrap 和 LayoutChanged 在校验成功后替换模型，查询借用它，无效模型保留旧状态并交由连接层断开 |
+| `crates/condr-gui/src/app/workspace_resources.rs` | 连接持有的 `WorkspaceResources`；集中管理 Diff、目录、文件缓存及当前请求编号，处理响应匹配、刷新、折叠、Workspace 移除与连接重置 |
 | `crates/condr-gui/src/app/dock.rs` | Dock 布局投影；`terminal_panel.rs` 负责终端 Pane 的呈现、焦点和光标闪烁 |
-| `crates/condr-gui/src/app/terminal_input.rs` | 键盘输入与终端几何；子模块处理鼠标、选择、剪贴板，`app/ime.rs` 处理输入法组合文本 |
+| `crates/condr-gui/src/app/terminal_input.rs` | 键盘输入与终端几何；`TerminalInputState` 管理目标、选择、链接、鼠标捕获、焦点、已转发按键和 IME 状态，统一按存活 Pane 清理；子模块处理鼠标、选择、剪贴板，`app/ime.rs` 处理输入法组合文本 |
+| `crates/condr-gui/src/app/files.rs` | Files 侧栏与 Preview Tab；`FilesViewState` 管理 Files/Changes 的本地展示选择、目录展开、Editor 和跳转位置，并按 Session 统一保留或清理；`changes.rs` 负责 Changes 侧栏与 Diff Tab |
+| `crates/condr-gui/src/app/updates.rs` | `UpdateCheck` 管理更新渠道、结果、已读状态及自动检查任务；设置窗口和侧栏读取同一个状态 |
 | `crates/condr-gui/src/app/settings.rs` | 设置窗口；`appearance`、`server`、`shortcuts` 按页面功能组织 |
 | `crates/condr-gui/src/app/sidebar.rs` | Sidebar 树；`drag_drop` 管理拖放，`icon` 定义状态图标，`item` 呈现树节点 |
 | `crates/condr-gui/src/terminal_element.rs` | GPUI Element 及完整的 `prepaint`/`paint` 实现；`cache` 缓存 shaping，`colors` 计算颜色，`geometry` 计算绘制区域，`input` 映射输入 |
 
 模块文件开头集中声明 `mod`、导入和重导出，之后是类型和实现。公共路径通过入口文件显式重导出；内部协作只开放到需要访问的共同父模块。共享状态仍由原来的所有者管理，相关实现可以放在子模块中。
+
+功能状态使用普通 struct，由连接或 GUI 根实体持有；生命周期规则放在状态所属模块，根实体调用其清理入口。Pane/Workspace 移除与整条连接替换复用同一保留规则，并始终用连接与领域 ID 共同标识目标。Session 的 Server 权威不变：GUI 只在接收结构时恢复和校验，普通查询借用模型，Dock 需要本地推演时显式复制。
+
+`gui_state.rs` 保存 Client 的 View、窗口、侧栏宽度，以及每个 Workspace 的侧栏展开、Changes 开关、Files/Changes 选择和比较基准；这些是 GUI 状态文件中的展示记忆，不属于 Server 的 Session Snapshot。目录展开、Editor、请求和终端输入状态只在本次运行中保留。
 
 按职责拆分，不按固定行数切块。消息枚举、请求分发或一个完整的验收场景可以较长；不要为了缩短文件把同一流程拆成难以追踪的小片段。
 

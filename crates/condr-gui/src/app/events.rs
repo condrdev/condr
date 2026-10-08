@@ -21,20 +21,26 @@ impl Condr {
         let message = match incoming {
             Incoming::Bootstrap(bootstrap) => {
                 let first_bootstrap = self.connections[index].server_id.is_none();
-                let application = self.connections[index].apply_bootstrap(bootstrap);
+                let application = match self.connections[index].apply_bootstrap(bootstrap) {
+                    Ok(application) => application,
+                    // Retrying would fetch the same invalid model; reconnect by hand.
+                    Err(error) => return self.mark_protocol_error(key, index, error),
+                };
                 if self
+                    .terminal_input
                     .hovered_link
                     .as_ref()
                     .is_some_and(|(hover_key, _, _)| *hover_key == key)
                 {
-                    self.hovered_link = None;
+                    self.terminal_input.hovered_link = None;
                 }
                 if self
-                    .pressed_terminal_link
+                    .terminal_input
+                    .pressed_link
                     .as_ref()
                     .is_some_and(|(press_key, _, _)| *press_key == key)
                 {
-                    self.pressed_terminal_link = None;
+                    self.terminal_input.pressed_link = None;
                 }
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
                 if application.authority_changed {
@@ -59,15 +65,15 @@ impl Condr {
                 let bootstrap_sequence = self.connections[index].sequence;
                 let active_projection_resolved =
                     self.resolve_projections_at(key, bootstrap_sequence);
-                let target_before_refresh = self.target_pane;
+                let target_before_refresh = self.terminal_input.target;
                 if application.reacquire_control {
                     self.acquire_and_subscribe(key);
                 } else if application.resubscribe {
                     self.connections[index].subscribe();
                 }
                 self.refresh_target_pane(key);
-                let target_changed =
-                    self.active_connection == key && self.target_pane != target_before_refresh;
+                let target_changed = self.active_connection == key
+                    && self.terminal_input.target != target_before_refresh;
                 return IncomingEffect {
                     rebuild: application.rebuild
                         || application.reacquire_control
@@ -109,7 +115,7 @@ impl Condr {
                     },
                     // No automatic reconnect: it would only fetch the same messages again.
                     // Connecting by hand retries (ADR 0028).
-                    None => self.mark_disconnected(
+                    None => self.mark_protocol_error(
                         key,
                         index,
                         "this Device sends messages this build cannot read; update it".into(),
@@ -161,7 +167,10 @@ impl Condr {
                     }
                     return IncomingEffect::default();
                 }
-                self.connections[index].sequence = sequence;
+                // A malformed layout must not advance the last validated model cursor.
+                if !matches!(event, SessionEvent::LayoutChanged { .. }) {
+                    self.connections[index].sequence = sequence;
+                }
                 let notify;
                 let mut git_changed = false;
                 match event {
@@ -173,38 +182,11 @@ impl Condr {
                         // round trip, so the UI never enters the "not synchronized" state
                         // and terminal views are untouched.
                         let connection = &mut self.connections[index];
-                        let previous_layout = connection.dock_projection();
-                        let previous_viewer = connection.presented_viewer();
-                        let before = connection.session();
-                        connection.snapshot = snapshot;
-                        if let (Some(before), Some(after)) = (before, connection.session()) {
-                            connection.reconcile_view(&before, &after);
-                        }
-                        connection.zoomed_panes = zoomed_panes.into_iter().collect();
-                        // A viewer Tab retargeted to another file needs the rebuild too:
-                        // that is where its Editor learns to ask for the new content.
-                        let layout_changed = connection.dock_projection() != previous_layout
-                            || connection.presented_viewer() != previous_viewer;
-                        // Terminals of closed Panes go; a new Pane's terminal arrives with
-                        // its first full frame.
-                        if let Ok(session) = Session::restore(connection.snapshot.clone()) {
-                            let live: HashSet<PaneId> = session
-                                .workspaces()
-                                .iter()
-                                .flat_map(|workspace| workspace.tabs())
-                                .flat_map(|tab| tab.panes())
-                                .map(|pane| pane.id())
-                                .collect();
-                            connection
-                                .terminals
-                                .retain(|pane_id, _| live.contains(pane_id));
-                            connection
-                                .terminal_hyperlinks
-                                .retain(|pane_id, _| live.contains(pane_id));
-                            connection
-                                .terminal_titles
-                                .retain(|pane_id, _| live.contains(pane_id));
-                        }
+                        let layout_changed = match connection.apply_layout(snapshot, zoomed_panes) {
+                            Ok(changed) => changed,
+                            Err(error) => return self.mark_protocol_error(key, index, error),
+                        };
+                        connection.sequence = sequence;
                         self.prune_dock_cache(key);
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);
@@ -233,9 +215,9 @@ impl Condr {
                         }
                     }
                     SessionEvent::AgentChanged { pane_id, agent } => {
-                        // `focused_terminal` is None while the window is inactive, so a
+                        // Terminal focus is None while the window is inactive, so a
                         // completion behind another window still shows as done.
-                        let visible = self.focused_terminal == Some((key, pane_id));
+                        let visible = self.terminal_input.focused == Some((key, pane_id));
                         if let Some(agent) = agent {
                             let previous = self.connections[index]
                                 .agents
@@ -248,13 +230,11 @@ impl Condr {
                                 || agent.state == AgentState::Unknown;
                             if started
                                 && let Some(workspace_id) =
-                                    Session::restore(self.connections[index].snapshot.clone())
-                                        .ok()
-                                        .and_then(|session| {
-                                            session
-                                                .workspace_for_pane(pane_id)
-                                                .map(|workspace| workspace.id())
-                                        })
+                                    self.connections[index].session().and_then(|session| {
+                                        session
+                                            .workspace_for_pane(pane_id)
+                                            .map(|workspace| workspace.id())
+                                    })
                             {
                                 self.sidebar_workspace_open
                                     .entry((key, workspace_id))
@@ -323,7 +303,7 @@ impl Condr {
                         notify = true;
                     }
                     SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
-                        let focused = self.focused_terminal == Some((key, pane_id));
+                        let focused = self.terminal_input.focused == Some((key, pane_id));
                         notify = if attention {
                             !focused && self.connections[index].attention.insert(pane_id)
                         } else {
@@ -364,7 +344,7 @@ impl Condr {
                         };
                     }
                 };
-                if let Some(selection) = &mut self.terminal_selection
+                if let Some(selection) = &mut self.terminal_input.selection
                     && selection.connection_key == key
                     && pane_ids.contains(&selection.pane_id)
                 {
@@ -374,7 +354,7 @@ impl Condr {
                     if selection.committed && server_selection.is_some() {
                         // The Server's frame now carries this selection; a frame that was
                         // already in flight before the Select keeps the local bridge.
-                        self.terminal_selection = None;
+                        self.terminal_input.selection = None;
                     } else if !selection.committed {
                         selection.range.display_offset = self.connections[index].terminals
                             [&selection.pane_id]
@@ -382,7 +362,7 @@ impl Condr {
                             .display_offset;
                     }
                 }
-                if self.last_terminal_mouse_motion.is_some_and(|motion| {
+                if self.terminal_input.mouse_motion.is_some_and(|motion| {
                     motion.connection_key == key
                         && pane_ids.contains(&motion.pane_id)
                         && self.connections[index]
@@ -392,24 +372,27 @@ impl Condr {
                                 terminal.view.mouse_tracking != motion.mouse_tracking
                             })
                 }) {
-                    self.last_terminal_mouse_motion = None;
+                    self.terminal_input.mouse_motion = None;
                 }
-                if let Some((hover_key, hover_pane, hovered)) = self.hovered_link.take() {
-                    self.hovered_link = if hover_key == key && pane_ids.contains(&hover_pane) {
-                        self.connections[index]
-                            .terminals
-                            .get(&hover_pane)
-                            .and_then(|terminal| {
-                                link_at(
-                                    &terminal.view,
-                                    hovered.position.row,
-                                    hovered.position.column,
-                                )
-                            })
-                            .map(|link| (hover_key, hover_pane, link))
-                    } else {
-                        Some((hover_key, hover_pane, hovered))
-                    };
+                if let Some((hover_key, hover_pane, hovered)) =
+                    self.terminal_input.hovered_link.take()
+                {
+                    self.terminal_input.hovered_link =
+                        if hover_key == key && pane_ids.contains(&hover_pane) {
+                            self.connections[index]
+                                .terminals
+                                .get(&hover_pane)
+                                .and_then(|terminal| {
+                                    link_at(
+                                        &terminal.view,
+                                        hovered.position.row,
+                                        hovered.position.column,
+                                    )
+                                })
+                                .map(|link| (hover_key, hover_pane, link))
+                        } else {
+                            Some((hover_key, hover_pane, hovered))
+                        };
                 }
                 for pane_id in &pane_ids {
                     let terminal_size = self.connections[index]
@@ -471,6 +454,7 @@ impl Condr {
             ServerMessage::ControlDenied {
                 server_id,
                 session_id,
+                cause,
                 reason,
             } => {
                 if self.connections[index].server_id != Some(server_id)
@@ -478,10 +462,10 @@ impl Condr {
                 {
                     return IncomingEffect::default();
                 }
-                let retry_control = reason == CONTROL_BUSY_REASON;
+                let retry_control = cause == ControlDenialReason::Busy;
                 self.connections[index].controlling = false;
                 self.connections[index].attention.clear();
-                self.connections[index].control_denied = Some(reason);
+                self.connections[index].control_denied = Some((cause, reason));
                 if retry_control {
                     self.schedule_control_retry(key, cx);
                 }
@@ -532,7 +516,7 @@ impl Condr {
                     LayoutResult::WorkspaceOpened { workspace_id } => Some((workspace_id, None)),
                     LayoutResult::TabCreated { tab_id, .. }
                     | LayoutResult::DiffShown { tab_id }
-                    | LayoutResult::FileShown { tab_id } => session.as_ref().and_then(|session| {
+                    | LayoutResult::FileShown { tab_id } => session.and_then(|session| {
                         session
                             .workspaces()
                             .iter()
@@ -688,17 +672,18 @@ impl Condr {
                 }
             }
             ServerMessage::GitDiff {
+                request_id,
                 workspace_id,
                 path,
                 result,
-                ..
             } => {
-                self.pending_diffs
-                    .remove(&(key, workspace_id, path.clone()));
-                let connection = &mut self.connections[index];
-                connection.diffs.insert((workspace_id, path), result);
-                connection.diffs_generation += 1;
-                // The rebuild hands the answer to the Diff Tab's Editor.
+                if !self.connections[index].resources.accept_diff(
+                    (workspace_id, path),
+                    request_id,
+                    result,
+                ) {
+                    return IncomingEffect::default();
+                }
                 IncomingEffect {
                     rebuild: self.active_connection == key,
                     notify: true,
@@ -706,42 +691,36 @@ impl Condr {
                 }
             }
             ServerMessage::Directory {
+                request_id,
                 workspace_id,
                 path,
                 result,
-                ..
             } => {
-                self.pending_directories
-                    .remove(&(key, workspace_id, path.clone()));
-                self.connections[index]
-                    .directories
-                    .insert((workspace_id, path), result);
+                if !self.connections[index].resources.accept_directory(
+                    (workspace_id, path),
+                    request_id,
+                    result,
+                ) {
+                    return IncomingEffect::default();
+                }
                 IncomingEffect {
                     notify: true,
                     ..IncomingEffect::default()
                 }
             }
             ServerMessage::FileContent {
+                request_id,
                 workspace_id,
                 path,
                 result,
-                ..
             } => {
-                self.pending_files
-                    .remove(&(key, workspace_id, path.clone()));
-                let connection = &mut self.connections[index];
-                let slot = (workspace_id, path);
-                if connection
-                    .files
-                    .get(&slot)
-                    .is_none_or(|(_, cached)| *cached != result)
-                {
-                    connection.files_generation += 1;
-                    connection
-                        .files
-                        .insert(slot, (connection.files_generation, result));
+                if !self.connections[index].resources.accept_file(
+                    (workspace_id, path),
+                    request_id,
+                    result,
+                ) {
+                    return IncomingEffect::default();
                 }
-                // The rebuild hands the answer to the Preview Tab's Editor.
                 IncomingEffect {
                     rebuild: self.active_connection == key,
                     notify: true,

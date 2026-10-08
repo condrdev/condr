@@ -127,6 +127,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     window.update(|window, cx| {
         view.update(cx, |view, cx| {
             let editor = view
+                .files_view
                 .diff_editors
                 .values()
                 .next()
@@ -153,7 +154,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
                     session.tab(tab_id).unwrap().file().is_some_and(|file| {
                         file.path() == relative_path::RelativePath::new("notes.txt")
                     })
-                }) && view.file_editors.values().any(|editor| {
+                }) && view.files_view.file_editors.values().any(|editor| {
                     let state = editor.state.read(cx);
                     state.value().contains("BETA") && state.cursor_position().line == 1
                 })
@@ -205,10 +206,14 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
-                view.read(cx).diff_editors.values().any(|editor| {
-                    let text = editor.state.read(cx).value();
-                    text.contains("+new") && !text.contains("BETA")
-                })
+                view.read(cx)
+                    .files_view
+                    .diff_editors
+                    .values()
+                    .any(|editor| {
+                        let text = editor.state.read(cx).value();
+                        text.contains("+new") && !text.contains("BETA")
+                    })
             })
         }),
         "the retargeted Diff Tab should show the second file's hunks"
@@ -319,6 +324,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
+                    .files_view
                     .diff_editors
                     .values()
                     .any(|editor| editor.state.read(cx).value().contains("+agent"))
@@ -336,6 +342,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.debug_bounds("change-committed.txt").is_none()
                 && window.read(|app| {
                     view.read(app)
+                        .files_view
                         .diff_editors
                         .values()
                         .all(|editor| editor.content == crate::app::changes::DiffContent::Unchanged)

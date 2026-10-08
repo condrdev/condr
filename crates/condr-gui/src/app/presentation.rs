@@ -21,10 +21,10 @@ impl Condr {
     }
 
     /// The connection, Session, Workspace and Tab the window shows, when it shows one.
-    pub(super) fn presented(&self) -> Option<(ConnectionKey, Session, WorkspaceId, TabId)> {
+    pub(super) fn presented(&self) -> Option<(ConnectionKey, &Session, WorkspaceId, TabId)> {
         let connection = self.active_connection()?;
         let session = connection.session()?;
-        let (workspace_id, tab_id) = connection.viewed(&session)?;
+        let (workspace_id, tab_id) = connection.viewed(session)?;
         Some((connection.key, session, workspace_id, tab_id))
     }
 
@@ -99,10 +99,10 @@ impl Condr {
         layout_changed: bool,
     ) -> IncomingEffect {
         let active_projection_resolved = self.resolve_projections_at(key, sequence);
-        let target_before_refresh = self.target_pane;
+        let target_before_refresh = self.terminal_input.target;
         self.refresh_target_pane(key);
         let target_changed =
-            self.active_connection == key && self.target_pane != target_before_refresh;
+            self.active_connection == key && self.terminal_input.target != target_before_refresh;
         IncomingEffect {
             rebuild: layout_changed || active_projection_resolved || target_changed,
             rebuild_active: false,
@@ -112,76 +112,36 @@ impl Condr {
 
     pub(super) fn clear_connection_gui_state(&mut self, key: ConnectionKey) {
         self.clear_files_state(key);
-        self.dock_surfaces
-            .retain(|surface, _| surface.connection_key != key);
-        if self
-            .active_dock_surface
-            .is_some_and(|surface| surface.connection_key == key)
-        {
+        self.retain_dock_cache(key, &HashSet::new(), &HashSet::new());
+    }
+
+    /// Presentation caches share one retention rule for structure changes and detach.
+    pub(super) fn retain_dock_cache(
+        &mut self,
+        key: ConnectionKey,
+        tab_ids: &HashSet<TabId>,
+        pane_ids: &HashSet<PaneId>,
+    ) {
+        self.dock_surfaces.retain(|surface, _| {
+            surface.connection_key != key || tab_ids.contains(&surface.tab_id)
+        });
+        self.panels.retain(|(connection_key, pane_id), _| {
+            *connection_key != key || pane_ids.contains(pane_id)
+        });
+        self.pending_sizes.retain(|(connection_key, pane_id), _| {
+            *connection_key != key || pane_ids.contains(pane_id)
+        });
+        self.terminal_geometry
+            .retain(|(connection_key, pane_id), _| {
+                *connection_key != key || pane_ids.contains(pane_id)
+            });
+        if self.active_dock_surface.is_some_and(|surface| {
+            surface.connection_key == key && !tab_ids.contains(&surface.tab_id)
+        }) {
             self.active_dock_surface = None;
         }
-        self.panels
-            .retain(|(connection_key, _), _| *connection_key != key);
-        self.pending_sizes
-            .retain(|(connection_key, _), _| *connection_key != key);
-        self.terminal_geometry
-            .retain(|(connection_key, _), _| *connection_key != key);
-        if self
-            .terminal_selection
-            .is_some_and(|selection| selection.connection_key == key)
-        {
-            self.terminal_selection = None;
-        }
-        if self
-            .hovered_link
-            .as_ref()
-            .is_some_and(|(connection_key, _, _)| *connection_key == key)
-        {
-            self.hovered_link = None;
-        }
-        if self
-            .pressed_terminal_link
-            .as_ref()
-            .is_some_and(|(connection_key, _, _)| *connection_key == key)
-        {
-            self.pressed_terminal_link = None;
-        }
-        if self
-            .terminal_mouse_capture
-            .is_some_and(|capture| capture.connection_key == key)
-        {
-            self.terminal_mouse_capture = None;
-        }
-        if self
-            .last_terminal_mouse_motion
-            .is_some_and(|motion| motion.connection_key == key)
-        {
-            self.last_terminal_mouse_motion = None;
-        }
-        if self
-            .focused_terminal
-            .is_some_and(|(connection_key, _)| connection_key == key)
-        {
-            self.focused_terminal = None;
-        }
-        if self
-            .reported_terminal_focus
-            .is_some_and(|(connection_key, _)| connection_key == key)
-        {
-            self.reported_terminal_focus = None;
-        }
-        if self
-            .target_pane
-            .is_some_and(|(connection_key, _)| connection_key == key)
-        {
-            self.target_pane = None;
-        }
-        if self
-            .terminal_composition
-            .as_ref()
-            .is_some_and(|composition| composition.connection_key == key)
-        {
-            self.terminal_composition = None;
-        }
+        self.terminal_input.retain_panes(|connection_key, pane_id| {
+            connection_key != key || pane_ids.contains(&pane_id)
+        });
     }
 }

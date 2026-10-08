@@ -1,26 +1,28 @@
 mod changes;
 mod connection;
+mod connection_lifecycle;
 mod dock;
 mod files;
 mod layout;
+mod session_model;
 mod settings;
 mod terminal;
 mod workflows;
 
 use super::super::{
-    Appearance, CONTROL_BUSY_REASON, ClientIo, Condr, ConnectionResult, ConnectionStatus,
-    DEFAULT_WINDOW_SIZE, DockSurfaceKey, Incoming, LocalTerminalSelection, ServerConnection,
-    SettingsTab, TerminalFont, TerminalPalette, code_font_size, code_theme_is_dirty,
-    color_scheme_is_dirty, default_window_options, reset_code_theme, reset_color_scheme,
-    select_appearance, select_code_theme, select_server_shell, select_settings_server,
-    select_settings_server_page, select_settings_tab, select_terminal_font_family,
-    select_terminal_font_size, selected_appearance, selected_code_theme, server_listen,
-    server_shell, set_server_listen, step_code_font_size, step_terminal_font_size,
-    terminal_font_family, terminal_font_size,
+    Appearance, ClientIo, Condr, ConnectionResult, ConnectionStatus, DEFAULT_WINDOW_SIZE,
+    DockSurfaceKey, Incoming, ServerConnection, SettingsTab, TerminalFont, TerminalPalette,
+    code_font_size, code_theme_is_dirty, color_scheme_is_dirty, default_window_options,
+    reset_code_theme, reset_color_scheme, select_appearance, select_code_theme,
+    select_server_shell, select_settings_server, select_settings_server_page, select_settings_tab,
+    select_terminal_font_family, select_terminal_font_size, selected_appearance,
+    selected_code_theme, server_listen, server_shell, set_server_listen, step_code_font_size,
+    step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
 use crate::app::config;
 use crate::app::gui_state;
 use crate::app::open_in::{OpenTarget, OpenTargetIcon};
+use crate::app::terminal_input::LocalTerminalSelection;
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 use condr_core::SplitDirection;
 use condr_core::protocol::{

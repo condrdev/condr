@@ -19,29 +19,6 @@ impl RuntimeState {
         }
     }
 
-    pub(super) fn publish_layout_change(
-        &mut self,
-        origin_client_id: u64,
-        origin: &ClientWriter,
-        request_id: u64,
-        effect: LayoutEffect,
-    ) -> bool {
-        let LayoutEffect { result, event, .. } = effect;
-        if self.publish_event(event, Some((origin_client_id, origin))) {
-            return true;
-        }
-        queue_message(
-            origin,
-            ServerMessage::LayoutApplied {
-                server_id: self.server_id,
-                session_id: self.session_id,
-                request_id,
-                sequence: self.sequence,
-                result,
-            },
-        )
-    }
-
     pub(super) fn publish_background(&mut self, event: SessionEvent) {
         self.publish_event(event, None);
     }

@@ -84,7 +84,7 @@ fn numbered_tab_shortcuts_follow_order_and_stay_out_of_terminal_input() {
         window.simulate_keystrokes(&format!("{modifier}-{number}"));
         assert!(wait_until(window, |window| selected(window, tab_id)));
     }
-    let pane_id = window.read(|app| view.read(app).target_pane.unwrap().1);
+    let pane_id = window.read(|app| view.read(app).terminal_input.target.unwrap().1);
     let terminal = window.debug_bounds(terminal_selector(pane_id)).unwrap();
     window.simulate_click(terminal.center(), Modifiers::default());
     window.run_until_parked();
@@ -847,7 +847,7 @@ fn dragging_workspaces_and_tabs_reorders_them_without_changing_focus() {
             Some((second_workspace, active_tab)),
             "reordering leaves the view where it was"
         );
-        assert_identity(&condr.active_session().unwrap());
+        assert_identity(condr.active_session().unwrap());
     });
     let authoritative = Session::restore(server.handle.snapshot()).unwrap();
     assert_eq!(authoritative.workspaces()[0].id(), second_workspace);
@@ -892,12 +892,14 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             .unwrap()
             .workspaces()
             .len(),
-        window.read(|app| condr_core::Session::restore(
-            view.read(app).connection(1).unwrap().snapshot.clone()
-        )
-        .unwrap()
-        .workspaces()
-        .len()),
+        window.read(|app| view
+            .read(app)
+            .connection(1)
+            .unwrap()
+            .session()
+            .unwrap()
+            .workspaces()
+            .len()),
         window.read(|app| view.read(app).connection(1).unwrap().sequence),
         window.read(|app| view.read(app).last_error.clone()),
     );

@@ -1,4 +1,7 @@
+mod operation;
+
 use super::*;
+pub(super) use operation::ClientLayouts;
 
 pub(super) struct LayoutEffect {
     pub(super) result: LayoutResult,
@@ -768,6 +771,8 @@ impl LayoutEffect {
     }
 }
 
+/// Commits the prepared structure under the Session lock. The operation retains any
+/// created worktree's rollback handle and performs failed-commit cleanup after unlocking.
 pub(super) fn apply_prepared_external_layout(
     state: &mut RuntimeState,
     prepared: PreparedExternalLayout,
@@ -790,7 +795,7 @@ pub(super) fn apply_prepared_external_layout(
         PreparedExternalLayout::CreateWorktree {
             parent_workspace_id,
             parent_root,
-            parent,
+            parent: _,
             child,
             base_branch,
         } => {
@@ -799,18 +804,10 @@ pub(super) fn apply_prepared_external_layout(
                 .workspace(parent_workspace_id)
                 .is_none_or(|workspace| workspace.root_directory() != parent_root)
             {
-                return Err(prepared_worktree_failure(
-                    &parent,
-                    &child,
-                    "parent Workspace changed while creating its worktree".into(),
-                ));
+                return Err("parent Workspace changed while creating its worktree".into());
             }
             let Some(workspace_id) = candidate.create_workspace(child.root().to_path_buf()) else {
-                return Err(prepared_worktree_failure(
-                    &parent,
-                    &child,
-                    "Session Workspace limit reached".into(),
-                ));
+                return Err("Session Workspace limit reached".into());
             };
             if !candidate.associate_worktree(
                 workspace_id,
@@ -819,11 +816,7 @@ pub(super) fn apply_prepared_external_layout(
                 true,
                 base_branch,
             ) {
-                return Err(prepared_worktree_failure(
-                    &parent,
-                    &child,
-                    "failed to associate the created worktree".into(),
-                ));
+                return Err("failed to associate the created worktree".into());
             }
             let tab_id = candidate
                 .workspace(workspace_id)
@@ -837,39 +830,20 @@ pub(super) fn apply_prepared_external_layout(
                 .expect("a new Workspace opens on a terminal Tab")
                 .id();
             let snapshot = candidate.snapshot();
-            if let Err(error) = validate_persistable_snapshot(&snapshot) {
-                return Err(prepared_worktree_failure(&parent, &child, error));
-            }
+            validate_persistable_snapshot(&snapshot)?;
             let launch = state.shell_launch();
-            let mut runtime = match TerminalRuntime::spawn_shell(
+            let mut runtime = TerminalRuntime::spawn_shell(
                 child.root(),
                 TerminalSize::new(24, 80),
                 launch.shell(),
                 Some(&launch.pane_environment(pane_id)),
-            ) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    return Err(prepared_worktree_failure(
-                        &parent,
-                        &child,
-                        format!("failed to start terminal: {error}"),
-                    ));
-                }
-            };
+            )
+            .map_err(|error| format!("failed to start terminal: {error}"))?;
             let updates = runtime
                 .take_updates()
                 .expect("new Terminal update receiver exists");
-            let mut effect = match commit_layout_candidate(
-                state,
-                candidate,
-                None,
-                Some((pane_id, runtime, updates)),
-            ) {
-                Ok(effect) => effect,
-                Err(error) => {
-                    return Err(prepared_worktree_failure(&parent, &child, error));
-                }
-            };
+            let mut effect =
+                commit_layout_candidate(state, candidate, None, Some((pane_id, runtime, updates)))?;
             effect.result = LayoutResult::WorkspaceCreated {
                 workspace_id,
                 tab_id,
@@ -986,13 +960,11 @@ pub(super) fn apply_prepared_external_layout(
 /// client, the CLI in a Pane included, may change structure (ADR 0009).
 pub(super) fn layout_authority_error(
     state: &RuntimeState,
-    _client_id: u64,
     server_id: ServerId,
     session_id: SessionId,
-    request_id: u64,
     stopping: bool,
-) -> Option<ServerMessage> {
-    let reason = if stopping {
+) -> Option<&'static str> {
+    if stopping {
         Some("Server is stopping")
     } else if server_id != state.server_id {
         Some("unknown Server")
@@ -1000,38 +972,5 @@ pub(super) fn layout_authority_error(
         Some("unknown Session")
     } else {
         None
-    };
-    reason.map(|reason| ServerMessage::LayoutRejected {
-        server_id: state.server_id,
-        session_id: state.session_id,
-        request_id,
-        reason: reason.into(),
-    })
-}
-
-pub(super) fn plan_client_external_layout(
-    state: &mut RuntimeState,
-    client_id: u64,
-    server_id: ServerId,
-    session_id: SessionId,
-    request_id: u64,
-    stopping: bool,
-    command: &LayoutCommand,
-) -> Result<ExternalLayoutPlan, Box<ServerMessage>> {
-    if let Some(error) = layout_authority_error(
-        state, client_id, server_id, session_id, request_id, stopping,
-    ) {
-        return Err(Box::new(error));
     }
-    let plan = external_layout_plan(state, command)
-        .map_err(|reason| {
-            Box::new(ServerMessage::LayoutRejected {
-                server_id: state.server_id,
-                session_id: state.session_id,
-                request_id,
-                reason,
-            })
-        })?
-        .expect("external Layout command has a plan");
-    Ok(plan)
 }

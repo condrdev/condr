@@ -537,14 +537,10 @@ fn stopping_server_rolls_back_a_prepared_worktree() {
         _ => panic!("expected a prepared worktree"),
     };
     assert!(child_root.exists());
-    assert!(matches!(
-        layout_authority_error(&state, 7, state.server_id, state.session_id, 17, true),
-        Some(ServerMessage::LayoutRejected {
-            request_id: 17,
-            reason,
-            ..
-        }) if reason == "Server is stopping"
-    ));
+    assert_eq!(
+        layout_authority_error(&state, state.server_id, state.session_id, true),
+        Some("Server is stopping")
+    );
 
     cancel_prepared_external_layout(prepared).unwrap();
     assert!(!child_root.exists());

@@ -84,14 +84,19 @@ impl Condr {
     /// update it, including for Server groups the Sidebar has not rendered yet. Call
     /// after every snapshot change; Workspaces keep their state across reconnects.
     pub(super) fn sync_sidebar_workspace_open(&mut self, cx: &mut Context<Self>) {
-        let sessions = self.restored_sessions();
         self.sidebar_workspace_open
             .retain(|(key, workspace_id), _| {
-                sessions
-                    .get(key)
+                self.connections
+                    .iter()
+                    .find(|connection| connection.key == *key)
+                    .and_then(ServerConnection::session)
                     .is_some_and(|session| session.workspace(*workspace_id).is_some())
             });
-        for (&key, session) in &sessions {
+        for connection in &self.connections {
+            let key = connection.key;
+            let Some(session) = connection.session() else {
+                continue;
+            };
             let active_workspace = self.presented_workspace_id(key, session);
             for workspace in session.workspaces() {
                 self.sidebar_workspace_open
@@ -110,31 +115,19 @@ impl Condr {
         }
     }
 
-    pub(super) fn restored_sessions(&self) -> HashMap<ConnectionKey, Session> {
-        self.connections
-            .iter()
-            .filter_map(|connection| {
-                Session::restore(connection.snapshot.clone())
-                    .ok()
-                    .map(|session| (connection.key, session))
-            })
-            .collect()
-    }
-
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.sidebar_collapsed {
             return self.render_collapsed_sidebar(cx);
         }
         let owner = cx.weak_entity();
-        let sessions = self.restored_sessions();
-        let needs_you = self.needs_you_items(&sessions, cx);
+        let needs_you = self.needs_you_items(cx);
         let items = self.connections.iter().map(|connection| {
             let key = connection.key;
             let server_target = DropTarget::Server { key, after: false };
             let active_server = key == self.active_connection;
             let connected = connection.can_mutate();
-            let workspaces = sessions
-                .get(&key)
+            let workspaces = connection
+                .session()
                 .map(|session| {
                     let active_workspace = self.presented_workspace_id(key, session);
                     // Drop handlers need the source index of the dragged Workspace.
@@ -222,7 +215,8 @@ impl Condr {
                                         })
                                         .active(
                                             active_server
-                                                && self.target_pane == Some((key, pane_id)),
+                                                && self.terminal_input.target
+                                                    == Some((key, pane_id)),
                                         )
                                         .disable(!connected)
                                         .on_click(
@@ -652,7 +646,7 @@ impl Condr {
     /// Carries a dot while the update check has found a newer build and Settings has not
     /// been opened since (ADR 0029); the About page says which.
     fn settings_button(&self, owner: WeakEntity<Self>, cx: &App) -> AnyElement {
-        let update = self.update_pending();
+        let update = self.updates.pending();
         let button = Button::new("open-settings")
             .debug_selector(|| "open-settings".into())
             .ghost()
@@ -680,18 +674,14 @@ impl Condr {
     /// One row per Blocked agent across all connections: its mark, the Workspace (and
     /// the Device once there is more than one), and what it waits for. A click lands in
     /// the Pane, as the OS notification's click does.
-    fn needs_you_items(
-        &self,
-        sessions: &HashMap<ConnectionKey, Session>,
-        cx: &mut Context<Self>,
-    ) -> Vec<CondrSidebarTreeItem> {
+    fn needs_you_items(&self, cx: &mut Context<Self>) -> Vec<CondrSidebarTreeItem> {
         let owner = cx.weak_entity();
         let several_devices = self.connections.len() > 1;
         let status = agent_sidebar_status(AgentDisplayState::Blocked);
         let mut items = Vec::new();
         for connection in &self.connections {
             let key = connection.key;
-            let Some(session) = sessions.get(&key) else {
+            let Some(session) = connection.session() else {
                 continue;
             };
             for workspace in session.workspaces() {
@@ -738,11 +728,10 @@ impl Condr {
 
     fn render_collapsed_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.weak_entity();
-        let sessions = self.restored_sessions();
         let mut avatars = Vec::new();
         for connection in &self.connections {
             let connection_key = connection.key;
-            let Some(session) = sessions.get(&connection.key) else {
+            let Some(session) = connection.session() else {
                 continue;
             };
             let active_workspace = self.presented_workspace_id(connection.key, session);

@@ -58,6 +58,10 @@ fn terminal_ime_cell(cursor: TerminalCursor, size: TerminalSize, offset: usize) 
 }
 
 impl TerminalComposition {
+    pub(super) fn target(&self) -> (ConnectionKey, PaneId) {
+        (self.connection_key, self.pane_id)
+    }
+
     pub(super) fn belongs_to(&self, connection_key: ConnectionKey, pane_id: PaneId) -> bool {
         self.connection_key == connection_key && self.pane_id == pane_id
     }
@@ -167,14 +171,16 @@ impl EntityInputHandler for Condr {
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.terminal_composition.take().is_some() {
+        let had_composition = self.terminal_input.composition.take().is_some();
+        let cancelled = std::mem::take(&mut self.terminal_input.cancelled_composition);
+        if had_composition || cancelled {
             window.invalidate_character_coordinates();
             cx.notify();
         }
     }
 
     fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
-        if let (Some(text), Some((key, pane_id))) = (item.text(), self.target_pane) {
+        if let (Some(text), Some((key, pane_id))) = (item.text(), self.terminal_input.target) {
             self.clear_selection(cx);
             self.terminal_command(key, pane_id, TerminalCommand::Paste(text));
         }
@@ -187,10 +193,15 @@ impl EntityInputHandler for Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let composition = self.terminal_composition.take();
+        let composition = self.terminal_input.composition.take();
         let had_composition = composition.is_some();
-        let committed = commit_terminal_composition(composition, self.target_pane, range, text);
-        if had_composition {
+        let cancelled = std::mem::take(&mut self.terminal_input.cancelled_composition);
+        let committed = if cancelled {
+            None
+        } else {
+            commit_terminal_composition(composition, self.terminal_input.target, range, text)
+        };
+        if had_composition || cancelled {
             window.invalidate_character_coordinates();
             cx.notify();
         }
@@ -211,17 +222,18 @@ impl EntityInputHandler for Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let composition = self.terminal_composition.take();
+        self.terminal_input.cancelled_composition = false;
+        let composition = self.terminal_input.composition.take();
         let previous_composition = composition.clone();
         let composition = update_terminal_composition(
             composition,
-            self.target_pane,
+            self.terminal_input.target,
             range,
             new_text,
             new_selected_range,
         );
         let changed = previous_composition != composition;
-        self.terminal_composition = composition;
+        self.terminal_input.composition = composition;
         if changed {
             window.invalidate_character_coordinates();
             cx.notify();
@@ -236,7 +248,7 @@ impl EntityInputHandler for Condr {
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let (key, offset) = self.active_terminal_composition().map_or_else(
-            || self.target_pane.map(|key| (key, 0)),
+            || self.terminal_input.target.map(|key| (key, 0)),
             |composition| {
                 let (_, offset) = clamp_utf16_boundary(&composition.text, range.start, false);
                 Some(((composition.connection_key, composition.pane_id), offset))
@@ -267,9 +279,10 @@ impl EntityInputHandler for Condr {
 
 impl Condr {
     fn active_terminal_composition(&self) -> Option<&TerminalComposition> {
-        self.terminal_composition
+        self.terminal_input
+            .composition
             .as_ref()
-            .filter(|composition| composition.belongs_to_target(self.target_pane))
+            .filter(|composition| composition.belongs_to_target(self.terminal_input.target))
     }
 
     pub(super) fn marked_text_for(
@@ -285,8 +298,10 @@ impl Condr {
 
 #[cfg(test)]
 mod ime_tests {
+    use crate::app::terminal_input::TerminalInputState;
     use condr_core::{
-        PaneId, Session, SplitDirection, TerminalCursor, TerminalCursorShape, TerminalSize,
+        PaneId, Session, SplitDirection, TerminalCursor, TerminalCursorShape, TerminalKey,
+        TerminalSize,
     };
 
     use super::{
@@ -330,6 +345,47 @@ mod ime_tests {
         assert!(composition.belongs_to(7, owner));
         assert!(!composition.belongs_to(7, other));
         assert!(!composition.belongs_to(8, owner));
+    }
+
+    #[test]
+    fn pruning_terminal_owners_drops_preedit_and_key_releases_only_for_that_device() {
+        let (pane_id, other_pane) = pane_ids();
+        let mut input = TerminalInputState {
+            target: Some((7, pane_id)),
+            focused: Some((7, pane_id)),
+            reported_focus: Some((7, pane_id)),
+            composition: Some(TerminalComposition {
+                connection_key: 7,
+                pane_id,
+                text: "draft".into(),
+                selected_range: 5..5,
+            }),
+            forwarded_keys: [
+                ("a".into(), (7, pane_id, TerminalKey::Character("a".into()))),
+                ("b".into(), (8, pane_id, TerminalKey::Character("b".into()))),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        // Removing a different Pane must not cancel this Pane's preedit.
+        input.retain_panes(|key, pane| key != 7 || pane != other_pane);
+        assert!(input.composition.is_some());
+        assert_eq!(input.forwarded_keys.len(), 2);
+
+        input.retain_panes(|key, pane| key != 7 || pane != pane_id);
+        assert!(input.target.is_none());
+        assert!(input.focused.is_none());
+        assert!(input.reported_focus.is_none());
+        assert!(input.composition.is_none());
+        assert!(!input.forwarded_keys.contains_key("a"));
+        assert!(
+            input.forwarded_keys.contains_key("b"),
+            "same Pane ID on another Device lives"
+        );
+
+        // Replacing that other Device uses the same cleanup path, with no live Panes.
+        input.retain_panes(|key, _| key != 8);
+        assert!(input.forwarded_keys.is_empty());
     }
 
     #[test]

@@ -621,7 +621,7 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let Ok(session) = Session::restore(connection.snapshot.clone()) else {
+        let Some(session) = connection.session() else {
             return;
         };
         let Some(workspace) = session.workspace(workspace_id) else {

@@ -172,7 +172,8 @@ impl TabGroupRenderer for CondrTabGroupRenderer {
 
 impl Condr {
     pub(super) fn focused_pane(&self) -> Option<PaneId> {
-        self.target_pane
+        self.terminal_input
+            .target
             .filter(|(key, _)| *key == self.active_connection)
             .map(|(_, pane_id)| pane_id)
             .or_else(|| self.connection_focused_pane(self.active_connection))
@@ -198,7 +199,7 @@ impl Condr {
             let should_focus = owner
                 .update(cx, |this, _| {
                     this.active_connection == key
-                        && this.target_pane == Some((key, pane_id))
+                        && this.terminal_input.target == Some((key, pane_id))
                         && this.active_dock_surface == Some(surface_key)
                 })
                 .unwrap_or(false);
@@ -214,24 +215,18 @@ impl Condr {
         if std::mem::take(&mut self.state_dirty) {
             self.schedule_state_save(cx);
         }
-        if !self.diff_editors.is_empty() {
-            self.prune_diff_editors();
-        }
-        if !self.file_editors.is_empty() {
-            self.prune_file_editors();
-        }
         let Some(connection) = self.active_connection() else {
             self.active_dock_surface = None;
             return;
         };
-        let Ok(session) = Session::restore(connection.snapshot.clone()) else {
+        let Some(session) = connection.session() else {
             self.active_dock_surface = None;
             return;
         };
         let key = connection.key;
         let controlling = connection.can_mutate();
-        let Some((_workspace_id, tab_id)) = connection.viewed(&session) else {
-            self.target_pane = None;
+        let Some((_workspace_id, tab_id)) = connection.viewed(session) else {
+            self.terminal_input.target = None;
             self.active_dock_surface = None;
             return;
         };
@@ -240,20 +235,21 @@ impl Condr {
             .expect("presented Tab belongs to the restored Session");
         // A viewer Tab has no Panes and no Dock (ADR 0017); the body renders it directly.
         let Some(tab_layout) = tab.layout().cloned() else {
-            self.target_pane = None;
+            let diff = tab.diff().map(|diff| diff.path().to_relative_path_buf());
+            let file = tab.file().map(|file| file.path().to_relative_path_buf());
+            self.terminal_input.target = None;
             self.active_dock_surface = None;
-            if let Some(diff) = tab.diff() {
-                let path = diff.path().to_relative_path_buf();
+            if let Some(path) = diff {
                 self.sync_diff_view(key, _workspace_id, tab_id, path, window, cx);
-            } else if let Some(file) = tab.file() {
-                let path = file.path().to_relative_path_buf();
+            } else if let Some(path) = file {
                 self.sync_file_view(key, _workspace_id, tab_id, path, window, cx);
             }
             return;
         };
         // The Pane the user targeted, while it is in this Tab; else the Tab's own focus.
         let focused = self
-            .target_pane
+            .terminal_input
+            .target
             .filter(|(target_key, _)| *target_key == key)
             .map(|(_, pane_id)| pane_id)
             .filter(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
@@ -270,7 +266,9 @@ impl Condr {
             .map(PaneLayout::Pane)
             .unwrap_or(tab_layout);
         // Where "Insert Path into Terminal" goes once a viewer Tab takes the active slot.
-        self.last_terminal_tabs.insert((key, _workspace_id), tab_id);
+        self.files_view
+            .last_terminal_tabs
+            .insert((key, _workspace_id), tab_id);
         let surface_key = DockSurfaceKey {
             connection_key: key,
             tab_id,
@@ -353,7 +351,7 @@ impl Condr {
             collect_layout_pane_ids(&layout, &mut surface.pane_ids);
         }
 
-        self.target_pane = Some((key, focused));
+        self.terminal_input.target = Some((key, focused));
         self.active_dock_surface = Some(surface_key);
         let needs_rebuild = self.dock_surfaces.get(&surface_key).is_none_or(|surface| {
             surface.projection.as_ref() != Some(&layout)
@@ -539,7 +537,7 @@ impl Condr {
         let Some(connection) = self.connection(surface_key.connection_key) else {
             return;
         };
-        let Ok(mut session) = Session::restore(connection.snapshot.clone()) else {
+        let Some(mut session) = connection.session().cloned() else {
             return;
         };
         let Some(tab) = session.tab(surface_key.tab_id) else {

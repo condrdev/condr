@@ -4,6 +4,45 @@ use condr_core::protocol::UnknownMessage;
 use std::time::{Duration, Instant};
 
 #[test]
+fn sending_without_io_preserves_the_connection_attempt_and_its_error() {
+    let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
+    connection.status = ConnectionStatus::Connecting;
+    connection.connect_generation = 9;
+    connection.send(ClientMessage::ServerAdmin {
+        server_id: ServerId(1),
+        command: condr_core::protocol::ServerAdminCommand::Status,
+    });
+    assert!(connection.status == ConnectionStatus::Connecting);
+    assert_eq!(connection.connect_generation, 9);
+    assert!(connection.error.is_none());
+
+    connection.status = ConnectionStatus::Disconnected;
+    connection.error = Some("update this Device".into());
+    connection.send(ClientMessage::AcquireControl {
+        session_id: SessionId(3),
+    });
+    assert_eq!(connection.error.as_deref(), Some("update this Device"));
+}
+
+#[test]
+fn a_closed_send_queue_preserves_the_task_that_receives_disconnection() {
+    let mut connection = connection_with_io();
+    let (outgoing, receiver) = std::sync::mpsc::channel();
+    drop(receiver);
+    connection.io.as_mut().unwrap().outgoing = outgoing;
+    connection.subscribed = true;
+    connection.send(ClientMessage::AcquireControl {
+        session_id: SessionId(3),
+    });
+    assert!(
+        connection.io.is_some(),
+        "the queued Disconnected event must still be consumed"
+    );
+    assert!(connection.status == ConnectionStatus::Connected);
+    assert!(connection.subscribed);
+}
+
+#[test]
 fn edit_server_fields_only_accept_host_and_port_shaped_text() {
     use crate::app::dialogs::{host_text_is_plausible, port_text_is_plausible};
 
@@ -140,7 +179,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
         same_authority.controlling = true;
         same_authority.bootstrap_resync_session_id = Some(SessionId(3));
         assert!(same_authority.recover_rejected_subscription(ServerId(1), SessionId(3)));
-        let recovered = same_authority.apply_bootstrap(bootstrap(8));
+        let recovered = same_authority.apply_bootstrap(bootstrap(8)).unwrap();
         assert!(recovered.reacquire_control);
         assert!(recovered.resubscribe);
         assert!(!recovered.authority_changed);
@@ -148,24 +187,26 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
 
         same_authority.subscribed = true;
         assert!(same_authority.request_snapshot());
-        let resynced = same_authority.apply_bootstrap(bootstrap(9));
+        let resynced = same_authority.apply_bootstrap(bootstrap(9)).unwrap();
         assert!(!resynced.reacquire_control);
         assert!(!resynced.resubscribe);
         assert!(!resynced.authority_changed);
     }
 
-    let application = connection.apply_bootstrap(SessionBootstrap {
-        settings: Default::default(),
-        server_id: ServerId(1),
-        runtime_epoch: RuntimeEpoch(2),
-        session_id: SessionId(30),
-        sequence: 11,
-        snapshot: Session::new().snapshot(),
-        terminals: Vec::new(),
-        agents: Vec::new(),
-        workspace_git: Vec::new(),
-        zoomed_panes: Vec::new(),
-    });
+    let application = connection
+        .apply_bootstrap(SessionBootstrap {
+            settings: Default::default(),
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(30),
+            sequence: 11,
+            snapshot: Session::new().snapshot(),
+            terminals: Vec::new(),
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        })
+        .unwrap();
     assert!(application.resubscribe);
     assert!(application.reacquire_control);
     assert!(!connection.controlling);
@@ -263,24 +304,26 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
     connection.bootstrap_resync_session_id = Some(SessionId(3));
     let pane_id = pane_id();
 
-    let application = connection.apply_bootstrap(SessionBootstrap {
-        settings: Default::default(),
-        server_id: ServerId(1),
-        runtime_epoch: RuntimeEpoch(2),
-        session_id: SessionId(3),
-        sequence: 8,
-        snapshot: Session::new().snapshot(),
-        terminals: vec![PaneTerminalSnapshot {
-            pane_id,
-            view: terminal_view(1, "bell"),
-            exited: false,
-            title: None,
-            attention: true,
-        }],
-        agents: Vec::new(),
-        workspace_git: Vec::new(),
-        zoomed_panes: Vec::new(),
-    });
+    let application = connection
+        .apply_bootstrap(SessionBootstrap {
+            settings: Default::default(),
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(3),
+            sequence: 8,
+            snapshot: Session::new().snapshot(),
+            terminals: vec![PaneTerminalSnapshot {
+                pane_id,
+                view: terminal_view(1, "bell"),
+                exited: false,
+                title: None,
+                attention: true,
+            }],
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        })
+        .unwrap();
 
     assert!(!application.resubscribe);
     assert!(!application.reacquire_control);
@@ -382,18 +425,20 @@ fn lag_notice_during_a_visual_gap_resync_still_reacquires_control() {
     connection.subscription_pending = false;
     assert!(connection.request_snapshot());
     assert!(connection.recover_rejected_subscription(ServerId(1), SessionId(3)));
-    let application = connection.apply_bootstrap(SessionBootstrap {
-        settings: Default::default(),
-        server_id: ServerId(1),
-        runtime_epoch: RuntimeEpoch(2),
-        session_id: SessionId(3),
-        sequence: 8,
-        snapshot: Session::new().snapshot(),
-        terminals: Vec::new(),
-        agents: Vec::new(),
-        workspace_git: Vec::new(),
-        zoomed_panes: Vec::new(),
-    });
+    let application = connection
+        .apply_bootstrap(SessionBootstrap {
+            settings: Default::default(),
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(3),
+            sequence: 8,
+            snapshot: Session::new().snapshot(),
+            terminals: Vec::new(),
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        })
+        .unwrap();
     assert!(application.reacquire_control);
     assert!(application.resubscribe);
     assert!(!application.authority_changed);
@@ -404,24 +449,26 @@ fn bootstrap_attention_survives_arriving_before_control_is_granted() {
     let mut connection = connection_with_io();
     connection.controlling = false;
     let pane = pane_id();
-    connection.apply_bootstrap(SessionBootstrap {
-        settings: Default::default(),
-        server_id: ServerId(1),
-        runtime_epoch: RuntimeEpoch(2),
-        session_id: SessionId(3),
-        sequence: 8,
-        snapshot: Session::new().snapshot(),
-        terminals: vec![PaneTerminalSnapshot {
-            pane_id: pane,
-            view: terminal_view(1, "x"),
-            exited: false,
-            title: None,
-            attention: true,
-        }],
-        agents: Vec::new(),
-        workspace_git: Vec::new(),
-        zoomed_panes: Vec::new(),
-    });
+    connection
+        .apply_bootstrap(SessionBootstrap {
+            settings: Default::default(),
+            server_id: ServerId(1),
+            runtime_epoch: RuntimeEpoch(2),
+            session_id: SessionId(3),
+            sequence: 8,
+            snapshot: Session::new().snapshot(),
+            terminals: vec![PaneTerminalSnapshot {
+                pane_id: pane,
+                view: terminal_view(1, "x"),
+                exited: false,
+                title: None,
+                attention: true,
+            }],
+            agents: Vec::new(),
+            workspace_git: Vec::new(),
+            zoomed_panes: Vec::new(),
+        })
+        .unwrap();
     assert!(connection.attention.contains(&pane));
 }
 

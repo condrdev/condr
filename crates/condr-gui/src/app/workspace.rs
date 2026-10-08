@@ -42,20 +42,15 @@ impl Condr {
         // Viewing only is a mode, not a failure: muted, and only while it lasts.
         let viewing_only = connection
             .control_denied
-            .as_deref()
-            .map(|reason| viewing_only_text(reason).to_owned());
+            .as_ref()
+            .map(|(cause, reason)| viewing_only_text(*cause, reason).to_owned());
         let can_mutate =
             connection.can_mutate() && !self.has_pending_projection_for(connection.key);
-        let Ok(session) = Session::restore(connection.snapshot.clone()) else {
-            return WorkspaceChrome::body(
-                div()
-                    .size_full()
-                    .child("Invalid Session state")
-                    .into_any_element(),
-            );
+        let Some(session) = connection.session() else {
+            return WorkspaceChrome::body(self.render_disconnected(connection, cx));
         };
         let key = connection.key;
-        let Some(workspace_id) = self.presented_workspace_id(key, &session) else {
+        let Some(workspace_id) = self.presented_workspace_id(key, session) else {
             // Nothing to show and not connected: say so, instead of a greyed-out Welcome.
             if connection.status != ConnectionStatus::Connected {
                 return WorkspaceChrome::body(self.render_disconnected(connection, cx));
@@ -67,7 +62,7 @@ impl Condr {
             .expect("presented Workspace belongs to the restored Session");
 
         let active_tab = self
-            .presented_tab_id(key, &session, workspace_id)
+            .presented_tab_id(key, session, workspace_id)
             .expect("presented Workspace has an active Tab");
         let surface_key = DockSurfaceKey {
             connection_key: key,
@@ -489,9 +484,9 @@ fn welcome_link(id: &'static str, label: &'static str, url: &'static str) -> But
         .on_click(move |_, _, cx| cx.open_url(url))
 }
 
-/// The strip's wording for a denied control; the busy reason is the Server's own words.
-fn viewing_only_text(reason: &str) -> &str {
-    if reason == CONTROL_BUSY_REASON {
+/// The strip's wording for denied control; other denials retain the Server's detail.
+fn viewing_only_text(cause: ControlDenialReason, reason: &str) -> &str {
+    if cause == ControlDenialReason::Busy {
         "Viewing only: another Condr window controls this device"
     } else {
         reason

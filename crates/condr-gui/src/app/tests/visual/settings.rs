@@ -924,7 +924,7 @@ fn only_the_check_button_reports_a_failed_update_check() {
         })
     });
     let state =
-        |window: &mut VisualTestContext| window.read(|app| view.read(app).update_state.clone());
+        |window: &mut VisualTestContext| window.read(|app| view.read(app).updates.state().clone());
 
     // GPUI's test client answers 404: the automatic check only logs it.
     window.executor().advance_clock(FIRST_CHECK_DELAY);
@@ -933,9 +933,9 @@ fn only_the_check_button_reports_a_failed_update_check() {
     assert!(window.read(|app| view.read(app).last_error.is_none()));
 
     window.update(|_, cx| view.update(cx, |this, cx| this.check_for_updates_now(cx)));
-    assert!(window.read(|app| view.read(app).checking_updates));
+    assert!(window.read(|app| view.read(app).updates.checking()));
     window.run_until_parked();
-    assert!(!window.read(|app| view.read(app).checking_updates));
+    assert!(!window.read(|app| view.read(app).updates.checking()));
     assert!(
         window
             .read(|app| view.read(app).last_error.clone())
@@ -989,7 +989,7 @@ fn a_found_update_opens_settings_on_about_once() {
         }))
     });
     let pending =
-        |window: &mut VisualTestContext| window.read(|app| view.read(app).update_pending());
+        |window: &mut VisualTestContext| window.read(|app| view.read(app).updates.pending());
     let open_settings = |window: &mut VisualTestContext| {
         let button = window.debug_bounds("open-settings").unwrap();
         window.simulate_click(button.center(), Modifiers::default());
@@ -1016,7 +1016,7 @@ fn a_found_update_opens_settings_on_about_once() {
     window.update(|_, cx| view.update(cx, |this, cx| this.check_for_updates_now(cx)));
     window.run_until_parked();
     assert!(matches!(
-        window.read(|app| view.read(app).update_state.clone()),
+        window.read(|app| view.read(app).updates.state().clone()),
         UpdateState::Available(_)
     ));
     assert!(pending(window), "a found update shows the dot");

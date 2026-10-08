@@ -2,6 +2,19 @@ mod dialogs;
 
 use super::*;
 
+pub(super) enum ConnectionInstallError {
+    Unavailable(String),
+    InvalidSession(String),
+}
+
+impl ConnectionInstallError {
+    pub(super) fn into_message(self) -> String {
+        match self {
+            Self::Unavailable(message) | Self::InvalidSession(message) => message,
+        }
+    }
+}
+
 impl Condr {
     pub(in crate::app) fn server_admin(&mut self, key: ConnectionKey, command: ServerAdminCommand) {
         let Some(connection) = self.connection_mut(key) else {
@@ -120,11 +133,12 @@ impl Condr {
             let Some(server_id) = connection.server_id else {
                 continue;
             };
-            connection.wake_probe = Some(sent_at);
-            connection.send(ClientMessage::Ping {
+            if connection.send(ClientMessage::Ping {
                 server_id,
                 nonce: 0,
-            });
+            }) {
+                connection.wake_probe = Some(sent_at);
+            }
         }
         let window = self.window_handle;
         cx.spawn(async move |owner, cx| {
@@ -160,9 +174,14 @@ impl Condr {
         result: Result<ClientConnection, String>,
         window: &Window,
         cx: &Context<Self>,
-    ) -> Result<BootstrapApplication, String> {
-        let client = result?;
+    ) -> Result<BootstrapApplication, ConnectionInstallError> {
+        let client = result.map_err(ConnectionInstallError::Unavailable)?;
         let bootstrap = client.bootstrap().unwrap().clone();
+        let server_id = bootstrap.server_id;
+        let session_id = bootstrap.session_id;
+        let application = connection
+            .apply_bootstrap(bootstrap)
+            .map_err(ConnectionInstallError::InvalidSession)?;
         if connection.server_build.as_deref() != Some(client.server_build()) {
             connection.server_build = Some(client.server_build().to_owned());
             connection.build_notice_dismissed = false;
@@ -172,13 +191,12 @@ impl Condr {
             client,
             connection.key,
             connection.connect_generation,
-            bootstrap.server_id,
-            bootstrap.session_id,
+            server_id,
+            session_id,
             window,
             cx,
         )
-        .map_err(|error| error.to_string())?;
-        let application = connection.apply_bootstrap(bootstrap);
+        .map_err(|error| ConnectionInstallError::Unavailable(error.to_string()))?;
         connection.io = Some(io);
         connection.reset_sync_state();
         Ok(application)
@@ -200,7 +218,7 @@ impl Condr {
         self.connection(self.active_connection)
     }
 
-    pub(super) fn active_session(&self) -> Option<Session> {
+    pub(super) fn active_session(&self) -> Option<&Session> {
         self.active_connection()?.session()
     }
 
@@ -257,6 +275,10 @@ impl Condr {
                     if connection.status == ConnectionStatus::Connected
                         && !connection.controlling
                         && connection.session_id == Some(session_id)
+                        && matches!(
+                            connection.control_denied,
+                            Some((ControlDenialReason::Busy, _))
+                        )
                     {
                         connection.send(ClientMessage::AcquireControl { session_id });
                         cx.notify();
@@ -403,7 +425,10 @@ impl Condr {
                 }
                 Err(error) => {
                     connection.status = ConnectionStatus::Disconnected;
-                    connection.error = Some(error);
+                    if matches!(error, ConnectionInstallError::InvalidSession(_)) {
+                        connection.reconnect_deadline = None;
+                    }
+                    connection.error = Some(error.into_message());
                     None
                 }
             }
@@ -446,6 +471,18 @@ impl Condr {
         }
     }
 
+    /// A protocol failure cannot recover by fetching the same state again. Also cancel
+    /// any reconnect timer already scheduled before this message arrived.
+    pub(super) fn mark_protocol_error(
+        &mut self,
+        key: ConnectionKey,
+        index: usize,
+        message: String,
+    ) -> IncomingEffect {
+        self.connections[index].reconnect_deadline = None;
+        self.mark_disconnected(key, index, message)
+    }
+
     pub(super) fn mark_disconnected(
         &mut self,
         key: ConnectionKey,
@@ -453,8 +490,12 @@ impl Condr {
         message: String,
     ) -> IncomingEffect {
         let connection = &mut self.connections[index];
+        // Retire all remaining messages in the reader/writer batch, including a
+        // Bootstrap already decoded when the writer reported its failure.
+        connection.connect_generation = connection.connect_generation.wrapping_add(1);
         connection.status = ConnectionStatus::Disconnected;
         connection.reset_sync_state();
+        connection.resources.clear_pending();
         connection.error = Some(message);
         connection.disconnected_at = Some(Instant::now());
         connection.cancellation.cancel();

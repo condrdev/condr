@@ -4,7 +4,7 @@ impl Condr {
     pub(super) fn refresh_target_pane(&mut self, key: ConnectionKey) {
         let target = self.connection_focused_pane(key);
         if key == self.active_connection {
-            self.target_pane = target.map(|pane_id| (key, pane_id));
+            self.terminal_input.target = target.map(|pane_id| (key, pane_id));
             if let Some(pane_id) = target {
                 self.mark_pane_seen(key, pane_id);
             }
@@ -14,7 +14,7 @@ impl Condr {
     pub(super) fn prune_dock_cache(&mut self, key: ConnectionKey) {
         let Some(session) = self
             .connection(key)
-            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
+            .and_then(|connection| connection.session())
         else {
             return;
         };
@@ -31,75 +31,9 @@ impl Condr {
             .flat_map(|tab| tab.panes())
             .map(|pane| pane.id())
             .collect::<HashSet<_>>();
-        self.prune_files_state(key, &session);
+        self.prune_files_state(key);
 
-        self.dock_surfaces.retain(|surface, _| {
-            surface.connection_key != key || tab_ids.contains(&surface.tab_id)
-        });
-        self.panels.retain(|(connection_key, pane_id), _| {
-            *connection_key != key || pane_ids.contains(pane_id)
-        });
-        self.pending_sizes.retain(|(connection_key, pane_id), _| {
-            *connection_key != key || pane_ids.contains(pane_id)
-        });
-        self.terminal_geometry
-            .retain(|(connection_key, pane_id), _| {
-                *connection_key != key || pane_ids.contains(pane_id)
-            });
-        if self.active_dock_surface.is_some_and(|surface| {
-            surface.connection_key == key && !tab_ids.contains(&surface.tab_id)
-        }) {
-            self.active_dock_surface = None;
-        }
-        if self.terminal_selection.is_some_and(|selection| {
-            selection.connection_key == key && !pane_ids.contains(&selection.pane_id)
-        }) {
-            self.terminal_selection = None;
-        }
-        if self
-            .hovered_link
-            .as_ref()
-            .is_some_and(|(connection_key, pane_id, _)| {
-                *connection_key == key && !pane_ids.contains(pane_id)
-            })
-        {
-            self.hovered_link = None;
-        }
-        if self
-            .pressed_terminal_link
-            .as_ref()
-            .is_some_and(|(connection_key, pane_id, _)| {
-                *connection_key == key && !pane_ids.contains(pane_id)
-            })
-        {
-            self.pressed_terminal_link = None;
-        }
-        if self.terminal_mouse_capture.is_some_and(|capture| {
-            capture.connection_key == key && !pane_ids.contains(&capture.pane_id)
-        }) {
-            self.terminal_mouse_capture = None;
-        }
-        if self.last_terminal_mouse_motion.is_some_and(|motion| {
-            motion.connection_key == key && !pane_ids.contains(&motion.pane_id)
-        }) {
-            self.last_terminal_mouse_motion = None;
-        }
-        if self
-            .focused_terminal
-            .is_some_and(|(connection_key, pane_id)| {
-                connection_key == key && !pane_ids.contains(&pane_id)
-            })
-        {
-            self.focused_terminal = None;
-        }
-        if self
-            .reported_terminal_focus
-            .is_some_and(|(connection_key, pane_id)| {
-                connection_key == key && !pane_ids.contains(&pane_id)
-            })
-        {
-            self.reported_terminal_focus = None;
-        }
+        self.retain_dock_cache(key, &tab_ids, &pane_ids);
     }
 
     /// The user selected this Pane: drop its unseen-completion marker.
@@ -121,7 +55,7 @@ impl Condr {
     pub(super) fn connection_focused_pane(&self, key: ConnectionKey) -> Option<PaneId> {
         let connection = self.connection(key)?;
         let session = connection.session()?;
-        let (_, tab_id) = connection.viewed(&session)?;
+        let (_, tab_id) = connection.viewed(session)?;
         Some(session.tab(tab_id)?.focused_pane()?.id())
     }
 
@@ -183,7 +117,7 @@ impl Condr {
             return false;
         };
         self.show_view(key, workspace_id, Some(tab_id));
-        self.target_pane = Some((key, pane_id));
+        self.terminal_input.target = Some((key, pane_id));
         self.mark_pane_seen(key, pane_id);
         if can_mutate && !server_focused {
             self.send_layout_to(key, LayoutCommand::FocusPane { pane_id });
@@ -214,9 +148,10 @@ impl Condr {
         {
             return None;
         }
-        let changed = self.active_connection != key || self.target_pane != Some((key, pane_id));
+        let changed =
+            self.active_connection != key || self.terminal_input.target != Some((key, pane_id));
         self.active_connection = key;
-        self.target_pane = Some((key, pane_id));
+        self.terminal_input.target = Some((key, pane_id));
         self.mark_pane_seen(key, pane_id);
         if changed {
             cx.notify();
@@ -295,13 +230,14 @@ impl Condr {
         if connection.can_mutate() {
             let request_id = connection.next_layout_request_id;
             connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-            connection.send(ClientMessage::Layout {
-                server_id,
-                session_id,
-                request_id,
-                command,
-            });
-            (connection.status == ConnectionStatus::Connected).then_some(request_id)
+            connection
+                .send(ClientMessage::Layout {
+                    server_id,
+                    session_id,
+                    request_id,
+                    command,
+                })
+                .then_some(request_id)
         } else {
             None
         }
@@ -336,8 +272,7 @@ impl Condr {
                 session_id,
                 pane_id,
                 command,
-            });
-            connection.status == ConnectionStatus::Connected
+            })
         } else {
             false
         }
@@ -404,7 +339,7 @@ impl Condr {
     ) {
         let cwd_from = self.connection(key).and_then(|connection| {
             let session = connection.session()?;
-            let tab_id = connection.viewed_tab_id(&session, workspace_id)?;
+            let tab_id = connection.viewed_tab_id(session, workspace_id)?;
             Some(session.tab(tab_id)?.focused_pane()?.id())
         });
         self.send_presenting_layout_to(
@@ -461,11 +396,14 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let sessions = self.restored_sessions();
         let all: Vec<(ConnectionKey, WorkspaceId)> = self
             .connections
             .iter()
-            .filter_map(|connection| sessions.get(&connection.key).map(|s| (connection.key, s)))
+            .filter_map(|connection| {
+                connection
+                    .session()
+                    .map(|session| (connection.key, session))
+            })
             .flat_map(|(key, session)| {
                 session
                     .workspaces()

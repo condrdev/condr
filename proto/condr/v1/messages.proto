@@ -371,6 +371,16 @@ message SessionReason {
   uint64 server_id = 1;
   uint64 session_id = 2;
   string reason = 3;
+  // Only control_denied uses this field. Absent or unknown values mean Other:
+  // display reason, but do not automatically retry acquiring control.
+  ControlDenialReason control_denial_reason = 4;
+}
+
+// Fallback: Other, including UNSPECIFIED from peers that predate the field.
+enum ControlDenialReason {
+  CONTROL_DENIAL_REASON_UNSPECIFIED = 0;
+  CONTROL_DENIAL_REASON_OTHER = 1;
+  CONTROL_DENIAL_REASON_BUSY = 2;
 }
 
 // 16 bytes, big-endian.

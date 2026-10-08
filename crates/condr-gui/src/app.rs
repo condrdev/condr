@@ -28,6 +28,7 @@ mod terminal_input;
 mod terminal_panel;
 mod updates;
 mod workspace;
+mod workspace_resources;
 
 use crate::assets::{APP_LOGO, CondrAssets};
 
@@ -42,12 +43,13 @@ use crate::terminal_element::{
 use changes::*;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
-    AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
-    LayoutResult, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame,
-    PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
-    ServerId, ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
-    SessionId, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
-    decode_pane_terminal_frame, relative_age, uptime_text,
+    AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage,
+    ControlDenialReason, LayoutCommand, LayoutResult, MAX_CHUNK_PAYLOAD_SIZE,
+    MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch,
+    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
+    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
+    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot, decode_pane_terminal_frame,
+    relative_age, uptime_text,
 };
 use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, BrowsedDirectory,
@@ -123,16 +125,15 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_input::{
-    LocalTerminalSelection, ReportedTerminalMouse, ReportedTerminalMouseMotion, TerminalGeometry,
-};
+use terminal_input::TerminalGeometry;
 #[cfg(test)]
 use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
 };
 use terminal_panel::TerminalPanel;
-use updates::{UpdateChannel, UpdateState};
+use updates::{UpdateChannel, UpdateCheck, UpdateState};
 use workspace::{default_worktree_branch, title_bar};
+use workspace_resources::WorkspaceResources;
 
 pub(crate) use startup::run;
 
@@ -228,7 +229,6 @@ const WAKE_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Two messages from a newer protocol this close together mean the Server keeps sending
 /// what this build cannot read: stop resynchronizing and say to update (ADR 0028).
 const UNKNOWN_MESSAGE_WINDOW: Duration = Duration::from_secs(10);
-const CONTROL_BUSY_REASON: &str = "another client controls this Session";
 const ACTIVE_PANE_BORDER_RGB: u32 = 0x0078d4;
 const INITIAL_SIDEBAR_WIDTH: Pixels = px(240.);
 const MIN_SIDEBAR_WIDTH: Pixels = px(150.);
@@ -273,22 +273,11 @@ pub(crate) struct Condr {
     #[cfg(feature = "test-support")]
     dock_rebuild_count: usize,
     panels: HashMap<(ConnectionKey, PaneId), Entity<TerminalPanel>>,
-    target_pane: Option<(ConnectionKey, PaneId)>,
     workspace_size: Size<Pixels>,
     focus_handle: FocusHandle,
-    terminal_selection: Option<LocalTerminalSelection>,
-    hovered_link: Option<(ConnectionKey, PaneId, HoveredTerminalLink)>,
-    pressed_terminal_link: Option<(ConnectionKey, PaneId, HoveredTerminalLink)>,
-    terminal_mouse_capture: Option<ReportedTerminalMouse>,
-    last_terminal_mouse_motion: Option<ReportedTerminalMouseMotion>,
-    focused_terminal: Option<(ConnectionKey, PaneId)>,
-    reported_terminal_focus: Option<(ConnectionKey, PaneId)>,
-    /// Key presses that reached a Pane's program, by GPUI key name, so only their
-    /// releases follow them there. Emptied whenever the focused terminal changes.
-    forwarded_key_presses: HashMap<String, (ConnectionKey, PaneId, TerminalKey)>,
+    terminal_input: terminal_input::TerminalInputState,
     pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
-    terminal_composition: Option<TerminalComposition>,
     window_handle: AnyWindowHandle,
     appearance: Appearance,
     fps_monitor: bool,
@@ -296,20 +285,7 @@ pub(crate) struct Condr {
     notifications: bool,
     /// Whether the machine is kept from sleeping and blanking while Condr runs.
     keep_awake: bool,
-    /// Whether the update check runs on its own, every five hours (ADR 0029).
-    auto_check_updates: bool,
-    /// Which published builds the update check looks for.
-    update_channel: UpdateChannel,
-    /// What the last check found; a newer build puts a dot on the Settings button and
-    /// is named on the About page.
-    update_state: UpdateState,
-    /// Settings has been opened since the last check found a newer build, which clears
-    /// the dot until a check finds one again. In memory only: a restart shows it anew.
-    update_seen: bool,
-    /// The Check button's request is in flight.
-    checking_updates: bool,
-    /// The five-hourly checks while `auto_check_updates` is on.
-    _automatic_update_checks: Task<()>,
+    updates: UpdateCheck,
     /// The OS request behind `keep_awake`; dropping it lets the machine sleep again.
     /// Windows implements it with `SetThreadExecutionState`, which is per thread: it must
     /// be created and dropped on the GPUI main thread, never from a background task.
@@ -318,38 +294,8 @@ pub(crate) struct Condr {
     /// only dragging the handle does.
     sidebar_width: Pixels,
     sidebar_collapsed: bool,
-    /// The Changes sidebar on the right (ADR 0017): the Workspaces showing it, and how
-    /// wide. Per Workspace like `sidebar_workspace_open`, and like it not persisted.
-    changes_open: HashSet<(ConnectionKey, WorkspaceId)>,
     changes_width: Pixels,
-    /// The Workspaces whose Changes and Diff Tab compare against the base (ADR 0034); the
-    /// others compare against `HEAD`. This Client's view, remembered in the state file.
-    changes_against_base: HashSet<(ConnectionKey, WorkspaceId)>,
-    collapsed_changes_sections: HashSet<ChangesSection>,
-    /// Directories folded shut in the Changes tree, by connection, Workspace and
-    /// repository path; Workspace ids repeat across Servers.
-    collapsed_change_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
-    /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
-    diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
-    /// Diffs asked of a Server and not yet answered, so a redraw asks only once.
-    pending_diffs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
-    /// Which view the right sidebar shows for each Workspace the user chose one for
-    /// (ADR 0018); not persisted. Others open on Changes, or Files outside a repository.
-    sidebar_views: HashMap<(ConnectionKey, WorkspaceId), SidebarView>,
-    /// The terminal Tab each Workspace presented last: where "Insert Path into Terminal"
-    /// sends its text once a viewer Tab has taken the Workspace's active slot.
-    last_terminal_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
-    /// Directories unfolded in the Files tree, by connection, Workspace and root-relative
-    /// path.
-    expanded_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
-    /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
-    file_editors: HashMap<(ConnectionKey, TabId), FileEditor>,
-    pending_directories: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
-    pending_files: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
-    /// The 0-based line the Preview Tab lands on once it shows this file: set by the Diff
-    /// Tab's "Show File", applied by `sync_file_view` when the text is there, then cleared.
-    /// Presentation only, so it never rides `ShowFile`.
-    pending_file_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
+    files_view: FilesViewState,
     /// What the open Root Directory dialog lists for a remote Device; replaced by the
     /// next such dialog, so a closed one is harmless.
     directory_browser: Option<DirectoryBrowser>,
@@ -374,7 +320,6 @@ pub(crate) struct Condr {
     _font_save: Option<Task<()>>,
     /// The same for the Preview and Diff font size.
     _code_font_save: Option<Task<()>>,
-    /// The Shell value waiting for its debounce, and the Server it belongs to.
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
     /// The title bar's Tab strip scrolls when the Tabs outgrow it; a newly active Tab
@@ -426,7 +371,7 @@ impl Condr {
             && let Err(error) = Self::install_connection(&mut connection, initial, window, cx)
         {
             connection.status = ConnectionStatus::Disconnected;
-            connection.error = Some(error);
+            connection.error = Some(error.into_message());
         }
 
         let config::LoadedConfig {
@@ -514,34 +459,20 @@ impl Condr {
             #[cfg(feature = "test-support")]
             dock_rebuild_count: 0,
             panels: HashMap::new(),
-            target_pane: None,
             workspace_size: size(
                 (window.viewport_size().width - INITIAL_SIDEBAR_WIDTH).max(px(0.)),
                 (window.viewport_size().height - WORKSPACE_TITLE_BAR_HEIGHT).max(px(0.)),
             ),
             focus_handle: cx.focus_handle(),
-            terminal_selection: None,
-            hovered_link: None,
-            pressed_terminal_link: None,
-            terminal_mouse_capture: None,
-            last_terminal_mouse_motion: None,
-            focused_terminal: None,
-            reported_terminal_focus: None,
-            forwarded_key_presses: HashMap::new(),
+            terminal_input: terminal_input::TerminalInputState::default(),
             pending_sizes: HashMap::new(),
             terminal_geometry: HashMap::new(),
-            terminal_composition: None,
             window_handle: window.window_handle(),
             appearance,
             fps_monitor,
             notifications,
             keep_awake,
-            auto_check_updates,
-            update_channel,
-            update_state: UpdateState::Unknown,
-            update_seen: false,
-            checking_updates: false,
-            _automatic_update_checks: Task::ready(()),
+            updates: UpdateCheck::new(auto_check_updates, update_channel),
             _keep_awake: None,
             sidebar_width: restored_state
                 .sidebar_width
@@ -549,24 +480,12 @@ impl Condr {
                     px(width).max(MIN_SIDEBAR_WIDTH).min(MAX_SIDEBAR_WIDTH)
                 }),
             sidebar_collapsed: restored_state.sidebar_collapsed,
-            changes_open: HashSet::new(),
-            changes_against_base: HashSet::new(),
             changes_width: restored_state
                 .changes_width
                 .map_or(INITIAL_CHANGES_WIDTH, |width| {
                     px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH)
                 }),
-            collapsed_changes_sections: HashSet::new(),
-            collapsed_change_dirs: HashSet::new(),
-            diff_editors: HashMap::new(),
-            pending_diffs: HashSet::new(),
-            sidebar_views: HashMap::new(),
-            last_terminal_tabs: HashMap::new(),
-            expanded_dirs: HashSet::new(),
-            file_editors: HashMap::new(),
-            pending_directories: HashSet::new(),
-            pending_files: HashSet::new(),
-            pending_file_line: None,
+            files_view: FilesViewState::default(),
             directory_browser: None,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,
@@ -609,9 +528,7 @@ impl Condr {
         }
         this.apply_keep_awake(cx);
         this.scan_open_targets(cx);
-        if this.auto_check_updates {
-            this.start_automatic_update_checks(updates::FIRST_CHECK_DELAY, cx);
-        }
+        this.updates.start_automatic(updates::FIRST_CHECK_DELAY, cx);
 
         // In the main window by its handle, like each connection's incoming task.
         this._connect_results_task = cx.spawn_in(window, async move |owner, cx| {

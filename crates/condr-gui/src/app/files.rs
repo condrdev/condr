@@ -10,6 +10,83 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use std::path::{Path, PathBuf};
 
+/// Local Files/Changes presentation, retained against the authoritative structure.
+#[derive(Default)]
+pub(super) struct FilesViewState {
+    /// Workspaces showing the right sidebar (ADR 0017); remembered in the GUI state
+    /// file alongside `sidebar_workspace_open` (ADR 0023).
+    pub(super) changes_open: HashSet<(ConnectionKey, WorkspaceId)>,
+    /// The Workspaces whose Changes and Diff Tab compare against the base (ADR 0034); the
+    /// others compare against `HEAD`. This Client's view, remembered in the state file.
+    pub(super) changes_against_base: HashSet<(ConnectionKey, WorkspaceId)>,
+    pub(super) collapsed_changes_sections: HashSet<ChangesSection>,
+    /// Directories folded shut in the Changes tree, by connection, Workspace and
+    /// repository path; Workspace ids repeat across Servers.
+    pub(super) collapsed_change_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
+    /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
+    pub(super) diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
+    /// Which view the right sidebar shows per Workspace (ADR 0018), remembered in the
+    /// GUI state file. Others open on Changes, or Files outside a repository.
+    pub(super) sidebar_views: HashMap<(ConnectionKey, WorkspaceId), SidebarView>,
+    /// The terminal Tab each Workspace presented last: where "Insert Path into Terminal"
+    /// sends its text once a viewer Tab has taken the Workspace's active slot.
+    pub(super) last_terminal_tabs: HashMap<(ConnectionKey, WorkspaceId), TabId>,
+    /// Directories unfolded in the Files tree, by connection, Workspace and root-relative
+    /// path.
+    pub(super) expanded_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
+    /// The Preview Tabs' Editors, by connection and Tab; pruned with the Tabs.
+    pub(super) file_editors: HashMap<(ConnectionKey, TabId), FileEditor>,
+    /// The 0-based line the Preview Tab lands on once it shows this file: set by the Diff
+    /// Tab's "Show File", applied by `sync_file_view` when the text is there, then cleared.
+    /// Presentation only, so it never rides `ShowFile`.
+    pub(super) pending_file_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
+}
+
+impl FilesViewState {
+    pub(super) fn retain_session(&mut self, key: ConnectionKey, session: Option<&Session>) {
+        let workspace_live = |connection_key: ConnectionKey, id: WorkspaceId| {
+            connection_key != key || session.is_some_and(|session| session.workspace(id).is_some())
+        };
+        self.changes_open
+            .retain(|(connection, id)| workspace_live(*connection, *id));
+        self.changes_against_base
+            .retain(|(connection, id)| workspace_live(*connection, *id));
+        self.expanded_dirs
+            .retain(|(connection, id, _)| workspace_live(*connection, *id));
+        self.collapsed_change_dirs
+            .retain(|(connection, id, _)| workspace_live(*connection, *id));
+        self.sidebar_views
+            .retain(|(connection, id), _| workspace_live(*connection, *id));
+        self.last_terminal_tabs.retain(|(connection, id), tab_id| {
+            workspace_live(*connection, *id)
+                && (*connection != key
+                    || session.is_some_and(|session| {
+                        session
+                            .workspace(*id)
+                            .and_then(|workspace| workspace.tab(*tab_id))
+                            .is_some_and(|tab| tab.terminals().is_some())
+                    }))
+        });
+        self.diff_editors.retain(|(connection, id), _| {
+            *connection != key
+                || session
+                    .is_some_and(|session| session.tab(*id).is_some_and(|tab| tab.diff().is_some()))
+        });
+        self.file_editors.retain(|(connection, id), _| {
+            *connection != key
+                || session
+                    .is_some_and(|session| session.tab(*id).is_some_and(|tab| tab.file().is_some()))
+        });
+        if self
+            .pending_file_line
+            .as_ref()
+            .is_some_and(|(connection, id, _, _)| !workspace_live(*connection, *id))
+        {
+            self.pending_file_line = None;
+        }
+    }
+}
+
 /// The text "Insert Path into Terminal" writes: the relative path, single-quoted when a
 /// shell would otherwise split or expand it, and a trailing space so typing can go on.
 /// Single quotes are literal in POSIX shells and PowerShell alike, so `$`, backticks and
@@ -124,7 +201,7 @@ impl Condr {
         self.ensure_directory(key, workspace_id, root.clone(), cx);
         let listing = self
             .connection(key)
-            .and_then(|connection| connection.directories.get(&(workspace_id, root)));
+            .and_then(|connection| connection.resources.directories.get(&(workspace_id, root)));
         let listing = match listing {
             None => return empty_state("Loading…", cx),
             Some(Err(reason)) => return failed_state(reason.clone(), cx),
@@ -171,16 +248,11 @@ impl Condr {
         path: RelativePathBuf,
         cx: &mut Context<Self>,
     ) {
-        let known = self.connection(key).is_some_and(|connection| {
-            connection
-                .directories
-                .contains_key(&(workspace_id, path.clone()))
-        });
-        if known
-            || self
-                .pending_directories
-                .contains(&(key, workspace_id, path.clone()))
-        {
+        if self.connection(key).is_some_and(|connection| {
+            let slot = (workspace_id, path.clone());
+            connection.resources.directories.contains_key(&slot)
+                || connection.resources.pending_directories.contains_key(&slot)
+        }) {
             return;
         }
         let owner = cx.weak_entity();
@@ -204,7 +276,7 @@ impl Condr {
             let path = directory.join(&entry.name);
             match entry.kind {
                 FileKind::Directory => {
-                    let expanded = self.expanded_dirs.contains(&(
+                    let expanded = self.files_view.expanded_dirs.contains(&(
                         context.key,
                         context.workspace_id,
                         path.clone(),
@@ -224,6 +296,7 @@ impl Condr {
                     self.ensure_directory(context.key, context.workspace_id, path.clone(), cx);
                     let listing = self.connection(context.key).and_then(|connection| {
                         connection
+                            .resources
                             .directories
                             .get(&(context.workspace_id, path.clone()))
                     });
@@ -435,18 +508,18 @@ impl Condr {
         let relative = path.to_string();
         let (root, target_pane) = self
             .connection(key)
-            .and_then(|connection| Session::restore(connection.snapshot.clone()).ok())
+            .and_then(|connection| connection.session())
             .and_then(|session| {
                 let workspace = session.workspace(workspace_id)?;
                 let root = workspace.root_directory().to_path_buf();
-                let target_pane = self.insert_target_pane(key, &session, workspace);
+                let target_pane = self.insert_target_pane(key, session, workspace);
                 Some((Some(root), target_pane))
             })
             .unwrap_or((None, None));
         let editor = self.connection(key).and_then(|connection| {
             let is_local = connection.endpoint.as_local_path().is_some();
             let root = root.as_deref()?;
-            let session = Session::restore(connection.snapshot.clone()).ok()?;
+            let session = connection.session()?;
             let workspace = session.workspace(workspace_id)?;
             let target = self.open_target_for(open_in::project_root(workspace))?;
             Some((
@@ -540,6 +613,7 @@ impl Condr {
         workspace: &condr_core::Workspace,
     ) -> Option<(TabId, PaneId)> {
         let tab = self
+            .files_view
             .last_terminal_tabs
             .get(&(key, workspace.id()))
             .and_then(|tab_id| workspace.tabs().iter().find(|tab| tab.id() == *tab_id))
@@ -602,22 +676,12 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let dir = (key, workspace_id, path.clone());
-        if self.expanded_dirs.remove(&dir) {
+        if self.files_view.expanded_dirs.remove(&dir) {
             if let Some(connection) = self.connection_mut(key) {
-                connection
-                    .directories
-                    .retain(|(listed_workspace, listed), _| {
-                        *listed_workspace != workspace_id || !listed.starts_with(&path)
-                    });
+                connection.resources.fold_directory(workspace_id, &path);
             }
-            self.pending_directories
-                .retain(|(pending_key, pending_workspace, pending)| {
-                    *pending_key != key
-                        || *pending_workspace != workspace_id
-                        || !pending.starts_with(&path)
-                });
         } else {
-            self.expanded_dirs.insert(dir);
+            self.files_view.expanded_dirs.insert(dir);
             self.request_directory(key, workspace_id, path);
         }
         cx.notify();
@@ -656,7 +720,7 @@ impl Condr {
             .connection(key)
             .and_then(|connection| connection.workspace_git.get(&workspace_id))
             .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path));
-        let editor = self.file_editors.get(&(key, tab_id));
+        let editor = self.files_view.file_editors.get(&(key, tab_id));
         let content = editor.map_or(FileViewContent::Loading, |editor| editor.content.clone());
         let header = h_flex()
             .debug_selector(|| "file-header".into())
@@ -740,35 +804,44 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let answer = connection.files.get(&(workspace_id, path.clone())).cloned();
+        let answer = connection
+            .resources
+            .files
+            .get(&(workspace_id, path.clone()))
+            .cloned();
         if answer.is_none()
-            && !self
+            && !connection
+                .resources
                 .pending_files
-                .contains(&(key, workspace_id, path.clone()))
+                .contains_key(&(workspace_id, path.clone()))
         {
             self.request_file(key, workspace_id, path.clone());
         }
 
-        let editor = self.file_editors.entry((key, tab_id)).or_insert_with(|| {
-            let state = cx.new(|cx| {
-                let mut state = EditorState::new(window, cx)
-                    // Any language puts the Editor in code mode; the real one is set per
-                    // file below, since one Tab shows many files over its life.
-                    .language("text")
-                    .line_number(true)
-                    .soft_wrap(false)
-                    .indent_guides(false)
-                    .folding(false)
-                    .searchable(true);
-                state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
-                state
+        let editor = self
+            .files_view
+            .file_editors
+            .entry((key, tab_id))
+            .or_insert_with(|| {
+                let state = cx.new(|cx| {
+                    let mut state = EditorState::new(window, cx)
+                        // Any language puts the Editor in code mode; the real one is set per
+                        // file below, since one Tab shows many files over its life.
+                        .language("text")
+                        .line_number(true)
+                        .soft_wrap(false)
+                        .indent_guides(false)
+                        .folding(false)
+                        .searchable(true);
+                    state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
+                    state
+                });
+                FileEditor {
+                    state,
+                    shown: None,
+                    content: FileViewContent::Loading,
+                }
             });
-            FileEditor {
-                state,
-                shown: None,
-                content: FileViewContent::Loading,
-            }
-        });
         let Some((generation, answer)) = answer else {
             if editor
                 .shown
@@ -782,8 +855,12 @@ impl Condr {
         };
         if editor.shown.as_ref() == Some(&(path.clone(), generation)) {
             if editor.content == FileViewContent::Text
-                && let Some(line) =
-                    take_pending_line(&mut self.pending_file_line, key, workspace_id, &path)
+                && let Some(line) = take_pending_line(
+                    &mut self.files_view.pending_file_line,
+                    key,
+                    workspace_id,
+                    &path,
+                )
             {
                 editor
                     .state
@@ -809,7 +886,14 @@ impl Condr {
             && editor.content == FileViewContent::Text
             && content == FileViewContent::Text;
         let land = (content == FileViewContent::Text)
-            .then(|| take_pending_line(&mut self.pending_file_line, key, workspace_id, &shown_path))
+            .then(|| {
+                take_pending_line(
+                    &mut self.files_view.pending_file_line,
+                    key,
+                    workspace_id,
+                    &shown_path,
+                )
+            })
             .flatten();
         editor.content = content;
         let language = language_for(&shown_path);
@@ -854,14 +938,18 @@ impl Condr {
         }
         let request_id = connection.next_layout_request_id;
         connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-        connection.send(ClientMessage::ListDirectory {
+        if connection.send(ClientMessage::ListDirectory {
             server_id,
             session_id,
             request_id,
             workspace_id,
             path: path.clone(),
-        });
-        self.pending_directories.insert((key, workspace_id, path));
+        }) {
+            connection
+                .resources
+                .pending_directories
+                .insert((workspace_id, path), request_id);
+        }
     }
 
     fn request_file(
@@ -882,14 +970,18 @@ impl Condr {
         }
         let request_id = connection.next_layout_request_id;
         connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-        connection.send(ClientMessage::ReadFile {
+        if connection.send(ClientMessage::ReadFile {
             server_id,
             session_id,
             request_id,
             workspace_id,
             path: path.clone(),
-        });
-        self.pending_files.insert((key, workspace_id, path));
+        }) {
+            connection
+                .resources
+                .pending_files
+                .insert((workspace_id, path), request_id);
+        }
     }
 
     /// The working tree moved: asks again for every cached listing of the Workspace and
@@ -901,34 +993,21 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
     ) {
-        let Some(connection) = self.connection(key) else {
+        let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        let directories: Vec<RelativePathBuf> = connection
-            .directories
-            .keys()
-            .filter(|(listed_workspace, _)| *listed_workspace == workspace_id)
-            .map(|(_, path)| path.clone())
-            .collect();
-        let shown = Session::restore(connection.snapshot.clone())
-            .ok()
-            .and_then(|session| {
-                let file = session.file_tab(workspace_id)?.file()?;
-                Some(file.path().to_relative_path_buf())
-            });
-        if let Some(connection) = self.connection_mut(key) {
-            connection.files.retain(|(read_workspace, path), _| {
-                *read_workspace != workspace_id || shown.as_ref() == Some(path)
-            });
-        }
-        self.pending_directories
-            .retain(|(pending_key, pending_workspace, _)| {
-                *pending_key != key || *pending_workspace != workspace_id
-            });
-        self.pending_files
-            .retain(|(pending_key, pending_workspace, _)| {
-                *pending_key != key || *pending_workspace != workspace_id
-            });
+        let shown = connection.session().and_then(|session| {
+            Some(
+                session
+                    .file_tab(workspace_id)?
+                    .file()?
+                    .path()
+                    .to_relative_path_buf(),
+            )
+        });
+        let directories = connection
+            .resources
+            .refresh_files(workspace_id, shown.as_deref());
         for path in directories {
             self.request_directory(key, workspace_id, path);
         }
@@ -942,71 +1021,33 @@ impl Condr {
     /// cache they would have filled. Without this a listing or file stays "pending" and
     /// is never asked for again.
     pub(super) fn clear_pending_requests(&mut self, key: ConnectionKey) {
-        self.pending_diffs
-            .retain(|(pending_key, _, _)| *pending_key != key);
-        self.pending_directories
-            .retain(|(pending_key, _, _)| *pending_key != key);
-        self.pending_files
-            .retain(|(pending_key, _, _)| *pending_key != key);
+        if let Some(connection) = self.connection_mut(key) {
+            connection.resources.clear_pending();
+        }
     }
 
-    /// Drops the sidebar state of Workspaces and Tabs that left `session`, the way
-    /// `prune_dock_cache` does for Panes: fold state, view choice and the terminal Tab
-    /// "Insert Path" targets.
-    pub(super) fn prune_files_state(&mut self, key: ConnectionKey, session: &Session) {
-        let workspace_ids: HashSet<WorkspaceId> = session
-            .workspaces()
-            .iter()
-            .map(|workspace| workspace.id())
-            .collect();
-        let live = |connection_key: ConnectionKey, workspace_id: WorkspaceId| {
-            connection_key != key || workspace_ids.contains(&workspace_id)
+    /// The same retention rules handle a closed Workspace and a replaced connection.
+    pub(super) fn prune_files_state(&mut self, key: ConnectionKey) {
+        let Some(connection) = self
+            .connections
+            .iter_mut()
+            .find(|connection| connection.key == key)
+        else {
+            return;
         };
-        self.expanded_dirs
-            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
-        self.collapsed_change_dirs
-            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
-        self.changes_against_base
-            .retain(|(connection_key, workspace_id)| live(*connection_key, *workspace_id));
-        self.sidebar_views
-            .retain(|(connection_key, workspace_id), _| live(*connection_key, *workspace_id));
-        self.last_terminal_tabs
-            .retain(|(connection_key, _), tab_id| {
-                *connection_key != key
-                    || session
-                        .tab(*tab_id)
-                        .is_some_and(|tab| tab.terminals().is_some())
-            });
-        self.pending_directories
-            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
-        self.pending_files
-            .retain(|(connection_key, workspace_id, _)| live(*connection_key, *workspace_id));
+        self.files_view.retain_session(key, connection.session());
+        let live = connection
+            .session()
+            .into_iter()
+            .flat_map(Session::workspaces)
+            .map(Workspace::id)
+            .collect();
+        connection.resources.retain_workspaces(&live);
     }
 
-    /// Everything `prune_files_state` keeps per Workspace, dropped for the whole
-    /// connection: the Server or Session behind `key` is a different one now.
     pub(super) fn clear_files_state(&mut self, key: ConnectionKey) {
-        self.expanded_dirs
-            .retain(|(connection_key, _, _)| *connection_key != key);
-        self.collapsed_change_dirs
-            .retain(|(connection_key, _, _)| *connection_key != key);
-        self.changes_against_base
-            .retain(|(connection_key, _)| *connection_key != key);
-        self.sidebar_views
-            .retain(|(connection_key, _), _| *connection_key != key);
-        self.last_terminal_tabs
-            .retain(|(connection_key, _), _| *connection_key != key);
+        self.files_view.retain_session(key, None);
         self.clear_pending_requests(key);
-    }
-
-    /// Drops Editors whose Tabs are gone, so a closed Preview Tab frees its text.
-    pub(super) fn prune_file_editors(&mut self) {
-        let sessions = self.restored_sessions();
-        self.file_editors.retain(|(key, tab_id), _| {
-            sessions
-                .get(key)
-                .is_some_and(|session| session.tab(*tab_id).is_some_and(|tab| tab.file().is_some()))
-        });
     }
 }
 
@@ -1057,6 +1098,41 @@ mod tests {
     use super::{absolute_path, language_for, terminal_path_text};
     use relative_path::RelativePath;
     use std::path::Path;
+
+    #[test]
+    fn closing_workspace_clears_its_file_view_without_touching_another_device() {
+        use super::{FilesViewState, Session};
+        let mut session = Session::new();
+        session.create_workspace(std::env::temp_dir()).unwrap();
+        let workspace = &session.workspaces()[0];
+        let id = workspace.id();
+        let tab = workspace.tabs()[0].id();
+        let mut view = FilesViewState::default();
+        for key in [1, 2] {
+            view.changes_open.insert((key, id));
+            view.changes_against_base.insert((key, id));
+            view.expanded_dirs.insert((key, id, "src".into()));
+            view.last_terminal_tabs.insert((key, id), tab);
+        }
+        view.pending_file_line = Some((1, id, "README.md".into(), 10));
+        view.retain_session(1, Some(&session));
+        assert!(
+            view.changes_open.contains(&(1, id)),
+            "reconnect keeps live view choices"
+        );
+        session.close_workspace(id).unwrap();
+        view.retain_session(1, Some(&session));
+        assert!(!view.changes_open.contains(&(1, id)));
+        assert!(!view.last_terminal_tabs.contains_key(&(1, id)));
+        assert!(view.pending_file_line.is_none());
+        assert!(view.changes_open.contains(&(2, id)));
+        assert!(view.last_terminal_tabs.contains_key(&(2, id)));
+        view.retain_session(2, None);
+        assert!(view.changes_open.is_empty());
+        assert!(view.changes_against_base.is_empty());
+        assert!(view.expanded_dirs.is_empty());
+        assert!(view.last_terminal_tabs.is_empty());
+    }
 
     #[test]
     fn absolute_paths_follow_the_roots_own_separator() {

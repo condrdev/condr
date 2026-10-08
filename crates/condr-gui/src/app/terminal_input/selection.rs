@@ -19,7 +19,7 @@ impl Condr {
             3.. => Some(TerminalSelectionUnit::Line),
             _ => None,
         };
-        self.terminal_selection = Some(LocalTerminalSelection {
+        self.terminal_input.selection = Some(LocalTerminalSelection {
             connection_key: key,
             pane_id,
             range: TerminalSelection {
@@ -44,7 +44,7 @@ impl Condr {
         };
         if let Some(command) = command {
             let sent = self.terminal_command(key, pane_id, command);
-            if sent && let Some(selection) = &mut self.terminal_selection {
+            if sent && let Some(selection) = &mut self.terminal_input.selection {
                 selection.committed = unit.is_some();
             }
         }
@@ -58,7 +58,7 @@ impl Condr {
         position: TerminalPosition,
         cx: &mut Context<Self>,
     ) {
-        if let Some(selection) = &mut self.terminal_selection
+        if let Some(selection) = &mut self.terminal_input.selection
             && selection.dragging
             && selection.connection_key == key
             && selection.pane_id == pane_id
@@ -70,7 +70,7 @@ impl Condr {
     }
 
     pub(crate) fn is_selecting(&self, key: ConnectionKey, pane_id: PaneId) -> bool {
-        self.terminal_selection.is_some_and(|selection| {
+        self.terminal_input.selection.is_some_and(|selection| {
             selection.dragging && selection.connection_key == key && selection.pane_id == pane_id
         })
     }
@@ -83,7 +83,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.update_selection(key, pane_id, position, cx);
-        if let Some(selection) = &mut self.terminal_selection
+        if let Some(selection) = &mut self.terminal_input.selection
             && selection.connection_key == key
             && selection.pane_id == pane_id
             && selection.dragging
@@ -100,7 +100,7 @@ impl Condr {
                 pane_id,
                 TerminalCommand::Select(range.selected_cell_range(columns).map(|_| range)),
             );
-            if sent && let Some(selection) = &mut self.terminal_selection {
+            if sent && let Some(selection) = &mut self.terminal_input.selection {
                 selection.committed = true;
             }
         }
@@ -124,7 +124,8 @@ impl Condr {
         pane_id: PaneId,
     ) -> Option<(TerminalSelection, bool)> {
         let local = self
-            .terminal_selection
+            .terminal_input
+            .selection
             .filter(|selection| selection.connection_key == key && selection.pane_id == pane_id);
         // A drag in progress, or a selection the Server never received (a Client that
         // cannot mutate), is local; a committed one only bridges until the next frame.
@@ -138,7 +139,7 @@ impl Condr {
     }
 
     pub(in crate::app) fn clear_selection(&mut self, cx: &mut Context<Self>) {
-        if self.terminal_selection.take().is_some() {
+        if self.terminal_input.selection.take().is_some() {
             cx.notify();
         }
     }

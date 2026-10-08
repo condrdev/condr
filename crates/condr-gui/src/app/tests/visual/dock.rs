@@ -337,7 +337,7 @@ fn the_view_is_local_follows_activation_and_survives_a_closed_tab() {
         });
     });
     assert_eq!(
-        window.read(|app| view.read(app).target_pane),
+        window.read(|app| view.read(app).terminal_input.target),
         Some((1, first_pane))
     );
     assert_eq!(
@@ -560,7 +560,7 @@ fn dragging_a_pane_header_moves_it_beside_or_swaps_it_with_the_target() {
         layout(window)
     );
     assert_eq!(
-        window.read(|app| view.read(app).target_pane),
+        window.read(|app| view.read(app).terminal_input.target),
         Some((1, second)),
         "dragging a Pane away does not target it"
     );
@@ -629,7 +629,7 @@ fn clicking_a_pane_header_targets_the_pane() {
     }));
     let second = second.unwrap();
     assert!(wait_until(window, |window| {
-        window.read(|app| view.read(app).target_pane) == Some((1, second))
+        window.read(|app| view.read(app).terminal_input.target) == Some((1, second))
     }));
 
     window.update(|window, cx| _ = window.draw(cx));
@@ -642,7 +642,7 @@ fn clicking_a_pane_header_targets_the_pane() {
     window.simulate_click(header.center(), Modifiers::default());
     assert!(
         wait_until(window, |window| {
-            window.read(|app| view.read(app).target_pane) == Some((1, first))
+            window.read(|app| view.read(app).terminal_input.target) == Some((1, first))
         }),
         "a header click targets its Pane"
     );
@@ -805,7 +805,7 @@ fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
             this.toggle_sidebar(cx);
             this.sidebar_width = px(300.);
             this.toggle_changes_sidebar(cx);
-            this.sidebar_views.insert(
+            this.files_view.sidebar_views.insert(
                 (1, second_workspace),
                 crate::app::changes::SidebarView::Files,
             );
@@ -844,9 +844,13 @@ fn a_second_run_restores_the_sidebars_and_the_view_from_the_state_file() {
         let this = second.read(app);
         assert!(this.sidebar_collapsed);
         assert_eq!(this.sidebar_width, px(300.));
-        assert!(this.changes_open.contains(&(1, second_workspace)));
+        assert!(
+            this.files_view
+                .changes_open
+                .contains(&(1, second_workspace))
+        );
         assert_eq!(
-            this.sidebar_views.get(&(1, second_workspace)),
+            this.files_view.sidebar_views.get(&(1, second_workspace)),
             Some(&crate::app::changes::SidebarView::Files)
         );
         assert!(

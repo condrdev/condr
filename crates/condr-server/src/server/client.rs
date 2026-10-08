@@ -1,4 +1,5 @@
 use super::*;
+use condr_core::protocol::ControlDenialReason;
 
 struct PeerRegistration {
     state: Arc<Mutex<RuntimeState>>,
@@ -287,6 +288,12 @@ pub(super) fn handle_client(
     // Buffered from here on: the handshake above read unbuffered so a Tunnel could take
     // the raw stream, and nothing hands it on after this point (ADR 0028).
     let mut stream = io::BufReader::new(stream);
+    let layouts = ClientLayouts::new(
+        client_id,
+        Arc::clone(&state),
+        Arc::clone(&lifecycle),
+        outbound.clone(),
+    );
     let mut stopping_server = false;
     loop {
         let message = match condr_core::protocol::read_message_with_limit::<_, ClientMessage>(
@@ -318,8 +325,6 @@ pub(super) fn handle_client(
             }
             Err(_) => break,
         };
-        let mut started_terminals = Vec::new();
-        let mut removed_terminals = Vec::new();
         let should_close = match message {
             // A newer Client should not have sent it (ADR 0028); say so and go on.
             ClientMessage::Unknown => queue_message(
@@ -328,9 +333,7 @@ pub(super) fn handle_client(
                     message: "this Server does not support that request; update it".into(),
                 },
             ),
-            ClientMessage::SnapshotRequest { session_id } => {
-                queue_runtime_bootstrap(&state, client_id, session_id, &outbound)
-            }
+            ClientMessage::SnapshotRequest { session_id } => layouts.snapshot(session_id),
             ClientMessage::OverviewRequest { session_id } => {
                 let response = {
                     let state = state.lock().expect("server state lock poisoned");
@@ -493,6 +496,7 @@ pub(super) fn handle_client(
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
+                            cause: ControlDenialReason::Other,
                             reason: "unknown Session".into(),
                         },
                         false,
@@ -512,6 +516,7 @@ pub(super) fn handle_client(
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
+                            cause: ControlDenialReason::Busy,
                             reason: "another client controls this Session".into(),
                         },
                         false,
@@ -550,6 +555,7 @@ pub(super) fn handle_client(
                         ServerMessage::ControlDenied {
                             server_id: state.server_id,
                             session_id,
+                            cause: ControlDenialReason::Other,
                             reason: "client does not control this Session".into(),
                         },
                         false,
@@ -572,298 +578,7 @@ pub(super) fn handle_client(
                 session_id,
                 request_id,
                 command,
-            } => {
-                let external = matches!(
-                    command,
-                    LayoutCommand::CreateWorkspace { .. }
-                        | LayoutCommand::CreateWorktree { .. }
-                        | LayoutCommand::OpenWorktree { .. }
-                        | LayoutCommand::RemoveWorktree { .. }
-                );
-                if external {
-                    let operation = lifecycle.begin_operation();
-                    let launch = state
-                        .lock()
-                        .expect("server state lock poisoned")
-                        .shell_launch();
-                    let plan = if operation.is_some() {
-                        let mut state = state.lock().expect("server state lock poisoned");
-                        plan_client_external_layout(
-                            &mut state,
-                            client_id,
-                            server_id,
-                            session_id,
-                            request_id,
-                            lifecycle.is_stopping(),
-                            &command,
-                        )
-                    } else {
-                        let state = state.lock().expect("server state lock poisoned");
-                        Err(Box::new(ServerMessage::LayoutRejected {
-                            server_id: state.server_id,
-                            session_id: state.session_id,
-                            request_id,
-                            reason: "Server is stopping".into(),
-                        }))
-                    };
-                    match plan.and_then(|plan| {
-                        prepare_external_layout(plan).map_err(|reason| {
-                            Box::new(ServerMessage::LayoutRejected {
-                                server_id,
-                                session_id,
-                                request_id,
-                                reason,
-                            })
-                        })
-                    }) {
-                        Err(message) => queue_message(&outbound, *message),
-                        Ok(mut prepared) => {
-                            let probes = {
-                                let state = state.lock().expect("server state lock poisoned");
-                                if let Some(message) = layout_authority_error(
-                                    &state,
-                                    client_id,
-                                    server_id,
-                                    session_id,
-                                    request_id,
-                                    lifecycle.is_stopping(),
-                                ) {
-                                    Err(Box::new(message))
-                                } else if let PreparedExternalLayout::RemoveWorktreeReady {
-                                    workspace_id,
-                                    ..
-                                } = &prepared
-                                {
-                                    Ok(state.terminal_cwd_probes_for_workspace(*workspace_id))
-                                } else {
-                                    Ok(Vec::new())
-                                }
-                            };
-                            let approval = probes.and_then(|probes| {
-                                let observations = observe_terminal_cwds(probes);
-                                let mut state = state.lock().expect("server state lock poisoned");
-                                if let Some(message) = layout_authority_error(
-                                    &state,
-                                    client_id,
-                                    server_id,
-                                    session_id,
-                                    request_id,
-                                    lifecycle.is_stopping(),
-                                ) {
-                                    Err(Box::new(message))
-                                } else {
-                                    state.record_terminal_cwd_observations(observations);
-                                    approve_external_layout(&mut state, &mut prepared).map_err(
-                                        |reason| {
-                                            Box::new(ServerMessage::LayoutRejected {
-                                                server_id: state.server_id,
-                                                session_id: state.session_id,
-                                                request_id,
-                                                reason,
-                                            })
-                                        },
-                                    )
-                                }
-                            });
-                            match approval {
-                                Err(message) => {
-                                    let failed = queue_message(&outbound, *message);
-                                    let cleanup_failed = cancel_prepared_external_layout(prepared)
-                                        .is_err_and(|message| {
-                                            tracing::warn!("{message}");
-                                            queue_message(
-                                                &outbound,
-                                                ServerMessage::Error { message },
-                                            )
-                                        });
-                                    failed || cleanup_failed
-                                }
-                                Ok(()) => {
-                                    match finish_external_layout(prepared, &launch) {
-                                        Err(failure) => {
-                                            let ExternalLayoutFinishError {
-                                                message,
-                                                restarted,
-                                                exited,
-                                                cwds,
-                                            } = failure;
-                                            let stopping = lifecycle.is_stopping();
-                                            let clients = {
-                                                let mut state = state
-                                                    .lock()
-                                                    .expect("server state lock poisoned");
-                                                state.record_terminal_cwds(cwds);
-                                                if stopping {
-                                                    Vec::new()
-                                                } else {
-                                                    let mut cleared_agents = Vec::new();
-                                                    for (pane_id, runtime, updates) in restarted {
-                                                        if state.session.pane(pane_id).is_none()
-                                                            || state
-                                                                .terminals
-                                                                .contains_key(&pane_id)
-                                                        {
-                                                            continue;
-                                                        }
-                                                        state.exited_terminals.remove(&pane_id);
-                                                        if state.agents.remove(&pane_id).is_some() {
-                                                            cleared_agents.push(pane_id);
-                                                        }
-                                                        started_terminals.push(
-                                                            state.install_terminal(
-                                                                pane_id, runtime, updates,
-                                                            ),
-                                                        );
-                                                    }
-                                                    for pane_id in cleared_agents {
-                                                        state.publish_background(
-                                                            SessionEvent::AgentChanged {
-                                                                pane_id,
-                                                                agent: None,
-                                                            },
-                                                        );
-                                                    }
-                                                    for (pane_id, runtime) in exited {
-                                                        state.restore_exited_terminal(
-                                                            pane_id, runtime,
-                                                        );
-                                                    }
-                                                    state
-                                                        .subscribers
-                                                        .keys()
-                                                        .copied()
-                                                        .collect::<Vec<_>>()
-                                                }
-                                            };
-                                            for client_id in clients {
-                                                flush_terminal_render(&state, client_id);
-                                            }
-                                            queue_message(
-                                                &outbound,
-                                                ServerMessage::LayoutRejected {
-                                                    server_id,
-                                                    session_id,
-                                                    request_id,
-                                                    reason: message,
-                                                },
-                                            )
-                                        }
-                                        Ok(prepared) => {
-                                            let mut state =
-                                                state.lock().expect("server state lock poisoned");
-                                            // A successful Git removal cannot be rolled back, so its
-                                            // matching Session close must commit during shutdown.
-                                            let stopping = lifecycle.is_stopping()
-                                                && !matches!(
-                                                    &prepared,
-                                                    PreparedExternalLayout::RemoveWorktree { .. }
-                                                );
-                                            if let Some(message) = layout_authority_error(
-                                                &state, client_id, server_id, session_id,
-                                                request_id, stopping,
-                                            ) {
-                                                drop(state);
-                                                let failed = queue_message(&outbound, message);
-                                                let cleanup_failed =
-                                                    cancel_prepared_external_layout(prepared)
-                                                        .is_err_and(|message| {
-                                                            tracing::warn!("{message}");
-                                                            queue_message(
-                                                                &outbound,
-                                                                ServerMessage::Error { message },
-                                                            )
-                                                        });
-                                                failed || cleanup_failed
-                                            } else {
-                                                match apply_prepared_external_layout(
-                                                    &mut state, prepared,
-                                                ) {
-                                                    Ok(mut effect) => {
-                                                        started_terminals.extend(std::mem::take(
-                                                            &mut effect.started_terminals,
-                                                        ));
-                                                        removed_terminals = std::mem::take(
-                                                            &mut effect.removed_terminals,
-                                                        );
-                                                        state.publish_layout_change(
-                                                            client_id, &outbound, request_id,
-                                                            effect,
-                                                        )
-                                                    }
-                                                    Err(reason) => queue_message(
-                                                        &outbound,
-                                                        ServerMessage::LayoutRejected {
-                                                            server_id: state.server_id,
-                                                            session_id: state.session_id,
-                                                            request_id,
-                                                            reason,
-                                                        },
-                                                    ),
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    let probes = {
-                        let state = state.lock().expect("server state lock poisoned");
-                        if let Some(message) = layout_authority_error(
-                            &state,
-                            client_id,
-                            server_id,
-                            session_id,
-                            request_id,
-                            lifecycle.is_stopping(),
-                        ) {
-                            Err(message)
-                        } else {
-                            Ok(state.terminal_cwd_probes_for_layout(&command))
-                        }
-                    };
-                    match probes {
-                        Err(message) => queue_message(&outbound, message),
-                        Ok(probes) => {
-                            let observations = observe_terminal_cwds(probes);
-                            let mut state = state.lock().expect("server state lock poisoned");
-                            if let Some(message) = layout_authority_error(
-                                &state,
-                                client_id,
-                                server_id,
-                                session_id,
-                                request_id,
-                                lifecycle.is_stopping(),
-                            ) {
-                                queue_message(&outbound, message)
-                            } else {
-                                state.record_terminal_cwd_observations(observations);
-                                match apply_layout_command(&mut state, command) {
-                                    Ok(mut effect) => {
-                                        started_terminals
-                                            .extend(std::mem::take(&mut effect.started_terminals));
-                                        removed_terminals =
-                                            std::mem::take(&mut effect.removed_terminals);
-                                        state.publish_layout_change(
-                                            client_id, &outbound, request_id, effect,
-                                        )
-                                    }
-                                    Err(reason) => queue_message(
-                                        &outbound,
-                                        ServerMessage::LayoutRejected {
-                                            server_id: state.server_id,
-                                            session_id: state.session_id,
-                                            request_id,
-                                            reason,
-                                        },
-                                    ),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            } => layouts.handle(server_id, session_id, request_id, command),
             ClientMessage::Terminal {
                 server_id,
                 session_id,
@@ -913,6 +628,7 @@ pub(super) fn handle_client(
                         ServerMessage::ControlDenied {
                             server_id,
                             session_id,
+                            cause: ControlDenialReason::Other,
                             reason: "acquire Session control before using a terminal".into(),
                         },
                     )
@@ -1404,22 +1120,6 @@ pub(super) fn handle_client(
             }
             ClientMessage::Detach => true,
         };
-        for (pane_id, instance_id, updates, agent_probe, cwd_probe, notice_probe, view_source) in
-            started_terminals
-        {
-            monitor_terminal(TerminalMonitor {
-                pane_id,
-                instance_id,
-                updates,
-                agent_probe,
-                cwd_probe,
-                notice_probe,
-                view_source,
-                state: Arc::clone(&state),
-                lifecycle: Arc::clone(&lifecycle),
-            });
-        }
-        drop(removed_terminals);
         if should_close {
             break;
         }
@@ -1440,6 +1140,7 @@ pub(super) fn handle_client(
     if stopping_server {
         stop.store(true, Ordering::Release);
     }
+    drop(layouts);
     drop(outbound);
     let _ = writer.join();
 }

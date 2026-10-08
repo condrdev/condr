@@ -8,11 +8,12 @@ use crate::agent_discovery::AgentInstallation;
 use crate::agent_hooks::HooksReport;
 use crate::protocol::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
-    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerLogRecord, ServerMessage, ServerSettings, SessionEvent, SessionId, SessionOverview,
-    TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, ControlDenialReason, DiffBase,
+    GitBaseChanges, LayoutCommand, LayoutResult, PaneAgentSnapshot, PaneTerminalFrame,
+    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand,
+    ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord, ServerMessage,
+    ServerSettings, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
+    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
@@ -1394,6 +1395,7 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                 server_id: server_id.0,
                 session_id: session_id.0,
                 reason: reason.clone(),
+                control_denial_reason: super::ControlDenialReason::Unspecified as i32,
             };
         let message = match message {
             ServerMessage::Bootstrap(header) => Message::Bootstrap(header.try_into()?),
@@ -1486,8 +1488,15 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
             ServerMessage::ControlDenied {
                 server_id,
                 session_id,
+                cause,
                 reason: text,
-            } => Message::ControlDenied(reason(server_id, session_id, text)),
+            } => Message::ControlDenied(SessionReason {
+                control_denial_reason: match cause {
+                    ControlDenialReason::Other => super::ControlDenialReason::Other,
+                    ControlDenialReason::Busy => super::ControlDenialReason::Busy,
+                } as i32,
+                ..reason(server_id, session_id, text)
+            }),
             ServerMessage::LayoutRejected {
                 server_id,
                 session_id,
@@ -1715,6 +1724,10 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
         Message::ControlDenied(denied) => ServerMessage::ControlDenied {
             server_id: ServerId(denied.server_id),
             session_id: SessionId(denied.session_id),
+            cause: match super::ControlDenialReason::try_from(denied.control_denial_reason) {
+                Ok(super::ControlDenialReason::Busy) => ControlDenialReason::Busy,
+                _ => ControlDenialReason::Other,
+            },
             reason: denied.reason,
         },
         Message::LayoutRejected(rejected) => ServerMessage::LayoutRejected {

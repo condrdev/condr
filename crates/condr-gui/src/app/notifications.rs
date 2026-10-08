@@ -44,13 +44,11 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let workspace = Session::restore(connection.snapshot.clone())
-            .ok()
-            .and_then(|session| {
-                session
-                    .workspace_for_pane(pane_id)
-                    .map(|workspace| workspace.name().to_owned())
-            });
+        let workspace = connection.session().and_then(|session| {
+            session
+                .workspace_for_pane(pane_id)
+                .map(|workspace| workspace.name().to_owned())
+        });
         // What it waits for comes first (ADR 0024): that is what decides whether to come.
         let body = [
             agent.blocked_on.clone(),

@@ -237,8 +237,8 @@ impl Condr {
         let Some(workspace) = self.presented_workspace() else {
             return;
         };
-        if !self.changes_open.remove(&workspace) {
-            self.changes_open.insert(workspace);
+        if !self.files_view.changes_open.remove(&workspace) {
+            self.files_view.changes_open.insert(workspace);
         }
         self.schedule_state_save(cx);
         cx.notify();
@@ -246,21 +246,21 @@ impl Condr {
 
     pub(super) fn changes_sidebar_open(&self) -> bool {
         self.presented_workspace()
-            .is_some_and(|workspace| self.changes_open.contains(&workspace))
+            .is_some_and(|workspace| self.files_view.changes_open.contains(&workspace))
     }
 
     /// The Workspace presented for the sidebar to review. Without one the column stays
     /// hidden and its toggle disabled.
     pub(super) fn presented_workspace(&self) -> Option<(ConnectionKey, WorkspaceId)> {
         let connection = self.active_connection()?;
-        let session = Session::restore(connection.snapshot.clone()).ok()?;
-        let workspace_id = self.presented_workspace_id(connection.key, &session)?;
+        let session = connection.session()?;
+        let workspace_id = self.presented_workspace_id(connection.key, session)?;
         Some((connection.key, workspace_id))
     }
 
     fn toggle_changes_section(&mut self, section: ChangesSection, cx: &mut Context<Self>) {
-        if !self.collapsed_changes_sections.remove(&section) {
-            self.collapsed_changes_sections.insert(section);
+        if !self.files_view.collapsed_changes_sections.remove(&section) {
+            self.files_view.collapsed_changes_sections.insert(section);
         }
         cx.notify();
     }
@@ -329,7 +329,8 @@ impl Condr {
         workspace_id: WorkspaceId,
         in_repository: bool,
     ) -> SidebarView {
-        self.sidebar_views
+        self.files_view
+            .sidebar_views
             .get(&(key, workspace_id))
             .copied()
             .unwrap_or(if in_repository {
@@ -346,7 +347,12 @@ impl Condr {
         view: SidebarView,
         cx: &mut Context<Self>,
     ) {
-        if self.sidebar_views.insert((key, workspace_id), view) != Some(view) {
+        if self
+            .files_view
+            .sidebar_views
+            .insert((key, workspace_id), view)
+            != Some(view)
+        {
             self.schedule_state_save(cx);
             cx.notify();
         }
@@ -365,10 +371,10 @@ impl Condr {
             .border_color(theme.sidebar_border);
 
         let presented = self.active_connection().and_then(|connection| {
-            let session = Session::restore(connection.snapshot.clone()).ok()?;
-            let workspace_id = self.presented_workspace_id(connection.key, &session)?;
+            let session = connection.session()?;
+            let workspace_id = self.presented_workspace_id(connection.key, session)?;
             let workspace = session.workspace(workspace_id)?;
-            let presented_tab = self.presented_tab_id(connection.key, &session, workspace_id);
+            let presented_tab = self.presented_tab_id(connection.key, session, workspace_id);
             let shown_diff = session
                 .diff_tab(workspace_id)
                 .filter(|tab| presented_tab == Some(tab.id()))
@@ -490,7 +496,12 @@ impl Condr {
         workspace_id: WorkspaceId,
         git: &WorkspaceGitSnapshot,
     ) -> DiffBase {
-        if git.base.is_some() && self.changes_against_base.contains(&(key, workspace_id)) {
+        if git.base.is_some()
+            && self
+                .files_view
+                .changes_against_base
+                .contains(&(key, workspace_id))
+        {
             DiffBase::MergeBase
         } else {
             DiffBase::Head
@@ -508,8 +519,14 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let changed = match against {
-            DiffBase::MergeBase => self.changes_against_base.insert((key, workspace_id)),
-            DiffBase::Head => self.changes_against_base.remove(&(key, workspace_id)),
+            DiffBase::MergeBase => self
+                .files_view
+                .changes_against_base
+                .insert((key, workspace_id)),
+            DiffBase::Head => self
+                .files_view
+                .changes_against_base
+                .remove(&(key, workspace_id)),
         };
         if !changed {
             return;
@@ -524,15 +541,8 @@ impl Condr {
     /// rebuild.
     pub(super) fn forget_workspace_diffs(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
         if let Some(connection) = self.connection_mut(key) {
-            connection
-                .diffs
-                .retain(|(diff_workspace, _), _| *diff_workspace != workspace_id);
-            connection.diffs_generation += 1;
+            connection.resources.invalidate_diffs(workspace_id);
         }
-        self.pending_diffs
-            .retain(|(pending_key, pending_workspace, _)| {
-                *pending_key != key || *pending_workspace != workspace_id
-            });
     }
 
     /// What the Changes list compares against (ADR 0034), named on a button whose menu
@@ -649,7 +659,10 @@ impl Condr {
             if rows.is_empty() {
                 continue;
             }
-            let collapsed = self.collapsed_changes_sections.contains(&section);
+            let collapsed = self
+                .files_view
+                .collapsed_changes_sections
+                .contains(&section);
             let toggle_owner = cx.weak_entity();
             list = list.child(
                 h_flex()
@@ -711,7 +724,7 @@ impl Condr {
                     path,
                     children,
                 } => {
-                    let collapsed = self.collapsed_change_dirs.contains(&(
+                    let collapsed = self.files_view.collapsed_change_dirs.contains(&(
                         context.key,
                         context.workspace_id,
                         path.clone(),
@@ -764,8 +777,8 @@ impl Condr {
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     let dir = (key, workspace_id, toggle_path.clone());
-                    if !this.collapsed_change_dirs.remove(&dir) {
-                        this.collapsed_change_dirs.insert(dir);
+                    if !this.files_view.collapsed_change_dirs.remove(&dir) {
+                        this.files_view.collapsed_change_dirs.insert(dir);
                     }
                     cx.notify();
                 });
@@ -877,7 +890,7 @@ impl Condr {
             || "Against HEAD".to_owned(),
             |git| comparison_label(git, against),
         );
-        let editor = self.diff_editors.get(&(key, tab_id));
+        let editor = self.files_view.diff_editors.get(&(key, tab_id));
         let content = editor.map_or(DiffContent::Loading, |editor| editor.content.clone());
         let header = h_flex()
             .debug_selector(|| "diff-header".into())
@@ -1002,12 +1015,18 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let row = self
+            .files_view
             .diff_editors
             .get(&(key, tab_id))
             .map(|editor| editor.state.read(cx).cursor_position().line as usize);
         let line = self
             .connection(key)
-            .and_then(|connection| connection.diffs.get(&(workspace_id, path.clone())))
+            .and_then(|connection| {
+                connection
+                    .resources
+                    .diffs
+                    .get(&(workspace_id, path.clone()))
+            })
             .and_then(|answer| answer.as_ref().ok())
             .and_then(|diff| match &diff.content {
                 FileDiffContent::Text { hunks } => Some(hunks),
@@ -1015,7 +1034,8 @@ impl Condr {
             })
             .zip(row)
             .and_then(|(hunks, row)| file_line_for_diff_row(hunks, row));
-        self.pending_file_line = line.map(|line| (key, workspace_id, path.clone(), line));
+        self.files_view.pending_file_line =
+            line.map(|line| (key, workspace_id, path.clone(), line));
         self.show_file_on(key, workspace_id, path, window, cx);
     }
 
@@ -1034,39 +1054,47 @@ impl Condr {
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let generation = connection.diffs_generation;
-        let answer = connection.diffs.get(&(workspace_id, path.clone()));
+        let generation = connection.resources.diffs_generation;
+        let answer = connection
+            .resources
+            .diffs
+            .get(&(workspace_id, path.clone()));
         let request = answer.is_none()
-            && !self
+            && !connection
+                .resources
                 .pending_diffs
-                .contains(&(key, workspace_id, path.clone()));
+                .contains_key(&(workspace_id, path.clone()));
         let answer = answer.cloned();
         if request {
             self.request_diff(key, workspace_id, path.clone());
         }
 
-        let editor = self.diff_editors.entry((key, tab_id)).or_insert_with(|| {
-            let state = cx.new(|cx| {
-                let mut state = EditorState::new(window, cx)
-                    .language("diff")
-                    .line_number(true)
-                    .soft_wrap(false)
-                    .indent_guides(false)
-                    .folding(false)
-                    .searchable(true);
-                state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
-                state
+        let editor = self
+            .files_view
+            .diff_editors
+            .entry((key, tab_id))
+            .or_insert_with(|| {
+                let state = cx.new(|cx| {
+                    let mut state = EditorState::new(window, cx)
+                        .language("diff")
+                        .line_number(true)
+                        .soft_wrap(false)
+                        .indent_guides(false)
+                        .folding(false)
+                        .searchable(true);
+                    state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
+                    state
+                });
+                let decorations = state.update(cx, |state, cx| {
+                    state.create_decorations_collection(Vec::new(), cx)
+                });
+                DiffEditor {
+                    state,
+                    decorations,
+                    shown: None,
+                    content: DiffContent::Loading,
+                }
             });
-            let decorations = state.update(cx, |state, cx| {
-                state.create_decorations_collection(Vec::new(), cx)
-            });
-            DiffEditor {
-                state,
-                decorations,
-                shown: None,
-                content: DiffContent::Loading,
-            }
-        });
         let Some(answer) = answer else {
             if editor
                 .shown
@@ -1127,25 +1155,19 @@ impl Condr {
         }
         let request_id = connection.next_layout_request_id;
         connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-        connection.send(ClientMessage::GitDiff {
+        if connection.send(ClientMessage::GitDiff {
             server_id,
             session_id,
             request_id,
             workspace_id,
             path: path.clone(),
             against,
-        });
-        self.pending_diffs.insert((key, workspace_id, path));
-    }
-
-    /// Drops Editors whose Tabs are gone, so a closed Diff Tab frees its text.
-    pub(super) fn prune_diff_editors(&mut self) {
-        let sessions = self.restored_sessions();
-        self.diff_editors.retain(|(key, tab_id), _| {
-            sessions
-                .get(key)
-                .is_some_and(|session| session.tab(*tab_id).is_some_and(|tab| tab.diff().is_some()))
-        });
+        }) {
+            connection
+                .resources
+                .pending_diffs
+                .insert((workspace_id, path), request_id);
+        }
     }
 }
 

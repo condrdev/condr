@@ -12,6 +12,71 @@ pub(super) use mouse::next_hovered_link;
 pub(super) use mouse::{ReportedTerminalMouse, ReportedTerminalMouseMotion};
 pub(super) use selection::LocalTerminalSelection;
 
+/// One window's terminal interaction state. Every retained owner is scoped to its Device.
+#[derive(Default)]
+pub(super) struct TerminalInputState {
+    pub(super) target: Option<(ConnectionKey, PaneId)>,
+    pub(super) selection: Option<LocalTerminalSelection>,
+    pub(super) hovered_link: Option<(ConnectionKey, PaneId, HoveredTerminalLink)>,
+    pub(super) pressed_link: Option<(ConnectionKey, PaneId, HoveredTerminalLink)>,
+    pub(super) mouse_capture: Option<ReportedTerminalMouse>,
+    pub(super) mouse_motion: Option<ReportedTerminalMouseMotion>,
+    pub(super) focused: Option<(ConnectionKey, PaneId)>,
+    pub(super) reported_focus: Option<(ConnectionKey, PaneId)>,
+    /// Only releases for key presses actually sent to the current Pane may follow them.
+    pub(super) forwarded_keys: HashMap<String, (ConnectionKey, PaneId, TerminalKey)>,
+    pub(super) composition: Option<TerminalComposition>,
+    /// The preedit owner closed, but the OS may still commit it. Keep only this marker
+    /// until that commit, an unmark, or a new preedit starts.
+    pub(super) cancelled_composition: bool,
+}
+
+impl TerminalInputState {
+    fn set_focused(&mut self, focused: Option<(ConnectionKey, PaneId)>) -> bool {
+        if self.focused == focused {
+            return false;
+        }
+        self.focused = focused;
+        // A key let go of elsewhere is never released here.
+        self.forwarded_keys.clear();
+        true
+    }
+
+    /// Used both when Panes close and when a Device's authority changes. No terminal
+    /// command is sent to an owner that has gone; normal focus synchronization follows.
+    pub(super) fn retain_panes(&mut self, keep: impl Fn(ConnectionKey, PaneId) -> bool) {
+        self.target = self.target.filter(|&(key, pane)| keep(key, pane));
+        self.focused = self.focused.filter(|&(key, pane)| keep(key, pane));
+        self.reported_focus = self.reported_focus.filter(|&(key, pane)| keep(key, pane));
+        self.selection = self
+            .selection
+            .filter(|value| keep(value.connection_key, value.pane_id));
+        self.hovered_link = self
+            .hovered_link
+            .take()
+            .filter(|(key, pane, _)| keep(*key, *pane));
+        self.pressed_link = self
+            .pressed_link
+            .take()
+            .filter(|(key, pane, _)| keep(*key, *pane));
+        self.mouse_capture = self
+            .mouse_capture
+            .filter(|value| keep(value.connection_key, value.pane_id));
+        self.mouse_motion = self
+            .mouse_motion
+            .filter(|value| keep(value.connection_key, value.pane_id));
+        self.forwarded_keys
+            .retain(|_, (key, pane, _)| keep(*key, *pane));
+        if self.composition.as_ref().is_some_and(|value| {
+            let (key, pane) = value.target();
+            !keep(key, pane)
+        }) {
+            self.composition = None;
+            self.cancelled_composition = true;
+        }
+    }
+}
+
 impl Condr {
     pub(crate) fn resize_terminal(
         &mut self,
@@ -47,10 +112,11 @@ impl Condr {
         self.terminal_geometry.insert((key, pane_id), geometry);
         if changed
             && self
-                .terminal_composition
+                .terminal_input
+                .composition
                 .as_ref()
                 .is_some_and(|composition| {
-                    composition.belongs_to_target(self.target_pane)
+                    composition.belongs_to_target(self.terminal_input.target)
                         && composition.belongs_to(key, pane_id)
                 })
         {
@@ -76,8 +142,8 @@ impl Condr {
     pub(crate) fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !window.is_window_active() {
             window.release_pointer();
-            self.terminal_mouse_capture = None;
-            if let Some(selection) = &mut self.terminal_selection {
+            self.terminal_input.mouse_capture = None;
+            if let Some(selection) = &mut self.terminal_input.selection {
                 selection.dragging = false;
             }
         }
@@ -93,36 +159,31 @@ impl Condr {
                 })
             })
             .flatten();
-        if focused != self.focused_terminal {
-            self.focused_terminal = focused;
-            // A key let go of elsewhere is never released here.
-            self.forwarded_key_presses.clear();
-            if let Some((key, pane_id)) = focused {
-                // Returning to the window shows this Pane: its completion has been seen.
-                self.mark_pane_seen(key, pane_id);
-                cx.dismiss_system_notification(&notifications::agent_notification_tag(
-                    key, pane_id,
-                ));
-                self.clear_pane_attention(key, pane_id);
-                cx.notify();
-            }
+        if self.terminal_input.set_focused(focused)
+            && let Some((key, pane_id)) = focused
+        {
+            // Returning to the window shows this Pane: its completion has been seen.
+            self.mark_pane_seen(key, pane_id);
+            cx.dismiss_system_notification(&notifications::agent_notification_tag(key, pane_id));
+            self.clear_pane_attention(key, pane_id);
+            cx.notify();
         }
         let reportable_focus = focused.filter(|(key, _)| {
             self.connection(*key)
                 .is_some_and(|connection| connection.controlling)
         });
-        if reportable_focus == self.reported_terminal_focus {
+        if reportable_focus == self.terminal_input.reported_focus {
             return;
         }
-        self.last_terminal_mouse_motion = None;
+        self.terminal_input.mouse_motion = None;
 
-        if let Some((key, pane_id)) = self.reported_terminal_focus.take() {
+        if let Some((key, pane_id)) = self.terminal_input.reported_focus.take() {
             self.terminal_command(key, pane_id, TerminalCommand::Focus(false));
         }
         if let Some((key, pane_id)) = reportable_focus
             && self.terminal_command(key, pane_id, TerminalCommand::Focus(true))
         {
-            self.reported_terminal_focus = Some((key, pane_id));
+            self.terminal_input.reported_focus = Some((key, pane_id));
         }
     }
 
@@ -167,7 +228,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, pane_id)) = self.target_pane else {
+        let Some((key, pane_id)) = self.terminal_input.target else {
             cx.propagate();
             return;
         };
@@ -204,7 +265,8 @@ impl Condr {
             kind,
         };
         if self.terminal_command(key, pane_id, command) {
-            self.forwarded_key_presses
+            self.terminal_input
+                .forwarded_keys
                 .insert(stroke_key.to_owned(), (key, pane_id, terminal_key));
         }
     }
@@ -228,7 +290,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, pane_id)) = self.target_pane else {
+        let Some((key, pane_id)) = self.terminal_input.target else {
             return;
         };
         let stroke = &event.keystroke;
@@ -314,10 +376,11 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let stroke = &event.keystroke;
-        let Some((key, pane_id, pressed)) = self.forwarded_key_presses.remove(&stroke.key) else {
+        let Some((key, pane_id, pressed)) = self.terminal_input.forwarded_keys.remove(&stroke.key)
+        else {
             return;
         };
-        if self.target_pane != Some((key, pane_id))
+        if self.terminal_input.target != Some((key, pane_id))
             || !self.terminal_is_focused(key, pane_id, window, cx)
         {
             return;

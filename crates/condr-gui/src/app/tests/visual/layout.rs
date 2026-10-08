@@ -180,7 +180,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     });
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            let mut local = Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+            let mut local = this.connection(1).unwrap().session().unwrap().clone();
             assert!(local.set_tab_split_ratios(tab_id, &[0.72]));
             let local_layout = local.tab(tab_id).unwrap().layout().unwrap().clone();
             let surface = this.dock_surfaces.get(&surface_key).unwrap();
@@ -368,7 +368,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             condr
                 .presented()
                 .map(|(_, _, workspace_id, _)| workspace_id),
-            condr.target_pane,
+            condr.terminal_input.target,
         )
     });
     window.simulate_click(workspace_toggle.center(), Modifiers::default());
@@ -387,7 +387,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
                 condr
                     .presented()
                     .map(|(_, _, workspace_id, _)| workspace_id),
-                condr.target_pane,
+                condr.terminal_input.target,
             )
         }),
         selection_before,
@@ -878,13 +878,13 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
 
     // Selecting another target first, so the click has something to change.
     window.update(|_, cx| {
-        view.update(cx, |this, _| this.target_pane = None);
+        view.update(cx, |this, _| this.terminal_input.target = None);
     });
     window.simulate_click(row.center(), Modifiers::default());
     window.run_until_parked();
     window.update(|window, cx| _ = window.draw(cx));
     assert_eq!(
-        window.read(|app| view.read(app).target_pane),
+        window.read(|app| view.read(app).terminal_input.target),
         Some((1, pane_id)),
         "clicking the row lands in the Pane"
     );
@@ -916,21 +916,43 @@ fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
     window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
     assert!(wait_until(window, |window| {
         window.read(|app| {
-            view.read(app)
-                .active_session()
-                .is_some_and(|session| !session.workspaces().is_empty())
+            let this = view.read(app);
+            this.active_connection().is_some_and(|connection| {
+                connection.session().is_some_and(|session| {
+                    session.workspaces().first().is_some_and(|workspace| {
+                        connection.view_workspace == Some(workspace.id())
+                            && connection.view_tabs.get(&workspace.id())
+                                == workspace.tabs().first().map(|tab| tab.id()).as_ref()
+                    })
+                })
+            })
         })
     }));
     for expected in 2..=12 {
         window.update(|window, cx| _ = window.draw(cx));
         let new_tab = window.debug_bounds("new-tab").expect("New Tab is rendered");
+        let strip = window.debug_bounds("workspace-tabs").unwrap();
+        assert!(
+            strip.contains(&new_tab.center()),
+            "New Tab must be visible before clicking it: {new_tab:?} in {strip:?}"
+        );
         window.simulate_click(new_tab.center(), Modifiers::default());
         assert!(
             wait_until(window, |window| {
                 window.read(|app| {
-                    view.read(app)
-                        .active_session()
-                        .is_some_and(|session| session.workspaces()[0].tabs().len() == expected)
+                    let this = view.read(app);
+                    let Some(connection) = this.active_connection() else {
+                        return false;
+                    };
+                    let Some(session) = connection.session() else {
+                        return false;
+                    };
+                    let workspace = &session.workspaces()[0];
+                    // LayoutChanged adds the Tab; LayoutApplied then selects it and
+                    // scrolls its New Tab button into view. Wait for both before clicking.
+                    workspace.tabs().len() == expected
+                        && connection.viewed_tab_id(session, workspace.id())
+                            == workspace.tabs().last().map(|tab| tab.id())
                 })
             }),
             "Tab {expected} was not created"

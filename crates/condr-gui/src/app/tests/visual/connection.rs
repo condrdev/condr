@@ -17,8 +17,8 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
             let server_id = connection.server_id.unwrap();
             let session_id = connection.session_id.unwrap();
             let sequence = connection.sequence;
-            let original = connection.snapshot.clone();
-            let mut session = Session::restore(original.clone()).unwrap();
+            let original = connection.session().unwrap().snapshot();
+            let mut session = connection.session().unwrap().clone();
             session.create_workspace(std::env::temp_dir()).unwrap();
             let pane_id = session.workspaces()[0].tabs()[0]
                 .focused_pane()
@@ -148,7 +148,7 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
             let generation = connection.connect_generation;
             let server_id = connection.server_id.unwrap();
             let session_id = connection.session_id.unwrap();
-            let snapshot = connection.snapshot.clone();
+            let snapshot = connection.session().unwrap().snapshot();
             assert!(connection.subscribed);
 
             for sequence in [
@@ -214,7 +214,7 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
             let sequence = connection.sequence + 1;
             // The test Server starts empty; the event may announce a Workspace the GUI
             // has never seen, exactly like a `condr workspace create` from a Pane.
-            let mut session = Session::restore(connection.snapshot.clone()).unwrap();
+            let mut session = connection.session().unwrap().clone();
             if session.workspaces().is_empty() {
                 session.create_workspace(std::env::temp_dir()).unwrap();
             }
@@ -240,7 +240,8 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
 
             let connection = this.connection(1).unwrap();
             assert_eq!(
-                connection.snapshot, snapshot,
+                connection.session().unwrap().snapshot(),
+                snapshot,
                 "the event's structure is applied"
             );
             assert_eq!(connection.sequence, sequence);
@@ -251,6 +252,103 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
             assert!(connection.can_mutate(), "the UI stays enabled throughout");
         });
     });
+}
+
+#[test]
+fn control_retry_uses_the_cause_instead_of_the_display_text() {
+    use condr_core::protocol::ControlDenialReason;
+
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.connect_generation;
+            let server_id = connection.server_id.unwrap();
+            let session_id = connection.session_id.unwrap();
+
+            for (cause, reason, retry) in [
+                (
+                    ControlDenialReason::Other,
+                    "another client controls this Session",
+                    false,
+                ),
+                (ControlDenialReason::Busy, "control is occupied", true),
+            ] {
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::ControlDenied {
+                        server_id,
+                        session_id,
+                        cause,
+                        reason: reason.into(),
+                    }),
+                    cx,
+                );
+                let connection = this.connection(1).unwrap();
+                assert!(!connection.controlling);
+                assert_eq!(connection.control_denied, Some((cause, reason.into())));
+                assert_eq!(connection.control_retry_scheduled, retry);
+            }
+        });
+    });
+}
+
+#[test]
+fn a_non_retryable_denial_cancels_an_already_scheduled_control_retry() {
+    use condr_core::protocol::ControlDenialReason;
+
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let outgoing = window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection_mut(1).unwrap();
+            let (sender, receiver) = mpsc::channel();
+            connection.io = Some(ClientIo {
+                outgoing: sender,
+                _incoming_task: Task::ready(()),
+            });
+            let generation = connection.connect_generation;
+            let server_id = connection.server_id.unwrap();
+            let session_id = connection.session_id.unwrap();
+            for cause in [ControlDenialReason::Busy, ControlDenialReason::Other] {
+                this.handle_incoming(
+                    1,
+                    generation,
+                    Incoming::Message(ServerMessage::ControlDenied {
+                        server_id,
+                        session_id,
+                        cause,
+                        reason: "control is unavailable".into(),
+                    }),
+                    cx,
+                );
+            }
+            assert!(this.connection(1).unwrap().control_retry_scheduled);
+            receiver
+        })
+    });
+    window.run_until_parked();
+    window
+        .executor()
+        .advance_clock(crate::app::CONTROL_RETRY_DELAY);
+    window.run_until_parked();
+    assert!(!window.read(|app| {
+        view.read(app)
+            .connection(1)
+            .unwrap()
+            .control_retry_scheduled
+    }));
+    assert!(
+        !outgoing
+            .try_iter()
+            .any(|message| matches!(message, ClientMessage::AcquireControl { .. }))
+    );
 }
 
 #[test]
@@ -308,7 +406,7 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
             view.read(app).connection(1).is_some_and(|connection| {
                 connection.status == ConnectionStatus::Connected
                     && !connection.controlling
-                    && connection.control_denied.as_deref() == Some(CONTROL_BUSY_REASON)
+                    && connection.control_denied.is_some()
             })
         })
     }));
@@ -390,7 +488,7 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
     }));
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            let mut local = Session::restore(this.connection(1).unwrap().snapshot.clone()).unwrap();
+            let mut local = this.connection(1).unwrap().session().unwrap().clone();
             assert!(local.set_tab_split_ratios(surface_key.tab_id, &[0.72]));
             let local_layout = local
                 .tab(surface_key.tab_id)
@@ -431,7 +529,10 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            let authoritative = Session::restore(this.connection(1).unwrap().snapshot.clone())
+            let authoritative = this
+                .connection(1)
+                .unwrap()
+                .session()
                 .unwrap()
                 .tab(surface_key.tab_id)
                 .unwrap()
@@ -561,7 +662,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         (
             connection.server_id,
             connection.runtime_epoch,
-            connection.snapshot.clone(),
+            connection.session().unwrap().snapshot(),
             pane_id,
         )
     });
@@ -632,7 +733,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         let connection = condr.connection(1).unwrap();
         assert_eq!(connection.server_id, server_id);
         assert_ne!(connection.runtime_epoch, runtime_epoch);
-        assert_eq!(connection.snapshot, expected_snapshot);
+        assert_eq!(connection.session().unwrap().snapshot(), expected_snapshot);
         assert_eq!(connection.terminals.len(), 1);
         assert!(connection.agents.is_empty());
         assert!(
@@ -1171,7 +1272,7 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
             let server_id = connection.server_id.unwrap();
             let session_id = connection.session_id.unwrap();
             let sequence = connection.sequence;
-            let mut session = Session::restore(connection.snapshot.clone()).unwrap();
+            let mut session = connection.session().unwrap().clone();
             session.create_workspace(std::env::temp_dir()).unwrap();
             let pane_id = session.workspaces()[0].tabs()[0]
                 .focused_pane()

@@ -210,10 +210,12 @@ impl Condr {
         }
         let request_id = connection.next_layout_request_id;
         connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-        connection.send(ClientMessage::BrowseDirectory {
+        if !connection.send(ClientMessage::BrowseDirectory {
             request_id,
             path: PathBuf::from(&directory),
-        });
+        }) {
+            return;
+        }
         if let Some(browser) = self.directory_browser.as_mut() {
             browser.request_id = request_id;
             browser.requested = directory;

@@ -415,8 +415,8 @@ impl Condr {
         }));
     }
 
-    /// The state as it stands: connected Servers are written from their live view, every
-    /// other Server keeps what the file had.
+    /// Servers with a validated model are written from this Client's current view;
+    /// Servers not yet bootstrapped keep what the file had.
     pub(super) fn collect_state(&self, cx: &App) -> GuiState {
         let mut servers = self.restored_state.servers.clone();
         for connection in &self.connections {
@@ -436,9 +436,16 @@ impl Condr {
                             .sidebar_workspace_open
                             .get(&(key, workspace_id))
                             .is_some_and(|open| *open.read(cx)),
-                        changes_open: self.changes_open.contains(&(key, workspace_id)),
-                        sidebar_view: self.sidebar_views.get(&(key, workspace_id)).copied(),
-                        against_base: self.changes_against_base.contains(&(key, workspace_id)),
+                        changes_open: self.files_view.changes_open.contains(&(key, workspace_id)),
+                        sidebar_view: self
+                            .files_view
+                            .sidebar_views
+                            .get(&(key, workspace_id))
+                            .copied(),
+                        against_base: self
+                            .files_view
+                            .changes_against_base
+                            .contains(&(key, workspace_id)),
                     };
                     (workspace_id, state)
                 })
@@ -470,7 +477,11 @@ impl Condr {
     /// remembers them. Ids the Session no longer has are skipped; `set_view` and the
     /// sidebar sync already run before this, so entries exist for every live Workspace.
     pub(super) fn restore_server_state(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
-        let Some(connection) = self.connection(key) else {
+        let Some(connection) = self
+            .connections
+            .iter()
+            .find(|connection| connection.key == key)
+        else {
             return;
         };
         let (Some(server_id), Some(session)) = (connection.server_id, connection.session()) else {
@@ -479,6 +490,7 @@ impl Condr {
         let Some(saved) = self.restored_state.servers.get(&server_id).cloned() else {
             return;
         };
+        let mut view_tabs = Vec::new();
         for workspace in session.workspaces() {
             let workspace_id = workspace.id();
             let Some(state) = saved.workspaces.get(&workspace_id) else {
@@ -493,27 +505,31 @@ impl Condr {
                 });
             }
             if state.changes_open {
-                self.changes_open.insert((key, workspace_id));
+                self.files_view.changes_open.insert((key, workspace_id));
             } else {
-                self.changes_open.remove(&(key, workspace_id));
+                self.files_view.changes_open.remove(&(key, workspace_id));
             }
             if state.against_base {
-                self.changes_against_base.insert((key, workspace_id));
+                self.files_view
+                    .changes_against_base
+                    .insert((key, workspace_id));
             }
             if let Some(view) = state.sidebar_view {
-                self.sidebar_views.insert((key, workspace_id), view);
+                self.files_view
+                    .sidebar_views
+                    .insert((key, workspace_id), view);
             }
             if let Some(tab_id) = state.view_tab
                 && workspace.tab(tab_id).is_some()
-                && let Some(connection) = self.connection_mut(key)
             {
-                connection.view_tabs.insert(workspace_id, tab_id);
+                view_tabs.push((workspace_id, tab_id));
             }
         }
-        if let Some(workspace_id) = saved.view_workspace
-            && let Some(connection) = self.connection_mut(key)
-        {
-            connection.set_view(workspace_id, None);
+        if let Some(connection) = self.connection_mut(key) {
+            connection.view_tabs.extend(view_tabs);
+            if let Some(workspace_id) = saved.view_workspace {
+                connection.set_view(workspace_id, None);
+            }
         }
         if self.restored_state.active_server == Some(server_id) {
             self.active_connection = key;

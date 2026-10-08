@@ -13,8 +13,8 @@ impl Condr {
             return false;
         }
         self.clear_selection(cx);
-        self.last_terminal_mouse_motion = None;
-        self.terminal_mouse_capture = Some(ReportedTerminalMouse {
+        self.terminal_input.mouse_motion = None;
+        self.terminal_input.mouse_capture = Some(ReportedTerminalMouse {
             connection_key: key,
             pane_id,
             button,
@@ -27,17 +27,20 @@ impl Condr {
         key: ConnectionKey,
         pane_id: PaneId,
     ) -> Option<TerminalMouseButton> {
-        self.terminal_mouse_capture
+        self.terminal_input
+            .mouse_capture
             .filter(|capture| capture.connection_key == key && capture.pane_id == pane_id)
             .map(|capture| capture.button)
     }
 
     pub(crate) fn terminal_mouse_gesture_owner(&self) -> Option<(ConnectionKey, PaneId)> {
-        self.terminal_selection
+        self.terminal_input
+            .selection
             .filter(|selection| selection.dragging)
             .map(|selection| (selection.connection_key, selection.pane_id))
             .or_else(|| {
-                self.terminal_mouse_capture
+                self.terminal_input
+                    .mouse_capture
                     .map(|capture| (capture.connection_key, capture.pane_id))
             })
     }
@@ -64,8 +67,8 @@ impl Condr {
         if self.terminal_mouse_capture(key, pane_id) != Some(button) {
             return false;
         }
-        self.terminal_mouse_capture = None;
-        self.last_terminal_mouse_motion = None;
+        self.terminal_input.mouse_capture = None;
+        self.terminal_input.mouse_motion = None;
         self.terminal_command(key, pane_id, TerminalCommand::Mouse(event));
         true
     }
@@ -88,11 +91,11 @@ impl Condr {
             mouse_tracking,
             event,
         };
-        if self.last_terminal_mouse_motion == Some(motion) {
+        if self.terminal_input.mouse_motion == Some(motion) {
             return true;
         }
         if self.terminal_command(key, pane_id, TerminalCommand::Mouse(event)) {
-            self.last_terminal_mouse_motion = Some(motion);
+            self.terminal_input.mouse_motion = Some(motion);
             true
         } else {
             false
@@ -107,7 +110,7 @@ impl Condr {
         clear_selection: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.last_terminal_mouse_motion = None;
+        self.terminal_input.mouse_motion = None;
         let sent = self.terminal_command(key, pane_id, TerminalCommand::Mouse(event));
         if sent && clear_selection {
             self.clear_selection(cx);
@@ -122,8 +125,13 @@ impl Condr {
         link: Option<HoveredTerminalLink>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(next) = next_hovered_link(self.hovered_link.as_ref(), key, pane_id, link) {
-            self.hovered_link = next;
+        if let Some(next) = next_hovered_link(
+            self.terminal_input.hovered_link.as_ref(),
+            key,
+            pane_id,
+            link,
+        ) {
+            self.terminal_input.hovered_link = next;
             cx.notify();
         }
     }
@@ -133,7 +141,8 @@ impl Condr {
         key: ConnectionKey,
         pane_id: PaneId,
     ) -> Option<HoveredTerminalLink> {
-        self.hovered_link
+        self.terminal_input
+            .hovered_link
             .as_ref()
             .filter(|(link_key, link_pane, _)| *link_key == key && *link_pane == pane_id)
             .map(|(_, _, link)| link.clone())
@@ -145,7 +154,7 @@ impl Condr {
         pane_id: PaneId,
         link: Option<HoveredTerminalLink>,
     ) {
-        self.pressed_terminal_link = link.map(|link| (key, pane_id, link));
+        self.terminal_input.pressed_link = link.map(|link| (key, pane_id, link));
     }
 
     pub(crate) fn take_pressed_terminal_link(
@@ -154,11 +163,15 @@ impl Condr {
         pane_id: PaneId,
     ) -> Option<HoveredTerminalLink> {
         if self
-            .pressed_terminal_link
+            .terminal_input
+            .pressed_link
             .as_ref()
             .is_some_and(|(link_key, link_pane, _)| *link_key == key && *link_pane == pane_id)
         {
-            self.pressed_terminal_link.take().map(|(_, _, link)| link)
+            self.terminal_input
+                .pressed_link
+                .take()
+                .map(|(_, _, link)| link)
         } else {
             None
         }

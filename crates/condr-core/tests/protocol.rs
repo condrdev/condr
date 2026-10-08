@@ -197,6 +197,24 @@ fn snapshot_rejection_round_trip_preserves_identity() {
 }
 
 #[test]
+fn control_denial_round_trip_preserves_cause_and_display_text() {
+    for cause in [ControlDenialReason::Other, ControlDenialReason::Busy] {
+        let message = ServerMessage::ControlDenied {
+            server_id: ServerId(4),
+            session_id: SessionId(7),
+            cause,
+            reason: "control is unavailable".into(),
+        };
+        let mut bytes = Vec::new();
+        write_message(&mut bytes, &message).unwrap();
+        assert_eq!(
+            read_message::<_, ServerMessage>(&mut bytes.as_slice()).unwrap(),
+            message
+        );
+    }
+}
+
+#[test]
 fn layout_rejection_round_trip_keeps_request_correlation() {
     let message = ServerMessage::LayoutRejected {
         server_id: ServerId(4),
