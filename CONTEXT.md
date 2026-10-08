@@ -78,7 +78,7 @@ _Avoid_: Agent
 The one viewer Tab a Workspace may have, showing one file's working-tree changes as the Server computes them (ADR 0017), against whatever the Workspace's Changes view compares with: `HEAD` or its Base Branch (ADR 0034). Its header names which. Clicking a file in the Changes sidebar creates it or retargets it; it is Session state like every Tab and has no Panes, so Pane commands do not apply to it. Its header's "Show File" opens the same file in the Preview Tab at the line under the diff cursor. Its name starts as "Diff" and is display only.
 
 **Preview Tab**:
-The one viewer Tab a Workspace may have for a file's content as it is on disk, read by the Server under the Root Directory (ADR 0018). Clicking a file in the Files view creates it or retargets it; it sits beside the Diff Tab and behaves like it. Its name starts as "Preview" and is display only.
+The one viewer Tab a Workspace may have for a file's content as it is on disk, read by the Server under the Root Directory (ADR 0018). Clicking a file in the Files view creates it or retargets it; it sits beside the Diff Tab and behaves like it. Markdown and SVG open rendered, with Source a click away, and image files show as pictures (ADR 0037). Its name starts as "Preview" and is display only.
 
 **Changes**:
 One of the two views of the right sidebar: the presented Workspace's working-tree changes, index and worktree folded into one status per path, read-only (ADR 0017). It compares against `HEAD` or against the merge base with the Workspace's Base Branch; the choice is each Client's own view per Workspace, and without a Base Branch only `HEAD` is offered (ADR 0034). The default view for a Workspace inside a repository.
