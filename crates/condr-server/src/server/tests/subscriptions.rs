@@ -87,7 +87,7 @@ fn lagged_subscriber_is_told_to_bootstrap_and_can_resubscribe() {
     let (handle, endpoint, thread) = start();
     let mut stream = connect_and_bootstrap(&endpoint);
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let (server_id, session_id) = {
         let state = handle.state.lock().unwrap();
@@ -166,11 +166,11 @@ fn lagged_subscriber_is_told_to_bootstrap_and_can_resubscribe() {
 }
 
 #[test]
-fn lagged_direct_requests_keep_the_connection_and_do_not_commit_control() {
+fn lagged_direct_requests_keep_the_connection() {
     let (handle, endpoint, thread) = start();
     let mut stream = connect_and_bootstrap(&endpoint);
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let (server_id, session_id) = {
         let state = handle.state.lock().unwrap();
@@ -202,10 +202,7 @@ fn lagged_direct_requests_keep_the_connection_and_do_not_commit_control() {
     assert!(lagged, "test did not reach the reliable queue bound");
     handle.state.lock().unwrap().subscribers.remove(&client_id);
 
-    // A direct request while lagged is answered by nothing, but the connection survives and
-    // the grant is not committed because its response never reached the client.
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
+    // A direct request while lagged is answered by nothing, but the connection survives.
     condr_core::protocol::write_message(
         &mut stream,
         &ClientMessage::Ping {
@@ -223,7 +220,7 @@ fn lagged_direct_requests_keep_the_connection_and_do_not_commit_control() {
         ServerMessage::SubscriptionRejected { .. }
     ));
 
-    // Recovery: Bootstrap reopens the queue, then subscribe and control work normally.
+    // Recovery: Bootstrap reopens the queue, then subscribe works normally.
     condr_core::protocol::write_message(
         &mut stream,
         &ClientMessage::SnapshotRequest { session_id },
@@ -245,14 +242,14 @@ fn lagged_direct_requests_keep_the_connection_and_do_not_commit_control() {
         assembler.push(batch).unwrap();
     }
     let bootstrap = assembler.finish().unwrap();
-    // Inbound requests are handled in order on one connection, so once the Bootstrap has
-    // arrived the earlier (lagged) AcquireControl was processed: it must not have committed.
-    assert_eq!(handle.state.lock().unwrap().active_controller, None);
     subscribe(&mut stream, session_id, bootstrap.sequence);
-    acquire_control(&mut stream, session_id);
-    assert_eq!(
-        handle.state.lock().unwrap().active_controller,
-        Some(client_id)
+    assert!(
+        handle
+            .state
+            .lock()
+            .unwrap()
+            .subscribers
+            .contains_key(&client_id)
     );
 
     handle.stop();
@@ -316,7 +313,6 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
 
-    acquire_control(&mut first, session_id);
     condr_core::protocol::write_message(
         &mut first,
         &ClientMessage::Layout {
@@ -340,15 +336,6 @@ fn snapshot_change_is_replayed_after_the_bootstrap_cursor() {
         } if event_server == server_id && event_session == session_id
     ));
     assert_layout_applied(&mut first, server_id, session_id, 1, 1);
-    condr_core::protocol::write_message(&mut first, &ClientMessage::ReleaseControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut first).unwrap(),
-        ServerMessage::ControlReleased {
-            server_id: released_server,
-            session_id: released_session,
-        } if released_server == server_id && released_session == session_id
-    ));
 
     condr_core::protocol::write_message(
         &mut second,
@@ -422,8 +409,6 @@ fn subscribed_client_receives_future_events_in_sequence_order() {
         condr_core::protocol::read_message::<_, ServerMessage>(&mut subscriber).unwrap(),
         ServerMessage::Subscribed { sequence: 0, .. }
     ));
-
-    acquire_control(&mut controller, session_id);
 
     let mut snapshot_sequences = Vec::new();
     for request_id in 1..=2 {

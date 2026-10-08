@@ -33,12 +33,12 @@ pub use framing::{
 pub use handshake::{ClientHandshake, Hello, Refusal, Welcome};
 pub use messages::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, ControlDenialReason, DiffBase,
-    GitBaseChanges, LayoutCommand, LayoutResult, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand,
-    ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord, ServerMessage,
-    ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
-    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot, relative_age, uptime_text,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
+    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
+    ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
+    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    relative_age, uptime_text,
 };
 
 /// This build's protocol (ADR 0028). Fields and oneof members are added without raising
@@ -50,6 +50,9 @@ pub const MIN_CLIENT_PROTOCOL: u32 = 1;
 /// The oldest Server protocol this Client works with.
 pub const MIN_SERVER_PROTOCOL: u32 = 1;
 pub const MAX_FRAME_SIZE: usize = 2 * 1024 * 1024;
+/// How long a subscribed Client's writer may stay silent before it sends a `Ping`, so the
+/// Server can tell a window that went away from one that is only idle (ADR 0036).
+pub const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 /// The largest clipboard image a Client may paste into a remote Pane (ADR 0012).
 pub const MAX_CLIPBOARD_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 /// The inbound frame allowance for `ClientMessage::PasteImage` alone: the image plus the

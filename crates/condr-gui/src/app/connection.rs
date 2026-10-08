@@ -75,7 +75,19 @@ impl ClientIo {
         thread::Builder::new()
             .name("condr-client-writer".into())
             .spawn(move || {
-                while let Ok(mut message) = outgoing_rx.recv() {
+                loop {
+                    let mut message =
+                        match outgoing_rx.recv_timeout(condr_core::protocol::HEARTBEAT_INTERVAL) {
+                            Ok(message) => message,
+                            // Idle, not gone: the Server drops a subscriber that stays silent
+                            // (ADR 0036). Here, not on the UI thread, so a stalled frame
+                            // cannot cost the connection.
+                            Err(mpsc::RecvTimeoutError::Timeout) => ClientMessage::Ping {
+                                server_id: initial_server_id,
+                                nonce: 0,
+                            },
+                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        };
                     let image_pane = match &mut message {
                         ClientMessage::PasteImage {
                             pane_id,

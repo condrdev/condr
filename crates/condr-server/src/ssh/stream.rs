@@ -203,7 +203,7 @@ impl SshStream {
         self.process.shutdown()
     }
 
-    pub(crate) fn set_handshake_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    pub(crate) fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         let mut deadline = self.process.deadline.0.lock().unwrap();
         if deadline.stopped {
             drop(deadline);
@@ -270,7 +270,7 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         stream
-            .set_handshake_timeout(Some(Duration::from_millis(100)))
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();
         let (sent, received) = mpsc::channel();
         let read = thread::spawn(move || sent.send(stream.read(&mut [0]).unwrap_err()).unwrap());
@@ -296,7 +296,7 @@ mod tests {
         use crate::{ConnectionCancellation, EndpointStream};
         let mut stream = SshStream::spawn(Command::new("cat")).unwrap();
         stream
-            .set_handshake_timeout(Some(Duration::from_millis(300)))
+            .set_read_timeout(Some(Duration::from_millis(300)))
             .unwrap();
         for _ in 0..8 {
             thread::sleep(Duration::from_millis(70));
@@ -354,7 +354,7 @@ mod tests {
         let mut stream = SshStream::spawn(Command::new("cat")).unwrap();
         let process = Arc::clone(&stream.process);
         stream
-            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         let bytes: Vec<u8> = (0..256 * 1024).map(|i| i as u8).collect();
         let mut writer = stream.try_clone().unwrap();
@@ -365,9 +365,9 @@ mod tests {
         write.join().unwrap();
         assert_eq!(received, bytes);
         stream
-            .set_handshake_timeout(Some(Duration::from_millis(20)))
+            .set_read_timeout(Some(Duration::from_millis(20)))
             .unwrap();
-        stream.set_handshake_timeout(None).unwrap();
+        stream.set_read_timeout(None).unwrap();
         thread::sleep(Duration::from_millis(40));
         stream.write_all(b"alive").unwrap();
         let mut alive = [0; 5];
@@ -381,7 +381,7 @@ mod tests {
 
         let mut stalled = SshStream::spawn(Command::new("cat")).unwrap();
         stalled
-            .set_handshake_timeout(Some(Duration::from_millis(20)))
+            .set_read_timeout(Some(Duration::from_millis(20)))
             .unwrap();
         assert_eq!(
             stalled.read(&mut [0]).unwrap_err().kind(),

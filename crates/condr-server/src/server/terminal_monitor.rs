@@ -311,8 +311,9 @@ pub(super) fn apply_terminal_notices(
         }
     }
     if notices.bells > 0
-        && state.active_controller.is_some()
-        && state.focused_terminal != Some(pane_id)
+        && state
+            .focused_terminal
+            .is_none_or(|(focused, _)| focused != pane_id)
         && state.pending_terminal_bells.insert(pane_id)
     {
         state.publish_background(SessionEvent::TerminalAttentionChanged {

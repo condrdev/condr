@@ -125,9 +125,10 @@ fn reliable_message_is_a_terminal_chunk_protocol_fence() {
     )
     .unwrap();
 
-    let reliable = ServerMessage::ControlGranted {
+    let reliable = ServerMessage::Subscribed {
         server_id: ServerId(1),
         session_id: SessionId(2),
+        sequence: 1,
     };
     assert!(enforce_terminal_chunk_reliable_fence(&mut assembly, &reliable).is_err());
     assert!(assembly.is_none());

@@ -18,7 +18,7 @@ fn sending_without_io_preserves_the_connection_attempt_and_its_error() {
 
     connection.status = ConnectionStatus::Disconnected;
     connection.error = Some("update this Device".into());
-    connection.send(ClientMessage::AcquireControl {
+    connection.send(ClientMessage::SnapshotRequest {
         session_id: SessionId(3),
     });
     assert_eq!(connection.error.as_deref(), Some("update this Device"));
@@ -31,7 +31,7 @@ fn a_closed_send_queue_preserves_the_task_that_receives_disconnection() {
     drop(receiver);
     connection.io.as_mut().unwrap().outgoing = outgoing;
     connection.subscribed = true;
-    connection.send(ClientMessage::AcquireControl {
+    connection.send(ClientMessage::SnapshotRequest {
         session_id: SessionId(3),
     });
     assert!(
@@ -128,7 +128,6 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
     connection.runtime_epoch = Some(RuntimeEpoch(2));
     connection.session_id = Some(SessionId(3));
     connection.sequence = 7;
-    connection.controlling = true;
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
     connection.io = Some(ClientIo {
         outgoing,
@@ -159,7 +158,7 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
     ));
     assert!(!connection.recover_rejected_subscription(ServerId(9), SessionId(30)));
 
-    // Same authority: a rejection-recovery Bootstrap re-acquires control without discarding
+    // Same authority: a rejection-recovery Bootstrap drops pending layout without discarding
     // the connection's GUI state, and a plain visual resync Bootstrap touches neither.
     {
         let bootstrap = |sequence| SessionBootstrap {
@@ -176,19 +175,17 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
         };
         let mut same_authority = connection_with_io();
         same_authority.subscribed = true;
-        same_authority.controlling = true;
         same_authority.bootstrap_resync_session_id = Some(SessionId(3));
         assert!(same_authority.recover_rejected_subscription(ServerId(1), SessionId(3)));
         let recovered = same_authority.apply_bootstrap(bootstrap(8)).unwrap();
-        assert!(recovered.reacquire_control);
+        assert!(recovered.recovery);
         assert!(recovered.resubscribe);
         assert!(!recovered.authority_changed);
-        assert!(same_authority.controlling);
 
         same_authority.subscribed = true;
         assert!(same_authority.request_snapshot());
         let resynced = same_authority.apply_bootstrap(bootstrap(9)).unwrap();
-        assert!(!resynced.reacquire_control);
+        assert!(!resynced.recovery);
         assert!(!resynced.resubscribe);
         assert!(!resynced.authority_changed);
     }
@@ -208,19 +205,9 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
         })
         .unwrap();
     assert!(application.resubscribe);
-    assert!(application.reacquire_control);
-    assert!(!connection.controlling);
+    assert!(application.recovery);
     assert!(connection.bootstrap_resync_session_id.is_none());
-    connection.send(condr_core::protocol::ClientMessage::AcquireControl {
-        session_id: SessionId(30),
-    });
     connection.subscribe();
-    assert_eq!(
-        outgoing_rx.recv().unwrap(),
-        condr_core::protocol::ClientMessage::AcquireControl {
-            session_id: SessionId(30),
-        }
-    );
     assert_eq!(
         outgoing_rx.recv().unwrap(),
         condr_core::protocol::ClientMessage::Subscribe {
@@ -238,7 +225,6 @@ fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
     connection.runtime_epoch = Some(RuntimeEpoch(2));
     connection.session_id = Some(SessionId(3));
     connection.sequence = 7;
-    connection.controlling = true;
     connection.subscribed = true;
     connection.bootstrap_resync_session_id = Some(SessionId(3));
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
@@ -299,7 +285,6 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
     connection.runtime_epoch = Some(RuntimeEpoch(2));
     connection.session_id = Some(SessionId(3));
     connection.sequence = 7;
-    connection.controlling = true;
     connection.subscribed = true;
     connection.bootstrap_resync_session_id = Some(SessionId(3));
     let pane_id = pane_id();
@@ -326,7 +311,7 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
         .unwrap();
 
     assert!(!application.resubscribe);
-    assert!(!application.reacquire_control);
+    assert!(!application.recovery);
     assert!(connection.subscribed);
     assert!(connection.can_mutate());
     assert!(connection.attention.contains(&pane_id));
@@ -418,7 +403,7 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
 }
 
 #[test]
-fn lag_notice_during_a_visual_gap_resync_still_reacquires_control() {
+fn lag_notice_during_a_visual_gap_resync_still_recovers() {
     let mut connection = connection_with_io();
     // A revision gap already dropped the subscription and requested a snapshot.
     connection.subscribed = false;
@@ -439,37 +424,9 @@ fn lag_notice_during_a_visual_gap_resync_still_reacquires_control() {
             zoomed_panes: Vec::new(),
         })
         .unwrap();
-    assert!(application.reacquire_control);
+    assert!(application.recovery);
     assert!(application.resubscribe);
     assert!(!application.authority_changed);
-}
-
-#[test]
-fn bootstrap_attention_survives_arriving_before_control_is_granted() {
-    let mut connection = connection_with_io();
-    connection.controlling = false;
-    let pane = pane_id();
-    connection
-        .apply_bootstrap(SessionBootstrap {
-            settings: Default::default(),
-            server_id: ServerId(1),
-            runtime_epoch: RuntimeEpoch(2),
-            session_id: SessionId(3),
-            sequence: 8,
-            snapshot: Session::new().snapshot(),
-            terminals: vec![PaneTerminalSnapshot {
-                pane_id: pane,
-                view: terminal_view(1, "x"),
-                exited: false,
-                title: None,
-                attention: true,
-            }],
-            agents: Vec::new(),
-            workspace_git: Vec::new(),
-            zoomed_panes: Vec::new(),
-        })
-        .unwrap();
-    assert!(connection.attention.contains(&pane));
 }
 
 #[test]
@@ -515,7 +472,7 @@ fn a_message_from_a_newer_protocol_resynchronizes_once_then_disconnects() {
         connection.receive_unknown(UnknownMessage::Reply, later),
         Some(true)
     );
-    assert!(connection.reacquire_after_bootstrap);
+    assert!(connection.recover_after_bootstrap);
     assert_eq!(
         outgoing_rx.recv().unwrap(),
         condr_core::protocol::ClientMessage::SnapshotRequest {

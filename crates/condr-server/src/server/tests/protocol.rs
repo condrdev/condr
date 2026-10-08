@@ -136,10 +136,8 @@ fn invalid_workspace_roots_preserve_authoritative_layout_focus_and_terminals() {
     let session_id = bootstrap.session_id;
     let mut stream = connection.into_stream();
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-
-    acquire_control(&mut stream, session_id);
 
     condr_core::protocol::write_message(
         &mut stream,
@@ -331,9 +329,8 @@ fn tcp_reconnect_bootstraps_authoritative_agent_and_git_state() {
     let session_id = bootstrap.session_id;
     let mut stream = connection.into_stream();
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    acquire_control(&mut stream, session_id);
     subscribe(&mut stream, session_id, bootstrap.sequence);
     condr_core::protocol::write_message(
         &mut stream,
@@ -652,13 +649,13 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     );
     for stream in [&mut first, &mut second] {
         stream
-            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         assert!(condr_core::protocol::read_message::<_, ServerMessage>(stream).is_err());
     }
     // The delayed device now sends Hello: the Server re-reads the list before serving it.
     delayed
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     condr_core::protocol::write_message(
         &mut delayed,

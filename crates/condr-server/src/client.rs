@@ -152,7 +152,7 @@ impl ClientConnection {
         let server_build = welcome.build;
         // Authentication is complete. Bootstrap may be large: bound inactivity,
         // not total transfer time, just as socket read timeouts do.
-        stream.set_handshake_timeout(Some(crate::server::HANDSHAKE_TIMEOUT))?;
+        stream.set_read_timeout(Some(crate::server::HANDSHAKE_TIMEOUT))?;
         let request = if terminal_views {
             ClientMessage::SnapshotRequest { session_id }
         } else {
@@ -192,7 +192,7 @@ impl ClientConnection {
             }
             (None, overview)
         };
-        stream.set_handshake_timeout(None)?;
+        stream.set_read_timeout(None)?;
         Ok(Self {
             stream,
             cancellation,
@@ -242,9 +242,6 @@ impl ClientConnection {
                     nonce: answered, ..
                 } if answered == nonce => return Ok(()),
                 ServerMessage::Error { message } => return Err(io::Error::other(message)),
-                ServerMessage::ControlDenied { reason, .. } => {
-                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, reason));
-                }
                 _ => {}
             }
         }
@@ -377,7 +374,7 @@ impl ClientConnection {
         } else {
             crate::server::HANDSHAKE_TIMEOUT
         };
-        stream.set_handshake_timeout(Some(timeout))?;
+        stream.set_read_timeout(Some(timeout))?;
         condr_core::protocol::write_message(
             &mut stream,
             &ClientHandshake::Hello(Hello::new(client_name)),

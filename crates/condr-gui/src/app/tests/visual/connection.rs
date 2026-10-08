@@ -254,105 +254,11 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
     });
 }
 
+/// Another Client on the Session, a second window or a connection whose device went away
+/// unnoticed, never holds this one back: there is no Session control to wait for
+/// (ADR 0036).
 #[test]
-fn control_retry_uses_the_cause_instead_of_the_display_text() {
-    use condr_core::protocol::ControlDenialReason;
-
-    let _serial_guard = acquire_visual_test_lock();
-    let mut cx = TestAppContext::single();
-    cx.update(gpui_kit::init);
-    let (view, window, _server) = connected_condr(&mut cx);
-    window.update(|_, cx| {
-        view.update(cx, |this, cx| {
-            let connection = this.connection(1).unwrap();
-            let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
-
-            for (cause, reason, retry) in [
-                (
-                    ControlDenialReason::Other,
-                    "another client controls this Session",
-                    false,
-                ),
-                (ControlDenialReason::Busy, "control is occupied", true),
-            ] {
-                this.handle_incoming(
-                    1,
-                    generation,
-                    Incoming::Message(ServerMessage::ControlDenied {
-                        server_id,
-                        session_id,
-                        cause,
-                        reason: reason.into(),
-                    }),
-                    cx,
-                );
-                let connection = this.connection(1).unwrap();
-                assert!(!connection.controlling);
-                assert_eq!(connection.control_denied, Some((cause, reason.into())));
-                assert_eq!(connection.control_retry_scheduled, retry);
-            }
-        });
-    });
-}
-
-#[test]
-fn a_non_retryable_denial_cancels_an_already_scheduled_control_retry() {
-    use condr_core::protocol::ControlDenialReason;
-
-    let _serial_guard = acquire_visual_test_lock();
-    let mut cx = TestAppContext::single();
-    cx.update(gpui_kit::init);
-    let (view, window, _server) = connected_condr(&mut cx);
-    let outgoing = window.update(|_, cx| {
-        view.update(cx, |this, cx| {
-            let connection = this.connection_mut(1).unwrap();
-            let (sender, receiver) = mpsc::channel();
-            connection.io = Some(ClientIo {
-                outgoing: sender,
-                _incoming_task: Task::ready(()),
-            });
-            let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
-            for cause in [ControlDenialReason::Busy, ControlDenialReason::Other] {
-                this.handle_incoming(
-                    1,
-                    generation,
-                    Incoming::Message(ServerMessage::ControlDenied {
-                        server_id,
-                        session_id,
-                        cause,
-                        reason: "control is unavailable".into(),
-                    }),
-                    cx,
-                );
-            }
-            assert!(this.connection(1).unwrap().control_retry_scheduled);
-            receiver
-        })
-    });
-    window.run_until_parked();
-    window
-        .executor()
-        .advance_clock(crate::app::CONTROL_RETRY_DELAY);
-    window.run_until_parked();
-    assert!(!window.read(|app| {
-        view.read(app)
-            .connection(1)
-            .unwrap()
-            .control_retry_scheduled
-    }));
-    assert!(
-        !outgoing
-            .try_iter()
-            .any(|message| matches!(message, ClientMessage::AcquireControl { .. }))
-    );
-}
-
-#[test]
-fn denied_replacement_connection_retries_after_the_controller_releases() {
+fn another_client_on_the_session_never_blocks_the_gui() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(gpui_kit::init);
@@ -364,7 +270,6 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
             .endpoint
             .clone()
     });
-
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
             this.disconnect_server(1);
@@ -372,28 +277,18 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
         });
     });
 
-    let contender = ClientConnection::connect(&endpoint, "control-contender").unwrap();
-    let session_id = contender.bootstrap().unwrap().session_id;
-    let mut contender_stream = contender.into_stream();
-    let deadline = Instant::now() + TEST_TIMEOUT;
-    loop {
-        condr_core::protocol::write_message(
-            &mut contender_stream,
-            &ClientMessage::AcquireControl { session_id },
-        )
-        .unwrap();
-        match condr_core::protocol::read_message(&mut contender_stream).unwrap() {
-            ServerMessage::ControlGranted { .. } => break,
-            ServerMessage::ControlDenied { .. } => {
-                assert!(
-                    Instant::now() < deadline,
-                    "the disconnected GUI never released control"
-                );
-                std::thread::sleep(TEST_POLL_INTERVAL);
-            }
-            message => panic!("unexpected control response: {message:?}"),
-        }
-    }
+    let other = ClientConnection::connect(&endpoint, "other-window").unwrap();
+    let bootstrap = other.bootstrap().unwrap();
+    let (session_id, sequence) = (bootstrap.session_id, bootstrap.sequence);
+    let mut other_stream = other.into_stream();
+    condr_core::protocol::write_message(
+        &mut other_stream,
+        &ClientMessage::Subscribe {
+            session_id,
+            after_sequence: sequence,
+        },
+    )
+    .unwrap();
 
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
@@ -401,25 +296,6 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
             cx.notify();
         });
     });
-    assert!(wait_until(window, |window| {
-        window.read(|app| {
-            view.read(app).connection(1).is_some_and(|connection| {
-                connection.status == ConnectionStatus::Connected
-                    && !connection.controlling
-                    && connection.control_denied.is_some()
-            })
-        })
-    }));
-
-    condr_core::protocol::write_message(
-        &mut contender_stream,
-        &ClientMessage::ReleaseControl { session_id },
-    )
-    .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message(&mut contender_stream).unwrap(),
-        ServerMessage::ControlReleased { .. }
-    ));
     assert!(
         wait_until(window, |window| {
             window.read(|app| {
@@ -428,8 +304,9 @@ fn denied_replacement_connection_retries_after_the_controller_releases() {
                     .is_some_and(ServerConnection::can_mutate)
             })
         }),
-        "replacement connection did not retry control acquisition"
+        "the GUI must be usable while another Client stays subscribed"
     );
+    drop(other_stream);
 }
 
 #[test]

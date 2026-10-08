@@ -8,12 +8,11 @@ use crate::agent_discovery::AgentInstallation;
 use crate::agent_hooks::HooksReport;
 use crate::protocol::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, ControlDenialReason, DiffBase,
-    GitBaseChanges, LayoutCommand, LayoutResult, PaneAgentSnapshot, PaneTerminalFrame,
-    PaneTerminalMetadata, PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand,
-    ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord, ServerMessage,
-    ServerSettings, SessionEvent, SessionId, SessionOverview, TerminalFrameBatch,
-    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
+    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
+    ServerLogRecord, ServerMessage, ServerSettings, SessionEvent, SessionId, SessionOverview,
+    TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
@@ -192,12 +191,6 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 server_id: server_id.0,
                 nonce: *nonce,
             }),
-            ClientMessage::AcquireControl { session_id } => {
-                Message::AcquireControl(session(session_id))
-            }
-            ClientMessage::ReleaseControl { session_id } => {
-                Message::ReleaseControl(session(session_id))
-            }
             ClientMessage::Layout {
                 server_id,
                 session_id,
@@ -368,12 +361,6 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
             Message::Ping(ping) => ClientMessage::Ping {
                 server_id: ServerId(ping.server_id),
                 nonce: ping.nonce,
-            },
-            Message::AcquireControl(request) => ClientMessage::AcquireControl {
-                session_id: session(request),
-            },
-            Message::ReleaseControl(request) => ClientMessage::ReleaseControl {
-                session_id: session(request),
             },
             Message::Layout(layout) => ClientMessage::Layout {
                 server_id: ServerId(layout.server_id),
@@ -1386,16 +1373,11 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
 
     fn try_from(message: &ServerMessage) -> Result<Self, String> {
         use server_message::Message;
-        let address = |server_id: &ServerId, session_id: &SessionId| SessionAddress {
-            server_id: server_id.0,
-            session_id: session_id.0,
-        };
         let reason =
             |server_id: &ServerId, session_id: &SessionId, reason: &String| SessionReason {
                 server_id: server_id.0,
                 session_id: session_id.0,
                 reason: reason.clone(),
-                control_denial_reason: super::ControlDenialReason::Unspecified as i32,
             };
         let message = match message {
             ServerMessage::Bootstrap(header) => Message::Bootstrap(header.try_into()?),
@@ -1476,26 +1458,6 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                 server_id: server_id.0,
                 nonce: *nonce,
                 sequence: *sequence,
-            }),
-            ServerMessage::ControlGranted {
-                server_id,
-                session_id,
-            } => Message::ControlGranted(address(server_id, session_id)),
-            ServerMessage::ControlReleased {
-                server_id,
-                session_id,
-            } => Message::ControlReleased(address(server_id, session_id)),
-            ServerMessage::ControlDenied {
-                server_id,
-                session_id,
-                cause,
-                reason: text,
-            } => Message::ControlDenied(SessionReason {
-                control_denial_reason: match cause {
-                    ControlDenialReason::Other => super::ControlDenialReason::Other,
-                    ControlDenialReason::Busy => super::ControlDenialReason::Busy,
-                } as i32,
-                ..reason(server_id, session_id, text)
             }),
             ServerMessage::LayoutRejected {
                 server_id,
@@ -1642,8 +1604,6 @@ impl TryFrom<super::ServerMessage> for ServerMessage {
 
 fn decode_server_message(message: server_message::Message) -> WireResult<ServerMessage> {
     use server_message::Message;
-    let address =
-        |address: SessionAddress| (ServerId(address.server_id), SessionId(address.session_id));
     Ok(match message {
         Message::Bootstrap(header) => ServerMessage::Bootstrap(header.try_into()?),
         Message::Overview(overview) => ServerMessage::Overview(overview.try_into()?),
@@ -1706,29 +1666,6 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             server_id: ServerId(pong.server_id),
             nonce: pong.nonce,
             sequence: pong.sequence,
-        },
-        Message::ControlGranted(granted) => {
-            let (server_id, session_id) = address(granted);
-            ServerMessage::ControlGranted {
-                server_id,
-                session_id,
-            }
-        }
-        Message::ControlReleased(released) => {
-            let (server_id, session_id) = address(released);
-            ServerMessage::ControlReleased {
-                server_id,
-                session_id,
-            }
-        }
-        Message::ControlDenied(denied) => ServerMessage::ControlDenied {
-            server_id: ServerId(denied.server_id),
-            session_id: SessionId(denied.session_id),
-            cause: match super::ControlDenialReason::try_from(denied.control_denial_reason) {
-                Ok(super::ControlDenialReason::Busy) => ControlDenialReason::Busy,
-                _ => ControlDenialReason::Other,
-            },
-            reason: denied.reason,
         },
         Message::LayoutRejected(rejected) => ServerMessage::LayoutRejected {
             server_id: ServerId(rejected.server_id),

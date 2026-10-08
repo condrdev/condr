@@ -73,7 +73,7 @@ fn hooks_server_child() {
     let session_id = bootstrap.session_id;
     let mut stream = connection.into_stream();
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     if case == "rejected" {
         for (server, session) in [
@@ -116,7 +116,7 @@ fn hooks_server_child() {
             .unwrap()
             .into_stream();
         observer
-            .set_handshake_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         install(&mut stream, server_id, session_id);
         let deadline = Instant::now() + Duration::from_secs(5);

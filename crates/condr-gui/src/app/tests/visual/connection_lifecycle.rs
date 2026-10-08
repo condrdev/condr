@@ -71,7 +71,7 @@ fn failed_enqueue_does_not_register_layout_or_resource_work() {
 }
 
 #[test]
-fn disconnect_retires_bootstrap_and_control_messages_already_in_the_batch() {
+fn disconnect_retires_a_bootstrap_already_in_the_batch() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(gpui_kit::init);
@@ -96,18 +96,9 @@ fn disconnect_retires_bootstrap_and_control_messages_already_in_the_batch() {
             };
             this.mark_disconnected(1, 0, "writer closed".into());
             this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);
-            this.handle_incoming(
-                1,
-                generation,
-                Incoming::Message(ServerMessage::ControlGranted {
-                    server_id,
-                    session_id,
-                }),
-                cx,
-            );
             let connection = this.connection(1).unwrap();
             assert!(connection.status == ConnectionStatus::Disconnected);
-            assert!(!connection.controlling);
+            assert!(!connection.can_mutate());
             assert!(connection.io.is_none());
             assert_eq!(connection.error.as_deref(), Some("writer closed"));
         })

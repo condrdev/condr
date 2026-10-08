@@ -224,7 +224,7 @@ impl Condr {
             return;
         };
         let key = connection.key;
-        let controlling = connection.can_mutate();
+        let can_mutate = connection.can_mutate();
         let Some((_workspace_id, tab_id)) = connection.viewed(session) else {
             self.terminal_input.target = None;
             self.active_dock_surface = None;
@@ -372,9 +372,10 @@ impl Condr {
                 surface.area.clone()
             };
             area.update(cx, |dock, cx| {
-                // Locked, the Kit installs no drop handling, so a viewer sees no drop zones;
-                // Condr renders no tab bar, so unlocked adds no Kit-driven rearranging.
-                dock.set_locked(!controlling, window, cx);
+                // Locked, the Kit installs no drop handling, so a Session still synchronizing
+                // shows no drop zones; Condr renders no tab bar, so unlocked adds no
+                // Kit-driven rearranging.
+                dock.set_locked(!can_mutate, window, cx);
                 dock.set_center(dock_layout, window, cx);
             });
             let surface = self

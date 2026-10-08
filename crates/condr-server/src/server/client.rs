@@ -1,5 +1,4 @@
 use super::*;
-use condr_core::protocol::ControlDenialReason;
 
 struct PeerRegistration {
     state: Arc<Mutex<RuntimeState>>,
@@ -79,10 +78,7 @@ pub(super) fn handle_client(
     // One of the two spans ADR 0019 allows: every line this connection logs carries it.
     let _client_span =
         tracing::info_span!("client", id = client_id, transport = stream.transport()).entered();
-    if stream
-        .set_handshake_timeout(Some(HANDSHAKE_TIMEOUT))
-        .is_err()
-    {
+    if stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).is_err() {
         return;
     }
     let hello = loop {
@@ -245,7 +241,7 @@ pub(super) fn handle_client(
     }
     // Declared after the span, so it drops (and logs) while the span is still entered.
     let _disconnect_log = DisconnectLog;
-    let _ = stream.set_handshake_timeout(None);
+    let _ = stream.set_read_timeout(None);
 
     let mut writer_stream = match stream.try_clone() {
         Ok(stream) => stream,
@@ -394,6 +390,11 @@ pub(super) fn handle_client(
                 session_id,
                 after_sequence,
             } => {
+                // A subscriber is a window that stays: from now on it pings while idle,
+                // and one that falls silent has gone without its transport noticing.
+                let _ = stream
+                    .get_ref()
+                    .set_read_timeout(Some(SUBSCRIBER_READ_TIMEOUT));
                 let shared_state = Arc::clone(&state);
                 let mut state = state.lock().expect("server state lock poisoned");
                 let (responses, should_subscribe) = {
@@ -487,92 +488,6 @@ pub(super) fn handle_client(
                     )
                 }
             }
-            // Control changes commit only once their response is queued: a response lost to
-            // writer lag must not leave the client believing the opposite of the Server.
-            ClientMessage::AcquireControl { session_id } => {
-                let mut state = state.lock().expect("server state lock poisoned");
-                let (response, grant) = if session_id != state.session_id {
-                    (
-                        ServerMessage::ControlDenied {
-                            server_id: state.server_id,
-                            session_id,
-                            cause: ControlDenialReason::Other,
-                            reason: "unknown Session".into(),
-                        },
-                        false,
-                    )
-                } else if state.active_controller.is_none()
-                    || state.active_controller == Some(client_id)
-                {
-                    (
-                        ServerMessage::ControlGranted {
-                            server_id: state.server_id,
-                            session_id,
-                        },
-                        true,
-                    )
-                } else {
-                    (
-                        ServerMessage::ControlDenied {
-                            server_id: state.server_id,
-                            session_id,
-                            cause: ControlDenialReason::Busy,
-                            reason: "another client controls this Session".into(),
-                        },
-                        false,
-                    )
-                };
-                match queue_response(&outbound, response) {
-                    Ok(()) => {
-                        if grant {
-                            state.active_controller = Some(client_id);
-                        }
-                        false
-                    }
-                    Err(ReliableSendError::Lagged) => false,
-                    Err(ReliableSendError::Disconnected) => true,
-                }
-            }
-            ClientMessage::ReleaseControl { session_id } => {
-                let mut state = state.lock().expect("server state lock poisoned");
-                let (response, release) = if state.session_id != session_id {
-                    (
-                        ServerMessage::Error {
-                            message: "unknown Session".into(),
-                        },
-                        false,
-                    )
-                } else if state.active_controller == Some(client_id) {
-                    (
-                        ServerMessage::ControlReleased {
-                            server_id: state.server_id,
-                            session_id,
-                        },
-                        true,
-                    )
-                } else {
-                    (
-                        ServerMessage::ControlDenied {
-                            server_id: state.server_id,
-                            session_id,
-                            cause: ControlDenialReason::Other,
-                            reason: "client does not control this Session".into(),
-                        },
-                        false,
-                    )
-                };
-                match queue_response(&outbound, response) {
-                    Ok(()) => {
-                        if release {
-                            state.clear_controller_terminal_state();
-                            state.active_controller = None;
-                        }
-                        false
-                    }
-                    Err(ReliableSendError::Lagged) => false,
-                    Err(ReliableSendError::Disconnected) => true,
-                }
-            }
             ClientMessage::Layout {
                 server_id,
                 session_id,
@@ -587,16 +502,8 @@ pub(super) fn handle_client(
             } => {
                 let mut state = state.lock().expect("server state lock poisoned");
                 let is_copy = matches!(&command, TerminalCommand::Copy { .. });
-                // Reading and typing are open to every client, the CLI in a Pane
-                // included (ADR 0009); focus, mouse, resize, scroll and selection stay
-                // with the controller because they describe one viewer's state.
-                let needs_control = !matches!(
-                    &command,
-                    TerminalCommand::Copy { .. }
-                        | TerminalCommand::Text(_)
-                        | TerminalCommand::Paste(_)
-                        | TerminalCommand::Key { .. }
-                );
+                // Every Client may do everything: the last one to scroll or select sets it
+                // for all, and sizes come from the window last focused (ADR 0036).
                 let focus = match &command {
                     TerminalCommand::Focus(focused) => Some(*focused),
                     _ => None,
@@ -620,16 +527,6 @@ pub(super) fn handle_client(
                         &outbound,
                         ServerMessage::Error {
                             message: "Server is stopping".into(),
-                        },
-                    )
-                } else if needs_control && state.active_controller != Some(client_id) {
-                    queue_message(
-                        &outbound,
-                        ServerMessage::ControlDenied {
-                            server_id,
-                            session_id,
-                            cause: ControlDenialReason::Other,
-                            reason: "acquire Session control before using a terminal".into(),
                         },
                     )
                 } else if state.session.pane(pane_id).is_none() {
@@ -666,15 +563,21 @@ pub(super) fn handle_client(
                     let result = if !unavailable && !state.terminals.contains_key(&pane_id) {
                         Err(io::Error::new(io::ErrorKind::NotFound, "unknown Pane"))
                     } else {
-                        if focus == Some(true) && state.focused_terminal != Some(pane_id) {
-                            state.clear_terminal_focus();
-                        }
-                        if let Some(focused) = focus {
-                            state.record_terminal_focus(pane_id, focused);
-                        }
-                        if unavailable {
+                        let heard = match &command {
+                            TerminalCommand::Focus(focused) => {
+                                state.record_terminal_focus(pane_id, client_id, *focused)
+                            }
+                            TerminalCommand::Resize(_) => {
+                                state.sizing_client.is_none_or(|sizing| sizing == client_id)
+                            }
+                            _ => true,
+                        };
+                        if unavailable || !heard {
                             Ok(None)
                         } else {
+                            if matches!(&command, TerminalCommand::Mouse(_)) {
+                                state.mouse_client = Some(client_id);
+                            }
                             state.terminals[&pane_id].execute(command)
                         }
                     };
@@ -1131,10 +1034,7 @@ pub(super) fn handle_client(
     if let Some(staged) = state.staged_images.remove(&client_id) {
         clipboard_image::remove(staged);
     }
-    if state.active_controller == Some(client_id) {
-        state.clear_controller_terminal_state();
-        state.active_controller = None;
-    }
+    state.release_client_terminal_state(client_id);
     drop(state);
     drop(peer_registration);
     if stopping_server {

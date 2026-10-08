@@ -17,9 +17,6 @@ const TAB_MAX_WIDTH: Rems = rems(8.);
 const TAB_MIN_WIDTH: Rems = rems(6.);
 /// The hairline between two idle Tabs: shorter than the Tab, as Chrome draws it.
 const TAB_SEPARATOR_HEIGHT: Rems = rems(1.);
-/// The viewing-only note after the Tabs truncates past this instead of pushing them.
-const VIEWING_ONLY_MAX_WIDTH: Rems = rems(16.);
-
 pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
     let number = tab_index + 1;
     if name.is_empty() {
@@ -38,11 +35,6 @@ impl Condr {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
         let status = self.render_connection_status(connection, cx);
-        // Viewing only is a mode, not a failure: muted, and only while it lasts.
-        let viewing_only = connection
-            .control_denied
-            .as_ref()
-            .map(|(cause, reason)| viewing_only_text(*cause, reason).to_owned());
         let can_mutate =
             connection.can_mutate() && !self.has_pending_projection_for(connection.key);
         let Some(session) = connection.session() else {
@@ -81,15 +73,7 @@ impl Condr {
                 })
             }
         });
-        let strip = self.render_tab_strip(
-            key,
-            workspace_id,
-            workspace,
-            active_tab,
-            can_mutate,
-            viewing_only,
-            cx,
-        );
+        let strip = self.render_tab_strip(key, workspace_id, workspace, active_tab, can_mutate, cx);
         // The pill floats over the Panes rather than reflowing them: the dock keeps
         // its geometry, and the frozen output under it is what the user is waiting on.
         let body = div()
@@ -118,10 +102,8 @@ impl Condr {
 
     /// The Workspace's Tabs: a row that scrolls when it outgrows its slot, the way the
     /// Kit's `TabBar` scrolls its own, and brings a newly active Tab into view. "New Tab"
-    /// follows the last Tab and scrolls with it; the viewing-only note keeps its place
-    /// after the row. The Tabs themselves keep Condr's ghost-button look, which none of
-    /// the Kit `Tab` variants draw.
-    #[allow(clippy::too_many_arguments)]
+    /// follows the last Tab and scrolls with it. The Tabs themselves keep Condr's
+    /// ghost-button look, which none of the Kit `Tab` variants draw.
     fn render_tab_strip(
         &self,
         key: ConnectionKey,
@@ -129,7 +111,6 @@ impl Condr {
         workspace: &Workspace,
         active_tab: TabId,
         can_mutate: bool,
-        viewing_only: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let closes_workspace = workspace.tabs().len() == 1;
@@ -423,18 +404,6 @@ impl Condr {
                             ),
                     ),
             )
-            .when_some(viewing_only, |row, text| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .max_w(VIEWING_ONLY_MAX_WIDTH)
-                        .pr_2()
-                        .truncate()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(text),
-                )
-            })
             .into_any_element()
     }
 }
@@ -481,15 +450,6 @@ fn welcome_link(id: &'static str, label: &'static str, url: &'static str) -> But
         .xsmall()
         .label(label)
         .on_click(move |_, _, cx| cx.open_url(url))
-}
-
-/// The strip's wording for denied control; other denials retain the Server's detail.
-fn viewing_only_text(cause: ControlDenialReason, reason: &str) -> &str {
-    if cause == ControlDenialReason::Busy {
-        "Viewing only: another Condr window controls this device"
-    } else {
-        reason
-    }
 }
 
 impl Condr {

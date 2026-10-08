@@ -76,7 +76,7 @@ fn two_gui_clients_keep_independent_views_until_explicit_activation() {
     assert!(wait_until(second_window, |window| {
         window.read(|app| {
             let connection = second.read(app).connection(1).unwrap();
-            connection.is_synchronized() && connection.control_denied.is_some()
+            connection.is_synchronized()
         })
     }));
     assert_eq!(
@@ -145,7 +145,7 @@ fn two_gui_clients_keep_independent_views_until_explicit_activation() {
         Some((1, second_workspace, created_tab))
     );
 
-    // Both controller and viewer can browse different Tabs without sending commands.
+    // Both GUIs can browse different Tabs without sending commands.
     first_window.update(|window, cx| {
         first.update(cx, |this, cx| {
             this.activate_tab_on(1, second_tab, window, cx)

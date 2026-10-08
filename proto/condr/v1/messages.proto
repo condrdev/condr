@@ -15,8 +15,6 @@ message ClientMessage {
     SessionRequest overview_request = 2;
     Subscribe subscribe = 3;
     Ping ping = 4;
-    SessionRequest acquire_control = 5;
-    SessionRequest release_control = 6;
     LayoutRequest layout = 7;
     TerminalRequest terminal = 8;
     PasteImage paste_image = 9;
@@ -335,9 +333,6 @@ message ServerMessage {
     TerminalFrameBatch terminal_frame = 9;
     TerminalFrameChunk terminal_frame_chunk = 10;
     Pong pong = 11;
-    SessionAddress control_granted = 12;
-    SessionAddress control_released = 13;
-    SessionReason control_denied = 14;
     LayoutRejected layout_rejected = 15;
     LayoutApplied layout_applied = 16;
     TerminalCopied terminal_copied = 17;
@@ -356,11 +351,6 @@ message ServerMessage {
   }
 }
 
-message SessionAddress {
-  uint64 server_id = 1;
-  uint64 session_id = 2;
-}
-
 message SessionSequence {
   uint64 server_id = 1;
   uint64 session_id = 2;
@@ -371,16 +361,6 @@ message SessionReason {
   uint64 server_id = 1;
   uint64 session_id = 2;
   string reason = 3;
-  // Only control_denied uses this field. Absent or unknown values mean Other:
-  // display reason, but do not automatically retry acquiring control.
-  ControlDenialReason control_denial_reason = 4;
-}
-
-// Fallback: Other, including UNSPECIFIED from peers that predate the field.
-enum ControlDenialReason {
-  CONTROL_DENIAL_REASON_UNSPECIFIED = 0;
-  CONTROL_DENIAL_REASON_OTHER = 1;
-  CONTROL_DENIAL_REASON_BUSY = 2;
 }
 
 // 16 bytes, big-endian.

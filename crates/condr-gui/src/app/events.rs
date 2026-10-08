@@ -56,7 +56,7 @@ impl Condr {
                     // Now that the Session is known, the file's memory of it applies.
                     self.restore_server_state(key, cx);
                 }
-                if application.reacquire_control {
+                if application.recovery {
                     // Layout responses may have been lost to writer lag; this Bootstrap is
                     // the authoritative layout, so nothing stays pending against it.
                     _ = self.clear_pending_projections_for(key);
@@ -66,9 +66,7 @@ impl Condr {
                 let active_projection_resolved =
                     self.resolve_projections_at(key, bootstrap_sequence);
                 let target_before_refresh = self.terminal_input.target;
-                if application.reacquire_control {
-                    self.acquire_and_subscribe(key);
-                } else if application.resubscribe {
+                if application.recovery || application.resubscribe {
                     self.connections[index].subscribe();
                 }
                 self.refresh_target_pane(key);
@@ -76,7 +74,7 @@ impl Condr {
                     && self.terminal_input.target != target_before_refresh;
                 return IncomingEffect {
                     rebuild: application.rebuild
-                        || application.reacquire_control
+                        || application.recovery
                         || active_projection_resolved
                         || target_changed
                         || first_bootstrap,
@@ -414,65 +412,6 @@ impl Condr {
                     }
                 }
                 IncomingEffect::default()
-            }
-            ServerMessage::ControlGranted {
-                server_id,
-                session_id,
-            } => {
-                if self.connections[index].server_id != Some(server_id)
-                    || self.connections[index].session_id != Some(session_id)
-                {
-                    return IncomingEffect::default();
-                }
-                self.connections[index].controlling = true;
-                self.connections[index].control_retry_attempts = 0;
-                self.connections[index].control_retry_scheduled = false;
-                self.connections[index].control_denied = None;
-                IncomingEffect {
-                    notify: true,
-                    ..IncomingEffect::default()
-                }
-            }
-            ServerMessage::ControlReleased {
-                server_id,
-                session_id,
-            } => {
-                if self.connections[index].server_id != Some(server_id)
-                    || self.connections[index].session_id != Some(session_id)
-                {
-                    return IncomingEffect::default();
-                }
-                self.connections[index].controlling = false;
-                self.connections[index].attention.clear();
-                self.connections[index].control_retry_attempts = 0;
-                self.connections[index].control_retry_scheduled = false;
-                IncomingEffect {
-                    notify: true,
-                    ..IncomingEffect::default()
-                }
-            }
-            ServerMessage::ControlDenied {
-                server_id,
-                session_id,
-                cause,
-                reason,
-            } => {
-                if self.connections[index].server_id != Some(server_id)
-                    || self.connections[index].session_id != Some(session_id)
-                {
-                    return IncomingEffect::default();
-                }
-                let retry_control = cause == ControlDenialReason::Busy;
-                self.connections[index].controlling = false;
-                self.connections[index].attention.clear();
-                self.connections[index].control_denied = Some((cause, reason));
-                if retry_control {
-                    self.schedule_control_retry(key, cx);
-                }
-                IncomingEffect {
-                    notify: true,
-                    ..IncomingEffect::default()
-                }
             }
             ServerMessage::SubscriptionRejected {
                 server_id,

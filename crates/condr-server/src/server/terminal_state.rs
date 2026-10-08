@@ -1,24 +1,29 @@
 use super::*;
 
 impl RuntimeState {
-    pub(super) fn clear_controller_terminal_state(&mut self) {
-        for runtime in self.terminals.values() {
-            let _ = runtime.release_mouse();
-            // The selection belongs to the controller (ADR 0008); a successor must not
-            // inherit or copy it.
-            let _ = runtime.execute(TerminalCommand::Select(None));
+    /// What a leaving Client held: its focus is lost, its held mouse button released and
+    /// terminal sizes open to the rest. Selection and scroll position are every Client's,
+    /// so they stay (ADR 0036).
+    pub(super) fn release_client_terminal_state(&mut self, client_id: u64) {
+        if self.sizing_client == Some(client_id) {
+            self.sizing_client = None;
         }
-        self.clear_terminal_focus();
-        for pane_id in std::mem::take(&mut self.pending_terminal_bells) {
-            self.publish_background(SessionEvent::TerminalAttentionChanged {
-                pane_id,
-                attention: false,
-            });
+        if self.mouse_client == Some(client_id) {
+            self.mouse_client = None;
+            for runtime in self.terminals.values() {
+                let _ = runtime.release_mouse();
+            }
+        }
+        if self
+            .focused_terminal
+            .is_some_and(|(_, client)| client == client_id)
+        {
+            self.clear_terminal_focus();
         }
     }
 
     pub(super) fn clear_terminal_focus(&mut self) {
-        if let Some(pane_id) = self.focused_terminal.take()
+        if let Some((pane_id, _)) = self.focused_terminal.take()
             && let Some(runtime) = self.terminals.get(&pane_id)
         {
             let _ = runtime.execute(TerminalCommand::Focus(false));
@@ -81,12 +86,31 @@ impl RuntimeState {
         }
     }
 
-    pub(super) fn record_terminal_focus(&mut self, pane_id: PaneId, focused: bool) {
+    /// Records a Client's focus report and says whether the Pane should hear it. Focus
+    /// moves to whoever reports it last; a Client that no longer holds the Pane's focus
+    /// cannot take it from the one that does.
+    pub(super) fn record_terminal_focus(
+        &mut self,
+        pane_id: PaneId,
+        client_id: u64,
+        focused: bool,
+    ) -> bool {
         if focused {
-            self.focused_terminal = Some(pane_id);
+            if self
+                .focused_terminal
+                .is_some_and(|(focused, _)| focused != pane_id)
+            {
+                self.clear_terminal_focus();
+            }
+            self.focused_terminal = Some((pane_id, client_id));
+            self.sizing_client = Some(client_id);
             self.clear_terminal_attention(pane_id);
-        } else if self.focused_terminal == Some(pane_id) {
+            true
+        } else if self.focused_terminal == Some((pane_id, client_id)) {
             self.focused_terminal = None;
+            true
+        } else {
+            false
         }
     }
 

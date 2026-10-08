@@ -113,8 +113,6 @@ These administrative operations are accepted only from local and SSH connections
 
 So pair only your own Devices with the Server. Read-only and control permissions are not separated yet; sharing one Server among several people has to wait for that feature.
 
-**Viewing only** is not a permission boundary: when several windows connect at once, it only switches the windows that did not get control to a read-only view in their interface.
-
 ---
 
 ## What programs in a terminal can do

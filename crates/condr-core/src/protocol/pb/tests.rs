@@ -167,29 +167,6 @@ fn unknown_enum_values_decode_to_their_fallback() {
 }
 
 #[test]
-fn absent_or_unknown_control_denial_reasons_do_not_request_a_retry() {
-    for control_denial_reason in [0, 99] {
-        let message = super::ServerMessage {
-            message: Some(server_message::Message::ControlDenied(SessionReason {
-                server_id: 4,
-                session_id: 7,
-                reason: "another client controls this Session".into(),
-                control_denial_reason,
-            })),
-        };
-        assert_eq!(
-            ServerMessage::try_from(message).unwrap(),
-            ServerMessage::ControlDenied {
-                server_id: crate::protocol::ServerId(4),
-                session_id: crate::protocol::SessionId(7),
-                cause: crate::protocol::ControlDenialReason::Other,
-                reason: "another client controls this Session".into(),
-            }
-        );
-    }
-}
-
-#[test]
 fn an_unset_enum_is_malformed() {
     let agent = super::AgentSnapshot {
         session_id: None,

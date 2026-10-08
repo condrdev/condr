@@ -6,7 +6,7 @@ use condr_core::{
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
-fn controller_can_acknowledge_attention_while_terminal_is_closing() {
+fn a_client_can_acknowledge_attention_while_terminal_is_closing() {
     let (handle, endpoint, thread) = start();
     let mut stream = connect_and_bootstrap(&endpoint);
     let (server_id, session_id, pane_id) = {
@@ -23,7 +23,6 @@ fn controller_can_acknowledge_attention_while_terminal_is_closing() {
         state.pending_terminal_bells.insert(pane_id);
         (state.server_id, state.session_id, pane_id)
     };
-    acquire_control(&mut stream, session_id);
 
     send_terminal(
         &mut stream,
@@ -46,7 +45,7 @@ fn controller_can_acknowledge_attention_while_terminal_is_closing() {
     ));
     {
         let state = handle.state.lock().unwrap();
-        assert_eq!(state.focused_terminal, Some(pane_id));
+        assert_eq!(state.focused_terminal.map(|(pane, _)| pane), Some(pane_id));
         assert!(!state.pending_terminal_bells.contains(&pane_id));
     }
 
@@ -66,7 +65,6 @@ fn focus_changes_for_a_missing_pane_are_ignored_but_input_is_rejected() {
         let state = handle.state.lock().unwrap();
         (state.server_id, state.session_id)
     };
-    acquire_control(&mut stream, session_id);
     let missing = PaneId::from_u64(424_242);
 
     for focused in [false, true] {
@@ -108,69 +106,91 @@ fn focus_changes_for_a_missing_pane_are_ignored_but_input_is_rejected() {
     thread.join().unwrap().unwrap();
 }
 
+/// Without Session control every Client may focus a Pane: the last report wins, the
+/// previous holder's late unfocus cannot take it back, and leaving gives it up (ADR 0036).
 #[test]
-fn controller_is_exclusive_and_released_on_disconnect() {
+fn focus_follows_the_last_client_and_ends_when_it_leaves() {
     let (handle, endpoint, thread) = start();
     let mut first = connect_and_bootstrap(&endpoint);
     let mut second = connect_and_bootstrap(&endpoint);
-    let server_id = handle.server_id();
-    let session_id = handle.state.lock().unwrap().session_id;
-    acquire_control(&mut first, session_id);
-    condr_core::protocol::write_message(&mut second, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(&mut second).unwrap(),
-        ServerMessage::ControlDenied {
-            cause: condr_core::protocol::ControlDenialReason::Busy,
-            ..
-        }
-    ));
-    condr_core::protocol::write_message(
-        &mut second,
-        &ClientMessage::Layout {
+    let (server_id, session_id, pane_id) = {
+        let mut state = handle.state.lock().unwrap();
+        state
+            .session
+            .create_workspace(std::env::temp_dir())
+            .expect("Workspace capacity");
+        let pane_id = state.session.workspaces()[0].tabs()[0]
+            .focused_pane()
+            .unwrap()
+            .id();
+        // Focus is recorded for a closing Pane without a PTY behind it.
+        state.closing_terminals.insert(pane_id);
+        (state.server_id, state.session_id, pane_id)
+    };
+    let focus = |stream: &mut EndpointStream, focused: bool, nonce: u64| {
+        send_terminal(
+            stream,
             server_id,
             session_id,
-            request_id: 73,
-            command: LayoutCommand::CreateWorkspace {
-                name: None,
-                root_directory: std::env::temp_dir(),
-            },
-        },
-    )
-    .unwrap();
-    // Control is exclusive, but layout is not gated on it: the denied client still
-    // changes structure, as the CLI in a Pane does while the GUI holds control.
-    // The response follows the events the change raised on this subscribed stream.
-    let applied = read_layout_response(&mut second);
-    assert!(
-        matches!(
-            applied,
-            ServerMessage::LayoutApplied {
-                server_id: applied_server,
-                session_id: applied_session,
-                request_id: 73,
-                ..
-            } if applied_server == server_id && applied_session == session_id
-        ),
-        "{applied:?}"
-    );
-    drop(first);
-    thread::sleep(Duration::from_millis(20));
-    acquire_control(&mut second, session_id);
-    handle.stop();
+            pane_id,
+            TerminalCommand::Focus(focused),
+        );
+        condr_core::protocol::write_message(stream, &ClientMessage::Ping { server_id, nonce })
+            .unwrap();
+        assert!(matches!(
+            read_server(stream),
+            ServerMessage::Pong { nonce: answered, .. } if answered == nonce
+        ));
+    };
+    let focused = || {
+        handle
+            .state
+            .lock()
+            .unwrap()
+            .focused_terminal
+            .map(|(pane, _)| pane)
+    };
+
+    focus(&mut first, true, 1);
+    focus(&mut second, true, 2);
+    focus(&mut first, false, 3);
+    assert_eq!(focused(), Some(pane_id), "a stale unfocus is ignored");
+    {
+        let state = handle.state.lock().unwrap();
+        assert_eq!(
+            state.sizing_client,
+            state.focused_terminal.map(|(_, client)| client),
+            "the last Client to focus sizes the terminals"
+        );
+    }
+
     drop(second);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while focused().is_some() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        focused(),
+        None,
+        "the holder's focus ends with its connection"
+    );
+    assert_eq!(handle.state.lock().unwrap().sizing_client, None);
+
+    handle.stop();
+    drop(first);
     thread.join().unwrap().unwrap();
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn releasing_control_releases_reported_mouse_before_focus() {
+fn the_focused_client_sizes_and_leaving_releases_its_mouse_before_its_focus() {
     let (handle, endpoint, thread) = start();
     let mut stream = connect_and_bootstrap(&endpoint);
+    let mut observer = connect_and_bootstrap(&endpoint);
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
-    acquire_control(&mut stream, session_id);
     subscribe(&mut stream, session_id, 0);
+    subscribe(&mut observer, session_id, 0);
 
     condr_core::protocol::write_message(
         &mut stream,
@@ -213,19 +233,51 @@ fn releasing_control_releases_reported_mouse_before_focus() {
     wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
         view.size.columns == 160
     });
+
+    // The focused Client sizes the terminal: another Client's resize is dropped. The
+    // observer's echo is handled after its resize on the same connection.
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Focus(true),
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while handle.state.lock().unwrap().sizing_client.is_none() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    send_terminal(
+        &mut observer,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Resize(TerminalSize::new(8, 120)),
+    );
+    send_terminal(
+        &mut observer,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Text("echo sizing-held\r".into()),
+    );
+    let mut observer_views = std::collections::HashMap::new();
+    let view = wait_for_terminal_text(&mut observer, &mut observer_views, pane_id, "sizing-held");
+    assert_eq!(view.size.columns, 160);
+
     send_terminal(
         &mut stream,
         server_id,
         session_id,
         pane_id,
         TerminalCommand::Text(
-            "stty raw -echo; printf 'controller-cleanup-ready\\r\\n\\033[?1002h\\033[?1006h\\033[?1004h'; bytes=$(dd bs=1 count=36 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf '\\033[?1002l\\033[?1006l\\033[?1004l'; stty sane; printf '\\r\\ncontroller-cleanup-bytes_%s\\r\\n' \"$bytes\"\r"
+            "stty raw -echo; printf 'viewer-cleanup-ready\\r\\n\\033[?1002h\\033[?1006h\\033[?1004h'; bytes=$(dd bs=1 count=36 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf '\\033[?1002l\\033[?1006l\\033[?1004l'; stty sane; printf '\\r\\nviewer-cleanup-bytes_%s\\r\\n' \"$bytes\"\r"
                 .into(),
         ),
     );
     wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
         view.mouse_tracking == condr_core::TerminalMouseTracking::Drag
-            && view_text(view).contains("controller-cleanup-ready")
+            && view_text(view).contains("viewer-cleanup-ready")
     });
 
     let press_position = TerminalMousePosition { row: 3, column: 7 };
@@ -263,23 +315,22 @@ fn releasing_control_releases_reported_mouse_before_focus() {
             },
         }),
     );
-    condr_core::protocol::write_message(&mut stream, &ClientMessage::ReleaseControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        wait_for_message(&mut stream, |message| matches!(
-            message,
-            ServerMessage::ControlReleased { .. }
-        )),
-        ServerMessage::ControlReleased {
-            server_id: released_server,
-            session_id: released_session,
-        } if released_server == server_id && released_session == session_id
-    ));
-
-    let expected = "controller-cleanup-bytes_1b5b491b5b3c303b383b344d1b5b3c34303b31303b354d1b5b3c383b31303b356d1b5b4f";
-    wait_for_terminal_text(&mut stream, &mut views, pane_id, expected);
+    // Leaving gives all of it up; the other Client sees the Pane hear it, then sizes it.
+    drop(stream);
+    let expected = "viewer-cleanup-bytes_1b5b491b5b3c303b383b344d1b5b3c34303b31303b354d1b5b3c383b31303b356d1b5b4f";
+    wait_for_terminal_text(&mut observer, &mut observer_views, pane_id, expected);
+    send_terminal(
+        &mut observer,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Resize(TerminalSize::new(8, 120)),
+    );
+    wait_for_terminal(&mut observer, &mut observer_views, pane_id, |view| {
+        view.size.columns == 120
+    });
 
     handle.stop();
-    drop(stream);
+    drop(observer);
     thread.join().unwrap().unwrap();
 }

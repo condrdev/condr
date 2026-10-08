@@ -72,6 +72,9 @@ pub use local::{
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
 pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+/// A subscribed Client pings every `condr_core::protocol::HEARTBEAT_INTERVAL`; one silent
+/// this long is gone, even when its transport has not noticed (ADR 0036).
+const SUBSCRIBER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 const EVENT_HISTORY_LIMIT: usize = 256;
 const MAX_SHELL_SETTING_BYTES: usize = 4 * 1024;
@@ -505,15 +508,23 @@ struct RuntimeState {
     agents: std::collections::HashMap<PaneId, AgentSnapshot>,
     agent_control: AgentControl,
     terminal_titles: std::collections::HashMap<PaneId, String>,
-    /// BEL attention is controller-only because PTY focus has one authoritative owner.
+    /// Panes that rang while no Client had them focused, until one focuses them.
     pending_terminal_bells: std::collections::HashSet<PaneId>,
     workspace_git: std::collections::HashMap<WorkspaceId, WorkspaceGit>,
     /// Owns Git refresh scheduling for filesystem and terminal activity; `None` until
     /// the state has its shared handle, and in unit tests.
     git_watcher: Option<GitWatcher>,
     worktree_root: Option<PathBuf>,
-    active_controller: Option<u64>,
-    focused_terminal: Option<PaneId>,
+    /// The Pane a Client last reported focused, and that Client: any Client may move the
+    /// focus, only its holder may take it away (ADR 0036).
+    focused_terminal: Option<(PaneId, u64)>,
+    /// The Client that last sent a mouse event, whose held button is released when it
+    /// leaves.
+    mouse_client: Option<u64>,
+    /// The Client that last reported a focused Pane: the window in use, so its sizes are
+    /// the ones every terminal takes and anyone else's resize is dropped. While none has
+    /// (or it left), any Client's resize applies (ADR 0036).
+    sizing_client: Option<u64>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
     /// Live remote peers by client id, so a revocation can drop their connections. Named
@@ -660,8 +671,9 @@ impl RuntimeState {
             workspace_git: std::collections::HashMap::new(),
             git_watcher: None,
             worktree_root: load_worktree_root(config_path.as_deref()),
-            active_controller: None,
             focused_terminal: None,
+            mouse_client: None,
+            sizing_client: None,
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
             tcp_peers: std::collections::HashMap::new(),

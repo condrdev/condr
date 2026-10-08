@@ -43,13 +43,12 @@ use crate::terminal_element::{
 use changes::*;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
-    AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage,
-    ControlDenialReason, LayoutCommand, LayoutResult, MAX_CHUNK_PAYLOAD_SIZE,
-    MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch,
-    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
-    ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch,
-    TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot, decode_pane_terminal_frame,
-    relative_age, uptime_text,
+    AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
+    LayoutResult, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame,
+    PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
+    ServerId, ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
+    SessionId, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    decode_pane_terminal_frame, relative_age, uptime_text,
 };
 use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, BrowsedDirectory,
@@ -212,10 +211,6 @@ impl From<PaneTerminalSnapshot> for ClientTerminal {
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
 const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
 const SERVER_EVENT_BUFFER_CAPACITY: usize = 256;
-const CONTROL_RETRY_DELAY: Duration = Duration::from_millis(50);
-/// Retries double up to this while another client holds control; they never give up
-/// while the connection stays up, so a controller that leaves seconds later is noticed.
-const MAX_CONTROL_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// How often the GUI retries the Server after asking it to restart, and for how long;
 /// `condr server restart` itself waits up to 30 s for the old process to let go.
 const RESTART_RECONNECT_DELAY: Duration = Duration::from_millis(500);
@@ -522,7 +517,7 @@ impl Condr {
             this.restore_server_state(1, cx);
         }
         this.refresh_target_pane(1);
-        this.acquire_and_subscribe(1);
+        this.connections[0].subscribe();
         if let Some(error) = config_error {
             this.report_error(error, cx);
         }

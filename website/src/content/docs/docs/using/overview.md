@@ -21,7 +21,6 @@ The Condr interface has four areas:
 | **Tab bar** | Shows every Tab in the current Workspace. Click `+` to start a new shell in the current Pane's directory. |
 | **Open in** | Opens the project root in an external editor or file manager (local Devices only; remembers each project's choice). |
 | **Right sidebar toggle** | Shows or hides the right sidebar; the state is kept per Workspace. |
-| **Viewing only** | Shows that another Condr window has taken exclusive control of this Device. The interface is read-only and nothing can be operated. |
 
 ---
 

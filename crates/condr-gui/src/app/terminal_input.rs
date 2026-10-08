@@ -170,7 +170,7 @@ impl Condr {
         }
         let reportable_focus = focused.filter(|(key, _)| {
             self.connection(*key)
-                .is_some_and(|connection| connection.controlling)
+                .is_some_and(|connection| connection.status == ConnectionStatus::Connected)
         });
         if reportable_focus == self.terminal_input.reported_focus {
             return;
@@ -184,6 +184,16 @@ impl Condr {
             && self.terminal_command(key, pane_id, TerminalCommand::Focus(true))
         {
             self.terminal_input.reported_focus = Some((key, pane_id));
+            // Reporting focus makes this window the one that sizes the Server's terminals
+            // (ADR 0036). Sizes it sent while another window held that were dropped, so
+            // every Panel measures again and sends what differs.
+            self.pending_sizes
+                .retain(|(pending_key, _), _| *pending_key != key);
+            for ((panel_key, _), panel) in &self.panels {
+                if *panel_key == key {
+                    panel.update(cx, |_, cx| cx.notify());
+                }
+            }
         }
     }
 

@@ -81,17 +81,8 @@ fn local_server_helper() {
     let initial_sequence = first.bootstrap().unwrap().sequence;
     let mut first_stream = first.into_stream();
     first_stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(
-        &mut first_stream,
-        &ClientMessage::AcquireControl { session_id },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut first_stream),
-        ServerMessage::ControlGranted { .. }
-    ));
     condr_core::protocol::write_message(
         &mut first_stream,
         &ClientMessage::Subscribe {
@@ -183,19 +174,8 @@ fn local_server_helper() {
     let workspace_id = restarted_session.workspaces()[0].id();
     let mut restarted_stream = restarted.into_stream();
     restarted_stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    condr_core::protocol::write_message(
-        &mut restarted_stream,
-        &ClientMessage::AcquireControl {
-            session_id: restarted_session_id,
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        read_server(&mut restarted_stream),
-        ServerMessage::ControlGranted { .. }
-    ));
     condr_core::protocol::write_message(
         &mut restarted_stream,
         &ClientMessage::Subscribe {

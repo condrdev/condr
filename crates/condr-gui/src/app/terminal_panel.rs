@@ -107,7 +107,7 @@ impl Render for TerminalPanel {
             terminal,
             active,
             solo,
-            controlling,
+            can_mutate,
             marked_text,
             selection,
             hovered_link,
@@ -151,9 +151,8 @@ impl Render for TerminalPanel {
                     connection
                         .and_then(|connection| connection.agents.get(&self.pane_id))
                         .map(|agent| agent.kind),
-                    connection.is_some_and(|connection| {
-                        connection.controlling && connection.attention.contains(&self.pane_id)
-                    }),
+                    connection
+                        .is_some_and(|connection| connection.attention.contains(&self.pane_id)),
                     zoomed,
                     connection.is_some_and(|connection| {
                         connection.pasting_images.contains(&self.pane_id)
@@ -300,18 +299,18 @@ impl Render for TerminalPanel {
                 let _ = menu_owner.update(cx, |app, cx| {
                     app.set_target_pane(key, pane_id, cx);
                 });
-                menu.menu_with_enable("Split Right", Box::new(SplitRight), controlling)
-                    .menu_with_enable("Split Down", Box::new(SplitDown), controlling)
+                menu.menu_with_enable("Split Right", Box::new(SplitRight), can_mutate)
+                    .menu_with_enable("Split Down", Box::new(SplitDown), can_mutate)
                     .separator()
                     .submenu("Swap", window, cx, move |menu, _, _| {
-                        menu.menu_with_enable("Left", Box::new(SwapLeft), controlling)
-                            .menu_with_enable("Right", Box::new(SwapRight), controlling)
-                            .menu_with_enable("Up", Box::new(SwapUp), controlling)
-                            .menu_with_enable("Down", Box::new(SwapDown), controlling)
+                        menu.menu_with_enable("Left", Box::new(SwapLeft), can_mutate)
+                            .menu_with_enable("Right", Box::new(SwapRight), can_mutate)
+                            .menu_with_enable("Up", Box::new(SwapUp), can_mutate)
+                            .menu_with_enable("Down", Box::new(SwapDown), can_mutate)
                     })
                     .separator()
-                    .menu_with_enable("Toggle Zoom", Box::new(ToggleZoom), controlling)
-                    .menu_with_enable("Close Pane", Box::new(ClosePane), controlling)
+                    .menu_with_enable("Toggle Zoom", Box::new(ToggleZoom), can_mutate)
+                    .menu_with_enable("Close Pane", Box::new(ClosePane), can_mutate)
             })
             .anchor(Anchor::TopRight);
         // The zoom state is otherwise invisible: a zoomed Pane looks like a one-Pane Tab.
@@ -329,7 +328,7 @@ impl Render for TerminalPanel {
             .tooltip_with_action(zoom_label, &ToggleZoom, Some(SHORTCUT_CONTEXT))
             .accessibility_label(zoom_label)
             .debug_selector(move || format!("terminal-pane-zoom-{}", pane_id.as_u64()))
-            .disabled(!controlling)
+            .disabled(!can_mutate)
             .on_click(move |_, _, cx| {
                 let _ = zoom_owner.update(cx, |app, cx| {
                     app.set_target_pane(key, pane_id, cx);
@@ -380,7 +379,7 @@ impl Render for TerminalPanel {
                     })
                     // Dragging the header rearranges the Tab (see `DraggedPane`). A zoomed
                     // Pane has nothing beside it to land on.
-                    .when(controlling && !zoomed, |this| {
+                    .when(can_mutate && !zoomed, |this| {
                         let name = pane_title.clone();
                         this.on_drag(
                             AnyDrag::new(super::dock::DraggedPane { key, pane_id }),

@@ -1522,6 +1522,13 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         "a selected but unfocused terminal must retain bell attention"
     );
 
+    // A size sent while another window sized the terminals was dropped by the Server.
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.pending_sizes
+                .insert((1, pane_id), TerminalSize::new(1, 2));
+        });
+    });
     window.update(|window, cx| terminal_focus.focus(window, cx));
     window.update(|window, cx| _ = window.draw(cx));
     window.run_until_parked();
@@ -1538,6 +1545,11 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .contains(&pane_id)),
         "successfully reporting terminal focus must clear bell attention"
     );
+    assert_ne!(
+        window.read(|app| view.read(app).pending_sizes.get(&(1, pane_id)).copied()),
+        Some(TerminalSize::new(1, 2)),
+        "reporting focus makes this window size the terminals, so it measures again"
+    );
 
     window.update(|window, cx| app_focus.focus(window, cx));
     window.update(|window, cx| _ = window.draw(cx));
@@ -1552,47 +1564,6 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .attention
             .contains(&pane_id)),
         "the ordered focus clear must cancel a delayed pre-focus bell"
-    );
-    window.update(|_, cx| {
-        view.update(cx, |this, _| {
-            this.connection_mut(1).unwrap().controlling = false;
-        });
-    });
-    send_attention(window, true);
-    assert!(
-        window.read(|app| view
-            .read(app)
-            .connection(1)
-            .unwrap()
-            .attention
-            .contains(&pane_id)),
-        "attention is Server state and is kept without control; the pane header and \
-         sidebar gate on `controlling` instead (3c92fb8)"
-    );
-
-    window.update(|window, cx| terminal_focus.focus(window, cx));
-    window.update(|window, cx| _ = window.draw(cx));
-    window.run_until_parked();
-    assert_eq!(
-        window.read(|app| view.read(app).terminal_input.focused),
-        Some((1, pane_id))
-    );
-    assert_eq!(
-        window.read(|app| view.read(app).terminal_input.reported_focus),
-        None,
-        "a viewer tracks local focus even though it cannot report Focus(true)"
-    );
-
-    window.update(|window, cx| {
-        view.update(cx, |this, cx| {
-            this.connection_mut(1).unwrap().controlling = true;
-            this.sync_terminal_focus(window, cx);
-        });
-    });
-    assert_eq!(
-        window.read(|app| view.read(app).terminal_input.reported_focus),
-        Some((1, pane_id)),
-        "control reacquisition must report existing local focus without a new focus event"
     );
 }
 

@@ -74,26 +74,20 @@ pub(super) struct ServerConnection {
     pub(super) io: Option<ClientIo>,
     pub(super) cancellation: ConnectionCancellation,
     pub(super) connect_generation: u64,
-    pub(super) controlling: bool,
     pub(super) subscribed: bool,
     pub(super) subscription_pending: bool,
-    pub(super) control_retry_attempts: u8,
-    pub(super) control_retry_scheduled: bool,
     pub(super) bootstrap_resync_session_id: Option<SessionId>,
-    /// Set by a subscription rejection: the next Bootstrap must re-acquire control and drop
-    /// pending layout projections, because responses may have been lost to writer lag.
-    pub(super) reacquire_after_bootstrap: bool,
+    /// Set by a subscription rejection: the next Bootstrap must drop pending layout
+    /// projections, because responses may have been lost to writer lag.
+    pub(super) recover_after_bootstrap: bool,
     /// When a message from a newer protocol last forced a Bootstrap. A second within
     /// [`UNKNOWN_MESSAGE_WINDOW`] disconnects rather than loop (ADR 0028).
     pub(super) unknown_message_at: Option<Instant>,
     /// Why the connection is not up: the connect attempt's or the disconnect's reason.
-    /// Only that; a refused command is a toast and a denied control is `control_denied`.
+    /// Only that; a refused command is a toast.
     pub(super) error: Option<String>,
     /// The typed reason behind `error` when the Server refused the handshake.
     pub(super) refusal: Option<condr_core::protocol::Refusal>,
-    /// The Server's reason for not granting this Client control, while it stands. Not an
-    /// error: the Session is still viewable, and the busy case retries on its own.
-    pub(super) control_denied: Option<(ControlDenialReason, String)>,
     /// Set while the GUI reconnects on its own, after a restart it asked for or a
     /// connection that ended without it; cleared on success or at the deadline.
     pub(super) reconnect_deadline: Option<Instant>,
@@ -107,8 +101,9 @@ pub(super) struct ServerConnection {
 pub(super) struct BootstrapApplication {
     pub(super) rebuild: bool,
     pub(super) resubscribe: bool,
-    /// Re-send AcquireControl and drop pending layout projections.
-    pub(super) reacquire_control: bool,
+    /// A new authority or a rejected subscription: drop pending layout projections and
+    /// subscribe afresh.
+    pub(super) recovery: bool,
     /// A different Server/runtime/Session: cached GUI state for the connection is stale.
     pub(super) authority_changed: bool,
 }
@@ -201,17 +196,13 @@ impl ServerConnection {
             io: None,
             cancellation: ConnectionCancellation::default(),
             connect_generation: 0,
-            controlling: false,
             subscribed: false,
             subscription_pending: false,
-            control_retry_attempts: 0,
-            control_retry_scheduled: false,
             bootstrap_resync_session_id: None,
-            reacquire_after_bootstrap: false,
+            recover_after_bootstrap: false,
             unknown_message_at: None,
             error: None,
             refusal: None,
-            control_denied: None,
             disconnected_at: None,
             wake_probe: None,
             next_layout_request_id: 1,
@@ -219,20 +210,16 @@ impl ServerConnection {
     }
 
     pub(super) fn can_mutate(&self) -> bool {
-        self.is_synchronized() && self.controlling
+        self.is_synchronized()
     }
 
     pub(super) fn reset_sync_state(&mut self) {
-        self.controlling = false;
-        self.control_denied = None;
         self.attention.clear();
         self.pasting_images.clear();
         self.subscribed = false;
         self.subscription_pending = false;
-        self.control_retry_attempts = 0;
-        self.control_retry_scheduled = false;
         self.bootstrap_resync_session_id = None;
-        self.reacquire_after_bootstrap = false;
+        self.recover_after_bootstrap = false;
         self.wake_probe = None;
     }
 
@@ -352,13 +339,10 @@ impl ServerConnection {
             || self.runtime_epoch != Some(bootstrap.runtime_epoch)
             || self.session_id != Some(bootstrap.session_id);
         let resubscribe = self.bootstrap_resync_session_id.is_some() && !self.subscribed;
-        let rejected_recovery = std::mem::take(&mut self.reacquire_after_bootstrap);
+        let rejected_recovery = std::mem::take(&mut self.recover_after_bootstrap);
         if authority_changed {
-            self.controlling = false;
             self.subscribed = false;
             self.subscription_pending = false;
-            self.control_retry_attempts = 0;
-            self.control_retry_scheduled = false;
             self.agent_trackers.clear();
             self.attention.clear();
         }
@@ -367,8 +351,7 @@ impl ServerConnection {
         self.session_id = Some(bootstrap.session_id);
         self.sequence = bootstrap.sequence;
         self.replace_session(session);
-        // Server-authoritative; the Bootstrap usually lands before ControlGranted, so keep it
-        // regardless of `controlling` and let presentation gate on control instead.
+        // Server-authoritative, like the rest of the Bootstrap.
         self.attention = bootstrap
             .terminals
             .iter()
@@ -414,7 +397,7 @@ impl ServerConnection {
         Ok(BootstrapApplication {
             rebuild: previous_layout != self.dock_projection(),
             resubscribe: resubscribe || authority_changed,
-            reacquire_control: authority_changed || rejected_recovery,
+            recovery: authority_changed || rejected_recovery,
             authority_changed,
         })
     }
@@ -585,14 +568,14 @@ impl ServerConnection {
         server_id: ServerId,
         authoritative_session_id: SessionId,
     ) -> bool {
-        // Writer overflow may already have discarded a queued ControlGranted or LayoutApplied,
+        // Writer overflow may already have discarded a queued LayoutApplied,
         // so the rejection is actionable even while a visual-gap snapshot is in flight.
         if self.server_id != Some(server_id) {
             return false;
         }
         self.subscription_pending = false;
         self.subscribed = false;
-        self.reacquire_after_bootstrap = true;
+        self.recover_after_bootstrap = true;
         self.request_snapshot_for(authoritative_session_id);
         true
     }

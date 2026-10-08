@@ -183,7 +183,7 @@ impl EndpointStream {
         }
     }
 
-    pub fn set_handshake_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         match self {
             Self::Local(stream) | Self::Tunnel(stream) => {
                 use interprocess::local_socket::traits::Stream as _;
@@ -194,7 +194,7 @@ impl EndpointStream {
                 }
             }
             Self::Tcp(stream) => stream.socket().set_read_timeout(timeout),
-            Self::Ssh(stream) => stream.set_handshake_timeout(timeout),
+            Self::Ssh(stream) => stream.set_read_timeout(timeout),
             Self::P2p(stream) => {
                 stream.set_read_timeout(timeout);
                 Ok(())

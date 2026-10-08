@@ -449,7 +449,6 @@ fn failed_managed_worktree_removal_restarts_its_live_terminals() {
     approve_external_layout(&mut state, &mut prepared).unwrap();
     assert!(!state.terminals.contains_key(&pane_id));
     assert!(!state.terminal_instances.contains_key(&pane_id));
-    state.active_controller = Some(1);
     apply_terminal_notices(
         &mut state,
         pane_id,
@@ -523,7 +522,6 @@ fn stopping_server_rolls_back_a_prepared_worktree() {
 
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
     state.worktree_root = Some(temp.join("worktrees"));
-    state.active_controller = Some(7);
     let parent_workspace_id = state
         .session
         .create_workspace(repository.clone())
@@ -724,9 +722,8 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     let session_id = first_bootstrap.session_id;
     let mut first = first_connection.into_stream();
     first
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    acquire_control(&mut first, session_id);
     subscribe(&mut first, session_id, first_bootstrap.sequence);
     let mut first_terminal_views = std::collections::HashMap::new();
     condr_core::protocol::write_message(
@@ -791,9 +788,8 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
 
     let mut second = second_connection.into_stream();
     second
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    acquire_control(&mut second, session_id);
     condr_core::protocol::write_message(
         &mut second,
         &ClientMessage::Subscribe {

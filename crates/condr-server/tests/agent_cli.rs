@@ -535,7 +535,7 @@ fn blocked_timeout_exit_and_disconnect_do_not_report_false_readiness() {
     let overview = client.overview().clone();
     let mut stream = client.into_stream();
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     write_message(
         &mut stream,

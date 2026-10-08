@@ -115,7 +115,7 @@ fn cold_split_workspace_uses_the_real_dock_size_before_first_paint() {
 }
 
 #[test]
-fn readonly_dock_resize_restores_the_authoritative_projection() {
+fn unsynchronized_dock_resize_restores_the_authoritative_projection() {
     let _serial_guard = acquire_visual_test_lock();
     let workspace_root = TestDirectory::new("readonly-dock-resize");
     let mut cx = TestAppContext::single();
@@ -188,7 +188,8 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
             let available_size = surface.area.read(cx).bounds().size;
             let area = surface.area.clone();
             let dock_layout = this.build_dock_layout(1, &local_layout, available_size, cx);
-            this.connection_mut(1).unwrap().controlling = false;
+            // Mid-resync: nothing may be sent against a Session the GUI is re-reading.
+            this.connection_mut(1).unwrap().subscribed = false;
             area.update(cx, |dock, cx| {
                 dock.set_center(dock_layout, window, cx);
             });
@@ -212,7 +213,7 @@ fn readonly_dock_resize_restores_the_authoritative_projection() {
     assert_eq!(
         window.read(|app| view.read(app).connection(1).unwrap().next_layout_request_id),
         next_request_id,
-        "a read-only Dock resize must not send a Layout command"
+        "an unsynchronized Dock resize must not send a Layout command"
     );
     assert_eq!(
         window.read(|app| view.read(app).dock_rebuild_count),

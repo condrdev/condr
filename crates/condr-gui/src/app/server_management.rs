@@ -234,65 +234,6 @@ impl Condr {
         self.connection(connection_key)?.terminals.get(&pane_id)
     }
 
-    pub(super) fn acquire_and_subscribe(&mut self, key: ConnectionKey) {
-        let Some(connection) = self.connection_mut(key) else {
-            return;
-        };
-        let Some(session_id) = connection.session_id else {
-            return;
-        };
-        connection.send(ClientMessage::AcquireControl { session_id });
-        connection.subscribe();
-    }
-
-    pub(super) fn schedule_control_retry(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
-        let Some(connection) = self.connection_mut(key) else {
-            return;
-        };
-        if connection.status != ConnectionStatus::Connected
-            || connection.controlling
-            || connection.control_retry_scheduled
-        {
-            return;
-        }
-        let Some(session_id) = connection.session_id else {
-            return;
-        };
-        let generation = connection.connect_generation;
-        connection.control_retry_scheduled = true;
-        let delay = CONTROL_RETRY_DELAY
-            .saturating_mul(1 << connection.control_retry_attempts.min(8))
-            .min(MAX_CONTROL_RETRY_DELAY);
-        connection.control_retry_attempts = connection.control_retry_attempts.saturating_add(1);
-
-        cx.spawn(async move |owner, cx| {
-            cx.background_executor().timer(delay).await;
-            owner
-                .update(cx, |this, cx| {
-                    let Some(connection) = this.connection_mut(key) else {
-                        return;
-                    };
-                    if connection.connect_generation != generation {
-                        return;
-                    }
-                    connection.control_retry_scheduled = false;
-                    if connection.status == ConnectionStatus::Connected
-                        && !connection.controlling
-                        && connection.session_id == Some(session_id)
-                        && matches!(
-                            connection.control_denied,
-                            Some((ControlDenialReason::Busy, _))
-                        )
-                    {
-                        connection.send(ClientMessage::AcquireControl { session_id });
-                        cx.notify();
-                    }
-                })
-                .ok();
-        })
-        .detach();
-    }
-
     pub(super) fn start_connect(&mut self, key: ConnectionKey) -> bool {
         let needs_active_rebuild = self.clear_pending_projections_for(key);
         let Some(connection) = self.connection_mut(key) else {
@@ -461,7 +402,9 @@ impl Condr {
                 // event loop. The state file's memory of it applies here (ADR 0023).
                 self.restore_server_state(key, cx);
             }
-            self.acquire_and_subscribe(key);
+            if let Some(connection) = self.connection_mut(key) {
+                connection.subscribe();
+            }
             self.refresh_target_pane(key);
             if key == self.active_connection {
                 self.rebuild_dock(window, cx);

@@ -1,6 +1,5 @@
 #[cfg(target_os = "linux")]
 mod clipboard_image;
-mod control;
 mod hooks;
 // Layout tests run only where CI exercises the Server's worktree and PTY paths.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -12,6 +11,7 @@ mod protocol;
 mod shutdown;
 mod subscriptions;
 mod unit;
+mod viewers;
 
 use super::*;
 use crate::test_support::unique_suffix;
@@ -153,15 +153,6 @@ fn connect_and_bootstrap(endpoint: &Endpoint) -> EndpointStream {
     ClientConnection::connect(endpoint, "test")
         .unwrap()
         .into_stream()
-}
-
-fn acquire_control(stream: &mut EndpointStream, session_id: SessionId) {
-    condr_core::protocol::write_message(stream, &ClientMessage::AcquireControl { session_id })
-        .unwrap();
-    assert!(matches!(
-        condr_core::protocol::read_message::<_, ServerMessage>(stream).unwrap(),
-        ServerMessage::ControlGranted { .. }
-    ));
 }
 
 fn subscribe(stream: &mut EndpointStream, session_id: SessionId, after_sequence: u64) {

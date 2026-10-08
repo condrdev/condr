@@ -26,12 +26,6 @@ pub enum ClientMessage {
         server_id: ServerId,
         nonce: u64,
     },
-    AcquireControl {
-        session_id: SessionId,
-    },
-    ReleaseControl {
-        session_id: SessionId,
-    },
     Layout {
         server_id: ServerId,
         session_id: SessionId,
@@ -46,8 +40,7 @@ pub enum ClientMessage {
     },
     /// A clipboard image from the Client's machine for an Agent in a remote Pane (ADR
     /// 0012). The Server stages it in a private file and pastes that path into the Pane;
-    /// nothing of it enters Session state. Same authority as `Terminal` text: no Session
-    /// control needed. The only message allowed `MAX_IMAGE_FRAME_SIZE`.
+    /// nothing of it enters Session state. The only message allowed `MAX_IMAGE_FRAME_SIZE`.
     PasteImage {
         server_id: ServerId,
         session_id: SessionId,
@@ -56,7 +49,7 @@ pub enum ClientMessage {
         bytes: Vec<u8>,
     },
     /// The last `lines` rows of a Pane as plain text, scrollback included: how the CLI
-    /// and agents read a terminal. No Session control needed.
+    /// and agents read a terminal.
     ReadPane {
         server_id: ServerId,
         session_id: SessionId,
@@ -64,8 +57,8 @@ pub enum ClientMessage {
         lines: u32,
     },
     /// One file's working-tree diff against `HEAD` (ADR 0017), answered with
-    /// [`ServerMessage::GitDiff`]. No Session control needed. `against` is fixed to `HEAD`
-    /// today and reserved for the branch-against-base view.
+    /// [`ServerMessage::GitDiff`]. `against` is fixed to `HEAD` today and reserved for
+    /// the branch-against-base view.
     GitDiff {
         server_id: ServerId,
         session_id: SessionId,
@@ -76,7 +69,7 @@ pub enum ClientMessage {
         against: DiffBase,
     },
     /// One level of a Workspace's directory tree for the Files sidebar (ADR 0018),
-    /// answered with [`ServerMessage::Directory`]. No Session control needed.
+    /// answered with [`ServerMessage::Directory`].
     ListDirectory {
         server_id: ServerId,
         session_id: SessionId,
@@ -86,7 +79,7 @@ pub enum ClientMessage {
         path: RelativePathBuf,
     },
     /// One file's content for the Preview Tab (ADR 0018), answered with
-    /// [`ServerMessage::FileContent`]. No Session control needed.
+    /// [`ServerMessage::FileContent`].
     ReadFile {
         server_id: ServerId,
         session_id: SessionId,
@@ -97,7 +90,7 @@ pub enum ClientMessage {
     },
     /// The subdirectories of an absolute path on the Server's machine, or of its home
     /// directory when `path` is empty, for choosing a Root Directory; answered with
-    /// [`ServerMessage::BrowsedDirectory`]. No Session control needed.
+    /// [`ServerMessage::BrowsedDirectory`].
     BrowseDirectory {
         request_id: u64,
         path: PathBuf,
@@ -109,7 +102,6 @@ pub enum ClientMessage {
         command: AgentCommand,
     },
     /// Replaces the Server's shell preference; blank restores the system default.
-    /// Any client may do this, no Session control needed.
     SetServerSettings {
         server_id: ServerId,
         shell: String,
@@ -524,7 +516,7 @@ pub struct PaneTerminalSnapshot {
     pub exited: bool,
     /// The OSC 0/2 title the Terminal last reported, already sanitized by the Server.
     pub title: Option<String>,
-    /// Whether the active controller still needs to acknowledge a BEL from this Pane.
+    /// Whether a BEL from this Pane still waits for a Client to focus the Pane.
     pub attention: bool,
 }
 
@@ -619,7 +611,7 @@ pub enum SessionEvent {
         pane_id: PaneId,
         title: Option<String>,
     },
-    /// The active controller's ordered, coalesced BEL attention state for this Pane.
+    /// The ordered, coalesced BEL attention state for this Pane (ADR 0036).
     TerminalAttentionChanged {
         pane_id: PaneId,
         attention: bool,
@@ -671,16 +663,6 @@ impl ClientMessage {
     }
 }
 
-/// Why control was denied, independently of the display text.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ControlDenialReason {
-    /// Non-retryable, absent or unknown reasons. An older Server's untyped denial
-    /// is displayed without automatically retrying (ADR 0028).
-    Other,
-    /// Another Client holds control; retrying later may succeed.
-    Busy,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerMessage {
     Bootstrap(BootstrapHeader),
@@ -719,20 +701,6 @@ pub enum ServerMessage {
         server_id: ServerId,
         nonce: u64,
         sequence: u64,
-    },
-    ControlGranted {
-        server_id: ServerId,
-        session_id: SessionId,
-    },
-    ControlReleased {
-        server_id: ServerId,
-        session_id: SessionId,
-    },
-    ControlDenied {
-        server_id: ServerId,
-        session_id: SessionId,
-        cause: ControlDenialReason,
-        reason: String,
     },
     LayoutRejected {
         server_id: ServerId,
@@ -820,7 +788,7 @@ pub enum UnknownMessage {
     /// A terminal frame or chunk: the visual baseline is lost; one Bootstrap restores it.
     TerminalFrame,
     /// Anything else, possibly the reply something is waiting on: the stronger recovery
-    /// that also clears pending requests and reacquires control.
+    /// that also clears pending requests.
     Reply,
 }
 

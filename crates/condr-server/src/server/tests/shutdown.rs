@@ -7,7 +7,7 @@ fn stop_message_ends_server_when_the_requesting_client_is_not_reading() {
     let session_id = connection.bootstrap().unwrap().session_id;
     let mut stream = connection.into_stream();
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     subscribe(&mut stream, session_id, 0);
 
@@ -52,15 +52,14 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
     let bootstrap = connection.bootstrap().unwrap().clone();
     let server_id = bootstrap.server_id;
     let session_id = bootstrap.session_id;
-    let mut controller = connection.into_stream();
-    controller
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+    let mut requester = connection.into_stream();
+    requester
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
 
-    acquire_control(&mut controller, session_id);
-    subscribe(&mut controller, session_id, bootstrap.sequence);
+    subscribe(&mut requester, session_id, bootstrap.sequence);
     condr_core::protocol::write_message(
-        &mut controller,
+        &mut requester,
         &ClientMessage::Layout {
             server_id,
             session_id,
@@ -72,7 +71,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
         },
     )
     .unwrap();
-    let message = wait_for_message(&mut controller, |message| {
+    let message = wait_for_message(&mut requester, |message| {
         matches!(
             message,
             ServerMessage::Event {
@@ -84,7 +83,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
     let ServerMessage::Event { sequence, .. } = message else {
         unreachable!("predicate only accepts LayoutChanged events");
     };
-    assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
+    assert_layout_applied(&mut requester, server_id, session_id, 1, sequence);
     let pane_id = handle.state.lock().unwrap().session.workspaces()[0].tabs()[0]
         .focused_pane()
         .unwrap()
@@ -93,11 +92,11 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
     let stopper_connection = ClientConnection::connect(&endpoint, "blocked-resize-stop").unwrap();
     let mut stopper = stopper_connection.into_stream();
     stopper
-        .set_handshake_timeout(Some(Duration::from_secs(2)))
+        .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
 
     send_terminal(
-        &mut controller,
+        &mut requester,
         server_id,
         session_id,
         pane_id,
@@ -106,16 +105,16 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
         ),
     );
     let mut views = std::collections::HashMap::new();
-    wait_for_terminal_text(&mut controller, &mut views, pane_id, "condr-writer-blocked");
+    wait_for_terminal_text(&mut requester, &mut views, pane_id, "condr-writer-blocked");
     send_terminal(
-        &mut controller,
+        &mut requester,
         server_id,
         session_id,
         pane_id,
         TerminalCommand::Text("x".repeat(1024 * 1024)),
     );
     send_terminal(
-        &mut controller,
+        &mut requester,
         server_id,
         session_id,
         pane_id,
@@ -126,7 +125,7 @@ fn stop_server_cancels_resize_queued_behind_pty_backpressure() {
     condr_core::protocol::write_message(&mut stopper, &ClientMessage::StopServer { server_id })
         .unwrap();
     assert_eq!(read_server(&mut stopper), ServerMessage::ServerStopping);
-    drop(controller);
+    drop(requester);
     drop(stopper);
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -147,7 +146,7 @@ struct InflightWorktree {
     handle: ServerHandle,
     endpoint: Endpoint,
     server_thread: Option<thread::JoinHandle<io::Result<()>>>,
-    controller: Option<EndpointStream>,
+    requester: Option<EndpointStream>,
     server_id: ServerId,
     session_id: SessionId,
     parent_workspace_id: WorkspaceId,
@@ -214,13 +213,12 @@ fn inflight_worktree() -> InflightWorktree {
     handle.state.lock().unwrap().worktree_root = Some(temp.join("worktrees"));
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
-    let mut controller = connect_and_bootstrap(&endpoint);
-    controller
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+    let mut requester = connect_and_bootstrap(&endpoint);
+    requester
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    acquire_control(&mut controller, session_id);
     condr_core::protocol::write_message(
-        &mut controller,
+        &mut requester,
         &ClientMessage::Layout {
             server_id,
             session_id,
@@ -234,7 +232,7 @@ fn inflight_worktree() -> InflightWorktree {
     .unwrap();
     // The applied sequence is the LayoutChanged event's own; a Git or agent probe may
     // already have moved the Server's sequence on by the time this thread looks.
-    let message = wait_for_message(&mut controller, |message| {
+    let message = wait_for_message(&mut requester, |message| {
         matches!(
             message,
             ServerMessage::Event {
@@ -246,10 +244,10 @@ fn inflight_worktree() -> InflightWorktree {
     let ServerMessage::Event { sequence, .. } = message else {
         unreachable!("predicate only accepts LayoutChanged events");
     };
-    assert_layout_applied(&mut controller, server_id, session_id, 1, sequence);
+    assert_layout_applied(&mut requester, server_id, session_id, 1, sequence);
     let parent_workspace_id = handle.state.lock().unwrap().session.workspaces()[0].id();
     condr_core::protocol::write_message(
-        &mut controller,
+        &mut requester,
         &ClientMessage::Layout {
             server_id,
             session_id,
@@ -285,7 +283,7 @@ fn inflight_worktree() -> InflightWorktree {
         handle,
         endpoint,
         server_thread: Some(thread),
-        controller: Some(controller),
+        requester: Some(requester),
         server_id,
         session_id,
         parent_workspace_id,
@@ -298,14 +296,14 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
     let mut test = inflight_worktree();
     // Stop on the same connection that owns the checkout: it must not sit behind Git.
     condr_core::protocol::write_message(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         &ClientMessage::StopServer {
             server_id: test.server_id,
         },
     )
     .unwrap();
     assert_eq!(
-        read_server(test.controller.as_mut().unwrap()),
+        read_server(test.requester.as_mut().unwrap()),
         ServerMessage::ServerStopping
     );
     let stop_signalled = (0..100).any(|_| {
@@ -339,7 +337,7 @@ fn stop_message_waits_for_an_inflight_worktree_to_roll_back() {
 fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
     let mut test = inflight_worktree();
     condr_core::protocol::write_message(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         &ClientMessage::Ping {
             server_id: test.server_id,
             nonce: 41,
@@ -347,7 +345,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
     )
     .unwrap();
     assert!(matches!(
-        read_server(test.controller.as_mut().unwrap()),
+        read_server(test.requester.as_mut().unwrap()),
         ServerMessage::Pong { nonce: 41, .. }
     ));
 
@@ -361,18 +359,18 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
             state.sequence,
         )
     };
-    subscribe(test.controller.as_mut().unwrap(), test.session_id, sequence);
+    subscribe(test.requester.as_mut().unwrap(), test.session_id, sequence);
     let mut views = std::collections::HashMap::new();
     // Start consuming the Full baseline before any test helper skips visual messages.
     send_terminal(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         test.server_id,
         test.session_id,
         pane_id,
         TerminalCommand::Text("echo condr-checkout-responsive\r".into()),
     );
     wait_for_terminal_text(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         &mut views,
         pane_id,
         "condr-checkout-responsive",
@@ -394,7 +392,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
         ),
     ] {
         condr_core::protocol::write_message(
-            test.controller.as_mut().unwrap(),
+            test.requester.as_mut().unwrap(),
             &ClientMessage::Layout {
                 server_id: test.server_id,
                 session_id: test.session_id,
@@ -403,7 +401,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
             },
         )
         .unwrap();
-        let response = wait_for_message(test.controller.as_mut().unwrap(), |message| {
+        let response = wait_for_message(test.requester.as_mut().unwrap(), |message| {
             matches!(message, ServerMessage::LayoutRejected { .. })
         });
         assert!(
@@ -418,7 +416,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
     );
 
     std::fs::write(&test.release, "release\n").unwrap();
-    let event = wait_for_message(test.controller.as_mut().unwrap(), |message| {
+    let event = wait_for_message(test.requester.as_mut().unwrap(), |message| {
         matches!(
             message,
             ServerMessage::Event {
@@ -431,7 +429,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
         unreachable!()
     };
     assert_layout_applied(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         test.server_id,
         test.session_id,
         2,
@@ -439,7 +437,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
     );
     // Receiving success releases the connection's slot; no retry or extra Ping needed.
     condr_core::protocol::write_message(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         &ClientMessage::Layout {
             server_id: test.server_id,
             session_id: test.session_id,
@@ -451,7 +449,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
         },
     )
     .unwrap();
-    let event = wait_for_message(test.controller.as_mut().unwrap(), |message| {
+    let event = wait_for_message(test.requester.as_mut().unwrap(), |message| {
         matches!(
             message,
             ServerMessage::Event {
@@ -464,7 +462,7 @@ fn inflight_worktree_keeps_input_and_ping_responsive_and_rejects_more_layout() {
         unreachable!()
     };
     assert_layout_applied(
-        test.controller.as_mut().unwrap(),
+        test.requester.as_mut().unwrap(),
         test.server_id,
         test.session_id,
         5,
@@ -486,7 +484,7 @@ fn failed_worktree_terminal_start_rolls_back_checkout_and_registration() {
         .to_string_lossy()
         .into_owned();
     std::fs::write(&test.release, "release\n").unwrap();
-    let response = read_layout_response(test.controller.as_mut().unwrap());
+    let response = read_layout_response(test.requester.as_mut().unwrap());
     assert!(matches!(
         response,
         ServerMessage::LayoutRejected { request_id: 2, reason, .. }
@@ -510,30 +508,15 @@ fn failed_worktree_terminal_start_rolls_back_checkout_and_registration() {
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 #[test]
-fn disconnect_during_worktree_creation_releases_control_and_starts_its_terminal() {
+fn disconnect_during_worktree_creation_ends_the_connection_and_starts_its_terminal() {
     let mut test = inflight_worktree();
     // Local sockets close on drop; shutdown() only closes TCP/SSH/Peer-to-peer.
-    drop(test.controller.take());
+    drop(test.requester.take());
     let deadline = Instant::now() + Duration::from_secs(5);
-    while test
-        .handle
-        .state
-        .lock()
-        .unwrap()
-        .active_controller
-        .is_some()
-        && Instant::now() < deadline
-    {
+    while !test.handle.state.lock().unwrap().subscribers.is_empty() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
-    assert!(
-        test.handle
-            .state
-            .lock()
-            .unwrap()
-            .active_controller
-            .is_none()
-    );
+    assert!(test.handle.state.lock().unwrap().subscribers.is_empty());
     assert!(!test.release.exists());
     std::fs::write(&test.release, "release\n").unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -559,9 +542,8 @@ fn disconnect_during_worktree_creation_releases_control_and_starts_its_terminal(
         .collect();
     let mut observer = connection.into_stream();
     observer
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    acquire_control(&mut observer, test.session_id);
     subscribe(&mut observer, test.session_id, sequence);
     send_terminal(
         &mut observer,

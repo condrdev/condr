@@ -256,13 +256,10 @@ impl Condr {
         else {
             return false;
         };
-        let read_only = matches!(&command, TerminalCommand::Copy { .. });
-        let synchronizes_focus = matches!(&command, TerminalCommand::Focus(_));
-        if ((synchronizes_focus && connection.controlling)
-            || (read_only && connection.is_synchronized())
-            || connection.can_mutate())
-            && (synchronizes_focus
-                || !connection
+        // Focus is bookkeeping the Server must hear even for an exited Pane or mid-resync.
+        if matches!(&command, TerminalCommand::Focus(_))
+            || (connection.can_mutate()
+                && !connection
                     .terminals
                     .get(&pane_id)
                     .is_some_and(|terminal| terminal.exited))

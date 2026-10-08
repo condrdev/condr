@@ -215,7 +215,6 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
 #[test]
 fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
-    state.active_controller = Some(1);
     state
         .session
         .create_workspace(std::env::temp_dir())
@@ -282,7 +281,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     assert_eq!(events(&state).len(), 2, "pending bells stay coalesced");
 
     state.exited_terminals.insert(pane_id);
-    state.record_terminal_focus(pane_id, true);
+    state.record_terminal_focus(pane_id, 1, true);
     assert_eq!(
         events(&state).last(),
         Some(&SessionEvent::TerminalAttentionChanged {
@@ -301,7 +300,7 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
         },
     );
     assert_eq!(events(&state).len(), 3, "focused panes need no attention");
-    state.record_terminal_focus(pane_id, false);
+    state.record_terminal_focus(pane_id, 1, false);
     apply_terminal_notices(
         &mut state,
         pane_id,
@@ -312,46 +311,27 @@ fn terminal_notices_publish_title_changes_once_and_collapse_bells() {
     );
     assert_eq!(events(&state).len(), 4, "focus rearms the bell marker");
 
-    state.clear_controller_terminal_state();
-    state.active_controller = None;
+    // A leaving Client takes nothing from the others: the bell waits for a focus.
+    state.release_client_terminal_state(1);
+    assert_eq!(events(&state).len(), 4, "leaving acknowledges no bell");
+    state.record_terminal_focus(pane_id, 1, true);
     assert_eq!(
-        events(&state)
-            .into_iter()
-            .filter(|event| matches!(event, SessionEvent::TerminalAttentionChanged { .. }))
-            .collect::<Vec<_>>(),
-        vec![
-            SessionEvent::TerminalAttentionChanged {
-                pane_id,
-                attention: true,
-            },
-            SessionEvent::TerminalAttentionChanged {
-                pane_id,
-                attention: false,
-            },
-            SessionEvent::TerminalAttentionChanged {
-                pane_id,
-                attention: true,
-            },
-            SessionEvent::TerminalAttentionChanged {
-                pane_id,
-                attention: false,
-            },
-        ],
-        "controller handoff replays every attention marker with a later clear"
+        events(&state).last(),
+        Some(&SessionEvent::TerminalAttentionChanged {
+            pane_id,
+            attention: false,
+        })
     );
-    apply_terminal_notices(
-        &mut state,
-        pane_id,
-        TerminalNoticeBatch {
-            bells: 1,
-            ..TerminalNoticeBatch::default()
-        },
-    );
-    assert_eq!(
-        events(&state).len(),
-        5,
-        "BELs without an active controller do not leave stale attention"
-    );
+
+    // Focus goes to whoever reports it last; the previous holder's unfocus is stale.
+    assert!(state.record_terminal_focus(pane_id, 2, true));
+    assert!(!state.record_terminal_focus(pane_id, 1, false));
+    assert_eq!(state.focused_terminal, Some((pane_id, 2)));
+    state.release_client_terminal_state(1);
+    assert_eq!(state.focused_terminal, Some((pane_id, 2)));
+    state.release_client_terminal_state(2);
+    assert_eq!(state.focused_terminal, None);
+    assert_eq!(events(&state).len(), 5);
 
     state.clear_terminal_title(pane_id);
     assert_eq!(

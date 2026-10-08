@@ -83,7 +83,6 @@ fn a_pasted_image_is_staged_privately_pasted_as_a_path_and_removed_with_its_clie
     let mut stream = connect_and_bootstrap(&endpoint);
     let server_id = handle.server_id();
     let session_id = handle.state.lock().unwrap().session_id;
-    acquire_control(&mut stream, session_id);
     subscribe(&mut stream, session_id, 0);
     let mut views = std::collections::HashMap::new();
     let pane_id = workspace_pane(&mut stream, &handle, &mut views);
@@ -301,9 +300,8 @@ fn a_large_image_crosses_the_noise_tcp_transport_and_dies_with_the_server() {
     let session_id = bootstrap.session_id;
     let mut stream = connection.into_stream();
     stream
-        .set_handshake_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    acquire_control(&mut stream, session_id);
     subscribe(&mut stream, session_id, bootstrap.sequence);
     let mut views = std::collections::HashMap::new();
     let pane_id = workspace_pane(&mut stream, &handle, &mut views);

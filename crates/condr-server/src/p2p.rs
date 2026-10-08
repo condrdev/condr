@@ -481,7 +481,7 @@ pub fn splice(local: EndpointStream, remote: P2pStream) -> io::Result<()> {
     let mut remote_writer = remote.try_clone()?;
     let upstream_done = Arc::clone(&done);
     let upstream = thread::spawn(move || {
-        let _ = local_reader.set_handshake_timeout(Some(Duration::from_millis(500)));
+        let _ = local_reader.set_read_timeout(Some(Duration::from_millis(500)));
         let mut buffer = [0; 16 * 1024];
         loop {
             match local_reader.read(&mut buffer) {
