@@ -1,7 +1,6 @@
 use super::sidebar::{CondrIconName, DragPreview, DropTarget, attach_drop_target, drop_index};
 use super::*;
 use gpui_fps::fps_monitor;
-use gpui_kit::component::Colorize as _;
 use gpui_kit::component::InteractiveElementExt as _;
 
 #[derive(Clone)]
@@ -173,17 +172,17 @@ impl Condr {
             };
             let hover_group: SharedString = format!("tab-hover-{}", tab_id.as_u64()).into();
             let close_owner = cx.weak_entity();
-            // The ghost Button's hovered (or, once selected, pressed) tint over the title
-            // bar, made opaque, so the chip matches the Tab under the pointer.
+            // The ghost Button's hovered (or, once selected, selected) background over the
+            // title bar, made opaque, so the chip matches the Tab under the pointer.
             let tint = {
                 let theme = cx.theme();
-                let amount = if tab_id == active_tab { 0.2 } else { 0.1 };
-                if theme.mode.is_dark() {
-                    theme.secondary.lighten(amount)
+                if tab_id == active_tab {
+                    theme.secondary_active
+                } else if theme.mode.is_dark() {
+                    theme.accent.opacity(0.5)
                 } else {
-                    theme.secondary.darken(amount)
+                    theme.accent
                 }
-                .opacity(0.8)
             };
             let close_chip = cx.theme().background.blend(tint);
             let close_radius = cx.theme().radius;
