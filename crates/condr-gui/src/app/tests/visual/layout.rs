@@ -1,6 +1,6 @@
 use super::*;
 
-fn agent_changed(
+pub(super) fn agent_changed(
     window: &mut VisualTestContext,
     view: &Entity<Condr>,
     pane_id: PaneId,

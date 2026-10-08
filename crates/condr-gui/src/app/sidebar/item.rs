@@ -187,6 +187,7 @@ impl CondrSidebarTreeItem {
             drop_indicator,
             on_drop_move,
         } = self;
+        let selected = active || children.iter().any(Self::subtree_active);
         let is_submenu = !children.is_empty();
         let is_open = open_state.as_ref().is_some_and(|state| *state.read(cx));
         let show_children = is_open && is_submenu;
@@ -372,9 +373,10 @@ impl CondrSidebarTreeItem {
                 this.text_color(cx.theme().muted_foreground)
             })
             .when(!disabled, |this| {
-                // A click on a selected parent toggles it, as a folder row does in a file
-                // tree; on any other row it only selects, so switching never folds.
-                let toggle_state = open_state.clone().filter(|_| active);
+                // A click on a parent that is selected, itself or through a child, toggles
+                // it, as a folder row does in a file tree; on any other parent it only
+                // selects, so switching never folds.
+                let toggle_state = open_state.clone().filter(|_| selected);
                 this.on_click(move |event, window, cx| {
                     if let Some(open_state) = &toggle_state {
                         open_state.update(cx, |open, cx| {
