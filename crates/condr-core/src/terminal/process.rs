@@ -236,17 +236,6 @@ pub(super) fn attempt_process_tree_shutdown(
     Err(io::Error::new(io::ErrorKind::TimedOut, message))
 }
 
-pub(super) fn shutdown_process_tree(
-    process: &ProcessProbe,
-    child: Option<&mut (dyn Child + Send + Sync)>,
-) -> io::Result<Option<ExitStatus>> {
-    let requires_child_status = child.is_some();
-    let mut child = child;
-    let mut state = ProcessShutdownState::default();
-    attempt_process_tree_shutdown(process, &mut child, requires_child_status, &mut state)?;
-    Ok(state.status)
-}
-
 pub(super) fn poll_child_exit(
     child: &mut Option<&mut (dyn Child + Send + Sync)>,
     status: &mut Option<ExitStatus>,

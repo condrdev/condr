@@ -16,14 +16,18 @@ impl ConnectionInstallError {
 }
 
 impl Condr {
-    pub(in crate::app) fn server_admin(&mut self, key: ConnectionKey, command: ServerAdminCommand) {
+    pub(in crate::app) fn server_admin(
+        &mut self,
+        key: ConnectionKey,
+        command: ServerAdminCommand,
+    ) -> bool {
         let Some(connection) = self.connection_mut(key) else {
-            return;
+            return false;
         };
         let Some(server_id) = connection.server_id else {
-            return;
+            return false;
         };
-        connection.send(ClientMessage::ServerAdmin { server_id, command });
+        connection.send(ClientMessage::ServerAdmin { server_id, command })
     }
 
     pub(in crate::app) fn request_server_admin(&mut self, key: ConnectionKey) {

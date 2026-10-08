@@ -150,6 +150,84 @@ fn worktree_association_survives_parent_workspace_close() {
     assert!(session.workspace(child).unwrap().worktree().is_some());
 }
 
+fn empty_repository(path: &Path, tree: Option<gix::ObjectId>) -> condr_core::GitRepository {
+    let repo = gix::init(path).unwrap();
+    let tree = tree.unwrap_or_else(|| {
+        repo.write_object(gix::objs::Tree::empty())
+            .unwrap()
+            .detach()
+    });
+    let author = gix::actor::SignatureRef {
+        name: "Condr Tests".into(),
+        email: "condr@example.invalid".into(),
+        time: "0 +0000",
+    };
+    repo.commit_as(
+        author,
+        author,
+        "HEAD",
+        "initial",
+        tree,
+        std::iter::empty::<gix::ObjectId>(),
+    )
+    .unwrap();
+    discover_repository(path).unwrap().unwrap()
+}
+
+#[test]
+fn failed_worktree_registration_removes_only_its_own_directories() {
+    let temp = TempDirectory::new("worktree-registration-failure");
+    let parent = empty_repository(&temp.path().join("repository"), None);
+    let (previous, _) = create_worktree(&parent, "existing", None).unwrap();
+    let root = temp.path().join("blocked");
+    fs::write(&root, "existing file").unwrap();
+    let registrations = parent.git_directory().join("worktrees");
+    let existing = previous.git_directory().to_path_buf();
+    fs::write(existing.join("keep"), "existing registration").unwrap();
+
+    // Repeating the failure must not accumulate partially registered worktrees.
+    for _ in 0..2 {
+        let error = create_worktree(&parent, "new-branch", Some(&root)).unwrap_err();
+        assert!(error.to_string().contains("failed to register worktree"));
+        assert_eq!(fs::read_to_string(&root).unwrap(), "existing file");
+        let entries = fs::read_dir(&registrations)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(entries, vec![existing.clone()]);
+        assert!(previous.root().exists());
+        assert_eq!(
+            fs::read_to_string(existing.join("keep")).unwrap(),
+            "existing registration"
+        );
+    }
+}
+
+#[test]
+fn failed_worktree_checkout_removes_its_registration_and_destination() {
+    let temp = TempDirectory::new("worktree-checkout-failure");
+    // A readable commit whose tree object is missing fails after registration succeeded.
+    let missing_tree =
+        gix::ObjectId::from_hex(b"1111111111111111111111111111111111111111").unwrap();
+    let parent = empty_repository(&temp.path().join("repository"), Some(missing_tree));
+    let root = temp.path().join("worktrees");
+    assert!(create_worktree(&parent, "new-branch", Some(&root)).is_err());
+    assert!(!worktree_destination(parent.root(), "new-branch", Some(&root)).exists());
+    assert_eq!(
+        fs::read_dir(parent.git_directory().join("worktrees"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(
+        gix::open(parent.root())
+            .unwrap()
+            .try_find_reference("refs/heads/new-branch")
+            .unwrap()
+            .is_some()
+    );
+}
+
 #[test]
 fn discovery_reports_detached_heads_and_fingerprints_branch_switches() {
     let temp = TempDirectory::new("git-head");

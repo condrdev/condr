@@ -553,7 +553,7 @@ fn stopping_server_rolls_back_a_prepared_worktree() {
 }
 
 #[test]
-fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
+fn git_branch_refresh_accepts_activity_from_any_workspace_pane_without_notify() {
     let temp = std::env::temp_dir().join(format!(
         "condr-server-branch-refresh-{}-{}",
         std::process::id(),
@@ -593,33 +593,49 @@ fn git_branch_refresh_accepts_activity_from_any_workspace_pane() {
     let git = discover_repository(&repository).unwrap();
     set_workspace_git(&mut state, workspace_id, git);
 
+    let state = Arc::new(Mutex::new(state));
+    {
+        let mut locked = state.lock().unwrap();
+        let watcher = GitWatcher::without_filesystem(Arc::downgrade(&state));
+        watcher.watch(workspace_id, repository.clone(), None);
+        locked.git_watcher = Some(watcher);
+    }
     run_git(&repository, &["checkout", "-b", "feature/second-pane"]);
-    state.workspace_git_scanned_at.insert(
-        workspace_id,
-        Instant::now()
-            .checked_sub(GIT_SCAN_INTERVAL)
-            .expect("test Instant supports subtraction"),
-    );
-    let activity = Instant::now();
-    let WorkspaceGitScan::Ready { workspace_id, root } =
-        reserve_workspace_git_scan(&mut state, second_pane, activity, Instant::now())
-    else {
-        panic!("second Pane activity should reserve its Workspace Git scan");
-    };
-    let next = WorkspaceGit::scan(&root, None).unwrap();
-    apply_workspace_git_refresh(&mut state, workspace_id, &root, next);
-    assert_eq!(
-        state
+    {
+        let locked = state.lock().unwrap();
+        let activity = Instant::now();
+        locked.request_terminal_git_refresh(second_pane, activity);
+        locked.request_terminal_git_refresh(first_pane, activity);
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let refreshed = state
+            .lock()
+            .unwrap()
             .workspace_git
             .get(&workspace_id)
-            .and_then(|git| git.repository.branch()),
-        Some("feature/second-pane")
+            .and_then(|git| git.repository.branch())
+            == Some("feature/second-pane");
+        if refreshed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "terminal activity must refresh without notify"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    let watcher = state.lock().unwrap().git_watcher.take().unwrap();
+    watcher.shutdown();
+    assert!(
+        !state
+            .lock()
+            .unwrap()
+            .events
+            .iter()
+            .any(|event| { matches!(event.event, SessionEvent::WorkspaceFilesChanged { .. }) }),
+        "terminal output alone must not invalidate Files/Preview"
     );
-    assert!(matches!(
-        reserve_workspace_git_scan(&mut state, first_pane, activity, Instant::now()),
-        WorkspaceGitScan::Covered
-    ));
-
     drop(state);
     let _ = std::fs::remove_dir_all(temp);
 }

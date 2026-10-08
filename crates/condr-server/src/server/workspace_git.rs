@@ -4,11 +4,14 @@
 
 use super::*;
 use condr_core::protocol::GitBaseChanges;
-use condr_core::{GitBase, GitChanges, GitError};
+use condr_core::{GitBase, GitChanges, GitError, GitFingerprint};
 use notify::Watcher as _;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Weak;
+
+#[cfg(test)]
+mod tests;
 
 /// One Workspace's Git state. Equality decides whether a refresh is worth an event.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,15 +33,14 @@ impl WorkspaceGit {
         }
     }
 
-    /// Everything the sidebar shows, computed in one pass. Runs unlocked: status walks the
-    /// whole work tree. `recorded` is the Workspace's recorded base branch.
+    #[cfg(test)]
     pub(super) fn scan(root: &Path, recorded: Option<&str>) -> Result<Option<Self>, GitError> {
         discover_repository(root)?
             .map(|repository| Self::from_repository(repository, recorded))
             .transpose()
     }
 
-    /// The change lists of a repository already discovered; the expensive half of `scan`.
+    /// Everything the sidebar shows, computed in one pass off the state lock.
     pub(super) fn from_repository(
         repository: GitRepository,
         recorded: Option<&str>,
@@ -126,9 +128,6 @@ pub(super) fn set_workspace_git(
     workspace_id: WorkspaceId,
     git: Option<GitRepository>,
 ) {
-    state
-        .workspace_git_scanned_at
-        .insert(workspace_id, Instant::now());
     let git = git.map(WorkspaceGit::discovered);
     let changed = state.workspace_git.get(&workspace_id) != git.as_ref();
     let root = state
@@ -207,11 +206,21 @@ impl RuntimeState {
             );
         }
     }
+
+    /// Every Pane in a Workspace nudges the same scheduler. The probe never does Git I/O.
+    pub(super) fn request_terminal_git_refresh(&self, pane_id: PaneId, activity: Instant) {
+        if let Some(workspace) = self.session.workspace_for_pane(pane_id)
+            && let Some(watcher) = &self.git_watcher
+        {
+            watcher.terminal_activity(workspace.id(), activity);
+        }
+    }
 }
 
 /// Events within this window fold into one recomputation: a save, a checkout or a build
 /// touches many files at once.
 const GIT_WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
+const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
 enum WatchMessage {
     Watch {
@@ -221,13 +230,19 @@ enum WatchMessage {
     },
     Retain(Vec<WorkspaceId>),
     Refresh(WorkspaceId),
+    TerminalActivity(WorkspaceId),
     Filesystem(notify::Result<notify::Event>),
+    Stop,
 }
 
 /// Watches every Workspace root and recomputes its Git state when files change, off the
 /// state lock. `.git/objects` churn and paths the repository ignores do not count.
 pub(super) struct GitWatcher {
     messages: mpsc::Sender<WatchMessage>,
+    /// At most one queued terminal wakeup per Workspace, even while a scan is slow.
+    terminal_activity: Arc<Mutex<HashMap<WorkspaceId, Instant>>>,
+    stopping: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 struct Watched {
@@ -239,10 +254,12 @@ struct Watched {
     git_dir: Option<PathBuf>,
     /// A git directory outside the root that has its own watch.
     git_dir_subscribed: Option<PathBuf>,
-    /// Paths changed since the last scan, relative to the root; empty with `due` set means
-    /// a refresh was asked for outright.
+    /// Paths changed since the last filesystem scan, relative to the root.
     pending: Vec<PathBuf>,
-    due: Option<Instant>,
+    filesystem_due: Option<Instant>,
+    terminal_due: Option<Instant>,
+    scanned_at: Option<Instant>,
+    fingerprint: Option<GitFingerprint>,
     forced: bool,
     /// The last window dropped paths past `MAX_PENDING_PATHS`.
     overflow: bool,
@@ -258,8 +275,39 @@ impl GitWatcher {
         let watcher = notify::recommended_watcher(move |event| {
             let _ = filesystem.send(WatchMessage::Filesystem(event));
         });
-        thread::spawn(move || run_watcher(watcher, inbox, state));
-        Self { messages }
+        Self::spawn(state, messages, inbox, watcher)
+    }
+
+    #[cfg(test)]
+    pub(super) fn without_filesystem(state: Weak<Mutex<RuntimeState>>) -> Self {
+        let (messages, inbox) = mpsc::channel();
+        Self::spawn(
+            state,
+            messages,
+            inbox,
+            Err(notify::Error::generic("test: no notify backend")),
+        )
+    }
+
+    fn spawn(
+        state: Weak<Mutex<RuntimeState>>,
+        messages: mpsc::Sender<WatchMessage>,
+        inbox: mpsc::Receiver<WatchMessage>,
+        watcher: notify::Result<notify::RecommendedWatcher>,
+    ) -> Self {
+        let terminal_activity = Arc::new(Mutex::new(HashMap::new()));
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let terminal_activity = Arc::clone(&terminal_activity);
+            let stopping = Arc::clone(&stopping);
+            thread::spawn(move || run_watcher(watcher, inbox, state, terminal_activity, stopping))
+        };
+        Self {
+            messages,
+            terminal_activity,
+            stopping,
+            worker: Some(worker),
+        }
     }
 
     pub(super) fn watch(&self, workspace_id: WorkspaceId, root: PathBuf, git_dir: Option<PathBuf>) {
@@ -274,9 +322,96 @@ impl GitWatcher {
         let _ = self.messages.send(WatchMessage::Refresh(workspace_id));
     }
 
+    fn terminal_activity(&self, workspace_id: WorkspaceId, activity: Instant) {
+        let mut pending = self
+            .terminal_activity
+            .lock()
+            .expect("Git activity lock poisoned");
+        // Keep the latest timestamp without adding another wakeup to the inbox.
+        match pending.entry(workspace_id) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                *entry.get_mut() = (*entry.get()).max(activity);
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(activity);
+                let _ = self
+                    .messages
+                    .send(WatchMessage::TerminalActivity(workspace_id));
+            }
+        }
+    }
+
     /// Keeps only the listed Workspaces under watch.
     fn retain(&self, keep: Vec<WorkspaceId>) {
         let _ = self.messages.send(WatchMessage::Retain(keep));
+    }
+
+    /// The Server takes this out of RuntimeState and joins without holding its lock.
+    pub(super) fn shutdown(mut self) {
+        self.stop();
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("Git watcher thread panicked during shutdown");
+        }
+    }
+
+    fn stop(&self) {
+        // Stop wins over an existing filesystem backlog; the message also wakes idle recv.
+        self.stopping.store(true, Ordering::Release);
+        let _ = self.messages.send(WatchMessage::Stop);
+    }
+}
+
+impl Drop for GitWatcher {
+    fn drop(&mut self) {
+        // A worker's temporary upgraded Weak may own the last RuntimeState. Never join
+        // here: dropping that state on the worker itself must only request its exit.
+        self.stop();
+    }
+}
+
+impl Watched {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            real_root: resolved(&root),
+            root,
+            root_subscribed: false,
+            git_dir: None,
+            git_dir_subscribed: None,
+            pending: Vec::new(),
+            filesystem_due: None,
+            terminal_due: None,
+            scanned_at: None,
+            fingerprint: None,
+            forced: false,
+            overflow: false,
+            storm: false,
+        }
+    }
+
+    fn terminal_activity(&mut self, activity: Instant) {
+        if self.scanned_at.is_some_and(|scanned| scanned >= activity) {
+            return;
+        }
+        let due = self.scanned_at.map_or(activity, |scanned| {
+            activity.max(scanned + GIT_SCAN_INTERVAL)
+        });
+        // Further output must not push a waiting Workspace's scan back indefinitely.
+        self.terminal_due = Some(self.terminal_due.map_or(due, |pending| pending.min(due)));
+    }
+
+    fn next_due(&self) -> Option<Instant> {
+        self.filesystem_due
+            .into_iter()
+            .chain(self.terminal_due)
+            .min()
+    }
+
+    fn record_scan(&mut self, now: Instant, fingerprint: Option<GitFingerprint>) {
+        self.scanned_at = Some(now);
+        self.fingerprint = fingerprint;
+        self.terminal_due = None;
     }
 }
 
@@ -284,6 +419,8 @@ fn run_watcher(
     watcher: notify::Result<notify::RecommendedWatcher>,
     inbox: mpsc::Receiver<WatchMessage>,
     state: Weak<Mutex<RuntimeState>>,
+    terminal_activity: Arc<Mutex<HashMap<WorkspaceId, Instant>>>,
+    stopping: Arc<AtomicBool>,
 ) {
     let mut watcher = match watcher {
         Ok(watcher) => Some(watcher),
@@ -296,7 +433,10 @@ fn run_watcher(
     };
     let mut watched: HashMap<WorkspaceId, Watched> = HashMap::new();
     loop {
-        let next_due = watched.values().filter_map(|entry| entry.due).min();
+        if stopping.load(Ordering::Acquire) {
+            return;
+        }
+        let next_due = watched.values().filter_map(Watched::next_due).min();
         let message = match next_due {
             Some(due) => match inbox.recv_timeout(due.saturating_duration_since(Instant::now())) {
                 Ok(message) => Some(message),
@@ -314,27 +454,21 @@ fn run_watcher(
                 root,
                 git_dir,
             }) => {
-                let entry = watched.entry(workspace_id).or_insert_with(|| Watched {
-                    real_root: resolved(&root),
-                    root: root.clone(),
-                    root_subscribed: false,
-                    git_dir: None,
-                    git_dir_subscribed: None,
-                    pending: Vec::new(),
-                    due: None,
-                    forced: false,
-                    overflow: false,
-                    storm: false,
-                });
+                let entry = watched
+                    .entry(workspace_id)
+                    .or_insert_with(|| Watched::new(root.clone()));
                 if entry.root != root {
                     if let Some(watcher) = &mut watcher
                         && entry.root_subscribed
                     {
                         let _ = watcher.unwatch(&entry.root);
                     }
-                    entry.real_root = resolved(&root);
-                    entry.root = root;
-                    entry.root_subscribed = false;
+                    if let Some(watcher) = &mut watcher
+                        && let Some(git_dir) = &entry.git_dir_subscribed
+                    {
+                        let _ = watcher.unwatch(git_dir);
+                    }
+                    *entry = Watched::new(root);
                 }
                 if !entry.root_subscribed
                     && let Some(watcher) = &mut watcher
@@ -368,7 +502,18 @@ fn run_watcher(
             Some(WatchMessage::Refresh(workspace_id)) => {
                 if let Some(entry) = watched.get_mut(&workspace_id) {
                     entry.forced = true;
-                    entry.due = Some(Instant::now());
+                    entry.filesystem_due = Some(Instant::now());
+                }
+            }
+            Some(WatchMessage::TerminalActivity(workspace_id)) => {
+                let activity = terminal_activity
+                    .lock()
+                    .expect("Git activity lock poisoned")
+                    .remove(&workspace_id);
+                if let Some(activity) = activity
+                    && let Some(entry) = watched.get_mut(&workspace_id)
+                {
+                    entry.terminal_activity(activity);
                 }
             }
             Some(WatchMessage::Filesystem(Err(error))) => {
@@ -384,81 +529,140 @@ fn run_watcher(
                             } else {
                                 entry.overflow = true;
                             }
-                            entry.due = Some(now + GIT_WATCH_DEBOUNCE);
+                            if !entry.forced {
+                                entry.filesystem_due = Some(now + GIT_WATCH_DEBOUNCE);
+                            }
                         }
                     }
                 }
             }
+            Some(WatchMessage::Stop) => return,
             None => {}
         }
 
         let now = Instant::now();
-        let due: Vec<WorkspaceId> = watched
+        let mut due: Vec<_> = watched
             .iter()
-            .filter(|(_, entry)| entry.due.is_some_and(|due| due <= now))
-            .map(|(id, _)| *id)
+            .filter_map(|(id, entry)| entry.next_due().map(|due| (*id, due)))
+            .filter(|(_, due)| *due <= now)
             .collect();
-        for workspace_id in due {
-            let Some(entry) = watched.get_mut(&workspace_id) else {
-                continue;
-            };
-            entry.due = None;
-            let pending = std::mem::take(&mut entry.pending);
-            let forced = std::mem::take(&mut entry.forced);
-            let overflow = std::mem::take(&mut entry.overflow);
-            // `git status` rewriting the index, a commit or a fetch touch only `.git`: the
-            // Git state may move, the working tree the Files sidebar and Preview Tabs show
-            // did not. Without this every status-line poll refetched every open file.
-            let working_tree_changed =
-                forced || pending.iter().any(|path| path != Path::new(".git"));
-            let root = entry.root.clone();
-            // Discovery is cheap; the status walk is not, so the ignore check sits between.
-            let next = match discover_repository(&root) {
-                Ok(None) => Ok(None),
-                Ok(Some(repository)) => {
-                    // An overflowing window is judged by its sample and, while all
-                    // ignored, only marks the storm; the first window after it scans.
-                    if !forced && (overflow || !entry.storm) && repository.ignores_all(&pending) {
-                        entry.storm = overflow;
-                        continue;
-                    }
-                    entry.storm = false;
-                    watch_git_dir(
-                        entry,
-                        watcher.as_mut(),
-                        repository.git_directory().to_path_buf(),
-                    );
-                    let Some(shared) = state.upgrade() else {
-                        return;
-                    };
-                    let recorded = shared
-                        .lock()
-                        .expect("server state lock poisoned")
-                        .recorded_base(workspace_id);
-                    WorkspaceGit::from_repository(repository, recorded.as_deref()).map(Some)
-                }
-                Err(error) => Err(error),
-            };
-            let next = match next {
-                Ok(next) => next,
-                Err(error) => {
-                    tracing::warn!("Git scan of {} failed: {error}", root.display());
-                    continue;
-                }
-            };
-            let Some(state) = state.upgrade() else {
+        // A busy Workspace cannot repeatedly jump ahead of another one's overdue scan.
+        due.sort_by_key(|(_, due)| *due);
+        for (workspace_id, _) in due {
+            if stopping.load(Ordering::Acquire) {
                 return;
-            };
-            let mut state = state.lock().expect("server state lock poisoned");
-            if apply_workspace_git_refresh(&mut state, workspace_id, &root, next)
-                && working_tree_changed
-            {
-                // The same batch is what the Files sidebar and Preview Tabs follow
-                // (ADR 0018); ignored-only batches were skipped above.
-                state.publish_background(SessionEvent::WorkspaceFilesChanged { workspace_id });
+            }
+            let entry = watched.get_mut(&workspace_id).expect("watched Workspace");
+            if !refresh_workspace(workspace_id, entry, watcher.as_mut(), &state) {
+                return;
             }
         }
     }
+}
+
+/// The only background scan/commit path. Both sources run serially here, so an older
+/// terminal scan can never publish after a newer filesystem scan.
+fn refresh_workspace(
+    workspace_id: WorkspaceId,
+    entry: &mut Watched,
+    watcher: Option<&mut notify::RecommendedWatcher>,
+    state: &Weak<Mutex<RuntimeState>>,
+) -> bool {
+    let now = Instant::now();
+    let filesystem_due = entry.filesystem_due.is_some_and(|due| due <= now);
+    let terminal_due = entry.terminal_due.is_some_and(|due| due <= now);
+    let (pending, forced, overflow) = if filesystem_due {
+        entry.filesystem_due = None;
+        (
+            std::mem::take(&mut entry.pending),
+            std::mem::take(&mut entry.forced),
+            std::mem::take(&mut entry.overflow),
+        )
+    } else {
+        (Vec::new(), false, false)
+    };
+    let (known, recorded) = {
+        let Some(shared) = state.upgrade() else {
+            return false;
+        };
+        let state = shared.lock().expect("server state lock poisoned");
+        if state
+            .session
+            .workspace(workspace_id)
+            .is_none_or(|workspace| workspace.root_directory() != entry.root)
+        {
+            // Retain/Watch is already queued; do not keep an obsolete deadline hot.
+            entry.terminal_due = None;
+            return true;
+        }
+        let known = state.workspace_git.get(&workspace_id).map(|git| {
+            (
+                git.repository.clone(),
+                git.base.as_ref().map(|(base, _)| base.clone()),
+            )
+        });
+        (known, state.recorded_base(workspace_id))
+    };
+    // Terminal output alone does not justify a status walk when ref files did not move.
+    // Record the fingerprint before scanning: a switch racing the scan differs next time.
+    let fingerprint = known
+        .as_ref()
+        .and_then(|(repository, base)| repository.fingerprint(base.as_ref()));
+    let terminal_changed =
+        terminal_due && (fingerprint.is_none() || fingerprint != entry.fingerprint);
+    if terminal_due {
+        entry.record_scan(now, fingerprint.clone());
+    }
+    if !filesystem_due && !terminal_changed {
+        return true;
+    }
+    // Index/ref-only updates do not invalidate Files/Preview; terminal activity never did.
+    let mut working_tree_changed = forced || pending.iter().any(|path| path != Path::new(".git"));
+    let next = match discover_repository(&entry.root) {
+        Ok(None) => {
+            entry.record_scan(now, fingerprint);
+            Ok(None)
+        }
+        Ok(Some(repository)) => {
+            if filesystem_due
+                && !forced
+                && (overflow || !entry.storm)
+                && repository.ignores_all(&pending)
+            {
+                entry.storm = overflow;
+                if !terminal_changed {
+                    return true;
+                }
+                working_tree_changed = false;
+            }
+            entry.storm = false;
+            watch_git_dir(entry, watcher, repository.git_directory().to_path_buf());
+            entry.record_scan(now, fingerprint);
+            WorkspaceGit::from_repository(repository, recorded.as_deref()).map(Some)
+        }
+        Err(error) => {
+            entry.record_scan(now, fingerprint);
+            Err(error)
+        }
+    };
+    let next = match next {
+        Ok(next) => next,
+        Err(error) => {
+            tracing::warn!("Git scan of {} failed: {error}", entry.root.display());
+            return true;
+        }
+    };
+    let Some(shared) = state.upgrade() else {
+        return false;
+    };
+    let mut state = shared.lock().expect("server state lock poisoned");
+    if apply_workspace_git_refresh(&mut state, workspace_id, &entry.root, next)
+        && working_tree_changed
+    {
+        // The same batch is what the Files sidebar and Preview Tabs follow (ADR 0018).
+        state.publish_background(SessionEvent::WorkspaceFilesChanged { workspace_id });
+    }
+    true
 }
 
 /// Past this many paths in one window the rest are dropped and the kept ones stand in for

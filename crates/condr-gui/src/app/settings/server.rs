@@ -169,30 +169,31 @@ impl SettingsWindow {
     /// Saves the Listen address draft if it is a complete `host:port`; anything else is
     /// refused and stays in the field. With the listener off nothing goes out: the
     /// address is used when it is switched on. See `SettingsWindow::commit`.
-    pub(in crate::app) fn commit_listen(&mut self, cx: &mut Context<Self>) -> Option<bool> {
+    pub(super) fn commit_listen(&mut self, cx: &mut Context<Self>) -> CommitOutcome {
         let Ok(address) = self.listen.draft.trim().parse::<std::net::SocketAddr>() else {
             self.listen_refused = true;
-            return None;
+            return CommitOutcome::Invalid;
         };
         self.listen_refused = false;
-        let listening = self
-            .selected_connection(cx, |c| c.listen.is_some())
-            .unwrap_or(false);
+        let Some(listening) = self.selected_connection(cx, |c| c.listen.is_some()) else {
+            return CommitOutcome::Unavailable;
+        };
         if listening {
-            self.send_listen(Some(address.to_string()), cx);
+            CommitOutcome::from_queued(self.send_listen(Some(address.to_string()), cx))
+        } else {
+            CommitOutcome::Staged
         }
-        Some(listening)
     }
 
-    fn send_listen(&mut self, address: Option<String>, cx: &mut Context<Self>) {
+    fn send_listen(&mut self, address: Option<String>, cx: &mut Context<Self>) -> bool {
         if !admin_allowed(self, cx) {
-            return;
+            return false;
         }
         let key = self.selected_server;
         let command = ServerAdminCommand::SaveListen { address };
-        let _ = self
-            .owner
-            .update(cx, |owner, _| owner.server_admin(key, command));
+        self.owner
+            .update(cx, |owner, _| owner.server_admin(key, command))
+            .unwrap_or(false)
     }
 }
 
@@ -961,21 +962,21 @@ impl Condr {
     /// Asks a Server to store a new shell preference. The stored value comes back as a
     /// `ServerSettingsChanged` event; nothing is assumed locally. The Server persists
     /// every value it receives, so only a committed field calls this, never a keystroke.
-    pub(in crate::app) fn set_server_shell(&mut self, key: ConnectionKey, shell: &str) {
+    pub(in crate::app) fn set_server_shell(&mut self, key: ConnectionKey, shell: &str) -> bool {
         let Some(connection) = self
             .connections
             .iter_mut()
             .find(|connection| connection.key == key)
         else {
-            return;
+            return false;
         };
         let Some(server_id) = connection.server_id else {
-            return;
+            return false;
         };
         connection.send(ClientMessage::SetServerSettings {
             server_id,
             shell: shell.to_owned(),
-        });
+        })
     }
 
     /// Asks a Server for the state of every agent's hooks on its machine. The replies

@@ -247,6 +247,11 @@ fn files_under(root: &Path) -> std::collections::BTreeMap<String, String> {
             if path.is_dir() {
                 walk(root, &path, files);
             } else {
+                // Stable, empty transaction locks are metadata, not installed hook content.
+                if path.extension().is_some_and(|ext| ext == "condr-lock") {
+                    assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+                    continue;
+                }
                 let relative = path.strip_prefix(root).unwrap().components();
                 let key = relative
                     .map(|part| part.as_os_str().to_string_lossy())

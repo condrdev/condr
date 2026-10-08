@@ -115,8 +115,8 @@ impl Condr {
     }
 }
 
-/// The Settings window's root. Every value lives on `Condr`; it only owns the widget
-/// state a searchable list of 600 schemes needs to scroll to and filter its selection.
+/// The Settings window owns drafts, submission feedback and widget state. Applied
+/// preferences and Server reports live on `Condr`.
 pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
@@ -351,6 +351,9 @@ impl SettingsWindow {
 
     /// Switches the Server tab to another connection and reloads its shell.
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        // Submission feedback belongs to the Device whose fields are being replaced.
+        self.saved = None;
+        self._saved_clear = None;
         self.selected_server = key;
         self.shell.reset(connection_shell(&self.owner, key, cx));
         self.listen.reset(connection_listen(&self.owner, key, cx));
@@ -388,11 +391,11 @@ impl SettingsWindow {
     }
 
     /// Pushes the draft to `Condr`, which normalizes and applies it.
-    fn commit_font(&self, cx: &mut Context<Self>) {
+    fn commit_font(&self, cx: &mut Context<Self>) -> bool {
         let font = self.font_draft.clone();
-        let _ = self
-            .owner
-            .update(cx, move |owner, cx| owner.set_terminal_font(font, cx));
+        self.owner
+            .update(cx, move |owner, cx| owner.set_terminal_font(font, cx))
+            .is_ok()
     }
 }
 

@@ -68,9 +68,22 @@ pub(super) struct LoadedConfig {
 impl LoadedConfig {
     /// Read before starting the GUI event loop: the config and identity locks may wait.
     pub(super) fn read(path: Option<PathBuf>) -> Self {
-        let (device_key, key_error) = match condr_server::noise::identity_directory()
-            .and_then(|directory| condr_server::noise::load_device_key(&directory))
-        {
+        let device_key = condr_server::noise::identity_directory()
+            .and_then(|directory| condr_server::noise::load_device_key(&directory));
+        let client = path.as_deref().map_or(Ok(None), |path| {
+            condr_core::read_config_value(path, &[], "client")
+        });
+        Self::from_snapshot(path, device_key, client)
+    }
+
+    /// Decode one coherent `[client]` snapshot. A malformed optional preference falls
+    /// back independently; a broken Device list still prevents destructive overwrites.
+    fn from_snapshot(
+        path: Option<PathBuf>,
+        device_key: io::Result<DeviceKey>,
+        client: io::Result<Option<toml::Value>>,
+    ) -> Self {
+        let (device_key, key_error) = match device_key {
             Ok(key) => (Some(key), None),
             Err(error) => (
                 None,
@@ -83,14 +96,18 @@ impl LoadedConfig {
             || "config.toml".to_owned(),
             |path| path.display().to_string(),
         );
-        // One entry whose address no longer parses (a link format change, a hand edit) is
-        // skipped and reported; it stays in the file untouched and the rest of the list
-        // keeps working. Only an unreadable file disables Device list changes.
+        let (client, saved_servers) = match client {
+            Ok(client) => {
+                let servers =
+                    decode_list::<SavedServer>(client.as_ref().and_then(|c| c.get("servers")));
+                (client, servers)
+            }
+            Err(error) => (None, Err(error)),
+        };
+        let value = |key: &str| client.as_ref().and_then(|client| client.get(key));
+        // Invalid addresses remain on disk; only an unreadable list disables Device edits.
         let mut skipped = Vec::new();
-        let (servers, servers_error) = match path
-            .as_deref()
-            .map_or_else(|| Ok(Vec::new()), load_saved_servers)
-        {
+        let (servers, servers_error) = match saved_servers {
             Ok(saved) => (
                 saved
                     .into_iter()
@@ -118,68 +135,62 @@ impl LoadedConfig {
                 skipped.join("; ")
             )
         });
-        // A malformed `[[client.editors]]` is reported, not dropped: the user should learn
-        // why their editor is missing from the menu.
-        let (custom_editors, editors_error) = match path
-            .as_deref()
-            .map_or_else(|| Ok(Vec::new()), load_custom_editors)
-        {
+        // A malformed `[[client.editors]]` is reported, not silently dropped.
+        let (custom_editors, editors_error) = match decode_list(value(EDITORS_KEY)) {
             Ok(editors) => (editors, None),
             Err(error) => (
                 Vec::new(),
                 Some(format!("Failed to load [[client.editors]]: {error}")),
             ),
         };
+        let updates = value("updates");
+        let terminal = value("terminal");
+        let code = value("code");
+        let mut terminal_font = TerminalFont::default();
+        if let Some(family) = nonempty_string(terminal.and_then(|v| v.get(FONT_FAMILY_KEY))) {
+            terminal_font.family = family.to_owned().into();
+        }
+        terminal_font.size = font_size(terminal.and_then(|v| v.get(FONT_SIZE_KEY)));
+        let workspace_editors = decode_list::<SavedWorkspaceEditor>(value(WORKSPACE_EDITORS_KEY))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| (entry.root, entry.editor))
+            .collect();
         Self {
-            appearance: path
-                .as_deref()
-                .and_then(|path| load_appearance(path).ok())
+            appearance: value(APPEARANCE_KEY)
+                .and_then(toml::Value::as_str)
+                .map(Appearance::from_str)
                 .unwrap_or_default(),
-            fps_monitor: path
-                .as_deref()
-                .and_then(|path| load_fps_monitor(path).ok())
+            fps_monitor: value(FPS_MONITOR_KEY)
+                .and_then(toml::Value::as_bool)
                 .unwrap_or(false),
-            notifications: path
-                .as_deref()
-                .and_then(|path| load_notifications(path).ok())
+            notifications: value(NOTIFICATIONS_KEY)
+                .and_then(toml::Value::as_bool)
                 .unwrap_or(true),
-            keep_awake: path
-                .as_deref()
-                .and_then(|path| load_keep_awake(path).ok())
+            keep_awake: value(KEEP_AWAKE_KEY)
+                .and_then(toml::Value::as_bool)
                 .unwrap_or(false),
-            auto_check_updates: path
-                .as_deref()
-                .and_then(|path| load_auto_check_updates(path).ok())
+            auto_check_updates: updates
+                .and_then(|v| v.get(AUTO_CHECK_KEY))
+                .and_then(toml::Value::as_bool)
                 .unwrap_or(true),
-            update_channel: path
-                .as_deref()
-                .and_then(|path| load_update_channel(path).ok())
-                .unwrap_or_else(UpdateChannel::of_this_build),
-            terminal_font: path
-                .as_deref()
-                .and_then(|path| load_terminal_font(path).ok())
-                .unwrap_or_default(),
-            terminal_color_scheme: path
-                .as_deref()
-                .and_then(|path| load_terminal_color_scheme(path).ok())
-                .unwrap_or_default(),
-            code_theme: path
-                .as_deref()
-                .and_then(|path| load_code_theme(path).ok())
-                .unwrap_or_default(),
-            code_font_size: path
-                .as_deref()
-                .and_then(|path| load_code_font_size(path).ok())
-                .unwrap_or_else(|| TerminalFont::default().size),
-            default_editor: path
-                .as_deref()
-                .and_then(|path| load_default_editor(path).ok())
-                .flatten(),
+            update_channel: updates
+                .and_then(|v| v.get(CHANNEL_KEY))
+                .and_then(toml::Value::as_str)
+                .map_or_else(UpdateChannel::of_this_build, UpdateChannel::from_str),
+            terminal_font,
+            terminal_color_scheme: nonempty_string(terminal.and_then(|v| v.get(COLOR_SCHEME_KEY)))
+                .unwrap_or_default()
+                .to_owned()
+                .into(),
+            code_theme: nonempty_string(code.and_then(|v| v.get(CODE_THEME_KEY)))
+                .unwrap_or_default()
+                .to_owned()
+                .into(),
+            code_font_size: font_size(code.and_then(|v| v.get(FONT_SIZE_KEY))),
+            default_editor: nonempty_string(value(EDITOR_KEY)).map(str::to_owned),
             custom_editors,
-            workspace_editors: path
-                .as_deref()
-                .and_then(|path| load_workspace_editors(path).ok())
-                .unwrap_or_default(),
+            workspace_editors,
             path,
             device_key,
             servers,
@@ -193,149 +204,31 @@ impl LoadedConfig {
     }
 }
 
-/// A missing or unreadable preference follows the system rather than failing the load.
-pub(super) fn load_appearance(path: &Path) -> io::Result<Appearance> {
-    Ok(read_client_value(path, APPEARANCE_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_str)
-        .map(Appearance::from_str)
-        .unwrap_or_default())
-}
-
-pub(super) fn load_fps_monitor(path: &Path) -> io::Result<bool> {
-    Ok(read_client_value(path, FPS_MONITOR_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false))
-}
-
-/// Agent completion toasts are on unless the user turned them off.
-pub(super) fn load_notifications(path: &Path) -> io::Result<bool> {
-    Ok(read_client_value(path, NOTIFICATIONS_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(true))
-}
-
-pub(super) fn load_keep_awake(path: &Path) -> io::Result<bool> {
-    Ok(read_client_value(path, KEEP_AWAKE_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(false))
-}
-
-/// Automatic update checks are on unless the user turned them off.
-pub(super) fn load_auto_check_updates(path: &Path) -> io::Result<bool> {
-    Ok(
-        condr_core::read_config_value(path, &UPDATES_TABLE, AUTO_CHECK_KEY)?
-            .as_ref()
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(true),
+fn decode_list<T: serde::de::DeserializeOwned>(value: Option<&toml::Value>) -> io::Result<Vec<T>> {
+    value.map_or_else(
+        || Ok(Vec::new()),
+        |value| value.clone().try_into().map_err(invalid_data),
     )
 }
 
-/// Unset follows the channel this build was published on.
-pub(super) fn load_update_channel(path: &Path) -> io::Result<UpdateChannel> {
-    Ok(
-        condr_core::read_config_value(path, &UPDATES_TABLE, CHANNEL_KEY)?
-            .as_ref()
-            .and_then(toml::Value::as_str)
-            .map_or_else(UpdateChannel::of_this_build, UpdateChannel::from_str),
-    )
-}
-
-/// A missing or malformed key keeps its default so the terminal always has a font.
-pub(super) fn load_terminal_font(path: &Path) -> io::Result<TerminalFont> {
-    let mut font = TerminalFont::default();
-    if let Some(family) = condr_core::read_config_value(path, &TERMINAL_TABLE, FONT_FAMILY_KEY)?
-        .as_ref()
+fn nonempty_string(value: Option<&toml::Value>) -> Option<&str> {
+    value
         .and_then(toml::Value::as_str)
         .map(str::trim)
-        .filter(|family| !family.is_empty())
-    {
-        font.family = family.to_string().into();
-    }
-    if let Some(size) = condr_core::read_config_value(path, &TERMINAL_TABLE, FONT_SIZE_KEY)?
+        .filter(|value| !value.is_empty())
+}
+
+fn font_size(value: Option<&toml::Value>) -> f32 {
+    value
         .and_then(|value| {
             value
                 .as_float()
-                .or_else(|| value.as_integer().map(|size| size as f64))
+                .or_else(|| value.as_integer().map(|v| v as f64))
         })
-    {
-        font.size = TerminalFont::clamp_size(size as f32);
-    }
-    Ok(font)
-}
-
-/// Empty when unset; the caller resolves unknown names to the default palette.
-pub(super) fn load_terminal_color_scheme(path: &Path) -> io::Result<SharedString> {
-    Ok(
-        condr_core::read_config_value(path, &TERMINAL_TABLE, COLOR_SCHEME_KEY)?
-            .as_ref()
-            .and_then(toml::Value::as_str)
-            .map(|name| name.trim().to_string().into())
-            .unwrap_or_default(),
-    )
-}
-
-/// The theme's mono font size when unset or malformed, clamped like the terminal's.
-pub(super) fn load_code_font_size(path: &Path) -> io::Result<f32> {
-    Ok(
-        condr_core::read_config_value(path, &CODE_TABLE, FONT_SIZE_KEY)?
-            .and_then(|value| {
-                value
-                    .as_float()
-                    .or_else(|| value.as_integer().map(|size| size as f64))
-            })
-            .map_or_else(
-                || TerminalFont::default().size,
-                |size| TerminalFont::clamp_size(size as f32),
-            ),
-    )
-}
-
-/// Empty when unset, which is Default; the caller resolves an unknown name to Default too.
-pub(super) fn load_code_theme(path: &Path) -> io::Result<SharedString> {
-    Ok(
-        condr_core::read_config_value(path, &CODE_TABLE, CODE_THEME_KEY)?
-            .as_ref()
-            .and_then(toml::Value::as_str)
-            .map(|name| name.trim().to_string().into())
-            .unwrap_or_default(),
-    )
-}
-
-/// `None` when unset or blank; an unknown id is kept, since the editor may be installed later.
-pub(super) fn load_default_editor(path: &Path) -> io::Result<Option<String>> {
-    Ok(read_client_value(path, EDITOR_KEY)?
-        .as_ref()
-        .and_then(toml::Value::as_str)
-        .map(str::trim)
-        .filter(|editor| !editor.is_empty())
-        .map(str::to_owned))
-}
-
-pub(super) fn load_custom_editors(path: &Path) -> io::Result<Vec<CustomEditor>> {
-    read_client_value(path, EDITORS_KEY)?.map_or_else(
-        || Ok(Vec::new()),
-        |value| value.try_into().map_err(invalid_data),
-    )
-}
-
-pub(super) fn load_workspace_editors(path: &Path) -> io::Result<BTreeMap<PathBuf, String>> {
-    let saved: Vec<SavedWorkspaceEditor> = read_client_value(path, WORKSPACE_EDITORS_KEY)?
         .map_or_else(
-            || Ok(Vec::new()),
-            |value| value.try_into().map_err(invalid_data),
-        )?;
-    Ok(saved
-        .into_iter()
-        .map(|entry| (entry.root, entry.editor))
-        .collect())
-}
-
-fn read_client_value(path: &Path, key: &str) -> io::Result<Option<toml::Value>> {
-    condr_core::read_config_value(path, &["client"], key)
+            || TerminalFont::default().size,
+            |size| TerminalFont::clamp_size(size as f32),
+        )
 }
 
 impl Condr {
@@ -549,6 +442,98 @@ fn invalid_data(error: impl std::fmt::Display) -> io::Error {
 mod tests {
     use super::*;
 
+    fn read_config(path: &Path) -> LoadedConfig {
+        LoadedConfig::from_snapshot(
+            Some(path.to_path_buf()),
+            Ok(DeviceKey::from_seed([1; 32])),
+            condr_core::read_config_value(path, &[], "client"),
+        )
+    }
+
+    #[test]
+    fn decoding_a_snapshot_does_not_mix_in_later_config_edits() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-snapshot-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            "[client]\nappearance = 'dark'\n[client.terminal]\nfont_family = 'Cascadia Mono'\nfont_size = 17\n",
+        )
+        .unwrap();
+        let snapshot = condr_core::read_config_value(&path, &[], "client");
+        fs::write(&path, "this later edit is not valid TOML").unwrap();
+
+        let config =
+            LoadedConfig::from_snapshot(Some(path), Ok(DeviceKey::from_seed([1; 32])), snapshot);
+        assert_eq!(config.appearance, Appearance::Dark);
+        assert_eq!(config.terminal_font.family, "Cascadia Mono");
+        assert_eq!(config.terminal_font.size, 17.);
+        assert!(config.error.is_none());
+        assert!(config.servers_error.is_none());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn malformed_preferences_fall_back_independently_and_editors_report_an_error() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-partial-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        fs::write(
+            &path,
+            "[client]\nappearance = 7\nfps_monitor = true\nnotifications = 'broken'\nworkspace_editors = false\n\
+             [client.terminal]\nfont_family = 'Cascadia Mono'\nfont_size = 'broken'\n\
+             [client.updates]\nauto_check = 'broken'\n\
+             [[client.servers]]\nname = 'Build'\naddress = 'ssh://alice@build'\n\
+             [[client.editors]]\nname = 'Missing command'\n",
+        )
+        .unwrap();
+
+        let config = read_config(&path);
+        assert_eq!(config.appearance, Appearance::System);
+        assert!(config.fps_monitor);
+        assert!(config.notifications);
+        assert!(config.auto_check_updates);
+        assert_eq!(config.terminal_font.family, "Cascadia Mono");
+        assert_eq!(config.terminal_font.size, TerminalFont::default().size);
+        assert!(config.workspace_editors.is_empty());
+        assert!(config.custom_editors.is_empty());
+        assert_eq!(config.servers.len(), 1);
+        assert!(config.servers_error.is_none());
+        assert!(config.error.unwrap().contains("[[client.editors]]"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_snapshot_or_device_list_keeps_the_write_protection() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-client-protected-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.toml");
+        for text in [
+            "not valid TOML",
+            "[client]\nappearance = 'dark'\n[[client.servers]]\nname = 'Missing address'\n",
+        ] {
+            fs::write(&path, text).unwrap();
+            let config = read_config(&path);
+            assert!(config.servers.is_empty());
+            assert!(config.servers_error.is_some());
+            assert_eq!(config.error, config.servers_error);
+        }
+        assert_eq!(read_config(&path).appearance, Appearance::Dark);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn saving_the_appearance_preserves_the_other_config_keys() {
         let directory = std::env::temp_dir().join(format!(
@@ -568,10 +553,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(load_appearance(&path).unwrap(), Appearance::System);
+        assert_eq!(read_config(&path).appearance, Appearance::System);
         write_client_value(&path, APPEARANCE_KEY, Appearance::Dark.as_str().into()).unwrap();
 
-        assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
+        assert_eq!(read_config(&path).appearance, Appearance::Dark);
         assert_eq!(load_saved_servers(&path).unwrap().len(), 1);
         assert_eq!(
             condr_core::read_config_value(&path, &["server"], "listen")
@@ -582,7 +567,7 @@ mod tests {
         );
 
         write_client_value(&path, APPEARANCE_KEY, toml_edit::value("solarized")).unwrap();
-        assert_eq!(load_appearance(&path).unwrap(), Appearance::System);
+        assert_eq!(read_config(&path).appearance, Appearance::System);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -596,9 +581,9 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
 
-        assert!(!load_fps_monitor(&path).unwrap());
+        assert!(!read_config(&path).fps_monitor);
         write_client_value(&path, FPS_MONITOR_KEY, toml_edit::value(true)).unwrap();
-        assert!(load_fps_monitor(&path).unwrap());
+        assert!(read_config(&path).fps_monitor);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -612,9 +597,9 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
 
-        assert!(load_notifications(&path).unwrap());
+        assert!(read_config(&path).notifications);
         write_client_value(&path, NOTIFICATIONS_KEY, toml_edit::value(false)).unwrap();
-        assert!(!load_notifications(&path).unwrap());
+        assert!(!read_config(&path).notifications);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -628,7 +613,7 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
 
-        assert_eq!(load_terminal_font(&path).unwrap(), TerminalFont::default());
+        assert_eq!(read_config(&path).terminal_font, TerminalFont::default());
 
         write_value(
             &path,
@@ -638,7 +623,7 @@ mod tests {
         )
         .unwrap();
         write_value(&path, &TERMINAL_TABLE, FONT_SIZE_KEY, toml_edit::value(15)).unwrap();
-        let font = load_terminal_font(&path).unwrap();
+        let font = read_config(&path).terminal_font;
         assert_eq!(font.family.as_ref(), "Cascadia Mono");
         assert_eq!(font.size, 15.);
         let saved = fs::read_to_string(&path).unwrap();
@@ -655,7 +640,7 @@ mod tests {
             toml_edit::value(1000),
         )
         .unwrap();
-        let font = load_terminal_font(&path).unwrap();
+        let font = read_config(&path).terminal_font;
         assert_eq!(font.family, TerminalFont::default().family);
         assert_eq!(font.size, TerminalFont::MAX_SIZE);
         fs::remove_dir_all(directory).unwrap();
@@ -671,7 +656,7 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
 
-        assert_eq!(load_terminal_color_scheme(&path).unwrap(), "");
+        assert_eq!(read_config(&path).terminal_color_scheme, "");
         write_value(
             &path,
             &TERMINAL_TABLE,
@@ -679,7 +664,7 @@ mod tests {
             "Gruvbox Dark".into(),
         )
         .unwrap();
-        assert_eq!(load_terminal_color_scheme(&path).unwrap(), "Gruvbox Dark");
+        assert_eq!(read_config(&path).terminal_color_scheme, "Gruvbox Dark");
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -693,18 +678,18 @@ mod tests {
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
 
-        assert_eq!(load_code_theme(&path).unwrap(), "");
+        assert_eq!(read_config(&path).code_theme, "");
         write_value(&path, &CODE_TABLE, CODE_THEME_KEY, "Dracula".into()).unwrap();
-        assert_eq!(load_code_theme(&path).unwrap(), "Dracula");
+        assert_eq!(read_config(&path).code_theme, "Dracula");
 
         assert_eq!(
-            load_code_font_size(&path).unwrap(),
+            read_config(&path).code_font_size,
             TerminalFont::default().size
         );
         write_value(&path, &CODE_TABLE, FONT_SIZE_KEY, 17.into()).unwrap();
-        assert_eq!(load_code_font_size(&path).unwrap(), 17.);
+        assert_eq!(read_config(&path).code_font_size, 17.);
         write_value(&path, &CODE_TABLE, FONT_SIZE_KEY, 500.0.into()).unwrap();
-        assert_eq!(load_code_font_size(&path).unwrap(), TerminalFont::MAX_SIZE);
+        assert_eq!(read_config(&path).code_font_size, TerminalFont::MAX_SIZE);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -723,10 +708,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(load_default_editor(&path).unwrap(), None);
-        assert!(load_workspace_editors(&path).unwrap().is_empty());
+        assert_eq!(read_config(&path).default_editor, None);
+        assert!(read_config(&path).workspace_editors.is_empty());
         assert_eq!(
-            load_custom_editors(&path).unwrap(),
+            read_config(&path).custom_editors,
             [CustomEditor {
                 name: "Helix".into(),
                 command: vec!["wezterm".into(), "start".into(), "hx".into()],
@@ -748,18 +733,23 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(load_default_editor(&path).unwrap().as_deref(), Some("zed"));
+        assert_eq!(read_config(&path).default_editor.as_deref(), Some("zed"));
         assert_eq!(
-            load_workspace_editors(&path).unwrap(),
+            read_config(&path).workspace_editors,
             BTreeMap::from([(PathBuf::from("/repo/a"), "zed".to_owned())])
         );
-        assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
-        assert_eq!(load_custom_editors(&path).unwrap().len(), 1);
+        assert_eq!(read_config(&path).appearance, Appearance::Dark);
+        assert_eq!(read_config(&path).custom_editors.len(), 1);
 
         // A custom entry missing its command is a load error, not a silent drop, so the
         // user learns why their editor is not in the menu.
         fs::write(&path, "[[client.editors]]\nname = 'Broken'\n").unwrap();
-        assert!(load_custom_editors(&path).is_err());
+        assert!(
+            read_config(&path)
+                .error
+                .unwrap()
+                .contains("[[client.editors]]")
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -815,7 +805,7 @@ address = 'tcp://AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@127.0.0.1:4242'
             saved.contains("# was system"),
             "a trailing comment on the rewritten key must survive:\n{saved}"
         );
-        assert_eq!(load_appearance(&path).unwrap(), Appearance::Dark);
+        assert_eq!(read_config(&path).appearance, Appearance::Dark);
         assert_eq!(load_saved_servers(&path).unwrap().len(), 1);
 
         // Rewriting the server list regenerates it from the live connections, so its own

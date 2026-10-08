@@ -390,18 +390,25 @@ pub fn create_worktree(
         .map_err(git_error)?;
     }
 
-    let admin_directory = register_worktree(&repo, &destination, reference.as_ref())?;
-    if let Err(error) = checkout_worktree(&destination) {
-        // Leave nothing half-made: git would report the failure and no worktree.
-        let _ = fs::remove_dir_all(&destination);
-        let _ = fs::remove_dir_all(&admin_directory);
-        return Err(error);
+    let mut creation = WorktreeCreation::default();
+    let result = (|| {
+        creation.register(&repo, &destination, reference.as_ref())?;
+        checkout_worktree(&destination)?;
+        let child = discover_repository(&destination)?
+            .ok_or_else(|| GitError("created worktree is not a Git checkout".into()))?;
+        ensure_same_repository(parent, &child)?;
+        Ok((child, forked_from))
+    })();
+    match result {
+        Ok(created) => {
+            creation.commit();
+            Ok(created)
+        }
+        Err(error) => match creation.rollback() {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(GitError(format!("{error}; {cleanup}"))),
+        },
     }
-
-    let child = discover_repository(&destination)?
-        .ok_or_else(|| GitError("created worktree is not a Git checkout".into()))?;
-    ensure_same_repository(parent, &child)?;
-    Ok((child, forked_from))
 }
 
 /// The `refs/heads/` name for a user-typed branch, rejected like `check-ref-format --branch`.
@@ -441,44 +448,98 @@ fn ensure_branch_not_checked_out(
     Ok(())
 }
 
-/// Writes the files that make `destination` a linked worktree of `repo` and returns its
-/// private git directory. The layout is git's own: `HEAD`, `commondir` and `gitdir` beside
-/// each other, and a `.git` file in the checkout pointing back.
-fn register_worktree(
-    repo: &gix::Repository,
-    destination: &Path,
-    reference: &gix::refs::FullNameRef,
-) -> Result<PathBuf, GitError> {
-    let io = |error: std::io::Error| GitError(format!("failed to register worktree: {error}"));
-    let worktrees = repo.common_dir().join("worktrees");
-    let base_id = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("worktree")
-        .to_owned();
-    let mut id = base_id.clone();
-    let mut suffix = 1;
-    while worktrees.join(&id).exists() {
-        id = format!("{base_id}{suffix}");
-        suffix += 1;
+/// Owns only directories this creation reserved, until the checkout has been validated.
+/// Shared parent directories and branches survive a failed creation.
+#[derive(Default)]
+struct WorktreeCreation {
+    admin_directory: Option<PathBuf>,
+    destination: Option<PathBuf>,
+}
+
+impl WorktreeCreation {
+    /// Writes Git's linked-worktree registration: HEAD, commondir, gitdir and .git.
+    fn register(
+        &mut self,
+        repo: &gix::Repository,
+        destination: &Path,
+        reference: &gix::refs::FullNameRef,
+    ) -> Result<(), GitError> {
+        let io = |error: std::io::Error| GitError(format!("failed to register worktree: {error}"));
+        let worktrees = repo.common_dir().join("worktrees");
+        let base_id = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("worktree")
+            .to_owned();
+        let mut id = base_id.clone();
+        let mut suffix = 1;
+        fs::create_dir_all(&worktrees).map_err(io)?;
+        let admin_directory = loop {
+            let candidate = worktrees.join(&id);
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    id = format!("{base_id}{suffix}");
+                    suffix += 1;
+                }
+                Err(error) => return Err(io(error)),
+            }
+        };
+        self.admin_directory = Some(admin_directory.clone());
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(io)?;
+        }
+        // Reserve the leaf exclusively so rollback can never delete a pre-existing checkout.
+        fs::create_dir(destination).map_err(io)?;
+        self.destination = Some(destination.to_path_buf());
+        let dot_git = destination.join(".git");
+        fs::write(
+            admin_directory.join("HEAD"),
+            format!("ref: {}\n", reference.as_bstr()),
+        )
+        .map_err(io)?;
+        fs::write(admin_directory.join("commondir"), "../..\n").map_err(io)?;
+        fs::write(
+            admin_directory.join("gitdir"),
+            format!("{}\n", git_path(&dot_git)),
+        )
+        .map_err(io)?;
+        fs::write(dot_git, format!("gitdir: {}\n", git_path(&admin_directory))).map_err(io)?;
+        Ok(())
     }
-    let admin_directory = worktrees.join(&id);
-    fs::create_dir_all(&admin_directory).map_err(io)?;
-    fs::create_dir_all(destination).map_err(io)?;
-    let dot_git = destination.join(".git");
-    fs::write(
-        admin_directory.join("HEAD"),
-        format!("ref: {}\n", reference.as_bstr()),
-    )
-    .map_err(io)?;
-    fs::write(admin_directory.join("commondir"), "../..\n").map_err(io)?;
-    fs::write(
-        admin_directory.join("gitdir"),
-        format!("{}\n", git_path(&dot_git)),
-    )
-    .map_err(io)?;
-    fs::write(dot_git, format!("gitdir: {}\n", git_path(&admin_directory))).map_err(io)?;
-    Ok(admin_directory)
+
+    fn commit(mut self) {
+        self.destination = None;
+        self.admin_directory = None;
+    }
+
+    fn rollback(&mut self) -> Result<(), GitError> {
+        let mut failures = Vec::new();
+        for path in [&mut self.destination, &mut self.admin_directory] {
+            if let Some(path) = path.take()
+                && let Err(error) = fs::remove_dir_all(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                failures.push(format!("{}: {error}", path.display()));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(GitError(format!(
+                "failed to clean up worktree creation: {}",
+                failures.join("; ")
+            )))
+        }
+    }
+}
+
+impl Drop for WorktreeCreation {
+    fn drop(&mut self) {
+        if let Err(error) = self.rollback() {
+            tracing::warn!("{error}");
+        }
+    }
 }
 
 /// git writes forward slashes on every platform and reads either.

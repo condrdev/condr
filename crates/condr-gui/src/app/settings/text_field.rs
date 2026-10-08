@@ -6,7 +6,8 @@ const SAVED_HINT: Duration = Duration::from_secs(2);
 /// A free-text setting. Typing only moves `draft`; leaving the field, pressing Enter or
 /// the Save button shown while the draft is unsent commits it. So a half-typed value
 /// never reaches the config file or a Server, and the field is never rewritten under
-/// the user: `committed` is what was last sent, not the normalized value that came back.
+/// the user. `committed` is the last accepted draft (including a staged Listen address),
+/// not the normalized value that came back.
 pub(in crate::app) struct TextField {
     pub(super) input: Entity<InputState>,
     pub(super) draft: SharedString,
@@ -30,6 +31,24 @@ pub(in crate::app) enum TextFieldId {
     FontFamily,
     Shell,
     Listen,
+}
+
+/// A commit may validate a local draft without sending it, or fail before it queues.
+pub(super) enum CommitOutcome {
+    Invalid,
+    Unavailable,
+    Staged,
+    Queued,
+}
+
+impl CommitOutcome {
+    pub(super) fn from_queued(queued: bool) -> Self {
+        if queued {
+            Self::Queued
+        } else {
+            Self::Unavailable
+        }
+    }
 }
 
 impl SettingsWindow {
@@ -75,29 +94,32 @@ impl SettingsWindow {
         }
     }
 
-    /// Sends one field's draft. `None` from a committer means the draft was refused and
-    /// stays unsent; `Some(false)` means it was accepted but nothing had to go out.
+    /// Only an accepted draft becomes committed. A disabled listener stages its address
+    /// locally; an unavailable Server leaves the draft dirty so it can be retried.
     pub(super) fn commit(&mut self, id: TextFieldId, cx: &mut Context<Self>) {
         let draft = self.field(id).draft.clone();
         let outcome = match id {
             TextFieldId::FontFamily => {
                 self.font_draft.family = draft.clone();
-                self.commit_font(cx);
-                Some(true)
+                CommitOutcome::from_queued(self.commit_font(cx))
             }
             TextFieldId::Shell => {
                 let key = self.selected_server;
-                let sent = self
+                let queued = self
                     .owner
                     .update(cx, |owner, _| owner.set_server_shell(key, &draft))
-                    .is_ok();
-                Some(sent)
+                    .unwrap_or(false);
+                CommitOutcome::from_queued(queued)
             }
             TextFieldId::Listen => self.commit_listen(cx),
         };
-        if let Some(sent) = outcome {
-            self.field_mut(id).committed = draft;
-            if sent {
+        self.saved = None;
+        self._saved_clear = None;
+        match outcome {
+            CommitOutcome::Invalid | CommitOutcome::Unavailable => {}
+            CommitOutcome::Staged => self.field_mut(id).committed = draft,
+            CommitOutcome::Queued => {
+                self.field_mut(id).committed = draft;
                 self.saved = Some(id);
                 self._saved_clear = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(SAVED_HINT).await;
@@ -155,6 +177,7 @@ pub(super) fn text_field_row(
             .when(unsent, |row| {
                 row.child(
                     Button::new(format!("save-{id:?}"))
+                        .debug_selector(move || format!("settings-save-{id:?}"))
                         .label("Save")
                         .small()
                         .outline()
@@ -166,6 +189,7 @@ pub(super) fn text_field_row(
             .when(saved && !unsent, |row| {
                 row.child(
                     div()
+                        .debug_selector(move || format!("settings-saved-{id:?}"))
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .child("Saved"),

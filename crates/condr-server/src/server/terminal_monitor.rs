@@ -134,10 +134,10 @@ pub(super) fn monitor_terminal(monitor: TerminalMonitor) {
     });
 }
 
-/// Runs the agent, cwd, and Git probes for one Terminal off the frame path. The agent
+/// Runs agent/cwd probes and sends Git refresh intents off the frame path. The agent
 /// probe ticks on its own cadence (300 ms) whether or not the terminal printed anything,
-/// since processes exit without output; nudges only feed the cwd and Git probes. A slow `git` or process enumeration
-/// delays the next probe, never a frame.
+/// since processes exit without output; nudges feed cwd and the shared Git scheduler.
+/// Slow Git scans cannot delay agent-state or cwd detection.
 fn probe_terminal(
     pane_id: PaneId,
     instance_id: u64,
@@ -150,13 +150,16 @@ fn probe_terminal(
         let mut resume_pending = true;
         let mut resume_retry_at = Instant::now();
         let mut cwd_scan_due: Option<Instant> = None;
-        let mut git_scan_pending: Option<Instant> = None;
         loop {
             match activity.recv_timeout(agent_probe.poll_interval()) {
                 Ok(()) => {
                     let now = Instant::now();
                     cwd_scan_due = Some(now + CWD_SCAN_INTERVAL);
-                    git_scan_pending = Some(now);
+                    let state = state.lock().expect("server state lock poisoned");
+                    if !state.terminal_is_current(pane_id, instance_id) {
+                        break;
+                    }
+                    state.request_terminal_git_refresh(pane_id, now);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -191,66 +194,6 @@ fn probe_terminal(
                 if let Some(next) = agent_update {
                     state.agent_process_update(pane_id, agent_probe.agent());
                     apply_agent_refresh(&mut state, pane_id, next);
-                }
-            }
-            if let Some(activity_at) = git_scan_pending {
-                let scan = {
-                    let mut state = state.lock().expect("server state lock poisoned");
-                    if !state.terminal_is_current(pane_id, instance_id) {
-                        break;
-                    }
-                    reserve_workspace_git_scan(&mut state, pane_id, activity_at, now)
-                };
-                match scan {
-                    WorkspaceGitScan::Waiting => {}
-                    WorkspaceGitScan::Covered => git_scan_pending = None,
-                    WorkspaceGitScan::Ready { workspace_id, root } => {
-                        git_scan_pending = None;
-                        // Terminal output alone does not change the branch; only rediscover
-                        // when the ref files moved since the Workspace was last discovered.
-                        let (known, recorded) = {
-                            let state = state.lock().expect("server state lock poisoned");
-                            if !state.terminal_is_current(pane_id, instance_id) {
-                                break;
-                            }
-                            let known = state.workspace_git.get(&workspace_id).map(|git| {
-                                let base = git.base.as_ref().map(|(base, _)| base.clone());
-                                (git.repository.clone(), base)
-                            });
-                            (known, state.recorded_base(workspace_id))
-                        };
-                        let fingerprint = known
-                            .as_ref()
-                            .and_then(|(repository, base)| repository.fingerprint(base.as_ref()));
-                        {
-                            let mut state = state.lock().expect("server state lock poisoned");
-                            if !state.terminal_is_current(pane_id, instance_id) {
-                                break;
-                            }
-                            if fingerprint.is_some()
-                                && state.workspace_git_heads.get(&workspace_id)
-                                    == fingerprint.as_ref()
-                            {
-                                continue;
-                            }
-                            // Recorded before the scan: a switch racing the scan differs next time.
-                            match fingerprint {
-                                Some(fingerprint) => {
-                                    state.workspace_git_heads.insert(workspace_id, fingerprint);
-                                }
-                                None => {
-                                    state.workspace_git_heads.remove(&workspace_id);
-                                }
-                            }
-                        }
-                        if let Ok(next) = WorkspaceGit::scan(&root, recorded.as_deref()) {
-                            let mut state = state.lock().expect("server state lock poisoned");
-                            if !state.terminal_is_current(pane_id, instance_id) {
-                                break;
-                            }
-                            apply_workspace_git_refresh(&mut state, workspace_id, &root, next);
-                        }
-                    }
                 }
             }
         }
@@ -380,36 +323,4 @@ pub(super) fn apply_terminal_notices(
     if let Some(text) = notices.clipboard {
         state.broadcast_clipboard(pane_id, text);
     }
-}
-
-pub(super) enum WorkspaceGitScan {
-    Waiting,
-    Covered,
-    Ready {
-        workspace_id: WorkspaceId,
-        root: PathBuf,
-    },
-}
-
-pub(super) fn reserve_workspace_git_scan(
-    state: &mut RuntimeState,
-    pane_id: PaneId,
-    activity: Instant,
-    now: Instant,
-) -> WorkspaceGitScan {
-    let Some(workspace) = state.session.workspace_for_pane(pane_id) else {
-        return WorkspaceGitScan::Covered;
-    };
-    let workspace_id = workspace.id();
-    let root = workspace.root_directory().to_path_buf();
-    if let Some(scanned_at) = state.workspace_git_scanned_at.get(&workspace_id) {
-        if *scanned_at >= activity {
-            return WorkspaceGitScan::Covered;
-        }
-        if now.duration_since(*scanned_at) < GIT_SCAN_INTERVAL {
-            return WorkspaceGitScan::Waiting;
-        }
-    }
-    state.workspace_git_scanned_at.insert(workspace_id, now);
-    WorkspaceGitScan::Ready { workspace_id, root }
 }

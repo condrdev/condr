@@ -1,4 +1,6 @@
 mod mouse;
+#[cfg(test)]
+mod tests;
 
 use super::*;
 
@@ -128,19 +130,24 @@ impl TerminalRuntime {
         unsafe {
             windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 0);
         }
-        let mut child = pair.slave.spawn_command(command).map_err(other_error)?;
+        let child = pair.slave.spawn_command(command).map_err(other_error)?;
         // ponytail: portable-pty starts the shell running, so a child it starts before this
         // line escapes the Job; shells take far longer than that. Creating it inside the Job
         // needs PROC_THREAD_ATTRIBUTE_JOB_LIST in portable-pty's CreateProcessW.
         #[cfg(windows)]
-        if let Err(error) = child
-            .as_raw_handle()
-            .ok_or_else(|| io::Error::other("the shell has no process handle"))
-            .and_then(|handle| job.assign(handle))
-        {
-            let _ = child.kill();
-            return Err(error);
-        }
+        let child = {
+            let mut child = child;
+            if let Err(error) = child
+                .as_raw_handle()
+                .ok_or_else(|| io::Error::other("the shell has no process handle"))
+                .and_then(|handle| job.assign(handle))
+            {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+            child
+        };
         let shell_pid = child.process_id();
         #[cfg(not(windows))]
         let process = ProcessProbe::new(shell_pid);
@@ -161,123 +168,12 @@ impl TerminalRuntime {
         let last_known_cwd = Arc::new(Mutex::new(initial_cwd));
         let (update_sender, updates) = mpsc::channel();
 
-        let writer_stopping = Arc::new(AtomicBool::new(false));
-        let writer_stop = Arc::clone(&writer_stopping);
-        let writer_thread = match thread::Builder::new()
-            .name("condr-pty-writer".into())
-            .spawn(move || {
-                io_loop(TerminalIoLoop {
-                    writer,
-                    input: input_receiver,
-                    stopping: writer_stop,
-                })
-            }) {
-            Ok(thread) => thread,
-            Err(error) => {
-                let _ = shutdown_process_tree(&process, Some(&mut *child));
-                return Err(error);
-            }
-        };
-
         let resize = Arc::new(ResizeControl::default());
-        let resize_control = Arc::clone(&resize);
-        let resize_master = Arc::downgrade(&master);
-        let resize_terminal = Arc::clone(&terminal);
-        let resize_size = Arc::clone(&current_size);
-        let resize_revision = Arc::clone(&revision);
-        let resize_updates = update_sender.clone();
-        let resize_thread = match thread::Builder::new()
-            .name("condr-pty-resizer".into())
-            .spawn(move || {
-                resize_loop(
-                    resize_control,
-                    resize_master,
-                    resize_terminal,
-                    resize_size,
-                    resize_revision,
-                    resize_updates,
-                )
-            }) {
-            Ok(thread) => thread,
-            Err(error) => {
-                input.stop();
-                writer_stopping.store(true, Ordering::Release);
-                #[cfg(unix)]
-                let _ = writer_cancel.shutdown(Shutdown::Both);
-                let _ = writer_thread.join();
-                let _ = shutdown_process_tree(&process, Some(&mut *child));
-                return Err(error);
-            }
-        };
-
-        let reader_terminal = Arc::clone(&terminal);
-        let reader_revision = Arc::clone(&revision);
-        let reader_updates = update_sender.clone();
-        let reader_reported_cwd = Arc::clone(&reported_cwd);
-        let reader_notices = Arc::clone(&notices);
-        let reader_input = input.clone();
-        let reader_size = Arc::clone(&current_size);
-        let reader_cursor_settle = Arc::clone(&cursor_settle);
-        let reader_thread = match thread::Builder::new()
-            .name("condr-pty-reader".into())
-            .spawn(move || {
-                read_loop(TerminalReadLoop {
-                    reader,
-                    terminal: reader_terminal,
-                    input: reader_input,
-                    pending_replies,
-                    revision: reader_revision,
-                    updates: reader_updates,
-                    reported_cwd: reader_reported_cwd,
-                    notices: reader_notices,
-                    size: reader_size,
-                    cursor_settle: reader_cursor_settle,
-                })
-            }) {
-            Ok(thread) => thread,
-            Err(error) => {
-                input.stop();
-                resize.stop();
-                writer_stopping.store(true, Ordering::Release);
-                #[cfg(unix)]
-                let _ = writer_cancel.shutdown(Shutdown::Both);
-                let _ = writer_thread.join();
-                let _ = resize_thread.join();
-                let _ = shutdown_process_tree(&process, Some(&mut *child));
-                return Err(error);
-            }
-        };
-
-        #[cfg(not(unix))]
-        let exit_signal = update_sender.clone();
+        let writer_stopping = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(Some(child)));
-        if let Err(error) = thread::Builder::new()
-            .name("condr-pty-child-watch".into())
-            .spawn({
-                let child = Arc::downgrade(&child);
-                move || child_exit_watch(child, exit_signal)
-            })
-        {
-            // Same order as `stop_process_and_io`: the process tree goes first, and on
-            // ConPTY the master is released so the reader, which has no cancel, unblocks.
-            input.stop();
-            resize.stop();
-            writer_stopping.store(true, Ordering::Release);
-            #[cfg(unix)]
-            let _ = writer_cancel.shutdown(Shutdown::Both);
-            let mut child = lock_child(&child).take();
-            let _ = shutdown_process_tree(&process, child.as_deref_mut());
-            #[cfg(unix)]
-            let _ = reader_cancel.shutdown(Shutdown::Both);
-            #[cfg(not(unix))]
-            drop(master);
-            let _ = writer_thread.join();
-            let _ = resize_thread.join();
-            let _ = reader_thread.join();
-            return Err(error);
-        }
-
-        Ok(Self {
+        // Ownership is complete before starting any thread. A failed stage drops this
+        // runtime through the same process/I/O cleanup as a normally closed Pane.
+        let mut runtime = Self {
             terminal,
             master: Some(master),
             process,
@@ -296,15 +192,82 @@ impl TerminalRuntime {
             resize,
             child,
             process_shutdown: ProcessShutdownState::default(),
-            reader: Some(reader_thread),
-            writer: Some(writer_thread),
-            resizer: Some(resize_thread),
+            reader: None,
+            writer: None,
+            resizer: None,
             writer_stopping,
             #[cfg(unix)]
             reader_cancel: Some(reader_cancel),
             #[cfg(unix)]
             writer_cancel: Some(writer_cancel),
-        })
+        };
+
+        let writer_stop = Arc::clone(&runtime.writer_stopping);
+        runtime.writer = Some(runtime.start_thread("writer", move || {
+            io_loop(TerminalIoLoop {
+                writer,
+                input: input_receiver,
+                stopping: writer_stop,
+            })
+        })?);
+
+        let resize_control = Arc::clone(&runtime.resize);
+        let resize_master = Arc::downgrade(runtime.master.as_ref().expect("new PTY has a master"));
+        let resize_terminal = Arc::clone(&runtime.terminal);
+        let resize_size = Arc::clone(&runtime.size);
+        let resize_revision = Arc::clone(&runtime.revision);
+        let resize_updates = runtime.update_sender.clone();
+        runtime.resizer = Some(runtime.start_thread("resizer", move || {
+            resize_loop(
+                resize_control,
+                resize_master,
+                resize_terminal,
+                resize_size,
+                resize_revision,
+                resize_updates,
+            )
+        })?);
+
+        let reader_terminal = Arc::clone(&runtime.terminal);
+        let reader_revision = Arc::clone(&runtime.revision);
+        let reader_updates = runtime.update_sender.clone();
+        let reader_reported_cwd = Arc::clone(&runtime.reported_cwd);
+        let reader_notices = Arc::clone(&runtime.notices);
+        let reader_input = runtime.input.clone();
+        let reader_size = Arc::clone(&runtime.size);
+        let reader_cursor_settle = Arc::clone(&runtime.cursor_settle);
+        runtime.reader = Some(runtime.start_thread("reader", move || {
+            read_loop(TerminalReadLoop {
+                reader,
+                terminal: reader_terminal,
+                input: reader_input,
+                pending_replies,
+                revision: reader_revision,
+                updates: reader_updates,
+                reported_cwd: reader_reported_cwd,
+                notices: reader_notices,
+                size: reader_size,
+                cursor_settle: reader_cursor_settle,
+            })
+        })?);
+
+        #[cfg(not(unix))]
+        let exit_signal = runtime.update_sender.clone();
+        let child = Arc::downgrade(&runtime.child);
+        runtime.start_thread("child-watch", move || child_exit_watch(child, exit_signal))?;
+        Ok(runtime)
+    }
+
+    fn start_thread<T: Send + 'static>(
+        &self,
+        name: &'static str,
+        run: impl FnOnce() -> T + Send + 'static,
+    ) -> io::Result<JoinHandle<T>> {
+        #[cfg(test)]
+        tests::before_thread_start(self, name)?;
+        thread::Builder::new()
+            .name(format!("condr-pty-{name}"))
+            .spawn(run)
     }
 
     pub fn write(&self, bytes: impl Into<Vec<u8>>) -> io::Result<()> {
@@ -832,6 +795,8 @@ fn child_exit_watch(
 
 impl Drop for TerminalRuntime {
     fn drop(&mut self) {
-        let _ = self.close();
+        if let Err(error) = self.close() {
+            tracing::warn!("failed to close Terminal runtime: {error}");
+        }
     }
 }

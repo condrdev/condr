@@ -721,12 +721,6 @@ pub(super) fn commit_layout_candidate(
     state
         .workspace_git
         .retain(|workspace_id, _| session.workspace(*workspace_id).is_some());
-    state
-        .workspace_git_scanned_at
-        .retain(|workspace_id, _| session.workspace(*workspace_id).is_some());
-    state
-        .workspace_git_heads
-        .retain(|workspace_id, _| session.workspace(*workspace_id).is_some());
     state.unwatch_closed_workspaces();
     let mut removed_terminals = Vec::new();
     if let Some(closed) = closed {

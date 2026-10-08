@@ -68,6 +68,51 @@ fn reply(outbound: &ClientWriter, result: Result<AgentResponse, AgentError>) {
     }
 }
 
+/// Accepts a Hooks operation before touching configuration or invoking an agent CLI.
+/// Once accepted, shutdown waits for its real result; disk I/O holds no Session lock.
+pub(super) fn handle_hooks(
+    state: &Arc<Mutex<RuntimeState>>,
+    lifecycle: &Arc<ServerLifecycle>,
+    outbound: &ClientWriter,
+    server_id: ServerId,
+    session_id: SessionId,
+    agent: AgentKind,
+    action: condr_core::agent_hooks::HooksAction,
+) {
+    let operation = {
+        let state = state.lock().expect("server state lock poisoned");
+        (server_id == state.server_id && session_id == state.session_id)
+            .then(|| lifecycle.begin_operation())
+            .flatten()
+    };
+    let Some(_operation) = operation else {
+        reply(
+            outbound,
+            Err(error(
+                "invalid_agent_request",
+                "unknown Server/Session or Server is stopping",
+            )),
+        );
+        return;
+    };
+    let result = condr_core::agent_hooks::HookTarget::local()
+        .ok_or_else(|| error("no_home_directory", "cannot locate the home directory"))
+        .and_then(|target| {
+            condr_core::agent_hooks::run(&target, agent, action)
+                .map(AgentResponse::Hooks)
+                .map_err(|err| {
+                    error(
+                        match err.kind() {
+                            io::ErrorKind::InvalidData => "hooks_config_invalid",
+                            _ => "io",
+                        },
+                        err.to_string(),
+                    )
+                })
+        });
+    reply(outbound, result);
+}
+
 /// Prepares a native resume outside the Session lock, then verifies the same Terminal
 /// still owns the reservation before enqueueing it once.
 pub(super) fn resume_agent(

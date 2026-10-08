@@ -35,11 +35,11 @@ use condr_core::protocol::{
     terminal_batch_overhead,
 };
 use condr_core::{
-    AgentSnapshot, GitFingerprint, GitRepository, PaneEnvironment, PaneId, Session,
-    TerminalAgentProbe, TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget,
-    TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate,
-    TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree,
-    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
+    AgentSnapshot, GitRepository, PaneEnvironment, PaneId, Session, TerminalAgentProbe,
+    TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget, TerminalNoticeBatch,
+    TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView,
+    TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, discover_repository,
+    open_worktree, remove_worktree, validate_worktree_removal,
 };
 use config::{load_shell, load_worktree_root, save_shell};
 use layout::*;
@@ -81,7 +81,6 @@ const CWD_SCAN_INTERVAL: Duration = Duration::from_millis(500);
 /// A pending native resume checks whether the shell is idle at most this often: the
 /// check scans the whole process table, and a starting shell wakes the probe per chunk.
 const RESUME_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-const GIT_SCAN_INTERVAL: Duration = Duration::from_secs(2);
 const TERMINAL_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 const BOOTSTRAP_METADATA_HEADROOM: usize = 64 * 1024;
 const MAX_PERSISTED_SNAPSHOT_BYTES: usize = MAX_FRAME_SIZE - BOOTSTRAP_METADATA_HEADROOM;
@@ -347,7 +346,7 @@ impl BoundServer {
         self.lifecycle.begin_stop();
         self.stop.store(true, Ordering::Release);
         self.lifecycle.wait_for_operations();
-        let mut terminals = {
+        let (mut terminals, git_watcher) = {
             let mut state = self.state.lock().expect("server state lock poisoned");
             state.stop_agent_waits();
             clipboard_image::remove(
@@ -359,8 +358,14 @@ impl BoundServer {
             for runtime in state.terminals.values() {
                 runtime.prepare_agent_shutdown();
             }
-            std::mem::take(&mut state.terminals)
+            (
+                std::mem::take(&mut state.terminals),
+                state.git_watcher.take(),
+            )
         };
+        if let Some(watcher) = git_watcher {
+            watcher.shutdown();
+        }
         let mut terminal_result = Ok(());
         let mut final_cwds = Vec::new();
         let mut final_resumes = Vec::new();
@@ -503,12 +508,9 @@ struct RuntimeState {
     /// BEL attention is controller-only because PTY focus has one authoritative owner.
     pending_terminal_bells: std::collections::HashSet<PaneId>,
     workspace_git: std::collections::HashMap<WorkspaceId, WorkspaceGit>,
-    /// Recomputes `workspace_git` when files change; `None` until the state has its shared
-    /// handle, and in unit tests.
+    /// Owns Git refresh scheduling for filesystem and terminal activity; `None` until
+    /// the state has its shared handle, and in unit tests.
     git_watcher: Option<GitWatcher>,
-    workspace_git_scanned_at: std::collections::HashMap<WorkspaceId, Instant>,
-    /// HEAD fingerprints at the last rediscovery, shared by every Pane of the Workspace.
-    workspace_git_heads: std::collections::HashMap<WorkspaceId, GitFingerprint>,
     worktree_root: Option<PathBuf>,
     active_controller: Option<u64>,
     focused_terminal: Option<PaneId>,
@@ -657,8 +659,6 @@ impl RuntimeState {
             pending_terminal_bells: std::collections::HashSet::new(),
             workspace_git: std::collections::HashMap::new(),
             git_watcher: None,
-            workspace_git_scanned_at: std::collections::HashMap::new(),
-            workspace_git_heads: std::collections::HashMap::new(),
             worktree_root: load_worktree_root(config_path.as_deref()),
             active_controller: None,
             focused_terminal: None,

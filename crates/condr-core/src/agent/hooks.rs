@@ -8,9 +8,11 @@
 
 use super::hook::HookInput;
 use super::{AgentEventKind, AgentKind, AgentSupport};
+use atomicwrites::{AllowOverwrite, AtomicFile};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::io;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 /// How one agent's hooks are written, and what its hook invocations need that only its
@@ -275,6 +277,8 @@ pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Re
     let path = match action {
         HooksAction::Install => {
             let path = install(target, agent)?;
+            // The external CLI may inspect its hooks. Release the file transaction
+            // before invoking it; the Server still owns this operation until it returns.
             if let Some(enable) = agent.spec().hooks().and_then(|hooks| hooks.enable) {
                 warning = enable().err();
             }
@@ -297,6 +301,13 @@ pub fn run(target: &HookTarget, agent: AgentKind, action: HooksAction) -> io::Re
 }
 
 pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
+    let Some(_transaction) = HookTransaction::open(target, agent, false)? else {
+        return Ok(if agent.spec().hooks().is_some() {
+            HooksState::Missing
+        } else {
+            HooksState::Unsupported
+        });
+    };
     let Some(hooks) = agent.spec().hooks() else {
         return Ok(HooksState::Unsupported);
     };
@@ -344,6 +355,7 @@ pub fn state(target: &HookTarget, agent: AgentKind) -> io::Result<HooksState> {
 /// Writes this `condr`'s hooks, replacing any earlier Condr entries and leaving the
 /// user's alone. Returns the file written.
 pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
+    let _transaction = HookTransaction::open(target, agent, true)?;
     let hooks = match &agent.spec().support {
         AgentSupport::Full(hooks) => hooks,
         AgentSupport::RecognitionOnly(reason) => {
@@ -405,6 +417,9 @@ pub fn install(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
 
 /// Removes every Condr entry, leaving the rest of the file as it was.
 pub fn uninstall(target: &HookTarget, agent: AgentKind) -> io::Result<PathBuf> {
+    let Some(_transaction) = HookTransaction::open(target, agent, false)? else {
+        return Ok(target.path(agent));
+    };
     let path = target.path(agent);
     let Some(hooks) = agent.spec().hooks() else {
         return Ok(path);
@@ -700,6 +715,74 @@ fn write_config(path: &Path, root: &Value) -> io::Result<()> {
     write_file(path, text.as_bytes())
 }
 
+/// Locks all files one installation edits through their actual paths. The stable order
+/// also covers aliases sharing a plugin registry; one file must never be locked twice.
+struct HookTransaction {
+    _locks: Vec<File>,
+}
+
+impl HookTransaction {
+    fn open(target: &HookTarget, agent: AgentKind, create: bool) -> io::Result<Option<Self>> {
+        let Some(hooks) = agent.spec().hooks() else {
+            return Ok(None);
+        };
+        let path = target.path(agent);
+        let mut paths = vec![path.clone()];
+        match hooks.format {
+            HookFormat::Plugin { .. } => paths.push(manifest_path(&path)),
+            HookFormat::Script {
+                registry: Some(registry),
+                ..
+            } => paths.push((hooks.dir)(target).join(registry)),
+            _ => {}
+        }
+        // Inspecting or removing an absent installation must not create agent folders.
+        if !create {
+            let mut exists = false;
+            for path in &paths {
+                exists |= path.try_exists()?;
+            }
+            if !exists {
+                return Ok(None);
+            }
+        }
+        let mut lock_paths = Vec::with_capacity(paths.len());
+        for path in paths {
+            let path = std::path::absolute(&path)?;
+            let parent = path
+                .parent()
+                .ok_or_else(|| invalid(&path, "has no parent"))?;
+            std::fs::create_dir_all(parent)?;
+            let path = std::fs::canonicalize(parent)?.join(
+                path.file_name()
+                    .ok_or_else(|| invalid(&path, "must name a file"))?,
+            );
+            let path = match std::fs::canonicalize(&path) {
+                Ok(real) => real,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => path,
+                Err(error) => return Err(error),
+            };
+            let mut lock_path = path.into_os_string();
+            lock_path.push(".condr-lock");
+            lock_paths.push(PathBuf::from(lock_path));
+        }
+        lock_paths.sort();
+        lock_paths.dedup();
+        let mut locks = Vec::with_capacity(lock_paths.len());
+        for path in lock_paths {
+            let lock = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(path)?;
+            lock.lock()?;
+            locks.push(lock);
+        }
+        Ok(Some(Self { _locks: locks }))
+    }
+}
+
 /// Writes through a symlink (dotfile managers keep the real file elsewhere), replaces
 /// the target atomically, and leaves an already identical file untouched so a status
 /// check or a no-op uninstall never dirties the user's dotfiles.
@@ -715,9 +798,9 @@ fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let temporary = path.with_extension("condr-tmp");
-    std::fs::write(&temporary, bytes)?;
-    std::fs::rename(&temporary, &path)
+    AtomicFile::new(&path, AllowOverwrite)
+        .write(|file| file.write_all(bytes))
+        .map_err(io::Error::from)
 }
 
 fn invalid(path: &Path, detail: impl std::fmt::Display) -> io::Error {

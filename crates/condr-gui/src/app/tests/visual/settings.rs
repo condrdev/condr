@@ -1,6 +1,172 @@
 use super::*;
 
 #[test]
+fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let _writer = window.read(|cx| {
+        view.read(cx)
+            .connection(1)
+            .unwrap()
+            .io
+            .as_ref()
+            .unwrap()
+            .outgoing
+            .clone()
+    });
+    let main_window = window.update(|window, _| window.window_handle());
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.connections.push(ServerConnection::new(
+                2,
+                "Other device".into(),
+                Endpoint::local(std::env::temp_dir().join("condr-settings-other.sock")),
+            ));
+            this.open_settings(window, cx);
+        });
+    });
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    settings.update(|_, cx| {
+        select_settings_tab(&settings_view, SettingsTab::Server, cx);
+        view.update(cx, |this, _| {
+            let (outgoing, receiver) = std::sync::mpsc::channel();
+            drop(receiver);
+            this.connection_mut(1)
+                .unwrap()
+                .io
+                .as_mut()
+                .unwrap()
+                .outgoing = outgoing;
+        });
+        select_server_shell(&settings_view, "nu".into(), cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(settings.read(|cx| server_shell(&settings_view, cx)), "nu");
+    assert!(settings.debug_bounds("settings-save-Shell").is_some());
+    assert!(settings.debug_bounds("settings-saved-Shell").is_none());
+
+    let (outgoing, receiver) = std::sync::mpsc::channel();
+    settings.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(1)
+                .unwrap()
+                .io
+                .as_mut()
+                .unwrap()
+                .outgoing = outgoing;
+        });
+        select_server_shell(&settings_view, "nu".into(), cx);
+    });
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(ClientMessage::SetServerSettings { shell, .. }) if shell == "nu"
+    ));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("settings-save-Shell").is_none());
+    assert!(settings.debug_bounds("settings-saved-Shell").is_some());
+
+    settings.update(|_, cx| select_settings_server(&settings_view, 2, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(settings.read(|cx| server_shell(&settings_view, cx)), "");
+    assert!(settings.debug_bounds("settings-saved-Shell").is_none());
+    settings.update(|_, cx| select_server_shell(&settings_view, "fish".into(), cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("settings-save-Shell").is_some());
+    assert!(settings.debug_bounds("settings-saved-Shell").is_none());
+}
+
+#[test]
+fn listen_submission_distinguishes_invalid_unavailable_and_staged_addresses() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let _writer = window.read(|cx| {
+        view.read(cx)
+            .connection(1)
+            .unwrap()
+            .io
+            .as_ref()
+            .unwrap()
+            .outgoing
+            .clone()
+    });
+    let main_window = window.update(|window, _| window.window_handle());
+    window.update(|window, cx| view.update(cx, |this, cx| this.open_settings(window, cx)));
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    settings.update(|_, cx| {
+        select_settings_server_page(&settings_view, 1, cx);
+        select_settings_tab(&settings_view, SettingsTab::Server, cx);
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            connection.listen = Some("127.0.0.1:2637".into());
+            let (outgoing, receiver) = std::sync::mpsc::channel();
+            drop(receiver);
+            connection.io.as_mut().unwrap().outgoing = outgoing;
+        });
+        set_server_listen(&settings_view, "127.0.0.1:2638".into(), cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("settings-save-Listen").is_some());
+    assert!(settings.debug_bounds("settings-saved-Listen").is_none());
+
+    settings.update(|_, cx| set_server_listen(&settings_view, "127.0.0.1:".into(), cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.read(|cx| settings_view.read(cx).listen_refused));
+    assert!(settings.debug_bounds("settings-save-Listen").is_some());
+
+    let (outgoing, receiver) = std::sync::mpsc::channel();
+    settings.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let connection = this.connection_mut(1).unwrap();
+            connection.listen = None;
+            connection.io.as_mut().unwrap().outgoing = outgoing;
+        });
+        set_server_listen(&settings_view, "127.0.0.1:2639".into(), cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        settings.read(|cx| server_listen(&settings_view, cx)),
+        "127.0.0.1:2639"
+    );
+    assert!(!settings.read(|cx| settings_view.read(cx).listen_refused));
+    assert!(settings.debug_bounds("settings-save-Listen").is_none());
+    assert!(settings.debug_bounds("settings-saved-Listen").is_none());
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
+}
+
+#[test]
 fn the_settings_button_opens_a_separate_window_that_applies_a_theme_mode() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
