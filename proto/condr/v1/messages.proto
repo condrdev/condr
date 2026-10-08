@@ -10,6 +10,8 @@ import "condr/v1/session.proto";
 import "condr/v1/terminal.proto";
 
 message ClientMessage {
+  // Session control, removed by ADR 0036.
+  reserved 5, 6;
   oneof message {
     SessionRequest snapshot_request = 1;
     SessionRequest overview_request = 2;
@@ -321,6 +323,8 @@ message WorkspacePath {
 }
 
 message ServerMessage {
+  // Session control, removed by ADR 0036.
+  reserved 12, 13, 14;
   oneof message {
     BootstrapHeader bootstrap = 1;
     SessionOverview overview = 2;
@@ -361,6 +365,8 @@ message SessionReason {
   uint64 server_id = 1;
   uint64 session_id = 2;
   string reason = 3;
+  // The control denial reason, removed by ADR 0036.
+  reserved 4;
 }
 
 // 16 bytes, big-endian.
