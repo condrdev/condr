@@ -1,7 +1,8 @@
 //! The Files sidebar's data (ADR 0018): one directory level of a Workspace root and one
-//! file's content, read by the Server and answered over the protocol. Plain filesystem
-//! reads: browsing a Workspace does not need it to be a repository. Also the subdirectories
-//! of any absolute path, for choosing a Root Directory on another Device.
+//! file's content, text or an image's bytes (ADR 0037), read by the Server and answered
+//! over the protocol. Plain filesystem reads: browsing a Workspace does not need it to be
+//! a repository. Also the subdirectories of any absolute path, for choosing a Root
+//! Directory on another Device.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,6 +14,15 @@ use crate::valid_diff_path;
 
 /// The largest file the Preview Tab shows; larger ones yield a placeholder like a diff.
 pub const MAX_FILE_BYTES: u64 = crate::MAX_DIFF_BYTES;
+/// The largest image the Preview Tab shows (ADR 0037): its bytes ride one reply frame,
+/// with room left for the reply's own fields.
+// ponytail: one frame per image; chunk the reply if larger screenshots need showing.
+pub const MAX_IMAGE_BYTES: u64 = (crate::protocol::MAX_FRAME_SIZE - 64 * 1024) as u64;
+/// The extensions, lower case, whose files are sent as image bytes rather than probed for
+/// text (ADR 0037). SVG is text and reaches the Client as such.
+pub const IMAGE_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff",
+];
 /// The most entries one directory listing carries; the rest are dropped and said so.
 pub const MAX_DIRECTORY_ENTRIES: usize = 2000;
 /// How much of a file decides whether it is text, as git's own heuristic does.
@@ -56,9 +66,17 @@ pub struct BrowsedDirectory {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum FileContent {
-    Text { text: String },
+    Text {
+        text: String,
+    },
+    /// A file [`is_image`] names, undecoded: the Client decodes it.
+    Image {
+        bytes: Vec<u8>,
+    },
     Binary,
-    TooLarge { bytes: u64 },
+    TooLarge {
+        bytes: u64,
+    },
 }
 
 /// The Workspace root itself, or a directory inside it.
@@ -138,7 +156,16 @@ fn read_listing(
     Ok(DirectoryListing { entries, truncated })
 }
 
-/// `relative`'s content under `root`, as text when it looks like text.
+/// Whether the Server sends `path`'s bytes as an image, by its extension.
+pub fn is_image(path: &RelativePath) -> bool {
+    path.extension().is_some_and(|extension| {
+        IMAGE_EXTENSIONS
+            .iter()
+            .any(|image| extension.eq_ignore_ascii_case(image))
+    })
+}
+
+/// `relative`'s content under `root`: an image's bytes, else text when it looks like text.
 pub fn read_file(root: &Path, relative: &RelativePath) -> Result<FileContent, String> {
     if !valid_diff_path(relative) {
         return Err("invalid file path".into());
@@ -148,14 +175,23 @@ pub fn read_file(root: &Path, relative: &RelativePath) -> Result<FileContent, St
     if meta.is_dir() {
         return Err("is a directory".into());
     }
-    if meta.len() > MAX_FILE_BYTES {
+    let image = is_image(relative);
+    let limit = if image {
+        MAX_IMAGE_BYTES
+    } else {
+        MAX_FILE_BYTES
+    };
+    if meta.len() > limit {
         return Ok(FileContent::TooLarge { bytes: meta.len() });
     }
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
+    if bytes.len() as u64 > limit {
         return Ok(FileContent::TooLarge {
             bytes: bytes.len() as u64,
         });
+    }
+    if image {
+        return Ok(FileContent::Image { bytes });
     }
     if bytes[..bytes.len().min(BINARY_PROBE_BYTES)].contains(&0) {
         return Ok(FileContent::Binary);

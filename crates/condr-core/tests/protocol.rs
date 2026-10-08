@@ -690,6 +690,24 @@ fn a_pasted_image_gets_its_own_frame_allowance_and_nothing_else_does() {
 }
 
 #[test]
+fn the_largest_image_reply_fits_one_frame() {
+    let message = ServerMessage::FileContent {
+        request_id: u64::MAX,
+        workspace_id: WorkspaceId::from_u64(u64::MAX),
+        path: "a/".repeat(2048).into(),
+        result: Ok(condr_core::FileContent::Image {
+            bytes: vec![7; condr_core::MAX_IMAGE_BYTES as usize],
+        }),
+    };
+    let mut frame = Vec::new();
+    write_message(&mut frame, &message).unwrap();
+    assert_eq!(
+        read_message::<_, ServerMessage>(&mut frame.as_slice()).unwrap(),
+        message
+    );
+}
+
+#[test]
 fn server_admin_commands_round_trip() {
     let message = ClientMessage::ServerAdmin {
         server_id: ServerId(7),

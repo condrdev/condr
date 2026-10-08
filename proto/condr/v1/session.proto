@@ -254,5 +254,7 @@ message FileContent {
     string text = 1;
     Empty binary = 2;
     uint64 too_large = 3;
+    // An image file's undecoded bytes (ADR 0037).
+    bytes image = 4;
   }
 }

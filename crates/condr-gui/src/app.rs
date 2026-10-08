@@ -18,6 +18,7 @@ mod notifications;
 mod open_in;
 mod power;
 mod presentation;
+mod preview;
 mod server_connection;
 mod server_management;
 mod settings;

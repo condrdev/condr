@@ -20,7 +20,7 @@ gpui-kit.workspace = true
 gpui-fps.workspace = true
 gpui-pre-reqwest-client.workspace = true
 futures-lite.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["gif", "webp"] }
 condr-core = { path = "../condr-core" }
 condr-server = { path = "../condr-server" }
 relative-path.workspace = true

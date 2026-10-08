@@ -191,7 +191,6 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         }),
         "the retargeted Preview Tab should show the second file"
     );
-
     // The Server's watcher re-answers every cached file after a working-tree batch. An
     // answer with the same content must not count as a change: the Editor would drop its
     // highlighter and scroll back to the top on every refetch. Different content does land.
@@ -325,7 +324,6 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         scrolled,
         "an edit to the shown file must keep the viewport"
     );
-
     // A reconnect while a listing is in flight: the old connection's answer never comes
     // and the Bootstrap empties the caches, so the request must be forgotten with it, or
     // the root would say "Loading…" forever. The same-authority Bootstrap is fed directly:
@@ -394,6 +392,127 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("condr-files-list").is_none());
     assert!(window.debug_bounds("file-README.md").is_none());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The Preview Tab renders images (ADR 0037): an image file scaled to fit with its size
+/// in the header, and an SVG that switches to its text.
+#[test]
+fn preview_tab_renders_images() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = std::env::temp_dir().join(format!(
+        "condr-gui-preview-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    image::RgbaImage::new(3, 2)
+        .save(root.join("shot.png"))
+        .unwrap();
+    let mut gif = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new(&mut gif);
+        for _ in 0..2 {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::new(2, 1),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(50, 1),
+                ))
+                .unwrap();
+        }
+    }
+    std::fs::write(root.join("anim.gif"), gif).unwrap();
+    std::fs::write(
+        root.join("logo.svg"),
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="5"><rect width="4" height="5"/></svg>"#,
+    )
+    .unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = root.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    // The Server answers the new Workspace, which this Client then shows, as it frees the
+    // connection for the next layout command; a ShowFile sent earlier would be refused.
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .view_workspace
+                .is_some()
+        })
+    }));
+    let workspace_id =
+        window.read(|app| view.read(app).active_session().unwrap().workspaces()[0].id());
+    let show = |window: &mut VisualTestContext, path: &str| {
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| {
+                this.show_file_on(1, workspace_id, path.into(), window, cx);
+            });
+        });
+        assert!(
+            wait_until(window, |window| window.read(|app| {
+                view.read(app)
+                    .active_session()
+                    .and_then(|session| session.file_tab(workspace_id)?.file())
+                    .is_some_and(|file| file.path() == relative_path::RelativePath::new(path))
+            })),
+            "the Preview Tab should show {path}"
+        );
+    };
+    let image = |window: &mut VisualTestContext, path: &str| {
+        window.read(|app| {
+            view.read(app)
+                .files_view
+                .images
+                .get(&(1, workspace_id, path.into()))
+        })
+    };
+    let drawn = |window: &mut VisualTestContext, selector: &'static str| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds(selector).is_some()
+    };
+
+    show(window, "shot.png");
+    assert!(
+        wait_until(window, |window| drawn(window, "file-image")
+            && drawn(window, "file-image-summary")),
+        "an image file renders, its size in the header"
+    );
+    assert_eq!(image(window, "shot.png").unwrap().unwrap().size, size(3, 2));
+
+    show(window, "anim.gif");
+    assert!(wait_until(window, |window| drawn(window, "file-image")
+        && image(window, "anim.gif").is_some_and(|image| image.is_ok())));
+    assert!(
+        image(window, "shot.png").is_none(),
+        "the image shown before goes with it"
+    );
+
+    show(window, "logo.svg");
+    assert!(
+        wait_until(window, |window| drawn(window, "file-image")
+            && image(window, "logo.svg").is_some_and(|image| image.is_ok())),
+        "an SVG renders"
+    );
+    assert_eq!(
+        image(window, "logo.svg").unwrap().unwrap().size,
+        size(4, 5),
+        "in its own units, not GPUI's doubled raster"
+    );
+    let source = window.debug_bounds("file-view-source").unwrap();
+    window.simulate_click(source.center(), Modifiers::default());
+    window.run_until_parked();
+    assert!(drawn(window, "file-body") && !drawn(window, "file-image"));
 
     let _ = std::fs::remove_dir_all(&root);
 }

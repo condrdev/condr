@@ -718,6 +718,7 @@ impl From<&FileContent> for super::FileContent {
         Self {
             content: Some(match content {
                 FileContent::Text { text } => Content::Text(text.clone()),
+                FileContent::Image { bytes } => Content::Image(bytes.clone()),
                 FileContent::Binary => Content::Binary(Empty {}),
                 FileContent::TooLarge { bytes } => Content::TooLarge(*bytes),
             }),
@@ -732,6 +733,7 @@ impl TryFrom<super::FileContent> for FileContent {
         use file_content::Content;
         Ok(match member(content.content)? {
             Content::Text(text) => Self::Text { text },
+            Content::Image(bytes) => Self::Image { bytes },
             Content::Binary(_) => Self::Binary,
             Content::TooLarge(bytes) => Self::TooLarge { bytes },
         })

@@ -1,10 +1,16 @@
 //! The Files sidebar and the Preview Tab (ADR 0018): the presented Workspace's directory
 //! tree, one level per Server answer, and one file's content in GPUI Kit's read-only
-//! Editor. Like the Changes sidebar, everything shown is Server data.
+//! Editor, or rendered when it is an image (ADR 0037). Like the Changes sidebar,
+//! everything shown is Server data.
 
 use super::changes::{empty_state, status_color, status_glyph, tree_indent};
+use super::preview::{
+    DecodedImage, PreviewImages, Rendering, image_summary, release_images, render_image,
+    rendering_for,
+};
 use super::*;
 use condr_core::{DirectoryEntry, FileKind};
+use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::input::{Position, RopeExt as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -40,6 +46,8 @@ pub(super) struct FilesViewState {
     /// Tab's "Show File", applied by `sync_file_view` when the text is there, then cleared.
     /// Presentation only, so it never rides `ShowFile`.
     pub(super) pending_file_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
+    /// The images the Preview Tabs show, decoded (ADR 0037).
+    pub(super) images: PreviewImages,
 }
 
 impl FilesViewState {
@@ -84,6 +92,10 @@ impl FilesViewState {
         {
             self.pending_file_line = None;
         }
+        // ponytail: dropped without `release_images`, so their frames stay in the atlas
+        // until the window closes; this runs without an App to free them.
+        self.images
+            .retain(|(connection, id, _)| workspace_live(*connection, *id));
     }
 }
 
@@ -144,14 +156,21 @@ pub(super) struct FileEditor {
     /// The path and the generation of the cached answer the Editor text was built from.
     shown: Option<(RelativePathBuf, u64)>,
     pub(super) content: FileViewContent,
+    /// A file the Tab can render shows its text instead. Each file opens rendered, except
+    /// one "Show File" opens at a line.
+    pub(super) source: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum FileViewContent {
     Loading,
     Text,
+    /// Decoded into `FilesViewState::images`.
+    Image,
     Binary,
-    TooLarge { bytes: u64 },
+    TooLarge {
+        bytes: u64,
+    },
     Failed(String),
 }
 
@@ -705,7 +724,8 @@ impl Condr {
         );
     }
 
-    /// The Preview Tab's body: one file's content, or why there is none.
+    /// The Preview Tab's body: one file's content, rendered when it can be, or why there
+    /// is none.
     pub(super) fn render_file_tab(
         &self,
         key: ConnectionKey,
@@ -714,15 +734,128 @@ impl Condr {
         path: &RelativePath,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let editor = self.files_view.file_editors.get(&(key, tab_id));
+        let content = editor.map_or(FileViewContent::Loading, |editor| editor.content.clone());
+        let rendering = rendering_for(path).filter(|_| content == FileViewContent::Text);
+        let source = editor.is_some_and(|editor| editor.source);
+        let image = (content == FileViewContent::Image
+            || (rendering == Some(Rendering::Svg) && !source))
+            .then(|| {
+                self.files_view
+                    .images
+                    .get(&(key, workspace_id, path.to_relative_path_buf()))
+            });
+        let header = self.render_file_header(
+            key,
+            workspace_id,
+            tab_id,
+            path,
+            rendering,
+            source,
+            image.as_ref(),
+            cx,
+        );
+        let body = match (image, &content, editor) {
+            (Some(None), ..) => empty_state("Loading image…", cx),
+            (Some(Some(Ok(image))), ..) => render_image(image),
+            (Some(Some(Err(reason))), ..) => empty_state(reason, cx),
+            (None, FileViewContent::Text, Some(editor)) => {
+                let theme = cx.theme();
+                div()
+                    .debug_selector(|| "file-body".into())
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    // The code theme's background: the Editor draws none of its own.
+                    .when_some(
+                        theme.highlight_theme.style.editor_background,
+                        |this, background| this.bg(background),
+                    )
+                    .child(
+                        Editor::new(&editor.state)
+                            .readonly(true)
+                            .appearance(false)
+                            .bordered(false)
+                            .font_family(self.terminal_font.family.clone())
+                            .text_size(px(self.code_font_size))
+                            .h(relative(1.)),
+                    )
+                    .into_any_element()
+            }
+            (
+                None,
+                FileViewContent::Loading | FileViewContent::Text | FileViewContent::Image,
+                _,
+            ) => empty_state("Loading file…", cx),
+            (None, FileViewContent::Binary, _) => empty_state("Binary file", cx),
+            (None, FileViewContent::TooLarge { bytes }, _) => empty_state(
+                format!(
+                    "File too large to show ({:.1} MiB)",
+                    *bytes as f64 / (1024. * 1024.)
+                ),
+                cx,
+            ),
+            (None, FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
+        };
+        v_flex()
+            .debug_selector(|| "file-tab".into())
+            .size_full()
+            .child(header)
+            .child(body)
+            .into_any_element()
+    }
+
+    /// The path with its icon and Changes status, then what the Tab shows of it: an
+    /// image's size, or the choice between a renderable file's rendering and its text.
+    #[allow(clippy::too_many_arguments)]
+    fn render_file_header(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_id: TabId,
+        path: &RelativePath,
+        rendering: Option<Rendering>,
+        source: bool,
+        image: Option<&Option<Result<Arc<DecodedImage>, SharedString>>>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme();
-        let path_text = path.to_string();
         let entry = self
             .connection(key)
             .and_then(|connection| connection.workspace_git.get(&workspace_id))
             .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path));
-        let editor = self.files_view.file_editors.get(&(key, tab_id));
-        let content = editor.map_or(FileViewContent::Loading, |editor| editor.content.clone());
-        let header = h_flex()
+        let summary = image.and_then(|image| match image {
+            Some(Ok(image)) => Some(image_summary(image)),
+            _ => None,
+        });
+        let owner = cx.weak_entity();
+        let toggle = rendering.map(|_| {
+            ButtonGroup::new("file-view-mode")
+                .ghost()
+                .xsmall()
+                .child(
+                    Button::new("file-view-rendered")
+                        .debug_selector(|| "file-view-rendered".into())
+                        .label("Preview")
+                        .selected(!source),
+                )
+                .child(
+                    Button::new("file-view-source")
+                        .debug_selector(|| "file-view-source".into())
+                        .label("Source")
+                        .selected(source),
+                )
+                .on_click(move |selected, _, cx| {
+                    let source = selected.first() == Some(&1);
+                    let _ = owner.update(cx, |this, cx| {
+                        if let Some(editor) = this.files_view.file_editors.get_mut(&(key, tab_id)) {
+                            editor.source = source;
+                            cx.notify();
+                        }
+                    });
+                })
+        });
+        h_flex()
             .debug_selector(|| "file-header".into())
             .flex_none()
             .h_9()
@@ -743,56 +876,42 @@ impl Condr {
                     .truncate()
                     .text_sm()
                     .font_medium()
-                    .child(path_text.clone()),
+                    .child(path.to_string()),
             )
+            .when_some(summary, |this, summary| {
+                this.child(
+                    div()
+                        .debug_selector(|| "file-image-summary".into())
+                        .flex_none()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(summary),
+                )
+            })
             .when_some(entry, |this, entry| {
                 this.child(status_glyph(entry.status, cx))
-            });
-        let body = match (&content, editor) {
-            (FileViewContent::Text, Some(editor)) => div()
-                .debug_selector(|| "file-body".into())
-                .flex_1()
-                .min_h_0()
-                .w_full()
-                // The code theme's background: the Editor draws none of its own.
-                .when_some(
-                    theme.highlight_theme.style.editor_background,
-                    |this, background| this.bg(background),
-                )
-                .child(
-                    Editor::new(&editor.state)
-                        .readonly(true)
-                        .appearance(false)
-                        .bordered(false)
-                        .font_family(self.terminal_font.family.clone())
-                        .text_size(px(self.code_font_size))
-                        .h(relative(1.)),
-                )
-                .into_any_element(),
-            (FileViewContent::Loading, _) | (FileViewContent::Text, None) => {
-                empty_state("Loading file…", cx)
-            }
-            (FileViewContent::Binary, _) => empty_state("Binary file", cx),
-            (FileViewContent::TooLarge { bytes }, _) => empty_state(
-                format!(
-                    "File too large to show ({:.1} MiB)",
-                    *bytes as f64 / (1024. * 1024.)
-                ),
-                cx,
-            ),
-            (FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
-        };
-        v_flex()
-            .debug_selector(|| "file-tab".into())
-            .size_full()
-            .child(header)
-            .child(body)
+            })
+            .children(toggle)
             .into_any_element()
     }
 
-    /// Brings the Preview Tab's Editor in line with the Server's answer for its file.
-    /// Called from `rebuild_dock`, the one place that sees every presentation change.
+    /// Brings the Preview Tab in line with the Server's answer for its file, and its
+    /// images with theirs. Called from `rebuild_dock`, the one place that sees every
+    /// presentation change.
     pub(super) fn sync_file_view(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        tab_id: TabId,
+        path: RelativePathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_file_editor(key, workspace_id, tab_id, path, window, cx);
+        self.feed_images(key, workspace_id, cx);
+    }
+
+    fn sync_file_editor(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -840,6 +959,7 @@ impl Condr {
                     state,
                     shown: None,
                     content: FileViewContent::Loading,
+                    source: false,
                 }
             });
         let Some((generation, answer)) = answer else {
@@ -850,6 +970,10 @@ impl Condr {
             {
                 editor.content = FileViewContent::Loading;
                 editor.shown = None;
+                editor.source = false;
+                // The images of the file shown before go with it.
+                let shown = (key, workspace_id, path.clone());
+                release_images(self.files_view.images.retain_shown(&shown), cx);
             }
             return;
         };
@@ -862,6 +986,7 @@ impl Condr {
                     &path,
                 )
             {
+                editor.source = true;
                 editor
                     .state
                     .update(cx, |state, cx| land_on_line(state, line, window, cx));
@@ -876,6 +1001,7 @@ impl Condr {
         editor.shown = Some((path, generation));
         let (text, content) = match answer {
             Err(reason) => (String::new(), FileViewContent::Failed(reason)),
+            Ok(FileContent::Image { .. }) => (String::new(), FileViewContent::Image),
             Ok(FileContent::Binary) => (String::new(), FileViewContent::Binary),
             Ok(FileContent::TooLarge { bytes }) => {
                 (String::new(), FileViewContent::TooLarge { bytes })
@@ -895,6 +1021,20 @@ impl Condr {
                 )
             })
             .flatten();
+        if !same_file {
+            editor.source = false;
+            let shown = (key, workspace_id, shown_path.clone());
+            release_images(self.files_view.images.retain_shown(&shown), cx);
+        }
+        if land.is_some() {
+            editor.source = true;
+        }
+        let rendering = rendering_for(&shown_path).filter(|_| content == FileViewContent::Text);
+        if content == FileViewContent::Image || rendering == Some(Rendering::Svg) {
+            self.files_view
+                .images
+                .want((key, workspace_id, shown_path.clone()));
+        }
         editor.content = content;
         let language = language_for(&shown_path);
         editor.state.update(cx, |state, cx| {
@@ -952,7 +1092,7 @@ impl Condr {
         }
     }
 
-    fn request_file(
+    pub(super) fn request_file(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
@@ -1008,6 +1148,9 @@ impl Condr {
         let directories = connection
             .resources
             .refresh_files(workspace_id, shown.as_deref());
+        self.files_view
+            .images
+            .refresh(key, workspace_id, shown.as_deref());
         for path in directories {
             self.request_directory(key, workspace_id, path);
         }

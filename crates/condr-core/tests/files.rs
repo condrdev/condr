@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use relative_path::RelativePath;
 
 use condr_core::{
-    FileContent, FileKind, MAX_FILE_BYTES, browse_directory, list_directory, read_file,
+    FileContent, FileKind, MAX_FILE_BYTES, MAX_IMAGE_BYTES, browse_directory, list_directory,
+    read_file,
 };
 
 fn scratch(name: &str) -> PathBuf {
@@ -112,6 +113,46 @@ fn reading_tells_text_binary_and_oversized_files_apart() {
     assert!(read_file(&root, RelativePath::new("dir")).is_err());
     assert!(read_file(&root, RelativePath::new("")).is_err());
     assert!(read_file(&root, RelativePath::new("../notes.txt")).is_err());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn images_are_sent_as_bytes_up_to_their_own_limit() {
+    let root = scratch("images");
+    let png = [0x89, b'P', b'N', b'G', 0, 1, 2];
+    fs::write(root.join("shot.PNG"), png).unwrap();
+    // Over the text limit, under the image one.
+    let large = vec![b'x'; MAX_FILE_BYTES as usize + 1];
+    fs::write(root.join("large.gif"), &large).unwrap();
+    fs::write(
+        root.join("huge.jpg"),
+        vec![b'x'; MAX_IMAGE_BYTES as usize + 1],
+    )
+    .unwrap();
+    fs::write(root.join("logo.svg"), "<svg/>").unwrap();
+
+    assert_eq!(
+        read_file(&root, RelativePath::new("shot.PNG")).unwrap(),
+        FileContent::Image {
+            bytes: png.to_vec()
+        }
+    );
+    assert_eq!(
+        read_file(&root, RelativePath::new("large.gif")).unwrap(),
+        FileContent::Image { bytes: large }
+    );
+    assert!(matches!(
+        read_file(&root, RelativePath::new("huge.jpg")).unwrap(),
+        FileContent::TooLarge { bytes } if bytes == MAX_IMAGE_BYTES + 1
+    ));
+    assert_eq!(
+        read_file(&root, RelativePath::new("logo.svg")).unwrap(),
+        FileContent::Text {
+            text: "<svg/>".into()
+        },
+        "SVG is text"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
