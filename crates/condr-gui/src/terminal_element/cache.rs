@@ -20,8 +20,10 @@ pub(super) struct TerminalCellShapeKey {
     pub(super) flags: u16,
 }
 
+/// Shared, not cloned: a `ShapedLine` carries ~3 KB of inline decoration runs, so by
+/// value one Pane's grid-sized cell list cost tens of MB and a copy per cell per frame.
 pub(super) struct CachedShape {
-    pub(super) line: ShapedLine,
+    pub(super) line: Rc<ShapedLine>,
     /// The last `prepare` generation that used this entry.
     pub(super) used: u64,
 }
@@ -69,7 +71,7 @@ impl TerminalRenderCache {
         foreground: Hsla,
         flags: u16,
         shape: impl FnOnce() -> ShapedLine,
-    ) -> ShapedLine {
+    ) -> Rc<ShapedLine> {
         let key = TerminalCellShapeKey {
             text: text.clone(),
             foreground: [foreground.h, foreground.s, foreground.l, foreground.a].map(f32::to_bits),
@@ -80,7 +82,7 @@ impl TerminalRenderCache {
             return cached.line.clone();
         }
 
-        let line = shape();
+        let line = Rc::new(shape());
         self.shapes.insert(
             key,
             CachedShape {
@@ -106,7 +108,7 @@ impl TerminalRenderCache {
 
 pub(super) struct ShapedCell {
     pub(super) origin: Point<Pixels>,
-    pub(super) line: ShapedLine,
+    pub(super) line: Rc<ShapedLine>,
 }
 
 pub(super) fn cell_font(mut font: Font, flags: u16) -> Font {

@@ -423,7 +423,7 @@ impl Element for TerminalElement {
                     if let Some(line) = cursor_text {
                         overlay_cells.push(ShapedCell {
                             origin: cursor_origin,
-                            line,
+                            line: Rc::new(line),
                         });
                     }
                 }
@@ -455,7 +455,7 @@ impl Element for TerminalElement {
             {
                 overlay_cells.push(ShapedCell {
                     origin: cursor_origin,
-                    line: window.text_system().shape_line(
+                    line: Rc::new(window.text_system().shape_line(
                         marked_text.clone().into(),
                         font_size,
                         &[TextRun {
@@ -471,7 +471,7 @@ impl Element for TerminalElement {
                             strikethrough: None,
                         }],
                         None,
-                    ),
+                    )),
                 });
             }
         }
