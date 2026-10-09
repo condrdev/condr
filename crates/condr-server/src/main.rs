@@ -565,6 +565,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 })?;
                 eprintln!("detached process {} starting", std::process::id());
             }
+            #[cfg(windows)]
+            opt_out_of_power_throttling();
             condr_server::run(config)
                 .map(|()| 0)
                 .map_err(|error| failure("the Server stopped with an error", [error.to_string()]))
@@ -694,6 +696,40 @@ fn load_identity(directory: &std::path::Path) -> io::Result<ServerIdentity> {
             [error.to_string()],
         )
     })
+}
+
+/// Windows counts a process without a visible window as background work and, on a CPU
+/// with efficiency cores, keeps it on those; there the Server queued behind whatever its
+/// Panes ran, and every GUI waited on it. Opting out of power throttling schedules it as
+/// a foreground app is. The Panes' programs do not inherit this.
+#[cfg(windows)]
+#[allow(unsafe_code)] // SetProcessInformation has no safe wrapper.
+fn opt_out_of_power_throttling() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+        ProcessPowerThrottling, SetProcessInformation,
+    };
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        StateMask: 0,
+    };
+    // SAFETY: the pseudo-handle is always valid, and `state` outlives the call at the size given.
+    let set = unsafe {
+        SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            (&raw const state).cast(),
+            size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        )
+    };
+    if set == 0 {
+        tracing::debug!(
+            "the Server stays subject to power throttling: {}",
+            io::Error::last_os_error()
+        );
+    }
 }
 
 /// "3 hours ago" for a Unix timestamp; coarse on purpose, a device list is not a log.
