@@ -237,6 +237,16 @@ impl ServerConnection {
         self.session.as_ref()
     }
 
+    /// The Session the window shows: kept while connected or retrying on its own, the
+    /// frozen Panes then behind a veil. A device that gave up or was disconnected shows
+    /// none, so its Workspaces leave the sidebar and its body is the disconnected page
+    /// (ADR 0020); `session` still holds it for the reconnect to land where it was.
+    pub(super) fn presented_session(&self) -> Option<&Session> {
+        (self.status == ConnectionStatus::Connected || self.reconnect_deadline.is_some())
+            .then_some(self.session.as_ref())
+            .flatten()
+    }
+
     fn replace_session(&mut self, session: Session) {
         if let Some(before) = self.session.take() {
             self.reconcile_view(&before, &session);

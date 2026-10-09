@@ -253,7 +253,7 @@ impl Condr {
     /// hidden and its toggle disabled.
     pub(super) fn presented_workspace(&self) -> Option<(ConnectionKey, WorkspaceId)> {
         let connection = self.active_connection()?;
-        let session = connection.session()?;
+        let session = connection.presented_session()?;
         let workspace_id = self.presented_workspace_id(connection.key, session)?;
         Some((connection.key, workspace_id))
     }

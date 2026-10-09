@@ -23,7 +23,7 @@ impl Condr {
     /// The connection, Session, Workspace and Tab the window shows, when it shows one.
     pub(super) fn presented(&self) -> Option<(ConnectionKey, &Session, WorkspaceId, TabId)> {
         let connection = self.active_connection()?;
-        let session = connection.session()?;
+        let session = connection.presented_session()?;
         let (workspace_id, tab_id) = connection.viewed(session)?;
         Some((connection.key, session, workspace_id, tab_id))
     }

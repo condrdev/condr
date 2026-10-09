@@ -34,10 +34,9 @@ impl Condr {
         let Some(connection) = self.active_connection() else {
             return WorkspaceChrome::body(div().size_full().into_any_element());
         };
-        let status = self.render_connection_status(connection, cx);
         let can_mutate =
             connection.can_mutate() && !self.has_pending_projection_for(connection.key);
-        let Some(session) = connection.session() else {
+        let Some(session) = connection.presented_session() else {
             return WorkspaceChrome::body(self.render_disconnected(connection, cx));
         };
         let key = connection.key;
@@ -74,24 +73,14 @@ impl Condr {
             }
         });
         let strip = self.render_tab_strip(key, workspace_id, workspace, active_tab, can_mutate, cx);
-        // The pill floats over the Panes rather than reflowing them: the dock keeps
-        // its geometry, and the frozen output under it is what the user is waiting on.
+        // The veil covers the Panes rather than replacing them: the Dock keeps its
+        // geometry, so a reconnect shows the live output in place.
         let body = div()
             .size_full()
             .relative()
             .when_some(dock_area, |view, dock_area| view.child(dock_area))
             .children(viewer)
-            .when_some(status, |view, status| {
-                view.child(
-                    h_flex()
-                        .absolute()
-                        .top_2()
-                        .left_0()
-                        .right_0()
-                        .justify_center()
-                        .child(status),
-                )
-            })
+            .children(self.render_reconnect_veil(connection, cx))
             .into_any_element();
         WorkspaceChrome {
             tab_strip: Some(strip),

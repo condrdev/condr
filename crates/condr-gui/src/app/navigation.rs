@@ -398,7 +398,7 @@ impl Condr {
             .iter()
             .filter_map(|connection| {
                 connection
-                    .session()
+                    .presented_session()
                     .map(|session| (connection.key, session))
             })
             .flat_map(|(key, session)| {

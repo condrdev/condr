@@ -127,7 +127,7 @@ impl Condr {
             let active_server = key == self.active_connection;
             let connected = connection.can_mutate();
             let workspaces = connection
-                .session()
+                .presented_session()
                 .map(|session| {
                     let active_workspace = self.presented_workspace_id(key, session);
                     // Drop handlers need the source index of the dragged Workspace.
@@ -679,7 +679,7 @@ impl Condr {
         let mut items = Vec::new();
         for connection in &self.connections {
             let key = connection.key;
-            let Some(session) = connection.session() else {
+            let Some(session) = connection.presented_session() else {
                 continue;
             };
             for workspace in session.workspaces() {
@@ -729,7 +729,7 @@ impl Condr {
         let mut avatars = Vec::new();
         for connection in &self.connections {
             let connection_key = connection.key;
-            let Some(session) = connection.session() else {
+            let Some(session) = connection.presented_session() else {
                 continue;
             };
             let active_workspace = self.presented_workspace_id(connection.key, session);

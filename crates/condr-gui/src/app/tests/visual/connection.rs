@@ -1,6 +1,6 @@
 use super::*;
-use crate::app::WAKE_PROBE_TIMEOUT;
 use crate::app::tests::tcp;
+use crate::app::{RECONNECT_GRACE, RESTART_RECONNECT_TIMEOUT, WAKE_PROBE_TIMEOUT};
 use condr_server::DeviceKey;
 use std::sync::mpsc;
 
@@ -431,13 +431,14 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
             cx.notify();
         });
     });
+    // Disconnecting on purpose shows the device's page instead of its Panes (ADR 0020);
+    // the projection above is what they come back with.
     window.update(|window, cx| _ = window.draw(cx));
-    let restored_first = window.debug_bounds(terminal_selector(pane_ids[0])).unwrap();
-    let restored_second = window.debug_bounds(terminal_selector(pane_ids[1])).unwrap();
-    let restored_width = restored_first.size.width + restored_second.size.width;
+    assert!(window.debug_bounds("disconnected-page-1").is_some());
     assert!(
-        (restored_first.size.width / restored_width - 0.5).abs() < 0.03,
-        "disconnect must restore the authoritative split before reconnect"
+        window
+            .debug_bounds(terminal_selector(pane_ids[0]))
+            .is_none()
     );
     assert!(window.read(|app| {
         view.read(app).connection(1).is_some_and(|connection| {
@@ -487,6 +488,14 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
             && surface.projection.as_ref()
                 == Some(session.tab(surface_key.tab_id).unwrap().layout().unwrap())
     }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let restored_first = window.debug_bounds(terminal_selector(pane_ids[0])).unwrap();
+    let restored_second = window.debug_bounds(terminal_selector(pane_ids[1])).unwrap();
+    let restored_width = restored_first.size.width + restored_second.size.width;
+    assert!(
+        (restored_first.size.width / restored_width - 0.5).abs() < 0.03,
+        "the Panes come back in the authoritative split, not the unsent drag"
+    );
 
     window.update(|window, cx| {
         view.update(cx, |this, cx| this.remove_server(1, window, cx));
@@ -1254,6 +1263,74 @@ fn an_unexpected_disconnect_reconnects_on_its_own_and_says_so() {
             })
         }),
         "the GUI did not reconnect on its own"
+    );
+}
+
+/// ADR 0020: a drop that heals inside the grace is never seen; past it the frozen Panes
+/// sit behind a veil while the GUI retries; once it gives up the device shows only its
+/// page, and its Workspaces leave the sidebar.
+#[test]
+fn a_dropped_device_veils_its_panes_while_retrying_and_hides_them_once_it_gives_up() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    let workspace = view.read_with(window, |this, _| {
+        this.active_session().unwrap().workspaces()[0].id()
+    });
+    // Set by hand: a real drop would start a reconnect that races the assertions.
+    let drop_since = |window: &mut VisualTestContext, ago: Duration, retrying: bool| {
+        window.update(|window, cx| {
+            view.update(cx, |this, cx| {
+                let connection = this.connection_mut(1).unwrap();
+                connection.status = ConnectionStatus::Disconnected;
+                connection.error = Some("the device closed the connection".into());
+                connection.disconnected_at = Some(Instant::now() - ago);
+                connection.reconnect_deadline =
+                    retrying.then(|| Instant::now() + RESTART_RECONNECT_TIMEOUT);
+                cx.notify();
+            });
+            _ = window.draw(cx);
+        });
+    };
+
+    drop_since(window, Duration::ZERO, true);
+    assert!(window.debug_bounds("reconnect-veil-1").is_none());
+    assert!(window.debug_bounds("disconnected-page-1").is_none());
+
+    drop_since(window, RECONNECT_GRACE, true);
+    assert!(window.debug_bounds("reconnect-veil-1").is_some());
+    assert!(
+        window
+            .debug_bounds(sidebar_workspace_selector(workspace))
+            .is_some(),
+        "the sidebar keeps the Workspace whose Panes are under the veil"
+    );
+
+    drop_since(window, RECONNECT_GRACE, false);
+    assert!(window.debug_bounds("reconnect-veil-1").is_none());
+    assert!(window.debug_bounds("disconnected-page-1").is_some());
+    assert!(window.debug_bounds("connect-server-1").is_some());
+    assert!(
+        window
+            .debug_bounds(sidebar_workspace_selector(workspace))
+            .is_none(),
+        "a device that gave up lists no Workspaces"
     );
 }
 

@@ -1,7 +1,5 @@
 use super::*;
-use gpui_kit::component::button::ButtonRounded;
 use gpui_kit::component::clipboard::Clipboard;
-use gpui_kit::component::popover::Popover;
 
 /// Wide enough for a connect error to wrap into two or three readable lines.
 const DISCONNECTED_COLUMN_WIDTH: Rems = rems(30.);
@@ -64,10 +62,14 @@ impl Condr {
         let label = &connection.label;
         let reconnecting = connection.reconnect_deadline.is_some();
         let busy = connection.status == ConnectionStatus::Connecting || reconnecting;
+        // No reason means nothing failed: the user disconnected, or never connected.
+        let deliberate = connection.error.is_none();
         let title = if reconnecting {
             format!("Reconnecting to {label}…")
         } else if busy {
             format!("Connecting to {label}…")
+        } else if deliberate {
+            format!("Disconnected from {label}")
         } else {
             format!("Can't reach {label}")
         };
@@ -95,6 +97,11 @@ impl Condr {
                             .items_center()
                             .child(if busy {
                                 Spinner::new().small().into_any_element()
+                            } else if deliberate {
+                                Icon::new(super::sidebar::CondrIconName::Circle)
+                                    .size_5()
+                                    .text_color(muted)
+                                    .into_any_element()
                             } else {
                                 Icon::new(IconName::TriangleAlert)
                                     .size_5()
@@ -164,114 +171,35 @@ impl Condr {
             .into_any_element()
     }
 
-    /// Where a device's connection stands, as a pill over a Workspace whose device went
-    /// away: persistent and non-modal, the reason only on request. A device with nothing
-    /// open gets `render_disconnected` instead. Nothing while connected, and nothing for
-    /// the first `RECONNECT_GRACE` of a drop that may heal on its own.
-    pub(super) fn render_connection_status(
+    /// The veil over a Workspace whose device is reconnecting on its own: the frozen
+    /// Panes stay underneath, faded so their text is not read as live output, and the
+    /// disconnected page's column says what is happening, in the place the failure takes
+    /// if the retries give up. GPUI cannot blur what lies under an element, so the veil
+    /// is the background colour, nearly opaque. Nothing for the first `RECONNECT_GRACE`,
+    /// so a blip that heals on its own is never seen.
+    pub(super) fn render_reconnect_veil(
         &self,
         connection: &ServerConnection,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let key = connection.key;
-        let label = &connection.label;
-        let reconnecting = connection.reconnect_deadline.is_some();
-        let (text, busy) = match connection.status {
-            ConnectionStatus::Connected => return None,
-            ConnectionStatus::Connecting | ConnectionStatus::Disconnected if reconnecting => {
-                (format!("Reconnecting to {label}…"), true)
-            }
-            ConnectionStatus::Connecting => (format!("Connecting to {label}…"), true),
-            ConnectionStatus::Disconnected => (format!("Disconnected from {label}"), false),
-        };
-        if reconnecting
-            && connection
+        let reconnecting = connection.status != ConnectionStatus::Connected
+            && connection.reconnect_deadline.is_some();
+        if !reconnecting
+            || connection
                 .disconnected_at
                 .is_some_and(|at| at.elapsed() < RECONNECT_GRACE)
         {
             return None;
         }
-        let owner = cx.weak_entity();
-        let reason = (!busy).then(|| connection.error.clone()).flatten();
-        let endpoint = connection.endpoint.clone();
-        let refusal = connection.refusal.clone();
-        let muted = cx.theme().muted_foreground;
+        let key = connection.key;
         Some(
-            h_flex()
-                .debug_selector(move || format!("connection-status-{key}"))
-                .gap_2()
-                .items_center()
-                .pl_3()
-                .pr_1()
-                .py_1()
-                .rounded_full()
-                .bg(cx.theme().popover)
-                .border_1()
-                .border_color(cx.theme().border)
-                .shadow_sm()
-                .text_sm()
-                .child(if busy {
-                    Spinner::new().xsmall().into_any_element()
-                } else {
-                    div()
-                        .size_2()
-                        .rounded_full()
-                        .bg(cx.theme().danger)
-                        .into_any_element()
-                })
-                .child(div().text_color(muted).child(text))
-                .when_some(reason, |pill, reason| {
-                    let advice = connection_advice(&reason, &endpoint, refusal.as_ref());
-                    pill.child(
-                        Popover::new(("connection-details", key))
-                            .trigger(
-                                Button::new(("connection-details-trigger", key))
-                                    .small()
-                                    .rounded(ButtonRounded::Size(px(999.)))
-                                    .ghost()
-                                    .label("Details"),
-                            )
-                            .content(move |_, _, cx| {
-                                v_flex()
-                                    .gap_2()
-                                    .max_w(DISCONNECTED_COLUMN_WIDTH)
-                                    .text_sm()
-                                    .child(advice)
-                                    .child(
-                                        h_flex()
-                                            .gap_2()
-                                            .items_start()
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(reason.clone()),
-                                            )
-                                            .child(
-                                                Clipboard::new(("connection-error-copy", key))
-                                                    .value(reason.clone())
-                                                    .tooltip("Copy error"),
-                                            ),
-                                    )
-                            }),
-                    )
-                })
-                .when(!busy, |pill| {
-                    pill.child(
-                        Button::new(("connect-server", key))
-                            .debug_selector(move || format!("connect-server-{key}"))
-                            .small()
-                            .rounded(ButtonRounded::Size(px(999.)))
-                            .outline()
-                            .label("Connect")
-                            .on_click(move |_, window, cx| {
-                                let _ = owner
-                                    .update(cx, |this, cx| this.connect_server(key, window, cx));
-                            }),
-                    )
-                })
+            div()
+                .debug_selector(move || format!("reconnect-veil-{key}"))
+                .absolute()
+                .inset_0()
+                .occlude()
+                .bg(cx.theme().background.opacity(0.85))
+                .child(self.render_disconnected(connection, cx))
                 .into_any_element(),
         )
     }
