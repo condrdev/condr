@@ -21,7 +21,7 @@ Condr recognizes a recognition-only Agent from its process: the sidebar shows it
 
 `condr agent wait` and `condr agent prompt --wait` refuse a recognition-only Agent at once with `agent_reports_no_state` instead of waiting out their timeout. `condr agent prompt` without `--wait` still delivers the prompt.
 
-Kimi Code is the only one so far, because its Hooks cannot tell a subagent's Stop from the main Agent's. **Settings › Device › Agent integrations** shows it as Recognition only, with that reason.
+Kimi Code is the only one so far, because its Hooks cannot tell a subagent's Stop from the main Agent's. **Settings › Device › Agent integrations** shows it as Recognition only.
 
 ## Prepare and check Agents
 

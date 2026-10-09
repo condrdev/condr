@@ -860,40 +860,21 @@ pub(super) fn agents_page(
         let report = reports.iter().find(|report| report.agent == agent).cloned();
         let settings = settings.clone();
         // A custom row rather than `SettingItem::new`: the title carries the agent's
-        // mark, which the standard title slot cannot. The note under it says what the
-        // agent's hooks cannot report, or why it is recognized only (ADR 0035).
+        // mark, which the standard title slot cannot.
         group = group.item(
             SettingItem::render(move |_, _, cx| {
-                let note = report.as_ref().and_then(|report| report.note.clone());
                 h_flex()
                     .w_full()
                     .items_center()
                     .gap_4()
                     .child(
-                        v_flex()
+                        h_flex()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(
-                                        super::sidebar::agent_mark(agent, cx.theme().foreground)
-                                            .small(),
-                                    )
-                                    .child(agent.label()),
-                            )
-                            .when_some(note, |this, note| {
-                                this.child(
-                                    div()
-                                        .debug_selector(move || {
-                                            format!("agent-hooks-{}-note", agent.id())
-                                        })
-                                        .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(note),
-                                )
-                            }),
+                            .gap_2()
+                            .items_center()
+                            .child(super::sidebar::agent_mark(agent, cx.theme().foreground).small())
+                            .child(agent.label()),
                     )
                     .child(agent_hooks_field(&settings, agent, report.as_ref(), cx))
             })

@@ -21,7 +21,7 @@ Cursor CLI 和 Antigravity CLI 的 Hook 没有等待权限的事件，因此等�
 
 `condr agent wait` 和 `condr agent prompt --wait` 会立即以 `agent_reports_no_state` 拒绝仅识别的 Agent，不会等到超时。不带 `--wait` 的 `condr agent prompt` 照常发送。
 
-目前只有 Kimi Code 属于这一级，原因是它的 Hook 无法区分子 Agent 和主 Agent 的 Stop。**Settings › Device › Agent integrations** 中它显示为 Recognition only，并附上这个原因。
+目前只有 Kimi Code 属于这一级，原因是它的 Hook 无法区分子 Agent 和主 Agent 的 Stop。**Settings › Device › Agent integrations** 中它显示为 Recognition only。
 
 ## 准备与检查 Agent
 

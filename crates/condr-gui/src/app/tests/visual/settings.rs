@@ -820,7 +820,7 @@ fn hooks_reports_replace_their_agents_row_and_errors_clear_on_the_next_report() 
 }
 
 #[test]
-fn an_agents_note_shows_under_its_name_and_a_recognized_only_agent_says_why() {
+fn the_agent_integrations_page_shows_each_agents_hooks_state() {
     use condr_core::agent_hooks::{HooksReport, HooksState};
     use condr_core::protocol::AgentResponse;
     let _serial_guard = acquire_visual_test_lock();
@@ -883,12 +883,7 @@ fn an_agents_note_shows_under_its_name_and_a_recognized_only_agent_says_why() {
     });
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("agent-hooks-kimi-state").is_some());
-    assert!(
-        settings.debug_bounds("agent-hooks-kimi-note").is_some(),
-        "the reason shows under Kimi's name"
-    );
     assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
-    assert!(settings.debug_bounds("agent-hooks-claude-note").is_none());
 }
 
 #[test]
