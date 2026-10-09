@@ -156,8 +156,9 @@ impl EndpointStream {
         }
     }
 
-    /// Whether the peer may administer the Server. Local and SSH bridge connections execute
-    /// on the Server host; TCP clients are deliberately read-only.
+    /// Whether the peer may change how other devices reach the Server. Local and SSH bridge
+    /// connections execute on the Server host; a TCP or Peer-to-peer change could cut the
+    /// very connection that made it (ADR 0038).
     pub fn may_administer(&self) -> bool {
         matches!(self, Self::Local(_) | Self::Ssh(_))
     }

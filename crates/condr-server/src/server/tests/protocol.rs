@@ -550,8 +550,8 @@ fn server_settings_are_stored_published_and_reloaded() {
     let _ = std::fs::remove_dir_all(directory);
 }
 
-/// Machine-wide settings are administration (ADR 0038): a paired Device may set the shell
-/// but not the proxy, and each message changes one field.
+/// The proxy decides how other devices reach this one (ADR 0038): a paired Device may set
+/// the shell but not the proxy, and each message changes one field.
 #[test]
 fn only_a_local_connection_changes_the_proxy_and_one_field_leaves_the_others() {
     use condr_core::protocol::ServerSetting;
@@ -719,6 +719,38 @@ fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
         read_server(&mut second),
         ServerMessage::Error { message } if message.contains("only the Server host")
     ));
+    // Through Settings it may revoke others, but nothing that cuts its own connection
+    // (ADR 0038).
+    let server_id = handle.state.lock().unwrap().server_id;
+    for (command, refusal) in [
+        (
+            ServerAdminCommand::Revoke {
+                key: prefix.clone(),
+            },
+            "cannot revoke itself",
+        ),
+        (
+            ServerAdminCommand::SaveListen { address: None },
+            "local or SSH",
+        ),
+        (
+            ServerAdminCommand::SaveP2p { enabled: false },
+            "local or SSH",
+        ),
+        (ServerAdminCommand::Restart, "local or SSH"),
+    ] {
+        condr_core::protocol::write_message(
+            &mut second,
+            &ClientMessage::ServerAdmin { server_id, command },
+        )
+        .unwrap();
+        let reply = read_server(&mut second);
+        assert!(
+            matches!(&reply, ServerMessage::Error { message } if message.contains(refusal)),
+            "{reply:?}"
+        );
+    }
+    assert_eq!(noise::read_authorized(&directory).unwrap().len(), 1);
 
     // The host sees the device connected, and its last-seen time was written at pairing.
     let mut admin = connect_and_bootstrap(&host);

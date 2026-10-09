@@ -104,11 +104,11 @@ Pairing currently grants access to the whole Session. A Device connected over TC
 * Start Agent processes, and install Agent hooks through Settings.
 * Change the Server's default shell.
 * Read the Server's status, including its listen configuration, the fingerprints of connected Devices and recent errors.
+* Generate invites through Settings, list paired Devices, and revoke any of them but itself.
 
-These administrative operations are accepted only from local and SSH connections:
+These operations are accepted only from local and SSH connections. The first two could cut the very TCP or Peer-to-peer connection that asked for them:
 
-* Turning the TCP listener and Peer-to-peer on or off.
-* Generating invites, and listing and revoking paired Devices.
+* Turning the TCP listener and Peer-to-peer on or off, changing the listen address, and changing the proxy.
 * Restarting or stopping the Server.
 * Using this Device as a relay hop for Peer-to-peer connections.
 

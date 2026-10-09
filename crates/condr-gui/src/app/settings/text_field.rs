@@ -161,7 +161,7 @@ pub(super) fn text_field_row(
     let dirty = settings.clone();
     let reset = settings.clone();
     let default_dirty = default.clone();
-    SettingField::render(move |_, window, cx| {
+    SettingField::render(move |options, window, cx| {
         let (input, draft, unsent, saved, refusal) = {
             let this = render.read(cx);
             let field = this.field(id);
@@ -204,7 +204,17 @@ pub(super) fn text_field_row(
                         .child("Saved"),
                 )
             })
-            .child(Input::new(&input).w_64())
+            .child(
+                // Only a field for how other devices reach a Device is ever disabled.
+                div()
+                    .id("text-field")
+                    .when(options.is_disabled(), |field| {
+                        field.tooltip(|window, cx| {
+                            Tooltip::new(super::server::REACHABILITY_LOCKED).build(window, cx)
+                        })
+                    })
+                    .child(Input::new(&input).w_64().disabled(options.is_disabled())),
+            )
     })
     .on_reset(
         move |cx| dirty.read(cx).field(id).committed != default_dirty,

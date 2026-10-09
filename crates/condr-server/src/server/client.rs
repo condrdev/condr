@@ -980,10 +980,27 @@ pub(super) fn handle_client(
             }
             ClientMessage::ServerAdmin { server_id, command } => {
                 let restart = matches!(command, ServerAdminCommand::Restart);
-                let readonly_status = matches!(command, ServerAdminCommand::Status);
-                let response = if !stream.get_ref().may_administer() && !readonly_status {
+                // A paired Device could otherwise cut its own connection (ADR 0038).
+                let reachability = matches!(
+                    command,
+                    ServerAdminCommand::SaveListen { .. }
+                        | ServerAdminCommand::SaveP2p { .. }
+                        | ServerAdminCommand::Restart
+                );
+                let response = if reachability && !stream.get_ref().may_administer() {
                     ServerMessage::Error {
-                        message: "only a local or SSH connection may administer the Server".into(),
+                        message: "only a local or SSH connection may change how other devices \
+                                  reach this one"
+                            .into(),
+                    }
+                } else if let ServerAdminCommand::Revoke { key } = &command
+                    && stream
+                        .get_ref()
+                        .peer_key()
+                        .is_some_and(|own| own.matches_prefix(key))
+                {
+                    ServerMessage::Error {
+                        message: "a device cannot revoke itself".into(),
                     }
                 } else if state.lock().expect("server state lock poisoned").server_id != server_id {
                     ServerMessage::Error {
@@ -1201,8 +1218,8 @@ fn server_admin(
     }
 }
 
-/// Stores one setting and publishes the result. Machine-wide settings are administration
-/// (ADR 0038): only a local or SSH connection may change them.
+/// Stores one setting and publishes the result. A setting that decides how other devices
+/// reach this one only a local or SSH connection may change (ADR 0038).
 fn set_server_setting(
     state: &Arc<Mutex<RuntimeState>>,
     server_id: ServerId,
@@ -1217,8 +1234,9 @@ fn set_server_setting(
         ServerSetting::ProxyUrl(url) => ServerSetting::ProxyUrl(url.trim().to_owned()),
         setting => setting,
     };
-    let administration = !matches!(setting, ServerSetting::Shell(_));
-    if administration && !may_administer {
+    // The proxy carries Peer-to-peer's relay connection, so it decides reachability too.
+    let reachability = !matches!(setting, ServerSetting::Shell(_));
+    if reachability && !may_administer {
         return refuse("only a local or SSH connection may change the proxy".into());
     }
     let (value, what) = match &setting {

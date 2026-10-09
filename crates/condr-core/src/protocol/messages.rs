@@ -117,7 +117,8 @@ pub enum ClientMessage {
     },
     /// Asks which paired devices hold a live TCP connection right now. Server host only.
     ConnectedDevices,
-    /// Server management commands. Only local/SSH connections may administer.
+    /// Server management commands. Only local/SSH connections may change how other devices
+    /// reach the Server or restart it, and no device may revoke itself (ADR 0038).
     ServerAdmin {
         server_id: ServerId,
         command: ServerAdminCommand,
@@ -492,9 +493,9 @@ pub struct ServerSettings {
 pub enum ServerSetting {
     /// Blank restores the system default.
     Shell(String),
-    /// Administration: only a local or SSH connection may change it.
+    /// Decides Peer-to-peer reachability: only a local or SSH connection may change it.
     ProxyMode(crate::ProxyMode),
-    /// Administration, like `ProxyMode`.
+    /// Like `ProxyMode`.
     ProxyUrl(String),
 }
 

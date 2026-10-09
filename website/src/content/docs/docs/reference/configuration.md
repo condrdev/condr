@@ -34,7 +34,7 @@ The Settings window shows one Device at a time. The picker at its top chooses th
 | **Licenses** | This machine | Third-party open source dependencies and their licenses |
 | **About** | This machine | Version information, update channel, manual update check and the automatic check switch |
 
-> **Access restriction**: `Network`, `Remote access` and `Paired devices` are sensitive network settings, and can only be changed when running locally or connected over SSH. Over TCP or P2P, the interface is marked **Viewing only** and these controls are disabled.
+> **Access restriction**: over TCP or P2P, the settings that decide how other Devices reach this one, the proxy on `Network` and everything on `Remote access` including **Restart Condr**, are greyed out, because a change could cut the very connection that made it; hover over one to see why. Change them on the Device itself or over SSH. Everything else works over any connection, including **Generate invite** and **Revoke** for every Device except the one you are using.
 
 ---
 

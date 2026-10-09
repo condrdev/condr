@@ -1,6 +1,37 @@
 use super::*;
 use gpui_kit::component::clipboard::Clipboard;
+use gpui_kit::component::setting::RenderOptions;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tag::Tag;
+
+/// Why a TCP or Peer-to-peer window may not change how other devices reach a Device: the
+/// change could cut the very connection that made it (ADR 0038).
+pub(super) const REACHABILITY_LOCKED: &str =
+    "Change this on the device or over SSH. It can cut this connection.";
+
+/// `field` while this window may change how other devices reach the Device; otherwise
+/// `locked`, the same control greyed out with why on hover, since Kit's setting fields
+/// take no tooltip.
+fn reachability_item<F, E>(
+    title: &'static str,
+    allowed: bool,
+    field: F,
+    locked: impl Fn(&RenderOptions) -> E + 'static,
+) -> SettingItem
+where
+    F: gpui_kit::component::setting::AnySettingField + 'static,
+    E: IntoElement + 'static,
+{
+    if allowed {
+        SettingItem::new(title, field)
+    } else {
+        SettingItem::new(
+            title,
+            SettingField::render(move |options, _, _| locked(options)),
+        )
+        .disabled(true)
+    }
+}
 
 /// The shell a Server currently stores, as its Bootstrap or last event reported it.
 pub(super) fn connection_shell(
@@ -99,11 +130,11 @@ pub(super) fn network_page(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingPage {
-    let allowed = admin_allowed(this, cx);
-    let (manual, pending) = this
+    let allowed = reach_allowed(this, cx);
+    let (current, pending) = this
         .selected_connection(cx, |c| {
             (
-                c.settings.proxy.mode == ProxyMode::Manual,
+                c.settings.proxy.mode,
                 c.running_proxy
                     .as_ref()
                     .is_some_and(|running| *running != c.settings.proxy),
@@ -131,12 +162,19 @@ pub(super) fn network_page(
     )
     .default_value(ProxyMode::System.as_str());
     let mut group = SettingGroup::new().item(
-        SettingItem::new("Proxy", mode)
-            .description("The proxy to use for network requests.")
-            .disabled(!allowed)
-            .keywords(["proxy", "https_proxy", "network"]),
+        reachability_item("Proxy", allowed, mode, move |options| {
+            Button::new("proxy-mode")
+                .label(proxy_mode_label(current))
+                .dropdown_caret(true)
+                .outline()
+                .with_size(options.size())
+                .disabled(true)
+                .tooltip(REACHABILITY_LOCKED)
+        })
+        .description("The proxy to use for network requests.")
+        .keywords(["proxy", "https_proxy", "network"]),
     );
-    if manual {
+    if current == ProxyMode::Manual {
         group = group.item(
             SettingItem::new(
                 "Proxy URL",
@@ -189,7 +227,7 @@ pub(in crate::app) fn set_proxy_mode(
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| {
-        if !admin_allowed(this, cx) {
+        if !reach_allowed(this, cx) {
             return;
         }
         let key = this.selected_server;
@@ -235,13 +273,9 @@ pub(super) fn server_clients_page(
         .group(server_devices_group(this, settings, cx))
 }
 
-/// Whether this Client may change the selected Server: only a local or SSH connection
-/// can, and the Server refuses everything else (ADR 0015).
-fn server_admin_allowed(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
-    admin_allowed(settings.read(cx), cx)
-}
-
-fn admin_allowed(this: &SettingsWindow, cx: &App) -> bool {
+/// Whether this Client may change how other devices reach the selected Device: only a
+/// local or SSH connection can, and the Server refuses the rest (ADR 0038).
+fn reach_allowed(this: &SettingsWindow, cx: &App) -> bool {
     this.selected_connection(cx, |c| {
         c.status == ConnectionStatus::Connected
             && matches!(c.endpoint, Endpoint::Local(_) | Endpoint::Ssh(_))
@@ -300,7 +334,7 @@ impl SettingsWindow {
             return CommitOutcome::Invalid;
         }
         self.proxy_url_refused = None;
-        if !admin_allowed(self, cx) {
+        if !reach_allowed(self, cx) {
             return CommitOutcome::Unavailable;
         }
         let key = self.selected_server;
@@ -314,7 +348,7 @@ impl SettingsWindow {
     }
 
     fn send_listen(&mut self, address: Option<String>, cx: &mut Context<Self>) -> bool {
-        if !admin_allowed(self, cx) {
+        if !reach_allowed(self, cx) {
             return false;
         }
         let key = self.selected_server;
@@ -334,7 +368,7 @@ pub(super) fn server_header(
     select: &Entity<ServerSelect>,
     cx: &App,
 ) -> impl IntoElement {
-    let (status, route, remote) = this
+    let (status, route) = this
         .selected_connection(cx, |c| {
             let route = match &c.endpoint {
                 Endpoint::Local(_) => "Local",
@@ -342,10 +376,9 @@ pub(super) fn server_header(
                 Endpoint::Tcp(_) => "TCP",
                 Endpoint::P2p(_) => "Peer-to-peer",
             };
-            let remote = matches!(c.endpoint, Endpoint::Tcp(_) | Endpoint::P2p(_));
-            (c.status, route, remote)
+            (c.status, route)
         })
-        .unwrap_or((ConnectionStatus::Disconnected, "Local", false));
+        .unwrap_or((ConnectionStatus::Disconnected, "Local"));
     let (tag, state) = match status {
         ConnectionStatus::Connected => (Tag::success(), "Connected"),
         ConnectionStatus::Connecting => (Tag::warning(), "Connecting"),
@@ -372,16 +405,6 @@ pub(super) fn server_header(
                 .child(route),
         )
         .child(tag.outline().small().child(state))
-        // The Server refuses admin commands over TCP and Peer-to-peer (ADR 0015): a mode,
-        // said once here in muted text (ADR 0020), with the controls below disabled.
-        .when(remote, |this| {
-            this.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Viewing only. Connect locally or over SSH to change settings."),
-            )
-        })
 }
 
 /// What the Server last reported about itself: version, uptime, Session counts and the
@@ -495,7 +518,7 @@ fn server_restart_row(
         "Restart Condr",
         SettingField::render(move |_, _, cx| {
             let settings = restart.clone();
-            let allowed = server_admin_allowed(&settings, cx);
+            let allowed = reach_allowed(settings.read(cx), cx);
             let restarting = selected_connection(&settings, cx, |c| c.reconnect_deadline.is_some())
                 .unwrap_or_default();
             h_flex()
@@ -528,6 +551,7 @@ fn server_restart_row(
                             }
                         })
                         .disabled(!allowed || restarting)
+                        .when(!allowed, |button| button.tooltip(REACHABILITY_LOCKED))
                         .on_click(move |_, window, cx| {
                             let (owner, key) = {
                                 let this = settings.read(cx);
@@ -574,9 +598,23 @@ fn server_network_group(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingGroup {
+    let allowed = reach_allowed(this, cx);
+    let (listening, p2p) = this
+        .selected_connection(cx, |c| (c.listen.is_some(), c.p2p))
+        .unwrap_or_default();
+    let locked_switch = |id: &'static str, checked: bool| {
+        move |options: &RenderOptions| {
+            Switch::new(id)
+                .checked(checked)
+                .with_size(options.size())
+                .disabled(true)
+                .tooltip(REACHABILITY_LOCKED)
+        }
+    };
     SettingGroup::new()
-        .item(SettingItem::new(
+        .item(reachability_item(
             "TCP listener",
+            allowed,
             SettingField::switch(
                 {
                     let settings = settings.clone();
@@ -588,17 +626,20 @@ fn server_network_group(
                 },
             )
             .default_value(false),
+            locked_switch("tcp-listener", listening),
         ))
         .item(
             SettingItem::new(
                 "Listen address",
                 text_field_row(settings, TextFieldId::Listen, DEFAULT_LISTEN.into()),
             )
-            .description("host:port"),
+            .description("host:port")
+            .disabled(!allowed),
         )
         .item(
-            SettingItem::new(
+            reachability_item(
                 "Peer-to-peer",
+                allowed,
                 SettingField::switch(
                     {
                         let settings = settings.clone();
@@ -610,6 +651,7 @@ fn server_network_group(
                     },
                 )
                 .default_value(false),
+                locked_switch("p2p", p2p),
             )
             .description("Lets other devices reach this one by its key. No port to open.")
             .keywords(["p2p", "peer-to-peer", "relay"]),
@@ -624,7 +666,6 @@ fn server_invite_group(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingGroup {
-    let allowed = admin_allowed(this, cx);
     // Whether a device could reach this one now: what the process bound, not what is
     // saved for the next restart.
     let (reachable, pending, invite) = this
@@ -636,9 +677,7 @@ fn server_invite_group(
             )
         })
         .unwrap_or_default();
-    // Why the button is off is the header's business when this window is remote; the
-    // description only covers the Server's own state. The clipboard got the p2p link,
-    // or the TCP one without it (see the `Invite` reply).
+    // The clipboard got the p2p link, or the TCP one without it (see the `Invite` reply).
     let description: SharedString = match (&invite, reachable, pending) {
         (Some(invite), _, _) => format!(
             "The {} link is on the clipboard. Valid for {} minutes.",
@@ -669,7 +708,7 @@ fn server_invite_group(
                 })
                 .small()
                 .outline()
-                .disabled(!(allowed && reachable))
+                .disabled(!reachable)
                 .on_click(move |_, _, cx| {
                     settings.update(cx, |this, cx| {
                         let key = this.selected_server;
@@ -753,7 +792,15 @@ fn server_devices_group(
     settings: &Entity<SettingsWindow>,
     cx: &App,
 ) -> SettingGroup {
-    let allowed = admin_allowed(this, cx);
+    // Over TCP or Peer-to-peer this window is one of the rows, and revoking it would cut
+    // this very connection (ADR 0038).
+    let this_device = (!reach_allowed(this, cx))
+        .then(|| {
+            let owner = this.owner.upgrade()?;
+            let key = owner.read(cx).device_key.as_ref()?.public();
+            Some(key.to_string())
+        })
+        .flatten();
     let (mut clients, connected) = this
         .selected_connection(cx, |c| (c.clients.clone(), c.connected_devices.clone()))
         .unwrap_or_default();
@@ -773,6 +820,7 @@ fn server_devices_group(
     clients.sort_by_key(|client| !connected.contains(&client.fingerprint));
     for client in clients {
         let is_connected = connected.contains(&client.fingerprint);
+        let is_this_device = this_device.as_ref() == Some(&client.fingerprint);
         let settings = settings.clone();
         let keywords = [SharedString::from(client.name.clone()), "revoke".into()];
         group = group.item(
@@ -814,7 +862,7 @@ fn server_devices_group(
                             ),
                     )
                     .child(div().whitespace_nowrap().child(seen))
-                    .child(revoke_button(&settings, &client, allowed))
+                    .child(revoke_button(&settings, &client, is_this_device))
             })
             .keywords(keywords),
         );
@@ -825,7 +873,7 @@ fn server_devices_group(
 fn revoke_button(
     settings: &Entity<SettingsWindow>,
     client: &ServerClientInfo,
-    allowed: bool,
+    this_device: bool,
 ) -> Button {
     let settings = settings.clone();
     let key = client.fingerprint.clone();
@@ -834,7 +882,8 @@ fn revoke_button(
         .label("Revoke")
         .small()
         .ghost()
-        .disabled(!allowed)
+        .disabled(this_device)
+        .when(this_device, |button| button.tooltip("This device"))
         .on_click(move |_, window, cx| {
             let (owner, selected) = {
                 let this = settings.read(cx);
@@ -944,7 +993,7 @@ fn server_p2p_enabled(settings: &Entity<SettingsWindow>, cx: &App) -> bool {
 /// Saves `[server.p2p] enabled` on the selected Server; the restart row applies it.
 fn set_server_p2p_enabled(settings: &Entity<SettingsWindow>, enabled: bool, cx: &mut App) {
     settings.update(cx, |this, cx| {
-        if !admin_allowed(this, cx) {
+        if !reach_allowed(this, cx) {
             return;
         }
         let key = this.selected_server;
