@@ -139,14 +139,21 @@ impl Condr {
                     .is_some_and(|terminal| terminal.view.size == terminal_size))
     }
 
-    pub(crate) fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !window.is_window_active() {
-            window.release_pointer();
-            self.terminal_input.mouse_capture = None;
-            if let Some(selection) = &mut self.terminal_input.selection {
-                selection.dragging = false;
-            }
+    /// A window that loses activation mid-gesture never sees the button released.
+    /// Only the transition ends the gesture: focus syncs also run on every Server event,
+    /// and a click into an inactive window arrives before its activation does.
+    pub(super) fn end_pointer_gesture_on_deactivation(&mut self, window: &mut Window) {
+        if window.is_window_active() {
+            return;
         }
+        window.release_pointer();
+        self.terminal_input.mouse_capture = None;
+        if let Some(selection) = &mut self.terminal_input.selection {
+            selection.dragging = false;
+        }
+    }
+
+    pub(crate) fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focused = window
             .is_window_active()
             .then(|| {

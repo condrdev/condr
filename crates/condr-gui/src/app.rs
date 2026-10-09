@@ -398,6 +398,7 @@ impl Condr {
 
         let window_activation_subscription =
             cx.observe_window_activation(window, |this, window, cx| {
+                this.end_pointer_gesture_on_deactivation(window);
                 this.sync_terminal_focus(window, cx);
             });
         let window_appearance_subscription =

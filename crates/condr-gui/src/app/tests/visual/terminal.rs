@@ -251,6 +251,9 @@ fn terminal_drag_selection_updates_locally() {
 
     window.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
     window.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+    // Every Server event re-syncs terminal focus, and this window never activated, as a
+    // window whose activating click is still in flight has not: neither ends the drag.
+    window.update(|window, cx| view.update(cx, |this, cx| this.sync_terminal_focus(window, cx)));
     let dragging = window.read(|app| view.read(app).terminal_input.selection.unwrap());
     assert!(dragging.dragging);
     assert_eq!((dragging.connection_key, dragging.pane_id), (1, pane_id));
@@ -311,6 +314,17 @@ fn terminal_drag_selection_updates_locally() {
     assert!(wait_until_event_driven(window, |window| {
         window.read(|app| view.read(app).selection_for(1, pane_id).is_none())
     }));
+
+    // Losing activation mid-drag ends it: the button release goes to another window.
+    window.update(|window, _| window.activate_window());
+    window.run_until_parked();
+    window.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+    window.deactivate_window();
+    assert!(
+        window.read(|app| !view.read(app).is_selecting(1, pane_id)),
+        "a drag outlived its window's activation"
+    );
 }
 
 #[test]
