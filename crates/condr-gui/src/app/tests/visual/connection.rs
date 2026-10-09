@@ -1266,6 +1266,54 @@ fn an_unexpected_disconnect_reconnects_on_its_own_and_says_so() {
     );
 }
 
+/// A Server that said `ServerStopping` keeps accepting until it exits. Taking its
+/// Bootstrap would aim every command at a Session that refuses them all, one red toast
+/// each; the GUI waits for the next Server instead.
+#[test]
+fn a_reconnect_does_not_take_the_session_of_a_server_that_is_stopping() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let connection = this.connection(1).unwrap();
+            let generation = connection.connect_generation;
+            let endpoint = connection.endpoint.clone();
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::ServerStopping),
+                cx,
+            );
+            // Set by hand: the scheduled reconnect would race the assertions.
+            let connection = this.connection_mut(1).unwrap();
+            connection.connect_generation = connection.connect_generation.wrapping_add(1);
+            connection.status = ConnectionStatus::Connecting;
+            let generation = connection.connect_generation;
+            this.handle_connection_result(
+                ConnectionResult {
+                    key: 1,
+                    generation,
+                    endpoint: endpoint.clone(),
+                    result: ClientConnection::connect(&endpoint, "condr-test")
+                        .map_err(|error| error.to_string()),
+                    refusal: None,
+                },
+                window,
+                cx,
+            );
+            let connection = this.connection(1).unwrap();
+            assert!(connection.status == ConnectionStatus::Disconnected);
+            assert!(connection.io.is_none());
+            assert!(
+                connection.reconnect_deadline.is_some(),
+                "the GUI keeps waiting for the restarted Server"
+            );
+        });
+    });
+}
+
 /// ADR 0020: a drop that heals inside the grace is never seen; past it the frozen Panes
 /// sit behind a veil while the GUI retries; once it gives up the device shows only its
 /// page, and its Workspaces leave the sidebar.

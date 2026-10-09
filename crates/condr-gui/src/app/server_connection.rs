@@ -29,6 +29,9 @@ pub(super) struct ServerConnection {
     pub(super) update_restart_offered: bool,
     pub(super) server_id: Option<ServerId>,
     pub(super) runtime_epoch: Option<RuntimeEpoch>,
+    /// The Server process that said `ServerStopping`. It keeps accepting until it exits,
+    /// so a reconnect can reach it again; its Bootstrap is refused.
+    pub(super) stopping_runtime: Option<RuntimeEpoch>,
     pub(super) session_id: Option<SessionId>,
     pub(super) sequence: u64,
     /// The last validated Server model; absent until the first Bootstrap.
@@ -168,6 +171,7 @@ impl ServerConnection {
             update_restart_offered: false,
             server_id: None,
             runtime_epoch: None,
+            stopping_runtime: None,
             session_id: None,
             sequence: 0,
             session: None,

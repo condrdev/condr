@@ -174,6 +174,9 @@ impl Condr {
     ) -> Result<BootstrapApplication, ConnectionInstallError> {
         let client = result.map_err(ConnectionInstallError::Unavailable)?;
         let bootstrap = client.bootstrap().unwrap().clone();
+        if connection.stopping_runtime == Some(bootstrap.runtime_epoch) {
+            return Err(ConnectionInstallError::Unavailable("Condr stopped".into()));
+        }
         let server_id = bootstrap.server_id;
         let session_id = bootstrap.session_id;
         let application = connection

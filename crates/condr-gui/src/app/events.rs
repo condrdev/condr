@@ -723,6 +723,8 @@ impl Condr {
             | ServerMessage::DevicesRevoked { .. }
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
+                let connection = &mut self.connections[index];
+                connection.stopping_runtime = connection.runtime_epoch;
                 let effect = self.mark_disconnected(key, index, "Condr stopped".into());
                 self.begin_reconnect(key, cx);
                 effect
