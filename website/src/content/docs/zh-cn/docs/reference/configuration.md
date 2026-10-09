@@ -6,9 +6,9 @@ description: Condr 的配置体系详解：UI 与 config.toml 设置、完整配
 Condr 采用分层配置架构：
 * **客户端设置**：控制前端外观与交互逻辑，仅作用于当前设备。
 * **Server 设置**：控制终端实例、Worktree 及远程连接策略，作用于运行 Server 的宿主设备。
-* **整机设置**：每台机器只有一个值，这台机器上所有 Condr 进程都读取，例如代理。
+* **整机设置**：整台机器共用一组配置，本机上的所有 Condr 进程均会读取，例如代理设置。
 
-这些设置均持久化于同一份 `config.toml` 中，既支持在图形界面调整，也支持直接编辑配置文件。
+所有配置均保存在同一份 `config.toml` 中，可在图形界面中调整，也可直接编辑文件。
 
 ---
 
@@ -17,24 +17,24 @@ Condr 采用分层配置架构：
 * **快捷键**：macOS 为 `Cmd + ,`，Windows / Linux 为 `Ctrl + ,`。
 * **自动保存**：设置项变更会立即同步至 `config.toml`。文本输入框失焦、回车或点击 **Save** 时触发写入。
 
-设置窗口一次只显示一台设备。顶部的选择器用于切换设备，打开时默认选中本机，并显示本窗口连接它的方式与连接状态。本机显示全部页面；远程设备只显示下表中标为 **设备** 的页面；未连接的设备在连上之前不显示这些页面。
+设置窗口一次只配置一台设备。顶部选择器可切换设备（默认选中本机），并显示连接方式与在线状态。本机显示所有页面；远程设备仅显示下表中标有 **设备** 的页面；未连接的设备在连上之前不会显示页面。
 
 | 页面 | 作用于 | 说明 |
 | :--- | :--- | :--- |
-| **General** | 设备 | **Status**：版本、运行时间、活跃会话指标（Workspace / Pane 数量）与最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则回退至系统环境配置）。 |
-| **Appearance** | 本机 | 外观主题（跟随系统 / 浅色 / 深色）、终端字体与配色、Preview 与 Diff 的语法高亮及字号 |
-| **Notifications** | 本机 | 系统通知总开关及测试通知触发 |
-| **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标状态联动） |
+| **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境） |
+| **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体与配色，以及 Preview 和 Diff 的语法高亮与字号 |
+| **Notifications** | 本机 | 系统通知总开关及测试通知按钮 |
+| **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
 | **Shortcuts** | 本机 | 快捷键列表（只读） |
-| **Network** | 设备 | 该设备的 Peer-to-peer 连接与检查更新所用的代理：**System**、**None**，或 **Manual** 并填写 URL。 |
-| **Remote access** | 设备 | TCP 监听开关与监听地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需重启生效，此时按钮变为 **Restart to apply**。 |
-| **Paired devices** | 设备 | 点击 **Generate invite** 生成单次配对邀请（分别提供 P2P 与 TCP 格式链接）。列表按在线状态降序展示已配对设备，支持单项 **Revoke**（吊销配对凭证）。 |
-| **Agent integrations** | 设备 | 各 Agent Hook 状态及一键安装、更新、卸载操作。 |
-| **Developer** | 本机 | 渲染帧率监控开关；提供快捷打开应用、配置、数据、状态与日志目录的路径按钮 |
-| **Licenses** | 本机 | 第三方开源依赖及协议说明 |
-| **About** | 本机 | 版本信息、更新通道切换、手动检查更新及自动检查开关 |
+| **Network** | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**System**、**None**，或选择 **Manual** 并填写 URL |
+| **Remote access** | 设备 | TCP 监听开关与地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需要重启才能生效，修改后按钮会变为 **Restart to apply** |
+| **Paired devices** | 设备 | 点击 **Generate invite** 生成单次配对邀请（包含 P2P 和 TCP 两种链接）。列表优先显示在线设备，点击每行的 **Revoke** 可解除配对 |
+| **Agent integrations** | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
+| **Developer** | 本机 | 帧率监控开关，以及快速打开应用、配置、数据、状态和日志目录的按钮 |
+| **Licenses** | 本机 | 第三方开源依赖及开源协议 |
+| **About** | 本机 | 版本信息、更新通道选择、手动检查更新及自动检查开关 |
 
-> **权限限制**：通过 TCP 或 P2P 接入时，决定其他设备如何连到这台设备的设置（`Network` 中的代理，以及 `Remote access` 中的全部内容，含 **Restart Condr**）会置灰，因为改动可能切断当前连接本身；鼠标悬停可查看原因。请在设备本机或通过 SSH 修改。其余设置在任何连接下都可修改，包括 **Generate invite**，以及对当前所用设备以外的任意设备执行 **Revoke**。
+> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`Network` 中的代理，以及 `Remote access` 中的所有项，包括 **Restart Condr**）会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **Generate invite**，以及对当前所用设备之外的任意设备执行 **Revoke**。
 
 ---
 
@@ -44,10 +44,10 @@ GUI 客户端、后台 Server 与 `condr` CLI 共用位于配置目录下的 `co
 
 * **写入机制**：Condr 写入配置时使用文件锁规避并发竞争，并完整保留文件内的自定义注释与排版结构。
 * **生效规则**：
-  * GUI 界面修改通常即时生效（`Remote access` 网络层修改与 Peer-to-peer 的代理除外）。
-  * 手动编辑 `[client]` 及其子表需重启 GUI 窗口。
-  * 手动编辑 `[server]` 及其子表需执行 `condr server restart` 重启 Server。
-  * 手动编辑 `[network]` 后两者都要做。
+  * 在图形界面修改的设置通常立即生效，但 `Remote access` 页面的网络设置和 Peer-to-peer 代理除外。
+  * 手动编辑 `[client]` 及其子表后，重启 GUI 窗口生效。
+  * 手动编辑 `[server]` 及其子表后，需在终端运行 `condr server restart` 重启 Server。
+  * 手动编辑 `[network]` 后，上述两项操作均需执行。
 * **容错降级**：若配置文件出现语法或解析错误，Condr 会在窗口报错警示，并回退至全套默认参数运行。在修复语法错误前，UI 界面的改动将无法持久化。
 
 ---
@@ -213,7 +213,7 @@ shell = "/opt/homebrew/bin/fish"
 
 ## 整机配置项
 
-不带 `client` 或 `server` 前缀的表由这台机器上所有 Condr 进程读取。在 GUI 中，它和 Server 配置项一样经由那台机器的 Server 修改。
+不带 `client` 或 `server` 前缀的配置表由该机器上的所有 Condr 进程读取。在 GUI 中，它们与 Server 设置一样通过该机器的 Server 进行修改。
 
 ### `[network.proxy]` 代理
 
@@ -225,10 +225,10 @@ url = "http://user:password@proxy:8080"
 
 | 键 | 类型 / 取值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `mode` | `system` / `none` / `manual` | `system` | `system` 依次读取 `HTTPS_PROXY`（或 `ALL_PROXY`）与 `NO_PROXY`，再读取 Windows 或 macOS 的系统代理。`none` 不使用代理，无视环境变量。`manual` 使用 `url` |
-| `url` | `http://` 或 `https://` URL | 空 | `manual` 使用的代理，需要认证时带上 `user:password@`。切换到其他模式时保留。`manual` 下 `url` 为空表示不使用代理 |
+| `mode` | `system` / `none` / `manual` | `system` | `system` 优先读取 `HTTPS_PROXY`（或 `ALL_PROXY`）与 `NO_PROXY`，再读取 Windows 或 macOS 系统代理。`none` 完全不使用代理。`manual` 使用 `url` 的配置 |
+| `url` | `http://` 或 `https://` URL | 空 | `manual` 模式使用的代理地址，若需认证可包含 `user:password@`。切换到其他模式时保留该值。在 `manual` 模式下留空表示不使用代理 |
 
-代理作用于 Server 为 Peer-to-peer 连接 Condr relay 的连接，以及窗口的检查更新。Peer-to-peer 在 Server 重启后才使用新代理；窗口立即生效。
+代理设置作用于 Server 连接 Condr relay 的 Peer-to-peer 网络连接，以及窗口的检查更新。Peer-to-peer 在 Server 重启后应用新代理；检查更新则立即生效。
 
 ---
 

@@ -58,7 +58,7 @@ When several Agents change the same project at once, code and Git conflicts are 
 
 ### Independent Client views and multi-device collaboration
 - **Independent views**: each connected Client keeps its own record of which Workspace and Tab it is viewing. When several devices connect to the same Server, switching views on one does not affect the others.
-- **No locking out**: every connected device can type, scroll, select and rearrange. A terminal has one size, so it follows the window whose terminal you last clicked into; another window shows the same grid from its top-left corner until you click into it.
+- **Simultaneous access**: every connected device can type, scroll, select and rearrange the layout without locking others out. A terminal keeps a single shared size and matches whichever window you last clicked into; other windows show the same terminal from its top-left corner until you click into them.
 
 ### Agent state indicators
 

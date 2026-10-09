@@ -7,21 +7,21 @@ description: 在 Condr 中使用并查看命令行 Agent 的运行状态。
 
 ## 支持级别
 
-Condr 只支持官方集成的 Agent，分为两级。级别取决于 Agent 的 Hook 能报告什么。如果你常用的 CLI 还不在列表中，欢迎提交 [Issue](https://github.com/condrdev/condr/issues) 或 PR。
+Condr 仅对官方提供集成的 Agent 提供支持，分为两个级别，取决于 Agent 的 Hook 能汇报的状态信息。如果你常用的 CLI 尚未收录，欢迎提交 [Issue](https://github.com/condrdev/condr/issues) 或 PR。
 
 ### 完整支持
 
-完整支持的 Agent 的 Hook 能报告一轮开始，也能报告主 Agent 一轮结束，并且与子 Agent 的结束区分开，因此 Working 和 Idle 状态可信。Claude Code、Codex、OpenCode、Pi、Oh My Pi、Antigravity CLI、Grok Build、Cursor CLI 和 GitHub Copilot CLI 属于这一级。
+该级别的 Agent Hook 能明确报告会话轮次的开始与结束，并能区分主 Agent 与子 Agent，因此 Working 和 Idle 状态准确可靠。Claude Code、Codex、OpenCode、Pi、Oh My Pi、Antigravity CLI、Grok Build、Cursor CLI 与 GitHub Copilot CLI 均属于完整支持。
 
-Cursor CLI 和 Antigravity CLI 的 Hook 没有等待权限的事件，因此等待授权时不会显示 Blocked。Antigravity CLI 向你提问时仍会显示 Blocked。
+Cursor CLI 与 Antigravity CLI 的 Hook 缺少权限弹框事件，因此在等待授权时不会显示为 Blocked。但 Antigravity CLI 在主动向你提问等待回复时，仍会正常显示为 Blocked。
 
 ### 仅识别
 
-仅识别的 Agent 能被 Condr 从进程中认出：侧栏显示它的图标，进程退出后图标消失，`condr agent start` 也能启动它。它的 Hook 无法报告可信的状态，因此 Condr 不为它安装 Hook，它的状态始终是 Unknown。由于没有 Hook 提供会话 ID，Server 重启后不会恢复它的会话。
+Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退出后图标消失，并且支持通过 `condr agent start` 启动。由于其 Hook 无法提供可靠的状态报告，Condr 不会为其安装 Hook，状态固定显示为 Unknown。同时因为缺少 Hook 记录的会话 ID，Server 重启后无法自动恢复会话。
 
-`condr agent wait` 和 `condr agent prompt --wait` 会立即以 `agent_reports_no_state` 拒绝仅识别的 Agent，不会等到超时。不带 `--wait` 的 `condr agent prompt` 照常发送。
+对这类 Agent 运行 `condr agent wait` 与 `condr agent prompt --wait` 时，会直接返回 `agent_reports_no_state` 报错，不会等待超时。不带 `--wait` 的 `condr agent prompt` 则可以正常发送指令。
 
-目前只有 Kimi Code 属于这一级，原因是它的 Hook 无法区分子 Agent 和主 Agent 的 Stop。**Settings › Agent integrations** 中它显示为 Recognition only。
+目前仅 Kimi Code 属于这一级，因为它的 Hook 无法区分主 Agent 与子 Agent 的 Stop 事件。在 **Settings › Agent integrations** 中，它被标为 Recognition only。
 
 ## 准备与检查 Agent
 

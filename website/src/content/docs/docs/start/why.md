@@ -30,7 +30,7 @@ Condr treats "connect seamlessly to any machine, from anywhere" as a first-class
 - **Zero-configuration NAT traversal (direct P2P)**: based on the Iroh protocol with Relay-assisted hole punching, so a direct peer-to-peer connection can be established even when both ends sit behind complex internal networks or NAT, without a public IP or port forwarding.
 - **Bank-grade secure channel**: built-in mutual encrypted authentication based on the Noise protocol, combined with one-time pairing codes and a per-device Ed25519 key, so there are no certificates or key distribution to maintain.
 - **Every channel supported**: full support for native SSH socket forwarding and for local Unix Domain Sockets / named pipes, fitting into existing operations setups.
-- **Independent views per device**: when two devices connect to the same remote Server at the same time, each browses its own Workspaces and Tabs, and both stay fully usable; the terminals take the size of the window you last clicked into.
+- **Independent views across devices**: when multiple devices connect to the same remote Server, each browses its own Workspaces and Tabs and stays fully usable; terminals automatically resize to match the window you last clicked into.
 
 ### Server-owned runtime
 
@@ -56,7 +56,7 @@ Condr does not build a second-hand chat interface, take over the conversation lo
 | **Performance and resource usage** | Hundreds of MB of resident memory on the remote side, prone to stutter | Very low (plain text terminal) | **Very low (native Rust architecture, tiny memory footprint)** |
 | **NAT traversal and networking** | Relies on public exposure, reverse proxies or tunneling tools | Requires your own SSH jump host or VPN | **Built-in P2P hole punching, zero-configuration connectivity across complex internal networks** |
 | **Session persistence** | Depends on remote server state; occasional glitches after a drop | Depends on the tmux daemon; terminal-only recovery | **Resident server daemon, restores windows and split layout** |
-| **Multi-device collaboration** | Several people in one window are forced to share cursor and view | Same terminal screen shared, actions interfere with each other | **Each client owns its own view; the window in use sizes the terminals** |
+| **Multi-device collaboration** | Multiple users share a single cursor and view | Shared terminal screen where actions can conflict | **Each client has an independent view, with terminal dimensions adapting to the active window** |
 | **Code review efficiency** | Full-featured but heavy to launch | Typing `git diff` by hand, no graphical comparison | **Built-in light syntax-highlighted Diff and Preview views** |
 | **Agent CLI nativeness** | Mostly steered toward sidebar extensions, cutting the CLI apart | 100% native, but no visual orchestration | **100% native, plus intuitive state display and review** |
 

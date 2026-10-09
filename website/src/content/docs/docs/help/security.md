@@ -22,8 +22,8 @@ Condr has no user accounts and collects no telemetry. It contacts only these fou
 
 | Service | When | Purpose |
 | :--- | :--- | :--- |
-| `condr.dev` | 5 seconds after the window starts, then every 5 hours, on the stable channel | Checks for updates. Turn automatic checks off under **Settings › About**, or set `[client.updates] auto_check = false` |
-| `api.github.com` | The same, on the nightly channel | Checks for updates, as above |
+| `condr.dev` | 5 seconds after the window opens, then every 5 hours, on the stable channel | Checks for updates. Turn off automatic checks under **Settings › About**, or set `[client.updates] auto_check = false` |
+| `api.github.com` | Same as above, on the nightly channel | Checks for updates, as above |
 | `relay.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Helps with NAT hole punching, and relays encrypted traffic when a direct connection cannot be established |
 | `dns.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Publishes and looks up the relay address each Device currently uses |
 
@@ -104,11 +104,11 @@ Pairing currently grants access to the whole Session. A Device connected over TC
 * Start Agent processes, and install Agent hooks through Settings.
 * Change the Server's default shell.
 * Read the Server's status, including its listen configuration, the fingerprints of connected Devices and recent errors.
-* Generate invites through Settings, list paired Devices, and revoke any of them but itself.
+* Generate invites in Settings, view paired Devices and revoke any Device except the current one.
 
-These operations are accepted only from local and SSH connections. The first two could cut the very TCP or Peer-to-peer connection that asked for them:
+The following operations work only locally or over SSH. The first two could cut the TCP or Peer-to-peer connection they were made over:
 
-* Turning the TCP listener and Peer-to-peer on or off, changing the listen address, and changing the proxy.
+* Turning TCP listening or Peer-to-peer on or off, and changing the listen address or proxy.
 * Restarting or stopping the Server.
 * Using this Device as a relay hop for Peer-to-peer connections.
 

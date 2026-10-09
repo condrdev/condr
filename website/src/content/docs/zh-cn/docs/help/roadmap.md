@@ -11,7 +11,7 @@ Condr 0.1 正处于公开预览阶段。本页列出后续准备开发的功能�
 
 ### 1. 更多官方支持的 Agent CLI
 
-Condr 将官方支持更多常见的 Agent CLI，每个 Agent 都按[支持级别](/zh-cn/docs/using/agents/#支持级别)标明完整支持还是仅识别。如果你常用的 CLI 还不在列表中，欢迎提交 Issue 或 PR。
+Condr 将官方支持更多常用的 Agent CLI，并按[支持级别](/zh-cn/docs/using/agents/#支持级别)标明完整支持或仅识别。如果你常用的 CLI 尚未列出，欢迎提交 Issue 或 PR。
 
 ### 2. 终端内搜索
 

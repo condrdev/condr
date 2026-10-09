@@ -22,8 +22,8 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 
 | 服务地址 | 触发条件 | 用途说明 |
 | :--- | :--- | :--- |
-| `condr.dev` | stable 通道：窗口启动 5 秒后首次请求，其后每 5 小时轮询一次 | 检查版本更新。可在 **Settings › About** 中关闭自动检查，或设置 `[client.updates] auto_check = false` |
-| `api.github.com` | nightly 通道：同上 | 检查版本更新，同上 |
+| `condr.dev` | stable 通道：窗口启动 5 秒后，之后每 5 小时一次 | 检查更新。可在 **Settings › About** 中关闭自动检查，或设置 `[client.updates] auto_check = false` |
+| `api.github.com` | nightly 通道：同上 | 检查更新，同上 |
 | `relay.condr.dev` | Server 启用了 Peer-to-peer，或本机主动发起 `p2p://` 连接 | 辅助 NAT 打洞；在直连建立失败时中继加密流量 |
 | `dns.condr.dev` | Server 启用了 Peer-to-peer，或本机主动发起 `p2p://` 连接 | 发布并查询各设备当前使用的中继地址 |
 
@@ -104,12 +104,12 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 * 启动 Agent 进程，并通过图形配置界面安装 Agent Hook。
 * 更改 Server 运行时的默认 Shell。
 * 读取 Server 运行状态信息，包括网络监听配置、已连接设备指纹及最近的系统错误记录。
-* 通过图形配置界面签发 invite 凭证、查询已配对设备，并撤销除自身以外的任意设备。
+* 在设置中生成邀请、查看已配对设备，以及撤销除当前设备外的任意设备。
 
-以下操作只接受本机本地连接及 SSH 会话调用。其中前两项若从 TCP 或 Peer-to-peer 连接发起，可能切断该连接本身：
+以下操作只能在本机或通过 SSH 连接执行。其中前两项若经 TCP 或 Peer-to-peer 连接执行，可能断开这条连接本身：
 
-* 开启或关闭 TCP 监听端口及 Peer-to-peer 开关，修改监听地址与代理。
-* 重启或停止 Server 进程。
+* 开启或关闭 TCP 监听及 Peer-to-peer 开关，修改监听地址或代理。
+* 重启或停止 Server。
 * 将当前设备用作 Peer-to-peer 连接的中转。
 
 因此，请只将自己持有的设备与 Server 完成配对。当前系统尚未实现只读权限与控制权限的分权解耦，多用户协同共用单 Server 需等待该功能上线。

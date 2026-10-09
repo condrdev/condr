@@ -268,7 +268,7 @@ condr agent wait <target> [--until <state>] [--timeout <ms>]
 
 *Supported kinds (`--kind`)*: `claude`, `codex`, `opencode`, `pi`, `omp`, `antigravity`, `grok`, `cursor`, `copilot`, `kimi`.
 
-`kimi` is recognition only and its state stays Unknown, so `agent wait` and `agent prompt --wait` refuse it at once with `agent_reports_no_state` (see [Support levels](/docs/using/agents/#support-levels)).
+`kimi` is recognition only and its state stays Unknown, so `agent wait` and `agent prompt --wait` fail immediately with `agent_reports_no_state` (see [Support levels](/docs/using/agents/#support-levels)).
 
 #### Hook integration
 

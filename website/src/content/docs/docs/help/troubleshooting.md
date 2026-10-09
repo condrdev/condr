@@ -88,7 +88,7 @@ Once both sides run matching versions, go to the target Device and run `condr se
 
 Agent state comes entirely from hooks. Check these in order:
 
-1. **Are the hooks installed?** Run `condr agent hooks status <agent>` (for example, `condr agent hooks status claude`). `missing` means install them; `outdated` means reinstall them; `unsupported` means the Agent is recognition only: Condr installs no hooks for it and its state stays Unknown (see [Support levels](/docs/using/agents/#support-levels)). For a remote Device, pick it at the top of **Settings** and open **Agent integrations**; the command-line `agent hooks` acts on this machine only.
+1. **Are hooks installed?** Run `condr agent hooks status <agent>` (for example, `condr agent hooks status claude`). `missing` means they need to be installed; `outdated` means they need to be reinstalled; `unsupported` means the Agent is recognition only, so Condr does not install hooks and its state stays Unknown (see [Support levels](/docs/using/agents/#support-levels)). For a remote Device, select it at the top of **Settings** and open **Agent integrations**; the `agent hooks` command only works on the local machine.
 2. **Is the Agent running in a Condr Pane?** Hooks report only in terminal sessions where `CONDR_ENV=1` is set. Condr cannot see Agents running in other terminals.
 3. **Does the Agent report at startup?** Codex, Copilot and Antigravity send no state before their first prompt, and Cursor sends none while resuming a session; during that time the state shows Unknown.
 4. **Has Codex trusted the hooks?** Codex requires its hooks feature to be enabled and the hooks to be trusted explicitly. Installing Condr's hooks tries to enable the feature; if that fails, add `[features] hooks = true` to Codex's `config.toml`, then run `/hooks` inside Codex to trust them.
@@ -99,9 +99,9 @@ Agent state comes entirely from hooks. Check these in order:
 
 ## A Pane cannot find the Agent
 
-* **Where the Server's environment comes from**: when you open Condr from the Dock, Finder or a desktop menu, it reads your login shell's environment once at launch, so the Server it starts sees the same PATH as your terminal. A Server started with `condr server start` in a terminal uses that terminal's environment. Run `condr agent available` to list the Agents the Server can see.
-* **After installing an Agent or changing PATH**: the Server keeps the environment it started with. Run `condr server restart` in a terminal that already sees the change.
-* **If your login shell is slow**: Condr waits at most 5 seconds for it; past that, it keeps the bare launch environment and notes this in the GUI log.
+* **Where the Server gets its environment**: when opened from the Dock, Finder or a desktop menu, Condr loads your login shell environment once at startup, giving the Server the same PATH as your terminal. A Server started with `condr server start` in a terminal uses that terminal's environment. Run `condr agent available` to see which Agents the Server can find.
+* **After installing an Agent or updating PATH**: the Server keeps its original startup environment. Run `condr server restart` in a terminal where the changes are already visible.
+* **If your login shell loads slowly**: Condr waits up to 5 seconds. If it times out, it starts with the default system environment and logs a notice in the GUI log.
 
 ---
 
@@ -134,7 +134,7 @@ Condr runs `ssh` in fully non-interactive mode, so it cannot show a password pro
 * **Not turned on remotely**: run `condr server status` on the remote Device and check that Peer-to-peer is on.
 * **The invite is no longer valid**: when the reason shows `invite unknown, used or expired`, the invite has expired or been used; generate a new one on that Device.
 * **The local Server is not running**: Peer-to-peer connections go out through this machine's Server. If the reason shows `this machine's Server is unreachable`, make sure the local Server is running first.
-* **The network only lets traffic out through a proxy**: set it under **Settings › Network**: **System** (the default) follows `HTTPS_PROXY` or `ALL_PROXY`, then the Windows or macOS proxy setting, and **Manual** takes a URL such as `http://user:password@proxy:8080`. A Server installed as a service sees no shell's environment, so **Manual** is the dependable choice there. Peer-to-peer takes the proxy when the Server starts, so click **Restart to apply** after changing it. The Server's log line `p2p endpoint bound` shows the proxy in use. Such networks usually block hole punching too, so the connection stays on the relay.
+* **The network requires a proxy**: configure it under **Settings › Network**. **System** (default) uses `HTTPS_PROXY` or `ALL_PROXY`, then falls back to Windows or macOS system settings. **Manual** accepts a proxy URL such as `http://user:password@proxy:8080`. When the Server runs as a system service, it cannot access shell environment variables, making **Manual** the most reliable option. Peer-to-peer loads the proxy settings when the Server starts, so click **Restart to apply** after making changes. The `p2p endpoint bound` entry in the Server log shows the proxy in use. Networks that require proxies usually block direct hole punching, so connections will route through the relay.
 
 ---
 
@@ -152,14 +152,14 @@ Condr runs `ssh` in fully non-interactive mode, so it cannot show a password pro
 * **Windows SmartScreen blocks the installer**: click **More info** → **Run anyway**. Preview installers are not code-signed yet.
 * **The Linux AppImage does not start**: AppImages need FUSE. Without FUSE, add the `--appimage-extract-and-run` argument when you run it.
 * **Launching again shows no window**: Condr allows only one instance. Extra instances exit silently and do not bring the existing window forward. Check the taskbar or other virtual desktops for a running Condr window.
-* **The update check fails behind a proxy**: the check goes through the proxy under **Settings › Network**, to `condr.dev` on the stable channel and to `api.github.com` on the nightly channel. When the proxy blocks GitHub, only the stable channel can be checked.
+* **Update checks fail behind a proxy**: update requests use the proxy configured in **Settings › Network** (`condr.dev` for stable, `api.github.com` for nightly). If your proxy blocks GitHub, only the stable channel can check for updates.
 * **Error 448 in a Pane on Windows**: for example, pnpm reports `untrusted mount point`. The Server inherited the Redirection Guard restriction from its parent process and passed it on to every Pane process. Save your work in the Panes, then run `condr server restart` in a regular system terminal so the Server starts again in an unrestricted environment.
 
 ---
 
 ## A configuration change does not take effect
 
-* **Reloading after hand edits**: after editing `[client]` or its sub-tables by hand, restart the window; after editing `[server]` or its sub-tables by hand, run `condr server restart` in a terminal. After editing `[network]` by hand, do both. Settings changed in the window take effect immediately, except on the Remote access page and the proxy for Peer-to-peer.
+* **Applying manual configuration changes**: after editing `[client]` or its sub-tables, restart the GUI window. After editing `[server]` or its sub-tables, run `condr server restart` in a terminal. After editing `[network]`, perform both steps. Changes made directly in the GUI apply immediately, except for settings on the Remote access page and the Peer-to-peer proxy.
 * **A broken configuration file**: if the TOML has a syntax error, the window reports `Failed to load … Device list changes are disabled; fix the file and restart Condr.` on startup. Every setting falls back to its default and the Device list cannot be changed. Fix the file and restart the window to recover.
 * **The editor warns the file changed on Windows**: while another editor holds `config.toml` open, Condr overwrites the file in place, and the editor usually warns that the file was changed outside it.
 

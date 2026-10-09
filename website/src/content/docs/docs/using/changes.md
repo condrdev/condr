@@ -41,7 +41,7 @@ Each Workspace remembers its own choice.
 - **Switch to the file tree**: switch the tab at the top of the right sidebar to **Files** to expand and browse project folders as you would in a file manager.
 - **Change markers**: a folder with changes carries a dot, and files ignored by `.gitignore` are grayed out automatically.
 - **Click to preview**: click any text file to open a read-only preview in the **Preview** Tab. The syntax highlighting and scroll position refresh automatically when the file changes on disk.
-- **Rendered Markdown and images**: Markdown and SVG files open rendered; switch between **Preview** and **Source** in the Tab's header. Images (PNG, JPEG, GIF, WebP, BMP, ICO, TIFF up to about 2 MiB) show scaled to fit, and animated ones play. Images inside Markdown load from the project; images from the web show their alt text instead.
+- **Rendered Markdown and images**: Markdown and SVG files open rendered by default; switch between **Preview** and **Source** in the Tab header. Images (PNG, JPEG, GIF, WebP, BMP, ICO and TIFF under roughly 2 MiB) scale automatically to fit, and animated images play automatically. Images in Markdown files are loaded locally from the project; web images display their alt text instead.
 
 ## Right-click menu
 

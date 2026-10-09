@@ -41,7 +41,7 @@ Condr 新建 Worktree 时，会把父 Workspace 当时所在的分支记为 base
 - **切换至文件树**：在右侧栏顶部将标签切至 **Files**，即可像文件管理器一样展开和浏览项目文件夹。
 - **改动标记**：有修改的文件夹旁会带有一个圆点标记，被 `.gitignore` 忽略的文件会自动变灰。
 - **点击预览**：点击任意文本文件，即可在 **Preview** 标签页中打开只读预览，代码高亮与滚动位置在磁盘文件变动时会自动刷新。
-- **渲染 Markdown 与图片**：Markdown 和 SVG 文件默认以渲染效果打开，可在标签页标题栏的 **Preview** 与 **Source** 之间切换。图片（PNG、JPEG、GIF、WebP、BMP、ICO、TIFF，约 2 MiB 以内）缩放到合适大小显示，动图会播放。Markdown 中的图片从项目内加载，来自网络的图片只显示其替代文字。
+- **Markdown 与图片渲染**：Markdown 与 SVG 文件默认以渲染后的效果打开，可在 Tab 顶部的 **Preview** 与 **Source** 间随时切换。常见格式图片（PNG、JPEG、GIF、WebP、BMP、ICO、TIFF，约 2 MiB 以内）会自动缩放适应窗口，动图可直接播放。Markdown 中的图片仅支持加载项目本地文件，网络图片则显示其替代文字。
 
 ## 快捷右键菜单
 
