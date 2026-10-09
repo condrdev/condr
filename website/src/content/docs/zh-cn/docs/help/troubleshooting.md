@@ -134,6 +134,7 @@ Condr 以纯非交互模式执行底层 `ssh` 进程，期间无法提供交互�
 * **远端功能未启用**：在远端设备执行 `condr server status`，确认 Peer-to-peer 标志位已置为开启。
 * **邀请凭据失效**：诊断原因显示 `invite unknown, used or expired` 时，表明邀请码已过期或已被消耗，必须在服务端重新生成凭据。
 * **本机中转 Server 未运行**：P2P 会话需借由本机 Server 发起通信路由。诊断日志若提示 `this machine's Server is unreachable`，请先确保本机的 Server 处于正常运行状态。
+* **网络只能经代理出网**：Server 通过 `HTTPS_PROXY`（未设置时用 `HTTP_PROXY`）指定的代理连接 Condr 的 relay，例如 `http://user:password@proxy:8080`。Server 只在启动时读取该变量，设置后需执行 `condr server restart`。日志中的 `p2p endpoint bound` 一行会显示实际使用的代理。这类网络通常也无法打洞，连接会一直经 relay 转发。
 
 ---
 

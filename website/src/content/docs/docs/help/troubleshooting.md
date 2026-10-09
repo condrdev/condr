@@ -134,6 +134,7 @@ Condr runs `ssh` in fully non-interactive mode, so it cannot show a password pro
 * **Not turned on remotely**: run `condr server status` on the remote Device and check that Peer-to-peer is on.
 * **The invite is no longer valid**: when the reason shows `invite unknown, used or expired`, the invite has expired or been used; generate a new one on that Device.
 * **The local Server is not running**: Peer-to-peer connections go out through this machine's Server. If the reason shows `this machine's Server is unreachable`, make sure the local Server is running first.
+* **The network only lets traffic out through a proxy**: the Server reaches Condr's relay through the proxy named in `HTTPS_PROXY`, or `HTTP_PROXY` when that is unset, for example `http://user:password@proxy:8080`. The Server reads it when it starts, so run `condr server restart` after setting it. Its log line `p2p endpoint bound` shows the proxy in use. Such networks usually block hole punching too, so the connection stays on the relay.
 
 ---
 

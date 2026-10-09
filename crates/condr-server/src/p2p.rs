@@ -110,6 +110,12 @@ impl P2pNode {
         let secret = SecretKey::from_bytes(identity.device_key().seed());
         let enabled = self.enabled;
         let network = self.network.clone();
+        let proxy = matches!(network, Network::Condr)
+            .then(proxy_from_env)
+            .flatten();
+        let proxy_address = proxy
+            .as_ref()
+            .map(|url| url[url::Position::BeforeHost..url::Position::AfterPort].to_owned());
         let endpoint = self.handle.block_on(async move {
             let mut builder = IrohEndpoint::builder(presets::Minimal).secret_key(secret);
             if enabled {
@@ -124,6 +130,9 @@ impl P2pNode {
                     if enabled {
                         let pkarr: url::Url = PKARR_URL.parse().map_err(other)?;
                         builder = builder.address_lookup(PkarrPublisher::builder(pkarr));
+                    }
+                    if let Some(proxy) = proxy {
+                        builder = builder.proxy_url(proxy);
                     }
                     builder
                 }
@@ -142,7 +151,12 @@ impl P2pNode {
                 endpoint.bound_sockets().into_iter().map(TransportAddr::Ip),
             ));
         }
-        tracing::info!(id = %identity.public_key(), accepting = enabled, "p2p endpoint bound");
+        tracing::info!(
+            id = %identity.public_key(),
+            accepting = enabled,
+            proxy = proxy_address.as_deref(),
+            "p2p endpoint bound"
+        );
         let accept_task = enabled.then(|| {
             let endpoint = endpoint.clone();
             let node = Arc::downgrade(self);
@@ -520,6 +534,16 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The proxy the relay connection goes through: `HTTPS_PROXY`, since the relay is HTTPS,
+/// else `HTTP_PROXY`.
+// ponytail: NO_PROXY is not consulted; the relay is the only host behind it, so excluding
+// it means unsetting both variables for the Server.
+fn proxy_from_env() -> Option<url::Url> {
+    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok()?.parse().ok())
 }
 
 fn other(error: impl std::fmt::Display) -> io::Error {
