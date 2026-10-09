@@ -112,6 +112,28 @@ fn borrowed_models_keep_local_dock_edits_out_of_the_authoritative_structure() {
     );
 }
 
+#[test]
+fn a_closed_pane_leaves_no_attention_behind() {
+    let mut session = Session::new();
+    session.create_workspace(std::env::temp_dir()).unwrap();
+    let pane_id = session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id();
+    let split = session
+        .split_pane(pane_id, condr_core::SplitDirection::Horizontal, 0.5)
+        .unwrap();
+    let mut connection = connection_with_io();
+    connection.apply_bootstrap(bootstrap(&session)).unwrap();
+    connection.attention.extend([pane_id, split]);
+
+    session.close_pane(split).unwrap();
+    connection
+        .apply_layout(session.snapshot(), Vec::new())
+        .unwrap();
+    assert_eq!(connection.attention, [pane_id].into());
+}
+
 /// Run manually with `cargo test -p condr-gui session_model_read_cost -- --ignored --nocapture`.
 #[test]
 #[ignore = "reports model-query cost; timings are not a correctness assertion"]

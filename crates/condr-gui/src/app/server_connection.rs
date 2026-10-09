@@ -433,6 +433,11 @@ impl ServerConnection {
             .flat_map(|tab| tab.panes())
             .map(|pane| pane.id())
             .collect();
+        let live_workspaces: HashSet<WorkspaceId> = session
+            .workspaces()
+            .iter()
+            .map(|workspace| workspace.id())
+            .collect();
         self.replace_session(session);
         self.zoomed_panes = zoomed_panes.into_iter().collect();
         self.terminals.retain(|pane_id, _| live.contains(pane_id));
@@ -440,6 +445,13 @@ impl ServerConnection {
             .retain(|pane_id, _| live.contains(pane_id));
         self.terminal_titles
             .retain(|pane_id, _| live.contains(pane_id));
+        // The Server drops these with the Pane or Workspace without an event of their own.
+        self.agents.retain(|pane_id, _| live.contains(pane_id));
+        self.agent_trackers
+            .retain(|pane_id, _| live.contains(pane_id));
+        self.attention.retain(|pane_id| live.contains(pane_id));
+        self.workspace_git
+            .retain(|workspace_id, _| live_workspaces.contains(workspace_id));
         // Retargeting a viewer also needs to refresh its Editor, even without a Dock.
         Ok(self.dock_projection() != previous_layout || self.presented_viewer() != previous_viewer)
     }

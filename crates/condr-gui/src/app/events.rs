@@ -44,9 +44,9 @@ impl Condr {
                 }
                 clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
                 if application.authority_changed {
-                    self.clear_connection_gui_state(key);
+                    self.clear_connection_gui_state(key, cx);
                 } else {
-                    self.prune_dock_cache(key);
+                    self.prune_dock_cache(key, cx);
                 }
                 // The Bootstrap replaced every listing, file and diff cache; answers to
                 // requests sent before it were dropped with the old connection.
@@ -186,7 +186,7 @@ impl Condr {
                             Err(error) => return self.mark_protocol_error(key, index, error),
                         };
                         connection.sequence = sequence;
-                        self.prune_dock_cache(key);
+                        self.prune_dock_cache(key, cx);
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);
                     }

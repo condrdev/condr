@@ -11,7 +11,7 @@ impl Condr {
         }
     }
 
-    pub(super) fn prune_dock_cache(&mut self, key: ConnectionKey) {
+    pub(super) fn prune_dock_cache(&mut self, key: ConnectionKey, cx: &mut App) {
         let Some(session) = self
             .connection(key)
             .and_then(|connection| connection.session())
@@ -31,7 +31,7 @@ impl Condr {
             .flat_map(|tab| tab.panes())
             .map(|pane| pane.id())
             .collect::<HashSet<_>>();
-        self.prune_files_state(key);
+        self.prune_files_state(key, cx);
 
         self.retain_dock_cache(key, &tab_ids, &pane_ids);
     }

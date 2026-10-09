@@ -52,7 +52,12 @@ pub(super) struct FilesViewState {
 }
 
 impl FilesViewState {
-    pub(super) fn retain_session(&mut self, key: ConnectionKey, session: Option<&Session>) {
+    /// Hands back the images it dropped, for `release_images` to free from the atlas.
+    pub(super) fn retain_session(
+        &mut self,
+        key: ConnectionKey,
+        session: Option<&Session>,
+    ) -> Vec<Arc<DecodedImage>> {
         let workspace_live = |connection_key: ConnectionKey, id: WorkspaceId| {
             connection_key != key || session.is_some_and(|session| session.workspace(id).is_some())
         };
@@ -93,11 +98,39 @@ impl FilesViewState {
         {
             self.pending_file_line = None;
         }
-        // ponytail: dropped without `release_images`, so their frames stay in the atlas
-        // until the window closes; this runs without an App to free them.
-        self.images
-            .retain(|(connection, id, _)| workspace_live(*connection, *id));
+        // A Workspace's images are its Preview Tab's, so they go when that Tab closes.
+        self.images.retain(|(connection, id, _)| {
+            *connection != key
+                || session
+                    .and_then(|session| session.workspace(*id))
+                    .is_some_and(|workspace| {
+                        workspace.tabs().iter().any(|tab| tab.file().is_some())
+                    })
+        })
     }
+}
+
+/// The byte range of `old` that differs from `new`, and the text of `new` that replaces it.
+fn changed_span<'a>(old: &str, new: &'a str) -> (std::ops::Range<usize>, &'a str) {
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let mut suffix = old
+        .bytes()
+        .rev()
+        .zip(new.bytes().rev())
+        .take(old.len().min(new.len()) - prefix)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    (prefix..old.len() - suffix, &new[prefix..new.len() - suffix])
 }
 
 /// The text "Insert Path into Terminal" writes: the relative path, single-quoted when a
@@ -1074,11 +1107,15 @@ impl Condr {
                 // edit to the open document, not a new one. Kit keeps the highlighter and
                 // its old tree, so the colours stay while the new parse runs, and the
                 // viewport stays where it was instead of jumping to the top.
-                // ponytail: each update also lands in Kit's undo history, which nothing can
-                // clear or use in a read-only viewer; revisit if a long session shows it.
+                // shortcut: each update still lands in Kit's undo history (up to 1000 steps),
+                // which has no public clear; replacing only the changed span keeps a step the
+                // size of the edit, not the document twice. Clear it once Kit offers a way.
                 let scroll = state.scroll_offset();
-                state.select_all(window, cx);
-                state.replace(text, window, cx);
+                let (range, replacement) = changed_span(&state.value(), &text);
+                if !range.is_empty() || !replacement.is_empty() {
+                    state.set_selected_range(range, cx);
+                    state.replace(replacement.to_owned(), window, cx);
+                }
                 state.set_selected_range(0..0, cx);
                 state.set_scroll_offset(scroll, cx);
             } else {
@@ -1201,7 +1238,7 @@ impl Condr {
     }
 
     /// The same retention rules handle a closed Workspace and a replaced connection.
-    pub(super) fn prune_files_state(&mut self, key: ConnectionKey) {
+    pub(super) fn prune_files_state(&mut self, key: ConnectionKey, cx: &mut App) {
         let Some(connection) = self
             .connections
             .iter_mut()
@@ -1209,7 +1246,10 @@ impl Condr {
         else {
             return;
         };
-        self.files_view.retain_session(key, connection.session());
+        release_images(
+            self.files_view.retain_session(key, connection.session()),
+            cx,
+        );
         let live = connection
             .session()
             .into_iter()
@@ -1219,8 +1259,8 @@ impl Condr {
         connection.resources.retain_workspaces(&live);
     }
 
-    pub(super) fn clear_files_state(&mut self, key: ConnectionKey) {
-        self.files_view.retain_session(key, None);
+    pub(super) fn clear_files_state(&mut self, key: ConnectionKey, cx: &mut App) {
+        release_images(self.files_view.retain_session(key, None), cx);
         self.clear_pending_requests(key);
     }
 }
@@ -1269,9 +1309,27 @@ pub(super) fn truncated_note(cx: &App) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{absolute_path, language_for, terminal_path_text};
+    use super::{absolute_path, changed_span, language_for, terminal_path_text};
     use relative_path::RelativePath;
     use std::path::Path;
+
+    #[test]
+    fn a_changed_file_replaces_only_the_span_that_differs() {
+        let span = |old, new| {
+            let (range, text) = changed_span(old, new);
+            let mut patched = String::from(old);
+            patched.replace_range(range.clone(), text);
+            assert_eq!(patched, new);
+            (range, text)
+        };
+        assert_eq!(span("fn a() {}\n", "fn b() {}\n"), (3..4, "b"));
+        assert_eq!(span("one\nthree\n", "one\ntwo\nthree\n"), (5..5, "wo\nt"));
+        assert_eq!(span("aaa", "aa"), (2..3, ""));
+        assert_eq!(span("same", "same"), (4..4, ""));
+        // é and è share their first byte: the span widens to the whole character.
+        assert_eq!(span("caé!", "caè!"), (2..4, "è"));
+        assert_eq!(span("", "新"), (0..0, "新"));
+    }
 
     #[test]
     fn closing_workspace_clears_its_file_view_without_touching_another_device() {
@@ -1306,6 +1364,28 @@ mod tests {
         assert!(view.changes_against_base.is_empty());
         assert!(view.expanded_dirs.is_empty());
         assert!(view.last_terminal_tabs.is_empty());
+    }
+
+    #[test]
+    fn closing_the_preview_tab_lets_its_images_go() {
+        use super::{FilesViewState, Session};
+        let mut session = Session::new();
+        session.create_workspace(std::env::temp_dir()).unwrap();
+        let id = session.workspaces()[0].id();
+        let preview = session.show_file(id, "logo.png".into()).unwrap();
+        let mut view = FilesViewState::default();
+        assert!(view.images.want((1, id, "logo.png".into())));
+        view.retain_session(1, Some(&session));
+        assert!(
+            !view.images.want((1, id, "logo.png".into())),
+            "the open Preview Tab keeps its image"
+        );
+        session.close_tab(preview).unwrap();
+        view.retain_session(1, Some(&session));
+        assert!(
+            view.images.want((1, id, "logo.png".into())),
+            "the closed Preview Tab's image was dropped"
+        );
     }
 
     #[test]

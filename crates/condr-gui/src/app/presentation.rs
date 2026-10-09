@@ -110,8 +110,8 @@ impl Condr {
         }
     }
 
-    pub(super) fn clear_connection_gui_state(&mut self, key: ConnectionKey) {
-        self.clear_files_state(key);
+    pub(super) fn clear_connection_gui_state(&mut self, key: ConnectionKey, cx: &mut App) {
+        self.clear_files_state(key, cx);
         self.retain_dock_cache(key, &HashSet::new(), &HashSet::new());
     }
 

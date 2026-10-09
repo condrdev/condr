@@ -304,7 +304,7 @@ impl Condr {
         let was_active = self.active_connection == key;
         self.connections.remove(index);
         self.save_servers(cx);
-        self.clear_connection_gui_state(key);
+        self.clear_connection_gui_state(key, cx);
         self.sync_sidebar_workspace_open(cx);
         if was_active {
             self.active_connection = self
@@ -385,9 +385,9 @@ impl Condr {
             _ = self.clear_pending_projections_for(key);
             clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
             if application.authority_changed {
-                self.clear_connection_gui_state(key);
+                self.clear_connection_gui_state(key, cx);
             } else {
-                self.prune_dock_cache(key);
+                self.prune_dock_cache(key, cx);
             }
             self.sync_sidebar_workspace_open(cx);
             if first_bootstrap {

@@ -2013,7 +2013,7 @@ fn closing_a_preedit_owner_discards_its_late_commit_before_accepting_new_input()
                 .unwrap()
                 .apply_layout(session.snapshot(), Vec::new())
                 .unwrap();
-            this.prune_dock_cache(1);
+            this.prune_dock_cache(1, cx);
             this.refresh_target_pane(1);
             assert_eq!(this.terminal_input.target, Some((1, next_pane)));
             assert!(
@@ -2036,7 +2036,7 @@ fn closing_a_preedit_owner_discards_its_late_commit_before_accepting_new_input()
             // a replacement Device reuses the same Pane ID.
             for starts_preedit in [true, false] {
                 this.replace_and_mark_text_in_range(None, "old device preedit", None, window, cx);
-                this.clear_connection_gui_state(1);
+                this.clear_connection_gui_state(1, cx);
                 this.terminal_input.target = Some((1, next_pane));
                 if starts_preedit {
                     this.replace_and_mark_text_in_range(None, "new preedit", None, window, cx);
