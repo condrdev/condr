@@ -64,6 +64,13 @@ fn thread_start_failure_reaps_child_and_releases_io_for_every_stage() {
         let resources = failure.resources.expect("the requested stage was reached");
         let error = result.err().expect("thread creation must fail");
         assert_eq!(error.to_string(), format!("injected {stage} start failure"));
+        // Windows lists an exited process until its last handle closes, and the
+        // pseudoconsole host lets go of the shell's tens of milliseconds after the Job
+        // ended it; a slow CI runner saw it still listed (exit code 1) on the first check.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while process_table().process(resources.pid).is_some() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
         assert!(
             process_table().process(resources.pid).is_none(),
             "{stage} failure left the shell running or unreaped"
