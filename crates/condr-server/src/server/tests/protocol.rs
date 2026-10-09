@@ -473,7 +473,7 @@ fn server_settings_are_stored_published_and_reloaded() {
         &mut stream,
         &ClientMessage::SetServerSettings {
             server_id,
-            shell: "  nu ".into(),
+            setting: condr_core::protocol::ServerSetting::Shell("  nu ".into()),
         },
     )
     .unwrap();
@@ -548,6 +548,117 @@ fn server_settings_are_stored_published_and_reloaded() {
     handle.stop();
     thread.join().unwrap().unwrap();
     let _ = std::fs::remove_dir_all(directory);
+}
+
+/// Machine-wide settings are administration (ADR 0038): a paired Device may set the shell
+/// but not the proxy, and each message changes one field.
+#[test]
+fn only_a_local_connection_changes_the_proxy_and_one_field_leaves_the_others() {
+    use condr_core::protocol::ServerSetting;
+    use condr_core::{ProxyMode, ProxySetting};
+    let config = ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap();
+    let local = config.local_endpoint();
+    let server = BoundServer::bind(config).unwrap();
+    let tcp = server.endpoint().clone();
+    let handle = server.handle();
+    let thread = thread::spawn(move || server.run());
+    let open = |endpoint: &Endpoint| {
+        let connection = ClientConnection::connect(endpoint, "settings").unwrap();
+        let bootstrap = connection.bootstrap().unwrap().clone();
+        let mut stream = connection.into_stream();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        subscribe(&mut stream, bootstrap.session_id, bootstrap.sequence);
+        (stream, bootstrap.server_id)
+    };
+    let set = |stream: &mut EndpointStream, server_id, setting| {
+        condr_core::protocol::write_message(
+            stream,
+            &ClientMessage::SetServerSettings { server_id, setting },
+        )
+        .unwrap();
+        loop {
+            match read_server(stream) {
+                ServerMessage::Event {
+                    event: SessionEvent::ServerSettingsChanged { settings },
+                    ..
+                } => return Ok(settings),
+                ServerMessage::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+    };
+
+    let (mut paired, server_id) = open(&tcp);
+    assert!(
+        set(
+            &mut paired,
+            server_id,
+            ServerSetting::ProxyMode(ProxyMode::None)
+        )
+        .unwrap_err()
+        .contains("local or SSH")
+    );
+    let settings = set(&mut paired, server_id, ServerSetting::Shell("fish".into())).unwrap();
+    assert_eq!(settings.shell, "fish");
+    assert_eq!(settings.proxy, ProxySetting::default());
+
+    let (mut stream, server_id) = open(&local);
+    assert!(
+        set(
+            &mut stream,
+            server_id,
+            ServerSetting::ProxyUrl("socks5://proxy:1080".into())
+        )
+        .is_err()
+    );
+    let settings = set(
+        &mut stream,
+        server_id,
+        ServerSetting::ProxyMode(ProxyMode::Manual),
+    )
+    .unwrap();
+    assert_eq!(settings.shell, "fish", "one field leaves the others");
+    let settings = set(
+        &mut stream,
+        server_id,
+        ServerSetting::ProxyUrl(" http://proxy:8080 ".into()),
+    )
+    .unwrap();
+    assert_eq!(
+        settings.proxy,
+        ProxySetting {
+            mode: ProxyMode::Manual,
+            url: "http://proxy:8080".into(),
+        }
+    );
+
+    // Peer-to-peer took the proxy when the Server started: saved and running differ.
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::ServerAdmin {
+            server_id,
+            command: ServerAdminCommand::Status,
+        },
+    )
+    .unwrap();
+    let (proxy, running_proxy) = loop {
+        if let ServerMessage::ServerAdmin(ServerAdminResponse::Status {
+            proxy,
+            running_proxy,
+            ..
+        }) = read_server(&mut stream)
+        {
+            break (proxy, running_proxy);
+        }
+    };
+    assert_eq!(proxy, settings.proxy);
+    assert_eq!(running_proxy, ProxySetting::default());
+
+    drop((paired, stream));
+    handle.stop();
+    thread.join().unwrap().unwrap();
 }
 
 #[test]

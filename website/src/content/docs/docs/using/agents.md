@@ -21,7 +21,7 @@ Condr recognizes a recognition-only Agent from its process: the sidebar shows it
 
 `condr agent wait` and `condr agent prompt --wait` refuse a recognition-only Agent at once with `agent_reports_no_state` instead of waiting out their timeout. `condr agent prompt` without `--wait` still delivers the prompt.
 
-Kimi Code is the only one so far, because its Hooks cannot tell a subagent's Stop from the main Agent's. **Settings › Device › Agent integrations** shows it as Recognition only.
+Kimi Code is the only one so far, because its Hooks cannot tell a subagent's Stop from the main Agent's. **Settings › Agent integrations** shows it as Recognition only.
 
 ## Prepare and check Agents
 
@@ -36,7 +36,7 @@ Before you run an Agent in Condr, make sure the Condr Server can find the matchi
 Traditional terminal managers match screen text against regular expressions, so a change in the output easily leads them to the wrong state. Condr uses the Agents' native Hook mechanism instead: the Agent reports its own state, which makes Condr's view of it 100% accurate.
 
 - **Install a Hook in one step**: run `condr agent hooks install <agent>` (for example `condr agent hooks install claude`).
-- **Manage Hooks in the GUI**: go to **Settings › Device › Agent integrations** and install them there.
+- **Manage Hooks in the GUI**: go to **Settings › Agent integrations** and install them there.
 - **Check and uninstall**: run `condr agent hooks status <agent>` to see the status. To remove a Hook, run `condr agent hooks uninstall <agent>`.
 
 ## Agent state indicators

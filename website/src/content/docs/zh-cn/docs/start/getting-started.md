@@ -18,7 +18,7 @@ Condr 0.1 目前处于公开预览（Public Preview）阶段，功能与配置�
 桌面端已内置 Server 组件并默认随应用启动，无需额外配置：
 
 1. **新建工作区**：点击 **Open Project** 选择本地项目目录，Condr 将自动创建 Workspace 并唤起终端。
-2. **安装 Agent 集成**：进入 **Settings › Device › Agent integrations**，在需要支持的 Agent 项后点击 **Install**，以便 Condr 捕获并监听其运行状态。
+2. **安装 Agent 集成**：进入 **Settings › Agent integrations**，在需要支持的 Agent 项后点击 **Install**，以便 Condr 捕获并监听其运行状态。
 3. **运行 Agent**：在内置终端中直接执行 Agent 命令（例如 `claude`）。
 
 ## Headless Server

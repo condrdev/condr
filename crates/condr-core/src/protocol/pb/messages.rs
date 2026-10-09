@@ -11,12 +11,13 @@ use crate::protocol::{
     BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
     LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
     RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerLogRecord, ServerMessage, ServerSettings, SessionEvent, SessionId, SessionOverview,
-    TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionEvent, SessionId,
+    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
-    SessionSnapshot, TabId, TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
+    ProxyMode, ProxySetting, SessionSnapshot, TabId, TerminalCommand, TerminalView,
+    TerminalViewFrame, WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -69,14 +70,52 @@ fn encode_settings(settings: &ServerSettings) -> super::ServerSettings {
     super::ServerSettings {
         shell: settings.shell.clone(),
         default_shell: settings.default_shell.clone(),
+        proxy: Some(encode_proxy(&settings.proxy)),
     }
 }
 
-fn decode_settings(settings: super::ServerSettings) -> ServerSettings {
-    ServerSettings {
+fn decode_settings(settings: super::ServerSettings) -> WireResult<ServerSettings> {
+    Ok(ServerSettings {
         shell: settings.shell,
         default_shell: settings.default_shell,
+        proxy: decode_proxy(settings.proxy)?,
+    })
+}
+
+fn encode_proxy_mode(mode: ProxyMode) -> i32 {
+    match mode {
+        ProxyMode::System => super::ProxyMode::System,
+        ProxyMode::None => super::ProxyMode::None,
+        ProxyMode::Manual => super::ProxyMode::Manual,
     }
+    .into()
+}
+
+fn proxy_mode(mode: super::ProxyMode) -> ProxyMode {
+    match mode {
+        super::ProxyMode::Unspecified => unreachable!("enum_value rejects 0"),
+        super::ProxyMode::System => ProxyMode::System,
+        super::ProxyMode::None => ProxyMode::None,
+        super::ProxyMode::Manual => ProxyMode::Manual,
+    }
+}
+
+fn encode_proxy(proxy: &ProxySetting) -> super::ProxySetting {
+    super::ProxySetting {
+        mode: encode_proxy_mode(proxy.mode),
+        url: proxy.url.clone(),
+    }
+}
+
+/// Absent from a Server older than ADR 0038: the default.
+fn decode_proxy(proxy: Option<super::ProxySetting>) -> WireResult<ProxySetting> {
+    let Some(proxy) = proxy else {
+        return Ok(ProxySetting::default());
+    };
+    Ok(ProxySetting {
+        mode: proxy_mode(enum_or(proxy.mode, "proxy mode", super::ProxyMode::System)?),
+        url: proxy.url,
+    })
 }
 
 fn encode_metadata(terminals: &[PaneTerminalMetadata]) -> Vec<super::PaneTerminalMetadata> {
@@ -302,10 +341,17 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 session_id: session_id.0,
                 command: Some(command.into()),
             }),
-            ClientMessage::SetServerSettings { server_id, shell } => {
+            ClientMessage::SetServerSettings { server_id, setting } => {
+                use set_server_settings::Setting;
                 Message::SetServerSettings(super::SetServerSettings {
                     server_id: server_id.0,
-                    shell: shell.clone(),
+                    setting: Some(match setting {
+                        ServerSetting::Shell(shell) => Setting::Shell(shell.clone()),
+                        ServerSetting::ProxyMode(mode) => {
+                            Setting::ProxyMode(encode_proxy_mode(*mode))
+                        }
+                        ServerSetting::ProxyUrl(url) => Setting::ProxyUrl(url.clone()),
+                    }),
                 })
             }
             ClientMessage::StopServer { server_id } => Message::StopServer(ServerRequest {
@@ -434,10 +480,20 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 session_id: SessionId(agent.session_id),
                 command: required(agent.command, "agent command")?.try_into()?,
             },
-            Message::SetServerSettings(settings) => ClientMessage::SetServerSettings {
-                server_id: ServerId(settings.server_id),
-                shell: settings.shell,
-            },
+            Message::SetServerSettings(settings) => {
+                use set_server_settings::Setting;
+                ClientMessage::SetServerSettings {
+                    server_id: ServerId(settings.server_id),
+                    setting: match member(settings.setting)? {
+                        Setting::Shell(shell) => ServerSetting::Shell(shell),
+                        // Setting a mode this build does not know is not setting System.
+                        Setting::ProxyMode(mode) => {
+                            ServerSetting::ProxyMode(proxy_mode(enum_value(mode, "proxy mode")?))
+                        }
+                        Setting::ProxyUrl(url) => ServerSetting::ProxyUrl(url),
+                    },
+                }
+            }
             Message::StopServer(request) => ClientMessage::StopServer {
                 server_id: ServerId(request.server_id),
             },
@@ -946,7 +1002,7 @@ impl TryFrom<super::BootstrapHeader> for BootstrapHeader {
             session_id: SessionId(header.session_id),
             sequence: header.sequence,
             snapshot: decode_snapshot(header.snapshot)?,
-            settings: decode_settings(required(header.settings, "Server settings")?),
+            settings: decode_settings(required(header.settings, "Server settings")?)?,
             batch_count: header.batch_count,
         })
     }
@@ -1148,7 +1204,7 @@ impl TryFrom<super::SessionEvent> for SessionEvent {
                 attention: changed.attention,
             },
             Event::ServerSettingsChanged(settings) => Self::ServerSettingsChanged {
-                settings: decode_settings(settings),
+                settings: decode_settings(settings)?,
             },
             Event::Activated(activated) => Self::Activated {
                 workspace_id: workspace(activated.workspace_id),
@@ -1259,11 +1315,15 @@ impl From<&ServerAdminResponse> for super::ServerAdminResponse {
                     recent_errors,
                     running_listen,
                     running_p2p,
+                    proxy,
+                    running_proxy,
                 } => Response::Status(ServerStatus {
                     listen: listen.clone(),
                     p2p: *p2p,
                     running_listen: running_listen.clone(),
                     running_p2p: *running_p2p,
+                    proxy: Some(encode_proxy(proxy)),
+                    running_proxy: Some(encode_proxy(running_proxy)),
                     connected: connected.clone(),
                     version: version.clone(),
                     uptime_secs: *uptime_secs,
@@ -1324,6 +1384,8 @@ impl TryFrom<super::ServerAdminResponse> for ServerAdminResponse {
                 p2p: status.p2p,
                 running_listen: status.running_listen,
                 running_p2p: status.running_p2p,
+                proxy: decode_proxy(status.proxy)?,
+                running_proxy: decode_proxy(status.running_proxy)?,
                 connected: status.connected,
                 version: status.version,
                 uptime_secs: status.uptime_secs,

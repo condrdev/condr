@@ -29,9 +29,12 @@ interprocess = "2.4.2"
 nix = { version = "0.28.0", features = ["fs", "hostname", "poll", "process"] }
 # GPUI Kit owns the matching GPUI, component, platform, and asset dependencies.
 gpui-kit = "0.7"
-# The one Kit-managed crate declared directly: Kit builds it but does not re-export it,
-# and the GUI's update check (ADR 0029) is its only user. Keep it on Kit's gpui-pre line.
+# The three Kit-managed crates declared directly: Kit builds them but does not re-export
+# them, and the GUI's HTTP client for the update check (ADR 0029), built with the proxy
+# ADR 0038 sets, is their only user. Keep them on Kit's gpui-pre line.
 gpui-pre-reqwest-client = "0.3"
+gpui-pre-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+gpui-pre-http-client-tls = "0.3"
 # Reads GPUI's `AsyncBody`, a `futures::AsyncRead`; already built for GPUI.
 futures-lite = "2"
 gpui-fps = "0.6"
@@ -48,6 +51,8 @@ curve25519-dalek = { version = "4.1", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 # Peer-to-peer connections (ADR 0026): QUIC dialled by Device key, hole punching, relay.
 iroh = { version = "1.2", default-features = false, features = ["tls-ring"] }
+# The system proxy for the relay (ADR 0038); already built for iroh's reqwest.
+hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 url = "2"
 regex = "1"
 # Protocol relative paths: `/`-separated whatever platform the client or Server runs on.

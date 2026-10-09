@@ -18,7 +18,7 @@ Go to the [download page](/download/) to get the package for your platform, then
 The desktop app bundles the Server component and starts it with the app by default, so no extra setup is needed:
 
 1. **Create a Workspace**: click **Open Project** and choose a local project directory. Condr creates a Workspace and opens a terminal automatically.
-2. **Install Agent integrations**: go to **Settings › Device › Agent integrations** and click **Install** next to each Agent you want supported, so that Condr can capture and track its state.
+2. **Install Agent integrations**: go to **Settings › Agent integrations** and click **Install** next to each Agent you want supported, so that Condr can capture and track its state.
 3. **Run an Agent**: run the Agent command (for example `claude`) directly in the built-in terminal.
 
 ## Headless Server

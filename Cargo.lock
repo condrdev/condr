@@ -1382,6 +1382,7 @@ dependencies = [
  "toml 1.1.4+spec-1.1.0",
  "toml_edit 0.25.13+spec-1.1.0",
  "tracing",
+ "url",
  "windows-sys 0.59.0",
 ]
 
@@ -1396,6 +1397,8 @@ dependencies = [
  "futures-lite",
  "gpui-fps",
  "gpui-kit",
+ "gpui-pre-http-client-tls",
+ "gpui-pre-reqwest",
  "gpui-pre-reqwest-client",
  "image",
  "keepawake",
@@ -1424,6 +1427,7 @@ dependencies = [
  "curve25519-dalek 4.1.3",
  "embed-resource",
  "getrandom 0.3.4",
+ "hyper-util",
  "interprocess",
  "iroh",
  "nix",
@@ -4875,9 +4879,11 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "socket2",
+ "system-configuration 0.7.0",
  "tokio",
  "tower-service",
  "tracing",
+ "windows-registry 0.4.0",
 ]
 
 [[package]]
@@ -9829,6 +9835,17 @@ name = "system-configuration"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
+dependencies = [
+ "bitflags 2.13.1",
+ "core-foundation 0.9.4",
+ "system-configuration-sys",
+]
+
+[[package]]
+name = "system-configuration"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
 dependencies = [
  "bitflags 2.13.1",
  "core-foundation 0.9.4",

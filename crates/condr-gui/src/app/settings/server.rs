@@ -21,7 +21,7 @@ pub(super) fn connection_shell(
         .unwrap_or_default()
 }
 
-/// What picking a Server in the tab bar does; tests call it without the widget.
+/// What picking a Device in the picker does; tests call it without the widget.
 #[cfg(all(test, feature = "test-support"))]
 pub(in crate::app) fn select_settings_server(
     settings: &Entity<SettingsWindow>,
@@ -31,29 +31,16 @@ pub(in crate::app) fn select_settings_server(
     settings.update(cx, |this, cx| this.select_server(key, cx));
 }
 
-/// What clicking a tab in the tab bar does; tests call it without the widget.
+/// Shows the Device's page `page_ix`; tests call it without the sidebar. A new initial
+/// page starts a fresh Kit selection, so it works after the window has drawn.
 #[cfg(all(test, feature = "test-support"))]
-pub(in crate::app) fn select_settings_tab(
-    settings: &Entity<SettingsWindow>,
-    tab: SettingsTab,
-    cx: &mut App,
-) {
-    settings.update(cx, |this, cx| {
-        this.tab = tab;
-        cx.notify();
-    });
-}
-
-/// Which page the Server tab shows when first drawn; tests set it before selecting the
-/// tab, since Kit keeps the page selection once the tab has rendered.
-#[cfg(all(test, feature = "test-support"))]
-pub(in crate::app) fn select_settings_server_page(
+pub(in crate::app) fn select_settings_page(
     settings: &Entity<SettingsWindow>,
     page_ix: usize,
     cx: &mut App,
 ) {
     settings.update(cx, |this, cx| {
-        this.server_page = SelectIndex {
+        this.initial_page = SelectIndex {
             page_ix,
             group_ix: None,
         };
@@ -82,8 +69,7 @@ pub(in crate::app) fn select_server_shell(
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
 
-/// Preferences a Server owns, edited for one connection at a time; the Server picker sits
-/// in the tab bar. The first page is what the Server is and how it is doing, plus its
+/// The first of a Device's own pages: what its Server is and how it is doing, plus its
 /// terminal defaults. `this` is the window being rendered, so it must not go through
 /// `settings.read(cx)`.
 pub(super) fn server_general_page(
@@ -106,6 +92,126 @@ pub(super) fn server_general_page(
         )
 }
 
+/// How this machine reaches out (ADR 0038): the proxy its Server's relay connection and
+/// its GUI's update check go through. Peer-to-peer takes a change when Condr restarts.
+pub(super) fn network_page(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingPage {
+    let allowed = admin_allowed(this, cx);
+    let (manual, pending) = this
+        .selected_connection(cx, |c| {
+            (
+                c.settings.proxy.mode == ProxyMode::Manual,
+                c.running_proxy
+                    .as_ref()
+                    .is_some_and(|running| *running != c.settings.proxy),
+            )
+        })
+        .unwrap_or_default();
+    let mode = SettingField::dropdown(
+        ProxyMode::ALL
+            .into_iter()
+            .map(|mode| (mode.as_str().into(), proxy_mode_label(mode).into()))
+            .collect(),
+        {
+            let settings = settings.clone();
+            move |cx| {
+                selected_connection(&settings, cx, |c| c.settings.proxy.mode)
+                    .unwrap_or_default()
+                    .as_str()
+                    .into()
+            }
+        },
+        {
+            let settings = settings.clone();
+            move |mode, cx| set_proxy_mode(&settings, ProxyMode::parse(&mode), cx)
+        },
+    )
+    .default_value(ProxyMode::System.as_str());
+    let mut group = SettingGroup::new().item(
+        SettingItem::new("Proxy", mode)
+            .description("The proxy to use for network requests.")
+            .disabled(!allowed)
+            .keywords(["proxy", "https_proxy", "network"]),
+    );
+    if manual {
+        group = group.item(
+            SettingItem::new(
+                "Proxy URL",
+                text_field_row(settings, TextFieldId::ProxyUrl, "".into()),
+            )
+            .description("http:// or https://, with user:password@ if the proxy asks.")
+            .disabled(!allowed)
+            .keywords(["proxy"]),
+        );
+    }
+    if pending {
+        group = group.item(server_restart_row(this, settings, cx));
+    }
+    SettingPage::new("Network")
+        .icon(IconName::Globe)
+        .group(group)
+}
+
+fn proxy_mode_label(mode: ProxyMode) -> &'static str {
+    match mode {
+        ProxyMode::System => "System",
+        ProxyMode::None => "None",
+        ProxyMode::Manual => "Manual",
+    }
+}
+
+/// The Proxy URL a Server stores, as its Bootstrap or last event reported it.
+pub(super) fn connection_proxy_url(
+    owner: &WeakEntity<Condr>,
+    key: ConnectionKey,
+    cx: &App,
+) -> SharedString {
+    owner
+        .upgrade()
+        .and_then(|owner| {
+            owner
+                .read(cx)
+                .connections
+                .iter()
+                .find(|connection| connection.key == key)
+                .map(|connection| connection.settings.proxy.url.clone().into())
+        })
+        .unwrap_or_default()
+}
+
+/// What choosing a proxy mode does; tests call it without the dropdown.
+pub(in crate::app) fn set_proxy_mode(
+    settings: &Entity<SettingsWindow>,
+    mode: ProxyMode,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        if !admin_allowed(this, cx) {
+            return;
+        }
+        let key = this.selected_server;
+        let _ = this.owner.update(cx, |owner, _| {
+            owner.set_server_setting(key, ServerSetting::ProxyMode(mode))
+        });
+    });
+}
+
+/// What typing a Proxy URL and leaving the field does; tests call it without the widget.
+#[cfg(all(test, feature = "test-support"))]
+pub(in crate::app) fn set_proxy_url(
+    settings: &Entity<SettingsWindow>,
+    url: SharedString,
+    cx: &mut App,
+) {
+    settings.update(cx, |this, cx| {
+        this.proxy_url.draft = url;
+        this.commit(TextFieldId::ProxyUrl, cx);
+    });
+}
+
 /// How other devices reach this Server: the TCP listener and Peer-to-peer, and the
 /// restart that applies them.
 pub(super) fn server_remote_access_page(
@@ -114,7 +220,7 @@ pub(super) fn server_remote_access_page(
     cx: &App,
 ) -> SettingPage {
     SettingPage::new("Remote access")
-        .icon(IconName::Globe)
+        .icon(Icon::new(super::sidebar::CondrIconName::Waypoints))
         .group(server_network_group(this, settings, cx))
 }
 
@@ -152,7 +258,7 @@ fn selected_connection<T>(
 }
 
 impl SettingsWindow {
-    fn selected_connection<T>(
+    pub(super) fn selected_connection<T>(
         &self,
         cx: &App,
         read: impl FnOnce(&ServerConnection) -> T,
@@ -185,6 +291,28 @@ impl SettingsWindow {
         }
     }
 
+    /// Sends the Proxy URL draft once it is one the Server takes; a refused draft stays in
+    /// the field with the reason beside it.
+    pub(super) fn commit_proxy_url(&mut self, cx: &mut Context<Self>) -> CommitOutcome {
+        let url = self.proxy_url.draft.trim().to_owned();
+        if let Err(error) = condr_core::check_proxy_url(&url) {
+            self.proxy_url_refused = Some(error.into());
+            return CommitOutcome::Invalid;
+        }
+        self.proxy_url_refused = None;
+        if !admin_allowed(self, cx) {
+            return CommitOutcome::Unavailable;
+        }
+        let key = self.selected_server;
+        CommitOutcome::from_queued(
+            self.owner
+                .update(cx, |owner, _| {
+                    owner.set_server_setting(key, ServerSetting::ProxyUrl(url))
+                })
+                .unwrap_or(false),
+        )
+    }
+
     fn send_listen(&mut self, address: Option<String>, cx: &mut Context<Self>) -> bool {
         if !admin_allowed(self, cx) {
             return false;
@@ -197,7 +325,7 @@ impl SettingsWindow {
     }
 }
 
-/// The strip under the tab bar that says which Server the Device tab edits: the picker,
+/// The strip under the title bar that says which Device the pages describe: the picker,
 /// how this window reaches it (a Server can run while this GUI is disconnected, so it
 /// never claims "running") and the connection state. Only the transport: the address
 /// mostly repeats the name, and the Edit dialog has it in full.
@@ -342,11 +470,16 @@ fn count(n: u32, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
-/// The saved TCP listener or Peer-to-peer setting differs from what the Server process
-/// bound: only a restart applies it, so the row says so and the button steps forward.
+/// The saved TCP listener, Peer-to-peer or proxy setting differs from what the Server
+/// process started with: only a restart applies it, so the row says so and the button
+/// steps forward.
 fn restart_pending(this: &SettingsWindow, cx: &App) -> bool {
     this.selected_connection(cx, |c| {
-        c.listen != c.running_listen || c.p2p != c.running_p2p
+        c.listen != c.running_listen
+            || c.p2p != c.running_p2p
+            || c.running_proxy
+                .as_ref()
+                .is_some_and(|running| *running != c.settings.proxy)
     })
     .unwrap_or(false)
 }
@@ -442,7 +575,6 @@ fn server_network_group(
     cx: &App,
 ) -> SettingGroup {
     SettingGroup::new()
-        .title("Network")
         .item(SettingItem::new(
             "TCP listener",
             SettingField::switch(
@@ -940,10 +1072,14 @@ pub(super) fn agent_hooks_field(
 }
 
 impl Condr {
-    /// Asks a Server to store a new shell preference. The stored value comes back as a
+    /// Asks a Server to store one setting. The stored value comes back as a
     /// `ServerSettingsChanged` event; nothing is assumed locally. The Server persists
     /// every value it receives, so only a committed field calls this, never a keystroke.
-    pub(in crate::app) fn set_server_shell(&mut self, key: ConnectionKey, shell: &str) -> bool {
+    pub(in crate::app) fn set_server_setting(
+        &mut self,
+        key: ConnectionKey,
+        setting: ServerSetting,
+    ) -> bool {
         let Some(connection) = self
             .connections
             .iter_mut()
@@ -954,10 +1090,7 @@ impl Condr {
         let Some(server_id) = connection.server_id else {
             return false;
         };
-        connection.send(ClientMessage::SetServerSettings {
-            server_id,
-            shell: shell.to_owned(),
-        })
+        connection.send(ClientMessage::SetServerSettings { server_id, setting })
     }
 
     /// Asks a Server for the state of every agent's hooks on its machine. The replies

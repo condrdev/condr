@@ -109,23 +109,76 @@ fn available_update(
     }
 }
 
+/// The proxy the App's HTTP client goes through (ADR 0038). Only `startup::run` installs
+/// a client, so tests keep GPUI's test client and never reach GitHub unless they set this.
+pub(super) struct HttpProxy(pub(super) ProxySetting);
+
+impl Global for HttpProxy {}
+
 /// Gives GPUI its HTTP client, built off the main thread: loading the platform's CA
-/// certificates is not free, and nothing needs it before the first check. Only
-/// `startup::run` calls this, so tests keep GPUI's test client and never reach GitHub.
-pub(super) fn install_http_client(cx: &mut App) {
-    let client = cx.background_executor().spawn(async {
-        // Not `ReqwestClient::user_agent`: it leaves rustls to pick a crypto provider,
-        // and with both ring (iroh) and aws-lc-rs in the build it cannot.
-        reqwest_client::ReqwestClient::proxy_and_user_agent(
-            None,
-            &format!("Condr/{}", condr_core::build_identity()),
-        )
+/// certificates is not free, and nothing needs it before the first check. At startup
+/// `proxy` is `None` and `[network.proxy]` is read from the file, since this machine's
+/// Server has not answered yet.
+pub(super) fn install_http_client(proxy: Option<ProxySetting>, cx: &mut App) {
+    let client = cx.background_executor().spawn(async move {
+        let proxy =
+            proxy.unwrap_or_else(|| ProxySetting::load(condr_core::config_path().as_deref()));
+        (http_client(&proxy), proxy)
     });
     cx.spawn(async move |cx| match client.await {
-        Ok(client) => cx.update(|cx| cx.set_http_client(Arc::new(client))),
-        Err(error) => tracing::warn!("No HTTP client, so no update check: {error}"),
+        (Ok(client), proxy) => cx.update(|cx| {
+            cx.set_http_client(Arc::new(client));
+            cx.set_global(HttpProxy(proxy));
+        }),
+        (Err(error), _) => tracing::warn!("No HTTP client, so no update check: {error}"),
     })
     .detach();
+}
+
+/// Builds the client again when this machine's proxy changed. Nothing happens before
+/// startup installed one.
+pub(super) fn sync_http_proxy(proxy: &ProxySetting, cx: &mut App) {
+    if cx
+        .try_global::<HttpProxy>()
+        .is_some_and(|applied| applied.0 != *proxy)
+    {
+        // Recorded now, so a second report while this one builds does not build again.
+        cx.set_global(HttpProxy(proxy.clone()));
+        install_http_client(Some(proxy.clone()), cx);
+    }
+}
+
+/// Not `ReqwestClient::proxy_and_user_agent`: it cannot turn system proxy detection off.
+fn http_client(proxy: &ProxySetting) -> Result<reqwest_client::ReqwestClient, String> {
+    // The preconfigured TLS installs a crypto provider: with both ring (iroh) and
+    // aws-lc-rs in the build, rustls cannot pick one on its own.
+    let builder = gpui_pre_reqwest::Client::builder()
+        .use_preconfigured_tls(http_client_tls::tls_config())
+        .user_agent(format!("Condr/{}", condr_core::build_identity()))
+        .connect_timeout(Duration::from_secs(10));
+    let builder = match (proxy.mode, proxy.manual_url()) {
+        (ProxyMode::System, _) => builder,
+        (ProxyMode::Manual, Some(url)) => builder
+            .proxy(gpui_pre_reqwest::Proxy::all(url.as_str()).map_err(|error| error.to_string())?),
+        (ProxyMode::None | ProxyMode::Manual, _) => builder.no_proxy(),
+    };
+    builder
+        .build()
+        .map(Into::into)
+        .map_err(|error| error.to_string())
+}
+
+impl Condr {
+    /// This machine's proxy reaches the GUI's own HTTP client; a remote Device's does not.
+    pub(super) fn sync_local_settings(&self, key: ConnectionKey, cx: &mut App) {
+        if let Some(connection) = self
+            .connections
+            .iter()
+            .find(|c| c.key == key && matches!(c.endpoint, Endpoint::Local(_)))
+        {
+            sync_http_proxy(&connection.settings.proxy, cx);
+        }
+    }
 }
 
 /// The version in a plain-text answer. Only `1.2.3` counts: a captive portal or a proxy's

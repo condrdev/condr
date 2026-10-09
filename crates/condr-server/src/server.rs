@@ -29,9 +29,9 @@ use condr_core::protocol::{
     FramingError, LayoutCommand, LayoutResult, MAX_BOOTSTRAP_BATCHES, MAX_BOOTSTRAP_TOTAL_SIZE,
     MAX_CHUNK_PAYLOAD_SIZE, MAX_FRAME_SIZE, MIN_CLIENT_PROTOCOL, PROTOCOL_VERSION,
     PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot, Refusal,
-    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerId, ServerMessage, ServerSettings,
-    SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameChunk, Welcome,
-    WirePaneFrame, WorkspaceGitSnapshot, encode_bootstrap_record, frame_terminal_batch,
+    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerId, ServerMessage, ServerSetting,
+    ServerSettings, SessionBootstrap, SessionEvent, SessionId, SessionOverview, TerminalFrameChunk,
+    Welcome, WirePaneFrame, WorkspaceGitSnapshot, encode_bootstrap_record, frame_terminal_batch,
     terminal_batch_overhead,
 };
 use condr_core::{
@@ -41,7 +41,7 @@ use condr_core::{
     TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, discover_repository,
     open_worktree, remove_worktree, validate_worktree_removal,
 };
-use config::{load_shell, load_worktree_root, save_shell};
+use config::{load_shell, load_worktree_root, save_proxy, save_shell};
 use layout::*;
 #[cfg(test)]
 use local::snapshot_path_for_endpoint;
@@ -77,7 +77,8 @@ pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const SUBSCRIBER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 const EVENT_HISTORY_LIMIT: usize = 256;
-const MAX_SHELL_SETTING_BYTES: usize = 4 * 1024;
+/// The longest shell or proxy URL a Client may set.
+const MAX_SETTING_BYTES: usize = 4 * 1024;
 /// Process cwd reads are rate-limited behind terminal output; agent detection has its
 /// own cadence inside `TerminalAgentProbe`.
 const CWD_SCAN_INTERVAL: Duration = Duration::from_millis(500);
@@ -281,6 +282,12 @@ impl BoundServer {
             self.identity.clone(),
             self.p2p_enabled,
             crate::p2p::Network::Condr,
+            self.state
+                .lock()
+                .expect("server state lock poisoned")
+                .settings
+                .proxy
+                .clone(),
             p2p_sender,
         );
         if self.p2p_enabled
@@ -697,12 +704,15 @@ impl RuntimeState {
     }
 
     /// Publishes a shell preference after its serialized disk transaction succeeds.
-    fn set_shell(&mut self, shell: &str, origin: Option<(u64, &ClientWriter)>) -> bool {
-        let shell = shell.trim();
-        if self.settings.shell == shell {
+    fn set_settings(
+        &mut self,
+        settings: ServerSettings,
+        origin: Option<(u64, &ClientWriter)>,
+    ) -> bool {
+        if self.settings == settings {
             return false;
         }
-        self.settings.shell = shell.to_owned();
+        self.settings = settings;
         self.publish_event(
             SessionEvent::ServerSettingsChanged {
                 settings: self.settings.clone(),

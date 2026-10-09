@@ -5,7 +5,6 @@ mod text_field;
 
 use super::*;
 use gpui_kit::component::kbd::Kbd;
-use gpui_kit::component::tab::{Tab, TabBar};
 use shortcuts::shortcuts_page;
 
 pub(super) use appearance::*;
@@ -127,27 +126,28 @@ pub(super) struct SettingsWindow {
     /// normalized form, so a half-edited value never reaches the theme or the config
     /// file, and reopening Settings starts from what is actually in use.
     pub(super) font_draft: TerminalFont,
-    /// Which Server the Server page edits; starts at the active connection.
+    /// Which Device the window shows; starts at this machine (ADR 0038).
     pub(super) selected_server: ConnectionKey,
-    /// The three free-text fields; see `TextField` for how they commit.
+    /// The free-text fields; see `TextField` for how they commit.
     pub(super) font_family: TextField,
     pub(super) shell: TextField,
     pub(super) listen: TextField,
+    pub(super) proxy_url: TextField,
     /// The field whose value just went out, for the "Saved" hint beside it.
     pub(super) saved: Option<TextFieldId>,
     _saved_clear: Option<Task<()>>,
     /// The Listen draft is not a `host:port`; shown beside the field until it is.
     pub(super) listen_refused: bool,
-    /// Which tab is showing: this Client's settings or one Server's.
-    pub(super) tab: SettingsTab,
-    /// The page the Server tab opens on when it is first drawn; Kit keeps the selection
-    /// from then on. Tests point it at a page they need to see.
-    pub(super) server_page: SelectIndex,
-    /// The window opened while the sidebar's dot showed a newer build: the Application
-    /// tab first draws About's Updates group, where the dot was pointing.
+    /// Why the Proxy URL draft is not one, beside the field until it is.
+    pub(super) proxy_url_refused: Option<SharedString>,
+    /// The page a Device's pages open on when first drawn; Kit keeps the selection from
+    /// then on. Tests point it at a page they need to see.
+    pub(super) initial_page: SelectIndex,
+    /// The window opened while the sidebar's dot showed a newer build: this machine's
+    /// pages first draw About's Updates group, where the dot was pointing.
     open_on_update: bool,
-    /// The Server picker in the tab bar. Its items mirror `server_keys` by index,
-    /// refreshed on render when the connection list changes.
+    /// The Device picker at the top. Its items mirror `server_keys` by index, refreshed
+    /// on render when the connection list changes.
     server_select: Entity<ServerSelect>,
     server_keys: Vec<ConnectionKey>,
     server_labels: Vec<SharedString>,
@@ -161,14 +161,6 @@ pub(super) struct SettingsWindow {
 
 /// How often the General page's health figures are refreshed while Settings is open.
 const STATUS_REFRESH: Duration = Duration::from_secs(5);
-
-/// The two halves of Settings: this Client's own preferences and one Server's.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) enum SettingsTab {
-    #[default]
-    Application,
-    Server,
-}
 
 pub(super) type ServerSelect = SelectState<SearchableVec<SharedString>>;
 
@@ -251,9 +243,17 @@ impl SettingsWindow {
             .upgrade()
             .map(|owner| owner.read(cx).terminal_font.clone())
             .unwrap_or_default();
+        // This machine has the most pages, and the About page the update dot points at.
         let selected_server = owner
             .upgrade()
-            .map(|owner| owner.read(cx).active_connection)
+            .map(|owner| {
+                let owner = owner.read(cx);
+                owner
+                    .connections
+                    .iter()
+                    .find(|c| matches!(c.endpoint, Endpoint::Local(_)))
+                    .map_or(owner.active_connection, |c| c.key)
+            })
             .unwrap_or_default();
         let font_family = Self::text_field(
             TextFieldId::FontFamily,
@@ -270,6 +270,12 @@ impl SettingsWindow {
         let listen = Self::text_field(
             TextFieldId::Listen,
             connection_listen(&owner, selected_server, cx),
+            window,
+            cx,
+        );
+        let proxy_url = Self::text_field(
+            TextFieldId::ProxyUrl,
+            connection_proxy_url(&owner, selected_server, cx),
             window,
             cx,
         );
@@ -322,11 +328,12 @@ impl SettingsWindow {
             font_family,
             shell,
             listen,
+            proxy_url,
             saved: None,
             _saved_clear: None,
             listen_refused: false,
-            tab: SettingsTab::default(),
-            server_page: SelectIndex::default(),
+            proxy_url_refused: None,
+            initial_page: SelectIndex::default(),
             open_on_update,
             server_select,
             server_keys,
@@ -349,7 +356,7 @@ impl SettingsWindow {
         }
     }
 
-    /// Switches the Server tab to another connection and reloads its shell.
+    /// Shows another Device and reloads its fields.
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         // Submission feedback belongs to the Device whose fields are being replaced.
         self.saved = None;
@@ -357,7 +364,10 @@ impl SettingsWindow {
         self.selected_server = key;
         self.shell.reset(connection_shell(&self.owner, key, cx));
         self.listen.reset(connection_listen(&self.owner, key, cx));
+        self.proxy_url
+            .reset(connection_proxy_url(&self.owner, key, cx));
         self.listen_refused = false;
+        self.proxy_url_refused = None;
         let _ = self.owner.update(cx, |owner, _| {
             owner.request_agent_hooks(key);
             owner.request_server_admin(key);
@@ -432,60 +442,74 @@ impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_server_choices(window, cx);
         let settings = cx.entity();
-        let tab = self.tab;
-        let content = match tab {
-            SettingsTab::Application => {
-                let pages = [
-                    appearance_page(&self.owner, &settings, &self.color_scheme, &self.code_theme),
-                    notifications_page(&self.owner),
-                    power_page(&self.owner),
-                    shortcuts_page(),
-                    developer_page(&self.owner),
-                    licenses_page(&self.licenses),
-                    about_page(&self.owner, self.open_on_update, cx),
-                ];
-                // About is the last page and Updates its second group.
-                let about_updates = SelectIndex {
-                    page_ix: pages.len() - 1,
-                    group_ix: Some(1),
-                };
-                Settings::new("condr-settings-application")
-                    .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                    .when(self.open_on_update, |this| {
-                        this.default_selected_index(about_updates)
-                    })
-                    .pages(pages)
-            }
-            SettingsTab::Server => Settings::new("condr-settings-server")
-                .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
-                .default_selected_index(self.server_page)
-                .page(server_general_page(self, &settings, cx))
-                .page(server_remote_access_page(self, &settings, cx))
-                .page(server_clients_page(self, &settings, cx))
-                .page(agents_page(&settings, self.connection_hooks(cx))),
-        };
-        let tabs = TabBar::new("condr-settings-tabs")
-            .underline()
-            .selected_index(if tab == SettingsTab::Server { 1 } else { 0 })
-            .on_click(move |index, _, cx| {
-                let tab = if *index == 1 {
-                    SettingsTab::Server
-                } else {
-                    SettingsTab::Application
-                };
-                settings.update(cx, |this, cx| {
-                    if this.tab != tab {
-                        this.tab = tab;
-                        cx.notify();
-                    }
-                });
+        let (local, connected) = self
+            .selected_connection(cx, |c| {
+                (
+                    matches!(c.endpoint, Endpoint::Local(_)),
+                    c.status == ConnectionStatus::Connected,
+                )
             })
-            .prefix(div().w_3())
-            .children([Tab::new().label("Application"), Tab::new().label("Device")]);
-        // Which Server the Device tab edits, above its pages rather than in the tab bar,
-        // so the tab bar keeps its shape and the pages sit under the device they describe.
-        let header =
-            (tab == SettingsTab::Server).then(|| server_header(self, &self.server_select, cx));
+            .unwrap_or((true, false));
+        // Pages by topic, whichever process reads them (ADR 0038): every connected Device
+        // opens on General, this machine adds the GUI's pages around the other Device
+        // pages, and a Device that is not connected has no Device pages.
+        let mut pages = Vec::new();
+        if connected {
+            pages.push(server_general_page(self, &settings, cx));
+        }
+        if local {
+            pages.extend([
+                appearance_page(&self.owner, &settings, &self.color_scheme, &self.code_theme),
+                notifications_page(&self.owner),
+                power_page(&self.owner),
+                shortcuts_page(),
+            ]);
+        }
+        if connected {
+            pages.extend([
+                network_page(self, &settings, cx),
+                server_remote_access_page(self, &settings, cx),
+                server_clients_page(self, &settings, cx),
+                agents_page(&settings, self.connection_hooks(cx)),
+            ]);
+        }
+        if local {
+            pages.extend([
+                developer_page(&self.owner),
+                licenses_page(&self.licenses),
+                about_page(&self.owner, self.open_on_update, cx),
+            ]);
+        }
+        let initial = if local && self.open_on_update {
+            // About is the last page and Updates its second group.
+            SelectIndex {
+                page_ix: pages.len() - 1,
+                group_ix: Some(1),
+            }
+        } else {
+            self.initial_page
+        };
+        let content = if pages.is_empty() {
+            div()
+                .debug_selector(|| "settings-device-offline".into())
+                .p_4()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child("This device's settings appear once it connects.")
+                .into_any_element()
+        } else {
+            // Kit keeps the selection per id, so each Device, connected or not, and each
+            // initial page keeps its own.
+            Settings::new(SharedString::from(format!(
+                "condr-settings-{}-{connected}-{}",
+                self.selected_server, initial.page_ix
+            )))
+            .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
+            .default_selected_index(initial)
+            .pages(pages)
+            .into_any_element()
+        };
+        let header = server_header(self, &self.server_select, cx);
         // The dialog layer sits beside the page, not inside it, so Escape in a dialog
         // closes the dialog and not the window.
         div().size_full().relative().child(
@@ -502,8 +526,7 @@ impl Render for SettingsWindow {
                     }
                 })
                 .child(title_bar(SETTINGS_WINDOW_TITLE, cx))
-                .child(tabs)
-                .children(header)
+                .child(header)
                 .child(div().flex_1().min_h_0().child(content)),
         )
     }

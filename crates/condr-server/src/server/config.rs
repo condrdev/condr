@@ -119,6 +119,15 @@ pub(super) fn save_shell(path: &std::path::Path, shell: &str) -> io::Result<()> 
     )
 }
 
+/// Writes one `[network.proxy]` key (ADR 0038), keeping the rest of the file as it was.
+pub(super) fn save_proxy(path: &std::path::Path, key: &str, value: &str) -> io::Result<()> {
+    condr_core::update_config_values(
+        path,
+        &["network", "proxy"],
+        [(key, Some(toml_edit::value(value)))],
+    )
+}
+
 impl ServerConfig {
     /// The host's Server on a specific socket, with the default snapshot for that socket.
     pub fn at_socket(socket_path: impl Into<PathBuf>) -> Self {

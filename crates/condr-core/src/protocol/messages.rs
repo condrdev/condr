@@ -101,10 +101,10 @@ pub enum ClientMessage {
         session_id: SessionId,
         command: AgentCommand,
     },
-    /// Replaces the Server's shell preference; blank restores the system default.
+    /// Replaces one of the Server's settings (ADR 0038).
     SetServerSettings {
         server_id: ServerId,
-        shell: String,
+        setting: ServerSetting,
     },
     StopServer {
         server_id: ServerId,
@@ -473,15 +473,29 @@ pub struct BootstrapHeader {
     pub batch_count: u32,
 }
 
-/// Server-owned preferences, persisted in the Server's own `config.toml`. Clients
-/// change them through [`ClientMessage::SetServerSettings`] and learn the current
-/// values from the Bootstrap and [`SessionEvent::ServerSettingsChanged`].
+/// Server-owned preferences and this machine's machine-wide settings, persisted in the
+/// Server's own `config.toml`. Clients change them through
+/// [`ClientMessage::SetServerSettings`] and learn the current values from the Bootstrap
+/// and [`SessionEvent::ServerSettingsChanged`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ServerSettings {
     /// Program started in new terminals; empty means `default_shell`.
     pub shell: String,
     /// The system default shell this Server resolved, for display only.
     pub default_shell: String,
+    /// `[network.proxy]`, saved; Peer-to-peer takes it when the Server starts.
+    pub proxy: crate::ProxySetting,
+}
+
+/// One field of [`ServerSettings`] a Client sets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ServerSetting {
+    /// Blank restores the system default.
+    Shell(String),
+    /// Administration: only a local or SSH connection may change it.
+    ProxyMode(crate::ProxyMode),
+    /// Administration, like `ProxyMode`.
+    ProxyUrl(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -815,6 +829,9 @@ pub enum ServerAdminResponse {
         /// until a restart applies the saved values.
         running_listen: Option<String>,
         running_p2p: bool,
+        /// Saved and running `[network.proxy]`, like `listen`.
+        proxy: crate::ProxySetting,
+        running_proxy: crate::ProxySetting,
     },
     ListenSaved {
         listen: Option<String>,

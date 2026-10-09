@@ -19,11 +19,14 @@ fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device(
     let main_window = window.update(|window, _| window.window_handle());
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            this.connections.push(ServerConnection::new(
+            let mut other = ServerConnection::new(
                 2,
                 "Other device".into(),
                 Endpoint::local(std::env::temp_dir().join("condr-settings-other.sock")),
-            ));
+            );
+            // Shown as connected so its pages draw; without a Server id nothing goes out.
+            other.status = ConnectionStatus::Connected;
+            this.connections.push(other);
             this.open_settings(window, cx);
         });
     });
@@ -42,7 +45,8 @@ fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device(
             .unwrap()
     });
     settings.update(|_, cx| {
-        select_settings_tab(&settings_view, SettingsTab::Server, cx);
+        // General, the first page of every connected Device.
+        select_settings_page(&settings_view, 0, cx);
         view.update(cx, |this, _| {
             let (outgoing, receiver) = std::sync::mpsc::channel();
             drop(receiver);
@@ -74,7 +78,8 @@ fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device(
     });
     assert!(matches!(
         receiver.try_recv(),
-        Ok(ClientMessage::SetServerSettings { shell, .. }) if shell == "nu"
+        Ok(ClientMessage::SetServerSettings { setting: ServerSetting::Shell(shell), .. })
+            if shell == "nu"
     ));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("settings-save-Shell").is_none());
@@ -88,6 +93,130 @@ fn a_settings_draft_survives_failed_send_and_saved_feedback_stays_on_its_device(
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("settings-save-Shell").is_some());
     assert!(settings.debug_bounds("settings-saved-Shell").is_none());
+}
+
+/// Settings shows one Device at a time (ADR 0038): General first, this machine's GUI
+/// pages around its other Device pages, a remote Device's own pages only, and none for a
+/// Device that is not connected. The Proxy URL shows only under Manual, and only this
+/// machine's proxy reaches the GUI's HTTP client.
+#[test]
+fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_client() {
+    use crate::app::updates::HttpProxy;
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let main_window = window.update(|window, _| window.window_handle());
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            let mut remote = ServerConnection::new(
+                2,
+                "Builder".into(),
+                Endpoint::parse("ssh://builder@127.0.0.1:2", None).unwrap(),
+            );
+            remote.status = ConnectionStatus::Connected;
+            this.connections.push(remote);
+            this.open_settings(window, cx);
+        });
+    });
+    window.run_until_parked();
+    let settings_handle = window
+        .windows()
+        .into_iter()
+        .find(|handle| *handle != main_window)
+        .unwrap();
+    let settings = VisualTestContext::from_window(settings_handle, window).into_mut();
+    let settings_view = settings.read(|app| {
+        view.read(app)
+            .settings_view
+            .as_ref()
+            .and_then(|view| view.upgrade())
+            .unwrap()
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        settings.read(|app| settings_view.read(app).selected_server),
+        1
+    );
+    assert!(
+        settings.debug_bounds("terminal-color-scheme").is_none(),
+        "this machine opens on General"
+    );
+    settings.update(|_, cx| select_settings_page(&settings_view, 1, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        settings.debug_bounds("terminal-color-scheme").is_some(),
+        "Appearance comes next"
+    );
+
+    // A remote Device has its own pages only, Agent integrations the fifth.
+    settings.update(|_, cx| {
+        select_settings_server(&settings_view, 2, cx);
+        select_settings_page(&settings_view, 4, cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
+    assert!(settings.debug_bounds("terminal-color-scheme").is_none());
+    settings.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.connection_mut(2).unwrap().status = ConnectionStatus::Disconnected;
+        });
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("settings-device-offline").is_some());
+    assert!(settings.debug_bounds("agent-hooks-claude-state").is_none());
+
+    // This machine's Network page: a refused URL waits, and its field shows under Manual.
+    settings.update(|_, cx| {
+        select_settings_server(&settings_view, 1, cx);
+        select_settings_page(&settings_view, 5, cx);
+        set_proxy_url(&settings_view, "socks5://proxy:1080".into(), cx);
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.read(|app| settings_view.read(app).proxy_url_refused.is_some()));
+    assert!(
+        settings.debug_bounds("settings-save-ProxyUrl").is_none(),
+        "no URL field under System"
+    );
+    settings.update(|_, cx| set_proxy_mode(&settings_view, ProxyMode::Manual, cx));
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .is_some_and(|c| c.settings.proxy.mode == ProxyMode::Manual)
+        })
+    }));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("settings-save-ProxyUrl").is_some());
+    settings.update(|_, cx| set_proxy_url(&settings_view, " http://proxy:8080 ".into(), cx));
+    assert!(wait_until_event_driven(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .is_some_and(|c| c.settings.proxy.url == "http://proxy:8080")
+        })
+    }));
+
+    // Only this machine's proxy reaches the GUI's HTTP client.
+    let applied = |window: &mut VisualTestContext| {
+        window.read(|app| app.try_global::<HttpProxy>().map(|proxy| proxy.0.clone()))
+    };
+    window.update(|_, cx| {
+        cx.set_global(HttpProxy(ProxySetting::default()));
+        view.update(cx, |this, cx| {
+            this.connection_mut(2).unwrap().settings.proxy.mode = ProxyMode::None;
+            this.sync_local_settings(2, cx);
+        });
+    });
+    assert_eq!(applied(window), Some(ProxySetting::default()));
+    window.update(|_, cx| view.update(cx, |this, cx| this.sync_local_settings(1, cx)));
+    assert_eq!(
+        applied(window),
+        Some(ProxySetting {
+            mode: ProxyMode::Manual,
+            url: "http://proxy:8080".into(),
+        })
+    );
 }
 
 #[test]
@@ -123,8 +252,8 @@ fn listen_submission_distinguishes_invalid_unavailable_and_staged_addresses() {
             .unwrap()
     });
     settings.update(|_, cx| {
-        select_settings_server_page(&settings_view, 1, cx);
-        select_settings_tab(&settings_view, SettingsTab::Server, cx);
+        // Remote access.
+        select_settings_page(&settings_view, 6, cx);
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
             connection.listen = Some("127.0.0.1:2637".into());
@@ -259,6 +388,9 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
             .and_then(|view| view.upgrade())
             .expect("the Settings window view is recorded")
     });
+    // Appearance, after this machine's General.
+    settings.update(|_, cx| select_settings_page(&settings_view, 1, cx));
+    settings.update(|window, cx| _ = window.draw(cx));
     let select_state = settings.read(|app| settings_view.read(app).color_scheme.clone());
 
     // Colors: the real Select, opened by click, filtered by typing, confirmed by Enter.
@@ -341,12 +473,12 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         "an empty family falls back to the default font"
     );
 
-    // Shell: the Server page edits the selected Server; the Server stores the value and
+    // Shell: the General page edits the selected Device; the Server stores the value and
     // reports it back, so the connection's settings follow the field.
     assert_eq!(
         window.read(|app| settings_view.read(app).selected_server),
         1,
-        "the Server tab starts on the active connection"
+        "Settings starts on this machine"
     );
     window.update(|_, cx| select_settings_server(&settings_view, 1, cx));
     assert_eq!(window.read(|app| server_shell(&settings_view, app)), "");
@@ -415,7 +547,8 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
     );
 
     // Agents: opening Settings asked the Server for every agent's hooks state, and the
-    // Server tab renders those rows without reading the window entity re-entrantly.
+    // Agent integrations page renders those rows without reading the window entity
+    // re-entrantly.
     assert!(
         wait_until_event_driven(window, |window| {
             window.read(|app| {
@@ -426,7 +559,7 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         }),
         "every agent's hooks state must arrive from the Server"
     );
-    window.update(|_, cx| select_settings_tab(&settings_view, SettingsTab::Server, cx));
+    window.update(|_, cx| select_settings_page(&settings_view, 8, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     settings.run_until_parked();
 
@@ -876,11 +1009,8 @@ fn the_agent_integrations_page_shows_each_agents_hooks_state() {
             .and_then(|view| view.upgrade())
             .unwrap()
     });
-    // Agent integrations is the Server tab's fourth page.
-    settings.update(|_, cx| {
-        select_settings_server_page(&settings_view, 3, cx);
-        select_settings_tab(&settings_view, SettingsTab::Server, cx);
-    });
+    // Agent integrations is this machine's ninth page.
+    settings.update(|_, cx| select_settings_page(&settings_view, 8, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("agent-hooks-kimi-state").is_some());
     assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
@@ -949,11 +1079,8 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
             assert_eq!(invite.expires_in_secs, 600);
         });
     });
-    // The invite lives on the Server tab's Paired devices page, its third page.
-    settings.update(|_, cx| {
-        select_settings_server_page(&settings_view, 2, cx);
-        select_settings_tab(&settings_view, SettingsTab::Server, cx);
-    });
+    // The invite lives on the Paired devices page, this machine's eighth.
+    settings.update(|_, cx| select_settings_page(&settings_view, 7, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(
         settings.debug_bounds("server-invite-tcp").is_some()
@@ -1034,7 +1161,8 @@ fn the_settings_window_draws_its_confirm_dialogs() {
             .and_then(|view| view.upgrade())
             .unwrap()
     });
-    settings.update(|_, cx| select_settings_tab(&settings_view, SettingsTab::Server, cx));
+    // Remote access, where Restart is.
+    settings.update(|_, cx| select_settings_page(&settings_view, 6, cx));
     settings.update(|window, cx| _ = window.draw(cx));
 
     // The same confirm the Restart and Revoke buttons open; Root does not draw dialogs

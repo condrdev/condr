@@ -31,6 +31,7 @@ pub(in crate::app) enum TextFieldId {
     FontFamily,
     Shell,
     Listen,
+    ProxyUrl,
 }
 
 /// A commit may validate a local draft without sending it, or fail before it queues.
@@ -83,6 +84,7 @@ impl SettingsWindow {
             TextFieldId::FontFamily => &self.font_family,
             TextFieldId::Shell => &self.shell,
             TextFieldId::Listen => &self.listen,
+            TextFieldId::ProxyUrl => &self.proxy_url,
         }
     }
 
@@ -91,6 +93,16 @@ impl SettingsWindow {
             TextFieldId::FontFamily => &mut self.font_family,
             TextFieldId::Shell => &mut self.shell,
             TextFieldId::Listen => &mut self.listen,
+            TextFieldId::ProxyUrl => &mut self.proxy_url,
+        }
+    }
+
+    /// Why the draft was refused, beside the field until it is fixed.
+    pub(super) fn refusal(&self, id: TextFieldId) -> Option<SharedString> {
+        match id {
+            TextFieldId::Listen if self.listen_refused => Some("Enter host:port".into()),
+            TextFieldId::ProxyUrl => self.proxy_url_refused.clone(),
+            _ => None,
         }
     }
 
@@ -105,13 +117,15 @@ impl SettingsWindow {
             }
             TextFieldId::Shell => {
                 let key = self.selected_server;
+                let setting = ServerSetting::Shell(draft.to_string());
                 let queued = self
                     .owner
-                    .update(cx, |owner, _| owner.set_server_shell(key, &draft))
+                    .update(cx, |owner, _| owner.set_server_setting(key, setting))
                     .unwrap_or(false);
                 CommitOutcome::from_queued(queued)
             }
             TextFieldId::Listen => self.commit_listen(cx),
+            TextFieldId::ProxyUrl => self.commit_proxy_url(cx),
         };
         self.saved = None;
         self._saved_clear = None;
@@ -148,7 +162,7 @@ pub(super) fn text_field_row(
     let reset = settings.clone();
     let default_dirty = default.clone();
     SettingField::render(move |_, window, cx| {
-        let (input, draft, unsent, saved, refused) = {
+        let (input, draft, unsent, saved, refusal) = {
             let this = render.read(cx);
             let field = this.field(id);
             (
@@ -156,7 +170,7 @@ pub(super) fn text_field_row(
                 field.draft.clone(),
                 field.dirty(),
                 this.saved == Some(id),
-                id == TextFieldId::Listen && this.listen_refused,
+                this.refusal(id),
             )
         };
         if input.read(cx).value() != draft {
@@ -166,13 +180,8 @@ pub(super) fn text_field_row(
         h_flex()
             .gap_2()
             .items_center()
-            .when(refused, |row| {
-                row.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().danger)
-                        .child("Enter host:port"),
-                )
+            .when_some(refusal, |row, refusal| {
+                row.child(div().text_sm().text_color(cx.theme().danger).child(refusal))
             })
             .when(unsent, |row| {
                 row.child(

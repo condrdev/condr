@@ -10,6 +10,7 @@
 use crate::endpoint::EndpointStream;
 use crate::noise::{PublicKey, Secret, ServerIdentity};
 use condr_core::protocol::ClientHandshake;
+use condr_core::{ProxyMode, ProxySetting};
 use iroh::address_lookup::{DnsAddressLookup, MemoryLookup, PkarrPublisher};
 use iroh::endpoint::{Connection, Incoming, RecvStream, SendStream, presets};
 use iroh::{Endpoint as IrohEndpoint, EndpointAddr, RelayMode, RelayUrl, SecretKey, TransportAddr};
@@ -49,6 +50,8 @@ pub struct P2pNode {
     /// it the endpoint only dials, publishes nothing, and goes away when idle.
     enabled: bool,
     network: Network,
+    /// `[network.proxy]` as this Server started with it (ADR 0038).
+    proxy: ProxySetting,
     accepted: Sender<EndpointStream>,
     bound: Mutex<Option<Bound>>,
 }
@@ -67,6 +70,7 @@ impl P2pNode {
         identity: Option<Arc<ServerIdentity>>,
         enabled: bool,
         network: Network,
+        proxy: ProxySetting,
         accepted: Sender<EndpointStream>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -74,6 +78,7 @@ impl P2pNode {
             identity: Mutex::new(identity),
             enabled,
             network,
+            proxy,
             accepted,
             bound: Mutex::new(None),
         })
@@ -81,6 +86,10 @@ impl P2pNode {
 
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    pub fn proxy(&self) -> &ProxySetting {
+        &self.proxy
     }
 
     /// Binds now, so an enabled Server is reachable from the start.
@@ -111,7 +120,7 @@ impl P2pNode {
         let enabled = self.enabled;
         let network = self.network.clone();
         let proxy = matches!(network, Network::Condr)
-            .then(proxy_from_env)
+            .then(|| relay_proxy(&self.proxy))
             .flatten();
         let proxy_address = proxy
             .as_ref()
@@ -536,14 +545,49 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The proxy the relay connection goes through: `HTTPS_PROXY`, since the relay is HTTPS,
-/// else `HTTP_PROXY`.
-// ponytail: NO_PROXY is not consulted; the relay is the only host behind it, so excluding
-// it means unsetting both variables for the Server.
-fn proxy_from_env() -> Option<url::Url> {
-    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
-        .into_iter()
-        .find_map(|name| std::env::var(name).ok()?.parse().ok())
+/// The proxy the relay connection goes through (ADR 0038).
+fn relay_proxy(setting: &ProxySetting) -> Option<url::Url> {
+    match setting.mode {
+        ProxyMode::None => None,
+        ProxyMode::Manual => setting.manual_url(),
+        ProxyMode::System => system_proxy(
+            &hyper_util::client::proxy::matcher::Matcher::from_system(),
+            RELAY_URL,
+        ),
+    }
+}
+
+/// What `matcher` names for `target`. From the system, that is the `HTTPS_PROXY` family
+/// and `NO_PROXY`, then the Windows registry or macOS system configuration, as the GUI's
+/// reqwest reads them.
+fn system_proxy(
+    matcher: &hyper_util::client::proxy::matcher::Matcher,
+    target: &str,
+) -> Option<url::Url> {
+    use base64::Engine as _;
+    let intercept = matcher.intercept(&target.parse().ok()?)?;
+    let mut proxy: url::Url = intercept.uri().to_string().parse().ok()?;
+    // The matcher moves credentials into a header; iroh reads them from the URL.
+    let credentials = intercept
+        .basic_auth()
+        .and_then(|header| {
+            header
+                .to_str()
+                .ok()?
+                .strip_prefix("Basic ")
+                .map(str::to_owned)
+        })
+        .and_then(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .ok()
+        })
+        .and_then(|decoded| String::from_utf8(decoded).ok());
+    if let Some((user, password)) = credentials.as_deref().and_then(|pair| pair.split_once(':')) {
+        let _ = proxy.set_username(user);
+        let _ = proxy.set_password(Some(password));
+    }
+    Some(proxy)
 }
 
 fn other(error: impl std::fmt::Display) -> io::Error {
@@ -586,6 +630,7 @@ mod tests {
             Some(identity),
             enabled,
             Network::Loopback(lookup.clone()),
+            ProxySetting::default(),
             tx,
         );
         (node, rx)
@@ -676,5 +721,45 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&server_dir);
         let _ = std::fs::remove_dir_all(&client_dir);
+    }
+
+    #[test]
+    fn the_relay_proxy_follows_the_mode_and_keeps_system_credentials() {
+        use hyper_util::client::proxy::matcher::Matcher;
+        let setting = |mode, url: &str| ProxySetting {
+            mode,
+            url: url.into(),
+        };
+        assert_eq!(
+            relay_proxy(&setting(ProxyMode::None, "http://proxy:8080")),
+            None
+        );
+        assert_eq!(
+            relay_proxy(&setting(ProxyMode::Manual, "http://proxy:8080")).map(String::from),
+            Some("http://proxy:8080/".into())
+        );
+        assert_eq!(relay_proxy(&setting(ProxyMode::Manual, "")), None);
+
+        let matcher = Matcher::builder()
+            .all("http://user:p%40ss@proxy:8080")
+            .build();
+        let proxy = system_proxy(&matcher, RELAY_URL).unwrap();
+        assert_eq!(proxy.host_str(), Some("proxy"));
+        assert_eq!(proxy.port(), Some(8080));
+        assert_eq!(
+            proxy.username(),
+            "user",
+            "iroh reads the credentials from the URL"
+        );
+        assert_eq!(proxy.password(), Some("p%40ss"));
+        let bypassed = Matcher::builder()
+            .all("http://proxy:8080")
+            .no("relay.condr.dev")
+            .build();
+        assert_eq!(
+            system_proxy(&bypassed, RELAY_URL),
+            None,
+            "NO_PROXY is honoured"
+        );
     }
 }

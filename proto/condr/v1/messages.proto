@@ -129,9 +129,15 @@ message AgentRequest {
   AgentCommand command = 3;
 }
 
+// One setting per message (ADR 0038), so a Client never sends back a field it may not
+// change.
 message SetServerSettings {
   uint64 server_id = 1;
-  string shell = 2;
+  oneof setting {
+    string shell = 2;
+    ProxyMode proxy_mode = 3;
+    string proxy_url = 4;
+  }
 }
 
 message RevokeDevice {
@@ -374,9 +380,25 @@ message RuntimeEpoch {
   bytes value = 1;
 }
 
+// Unknown decodes to SYSTEM, the default.
+enum ProxyMode {
+  PROXY_MODE_UNSPECIFIED = 0;
+  PROXY_MODE_SYSTEM = 1;
+  PROXY_MODE_NONE = 2;
+  PROXY_MODE_MANUAL = 3;
+}
+
+// `[network.proxy]` (ADR 0038).
+message ProxySetting {
+  ProxyMode mode = 1;
+  string url = 2;
+}
+
 message ServerSettings {
   string shell = 1;
   string default_shell = 2;
+  // Absent from a Server older than ADR 0038: the default.
+  ProxySetting proxy = 3;
 }
 
 message BootstrapHeader {
@@ -696,6 +718,9 @@ message ServerStatus {
   // values, which differ from these until a restart applies them.
   optional string running_listen = 12;
   bool running_p2p = 13;
+  // Saved and running, like `listen`; Peer-to-peer takes the proxy when it starts.
+  ProxySetting proxy = 14;
+  ProxySetting running_proxy = 15;
 }
 
 message ServerClients {

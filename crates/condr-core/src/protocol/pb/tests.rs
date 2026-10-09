@@ -269,3 +269,72 @@ fn an_unknown_bootstrap_record_is_skipped_and_an_omitted_event_round_trips() {
         SessionEvent::Omitted
     );
 }
+
+#[test]
+fn the_proxy_setting_round_trips_and_an_older_or_newer_peer_reads_as_system() {
+    use crate::protocol::{ServerSetting, ServerSettings};
+    use crate::{ProxyMode, ProxySetting};
+    let settings = ServerSettings {
+        shell: "nu".into(),
+        default_shell: "sh".into(),
+        proxy: ProxySetting {
+            mode: ProxyMode::Manual,
+            url: "http://proxy:8080".into(),
+        },
+    };
+    let changed = SessionEvent::ServerSettingsChanged {
+        settings: settings.clone(),
+    };
+    let encoded = super::SessionEvent::try_from(&changed).unwrap();
+    assert_eq!(SessionEvent::try_from(encoded).unwrap(), changed);
+
+    let event = |proxy| super::SessionEvent {
+        event: Some(session_event::Event::ServerSettingsChanged(
+            super::ServerSettings {
+                shell: String::new(),
+                default_shell: String::new(),
+                proxy,
+            },
+        )),
+    };
+    for proxy in [
+        None,
+        Some(super::ProxySetting {
+            mode: 99,
+            url: String::new(),
+        }),
+    ] {
+        let SessionEvent::ServerSettingsChanged { settings } =
+            SessionEvent::try_from(event(proxy)).unwrap()
+        else {
+            panic!("settings stay settings");
+        };
+        assert_eq!(settings.proxy, ProxySetting::default());
+    }
+
+    for setting in [
+        ServerSetting::Shell("fish".into()),
+        ServerSetting::ProxyMode(ProxyMode::None),
+        ServerSetting::ProxyUrl("https://proxy".into()),
+    ] {
+        let message = ClientMessage::SetServerSettings {
+            server_id: crate::protocol::ServerId(1),
+            setting,
+        };
+        let encoded = super::ClientMessage::try_from(&message).unwrap();
+        assert_eq!(ClientMessage::try_from(encoded).unwrap(), message);
+    }
+    // Setting a mode this build does not know is not run as System.
+    let newer = super::ClientMessage {
+        message: Some(client_message::Message::SetServerSettings(
+            super::SetServerSettings {
+                server_id: 1,
+                setting: Some(set_server_settings::Setting::ProxyMode(99)),
+            },
+        )),
+    };
+    assert_eq!(
+        ClientMessage::try_from(newer).unwrap(),
+        ClientMessage::Unknown
+    );
+}

@@ -6,8 +6,9 @@ description: The full guide to configuring Condr, covering Settings and config.t
 Condr's configuration is layered:
 * **Client settings**: control the front end's appearance and interaction, and apply to the current machine only.
 * **Server settings**: control terminal instances, worktrees and remote connection policy, and apply to the host Device that runs the Server.
+* **Machine-wide settings**: one value per machine, read by every Condr process on it, such as the proxy.
 
-Both sets are persisted in the same `config.toml`, which you can adjust in the graphical interface or edit directly.
+All of them are persisted in the same `config.toml`, which you can adjust in the graphical interface or edit directly.
 
 ---
 
@@ -16,33 +17,24 @@ Both sets are persisted in the same `config.toml`, which you can adjust in the g
 * **Shortcut**: `Cmd + ,` on macOS, `Ctrl + ,` on Windows and Linux.
 * **Auto-save**: changes are written to `config.toml` immediately. A text field writes when it loses focus, when you press Enter or when you click **Save**.
 
-The Settings window has two tabs: **Application** (client) and **Device** (Server).
+The Settings window shows one Device at a time. The picker at its top chooses the Device, opens on this machine, and shows how this window reaches it and whether it is connected. This machine has every page; a remote Device has only the pages marked **Device** below; a Device that is not connected shows none of them until it connects.
 
-### Application (client)
+| Page | Applies to | Description |
+| :--- | :--- | :--- |
+| **General** | Device | **Status**: the version, uptime, session metrics (Workspace / Pane counts) and recent errors. **Terminal**: the default shell new Panes start (empty falls back to the system environment). |
+| **Appearance** | This machine | Appearance theme (follow system / light / dark), terminal font and colors, syntax highlighting and font size for Preview and Diff |
+| **Notifications** | This machine | The master switch for system notifications, and a test notification |
+| **Power** | This machine | Keep the screen on (linked to the coffee cup icon at the bottom of the sidebar) |
+| **Shortcuts** | This machine | The list of shortcuts (read-only) |
+| **Network** | Device | The proxy that Device's Peer-to-peer connections and update checks go through: **System**, **None** or **Manual** with a URL. |
+| **Remote access** | Device | The TCP listener switch and listen address, the Peer-to-peer switch, and the **Restart Condr** button that restarts the Server. Changes take effect after a restart, and the button then turns into **Restart to apply**. |
+| **Paired devices** | Device | **Generate invite** creates a one-time pairing invite (as both a P2P and a TCP link). The list shows paired Devices with online ones first, and each row has **Revoke**, which withdraws that pairing. |
+| **Agent integrations** | Device | Each Agent's hook status, with one-click install, update and uninstall. |
+| **Developer** | This machine | The frame rate monitor switch; buttons that open the application, config, data, state and log directories |
+| **Licenses** | This machine | Third-party open source dependencies and their licenses |
+| **About** | This machine | Version information, update channel, manual update check and the automatic check switch |
 
-| Page | Description |
-| :--- | :--- |
-| **Appearance** | Appearance theme (follow system / light / dark), terminal font and colors, syntax highlighting and font size for Preview and Diff |
-| **Notifications** | The master switch for system notifications, and a test notification |
-| **Power** | Keep the screen on (linked to the coffee cup icon at the bottom of the sidebar) |
-| **Shortcuts** | The list of shortcuts (read-only) |
-| **Developer** | The frame rate monitor switch; buttons that open the application, config, data, state and log directories |
-| **Licenses** | Third-party open source dependencies and their licenses |
-| **About** | Version information, update channel, manual update check and the automatic check switch |
-
-### Device (Server)
-
-The top of each page always shows which Device you are editing, its connection protocol and its connection status, and lets you switch quickly between Devices.
-
-| Page | Description |
-| :--- | :--- |
-| **General › Status** | The connection type, version, uptime, session metrics (Workspace / Pane counts), recent errors, listen address and P2P status. |
-| **General › Terminal** | The default shell new Panes start (empty falls back to the system environment). |
-| **Remote access** | The TCP listener switch and listen address, the Peer-to-peer switch, and the **Restart Condr** button that restarts the Server. Changes take effect after a restart, and the button then turns into **Restart to apply**. |
-| **Paired devices** | **Generate invite** creates a one-time pairing invite (as both a P2P and a TCP link). The list shows paired Devices with online ones first, and each row has **Revoke**, which withdraws that pairing. |
-| **Agent integrations** | Each Agent's hook status, with one-click install, update and uninstall. |
-
-> **Access restriction**: `Remote access` and `Paired devices` are sensitive network settings, and can only be changed when running locally or connected over SSH. Over TCP or P2P, the interface is marked **Viewing only** and these controls are disabled.
+> **Access restriction**: `Network`, `Remote access` and `Paired devices` are sensitive network settings, and can only be changed when running locally or connected over SSH. Over TCP or P2P, the interface is marked **Viewing only** and these controls are disabled.
 
 ---
 
@@ -52,9 +44,10 @@ The GUI client, the background Server and the `condr` CLI share the `config.toml
 
 * **Writing**: Condr takes a file lock when writing the config to avoid concurrent writes, and keeps your comments and layout intact.
 * **When changes apply**:
-  * Changes in the GUI usually apply immediately (except network changes on `Remote access`).
+  * Changes in the GUI usually apply immediately (except network changes on `Remote access`, and the proxy for Peer-to-peer).
   * After editing `[client]` or its sub-tables by hand, restart the GUI window.
   * After editing `[server]` or its sub-tables by hand, run `condr server restart` to restart the Server.
+  * After editing `[network]` by hand, do both.
 * **Error fallback**: if the file has a syntax or parse error, Condr reports it in the window and runs on the full set of defaults. Until the error is fixed, changes made in the UI cannot be saved.
 
 ---
@@ -214,7 +207,28 @@ shell = "/opt/homebrew/bin/fish"
 | --- | --- | --- | --- |
 | `shell` | path | Empty | The executable new Panes start. When empty, Unix-like systems read `$SHELL`, and Windows tries `pwsh.exe`, `powershell.exe` and `%ComSpec%` in that order |
 
-A shell changed under **Settings › Device › General** applies right away: the next new Pane uses it, with no Server restart.
+A shell changed under **Settings › General** applies right away: the next new Pane uses it, with no Server restart.
+
+---
+
+## Machine-wide keys
+
+A table without a `client` or `server` prefix is read by every Condr process on the machine. In the GUI it is edited through that machine's Server, like a Server key.
+
+### `[network.proxy]` proxy
+
+```toml
+[network.proxy]
+mode = "manual"
+url = "http://user:password@proxy:8080"
+```
+
+| Key | Type / values | Default | Description |
+| --- | --- | --- | --- |
+| `mode` | `system` / `none` / `manual` | `system` | `system` follows `HTTPS_PROXY` (or `ALL_PROXY`) and `NO_PROXY`, then the Windows or macOS proxy setting. `none` uses no proxy whatever the environment says. `manual` uses `url` |
+| `url` | `http://` or `https://` URL | Empty | The proxy `manual` uses, with `user:password@` when it asks for credentials. Kept while another mode is chosen. A blank `url` under `manual` means no proxy |
+
+The proxy covers the Server's connection to Condr's relay for Peer-to-peer and the window's update check. Peer-to-peer takes a change when the Server restarts; the window takes it at once.
 
 ---
 

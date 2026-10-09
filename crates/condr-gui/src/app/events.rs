@@ -51,6 +51,7 @@ impl Condr {
                 // The Bootstrap replaced every listing, file and diff cache; answers to
                 // requests sent before it were dropped with the old connection.
                 self.clear_pending_requests(key);
+                self.sync_local_settings(key, cx);
                 self.sync_sidebar_workspace_open(cx);
                 if first_bootstrap {
                     // Now that the Session is known, the file's memory of it applies.
@@ -310,6 +311,7 @@ impl Condr {
                     }
                     SessionEvent::ServerSettingsChanged { settings } => {
                         self.connections[index].settings = settings;
+                        self.sync_local_settings(key, cx);
                         notify = true;
                     }
                 }
@@ -547,11 +549,15 @@ impl Condr {
                         recent_errors,
                         running_listen,
                         running_p2p,
+                        // The saved proxy arrives with every change as `ServerSettingsChanged`.
+                        proxy: _,
+                        running_proxy,
                     } => {
                         connection.listen = listen;
                         connection.p2p = p2p;
                         connection.running_listen = running_listen;
                         connection.running_p2p = running_p2p;
+                        connection.running_proxy = Some(running_proxy);
                         connection.connected_devices = connected;
                         connection.health = Some(ServerHealth {
                             version,

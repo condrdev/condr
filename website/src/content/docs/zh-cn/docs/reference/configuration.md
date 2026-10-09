@@ -6,8 +6,9 @@ description: Condr 的配置体系详解：UI 与 config.toml 设置、完整配
 Condr 采用分层配置架构：
 * **客户端设置**：控制前端外观与交互逻辑，仅作用于当前设备。
 * **Server 设置**：控制终端实例、Worktree 及远程连接策略，作用于运行 Server 的宿主设备。
+* **整机设置**：每台机器只有一个值，这台机器上所有 Condr 进程都读取，例如代理。
 
-两套设置均持久化于同一份 `config.toml` 中，既支持在图形界面调整，也支持直接编辑配置文件。
+这些设置均持久化于同一份 `config.toml` 中，既支持在图形界面调整，也支持直接编辑配置文件。
 
 ---
 
@@ -16,33 +17,24 @@ Condr 采用分层配置架构：
 * **快捷键**：macOS 为 `Cmd + ,`，Windows / Linux 为 `Ctrl + ,`。
 * **自动保存**：设置项变更会立即同步至 `config.toml`。文本输入框失焦、回车或点击 **Save** 时触发写入。
 
-设置窗口分为 **Application**（客户端）与 **Device**（Server 端）两个标签页。
+设置窗口一次只显示一台设备。顶部的选择器用于切换设备，打开时默认选中本机，并显示本窗口连接它的方式与连接状态。本机显示全部页面；远程设备只显示下表中标为 **设备** 的页面；未连接的设备在连上之前不显示这些页面。
 
-### Application（客户端）
+| 页面 | 作用于 | 说明 |
+| :--- | :--- | :--- |
+| **General** | 设备 | **Status**：版本、运行时间、活跃会话指标（Workspace / Pane 数量）与最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则回退至系统环境配置）。 |
+| **Appearance** | 本机 | 外观主题（跟随系统 / 浅色 / 深色）、终端字体与配色、Preview 与 Diff 的语法高亮及字号 |
+| **Notifications** | 本机 | 系统通知总开关及测试通知触发 |
+| **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标状态联动） |
+| **Shortcuts** | 本机 | 快捷键列表（只读） |
+| **Network** | 设备 | 该设备的 Peer-to-peer 连接与检查更新所用的代理：**System**、**None**，或 **Manual** 并填写 URL。 |
+| **Remote access** | 设备 | TCP 监听开关与监听地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需重启生效，此时按钮变为 **Restart to apply**。 |
+| **Paired devices** | 设备 | 点击 **Generate invite** 生成单次配对邀请（分别提供 P2P 与 TCP 格式链接）。列表按在线状态降序展示已配对设备，支持单项 **Revoke**（吊销配对凭证）。 |
+| **Agent integrations** | 设备 | 各 Agent Hook 状态及一键安装、更新、卸载操作。 |
+| **Developer** | 本机 | 渲染帧率监控开关；提供快捷打开应用、配置、数据、状态与日志目录的路径按钮 |
+| **Licenses** | 本机 | 第三方开源依赖及协议说明 |
+| **About** | 本机 | 版本信息、更新通道切换、手动检查更新及自动检查开关 |
 
-| 页面 | 说明 |
-| :--- | :--- |
-| **Appearance** | 外观主题（跟随系统 / 浅色 / 深色）、终端字体与配色、Preview 与 Diff 的语法高亮及字号 |
-| **Notifications** | 系统通知总开关及测试通知触发 |
-| **Power** | 保持屏幕常亮（与侧边栏底部的咖啡杯图标状态联动） |
-| **Shortcuts** | 快捷键列表（只读） |
-| **Developer** | 渲染帧率监控开关；提供快捷打开应用、配置、数据、状态与日志目录的路径按钮 |
-| **Licenses** | 第三方开源依赖及协议说明 |
-| **About** | 版本信息、更新通道切换、手动检查更新及自动检查开关 |
-
-### Device（Server 端）
-
-顶部常驻当前编辑的设备标识、连接协议与连接状态；支持多设备之间快速切换。
-
-| 页面 | 说明 |
-| :--- | :--- |
-| **General › Status** | 查看连接方式、版本、运行时间、活跃会话指标（Workspace / Pane 数量）、最近错误日志、监听地址与 P2P 状态。 |
-| **General › Terminal** | 指定新 Pane 启动的默认 Shell（留空则回退至系统环境配置）。 |
-| **Remote access** | TCP 监听开关与监听地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需重启生效，此时按钮变为 **Restart to apply**。 |
-| **Paired devices** | 点击 **Generate invite** 生成单次配对邀请（分别提供 P2P 与 TCP 格式链接）。列表按在线状态降序展示已配对设备，支持单项 **Revoke**（吊销配对凭证）。 |
-| **Agent integrations** | 各 Agent Hook 状态及一键安装、更新、卸载操作。 |
-
-> **权限限制**：`Remote access` 与 `Paired devices` 属于高危网络配置，仅允许在本地运行或通过 SSH 登录时修改。通过 TCP 或 P2P 接入时，界面将标记为 **Viewing only**，相关控制项禁用。
+> **权限限制**：`Network`、`Remote access` 与 `Paired devices` 属于高危网络配置，仅允许在本地运行或通过 SSH 登录时修改。通过 TCP 或 P2P 接入时，界面将标记为 **Viewing only**，相关控制项禁用。
 
 ---
 
@@ -52,9 +44,10 @@ GUI 客户端、后台 Server 与 `condr` CLI 共用位于配置目录下的 `co
 
 * **写入机制**：Condr 写入配置时使用文件锁规避并发竞争，并完整保留文件内的自定义注释与排版结构。
 * **生效规则**：
-  * GUI 界面修改通常即时生效（`Remote access` 网络层修改除外）。
+  * GUI 界面修改通常即时生效（`Remote access` 网络层修改与 Peer-to-peer 的代理除外）。
   * 手动编辑 `[client]` 及其子表需重启 GUI 窗口。
   * 手动编辑 `[server]` 及其子表需执行 `condr server restart` 重启 Server。
+  * 手动编辑 `[network]` 后两者都要做。
 * **容错降级**：若配置文件出现语法或解析错误，Condr 会在窗口报错警示，并回退至全套默认参数运行。在修复语法错误前，UI 界面的改动将无法持久化。
 
 ---
@@ -214,7 +207,28 @@ shell = "/opt/homebrew/bin/fish"
 | --- | --- | --- | --- |
 | `shell` | path | 空 | 新 Pane 派生进程的可执行路径。缺省状态下，Unix-like 系统读取 `$SHELL`，Windows 依序探测 `pwsh.exe`、`powershell.exe` 与 `%ComSpec%` |
 
-若在 **Settings › Device › General** 界面中修改 Shell，系统将直接热更新：后续新建的 Pane 立即生效，无须重启 Server。
+若在 **Settings › General** 界面中修改 Shell，系统将直接热更新：后续新建的 Pane 立即生效，无须重启 Server。
+
+---
+
+## 整机配置项
+
+不带 `client` 或 `server` 前缀的表由这台机器上所有 Condr 进程读取。在 GUI 中，它和 Server 配置项一样经由那台机器的 Server 修改。
+
+### `[network.proxy]` 代理
+
+```toml
+[network.proxy]
+mode = "manual"
+url = "http://user:password@proxy:8080"
+```
+
+| 键 | 类型 / 取值 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `mode` | `system` / `none` / `manual` | `system` | `system` 依次读取 `HTTPS_PROXY`（或 `ALL_PROXY`）与 `NO_PROXY`，再读取 Windows 或 macOS 的系统代理。`none` 不使用代理，无视环境变量。`manual` 使用 `url` |
+| `url` | `http://` 或 `https://` URL | 空 | `manual` 使用的代理，需要认证时带上 `user:password@`。切换到其他模式时保留。`manual` 下 `url` 为空表示不使用代理 |
+
+代理作用于 Server 为 Peer-to-peer 连接 Condr relay 的连接，以及窗口的检查更新。Peer-to-peer 在 Server 重启后才使用新代理；窗口立即生效。
 
 ---
 

@@ -9,6 +9,7 @@ impl RuntimeState {
         let settings = ServerSettings {
             shell: load_shell(config_path.as_deref()),
             default_shell: condr_core::default_shell_program(),
+            proxy: condr_core::ProxySetting::load(config_path.as_deref()),
         };
         let launch = ShellLaunch {
             shell: settings.shell.clone(),

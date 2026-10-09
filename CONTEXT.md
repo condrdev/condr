@@ -42,7 +42,7 @@ The window surface shown when a Session contains no Workspaces. It offers an ent
 _Avoid_: Empty Workspace, empty Pane
 
 **Settings**:
-A GUI-owned window for this Client's appearance and Terminal preferences, each connected Server's shell preference, and bundled license notices. Client preferences apply to all its Panes; a Server preference belongs to that Server and is shared by its Clients.
+A GUI-owned window that shows one Device at a time, picked at its top and opening on this machine (ADR 0038): every connected Device opens on General, this machine adds the GUI's own pages around its other Device pages, a remote Device has its Device pages only, and pages are arranged by topic rather than by which process reads a setting. Client preferences apply to all its Panes; a Server preference belongs to that Server and is shared by its Clients; a machine-wide setting, the proxy first, has one value per machine that every Condr process on it reads, and is changed through that machine's Server.
 _Avoid_: Preferences, options, config
 
 **Appearance**:

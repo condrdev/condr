@@ -70,7 +70,7 @@ command = ["code-insiders", "--reuse-window"]
 默认情况下，新建分屏会使用系统的默认 Shell。你可以通过以下方式修改：
 
 ### 在界面中修改
-前往 **Settings › Device › General**，在 **Terminal** 区域的 Shell 框中输入目标 Shell 的路径（例如 `/bin/zsh` 或 `/opt/homebrew/bin/fish`）。
+前往 **Settings › General**，在 **Terminal** 区域的 Shell 框中输入目标 Shell 的路径（例如 `/bin/zsh` 或 `/opt/homebrew/bin/fish`）。
 
 ### 在配置文件中修改
 在 `config.toml` 中写入：

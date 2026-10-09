@@ -10,7 +10,7 @@ description: Condr 默认对外开放什么、每种连接方式信任谁、配�
 ## 默认只对本机开放
 
 * **本机 socket**：新安装的 Server 仅监听本机的私有 socket。在 macOS 和 Linux 上，socket 权限设为 `0600`，仅允许当前用户连接；在 Windows 上，命名管道仅允许当前用户和 SYSTEM 访问。
-* **TCP 端口**：在显式配置 `[server] listen` 之前，Server 不打开任何 TCP 端口。该配置可通过执行 `condr server start --listen` 或在 **Settings › Device › Remote access** 中写入。
+* **TCP 端口**：在显式配置 `[server] listen` 之前，Server 不打开任何 TCP 端口。该配置可通过执行 `condr server start --listen` 或在 **Settings › Remote access** 中写入。
 * **Peer-to-peer 访问**：在手动开启 Peer-to-peer 之前，其他设备无法通过 P2P 方式连接当前 Server。
 * **本机连接权限边界**：以当前用户身份运行的任意程序均可连接本机 socket 并执行全部操作（包括管理 Server）。Pane 内运行的程序和 Agent 同样具备该权限，且能够使用当前设备的设备密钥连接已配对的远程设备。
 
@@ -22,7 +22,7 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 
 | 服务地址 | 触发条件 | 用途说明 |
 | :--- | :--- | :--- |
-| `condr.dev` | stable 通道：窗口启动 5 秒后首次请求，其后每 5 小时轮询一次 | 检查版本更新。可在 **Settings › Application › About** 中关闭自动检查，或设置 `[client.updates] auto_check = false` |
+| `condr.dev` | stable 通道：窗口启动 5 秒后首次请求，其后每 5 小时轮询一次 | 检查版本更新。可在 **Settings › About** 中关闭自动检查，或设置 `[client.updates] auto_check = false` |
 | `api.github.com` | nightly 通道：同上 | 检查版本更新，同上 |
 | `relay.condr.dev` | Server 启用了 Peer-to-peer，或本机主动发起 `p2p://` 连接 | 辅助 NAT 打洞；在直连建立失败时中继加密流量 |
 | `dns.condr.dev` | Server 启用了 Peer-to-peer，或本机主动发起 `p2p://` 连接 | 发布并查询各设备当前使用的中继地址 |
@@ -87,7 +87,7 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 
 ## 撤销设备
 
-执行 `condr server revoke <指纹或前缀>`，或在界面打开 **Settings › Device › Paired devices** 点击 **Revoke**。
+执行 `condr server revoke <指纹或前缀>`，或在界面打开 **Settings › Paired devices** 点击 **Revoke**。
 
 * **生效时效**：Condr 会立即从 `authorized-clients` 中移除目标行，并同步切断该设备当前建立的所有活跃连接。
 * **后续接入表现**：后续 TCP 连接请求将在 Noise 握手阶段阻断；Peer-to-peer 连接将在 QUIC 握手完成后予以拒绝。

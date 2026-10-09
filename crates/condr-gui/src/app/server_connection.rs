@@ -64,6 +64,9 @@ pub(super) struct ServerConnection {
     /// saved values that only a restart applies.
     pub(super) running_listen: Option<String>,
     pub(super) running_p2p: bool,
+    /// The `[network.proxy]` Peer-to-peer started with, from `Status`; `None` until one
+    /// arrives, so a saved proxy is not taken for a pending one.
+    pub(super) running_proxy: Option<ProxySetting>,
     /// The Server's last `Status` report; `None` until the first one arrives.
     pub(super) health: Option<ServerHealth>,
     pub(super) clients: Vec<ServerClientInfo>,
@@ -187,6 +190,7 @@ impl ServerConnection {
             p2p: false,
             running_listen: None,
             running_p2p: false,
+            running_proxy: None,
             health: None,
             clients: Vec::new(),
             connected_devices: Vec::new(),

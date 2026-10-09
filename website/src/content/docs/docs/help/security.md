@@ -10,7 +10,7 @@ Use this page to judge whether a Device is suitable for running Condr, and to se
 ## Local only by default
 
 * **Local socket**: a fresh Server listens only on a private local socket. On macOS and Linux the socket's permissions are `0600`, so only your user can connect; on Windows the named pipe admits only your user and SYSTEM.
-* **TCP port**: until `[server] listen` is configured, the Server opens no TCP port. That setting is written by `condr server start --listen` or under **Settings › Device › Remote access**.
+* **TCP port**: until `[server] listen` is configured, the Server opens no TCP port. That setting is written by `condr server start --listen` or under **Settings › Remote access**.
 * **Peer-to-peer access**: until Peer-to-peer is turned on, other Devices cannot connect to this Server over P2P.
 * **Local connections have full rights**: any program running as your user can connect to the local socket and do everything, including managing the Server. Programs and Agents running in a Pane have the same rights, and they can use this Device's key to connect to paired remote Devices.
 
@@ -22,7 +22,7 @@ Condr has no user accounts and collects no telemetry. It contacts only these fou
 
 | Service | When | Purpose |
 | :--- | :--- | :--- |
-| `condr.dev` | 5 seconds after the window starts, then every 5 hours, on the stable channel | Checks for updates. Turn automatic checks off under **Settings › Application › About**, or set `[client.updates] auto_check = false` |
+| `condr.dev` | 5 seconds after the window starts, then every 5 hours, on the stable channel | Checks for updates. Turn automatic checks off under **Settings › About**, or set `[client.updates] auto_check = false` |
 | `api.github.com` | The same, on the nightly channel | Checks for updates, as above |
 | `relay.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Helps with NAT hole punching, and relays encrypted traffic when a direct connection cannot be established |
 | `dns.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Publishes and looks up the relay address each Device currently uses |
@@ -87,7 +87,7 @@ If you delete only `device-key`, the window may generate a new key before the Se
 
 ## Revoking a Device
 
-Run `condr server revoke <fingerprint or prefix>`, or open **Settings › Device › Paired devices** and click **Revoke**.
+Run `condr server revoke <fingerprint or prefix>`, or open **Settings › Paired devices** and click **Revoke**.
 
 * **Takes effect at once**: Condr immediately removes the Device's line from `authorized-clients` and cuts all of its active connections.
 * **Later attempts**: a later TCP connection is stopped during the Noise handshake; a Peer-to-peer connection is refused after the QUIC handshake completes.

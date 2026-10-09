@@ -36,9 +36,9 @@ pub use messages::{
     BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
     LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
     RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent, SessionId,
-    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
-    relative_age, uptime_text,
+    ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionBootstrap, SessionEvent,
+    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage,
+    WorkspaceGitSnapshot, relative_age, uptime_text,
 };
 
 /// This build's protocol (ADR 0028). Fields and oneof members are added without raising

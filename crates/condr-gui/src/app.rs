@@ -47,18 +47,18 @@ use condr_core::protocol::{
     AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
     LayoutResult, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame,
     PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
-    ServerId, ServerLogRecord, ServerMessage, ServerSettings, SessionBootstrap, SessionEvent,
-    SessionId, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
-    decode_pane_terminal_frame, relative_age, uptime_text,
+    ServerId, ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionBootstrap,
+    SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage,
+    WorkspaceGitSnapshot, decode_pane_terminal_frame, relative_age, uptime_text,
 };
 use condr_core::{
     AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, BrowsedDirectory,
-    DirectoryListing, FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, Session,
-    SessionSnapshot, SplitDirection, Tab, TabId, TerminalCellRun, TerminalCommand, TerminalCursor,
-    TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
-    TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
-    TerminalSelection, TerminalSelectionUnit, TerminalSize, TerminalViewDelta, TerminalViewFrame,
-    Workspace, WorkspaceId,
+    DirectoryListing, FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, ProxyMode,
+    ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabId, TerminalCellRun,
+    TerminalCommand, TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind,
+    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking,
+    TerminalPosition, TerminalSelection, TerminalSelectionUnit, TerminalSize, TerminalViewDelta,
+    TerminalViewFrame, Workspace, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
@@ -105,11 +105,11 @@ use settings::{
 };
 #[cfg(all(test, feature = "test-support"))]
 use settings::{
-    SettingsTab, code_font_size, code_theme_is_dirty, color_scheme_is_dirty, reset_code_theme,
+    code_font_size, code_theme_is_dirty, color_scheme_is_dirty, reset_code_theme,
     reset_color_scheme, select_appearance, select_code_theme, select_server_shell,
-    select_settings_server, select_settings_server_page, select_settings_tab,
-    select_terminal_font_family, select_terminal_font_size, selected_appearance,
-    selected_code_theme, server_listen, server_shell, set_server_listen, step_code_font_size,
+    select_settings_page, select_settings_server, select_terminal_font_family,
+    select_terminal_font_size, selected_appearance, selected_code_theme, server_listen,
+    server_shell, set_proxy_mode, set_proxy_url, set_server_listen, step_code_font_size,
     step_terminal_font_size, terminal_font_family, terminal_font_size,
 };
 #[cfg(test)]

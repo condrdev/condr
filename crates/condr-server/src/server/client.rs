@@ -902,9 +902,14 @@ pub(super) fn handle_client(
                 }
                 false
             }
-            ClientMessage::SetServerSettings { server_id, shell } => {
-                set_server_shell(&state, server_id, &shell, client_id, &outbound)
-            }
+            ClientMessage::SetServerSettings { server_id, setting } => set_server_setting(
+                &state,
+                server_id,
+                setting,
+                stream.get_ref().may_administer(),
+                client_id,
+                &outbound,
+            ),
             ClientMessage::StopServer { server_id } => {
                 let known_server = state.lock().expect("server state lock poisoned").server_id;
                 // A paired Device that stopped the Server could not start it again.
@@ -1111,6 +1116,12 @@ fn server_admin(
                 recent_errors: crate::logging::recent_errors(),
                 running_listen: state.running_listen.clone(),
                 running_p2p: state.p2p.as_ref().is_some_and(|p2p| p2p.enabled()),
+                proxy: state.settings.proxy.clone(),
+                running_proxy: state
+                    .p2p
+                    .as_ref()
+                    .map(|p2p| p2p.proxy().clone())
+                    .unwrap_or_default(),
             })
         }
         ServerAdminCommand::SaveListen { address } => {
@@ -1190,14 +1201,39 @@ fn server_admin(
     }
 }
 
-fn set_server_shell(
+/// Stores one setting and publishes the result. Machine-wide settings are administration
+/// (ADR 0038): only a local or SSH connection may change them.
+fn set_server_setting(
     state: &Arc<Mutex<RuntimeState>>,
     server_id: ServerId,
-    shell: &str,
+    setting: ServerSetting,
+    may_administer: bool,
     client_id: u64,
     outbound: &ClientWriter,
 ) -> bool {
-    let shell = shell.trim();
+    let refuse = |message: String| queue_message(outbound, ServerMessage::Error { message });
+    let setting = match setting {
+        ServerSetting::Shell(shell) => ServerSetting::Shell(shell.trim().to_owned()),
+        ServerSetting::ProxyUrl(url) => ServerSetting::ProxyUrl(url.trim().to_owned()),
+        setting => setting,
+    };
+    let administration = !matches!(setting, ServerSetting::Shell(_));
+    if administration && !may_administer {
+        return refuse("only a local or SSH connection may change the proxy".into());
+    }
+    let (value, what) = match &setting {
+        ServerSetting::Shell(shell) => (shell.as_str(), "shell preference"),
+        ServerSetting::ProxyMode(mode) => (mode.as_str(), "proxy"),
+        ServerSetting::ProxyUrl(url) => (url.as_str(), "proxy"),
+    };
+    if value.len() > MAX_SETTING_BYTES {
+        return refuse(format!("{what} setting exceeds {MAX_SETTING_BYTES} bytes"));
+    }
+    if let ServerSetting::ProxyUrl(url) = &setting
+        && let Err(error) = condr_core::check_proxy_url(url)
+    {
+        return refuse(error);
+    }
     let settings_write = Arc::clone(
         &state
             .lock()
@@ -1207,44 +1243,37 @@ fn set_server_shell(
     // Keep disk completion and the published value in the same order across clients,
     // without holding the Session lock during file or lock I/O.
     let _write = settings_write.lock().expect("settings write lock poisoned");
-    let path = {
+    let (path, settings) = {
         let state = state.lock().expect("server state lock poisoned");
         if server_id != state.server_id {
-            return queue_message(
-                outbound,
-                ServerMessage::Error {
-                    message: "unknown Server".into(),
-                },
-            );
+            return refuse("unknown Server".into());
         }
-        if shell.len() > MAX_SHELL_SETTING_BYTES {
-            return queue_message(
-                outbound,
-                ServerMessage::Error {
-                    message: format!("shell setting exceeds {MAX_SHELL_SETTING_BYTES} bytes"),
-                },
-            );
+        let mut settings = state.settings.clone();
+        match &setting {
+            ServerSetting::Shell(shell) => settings.shell.clone_from(shell),
+            ServerSetting::ProxyMode(mode) => settings.proxy.mode = *mode,
+            ServerSetting::ProxyUrl(url) => settings.proxy.url.clone_from(url),
         }
-        if state.settings.shell == shell {
+        if settings == state.settings {
             return false;
         }
-        state.config_path.clone()
+        (state.config_path.clone(), settings)
     };
-    if let Some(path) = path
-        && let Err(error) = save_shell(&path, shell)
-    {
-        return queue_message(
-            outbound,
-            ServerMessage::Error {
-                message: format!(
-                    "failed to save the shell preference to {}: {error}",
-                    path.display()
-                ),
-            },
-        );
+    if let Some(path) = path {
+        let saved = match &setting {
+            ServerSetting::Shell(shell) => save_shell(&path, shell),
+            ServerSetting::ProxyMode(mode) => save_proxy(&path, "mode", mode.as_str()),
+            ServerSetting::ProxyUrl(url) => save_proxy(&path, "url", url),
+        };
+        if let Err(error) = saved {
+            return refuse(format!(
+                "failed to save the {what} to {}: {error}",
+                path.display()
+            ));
+        }
     }
     state
         .lock()
         .expect("server state lock poisoned")
-        .set_shell(shell, Some((client_id, outbound)))
+        .set_settings(settings, Some((client_id, outbound)))
 }

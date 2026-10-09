@@ -245,6 +245,24 @@ fn field(label: &str, value: impl std::fmt::Display) {
     println!("{label:<13} {value}");
 }
 
+/// `[network.proxy]` for `condr server status --json`.
+fn proxy_json(proxy: &condr_core::ProxySetting) -> serde_json::Value {
+    json!({ "mode": proxy.mode.as_str(), "url": proxy.url })
+}
+
+/// The mode, or a Manual proxy's URL without its credentials, which output pasted into
+/// an issue must not carry.
+fn proxy_label(proxy: &condr_core::ProxySetting) -> String {
+    match proxy.manual_url() {
+        Some(mut url) => {
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            url.to_string()
+        }
+        None => proxy.mode.as_str().to_owned(),
+    }
+}
+
 /// Prints `headline`, then each detail line indented.
 fn report(headline: &str, details: &str) {
     eprintln!("{headline}");
@@ -392,6 +410,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 recent_errors,
                 running_listen,
                 running_p2p,
+                proxy,
+                running_proxy,
             } = status
             else {
                 unreachable!("server_status only returns Status");
@@ -410,6 +430,8 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         "p2p": p2p,
                         "running_listen": running_listen,
                         "running_p2p": running_p2p,
+                        "proxy": proxy_json(&proxy),
+                        "running_proxy": proxy_json(&running_proxy),
                         "connected_devices": connected,
                         "uptime_secs": uptime_secs,
                         "workspaces": workspaces,
@@ -434,16 +456,17 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 ),
             );
             field("Uptime", uptime_text(uptime_secs));
-            let pending = listen != running_listen || p2p != running_p2p;
+            let pending = listen != running_listen || p2p != running_p2p || proxy != running_proxy;
             match listen {
                 Some(address) => field("Listen", format_args!("tcp://{address}")),
                 None => field("Listen", "off"),
             }
             field("Peer-to-peer", if p2p { "on" } else { "off" });
+            field("Proxy", proxy_label(&proxy));
             if pending {
                 field(
                     "Pending",
-                    "restart to apply the Listen and Peer-to-peer changes",
+                    "restart to apply the Listen, Peer-to-peer and Proxy changes",
                 );
             }
             field("Workspaces", workspaces);

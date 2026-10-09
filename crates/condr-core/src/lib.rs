@@ -3,6 +3,7 @@ pub mod agent_discovery;
 mod config;
 mod files;
 mod git;
+mod network;
 mod paths;
 pub mod protocol;
 mod session;
@@ -28,6 +29,7 @@ pub use git::{
     MAX_DIFF_BYTES, MAX_GIT_CHANGES, create_worktree, discover_repository, open_worktree,
     remove_worktree, validate_worktree_removal, worktree_destination,
 };
+pub use network::{ProxyMode, ProxySetting, check_proxy_url};
 pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,
 };

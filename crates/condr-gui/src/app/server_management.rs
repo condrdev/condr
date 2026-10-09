@@ -405,6 +405,7 @@ impl Condr {
             if let Some(connection) = self.connection_mut(key) {
                 connection.subscribe();
             }
+            self.sync_local_settings(key, cx);
             self.refresh_target_pane(key);
             if key == self.active_connection {
                 self.rebuild_dock(window, cx);

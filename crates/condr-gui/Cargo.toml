@@ -19,6 +19,8 @@ async-channel.workspace = true
 gpui-kit.workspace = true
 gpui-fps.workspace = true
 gpui-pre-reqwest-client.workspace = true
+gpui-pre-reqwest.workspace = true
+gpui-pre-http-client-tls.workspace = true
 futures-lite.workspace = true
 image = { workspace = true, features = ["gif", "webp"] }
 condr-core = { path = "../condr-core" }

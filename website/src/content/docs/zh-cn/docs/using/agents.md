@@ -21,7 +21,7 @@ Cursor CLI 和 Antigravity CLI 的 Hook 没有等待权限的事件，因此等�
 
 `condr agent wait` 和 `condr agent prompt --wait` 会立即以 `agent_reports_no_state` 拒绝仅识别的 Agent，不会等到超时。不带 `--wait` 的 `condr agent prompt` 照常发送。
 
-目前只有 Kimi Code 属于这一级，原因是它的 Hook 无法区分子 Agent 和主 Agent 的 Stop。**Settings › Device › Agent integrations** 中它显示为 Recognition only。
+目前只有 Kimi Code 属于这一级，原因是它的 Hook 无法区分子 Agent 和主 Agent 的 Stop。**Settings › Agent integrations** 中它显示为 Recognition only。
 
 ## 准备与检查 Agent
 
@@ -36,7 +36,7 @@ Cursor CLI 和 Antigravity CLI 的 Hook 没有等待权限的事件，因此等�
 传统的终端管理工具依赖屏幕文本正则匹配，容易因输出变动导致误判。Condr 采用原生的 Hook 机制，由 Agent 主动上报，实现 100% 准确的状态感知。
 
 - **一键安装 Hook**：执行命令 `condr agent hooks install <agent>`（例如 `condr agent hooks install claude`）。
-- **图形化管理界面**：前往 **Settings › Device › Agent integrations** 直接安装。
+- **图形化管理界面**：前往 **Settings › Agent integrations** 直接安装。
 - **查看与卸载**：使用 `condr agent hooks status <agent>` 查看状态；如需移除，执行 `condr agent hooks uninstall <agent>`。
 
 ## Agent 状态指示

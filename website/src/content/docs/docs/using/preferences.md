@@ -72,7 +72,7 @@ New Panes use the system's default shell. Change it in either of these ways:
 
 ### In the window
 
-Open **Settings › Device › General** and type the shell's path into the **Shell** field of the **Terminal** group, such as `/bin/zsh` or `/opt/homebrew/bin/fish`.
+Open **Settings › General** and type the shell's path into the **Shell** field of the **Terminal** group, such as `/bin/zsh` or `/opt/homebrew/bin/fish`.
 
 ### In the configuration file
 
