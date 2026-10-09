@@ -430,9 +430,9 @@ impl Condr {
                 move |_, cx| {
                     let owner = new_workspace_owner.clone();
                     let tooltip = format!("New Workspace on {new_workspace_label}");
-                    // A device that is not connected says so in its heading, since its
-                    // Workspaces below look the same either way; the mark tells why on
-                    // hover and connects on click.
+                    // A device that is not connected says so in its heading: red when
+                    // something failed, grey when the user disconnected, as on its page.
+                    // The mark tells why on hover and connects on click.
                     let indicator = match status {
                         // A connected Server of another build gets a mark that says which
                         // side to update (ADR 0027); clicking it puts it away.
@@ -463,6 +463,12 @@ impl Condr {
                         }
                         ConnectionStatus::Disconnected => {
                             let connect_owner = owner.clone();
+                            let mark = match &connect_reason {
+                                Some(_) => Icon::new(CondrIconName::CircleAlert)
+                                    .text_color(cx.theme().danger),
+                                None => Icon::new(CondrIconName::Circle)
+                                    .text_color(cx.theme().muted_foreground),
+                            };
                             let why = connect_reason
                                 .clone()
                                 .map_or("Not connected. Click to connect.".to_owned(), |reason| {
@@ -474,10 +480,7 @@ impl Condr {
                                     .ghost()
                                     .xsmall()
                                     .compact()
-                                    .icon(
-                                        Icon::new(CondrIconName::CircleAlert)
-                                            .text_color(cx.theme().danger),
-                                    )
+                                    .icon(mark)
                                     .tooltip(why)
                                     .on_click(move |_, window, cx| {
                                         cx.stop_propagation();
