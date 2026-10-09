@@ -413,6 +413,7 @@ impl Condr {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let list = state.read(cx).list_state().clone();
+        let wheel_list = list.clone();
         let theme = cx.theme();
         let rem = theme.font_size;
         // Padding rather than a narrower column keeps the scrollbar at the Tab's edge.
@@ -431,6 +432,19 @@ impl Condr {
             .min_h_0()
             .w_full()
             .relative()
+            // The gutters are the TextView's padding, outside the list Kit scrolls on the
+            // wheel; over them the wheel scrolls the same list.
+            .on_scroll_wheel(move |event, window, _| {
+                if wheel_list.viewport_bounds().contains(&event.position) {
+                    return;
+                }
+                let delta = event.delta.pixel_delta(window.line_height()).y;
+                let max = wheel_list.max_offset_for_scrollbar().y;
+                let mut offset = wheel_list.scroll_px_offset_for_scrollbar();
+                offset.y = (offset.y + delta).clamp(-max, px(0.));
+                wheel_list.set_offset_from_scrollbar(offset);
+                window.refresh();
+            })
             // Kit resets its list to the top when an edit changes the block count, as it
             // renders; the list lays out only in prepaint, so putting back where the
             // reader was here, in between, keeps the viewport as the source view does.

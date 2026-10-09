@@ -382,6 +382,19 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
         120,
         "an edit to the rendered file must keep the viewport"
     );
+    // The wheel over the gutter beside the centred text scrolls it too.
+    let before = list.scroll_px_offset_for_scrollbar().y;
+    let rendered = window.debug_bounds("file-markdown").unwrap();
+    window.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: gpui_kit::point(rendered.origin.x + px(4.), rendered.center().y),
+        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-100.))),
+        ..Default::default()
+    });
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        list.scroll_px_offset_for_scrollbar().y < before,
+        "the wheel over the gutter should scroll the rendered file"
+    );
 
     // A reconnect while a listing is in flight: the old connection's answer never comes
     // and the Bootstrap empties the caches, so the request must be forgotten with it, or
