@@ -80,7 +80,7 @@ Every key combination not declared on this page passes through to the child proc
 ### Pass-through rules
 
 * **Selection lifetime**: copying clears the current selection highlight.
-* **Copy confirmation**: copies that pass through Condr show "Copied to clipboard", whether from Condr's own selection or from a program such as Claude Code, which also names the Pane it came from. A program's own native copy bypasses Condr and shows nothing: Codex, for example, copies to the clipboard of the machine it runs on, so on a remote Device use `Shift + drag` to let Condr copy instead.
+* **Copy confirmation**: copies that pass through Condr show "Copied to clipboard", whether from Condr's own selection or from a program such as Claude Code. A program's own native copy bypasses Condr and shows nothing: Codex, for example, copies to the clipboard of the machine it runs on, so on a remote Device use `Shift + drag` to let Condr copy instead.
 * **`Cmd + C` with nothing selected on macOS**: passes through to the foreground program. Supported programs, such as Claude Code, copy their own selection, while the shell and other programs receive nothing. On a Windows Device, `Cmd + C` reaches Claude Code too, as long as Condr has recognized it in the Pane.
 * **Conflicts on Windows**:
   * `Ctrl + C` with nothing selected passes through to the foreground application, usually to interrupt the current command.

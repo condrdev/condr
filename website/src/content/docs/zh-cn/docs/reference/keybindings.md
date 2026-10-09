@@ -80,7 +80,7 @@ Condr 的快捷键分为两层逻辑：
 ### 按键透传机制
 
 * **选区生命周期**：复制动作触发后自动清空当前选中高亮。
-* **复制提示**：经过 Condr 的复制会显示“Copied to clipboard”。来源可以是 Condr 自己的选区，也可以是程序（如 Claude Code）复制的内容，后者会注明来自哪个 Pane。程序自行调用系统剪贴板的复制不经过 Condr，不会有提示；例如 Codex 会复制到它所在机器的剪贴板，在远程 Device 上请改用 `Shift + 拖动` 让 Condr 来复制。
+* **复制提示**：经过 Condr 的复制会显示“Copied to clipboard”。来源可以是 Condr 自己的选区，也可以是程序（如 Claude Code）复制的内容。程序自行调用系统剪贴板的复制不经过 Condr，不会有提示；例如 Codex 会复制到它所在机器的剪贴板，在远程 Device 上请改用 `Shift + 拖动` 让 Condr 来复制。
 * **macOS 无选区时的 `Cmd + C`**：按键会交给前台程序。支持的程序（如 Claude Code）会复制自己的选区，Shell 等其他程序收不到任何输入。在 Windows Device 上，只要 Condr 已识别出 Pane 里的 Claude Code，`Cmd + C` 同样会送达它。
 * **Windows 平台的冲突处理**：
   * 无选区时按 `Ctrl + C`，按键透传至前台应用，通常用于中断当前命令。

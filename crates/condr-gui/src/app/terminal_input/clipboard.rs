@@ -65,15 +65,10 @@ impl Condr {
         );
     }
 
-    /// Puts what a Pane copied on the clipboard, Condr's selection or a program's OSC 52
-    /// (`from` names that program's Pane), and says so once the clipboard holds it. A
-    /// program clearing the clipboard, or a write the platform refused, says nothing.
-    pub(in crate::app) fn write_terminal_copy(
-        &self,
-        text: String,
-        from: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
+    /// Puts what a Pane copied on the clipboard, Condr's selection or a program's OSC 52,
+    /// and says so once the clipboard holds it. A program clearing the clipboard, or a
+    /// write the platform refused, says nothing.
+    pub(in crate::app) fn write_terminal_copy(&self, text: String, cx: &mut Context<Self>) {
         struct TerminalCopied;
 
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -81,15 +76,14 @@ impl Condr {
         if text.is_empty() || cx.read_from_clipboard().and_then(|item| item.text()) != Some(text) {
             return;
         }
-        let message = match from {
-            Some(pane) => format!("Copied to clipboard from {pane}"),
-            None => "Copied to clipboard".to_owned(),
-        };
         // Deferred because the Window is unreachable during its own update.
         let handle = self.window_handle;
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
-                window.push_notification(Notification::success(message).id::<TerminalCopied>(), cx);
+                window.push_notification(
+                    Notification::success("Copied to clipboard").id::<TerminalCopied>(),
+                    cx,
+                );
             });
         });
     }

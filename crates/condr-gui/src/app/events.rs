@@ -681,13 +681,12 @@ impl Condr {
             }
             ServerMessage::TerminalCopied { text, .. } => {
                 if let Some(text) = text {
-                    self.write_terminal_copy(text, None, cx);
+                    self.write_terminal_copy(text, cx);
                 }
                 IncomingEffect::default()
             }
-            ServerMessage::TerminalClipboard { pane_id, text } => {
-                let from = self.connections[index].pane_title(pane_id);
-                self.write_terminal_copy(text, from, cx);
+            ServerMessage::TerminalClipboard { text, .. } => {
+                self.write_terminal_copy(text, cx);
                 IncomingEffect::default()
             }
             // The GUI's only agent requests are hooks, so every result is one of theirs.
