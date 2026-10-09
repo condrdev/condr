@@ -90,10 +90,10 @@ Environment variables let you switch release channels, pin a version or force a 
 **Linux / macOS**:
 ```sh
 # Switch to the daily Nightly build
-CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh
+curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=nightly sh
 
 # Install a specific version
-CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
+curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=v0.1.0 sh
 
 # Force-reinstall the current version
 curl -fsSL https://condr.dev/install.sh | sh -s -- --force

@@ -90,10 +90,10 @@ Server 运行于守护进程模式，关闭当前终端不影响其运行。
 **Linux / macOS**：
 ```sh
 # 切换至每日 Nightly 构建
-CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh
+curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=nightly sh
 
 # 指定安装特定版本
-CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
+curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=v0.1.0 sh
 
 # 强制重装当前版本
 curl -fsSL https://condr.dev/install.sh | sh -s -- --force

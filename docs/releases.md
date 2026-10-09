@@ -45,8 +45,8 @@ Desktop users download the installer from [Releases](https://github.com/condrdev
 
 ```bash
 curl -fsSL https://condr.dev/install.sh | sh                          # the latest release
-CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh    # the nightly
-CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh     # one versioned release
+curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=nightly sh    # the nightly
+curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=v0.1.0 sh     # one versioned release
 curl -fsSL https://condr.dev/install.sh | sh -s -- --start            # also start the Server
 curl -fsSL https://condr.dev/install.sh | sh -s -- --force            # reinstall even when up to date
 sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz

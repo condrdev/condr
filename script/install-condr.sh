@@ -3,8 +3,8 @@
 #   curl -fsSL https://condr.dev/install.sh | sh
 #   curl -fsSL https://condr.dev/install.sh | sh -s -- --start
 #   curl -fsSL https://condr.dev/install.sh | sh -s -- --force
-#   CONDR_VERSION=nightly curl -fsSL https://condr.dev/install.sh | sh
-#   CONDR_VERSION=v0.1.0 curl -fsSL https://condr.dev/install.sh | sh
+#   curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=nightly sh
+#   curl -fsSL https://condr.dev/install.sh | CONDR_VERSION=v0.1.0 sh
 #   sh script/install-condr.sh --from ./condr-headless-<version>-linux-x86_64.tar.gz
 # Downloads the archive for this machine from GitHub Releases (or takes --from),
 # verifies it against SHA256SUMS, then runs `condr server install` with the
