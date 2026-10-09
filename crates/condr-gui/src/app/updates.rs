@@ -9,7 +9,6 @@ use gpui_kit::http_client::{AsyncBody, HttpClient};
 /// The first check waits this long after start, so it never competes with startup.
 pub(super) const FIRST_CHECK_DELAY: Duration = Duration::from_secs(5);
 pub(super) const CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60 * 60);
-const REPOSITORY_API: &str = "https://api.github.com/repos/condrdev/condr";
 
 /// Which published builds the update check looks for: `[client.updates] channel`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,12 +51,16 @@ impl UpdateChannel {
         }
     }
 
-    /// Where the GitHub API names this channel's newest build, and the JSON field that
-    /// holds it: the stable tag, or the commit the `nightly` tag points at.
-    fn latest_source(self) -> (&'static str, &'static str) {
+    /// Where this channel's newest build is named, and the JSON field that holds it: the
+    /// stable version condr.dev serves as plain text to the install scripts, or the
+    /// commit the `nightly` tag points at, from the GitHub API.
+    fn latest_source(self) -> (&'static str, Option<&'static str>) {
         match self {
-            Self::Stable => ("releases/latest", "/tag_name"),
-            Self::Nightly => ("git/ref/tags/nightly", "/object/sha"),
+            Self::Stable => ("https://condr.dev/version.txt", None),
+            Self::Nightly => (
+                "https://api.github.com/repos/condrdev/condr/git/ref/tags/nightly",
+                Some("/object/sha"),
+            ),
         }
     }
 }
@@ -77,13 +80,15 @@ pub(in crate::app) enum UpdateState {
 pub(in crate::app) struct AvailableUpdate {
     /// `Condr 0.2.0`, or `Nightly 1a2b3c4d5e6f`.
     pub(in crate::app) name: SharedString,
-    /// Its release page, where the person picks a package.
+    /// Where the person picks a package: condr.dev's download page for stable, which
+    /// always offers the latest release, or the nightly release page.
     pub(in crate::app) url: SharedString,
 }
 
-/// Whether `latest`, the channel's newest build as GitHub names it, is newer than this
-/// build: a higher version on stable, any other commit on nightly. A build without a
-/// commit (a local `cargo build`) therefore always sees the nightly as newer.
+/// Whether `latest`, the channel's newest build (a version on stable, a commit on
+/// nightly), is newer than this build: a higher version on stable, any other commit on
+/// nightly. A build without a commit (a local `cargo build`) therefore always sees the
+/// nightly as newer.
 fn available_update(
     channel: UpdateChannel,
     latest: &str,
@@ -91,15 +96,12 @@ fn available_update(
     this_commit: Option<&str>,
 ) -> Option<AvailableUpdate> {
     match channel {
-        UpdateChannel::Stable => {
-            let version = latest.strip_prefix('v').unwrap_or(latest);
-            (condr_core::compare_builds(this_build, version) == BuildComparison::OtherNewer).then(
-                || AvailableUpdate {
-                    name: format!("Condr {version}").into(),
-                    url: format!("{REPOSITORY_URL}/releases/tag/{latest}").into(),
-                },
-            )
-        }
+        UpdateChannel::Stable => (condr_core::compare_builds(this_build, latest)
+            == BuildComparison::OtherNewer)
+            .then(|| AvailableUpdate {
+                name: format!("Condr {latest}").into(),
+                url: "https://condr.dev/download/".into(),
+            }),
         UpdateChannel::Nightly => (this_commit != Some(latest)).then(|| AvailableUpdate {
             name: format!("Nightly {}", latest.get(..12).unwrap_or(latest)).into(),
             url: format!("{REPOSITORY_URL}/releases/tag/nightly").into(),
@@ -126,21 +128,27 @@ pub(super) fn install_http_client(cx: &mut App) {
     .detach();
 }
 
+/// The version in a plain-text answer. Only `1.2.3` counts: a captive portal or a proxy's
+/// error page answers 200 too.
+fn plain_version(body: &[u8]) -> Option<String> {
+    let version = std::str::from_utf8(body).ok()?.trim();
+    (version.split('.').count() == 3 && version.split('.').all(|part| part.parse::<u64>().is_ok()))
+        .then(|| version.to_owned())
+}
+
+/// Reads `field` from the JSON at `url`, or without a field the version `url` answers
+/// as plain text.
 async fn fetch_latest(
     client: Arc<dyn HttpClient>,
-    path: &str,
-    field: &str,
+    url: &str,
+    field: Option<&str>,
 ) -> Result<String, String> {
     let mut response = client
-        .get(
-            &format!("{REPOSITORY_API}/{path}"),
-            AsyncBody::empty(),
-            true,
-        )
+        .get(url, AsyncBody::empty(), true)
         .await
         .map_err(|error| error.to_string())?;
     if !response.status().is_success() {
-        return Err(format!("GitHub answered {}", response.status()));
+        return Err(format!("{url} answered {}", response.status()));
     }
     let mut body = Vec::new();
     response
@@ -148,12 +156,15 @@ async fn fetch_latest(
         .read_to_end(&mut body)
         .await
         .map_err(|error| error.to_string())?;
+    let Some(field) = field else {
+        return plain_version(&body).ok_or_else(|| format!("no version in {url}'s answer"));
+    };
     let json: serde_json::Value =
         serde_json::from_slice(&body).map_err(|error| error.to_string())?;
     json.pointer(field)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
-        .ok_or_else(|| format!("no {field} in GitHub's answer"))
+        .ok_or_else(|| format!("no {field} in {url}'s answer"))
 }
 
 /// Owns the update preferences, result, acknowledgement and repeating check task.
@@ -259,7 +270,7 @@ impl UpdateCheck {
     /// its failure, and the next one retries.
     fn check(&mut self, manual: bool, cx: &mut Context<Condr>) -> Task<()> {
         let channel = self.channel;
-        let (path, field) = channel.latest_source();
+        let (url, field) = channel.latest_source();
         if manual {
             self.checking = true;
         }
@@ -267,7 +278,7 @@ impl UpdateCheck {
             let client = cx.update(|cx| cx.http_client());
             let latest = cx
                 .background_executor()
-                .spawn(fetch_latest(client, path, field))
+                .spawn(fetch_latest(client, url, field))
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if let Err(error) = this.updates.finish(channel, latest, manual) {
@@ -342,22 +353,30 @@ impl Condr {
 
 #[cfg(test)]
 mod tests {
-    use super::{AvailableUpdate, UpdateChannel, available_update};
+    use super::{AvailableUpdate, UpdateChannel, available_update, plain_version};
+
+    #[test]
+    fn stable_reads_only_a_bare_version() {
+        assert_eq!(plain_version(b"0.2.0\n").as_deref(), Some("0.2.0"));
+        assert_eq!(plain_version(b"<html>Access denied</html>"), None);
+        assert_eq!(plain_version(b"0.2"), None);
+        assert_eq!(plain_version(b"v0.2.0"), None);
+    }
 
     #[test]
     fn stable_offers_only_a_higher_version() {
         let offer = |latest, this| available_update(UpdateChannel::Stable, latest, this, None);
         assert_eq!(
-            offer("v0.2.0", "0.1.0+1a2b3c4d5e6f"),
+            offer("0.2.0", "0.1.0+1a2b3c4d5e6f"),
             Some(AvailableUpdate {
                 name: "Condr 0.2.0".into(),
-                url: "https://github.com/condrdev/condr/releases/tag/v0.2.0".into(),
+                url: "https://condr.dev/download/".into(),
             })
         );
-        assert_eq!(offer("v0.1.0", "0.1.0"), None);
+        assert_eq!(offer("0.1.0", "0.1.0"), None);
         // A nightly of the released version is not older than the release.
-        assert_eq!(offer("v0.1.0", "0.1.0+1a2b3c4d5e6f"), None);
-        assert_eq!(offer("v0.1.0", "0.2.0"), None);
+        assert_eq!(offer("0.1.0", "0.1.0+1a2b3c4d5e6f"), None);
+        assert_eq!(offer("0.1.0", "0.2.0"), None);
     }
 
     #[test]

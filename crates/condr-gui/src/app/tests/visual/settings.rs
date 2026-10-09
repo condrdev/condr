@@ -1108,7 +1108,7 @@ fn only_the_check_button_reports_a_failed_update_check() {
         cx.set_http_client(FakeHttpClient::create(|_| async {
             Ok(Response::builder()
                 .status(200)
-                .body(r#"{"tag_name":"v99.0.0"}"#.into())
+                .body("99.0.0\n".into())
                 .unwrap())
         }))
     });
@@ -1145,7 +1145,7 @@ fn a_found_update_opens_settings_on_about_once() {
         cx.set_http_client(FakeHttpClient::create(|_| async {
             Ok(Response::builder()
                 .status(200)
-                .body(r#"{"tag_name":"v99.0.0"}"#.into())
+                .body("99.0.0\n".into())
                 .unwrap())
         }))
     });

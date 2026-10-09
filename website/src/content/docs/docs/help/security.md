@@ -18,11 +18,12 @@ Use this page to judge whether a Device is suitable for running Condr, and to se
 
 ## Network services Condr contacts
 
-Condr has no user accounts and collects no telemetry. It contacts only these three external services:
+Condr has no user accounts and collects no telemetry. It contacts only these four external services:
 
 | Service | When | Purpose |
 | :--- | :--- | :--- |
-| `api.github.com` | 5 seconds after the window starts, then every 5 hours | Checks for updates. Turn automatic checks off under **Settings › Application › About**, or set `[client.updates] auto_check = false` |
+| `condr.dev` | 5 seconds after the window starts, then every 5 hours, on the stable channel | Checks for updates. Turn automatic checks off under **Settings › Application › About**, or set `[client.updates] auto_check = false` |
+| `api.github.com` | The same, on the nightly channel | Checks for updates, as above |
 | `relay.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Helps with NAT hole punching, and relays encrypted traffic when a direct connection cannot be established |
 | `dns.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Publishes and looks up the relay address each Device currently uses |
 

@@ -152,6 +152,7 @@ Condr 以纯非交互模式执行底层 `ssh` 进程，期间无法提供交互�
 * **Windows SmartScreen 拦截提示**：点击弹窗中的 **更多信息** → **仍要运行**。预览版本安装二进制尚未集成机构代码签名证书。
 * **Linux AppImage 缺少依赖无法启动**：AppImage 打包规范强依赖 FUSE 用户态文件系统支持。若运行环境缺失 FUSE，需追加 `--appimage-extract-and-run` 参数启动程序。
 * **重复执行启动无任何窗口弹出**：Condr 强制实施单实例互斥锁，多余的派生实例将静默退出，不会唤醒当前已存在的窗口句柄。请检索系统任务栏或其余虚拟桌面确认主实例是否已在后台运行。
+* **代理环境下检查更新失败**：检查更新经 `HTTPS_PROXY` 发出，stable 通道访问 `condr.dev`，nightly 通道访问 `api.github.com`。若代理拦截 GitHub，只有 stable 通道能检查。
 * **Windows Pane 运行异常报错 448**：例如 pnpm 工具链抛出 `untrusted mount point`。此问题系 Server 继承了其父进程的 Redirection Guard 隔离限制，并下发至内部所有子 Pane 进程。请妥善保存 Pane 中的当前改动，随后于外部标准系统终端中运行 `condr server restart`，使 Server 在不受限的上下文环境中重新生成。
 
 ---

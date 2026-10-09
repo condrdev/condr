@@ -18,11 +18,12 @@ description: Condr 默认对外开放什么、每种连接方式信任谁、配�
 
 ## Condr 访问的网络服务
 
-Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访问以下三个外部服务：
+Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访问以下四个外部服务：
 
 | 服务地址 | 触发条件 | 用途说明 |
 | :--- | :--- | :--- |
-| `api.github.com` | 窗口启动 5 秒后首次请求，其后每 5 小时轮询一次 | 检查版本更新。可在 **Settings › Application › About** 中关闭自动检查，或设置 `[client.updates] auto_check = false` |
+| `condr.dev` | stable 通道：窗口启动 5 秒后首次请求，其后每 5 小时轮询一次 | 检查版本更新。可在 **Settings › Application › About** 中关闭自动检查，或设置 `[client.updates] auto_check = false` |
+| `api.github.com` | nightly 通道：同上 | 检查版本更新，同上 |
 | `relay.condr.dev` | Server 启用了 Peer-to-peer，或本机主动发起 `p2p://` 连接 | 辅助 NAT 打洞；在直连建立失败时中继加密流量 |
 | `dns.condr.dev` | Server 启用了 Peer-to-peer，或本机主动发起 `p2p://` 连接 | 发布并查询各设备当前使用的中继地址 |
 

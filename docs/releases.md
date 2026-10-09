@@ -41,7 +41,7 @@ The macOS job imports the certificate into a temporary keychain, reads the ident
 
 ## Installing a build
 
-Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use `script/install-condr.sh` / `.ps1`, which condr.dev serves as `install.sh` / `install.ps1`: the script picks the headless archive for the current machine from GitHub Releases, verifies it against `SHA256SUMS`, and runs `condr server install` with any remaining arguments (ADR 0016). Asked for nothing else, it first compares the installed `condr --version` with `condr.dev/version.txt` (the Cargo.toml version the site was built from, redeployed by `release.yml`) and stops without downloading when that release is already installed; `--force` reinstalls.
+Desktop users download the installer from [Releases](https://github.com/condrdev/condr/releases). Headless servers use `script/install-condr.sh` / `.ps1`, which condr.dev serves as `install.sh` / `install.ps1`: the script picks the headless archive for the current machine from GitHub Releases, verifies it against `SHA256SUMS`, and runs `condr server install` with any remaining arguments (ADR 0016). Asked for nothing else, it first compares the installed `condr --version` with `condr.dev/version.txt` (the Cargo.toml version the site was built from, redeployed by `release.yml`; the GUI's stable update check reads it too) and stops without downloading when that release is already installed; `--force` reinstalls.
 
 ```bash
 curl -fsSL https://condr.dev/install.sh | sh                          # the latest release

@@ -152,6 +152,7 @@ Condr runs `ssh` in fully non-interactive mode, so it cannot show a password pro
 * **Windows SmartScreen blocks the installer**: click **More info** → **Run anyway**. Preview installers are not code-signed yet.
 * **The Linux AppImage does not start**: AppImages need FUSE. Without FUSE, add the `--appimage-extract-and-run` argument when you run it.
 * **Launching again shows no window**: Condr allows only one instance. Extra instances exit silently and do not bring the existing window forward. Check the taskbar or other virtual desktops for a running Condr window.
+* **The update check fails behind a proxy**: the check goes through `HTTPS_PROXY`, to `condr.dev` on the stable channel and to `api.github.com` on the nightly channel. When the proxy blocks GitHub, only the stable channel can be checked.
 * **Error 448 in a Pane on Windows**: for example, pnpm reports `untrusted mount point`. The Server inherited the Redirection Guard restriction from its parent process and passed it on to every Pane process. Save your work in the Panes, then run `condr server restart` in a regular system terminal so the Server starts again in an unrestricted environment.
 
 ---
