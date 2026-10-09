@@ -413,7 +413,7 @@ impl Render for TerminalPanel {
                                             Tooltip::new("Terminal bell").build(window, cx)
                                         })
                                         .child(
-                                            super::sidebar::SidebarGlyph::CircleAlert
+                                            super::sidebar::SidebarGlyph::Bell
                                                 .icon()
                                                 .xsmall()
                                                 .text_color(cx.theme().warning),

@@ -97,7 +97,7 @@ pub(in crate::app) enum SidebarGlyph {
     Info,
     Circle,
     CircleFilled,
-    CircleAlert,
+    Bell,
 }
 
 impl SidebarGlyph {
@@ -106,7 +106,7 @@ impl SidebarGlyph {
             Self::Info => Icon::new(IconName::Info),
             Self::Circle => Icon::new(CondrIconName::Circle),
             Self::CircleFilled => Icon::new(CondrIconName::CircleFilled),
-            Self::CircleAlert => Icon::new(CondrIconName::CircleAlert),
+            Self::Bell => Icon::new(IconName::Bell),
         }
     }
 }
@@ -121,14 +121,14 @@ pub(in crate::app) struct SidebarStatusVisual {
 
 /// Overrides the agent state while a BEL from this Pane is unseen.
 pub(in crate::app) const BELL_SIDEBAR_STATUS: SidebarStatusVisual = SidebarStatusVisual {
-    glyph: SidebarGlyph::CircleAlert,
+    glyph: SidebarGlyph::Bell,
     tone: SidebarIconTone::Warning,
     key: "bell",
     label: "Bell",
 };
 
 /// A state at badge size: a glyph is a smudge here, so it is a plain dot in the tone's
-/// color. Only the bell keeps its alert glyph, which a dot could not say, and an unknown
+/// color. Only the bell keeps its glyph, which a dot could not say, and an unknown
 /// state shows nothing.
 pub(in crate::app) fn status_badge(
     glyph: SidebarGlyph,
@@ -137,7 +137,7 @@ pub(in crate::app) fn status_badge(
 ) -> Option<AnyElement> {
     match glyph {
         SidebarGlyph::Info => None,
-        SidebarGlyph::CircleAlert => Some(
+        SidebarGlyph::Bell => Some(
             glyph
                 .icon()
                 .size_2()
