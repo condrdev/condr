@@ -545,10 +545,18 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !closes_workspace {
+        let prompt = if closes_workspace {
+            Some((
+                "Close Workspace?",
+                "The workspace terminals will be stopped. Files are not deleted.".to_owned(),
+            ))
+        } else {
+            self.agents_closed_by(key, &command)
+        };
+        let Some((title, description)) = prompt else {
             self.send_layout_to(key, command);
             return;
-        }
+        };
         let owner = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             window.open_alert_dialog(cx, move |alert, _, _| {
@@ -556,8 +564,8 @@ impl Condr {
                 let command = command.clone();
                 alert
                     .confirm()
-                    .title("Close Workspace?")
-                    .description("The workspace terminals will be stopped. Files are not deleted.")
+                    .title(title)
+                    .description(description.clone())
                     .on_ok(move |_, _, cx| {
                         let _ =
                             owner.update(cx, |this, _| this.send_layout_to(key, command.clone()));
@@ -565,5 +573,45 @@ impl Condr {
                     })
             });
         });
+    }
+
+    /// The confirmation a Pane or Tab close needs because it would stop a running agent.
+    fn agents_closed_by(
+        &self,
+        key: ConnectionKey,
+        command: &LayoutCommand,
+    ) -> Option<(&'static str, String)> {
+        let connection = self.connection(key)?;
+        let (title, place, panes) = match *command {
+            LayoutCommand::ClosePane { pane_id } => ("Close Pane?", "Pane", vec![pane_id]),
+            LayoutCommand::CloseTab { tab_id } => (
+                "Close Tab?",
+                "Tab",
+                connection
+                    .session()?
+                    .tab(tab_id)?
+                    .panes()
+                    .iter()
+                    .map(|pane| pane.id())
+                    .collect(),
+            ),
+            _ => return None,
+        };
+        let agents: Vec<_> = panes
+            .iter()
+            .filter_map(|pane_id| connection.agents.get(pane_id))
+            .collect();
+        let description = match agents.as_slice() {
+            [] => return None,
+            [agent] => format!(
+                "{} is running in this {place} and will be stopped.",
+                agent.kind.label()
+            ),
+            agents => format!(
+                "{} agents are running in this {place} and will be stopped.",
+                agents.len()
+            ),
+        };
+        Some((title, description))
     }
 }

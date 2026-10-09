@@ -986,3 +986,106 @@ fn a_tab_strip_wider_than_its_slot_scrolls_and_keeps_open_in_in_place() {
         "the first Tab has scrolled out on the left: {first:?} in {tabs:?}"
     );
 }
+
+#[test]
+fn closing_a_pane_with_a_running_agent_asks_first() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut first = None;
+    assert!(wait_until(window, |window| {
+        first = window.read(|app| {
+            let tab = view
+                .read(app)
+                .active_session()?
+                .workspaces()
+                .first()?
+                .tabs()
+                .first()?;
+            Some((tab.id(), tab.focused_pane()?.id()))
+        });
+        first.is_some()
+    }));
+    let (tab_id, first_pane) = first.unwrap();
+    // A second Pane, so closing one does not take the Workspace (which always asks).
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::SplitPane {
+                focus: true,
+                pane_id: first_pane,
+                direction: SplitDirection::Horizontal,
+            });
+        });
+    });
+    let pane_count = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .and_then(|session| session.tab(tab_id))
+                .map_or(0, |tab| tab.panes().len())
+        })
+    };
+    assert!(wait_until(window, |window| pane_count(window) == 2));
+    let agent_pane = window.read(|app| {
+        let tab = view
+            .read(app)
+            .active_session()
+            .unwrap()
+            .tab(tab_id)
+            .unwrap();
+        tab.focused_pane().unwrap().id()
+    });
+    let close_focused = |window: &mut VisualTestContext| {
+        window.update(|window, cx| view.update(cx, |this, cx| this.close_pane(window, cx)));
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+
+    // Seeded straight into the map: a forged AgentChanged would advance the event
+    // sequence past the Server's, and the close that follows would then be dropped.
+    let set_agent = |window: &mut VisualTestContext, agent: Option<AgentSnapshot>| {
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                let agents = &mut this.connection_mut(1).unwrap().agents;
+                match agent {
+                    Some(agent) => agents.insert(agent_pane, agent),
+                    None => agents.remove(&agent_pane),
+                };
+            })
+        });
+    };
+    set_agent(
+        window,
+        Some(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Codex,
+            state: AgentState::Working,
+            blocked_on: None,
+        }),
+    );
+    close_focused(window);
+    assert!(
+        window.update(|window, cx| window.has_active_dialog(cx)),
+        "closing a Pane with a running agent must ask first"
+    );
+    window.update(|window, cx| window.close_dialog(cx));
+    window.run_until_parked();
+    assert_eq!(pane_count(window), 2, "cancelling keeps the Pane");
+
+    set_agent(window, None);
+    close_focused(window);
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    assert!(
+        wait_until(window, |window| pane_count(window) == 1),
+        "a Pane without an agent closes at once"
+    );
+}
