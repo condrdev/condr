@@ -525,7 +525,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .and_then(|connection| connection.agents.get(&agent_pane))
+                .and_then(|connection| connection.model.agents.get(&agent_pane))
                 .is_some_and(|agent| agent.state == condr_core::AgentState::Working)
         })
     });
@@ -548,7 +548,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .and_then(|connection| connection.agent_trackers.get(&agent_pane))
+                .and_then(|connection| connection.model.agent_trackers.get(&agent_pane))
                 .is_some_and(|tracker| tracker.display_state().label() == "done")
         })
     }));
@@ -584,6 +584,7 @@ fn detected_agent_sidebar_item_activates_its_real_pty_pane() {
             view.read(app)
                 .connection(1)
                 .unwrap()
+                .model
                 .agent_trackers
                 .get(&agent_pane)
                 .unwrap()

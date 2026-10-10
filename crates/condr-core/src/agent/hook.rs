@@ -171,6 +171,7 @@ impl HookInput {
 
 #[cfg(all(test, feature = "runtime"))]
 mod tests {
+    #[cfg(unix)]
     use super::report::Ancestors;
     use super::*;
     use crate::agent::AgentEvent;
