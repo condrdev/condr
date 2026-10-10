@@ -77,7 +77,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 **已定**：
 
 - 两端 UI 都用原生开发。
-- 客户端逻辑只有一份 Rust 实现，经 uniffi 生成 Swift 与 Kotlin 绑定。iroh、Noise 和 Condr 协议编进同一个库，每个平台只链接这一个库，所以不用 iroh 官方的 Swift 与 Kotlin 绑定：iOS 上链接两个各自构建的 Rust 静态库，会因标准库和分配器符号重复而失败。
+- 客户端逻辑只有一份 Rust 实现，经 uniffi 生成 Swift 与 Kotlin 绑定。iroh、Noise 和 Condr 协议编进同一个库，每个平台只链接这一个库，所以不用 iroh 官方的 Swift 与 Kotlin 绑定：同一工具链构建的两个 Rust 静态库会因标准库和分配器的内部符号重复而链接失败，两个 uniffi framework 还会在 `RustBuffer` 上冲突（ADR 0039）。
 - 手机支持 `p2p://` 与 `tcp://`，和桌面共用同一份连接与握手代码。
 - 推送要自建中转。原生 App 的推送经 APNs 和 FCM，它们的凭据只能放在 Condr 运营的服务端，不能放进每个用户的 Server。
 - 推送正文带 `blocked_on`，由 Server 用手机的设备公钥加密，中转、苹果和谷歌都看不到。这把公钥 Server 在配对时已经记进 `authorized-clients`，不需要另外约定密钥；手机端解密需要读到 device key，iOS 上 Notification Service Extension 要和 App 共享它。
@@ -85,15 +85,12 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **做到哪**（按顺序）：
 
-1. 写 ADR，定下这些问题：
-   - 客户端库的边界：`ClientConnection` 和设备密钥在 `condr-server` 里，协议和领域类型在 `condr-core` 里，和 PTY、VT、Git 同在一个 crate。手机库只该带协议、密钥和连接，所以要先把它们拆出来，或者用 feature 隔开。
-   - 手机的 Peer-to-peer 端点：App 自己绑定 iroh endpoint，直接拨 Server，不经 `Tunnel`。这仍符合 ADR 0025「一个 key 只在一个 endpoint 上」，因为 App 是手机上唯一使用这把 key 的进程；iOS 的 Notification Service Extension 只负责解密，不能再绑定 endpoint。
-   - 手机能做哪几个动作，至少要回答能不能给 Blocked 的 Agent 输入回复。
-2. 客户端库：拆出的 crate 加上 uniffi 绑定，产出 xcframework 与 AAR，CI 增加 iOS 与 Android 目标；按 ADR 0028 的预留，在 `Hello` 里加帧率上限、视口等 Client 提示。
+1. ADR：0039 定客户端库的边界（`condr-core` 的 `runtime` feature、`condr-client`、`condr-mobile` 与 `mobile/` 目录），0040 定手机自己绑定 iroh endpoint、配对、前后台和密钥存放，0041 定手机在 Pane 里是又一个窗口：和桌面一样输入、滚动、选择并接管终端尺寸，不改 Session 结构。
+2. 客户端库：按 ADR 0039 拆出 crate 并加上 uniffi 绑定，产出 xcframework 与 AAR，CI 增加 iOS 与 Android 目标；按 ADR 0041 加 `WatchTerminals`，帧率上限和视口提示等实测后再定。
 3. 配对与连接：桌面 Settings 的 Invite 把链接显示成二维码，手机扫码配对，Server 照常记进 `authorized-clients`。走 Peer-to-peer 的 Server 要开启 `[server.p2p] enabled`，配对引导要提示这一步。App 只在前台保持连接，回到前台时重连并重新 Bootstrap；后台全靠推送。
-4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、只读的终端视图。
+4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、Pane 的终端视图（打开时接管尺寸）。
 5. 推送：中转上线，按客户端限速，并在 SECURITY.md 写明它保存配对关系和推送 token、看不到通知内容；Agent 完成或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。
-6. 少量动作：按第 1 步的 ADR 实现。
+6. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
 
 **要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连。
 

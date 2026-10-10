@@ -17,3 +17,5 @@ This narrows the boundary ADR 0022 drew when it declined federation because "a S
 Two alternatives were declined. Keeping two keys per machine and sharing `client-key` between GUI and CLI fails as described: one `condr --device` call while the GUI is connected breaks the GUI's relayed path. A key per process, with the machine key signing per-process certificates that a remote Server verifies, is a certificate scheme invented only to avoid routing through the local Server, and it would change the authorized-list model for every transport.
 
 > ADR 0033 moves the identity directory from beside `config.toml` to the data directory; the first process that needs the key after the update moves the files, so the key and every pairing stay.
+
+> ADR 0040 adds the Companion, a phone app that runs no Server and binds its own iroh endpoint. It is the only process on its phone that holds the key, so the rule of one endpoint per key stands.

@@ -13,3 +13,5 @@ Three alternatives were declined. Federation, where the local Server proxies oth
 ADR 0011 and 0015 still describe how a TCP and an SSH connection are made; this ADR only lets the CLI make them. ADR 0013's boundary stands: a Server never speaks for another. Authorization is unchanged, so a CLI that reaches a Device has the same rights as the GUI that paired it; the `observe`/`control` split remains future work. Cross-Device Workspace migration, task queues and schedulers are out of scope.
 
 > ADR 0025 narrows this boundary: the local Server is its machine's Peer-to-peer Endpoint and forwards bytes for the GUI and CLI over `Tunnel`, holding no credential but the machine's own key and owning no remote Session.
+
+> ADR 0039 moves the parsing and dialling of `tcp://` and `p2p://` addresses and the Device key into a new `condr-client` crate, which `condr-server` and the Companion's library both use; `condr-core` still keeps no notion of a remote machine.

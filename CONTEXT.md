@@ -15,7 +15,7 @@ Which published builds the GUI's update check follows (ADR 0029): `stable`, the 
 _Avoid_: release track, update ring
 
 **Device**:
-A machine running Condr, identified by its one persistent key, `device-key` in the data directory (ADR 0025, ADR 0033). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. Device is the interface's name for a whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. The Device key is also this machine's Peer-to-peer endpoint, so one pairing is honored over TCP and Peer-to-peer alike (ADR 0026). A Device reaching a Server over TCP or Peer-to-peer is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no pairing.
+A machine running Condr, identified by its one persistent key: `device-key` in the data directory on a computer (ADR 0025, ADR 0033), the platform's secure storage on a phone (ADR 0040). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. A computer's Device runs a Server, and Device is the interface's name for the whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. A phone running the Companion is a Device without a Server: it is paired like any other and appears under Paired devices, never in the sidebar. The Device key is also this machine's Peer-to-peer endpoint, so one pairing is honored over TCP and Peer-to-peer alike (ADR 0026). A Device reaching a Server over TCP or Peer-to-peer is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no pairing.
 
 **Invite**:
 A one-time secret that `condr server invite` creates for ten minutes, independent of connection method. Pasted into Connect Remote Device with the Server's Device key, as `tcp://<id>.<invite>@host:port` or a `p2p://<id>.<invite>` link, it lets one unknown Device complete the handshake and become authorized over either transport; it is never stored by the Client.
@@ -30,8 +30,12 @@ A Condr-hosted service that helps Peer-to-peer connections hole-punch and forwar
 _Avoid_: proxy, gateway
 
 **Client**:
-The GUI or CLI connecting to a Server to inspect or change its Sessions. The native GUI can present several Servers; the CLI reaches one per call, its own Pane's Server by default or a saved Device named with `--device` (ADR 0022); neither Client owns Terminal processes.
+The GUI, the CLI or the Companion connecting to a Server to inspect or change its Sessions. The native GUI and the Companion can present several Servers; the CLI reaches one per call, its own Pane's Server by default or a saved Device named with `--device` (ADR 0022); no Client owns Terminal processes.
 _Avoid_: Server, runtime owner
+
+**Companion**:
+Condr's iOS and Android app (ADR 0039, ADR 0040, ADR 0041): a Client, and a Device without a Server. Paired through an Invite and connected only while in the foreground, it shows every paired Device's Workspaces, Agents and "Needs you"; inside a Pane it is one more window, sizing the terminal it shows. It changes no Session structure. Companion is an engineering term: the interface names the phone by the name given at pairing.
+_Avoid_: mobile client, mobile app (as a name)
 
 **Session**:
 A Server-owned working arrangement containing zero or more Workspaces, their Tabs and Pane layouts, including Pane focus. Each Client owns its View (ADR 0021). It is not an agent conversation.
@@ -96,6 +100,14 @@ The interactive command-line environment presented by a Pane. A Terminal remains
 **Agent**:
 A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`) comes only from hooks Condr installed into that CLI, delivered in-band as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed. A `Blocked` Agent may carry `blocked_on`, what its hook said it waits for (a tool and command, or a question), cleared with the state (ADR 0024).
 _Avoid_: Pane
+
+**Done**:
+How a Client shows an Agent that went `Idle` after `Working` or `Blocked` while that Client was not showing its Pane (ADR 0014). It is presentation, not a wire state, and each Client keeps its own, so an Agent watched finishing on the desktop is still Done on the phone.
+_Avoid_: Finished, Completed (as states)
+
+**Needs you**:
+The list of every `Blocked` Agent on every connected Device, with its `blocked_on`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything.
+_Avoid_: inbox, queue
 
 **Agent Conversation**:
 A conversation owned and stored by a native Agent CLI, identified by that CLI’s session ID. A Pane retains a reference to its running Agent Conversation so a replacement Server can reopen it.
