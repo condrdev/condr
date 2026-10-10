@@ -1,6 +1,80 @@
-//! Noise handshake and encrypted, bounded transport records.
+//! Authentication and encryption for TCP connections, modelled on WireGuard (ADR 0011).
+//!
+//! Each Device holds one persistent Ed25519 key (ADR 0025); the X25519 static key Noise
+//! speaks with is derived from it. A connection is one
+//! `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s` handshake: the Client already knows the Server's
+//! key, sends its own static key encrypted in the first message together with the Ed25519
+//! key it derives from, and the Server only answers peers it recognises by that Ed25519 key
+//! after checking the two agree. An authorized peer uses the all-zero pre-shared key, as an
+//! unconfigured WireGuard peer does. Pairing a new device uses a one-time, short-lived invite
+//! secret as that pre-shared key instead; the Server records the device's public key once the
+//! first transport message proves the Client held the secret.
+//!
+//! After the handshake every byte of the ordinary framed protocol travels inside Noise
+//! transport records of at most 64 KiB (`u16` big-endian length, then ciphertext).
 
-use super::*;
+use crate::{DeviceKey, PublicKey, Secret};
+use snow::{HandshakeState, TransportState};
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
+
+/// What the side that accepts a TCP or Peer-to-peer connection asks of the Server it runs
+/// in (ADR 0039): its own key, and its store of paired Devices. `condr-server` keeps that
+/// store in its identity directory; a Client, which only dials, answers with its key alone.
+pub trait Authority: Send + Sync {
+    /// The key this side answers with.
+    fn device_key(&self) -> io::Result<DeviceKey>;
+    /// Whether `device` is paired, as of the store right now.
+    fn is_authorized(&self, device: &PublicKey) -> io::Result<bool>;
+    /// The invite an unknown Device may redeem, while one is waiting.
+    fn pending_invite(&self) -> io::Result<Option<Secret>>;
+    /// Records `device` as paired under `name`, provided `invite` is still the pending
+    /// one: the first device to finish wins, and a stale invite cannot consume a newer one.
+    fn complete_pairing(&self, device: PublicKey, name: &str, invite: &Secret) -> io::Result<()>;
+    /// Notes that `device` connected now.
+    fn record_seen(&self, device: &PublicKey) -> io::Result<()>;
+}
+
+/// A key alone authorizes no one: what a Client that only dials hands its endpoint.
+impl Authority for DeviceKey {
+    fn device_key(&self) -> io::Result<DeviceKey> {
+        Ok(self.clone())
+    }
+
+    fn is_authorized(&self, _: &PublicKey) -> io::Result<bool> {
+        Ok(false)
+    }
+
+    fn pending_invite(&self) -> io::Result<Option<Secret>> {
+        Ok(None)
+    }
+
+    fn complete_pairing(&self, _: PublicKey, _: &str, _: &Secret) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this device cannot pair devices",
+        ))
+    }
+
+    fn record_seen(&self, _: &PublicKey) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The pre-shared key to answer `remote` with: the zero key for an authorized device, or
+/// the pending invite for an unknown one, which it then redeems. `None` refuses the peer.
+fn psk_for(
+    authority: &dyn Authority,
+    remote: &PublicKey,
+) -> io::Result<Option<(Secret, Option<Secret>)>> {
+    if authority.is_authorized(remote)? {
+        return Ok(Some((Secret::from_bytes([0; 32]), None)));
+    }
+    Ok(authority
+        .pending_invite()?
+        .map(|invite| (invite.clone(), Some(invite))))
+}
 
 const NOISE_PATTERN: &str = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
 
@@ -36,7 +110,7 @@ enum Noise {
     },
     Responder {
         handshake: Box<HandshakeState>,
-        identity: Arc<ServerIdentity>,
+        authority: Arc<dyn Authority>,
     },
     Transport {
         transport: Box<TransportState>,
@@ -44,7 +118,7 @@ enum Noise {
         /// Server side.
         remote: PublicKey,
         /// Set on the Server side, so a connection knows whether its peer is the host.
-        identity: Option<Arc<ServerIdentity>>,
+        authority: Option<Arc<dyn Authority>>,
         /// The invite the peer is redeeming, until the pairing is recorded.
         pairing: Option<Secret>,
         /// Whether a transport message from the peer has decrypted yet.
@@ -62,7 +136,7 @@ impl NoiseStream {
         client_key: &DeviceKey,
         invite: Option<&Secret>,
     ) -> io::Result<Self> {
-        let psk = invite.map_or([0; 32], |invite| invite.0);
+        let psk = invite.map_or([0; 32], |invite| *invite.as_bytes());
         let server_static = server_key
             .montgomery()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid Server key"))?;
@@ -83,16 +157,17 @@ impl NoiseStream {
     }
 
     /// The Server side; the handshake runs on first use, not on accept.
-    pub fn responder(socket: TcpStream, identity: Arc<ServerIdentity>) -> io::Result<Self> {
+    pub fn responder(socket: TcpStream, authority: Arc<dyn Authority>) -> io::Result<Self> {
+        let key = authority.device_key()?;
         let handshake = builder()?
-            .local_private_key(identity.key.noise_private())
+            .local_private_key(key.noise_private())
             .and_then(|builder| builder.build_responder())
             .map_err(noise_error)?;
         Ok(Self::new(
             socket,
             Noise::Responder {
                 handshake: Box::new(handshake),
-                identity,
+                authority,
             },
         ))
     }
@@ -130,7 +205,7 @@ impl NoiseStream {
         let mut noise = lock(&noise);
         let Noise::Transport {
             remote,
-            identity,
+            authority,
             pairing,
             verified,
             ..
@@ -138,12 +213,12 @@ impl NoiseStream {
         else {
             return Err(rejected("handshake incomplete"));
         };
-        match (pairing.as_ref(), *verified, identity.as_ref()) {
+        match (pairing.as_ref(), *verified, authority.as_ref()) {
             (None, _, _) => Ok(()),
             (Some(_), false, _) => Err(rejected("invite not yet proven")),
             (Some(_), true, None) => Err(rejected("no Server identity to record the device")),
-            (Some(invite), true, Some(identity)) => {
-                identity.complete_pairing(*remote, name, invite)?;
+            (Some(invite), true, Some(authority)) => {
+                authority.complete_pairing(*remote, name, invite)?;
                 *pairing = None;
                 Ok(())
             }
@@ -156,10 +231,12 @@ impl NoiseStream {
         match &*lock(&self.noise) {
             Noise::Transport {
                 remote,
-                identity: Some(identity),
+                authority: Some(authority),
                 ..
-            } => identity.is_authorized(remote),
-            Noise::Transport { identity: None, .. } => Ok(true),
+            } => authority.is_authorized(remote),
+            Noise::Transport {
+                authority: None, ..
+            } => Ok(true),
             _ => Ok(false),
         }
     }
@@ -169,17 +246,17 @@ impl NoiseStream {
         match &*lock(&self.noise) {
             Noise::Transport {
                 remote,
-                identity: Some(identity),
+                authority: Some(authority),
                 ..
-            } => identity.record_seen(remote),
+            } => authority.record_seen(remote),
             _ => Ok(()),
         }
     }
 
     /// Runs the handshake now instead of on first use; tests use it to hold a
     /// handshaken connection without sending anything.
-    #[cfg(test)]
-    pub(crate) fn handshake(&mut self) -> io::Result<()> {
+    #[doc(hidden)]
+    pub fn handshake(&mut self) -> io::Result<()> {
         self.ensure_transport()
     }
 
@@ -212,7 +289,12 @@ impl NoiseStream {
                 server_key,
                 claim,
             } => {
-                write_handshake(&mut self.socket, &mut handshake, &claim.0, &mut buffer)?;
+                write_handshake(
+                    &mut self.socket,
+                    &mut handshake,
+                    claim.as_bytes(),
+                    &mut buffer,
+                )?;
                 if read_handshake(&mut self.socket, &mut handshake, &mut buffer)?.is_none() {
                     return Err(rejected(
                         "the Server closed the handshake: this device is not authorized \
@@ -224,14 +306,14 @@ impl NoiseStream {
                     .map(|transport| Noise::Transport {
                         transport: Box::new(transport),
                         remote: server_key,
-                        identity: None,
+                        authority: None,
                         pairing: None,
                         verified: true,
                     })
             }
             Noise::Responder {
                 mut handshake,
-                identity,
+                authority,
             } => {
                 let Some(payload) = read_handshake(&mut self.socket, &mut handshake, &mut buffer)?
                 else {
@@ -245,18 +327,18 @@ impl NoiseStream {
                 // must be the one that key derives from, else it could pair a key it
                 // does not own.
                 let remote = <[u8; 32]>::try_from(payload)
-                    .map(PublicKey)
+                    .map(PublicKey::from_bytes)
                     .map_err(|_| rejected("peer sent no device key"))?;
                 if remote.montgomery() != Some(remote_static) {
                     return Err(rejected(format!(
                         "device key {remote} does not match the static key the peer used"
                     )));
                 }
-                let Some((psk, pairing)) = identity.psk_for(&remote)? else {
+                let Some((psk, pairing)) = psk_for(authority.as_ref(), &remote)? else {
                     return Err(rejected(format!("unknown device {remote}")));
                 };
                 handshake
-                    .set_psk(PSK_LOCATION, &psk.0)
+                    .set_psk(PSK_LOCATION, psk.as_bytes())
                     .map_err(noise_error)?;
                 write_handshake(&mut self.socket, &mut handshake, &[], &mut buffer)?;
                 handshake
@@ -264,7 +346,7 @@ impl NoiseStream {
                     .map(|transport| Noise::Transport {
                         transport: Box::new(transport),
                         remote,
-                        identity: Some(identity),
+                        authority: Some(authority),
                         pairing,
                         verified: false,
                     })
@@ -437,12 +519,45 @@ fn noise_error(error: snow::Error) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, format!("Noise: {error}"))
 }
 
+fn rejected(reason: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, reason.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{net::TcpListener, thread};
+
+    /// A Server that knows one paired Device and holds no invite.
+    struct Paired {
+        key: DeviceKey,
+        device: PublicKey,
+    }
+
+    impl Authority for Paired {
+        fn device_key(&self) -> io::Result<DeviceKey> {
+            Ok(self.key.clone())
+        }
+
+        fn is_authorized(&self, device: &PublicKey) -> io::Result<bool> {
+            Ok(*device == self.device)
+        }
+
+        fn pending_invite(&self) -> io::Result<Option<Secret>> {
+            Ok(None)
+        }
+
+        fn complete_pairing(&self, _: PublicKey, _: &str, _: &Secret) -> io::Result<()> {
+            Err(rejected("no invite"))
+        }
+
+        fn record_seen(&self, _: &PublicKey) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     fn pair(
-        identity: &Arc<ServerIdentity>,
+        identity: &Arc<Paired>,
         client: &DeviceKey,
         invite: Option<&Secret>,
     ) -> (NoiseStream, thread::JoinHandle<io::Result<NoiseStream>>) {
@@ -455,14 +570,16 @@ mod tests {
         });
         let socket = TcpStream::connect(address).unwrap();
         let client =
-            NoiseStream::initiator(socket, &identity.public_key(), client, invite).unwrap();
+            NoiseStream::initiator(socket, &identity.key.public(), client, invite).unwrap();
         (client, server)
     }
-    fn identity() -> (Arc<ServerIdentity>, DeviceKey) {
+
+    fn identity() -> (Arc<Paired>, DeviceKey) {
         let client = DeviceKey::generate().unwrap();
-        let identity = ServerIdentity::ephemeral()
-            .unwrap()
-            .with_authorized(client.public());
+        let identity = Paired {
+            key: DeviceKey::generate().unwrap(),
+            device: client.public(),
+        };
         (Arc::new(identity), client)
     }
     /// The static key proves what the peer holds; the Ed25519 key it names must derive

@@ -77,8 +77,8 @@ impl EndpointListener {
                 // Accepted sockets inherit nonblocking mode on Windows. Client handlers use
                 // blocking framed reads, so normalize the stream on every platform.
                 stream.set_nonblocking(false)?;
-                super::enable_keepalive(&stream)?;
-                NoiseStream::responder(stream, Arc::clone(identity)).map(EndpointStream::Tcp)
+                condr_client::enable_keepalive(&stream)?;
+                NoiseStream::responder(stream, identity.clone()).map(EndpointStream::Tcp)
             }
         }
     }

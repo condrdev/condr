@@ -1,0 +1,28 @@
+[package]
+name = "condr-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# What a Client does with a Server short of drawing it (ADR 0039): the Device key, both
+# ends of the TCP and Peer-to-peer transports, and the connection the GUI, the CLI and the
+# Companion share. It builds without `condr-core`'s runtime, for iOS and Android too.
+[dependencies]
+base64.workspace = true
+condr-core = { path = "../condr-core", default-features = false }
+curve25519-dalek.workspace = true
+getrandom.workspace = true
+hyper-util.workspace = true
+iroh.workspace = true
+sha2.workspace = true
+snow.workspace = true
+socket2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/condr-core", "crates/condr-server", "crates/condr-gui"]
+members = ["crates/condr-core", "crates/condr-client", "crates/condr-server", "crates/condr-gui"]
 resolver = "2"
 
 [workspace.package]
@@ -96,6 +96,7 @@ gpui-kit = { opt-level = 3 }
 onig_sys = { opt-level = 3 }
 syntect = { opt-level = 3 }
 condr-core = { opt-level = 2 }
+condr-client = { opt-level = 2 }
 condr-gui = { opt-level = 2 }
 condr-server = { opt-level = 2 }
 rustybuzz = { opt-level = 3 }

@@ -2,7 +2,7 @@ mod local;
 mod saved;
 mod stream;
 
-use crate::noise::{DeviceKey, NoiseStream, PublicKey, Secret, ServerIdentity};
+use crate::noise::{DeviceKey, NoiseStream, ServerIdentity};
 use crate::ssh::{SshEndpoint, SshStream};
 #[cfg(windows)]
 use atomicwrites::{AtomicFile, DisallowOverwrite};
@@ -11,13 +11,14 @@ use local::{LocalStream, connect_local};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 #[cfg(windows)]
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+pub use condr_client::{P2pEndpoint, TcpEndpoint};
 pub(crate) use local::acquire_local_bind_lock;
 pub use local::{EndpointListener, default_socket_path};
 pub use saved::{SavedServer, load_saved_servers, save_saved_servers};
@@ -29,156 +30,6 @@ pub enum Endpoint {
     Tcp(TcpEndpoint),
     Ssh(SshEndpoint),
     P2p(P2pEndpoint),
-}
-
-/// A Device reached Peer-to-peer by its key alone (ADR 0026). The Client does not dial
-/// it itself: its own local Server is the machine's Peer-to-peer endpoint, so `connect`
-/// opens the local socket and asks for a `Tunnel` (ADR 0025).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct P2pEndpoint {
-    pub device: PublicKey,
-    pub invite: Option<Secret>,
-}
-
-impl P2pEndpoint {
-    /// Parses `p2p://<id>[.<invite>]`, as printed by an invite.
-    pub fn parse(text: &str) -> io::Result<Self> {
-        let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
-        let credentials = text
-            .trim()
-            .strip_prefix("p2p://")
-            .ok_or_else(|| invalid("expected p2p://<id>[.<invite>]"))?
-            .trim_end_matches('/');
-        let (device, invite) = match credentials.split_once('.') {
-            Some((device, invite)) => (device, Some(Secret::parse(invite)?)),
-            None => (credentials, None),
-        };
-        Ok(Self {
-            device: PublicKey::parse(device)?,
-            invite,
-        })
-    }
-
-    pub fn without_invite(mut self) -> Self {
-        self.invite = None;
-        self
-    }
-
-    /// Asks this machine's Server to dial the Device; the returned stream carries the
-    /// remote Server's frames from its `Welcome` on, or one `Error` if the dial failed.
-    /// Inside a Pane that is the Pane's Server; elsewhere the default Server, started
-    /// when it is not running, as the GUI does (ADR 0025).
-    fn connect(&self) -> io::Result<EndpointStream> {
-        let local = match std::env::var(condr_core::PaneEnvironment::SOCKET_PATH) {
-            Ok(value) => Endpoint::from_env_value(&value)?,
-            Err(_) => crate::server::ensure_local_server()?,
-        };
-        let path = local.as_local_path().ok_or_else(|| {
-            io::Error::other("this machine's Server has no local socket to tunnel through")
-        })?;
-        let mut stream = connect_local(path).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "this machine's Server is unreachable at {}: {error}",
-                    path.display()
-                ),
-            )
-        })?;
-        condr_core::protocol::write_message(
-            &mut stream,
-            &condr_core::protocol::ClientHandshake::Tunnel {
-                device: *self.device.as_bytes(),
-                invite: self.invite.as_ref().map(|invite| *invite.as_bytes()),
-            },
-        )
-        .map_err(|error| io::Error::other(error.to_string()))?;
-        Ok(EndpointStream::Tunnel(stream))
-    }
-}
-
-/// Everything a Client needs to reach one TCP Server: where it listens, whose Device key
-/// it must present, which device key to speak with, and the invite that pairs a device
-/// the Server does not know yet. The Server binds with the same value, so its own
-/// `server_key` and `client_key` are the host identity.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TcpEndpoint {
-    /// A host name or IP address, resolved when connecting.
-    pub host: String,
-    pub port: u16,
-    pub server_key: PublicKey,
-    pub client_key: DeviceKey,
-    pub invite: Option<Secret>,
-}
-
-impl TcpEndpoint {
-    /// Parses `tcp://<server key>[.<invite>]@host:port`, as printed by an invite.
-    pub fn parse(text: &str, client_key: DeviceKey) -> io::Result<Self> {
-        let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
-        let (credentials, authority) = text
-            .trim()
-            .strip_prefix("tcp://")
-            .ok_or_else(|| invalid("expected tcp://<server key>[.<invite>]@host:port"))?
-            .rsplit_once('@')
-            .ok_or_else(|| invalid("expected tcp://<server key>[.<invite>]@host:port"))?;
-        let (host, port) = Self::split_authority(authority)?;
-        let (server_key, invite) = match credentials.split_once('.') {
-            Some((key, invite)) => (key, Some(Secret::parse(invite)?)),
-            None => (credentials, None),
-        };
-        Ok(Self {
-            host,
-            port,
-            server_key: PublicKey::parse(server_key)?,
-            client_key,
-            invite,
-        })
-    }
-
-    /// Splits `host:port`; the host may be a name, an IPv4 address or a bracketed IPv6
-    /// address.
-    pub fn split_authority(authority: &str) -> io::Result<(String, u16)> {
-        let invalid = |reason: &str| io::Error::new(io::ErrorKind::InvalidInput, reason.to_owned());
-        let (host, port) = authority
-            .trim()
-            .rsplit_once(':')
-            .ok_or_else(|| invalid("expected host:port"))?;
-        let host = host.trim_start_matches('[').trim_end_matches(']').trim();
-        if host.is_empty() {
-            return Err(invalid("the host is empty"));
-        }
-        let port = port
-            .parse::<u16>()
-            .ok()
-            .filter(|port| *port != 0)
-            .ok_or_else(|| invalid("the port must be a number from 1 to 65535"))?;
-        Ok((host.to_owned(), port))
-    }
-
-    /// A Server bound at `address`, as its own tests connect to it.
-    pub fn at(address: SocketAddr, server_key: PublicKey, client_key: DeviceKey) -> Self {
-        Self {
-            host: address.ip().to_string(),
-            port: address.port(),
-            server_key,
-            client_key,
-            invite: None,
-        }
-    }
-
-    /// `host:port`, with an IPv6 host in brackets.
-    pub fn authority(&self) -> String {
-        if self.host.contains(':') {
-            format!("[{}]:{}", self.host, self.port)
-        } else {
-            format!("{}:{}", self.host, self.port)
-        }
-    }
-
-    pub fn without_invite(mut self) -> Self {
-        self.invite = None;
-        self
-    }
 }
 
 impl Endpoint {
@@ -214,15 +65,9 @@ impl Endpoint {
     pub fn connect(&self) -> io::Result<EndpointStream> {
         match self {
             Self::Local(path) => connect_local(path).map(EndpointStream::Local),
-            Self::Tcp(tcp) => NoiseStream::initiator(
-                connect_tcp(&tcp.host, tcp.port)?,
-                &tcp.server_key,
-                &tcp.client_key,
-                tcp.invite.as_ref(),
-            )
-            .map(EndpointStream::Tcp),
+            Self::Tcp(tcp) => tcp.connect().map(EndpointStream::Tcp),
             Self::Ssh(ssh) => ssh.connect().map(EndpointStream::Ssh),
-            Self::P2p(p2p) => p2p.connect(),
+            Self::P2p(p2p) => tunnel(p2p),
         }
     }
 
@@ -300,43 +145,51 @@ impl fmt::Display for Endpoint {
     }
 }
 
-/// How long a TCP connect may take before the device is reported as not answering;
-/// the OS default is several times longer and the GUI would sit on "Connecting…".
-const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+impl condr_client::Connector for Endpoint {
+    type Stream = EndpointStream;
 
-fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
-    use std::net::ToSocketAddrs as _;
-    // One budget for every address the name resolves to, so a dual-stack host with an
-    // unreachable IPv6 route still fails within the timeout rather than N times it.
-    let deadline = Instant::now() + TCP_CONNECT_TIMEOUT;
-    let mut last_error = None;
-    for address in (host, port).to_socket_addrs()? {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            last_error = Some(io::Error::new(io::ErrorKind::TimedOut, "connect timed out"));
-            break;
-        }
-        match TcpStream::connect_timeout(&address, remaining) {
-            Ok(stream) => {
-                enable_keepalive(&stream)?;
-                return Ok(stream);
-            }
-            Err(error) => last_error = Some(error),
+    fn connect(&self) -> io::Result<EndpointStream> {
+        Endpoint::connect(self)
+    }
+
+    /// Only TCP pairs with its invite as the pre-shared key; a Peer-to-peer invite rides a
+    /// `Credential` frame the Server ignores once it knows the device.
+    fn without_invite(&self) -> Option<Self> {
+        match self {
+            Self::Tcp(tcp) if tcp.invite.is_some() => Some(Self::Tcp(tcp.clone().without_invite())),
+            Self::Local(_) | Self::Tcp(_) | Self::Ssh(_) | Self::P2p(_) => None,
         }
     }
-    Err(last_error.unwrap_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("{host} did not resolve to any address"),
-        )
-    }))
 }
 
-/// Without probes a peer that vanished (sleep, dropped link) leaves the reader blocked
-/// forever: the GUI shows a live connection, the Server keeps the client and its control.
-fn enable_keepalive(stream: &TcpStream) -> io::Result<()> {
-    let keepalive = socket2::TcpKeepalive::new()
-        .with_time(Duration::from_secs(15))
-        .with_interval(Duration::from_secs(5));
-    socket2::SockRef::from(stream).set_tcp_keepalive(&keepalive)
+/// Asks this machine's Server to dial the Device; the returned stream carries the
+/// remote Server's frames from its `Welcome` on, or one `Error` if the dial failed.
+/// Inside a Pane that is the Pane's Server; elsewhere the default Server, started
+/// when it is not running, as the GUI does (ADR 0025).
+fn tunnel(p2p: &P2pEndpoint) -> io::Result<EndpointStream> {
+    let local = match std::env::var(condr_core::PaneEnvironment::SOCKET_PATH) {
+        Ok(value) => Endpoint::from_env_value(&value)?,
+        Err(_) => crate::server::ensure_local_server()?,
+    };
+    let path = local.as_local_path().ok_or_else(|| {
+        io::Error::other("this machine's Server has no local socket to tunnel through")
+    })?;
+    let mut stream = connect_local(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "this machine's Server is unreachable at {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    condr_core::protocol::write_message(
+        &mut stream,
+        &condr_core::protocol::ClientHandshake::Tunnel {
+            device: *p2p.device.as_bytes(),
+            invite: p2p.invite.as_ref().map(|invite| *invite.as_bytes()),
+        },
+    )
+    .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(EndpointStream::Tunnel(stream))
 }

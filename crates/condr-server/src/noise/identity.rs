@@ -59,7 +59,7 @@ impl ServerIdentity {
                     Err(error) => return Err(error),
                 }
             }
-            DeviceKey::load_or_create(&path)
+            load_or_create_key(&path)
         })?;
         Ok(Self {
             key,
@@ -84,10 +84,6 @@ impl ServerIdentity {
 
     pub fn public_key(&self) -> PublicKey {
         self.key.public()
-    }
-
-    pub(crate) fn device_key(&self) -> &DeviceKey {
-        &self.key
     }
 
     /// Whether `remote` may connect without an invite, as of the store on disk right now.
@@ -116,38 +112,6 @@ impl ServerIdentity {
             client.last_seen = now();
             write_authorized(store, &clients)
         })
-    }
-
-    /// Whether `presented` is the pending invite, compared in constant time; a Peer-to-peer
-    /// Device the store does not know redeems its invite this way (ADR 0026).
-    pub(crate) fn pending_invite_matches(&self, presented: &Secret) -> io::Result<bool> {
-        let Some(store) = &self.store else {
-            return Ok(false);
-        };
-        Ok(read_invite(store)?.is_some_and(|invite| {
-            invite
-                .secret
-                .0
-                .iter()
-                .zip(presented.0.iter())
-                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                == 0
-        }))
-    }
-
-    /// The pre-shared key to answer `remote` with: the zero key for an authorized device,
-    /// or the pending invite for an unknown one. `None` refuses the peer.
-    pub(super) fn psk_for(
-        &self,
-        remote: &PublicKey,
-    ) -> io::Result<Option<(Secret, Option<Secret>)>> {
-        if self.is_authorized(remote)? {
-            return Ok(Some((Secret([0; 32]), None)));
-        }
-        let Some(store) = &self.store else {
-            return Ok(None);
-        };
-        Ok(read_invite(store)?.map(|invite| (invite.secret.clone(), Some(invite.secret))))
     }
 
     /// Records `remote` as paired, provided `invite` is still the pending one: the first
@@ -188,10 +152,79 @@ impl ServerIdentity {
     }
 }
 
+/// What the Noise responder and the Peer-to-peer endpoint ask of this machine's store.
+impl Authority for ServerIdentity {
+    fn device_key(&self) -> io::Result<DeviceKey> {
+        Ok(self.key.clone())
+    }
+
+    fn is_authorized(&self, device: &PublicKey) -> io::Result<bool> {
+        ServerIdentity::is_authorized(self, device)
+    }
+
+    fn pending_invite(&self) -> io::Result<Option<Secret>> {
+        match &self.store {
+            Some(store) => Ok(read_invite(store)?.map(|invite| invite.secret)),
+            None => Ok(None),
+        }
+    }
+
+    fn complete_pairing(&self, device: PublicKey, name: &str, invite: &Secret) -> io::Result<()> {
+        ServerIdentity::complete_pairing(self, device, name, invite)
+    }
+
+    fn record_seen(&self, device: &PublicKey) -> io::Result<()> {
+        ServerIdentity::record_seen(self, device)
+    }
+}
+
+/// The identity directory's identity, loaded on first use: a Server that neither listens on
+/// TCP nor accepts Peer-to-peer reads it only when a local Client first asks it to dial
+/// (ADR 0025).
+#[derive(Default)]
+pub(crate) struct LazyIdentity(Mutex<Option<Arc<ServerIdentity>>>);
+
+impl LazyIdentity {
+    fn get(&self) -> io::Result<Arc<ServerIdentity>> {
+        let mut identity = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(identity) = &*identity {
+            return Ok(Arc::clone(identity));
+        }
+        let loaded = Arc::new(ServerIdentity::load_or_create(&identity_directory()?)?);
+        *identity = Some(Arc::clone(&loaded));
+        Ok(loaded)
+    }
+}
+
+impl Authority for LazyIdentity {
+    fn device_key(&self) -> io::Result<DeviceKey> {
+        self.get()?.device_key()
+    }
+
+    fn is_authorized(&self, device: &PublicKey) -> io::Result<bool> {
+        self.get()?.is_authorized(device)
+    }
+
+    fn pending_invite(&self) -> io::Result<Option<Secret>> {
+        Authority::pending_invite(&*self.get()?)
+    }
+
+    fn complete_pairing(&self, device: PublicKey, name: &str, invite: &Secret) -> io::Result<()> {
+        self.get()?.complete_pairing(device, name, invite)
+    }
+
+    fn record_seen(&self, device: &PublicKey) -> io::Result<()> {
+        self.get()?.record_seen(device)
+    }
+}
+
 impl fmt::Debug for ServerIdentity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServerIdentity")
-            .field("public_key", &self.key.public)
+            .field("public_key", &self.key.public())
             .field("store", &self.store)
             .field("always_authorized", &self.always_authorized)
             .finish()
@@ -271,7 +304,7 @@ pub fn device_name() -> String {
 /// This machine's one key, which its GUI and CLI present to TCP Servers and its own
 /// Server answers with; `ServerIdentity::load_or_create` reads the same file.
 pub fn load_device_key(directory: &Path) -> io::Result<DeviceKey> {
-    DeviceKey::load_or_create(&directory.join(DEVICE_KEY_FILE))
+    load_or_create_key(&directory.join(DEVICE_KEY_FILE))
 }
 
 /// Replaces the pending invite with a fresh one valid for [`INVITE_TTL`].

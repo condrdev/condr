@@ -14,22 +14,15 @@ path = "src/main.rs"
 
 [dependencies]
 atomicwrites.workspace = true
-base64.workspace = true
 clap.workspace = true
 interprocess.workspace = true
 relative-path.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-snow.workspace = true
-socket2.workspace = true
-getrandom.workspace = true
-curve25519-dalek.workspace = true
 sha2.workspace = true
-iroh.workspace = true
-hyper-util.workspace = true
-url.workspace = true
 toml_edit.workspace = true
 condr-core = { path = "../condr-core" }
+condr-client = { path = "../condr-client" }
 tokio.workspace = true
 notify.workspace = true
 tracing.workspace = true

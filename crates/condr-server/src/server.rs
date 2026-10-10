@@ -71,7 +71,7 @@ pub use local::{
 };
 
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
-pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) use condr_client::HANDSHAKE_TIMEOUT;
 /// A subscribed Client pings every `condr_core::protocol::HEARTBEAT_INTERVAL`; one silent
 /// this long is gone, even when its transport has not noticed (ADR 0036).
 const SUBSCRIBER_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -277,10 +277,18 @@ impl BoundServer {
         // when enabled and dials for local `Tunnel` frames either way. Built here because
         // it needs the runtime this `spawn_blocking` task runs on.
         let (p2p_sender, p2p_accepted) = std::sync::mpsc::channel();
+        let authority: Arc<dyn crate::noise::Authority> = match &self.identity {
+            Some(identity) => Arc::clone(identity) as _,
+            None => Arc::new(crate::noise::LazyIdentity::default()),
+        };
+        let accept: crate::p2p::Accept = Box::new(move |stream| {
+            p2p_sender
+                .send(EndpointStream::P2p(stream))
+                .map_err(|_| io::Error::other("the Server stopped accepting"))
+        });
         let p2p = crate::p2p::P2pNode::new(
             tokio::runtime::Handle::current(),
-            self.identity.clone(),
-            self.p2p_enabled,
+            authority,
             crate::p2p::Network::Condr,
             self.state
                 .lock()
@@ -288,7 +296,7 @@ impl BoundServer {
                 .settings
                 .proxy
                 .clone(),
-            p2p_sender,
+            self.p2p_enabled.then_some(accept),
         );
         if self.p2p_enabled
             && let Err(error) = p2p.start()

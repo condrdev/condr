@@ -1,6 +1,7 @@
 //! Transport-independent stream operations and connection cancellation.
 
 use super::*;
+use crate::noise::PublicKey;
 
 pub enum EndpointStream {
     Local(LocalStream),
@@ -10,65 +11,12 @@ pub enum EndpointStream {
     /// Server splices onto the remote Device after a `Tunnel` frame (ADR 0025).
     Tunnel(LocalStream),
     /// The Server side of an accepted Peer-to-peer connection: one QUIC stream (ADR 0026).
-    P2p(crate::p2p::P2pStream),
+    P2p(condr_client::P2pStream),
 }
 
 /// Cancels a pending or established remote connection without waiting for its
 /// reader/writer queue. Local connections still use protocol Detach.
-#[derive(Clone, Default)]
-pub struct ConnectionCancellation {
-    state: Arc<Mutex<CancellationState>>,
-}
-
-#[derive(Default)]
-struct CancellationState {
-    cancelled: bool,
-    stream: Option<EndpointStream>,
-}
-
-impl ConnectionCancellation {
-    pub fn cancel(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.cancelled = true;
-        if let Some(stream) = state.stream.take() {
-            let _ = stream.shutdown();
-        }
-    }
-
-    pub(crate) fn connect(&self, endpoint: &Endpoint) -> io::Result<EndpointStream> {
-        if self.state.lock().unwrap().cancelled {
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "connection cancelled",
-            ));
-        }
-        let stream = endpoint.connect()?;
-        self.attach(&stream)?;
-        Ok(stream)
-    }
-
-    pub(crate) fn attach(&self, stream: &EndpointStream) -> io::Result<()> {
-        let mut state = self.state.lock().unwrap();
-        if state.cancelled {
-            let _ = stream.shutdown();
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "connection cancelled",
-            ));
-        }
-        state.stream = match stream {
-            EndpointStream::Local(_) | EndpointStream::Tunnel(_) => None,
-            _ => Some(stream.try_clone()?),
-        };
-        Ok(())
-    }
-
-    pub(crate) fn clear(&self) {
-        if let Some(stream) = self.state.lock().unwrap().stream.take() {
-            let _ = stream.shutdown();
-        }
-    }
-}
+pub type ConnectionCancellation = condr_client::Cancellation<EndpointStream>;
 
 impl std::io::Read for EndpointStream {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
@@ -201,5 +149,33 @@ impl EndpointStream {
                 Ok(())
             }
         }
+    }
+}
+
+impl condr_client::ServerStream for EndpointStream {
+    fn try_clone(&self) -> io::Result<Self> {
+        EndpointStream::try_clone(self)
+    }
+
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        EndpointStream::set_read_timeout(self, timeout)
+    }
+
+    fn shutdown(&self) -> io::Result<()> {
+        EndpointStream::shutdown(self)
+    }
+
+    /// SSH establishes its encrypted session before the first protocol byte, and a
+    /// tunnelled Peer-to-peer dial looks the Device up, reaches the relay and punches
+    /// through before the remote answers.
+    fn welcome_timeout(&self) -> Duration {
+        match self {
+            Self::Ssh(_) | Self::Tunnel(_) => condr_client::SLOW_HANDSHAKE_TIMEOUT,
+            Self::Local(_) | Self::Tcp(_) | Self::P2p(_) => condr_client::HANDSHAKE_TIMEOUT,
+        }
+    }
+
+    fn cancel_by_shutdown(&self) -> bool {
+        !matches!(self, Self::Local(_) | Self::Tunnel(_))
     }
 }
