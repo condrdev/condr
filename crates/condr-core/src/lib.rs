@@ -1,9 +1,15 @@
+// Without `runtime`, the code the PTY, hook and Git paths share with the protocol has no
+// caller left in this crate.
+#![cfg_attr(not(feature = "runtime"), allow(dead_code))]
+
 mod agent;
 pub mod agent_discovery;
+#[cfg(feature = "runtime")]
 mod config;
 mod files;
 mod git;
 mod network;
+#[cfg(feature = "runtime")]
 mod paths;
 pub mod protocol;
 mod session;
@@ -13,23 +19,30 @@ pub mod uri;
 
 pub use agent::{
     AgentDetector, AgentDisplayState, AgentEvent, AgentEventKind, AgentKind, AgentPublish,
-    AgentResume, AgentSnapshot, AgentSpec, AgentState, AgentSupport, AgentTracker, ProcessInfo,
-    ProcessProbeResult, hook as agent_hook, hooks as agent_hooks, identify_agent_among,
-    identify_agent_process,
+    AgentResume, AgentSnapshot, AgentSpec, AgentState, AgentSupport, AgentTracker,
+    ProcessProbeResult, hook as agent_hook, hooks as agent_hooks,
 };
+#[cfg(feature = "runtime")]
+pub use agent::{ProcessInfo, identify_agent_among, identify_agent_process};
+#[cfg(feature = "runtime")]
 pub use config::{config_path, read_config_text, read_config_value, update_config_values};
 pub use files::{
     BrowsedDirectory, DirectoryEntry, DirectoryListing, FileContent, FileKind,
-    MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, MAX_IMAGE_BYTES, browse_directory, is_image,
-    list_directory, read_file, valid_directory_path,
+    MAX_DIRECTORY_ENTRIES, MAX_FILE_BYTES, MAX_IMAGE_BYTES, is_image, valid_directory_path,
 };
+#[cfg(feature = "runtime")]
+pub use files::{browse_directory, list_directory, read_file};
 pub use git::{
-    DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitBase, GitChangeEntry,
-    GitChangeStatus, GitChanges, GitDiffStat, GitError, GitFingerprint, GitRepository, GitUpstream,
-    MAX_DIFF_BYTES, MAX_GIT_CHANGES, create_worktree, discover_repository, open_worktree,
-    remove_worktree, validate_worktree_removal, worktree_destination,
+    DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitChangeEntry, GitChangeStatus,
+    GitChanges, GitDiffStat, GitUpstream, MAX_DIFF_BYTES, MAX_GIT_CHANGES,
+};
+#[cfg(feature = "runtime")]
+pub use git::{
+    GitBase, GitError, GitFingerprint, GitRepository, create_worktree, discover_repository,
+    open_worktree, remove_worktree, validate_worktree_removal, worktree_destination,
 };
 pub use network::{ProxyMode, ProxySetting, check_proxy_url};
+#[cfg(feature = "runtime")]
 pub use paths::{
     config_directory, data_directory, log_directory, runtime_directory, state_directory,
 };
@@ -39,17 +52,20 @@ pub use session::{
     Workspace, WorkspaceId, WorktreeAssociation, valid_diff_path,
 };
 pub use snapshot::{SessionSnapshot, SnapshotError};
+#[cfg(feature = "runtime")]
 pub use terminal::{
-    CURSOR_POSITION_SETTLE, CommandBuilder, DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR,
-    DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR, DETECTED_LINK_FLAG, PaneEnvironment,
-    TerminalAgentProbe, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
-    TerminalCursor, TerminalCursorShape, TerminalCwdProbe, TerminalFrameError,
-    TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind, TerminalLaunchProbe,
-    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMousePosition,
-    TerminalMouseTracking, TerminalMouseWheel, TerminalNoticeBatch, TerminalNoticeProbe,
-    TerminalPosition, TerminalRuntime, TerminalScroll, TerminalSelection, TerminalSelectionUnit,
-    TerminalSide, TerminalSize, TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame,
-    TerminalViewSource, default_indexed_color, default_shell_program,
+    CURSOR_POSITION_SETTLE, CommandBuilder, PaneEnvironment, TerminalAgentProbe, TerminalCwdProbe,
+    TerminalLaunchProbe, TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime,
+    TerminalViewSource, default_shell_program,
+};
+pub use terminal::{
+    DEFAULT_ANSI_COLORS, DEFAULT_BACKGROUND_COLOR, DEFAULT_CURSOR_COLOR, DEFAULT_FOREGROUND_COLOR,
+    DETECTED_LINK_FLAG, TerminalCell, TerminalCellRun, TerminalColor, TerminalCommand,
+    TerminalCursor, TerminalCursorShape, TerminalFrameError, TerminalHyperlinkBudget, TerminalKey,
+    TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
+    TerminalMousePosition, TerminalMouseTracking, TerminalMouseWheel, TerminalPosition,
+    TerminalScroll, TerminalSelection, TerminalSelectionUnit, TerminalSide, TerminalSize,
+    TerminalUpdate, TerminalView, TerminalViewDelta, TerminalViewFrame, default_indexed_color,
 };
 
 pub const APP_NAME: &str = "Condr";

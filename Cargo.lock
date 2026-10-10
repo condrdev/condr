@@ -1373,7 +1373,6 @@ dependencies = [
  "prost",
  "prost-build",
  "protox",
- "regex",
  "relative-path",
  "serde",
  "serde_json",

@@ -54,7 +54,6 @@ iroh = { version = "1.2", default-features = false, features = ["tls-ring"] }
 # The system proxy for the relay (ADR 0038); already built for iroh's reqwest.
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 url = "2"
-regex = "1"
 # Protocol relative paths: `/`-separated whatever platform the client or Server runs on.
 # Preview and Diff Tab highlighting (ADR 0032): the Sublime syntaxes bat curates, on Oniguruma,
 # and tmTheme loading for the themes two-face does not bundle.

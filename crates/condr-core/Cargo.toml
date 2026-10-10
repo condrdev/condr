@@ -7,22 +7,41 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+default = ["runtime"]
+# Everything that needs a PTY, a VT, Git, the process table or the desktop's files
+# (ADR 0039). Without it the crate is the protocol, the Session and the domain types,
+# which is all `condr-client` and the Companion's library take.
+runtime = [
+    "dep:alacritty_terminal",
+    "dep:atomicwrites",
+    "dep:core-foundation-sys",
+    "dep:dirs",
+    "dep:filedescriptor",
+    "dep:gix",
+    "dep:nix",
+    "dep:portable-pty",
+    "dep:sysinfo",
+    "dep:toml",
+    "dep:toml_edit",
+    "dep:windows-sys",
+]
+
 [dependencies]
-alacritty_terminal.workspace = true
-atomicwrites.workspace = true
+alacritty_terminal = { workspace = true, optional = true }
+atomicwrites = { workspace = true, optional = true }
 base64.workspace = true
-dirs.workspace = true
-gix.workspace = true
-portable-pty.workspace = true
+dirs = { workspace = true, optional = true }
+gix = { workspace = true, optional = true }
+portable-pty = { workspace = true, optional = true }
 prost.workspace = true
-regex.workspace = true
 relative-path.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 smol_str.workspace = true
-sysinfo.workspace = true
-toml.workspace = true
-toml_edit.workspace = true
+sysinfo = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+toml_edit = { workspace = true, optional = true }
 tracing.workspace = true
 url.workspace = true
 
@@ -31,14 +50,14 @@ prost-build.workspace = true
 protox.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-filedescriptor.workspace = true
-nix.workspace = true
+filedescriptor = { workspace = true, optional = true }
+nix = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation-sys.workspace = true
+core-foundation-sys = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { workspace = true, optional = true, features = ["Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

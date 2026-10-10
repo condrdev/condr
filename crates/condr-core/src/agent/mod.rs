@@ -18,15 +18,19 @@ mod kimi;
 mod omp;
 mod opencode;
 mod pi;
+#[cfg(feature = "runtime")]
 mod process;
 
-use process::{normalized_lookup_name, path_basename};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 pub use detector::{AgentDetector, AgentPublish, ProcessProbeResult};
-pub use event::{AGENT_EVENT_OSC_PREFIX, AgentEvent, AgentEventKind};
+#[cfg(feature = "runtime")]
+pub(crate) use event::AGENT_EVENT_OSC_PREFIX;
+pub use event::{AgentEvent, AgentEventKind};
+#[cfg(feature = "runtime")]
 pub(crate) use process::is_shell;
+#[cfg(feature = "runtime")]
 pub use process::{ProcessInfo, identify_agent_among, identify_agent_process};
 
 /// Everything Condr knows about one supported agent CLI (ADR 0035). Each agent's module
@@ -282,6 +286,23 @@ pub(crate) fn valid_session_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+pub(crate) fn normalized_lookup_name(name: &str) -> String {
+    let mut name = name.trim().to_lowercase();
+    for suffix in [".exe", ".cmd", ".bat", ".ps1", ".js"] {
+        if name.ends_with(suffix) {
+            name.truncate(name.len() - suffix.len());
+            break;
+        }
+    }
+    name
+}
+
+pub(crate) fn path_basename(path: &str) -> &str {
+    path.rsplit(['/', '\\'])
+        .find(|component| !component.is_empty())
+        .unwrap_or(path)
 }
 
 #[cfg(test)]

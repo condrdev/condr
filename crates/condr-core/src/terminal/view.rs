@@ -1,16 +1,20 @@
+#[cfg(feature = "runtime")]
 mod snapshot;
 mod wire;
 
 use super::*;
-use std::cell::RefCell;
+use serde::{Deserialize, Serialize};
+use smol_str::SmolStr;
 use std::collections::HashMap;
+use std::io;
 
+#[cfg(feature = "runtime")]
 pub(super) use snapshot::{
     DetectedLinks, SnapshotHyperlinks, detect_links, publish_view, side, snapshot_terminal,
     snapshot_terminal_with_links, terminal_cell, terminal_cursor, viewport_point,
     viewport_selection,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 pub(super) use snapshot::{blank_cell, terminal_cell_text};
 pub use wire::TerminalHyperlinkBudget;
 pub(crate) use wire::{
@@ -104,20 +108,6 @@ pub enum TerminalMouseTracking {
     Click,
     Drag,
     Motion,
-}
-
-impl TerminalMouseTracking {
-    pub(super) fn from_term_mode(mode: TermMode) -> Self {
-        if mode.contains(TermMode::MOUSE_MOTION) {
-            Self::Motion
-        } else if mode.contains(TermMode::MOUSE_DRAG) {
-            Self::Drag
-        } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
-            Self::Click
-        } else {
-            Self::None
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -418,40 +408,6 @@ impl TerminalSize {
             ))
         } else {
             Ok(self)
-        }
-    }
-
-    pub(super) fn window_size(self) -> WindowSize {
-        WindowSize {
-            num_lines: self.rows,
-            num_cols: self.columns,
-            cell_width: self.cell_width,
-            cell_height: self.cell_height,
-        }
-    }
-}
-
-impl Dimensions for TerminalSize {
-    fn total_lines(&self) -> usize {
-        usize::from(self.rows)
-    }
-
-    fn screen_lines(&self) -> usize {
-        usize::from(self.rows)
-    }
-
-    fn columns(&self) -> usize {
-        usize::from(self.columns)
-    }
-}
-
-impl From<TerminalSize> for PtySize {
-    fn from(size: TerminalSize) -> Self {
-        Self {
-            rows: size.rows,
-            cols: size.columns,
-            pixel_width: size.columns.saturating_mul(size.cell_width),
-            pixel_height: size.rows.saturating_mul(size.cell_height),
         }
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::RefCell;
 
 pub(in crate::terminal) fn publish_view(
     revision: &AtomicU64,
@@ -379,5 +380,55 @@ pub(in crate::terminal) fn side(side: TerminalSide) -> Side {
     match side {
         TerminalSide::Left => Side::Left,
         TerminalSide::Right => Side::Right,
+    }
+}
+
+impl TerminalMouseTracking {
+    pub(in crate::terminal) fn from_term_mode(mode: TermMode) -> Self {
+        if mode.contains(TermMode::MOUSE_MOTION) {
+            Self::Motion
+        } else if mode.contains(TermMode::MOUSE_DRAG) {
+            Self::Drag
+        } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+            Self::Click
+        } else {
+            Self::None
+        }
+    }
+}
+
+impl TerminalSize {
+    pub(in crate::terminal) fn window_size(self) -> WindowSize {
+        WindowSize {
+            num_lines: self.rows,
+            num_cols: self.columns,
+            cell_width: self.cell_width,
+            cell_height: self.cell_height,
+        }
+    }
+}
+
+impl Dimensions for TerminalSize {
+    fn total_lines(&self) -> usize {
+        usize::from(self.rows)
+    }
+
+    fn screen_lines(&self) -> usize {
+        usize::from(self.rows)
+    }
+
+    fn columns(&self) -> usize {
+        usize::from(self.columns)
+    }
+}
+
+impl From<TerminalSize> for PtySize {
+    fn from(size: TerminalSize) -> Self {
+        Self {
+            rows: size.rows,
+            cols: size.columns,
+            pixel_width: size.columns.saturating_mul(size.cell_width),
+            pixel_height: size.rows.saturating_mul(size.cell_height),
+        }
     }
 }

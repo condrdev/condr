@@ -9,6 +9,7 @@ mod view;
 
 use super::*;
 use crate::agent::AgentEventKind;
+use smol_str::SmolStr;
 
 struct RecordingWriter(Arc<Mutex<Vec<u8>>>);
 

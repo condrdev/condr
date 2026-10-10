@@ -110,23 +110,6 @@ pub(crate) fn is_shell(name: &str) -> bool {
     crate::terminal::KNOWN_SHELLS.contains(&normalized_lookup_name(path_basename(name)).as_str())
 }
 
-pub(super) fn normalized_lookup_name(name: &str) -> String {
-    let mut name = name.trim().to_lowercase();
-    for suffix in [".exe", ".cmd", ".bat", ".ps1", ".js"] {
-        if name.ends_with(suffix) {
-            name.truncate(name.len() - suffix.len());
-            break;
-        }
-    }
-    name
-}
-
-pub(super) fn path_basename(path: &str) -> &str {
-    path.rsplit(['/', '\\'])
-        .find(|component| !component.is_empty())
-        .unwrap_or(path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

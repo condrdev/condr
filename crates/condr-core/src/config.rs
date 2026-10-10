@@ -157,6 +157,28 @@ fn write_config_text(path: &Path, text: &str) -> io::Result<()> {
     result
 }
 
+/// The proxy is a machine-wide setting (ADR 0038), so only a process that reads
+/// `config.toml` loads it.
+impl crate::ProxySetting {
+    /// The saved setting; a missing or malformed file is the default.
+    pub fn load(path: Option<&Path>) -> Self {
+        let Some(path) = path else {
+            return Self::default();
+        };
+        let read = |key| {
+            read_config_value(path, &["network", "proxy"], key)
+                .ok()
+                .flatten()
+                .and_then(|value| value.as_str().map(|value| value.trim().to_owned()))
+                .unwrap_or_default()
+        };
+        Self {
+            mode: crate::ProxyMode::parse(&read("mode")),
+            url: read("url"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +231,48 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_setting_round_trips_and_falls_back_to_system() {
+        let directory = std::env::temp_dir().join(format!(
+            "condr-core-network-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path = directory.join("config.toml");
+        std::fs::create_dir_all(&directory).unwrap();
+        assert_eq!(
+            crate::ProxySetting::load(Some(&path)),
+            crate::ProxySetting::default()
+        );
+
+        update_config_values(
+            &path,
+            &["network", "proxy"],
+            [
+                ("mode", Some(toml_edit::value("manual"))),
+                ("url", Some(toml_edit::value(" http://proxy:8080 "))),
+            ],
+        )
+        .unwrap();
+        let setting = crate::ProxySetting::load(Some(&path));
+        assert_eq!(setting.mode, crate::ProxyMode::Manual);
+        assert_eq!(
+            setting.manual_url().map(String::from).as_deref(),
+            Some("http://proxy:8080/")
+        );
+
+        update_config_values(
+            &path,
+            &["network", "proxy"],
+            [("mode", Some(toml_edit::value("socks")))],
+        )
+        .unwrap();
+        let setting = crate::ProxySetting::load(Some(&path));
+        assert_eq!(setting.mode, crate::ProxyMode::System);
+        assert_eq!(setting.url, "http://proxy:8080", "the URL is kept");
+        assert_eq!(setting.manual_url(), None);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
