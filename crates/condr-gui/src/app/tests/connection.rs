@@ -71,8 +71,8 @@ fn edit_server_fields_only_accept_host_and_port_shaped_text() {
 fn hooks_actions_go_to_the_server_as_agent_commands() {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.session_id = Some(SessionId(3));
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.session_id = Some(SessionId(3));
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
     connection.io = Some(ClientIo {
         outgoing,
@@ -95,7 +95,7 @@ fn hooks_actions_go_to_the_server_as_agent_commands() {
         }
     );
     // No Session yet: nothing to ask, and no disconnect either.
-    connection.session_id = None;
+    connection.model.session_id = None;
     connection.send_agent_hooks(
         condr_core::AgentKind::Claude,
         condr_core::agent_hooks::HooksAction::Status,
@@ -124,10 +124,10 @@ fn server_path_input_preserves_valid_whitespace() {
 fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubscribes() {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.runtime_epoch = Some(RuntimeEpoch(2));
-    connection.session_id = Some(SessionId(3));
-    connection.sequence = 7;
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.runtime_epoch = Some(RuntimeEpoch(2));
+    connection.model.session_id = Some(SessionId(3));
+    connection.model.sequence = 7;
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
     connection.io = Some(ClientIo {
         outgoing,
@@ -221,10 +221,10 @@ fn typed_subscription_rejection_requests_one_authoritative_bootstrap_then_resubs
 fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.runtime_epoch = Some(RuntimeEpoch(2));
-    connection.session_id = Some(SessionId(3));
-    connection.sequence = 7;
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.runtime_epoch = Some(RuntimeEpoch(2));
+    connection.model.session_id = Some(SessionId(3));
+    connection.model.sequence = 7;
     connection.subscribed = true;
     connection.bootstrap_resync_session_id = Some(SessionId(3));
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
@@ -258,8 +258,8 @@ fn typed_snapshot_rejection_retargets_the_in_flight_resync() {
 fn a_dropped_active_subscription_requests_an_authoritative_bootstrap() {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.session_id = Some(SessionId(3));
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.session_id = Some(SessionId(3));
     connection.subscribed = true;
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
     connection.io = Some(ClientIo {
@@ -281,10 +281,10 @@ fn a_dropped_active_subscription_requests_an_authoritative_bootstrap() {
 fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.runtime_epoch = Some(RuntimeEpoch(2));
-    connection.session_id = Some(SessionId(3));
-    connection.sequence = 7;
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.runtime_epoch = Some(RuntimeEpoch(2));
+    connection.model.session_id = Some(SessionId(3));
+    connection.model.sequence = 7;
     connection.subscribed = true;
     connection.bootstrap_resync_session_id = Some(SessionId(3));
     let pane_id = pane_id();
@@ -314,7 +314,7 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
     assert!(!application.recovery);
     assert!(connection.subscribed);
     assert!(connection.can_mutate());
-    assert!(connection.attention.contains(&pane_id));
+    assert!(connection.model.attention.contains(&pane_id));
 }
 
 #[test]
@@ -433,8 +433,8 @@ fn lag_notice_during_a_visual_gap_resync_still_recovers() {
 fn a_message_from_a_newer_protocol_resynchronizes_once_then_disconnects() {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.session_id = Some(SessionId(3));
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.session_id = Some(SessionId(3));
     connection.subscribed = true;
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
     connection.io = Some(ClientIo {

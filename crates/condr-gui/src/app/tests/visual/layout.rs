@@ -11,9 +11,9 @@ pub(super) fn agent_changed(
             let connection = this.connection(1).unwrap();
             let generation = connection.connect_generation;
             let message = ServerMessage::Event {
-                server_id: connection.server_id.unwrap(),
-                session_id: connection.session_id.unwrap(),
-                sequence: connection.sequence + 1,
+                server_id: connection.model.server_id.unwrap(),
+                session_id: connection.model.session_id.unwrap(),
+                sequence: connection.model.sequence + 1,
                 event: SessionEvent::AgentChanged { pane_id, agent },
             };
             this.handle_incoming(1, generation, Incoming::Message(message), cx);
@@ -1055,7 +1055,7 @@ fn closing_a_pane_with_a_running_agent_asks_first() {
     let set_agent = |window: &mut VisualTestContext, agent: Option<AgentSnapshot>| {
         window.update(|_, cx| {
             view.update(cx, |this, _| {
-                let agents = &mut this.connection_mut(1).unwrap().agents;
+                let agents = &mut this.connection_mut(1).unwrap().model.agents;
                 match agent {
                     Some(agent) => agents.insert(agent_pane, agent),
                     None => agents.remove(&agent_pane),

@@ -42,23 +42,22 @@ use crate::terminal_element::{
     TerminalRenderCache, link_at,
 };
 use changes::*;
+use condr_client::SessionModel;
+use condr_client::frames::ClientTerminal;
 use condr_core::agent_hooks::{HooksAction, HooksReport, HooksState};
 use condr_core::protocol::{
-    AgentCommand, AgentResponse, BootstrapAssembler, BootstrapHeader, ClientMessage, LayoutCommand,
-    LayoutResult, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE, PaneTerminalFrame,
-    PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
-    ServerId, ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionBootstrap,
-    SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage,
-    WorkspaceGitSnapshot, decode_pane_terminal_frame, relative_age, uptime_text,
+    AgentCommand, AgentResponse, ClientMessage, LayoutCommand, LayoutResult, RuntimeEpoch,
+    ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId, ServerLogRecord,
+    ServerMessage, ServerSetting, SessionBootstrap, SessionEvent, SessionId, UnknownMessage,
+    WorkspaceGitSnapshot, relative_age, uptime_text,
 };
 use condr_core::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, AgentTracker, BrowsedDirectory,
-    DirectoryListing, FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, ProxyMode,
-    ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabId, TerminalCellRun,
-    TerminalCommand, TerminalCursor, TerminalHyperlinkBudget, TerminalKey, TerminalKeyEventKind,
-    TerminalModifiers, TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking,
-    TerminalPosition, TerminalSelection, TerminalSelectionUnit, TerminalSize, TerminalViewDelta,
-    TerminalViewFrame, Workspace, WorkspaceId,
+    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, BrowsedDirectory, DirectoryListing,
+    FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, ProxyMode, ProxySetting, Session,
+    SessionSnapshot, SplitDirection, Tab, TabId, TerminalCommand, TerminalCursor, TerminalKey,
+    TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
+    TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSelectionUnit,
+    TerminalSize, Workspace, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,
@@ -190,24 +189,6 @@ struct ActivateTab {
 }
 
 pub(crate) type ConnectionKey = u64;
-
-/// A Pane's terminal as this Client holds it. The view is shared with the Panel that
-/// paints it, so a frame redraw clones a pointer, not the cell grid; frames mutate it in
-/// place through `Arc::make_mut` once the previous frame's element is gone.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct ClientTerminal {
-    pub(super) view: Arc<condr_core::TerminalView>,
-    pub(super) exited: bool,
-}
-
-impl From<PaneTerminalSnapshot> for ClientTerminal {
-    fn from(snapshot: PaneTerminalSnapshot) -> Self {
-        Self {
-            view: Arc::new(snapshot.view),
-            exited: snapshot.exited,
-        }
-    }
-}
 
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1280.0), px(720.0));
 const CONNECTION_RESULT_BUFFER_CAPACITY: usize = 16;
@@ -515,7 +496,7 @@ impl Condr {
         };
         this.sync_sidebar_workspace_open(cx);
         // A connection handed in ready has bootstrapped already, so restore it here.
-        if this.connections[0].server_id.is_some() {
+        if this.connections[0].model.server_id.is_some() {
             this.restore_server_state(1, cx);
         }
         this.refresh_target_pane(1);

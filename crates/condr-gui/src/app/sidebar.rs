@@ -145,7 +145,7 @@ impl Condr {
                         .map(|(workspace_index, workspace)| {
                             let workspace_id = workspace.id();
                             let workspace_name = workspace.name().to_owned();
-                            let git = connection.workspace_git.get(&workspace_id);
+                            let git = connection.model.workspace_git.get(&workspace_id);
                             // Every Workspace gets its second line, `detached` and no
                             // repository included, so the rows keep one height.
                             let detail = git.map_or_else(
@@ -166,15 +166,9 @@ impl Condr {
                                 .flat_map(|tab| tab.panes())
                                 .filter_map(|pane| {
                                     let pane_id = pane.id();
-                                    let agent = connection.agents.get(&pane_id)?;
-                                    let state = connection
-                                        .agent_trackers
-                                        .get(&pane_id)
-                                        .map(|tracker| tracker.display_state())
-                                        .unwrap_or_else(|| {
-                                            AgentTracker::new(agent.state).display_state()
-                                        });
-                                    let status = if connection.attention.contains(&pane_id) {
+                                    let agent = connection.model.agents.get(&pane_id)?;
+                                    let state = connection.model.agent_display_state(pane_id)?;
+                                    let status = if connection.model.attention.contains(&pane_id) {
                                         BELL_SIDEBAR_STATUS
                                     } else {
                                         agent_sidebar_status(state)
@@ -185,6 +179,7 @@ impl Condr {
                                     // mark already says which agent, so the name is only
                                     // the fallback before a title arrives.
                                     let row_label = connection
+                                        .model
                                         .terminal_titles
                                         .get(&pane_id)
                                         .cloned()
@@ -682,46 +677,36 @@ impl Condr {
         let mut items = Vec::new();
         for connection in &self.connections {
             let key = connection.key;
-            let Some(session) = connection.presented_session() else {
+            if connection.presented_session().is_none() {
                 continue;
-            };
-            for workspace in session.workspaces() {
-                for pane in workspace.tabs().iter().flat_map(|tab| tab.panes()) {
-                    let pane_id = pane.id();
-                    let Some(agent) = connection
-                        .agents
-                        .get(&pane_id)
-                        .filter(|agent| agent.state == AgentState::Blocked)
-                    else {
-                        continue;
-                    };
-                    let label = if several_devices {
-                        format!("{} · {}", workspace.name(), connection.label)
-                    } else {
-                        workspace.name().to_owned()
-                    };
-                    let owner = owner.clone();
-                    items.push(
-                        CondrSidebarTreeItem::new(
-                            format!("needs-you-{key}-{}", pane_id.as_u64()),
-                            format!("needs-you-{key}-{}", pane_id.as_u64()),
-                            format!("needs-you-label-{key}-{}", pane_id.as_u64()),
-                            label,
-                        )
-                        .icon(CondrSidebarIcon::agent(
-                            agent.kind,
-                            status,
-                            format!("needs-you-status-{key}-{}", pane_id.as_u64()),
-                            format!("{}: {}", agent.kind.label(), status.label),
-                        ))
-                        .when_some(agent.blocked_on.clone(), |item, text| item.detail(text))
-                        .disable(!connection.can_mutate())
-                        .on_click(move |_, window, cx| {
-                            let _ = owner
-                                .update(cx, |this, cx| this.select_pane(key, pane_id, window, cx));
-                        }),
-                    );
-                }
+            }
+            for (workspace, pane_id, agent) in connection.model.blocked_agents() {
+                let label = if several_devices {
+                    format!("{} · {}", workspace.name(), connection.label)
+                } else {
+                    workspace.name().to_owned()
+                };
+                let owner = owner.clone();
+                items.push(
+                    CondrSidebarTreeItem::new(
+                        format!("needs-you-{key}-{}", pane_id.as_u64()),
+                        format!("needs-you-{key}-{}", pane_id.as_u64()),
+                        format!("needs-you-label-{key}-{}", pane_id.as_u64()),
+                        label,
+                    )
+                    .icon(CondrSidebarIcon::agent(
+                        agent.kind,
+                        status,
+                        format!("needs-you-status-{key}-{}", pane_id.as_u64()),
+                        format!("{}: {}", agent.kind.label(), status.label),
+                    ))
+                    .when_some(agent.blocked_on.clone(), |item, text| item.detail(text))
+                    .disable(!connection.can_mutate())
+                    .on_click(move |_, window, cx| {
+                        let _ =
+                            owner.update(cx, |this, cx| this.select_pane(key, pane_id, window, cx));
+                    }),
+                );
             }
         }
         items

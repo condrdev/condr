@@ -123,8 +123,9 @@ impl Render for TerminalPanel {
                 let app = owner.read(cx);
                 let active = app.terminal_input.target == Some((self.connection_key, self.pane_id));
                 let connection = app.connection(self.connection_key);
-                let zoomed = connection
-                    .is_some_and(|connection| connection.zoomed_panes.contains(&self.pane_id));
+                let zoomed = connection.is_some_and(|connection| {
+                    connection.model.zoomed_panes.contains(&self.pane_id)
+                });
                 // A zoomed Pane is alone on its surface too, but it is not the Tab's only
                 // Pane: keeping the active border is what says "zoomed".
                 let solo = !zoomed
@@ -146,13 +147,14 @@ impl Render for TerminalPanel {
                     app.marked_text_for(self.connection_key, self.pane_id),
                     app.selection_for(self.connection_key, self.pane_id),
                     app.hovered_link_for(self.connection_key, self.pane_id),
-                    connection.and_then(|connection| connection.runtime_epoch),
+                    connection.and_then(|connection| connection.model.runtime_epoch),
                     pane_title,
                     connection
-                        .and_then(|connection| connection.agents.get(&self.pane_id))
+                        .and_then(|connection| connection.model.agents.get(&self.pane_id))
                         .map(|agent| agent.kind),
-                    connection
-                        .is_some_and(|connection| connection.attention.contains(&self.pane_id)),
+                    connection.is_some_and(|connection| {
+                        connection.model.attention.contains(&self.pane_id)
+                    }),
                     zoomed,
                     connection.is_some_and(|connection| {
                         connection.pasting_images.contains(&self.pane_id)

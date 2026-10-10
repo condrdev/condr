@@ -355,7 +355,7 @@ fn the_view_is_local_follows_activation_and_survives_a_closed_tab() {
 
     // Another client (the CLI, an agent) asking every viewer to show a Tab moves this
     // view too; the Session it reads stays the same.
-    let sequence_before = window.read(|app| view.read(app).connection(1).unwrap().sequence);
+    let sequence_before = window.read(|app| view.read(app).connection(1).unwrap().model.sequence);
     let mut cli = ClientConnection::connect_overview(&endpoint, "cli").unwrap();
     cli.layout(LayoutCommand::ActivateTab { tab_id: second_tab })
         .unwrap()
@@ -363,7 +363,9 @@ fn the_view_is_local_follows_activation_and_survives_a_closed_tab() {
     assert!(wait_until(window, |window| {
         presented(window, &view) == Some((1, second_workspace, second_tab))
     }));
-    assert!(window.read(|app| view.read(app).connection(1).unwrap().sequence) > sequence_before);
+    assert!(
+        window.read(|app| view.read(app).connection(1).unwrap().model.sequence) > sequence_before
+    );
     cli.layout(LayoutCommand::ActivateWorkspace {
         workspace_id: first_workspace,
     })

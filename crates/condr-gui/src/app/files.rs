@@ -416,7 +416,7 @@ impl Condr {
         // A folded directory still tells whether something under it changed.
         let has_changes = self
             .connection(key)
-            .and_then(|connection| connection.workspace_git.get(&workspace_id))
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .is_some_and(|git| {
                 git.changes
                     .entries
@@ -494,7 +494,7 @@ impl Condr {
         // A changed file carries its status glyph, so the two views tell the same story.
         let status = self
             .connection(key)
-            .and_then(|connection| connection.workspace_git.get(&workspace_id))
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path))
             .map(|entry| entry.status);
         h_flex()
@@ -868,7 +868,7 @@ impl Condr {
         let theme = cx.theme();
         let entry = self
             .connection(key)
-            .and_then(|connection| connection.workspace_git.get(&workspace_id))
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path));
         let summary = image.and_then(|image| match image {
             Some(Ok(image)) => Some(image_summary(image)),
@@ -1137,7 +1137,8 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
         else {
             return;
         };
@@ -1169,7 +1170,8 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
         else {
             return;
         };

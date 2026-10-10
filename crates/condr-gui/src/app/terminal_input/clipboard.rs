@@ -121,12 +121,14 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return false;
         };
-        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
         else {
             return false;
         };
         if !connection.can_mutate()
             || connection
+                .model
                 .terminals
                 .get(&pane_id)
                 .is_none_or(|terminal| terminal.exited)

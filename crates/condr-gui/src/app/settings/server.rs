@@ -47,7 +47,7 @@ pub(super) fn connection_shell(
                 .connections
                 .iter()
                 .find(|connection| connection.key == key)
-                .map(|connection| connection.settings.shell.clone().into())
+                .map(|connection| connection.model.settings.shell.clone().into())
         })
         .unwrap_or_default()
 }
@@ -134,10 +134,10 @@ pub(super) fn network_page(
     let (current, pending) = this
         .selected_connection(cx, |c| {
             (
-                c.settings.proxy.mode,
+                c.model.settings.proxy.mode,
                 c.running_proxy
                     .as_ref()
-                    .is_some_and(|running| *running != c.settings.proxy),
+                    .is_some_and(|running| *running != c.model.settings.proxy),
             )
         })
         .unwrap_or_default();
@@ -149,7 +149,7 @@ pub(super) fn network_page(
         {
             let settings = settings.clone();
             move |cx| {
-                selected_connection(&settings, cx, |c| c.settings.proxy.mode)
+                selected_connection(&settings, cx, |c| c.model.settings.proxy.mode)
                     .unwrap_or_default()
                     .as_str()
                     .into()
@@ -215,7 +215,7 @@ pub(super) fn connection_proxy_url(
                 .connections
                 .iter()
                 .find(|connection| connection.key == key)
-                .map(|connection| connection.settings.proxy.url.clone().into())
+                .map(|connection| connection.model.settings.proxy.url.clone().into())
         })
         .unwrap_or_default()
 }
@@ -502,7 +502,7 @@ fn restart_pending(this: &SettingsWindow, cx: &App) -> bool {
             || c.p2p != c.running_p2p
             || c.running_proxy
                 .as_ref()
-                .is_some_and(|running| *running != c.settings.proxy)
+                .is_some_and(|running| *running != c.model.settings.proxy)
     })
     .unwrap_or(false)
 }
@@ -1136,7 +1136,7 @@ impl Condr {
         else {
             return false;
         };
-        let Some(server_id) = connection.server_id else {
+        let Some(server_id) = connection.model.server_id else {
             return false;
         };
         connection.send(ClientMessage::SetServerSettings { server_id, setting })

@@ -80,14 +80,14 @@ fn disconnect_retires_a_bootstrap_already_in_the_batch() {
         view.update(cx, |this, cx| {
             let connection = this.connection(1).unwrap();
             let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
+            let server_id = connection.model.server_id.unwrap();
+            let session_id = connection.model.session_id.unwrap();
             let bootstrap = SessionBootstrap {
-                settings: connection.settings.clone(),
+                settings: connection.model.settings.clone(),
                 server_id,
-                runtime_epoch: connection.runtime_epoch.unwrap(),
+                runtime_epoch: connection.model.runtime_epoch.unwrap(),
                 session_id,
-                sequence: connection.sequence,
+                sequence: connection.model.sequence,
                 snapshot: connection.session().unwrap().snapshot(),
                 terminals: Vec::new(),
                 agents: Vec::new(),

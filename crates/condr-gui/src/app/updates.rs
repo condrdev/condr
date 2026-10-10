@@ -176,7 +176,7 @@ impl Condr {
             .iter()
             .find(|c| c.key == key && matches!(c.endpoint, Endpoint::Local(_)))
         {
-            sync_http_proxy(&connection.settings.proxy, cx);
+            sync_http_proxy(&connection.model.settings.proxy, cx);
         }
     }
 }

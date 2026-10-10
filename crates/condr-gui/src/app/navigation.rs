@@ -41,14 +41,12 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        if let Some(tracker) = connection.agent_trackers.get_mut(&pane_id) {
-            tracker.mark_seen();
-        }
+        connection.model.mark_seen(pane_id);
     }
 
     pub(super) fn clear_pane_attention(&mut self, key: ConnectionKey, pane_id: PaneId) -> bool {
         self.connection_mut(key)
-            .is_some_and(|connection| connection.attention.remove(&pane_id))
+            .is_some_and(|connection| connection.model.attention.remove(&pane_id))
     }
 
     /// The focused Pane of the Tab connection `key` shows.
@@ -223,7 +221,8 @@ impl Condr {
             return None;
         }
         let connection = self.connection_mut(key)?;
-        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
         else {
             return None;
         };
@@ -252,7 +251,8 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return false;
         };
-        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
         else {
             return false;
         };
@@ -260,6 +260,7 @@ impl Condr {
         if matches!(&command, TerminalCommand::Focus(_))
             || (connection.can_mutate()
                 && !connection
+                    .model
                     .terminals
                     .get(&pane_id)
                     .is_some_and(|terminal| terminal.exited))
@@ -599,7 +600,7 @@ impl Condr {
         };
         let agents: Vec<_> = panes
             .iter()
-            .filter_map(|pane_id| connection.agents.get(pane_id))
+            .filter_map(|pane_id| connection.model.agents.get(pane_id))
             .collect();
         let description = match agents.as_slice() {
             [] => return None,

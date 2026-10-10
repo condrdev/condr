@@ -20,7 +20,7 @@ impl Condr {
         }
         let message = match incoming {
             Incoming::Bootstrap(bootstrap) => {
-                let first_bootstrap = self.connections[index].server_id.is_none();
+                let first_bootstrap = self.connections[index].model.server_id.is_none();
                 let application = match self.connections[index].apply_bootstrap(bootstrap) {
                     Ok(application) => application,
                     // Retrying would fetch the same invalid model; reconnect by hand.
@@ -63,7 +63,7 @@ impl Condr {
                     _ = self.clear_pending_projections_for(key);
                 }
 
-                let bootstrap_sequence = self.connections[index].sequence;
+                let bootstrap_sequence = self.connections[index].model.sequence;
                 let active_projection_resolved =
                     self.resolve_projections_at(key, bootstrap_sequence);
                 let target_before_refresh = self.terminal_input.target;
@@ -149,13 +149,13 @@ impl Condr {
                 event,
             } => {
                 let connection = &mut self.connections[index];
-                if connection.server_id != Some(server_id)
-                    || connection.session_id != Some(session_id)
+                if connection.model.server_id != Some(server_id)
+                    || connection.model.session_id != Some(session_id)
                 {
                     return IncomingEffect::default();
                 }
-                if sequence != connection.sequence.saturating_add(1) {
-                    if sequence > connection.sequence {
+                if sequence != connection.model.sequence.saturating_add(1) {
+                    if sequence > connection.model.sequence {
                         connection.subscribed = false;
                         connection.subscription_pending = false;
                         connection.request_snapshot();
@@ -168,7 +168,7 @@ impl Condr {
                 }
                 // A malformed layout must not advance the last validated model cursor.
                 if !matches!(event, SessionEvent::LayoutChanged { .. }) {
-                    self.connections[index].sequence = sequence;
+                    self.connections[index].model.sequence = sequence;
                 }
                 let notify;
                 let mut git_changed = false;
@@ -185,7 +185,7 @@ impl Condr {
                             Ok(changed) => changed,
                             Err(error) => return self.mark_protocol_error(key, index, error),
                         };
-                        connection.sequence = sequence;
+                        connection.model.sequence = sequence;
                         self.prune_dock_cache(key, cx);
                         self.sync_sidebar_workspace_open(cx);
                         return self.settle_layout(key, sequence, layout_changed);
@@ -205,7 +205,8 @@ impl Condr {
                         };
                     }
                     SessionEvent::TerminalExited { pane_id } => {
-                        if let Some(terminal) = self.connections[index].terminals.get_mut(&pane_id)
+                        if let Some(terminal) =
+                            self.connections[index].model.terminals.get_mut(&pane_id)
                         {
                             terminal.exited = true;
                             notify = true;
@@ -217,17 +218,15 @@ impl Condr {
                         // Terminal focus is None while the window is inactive, so a
                         // completion behind another window still shows as done.
                         let visible = self.terminal_input.focused == Some((key, pane_id));
+                        let change = self.connections[index].model.apply_agent(
+                            pane_id,
+                            agent.clone(),
+                            visible,
+                        );
                         if let Some(agent) = agent {
-                            let previous = self.connections[index]
-                                .agents
-                                .insert(pane_id, agent.clone());
-                            // The Server only publishes changed snapshots, so Unknown here is
-                            // a new process, not a repeat that would reopen a manual collapse.
-                            let started = previous
-                                .as_ref()
-                                .is_none_or(|previous| previous.kind != agent.kind)
-                                || agent.state == AgentState::Unknown;
-                            if started
+                            // A new process reopens the Workspace row; a repeat does not
+                            // undo a manual collapse.
+                            if change.started
                                 && let Some(workspace_id) =
                                     self.connections[index].session().and_then(|session| {
                                         session
@@ -243,40 +242,24 @@ impl Condr {
                                         cx.notify();
                                     });
                             }
-                            self.connections[index]
-                                .agent_trackers
-                                .entry(pane_id)
-                                .and_modify(|tracker| {
-                                    // Unknown is only published for a new process; it
-                                    // must not carry the previous generation's done.
-                                    if agent.state == AgentState::Unknown {
-                                        *tracker = AgentTracker::new(agent.state);
-                                    } else {
-                                        tracker.update(agent.state, visible);
-                                    }
-                                })
-                                .or_insert_with(|| AgentTracker::new(agent.state));
                             if !visible {
                                 self.notify_agent_change(
                                     key,
                                     pane_id,
-                                    previous.map(|previous| previous.state),
+                                    change.previous.map(|previous| previous.state),
                                     &agent,
                                     cx,
                                 );
                             }
-                        } else {
-                            self.connections[index].agents.remove(&pane_id);
-                            self.connections[index].agent_trackers.remove(&pane_id);
                         }
                         notify = true;
                     }
                     SessionEvent::WorkspaceGitChanged { workspace_id, git } => {
                         let connection = &mut self.connections[index];
                         if let Some(git) = git {
-                            connection.workspace_git.insert(workspace_id, git);
+                            connection.model.workspace_git.insert(workspace_id, git);
                         } else {
-                            connection.workspace_git.remove(&workspace_id);
+                            connection.model.workspace_git.remove(&workspace_id);
                         }
                         // The working tree moved: every diff of it is stale.
                         self.forget_workspace_diffs(key, workspace_id);
@@ -290,7 +273,7 @@ impl Condr {
                     }
                     SessionEvent::TerminalTitleChanged { pane_id, title } => {
                         // Reliable metadata can precede a new Pane's first visual frame.
-                        let titles = &mut self.connections[index].terminal_titles;
+                        let titles = &mut self.connections[index].model.terminal_titles;
                         match title {
                             Some(title) => {
                                 titles.insert(pane_id, title);
@@ -304,13 +287,13 @@ impl Condr {
                     SessionEvent::TerminalAttentionChanged { pane_id, attention } => {
                         let focused = self.terminal_input.focused == Some((key, pane_id));
                         notify = if attention {
-                            !focused && self.connections[index].attention.insert(pane_id)
+                            !focused && self.connections[index].model.attention.insert(pane_id)
                         } else {
-                            self.connections[index].attention.remove(&pane_id)
+                            self.connections[index].model.attention.remove(&pane_id)
                         };
                     }
                     SessionEvent::ServerSettingsChanged { settings } => {
-                        self.connections[index].settings = settings;
+                        self.connections[index].model.settings = settings;
                         self.sync_local_settings(key, cx);
                         notify = true;
                     }
@@ -323,18 +306,16 @@ impl Condr {
                 }
             }
             ServerMessage::TerminalFrame(batch) => {
-                if self.connections[index].server_id != Some(batch.server_id)
-                    || self.connections[index].session_id != Some(batch.session_id)
+                if self.connections[index].model.server_id != Some(batch.server_id)
+                    || self.connections[index].model.session_id != Some(batch.session_id)
                 {
                     return IncomingEffect::default();
                 }
 
-                let connection = &mut self.connections[index];
-                let pane_ids = match apply_terminal_frame_batch(
-                    &mut connection.terminals,
-                    &mut connection.terminal_hyperlinks,
-                    batch.panes,
-                ) {
+                let pane_ids = match self.connections[index]
+                    .model
+                    .apply_terminal_frames(batch.panes)
+                {
                     Ok(pane_ids) => pane_ids,
                     Err(()) => {
                         let notify = self.connections[index].request_snapshot();
@@ -348,7 +329,8 @@ impl Condr {
                     && selection.connection_key == key
                     && pane_ids.contains(&selection.pane_id)
                 {
-                    let server_selection = self.connections[index].terminals[&selection.pane_id]
+                    let server_selection = self.connections[index].model.terminals
+                        [&selection.pane_id]
                         .view
                         .selection;
                     if selection.committed && server_selection.is_some() {
@@ -356,7 +338,7 @@ impl Condr {
                         // already in flight before the Select keeps the local bridge.
                         self.terminal_input.selection = None;
                     } else if !selection.committed {
-                        selection.range.display_offset = self.connections[index].terminals
+                        selection.range.display_offset = self.connections[index].model.terminals
                             [&selection.pane_id]
                             .view
                             .display_offset;
@@ -366,6 +348,7 @@ impl Condr {
                     motion.connection_key == key
                         && pane_ids.contains(&motion.pane_id)
                         && self.connections[index]
+                            .model
                             .terminals
                             .get(&motion.pane_id)
                             .is_some_and(|terminal| {
@@ -380,6 +363,7 @@ impl Condr {
                     self.terminal_input.hovered_link =
                         if hover_key == key && pane_ids.contains(&hover_pane) {
                             self.connections[index]
+                                .model
                                 .terminals
                                 .get(&hover_pane)
                                 .and_then(|terminal| {
@@ -396,6 +380,7 @@ impl Condr {
                 }
                 for pane_id in &pane_ids {
                     let terminal_size = self.connections[index]
+                        .model
                         .terminals
                         .get(pane_id)
                         .expect("applied terminal still exists")
@@ -440,8 +425,8 @@ impl Condr {
                 sequence,
                 result,
             } => {
-                if self.connections[index].server_id != Some(server_id)
-                    || self.connections[index].session_id != Some(session_id)
+                if self.connections[index].model.server_id != Some(server_id)
+                    || self.connections[index].model.session_id != Some(session_id)
                 {
                     return IncomingEffect::default();
                 }
@@ -479,7 +464,7 @@ impl Condr {
                 // The origin client gets the LayoutChanged event before this reply, so the
                 // structure is usually already in; settle against it now rather than waiting
                 // for a Bootstrap that no longer comes.
-                let applied = self.connections[index].sequence;
+                let applied = self.connections[index].model.sequence;
                 if applied >= sequence {
                     let mut effect = self.settle_layout(key, applied, false);
                     effect.rebuild_active |= view_changed;
@@ -497,8 +482,8 @@ impl Condr {
                 request_id,
                 reason,
             } => {
-                if self.connections[index].server_id != Some(server_id)
-                    || self.connections[index].session_id != Some(session_id)
+                if self.connections[index].model.server_id != Some(server_id)
+                    || self.connections[index].model.session_id != Some(session_id)
                 {
                     return IncomingEffect::default();
                 }
@@ -603,7 +588,7 @@ impl Condr {
                     }
                     ServerAdminResponse::Revoked { .. } => {
                         connection.send(ClientMessage::ServerAdmin {
-                            server_id: connection.server_id.unwrap_or(ServerId(0)),
+                            server_id: connection.model.server_id.unwrap_or(ServerId(0)),
                             command: ServerAdminCommand::Clients,
                         });
                     }
@@ -724,7 +709,7 @@ impl Condr {
             | ServerMessage::ConnectedDevices { .. } => IncomingEffect::default(),
             ServerMessage::ServerStopping => {
                 let connection = &mut self.connections[index];
-                connection.stopping_runtime = connection.runtime_epoch;
+                connection.stopping_runtime = connection.model.runtime_epoch;
                 let effect = self.mark_disconnected(key, index, "Condr stopped".into());
                 self.begin_reconnect(key, cx);
                 effect
@@ -739,9 +724,9 @@ impl Condr {
                     return IncomingEffect::default();
                 }
                 connection.subscription_pending = false;
-                if connection.server_id == Some(server_id)
-                    && connection.session_id == Some(session_id)
-                    && connection.sequence == sequence
+                if connection.model.server_id == Some(server_id)
+                    && connection.model.session_id == Some(session_id)
+                    && connection.model.sequence == sequence
                 {
                     connection.subscribed = true;
                 } else {

@@ -1,4 +1,57 @@
 use super::*;
+use condr_core::protocol::encode_pane_terminal_frame;
+use condr_core::{Session, TerminalCell, TerminalColor, TerminalMouseTracking, TerminalSize};
+
+fn terminal_cell(text: &str) -> TerminalCell {
+    TerminalCell {
+        text: text.into(),
+        foreground: TerminalColor::Named(0),
+        background: TerminalColor::Named(0),
+        flags: 0,
+        hyperlink: None,
+    }
+}
+
+fn terminal_hyperlink_budgets(
+    terminals: &mut std::collections::HashMap<condr_core::PaneId, ClientTerminal>,
+) -> std::collections::HashMap<condr_core::PaneId, TerminalHyperlinkBudget> {
+    terminals
+        .iter_mut()
+        .map(|(&pane_id, terminal)| {
+            (
+                pane_id,
+                TerminalHyperlinkBudget::new(std::sync::Arc::make_mut(&mut terminal.view)),
+            )
+        })
+        .collect()
+}
+
+fn terminal_view(revision: u64, text: &str) -> TerminalView {
+    let cells = text
+        .chars()
+        .map(|character| terminal_cell(&character.to_string()))
+        .collect::<Vec<_>>();
+    TerminalView {
+        selection: None,
+        revision,
+        size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
+        display_offset: 0,
+        mouse_tracking: TerminalMouseTracking::None,
+        cells,
+        cursor: None,
+    }
+}
+
+fn pane_id() -> condr_core::PaneId {
+    let mut session = Session::new();
+    session
+        .create_workspace(std::env::temp_dir())
+        .expect("Workspace capacity");
+    session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id()
+}
 
 #[test]
 fn terminal_frame_chunks_survive_metadata_and_activation_interleaving_until_complete() {
@@ -291,7 +344,7 @@ fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
 }
 
 #[test]
-fn gui_visual_slot_composes_pending_deltas_into_one_signal() {
+fn visual_slot_composes_pending_deltas_into_one_signal() {
     let pane_id = pane_id();
     let slot = TerminalVisualSlot::default();
     let batch = |frame| TerminalFrameBatch {

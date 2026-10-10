@@ -259,6 +259,7 @@ impl Condr {
                     .id()
             });
         let authoritative_layout = connection
+            .model
             .zoomed_panes
             .iter()
             .copied()
@@ -548,6 +549,7 @@ impl Condr {
             return;
         };
         let zoomed = connection
+            .model
             .zoomed_panes
             .iter()
             .any(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id));

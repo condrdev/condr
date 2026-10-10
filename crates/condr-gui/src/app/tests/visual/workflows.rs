@@ -269,7 +269,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
             parent_workspace_id.is_some()
                 && condr
                     .connection(1)
-                    .is_some_and(|connection| !connection.workspace_git.is_empty())
+                    .is_some_and(|connection| !connection.model.workspace_git.is_empty())
         })
     }));
     window.update(|window, cx| _ = window.draw(cx));
@@ -303,7 +303,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
             managed_workspace.as_ref().is_some_and(|(workspace_id, _)| {
                 condr
                     .connection(1)
-                    .and_then(|connection| connection.workspace_git.get(workspace_id))
+                    .and_then(|connection| connection.model.workspace_git.get(workspace_id))
                     .and_then(|git| git.branch.as_deref())
                     == Some(created_branch.as_str())
             })
@@ -333,7 +333,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
     let (sequence, error) = window.read(|app| {
         let condr = view.read(app);
         (
-            condr.connection(1).unwrap().sequence,
+            condr.connection(1).unwrap().model.sequence,
             condr.last_error.clone(),
         )
     });
@@ -382,7 +382,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
             condr
                 .active_session()
                 .is_some_and(|session| session.workspace(managed_workspace_id).is_some()),
-            connection.sequence,
+            connection.model.sequence,
             condr.last_error.clone(),
         )
     });
@@ -439,6 +439,7 @@ fn worktree_actions_use_the_workspace_context_and_real_server() {
         view.read(app)
             .connection(1)
             .unwrap()
+            .model
             .workspace_git
             .values()
             .any(|git| git.branch.as_deref() == Some("feature/ui"))
@@ -651,7 +652,7 @@ fn tcp_paths_use_server_side_text_dialogs() {
             parent_workspace_id.is_some()
                 && condr
                     .connection(1)
-                    .is_some_and(|connection| !connection.workspace_git.is_empty())
+                    .is_some_and(|connection| !connection.model.workspace_git.is_empty())
         })
     }));
 
@@ -900,7 +901,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             .unwrap()
             .workspaces()
             .len()),
-        window.read(|app| view.read(app).connection(1).unwrap().sequence),
+        window.read(|app| view.read(app).connection(1).unwrap().model.sequence),
         window.read(|app| view.read(app).last_error.clone()),
     );
     assert_eq!(
@@ -951,7 +952,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             (
                 condr
                     .connection(1)
-                    .and_then(|connection| connection.terminals.get(&new_pane))
+                    .and_then(|connection| connection.model.terminals.get(&new_pane))
                     .is_some_and(|terminal| !terminal.exited),
                 condr
                     .panels
@@ -976,7 +977,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .and_then(|connection| connection.terminals.get(&new_pane))
+                .and_then(|connection| connection.model.terminals.get(&new_pane))
                 .is_some_and(|terminal| {
                     terminal
                         .view
@@ -1024,6 +1025,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         window.read(|app| {
             view.read(app).connection(1).is_some_and(|connection| {
                 connection
+                    .model
                     .terminals
                     .values()
                     .any(|terminal| !terminal.exited)
@@ -1148,7 +1150,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
             (
                 condr
                     .connection(1)
-                    .and_then(|connection| connection.terminals.get(&new_pane))
+                    .and_then(|connection| connection.model.terminals.get(&new_pane))
                     .is_some_and(|terminal| {
                         terminal
                             .view
@@ -1175,7 +1177,7 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
     let output_received = wait_until(window, |window| {
         window.read(|app| {
             view.read(app).connection(1).is_some_and(|connection| {
-                connection.terminals.values().any(|terminal| {
+                connection.model.terminals.values().any(|terminal| {
                     terminal
                         .view
                         .cells

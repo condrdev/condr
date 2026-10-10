@@ -281,7 +281,7 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.read(|app| {
                 view.read(app)
                     .active_connection()
-                    .and_then(|connection| connection.workspace_git.values().next())
+                    .and_then(|connection| connection.model.workspace_git.values().next())
                     .and_then(|git| git.base.as_ref())
                     .is_some_and(|base| base.branch == "main")
             })

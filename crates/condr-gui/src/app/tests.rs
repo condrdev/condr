@@ -3,7 +3,6 @@ mod input;
 mod session_model;
 mod sidebar;
 mod startup;
-mod terminal_frames;
 #[cfg(feature = "test-support")]
 mod visual;
 
@@ -16,26 +15,23 @@ use super::{
     ActivateTab, BELL_SIDEBAR_STATUS, ClientIo, ClosePane, CondrAssets, ConnectionStatus,
     FocusLeft, NewTab, NextTab, NextWorkspace, OpenSettings, PreviousTab, PreviousWorkspace,
     ServerConnection, SidebarGlyph, SidebarIconTone, SplitDown, SplitRight,
-    TerminalClipboardShortcut, TerminalVisualSlot, ToggleChanges, ToggleSidebar, ToggleZoom,
-    accepted_text_input, agent_sidebar_status, agent_status_summary, apply_terminal_frame_batch,
-    assemble_terminal_frame_chunk, clear_pending_sizes_for_bootstrap, connect_to_server_with,
-    enforce_terminal_chunk_reliable_fence, fixed_shortcut, lock_exclusively, merge_terminal_deltas,
-    read_bootstrap_batches, reorder_connection, should_defer_to_character_input,
-    single_instance_lock_path, terminal_chunk_identity_matches, terminal_clipboard_shortcut,
+    TerminalClipboardShortcut, ToggleChanges, ToggleSidebar, ToggleZoom, accepted_text_input,
+    agent_sidebar_status, agent_status_summary, clear_pending_sizes_for_bootstrap,
+    connect_to_server_with, fixed_shortcut, lock_exclusively, reorder_connection,
+    should_defer_to_character_input, single_instance_lock_path, terminal_clipboard_shortcut,
     upstream_label,
 };
 use crate::terminal_element::HoveredTerminalLink;
+use condr_client::frames::read_bootstrap_batches;
 use condr_core::TerminalKey;
 use condr_core::protocol::{
     AgentCommand, BootstrapBatch, BootstrapHeader, BootstrapRecord, ClientMessage,
-    PaneTerminalFrame, PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage,
-    SessionBootstrap, SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk,
-    encode_bootstrap_record, encode_pane_terminal_frame,
+    PaneTerminalSnapshot, RuntimeEpoch, ServerId, ServerMessage, SessionBootstrap, SessionId,
+    encode_bootstrap_record,
 };
 use condr_core::{
-    AgentDisplayState, Session, TerminalCell, TerminalCellRun, TerminalColor,
-    TerminalHyperlinkBudget, TerminalMouseTracking, TerminalSize, TerminalView, TerminalViewDelta,
-    TerminalViewFrame,
+    AgentDisplayState, Session, TerminalCell, TerminalColor, TerminalMouseTracking, TerminalSize,
+    TerminalView,
 };
 use condr_server::{DeviceKey, Endpoint, TcpEndpoint};
 use gpui_kit::{AssetSource as _, KeyDownEvent, Keystroke, Task};
@@ -50,20 +46,6 @@ fn terminal_cell(text: &str) -> TerminalCell {
     }
 }
 
-fn terminal_hyperlink_budgets(
-    terminals: &mut std::collections::HashMap<condr_core::PaneId, ClientTerminal>,
-) -> std::collections::HashMap<condr_core::PaneId, TerminalHyperlinkBudget> {
-    terminals
-        .iter_mut()
-        .map(|(&pane_id, terminal)| {
-            (
-                pane_id,
-                TerminalHyperlinkBudget::new(std::sync::Arc::make_mut(&mut terminal.view)),
-            )
-        })
-        .collect()
-}
-
 /// A TCP endpoint with fixed keys, so two calls with one address compare equal.
 pub(super) fn tcp(address: &str) -> Endpoint {
     Endpoint::tcp(TcpEndpoint::at(
@@ -76,10 +58,10 @@ pub(super) fn tcp(address: &str) -> Endpoint {
 fn connection_with_io() -> ServerConnection {
     let mut connection = ServerConnection::new(1, "test".into(), tcp("127.0.0.1:9"));
     connection.status = ConnectionStatus::Connected;
-    connection.server_id = Some(ServerId(1));
-    connection.runtime_epoch = Some(RuntimeEpoch(2));
-    connection.session_id = Some(SessionId(3));
-    connection.sequence = 7;
+    connection.model.server_id = Some(ServerId(1));
+    connection.model.runtime_epoch = Some(RuntimeEpoch(2));
+    connection.model.session_id = Some(SessionId(3));
+    connection.model.sequence = 7;
     let (outgoing, outgoing_rx) = std::sync::mpsc::channel();
     std::mem::forget(outgoing_rx);
     connection.io = Some(ClientIo {

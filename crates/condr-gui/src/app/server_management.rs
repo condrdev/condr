@@ -24,7 +24,7 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return false;
         };
-        let Some(server_id) = connection.server_id else {
+        let Some(server_id) = connection.model.server_id else {
             return false;
         };
         connection.send(ClientMessage::ServerAdmin { server_id, command })
@@ -127,7 +127,7 @@ impl Condr {
             if connection.status != ConnectionStatus::Connected {
                 continue;
             }
-            let Some(server_id) = connection.server_id else {
+            let Some(server_id) = connection.model.server_id else {
                 continue;
             };
             if connection.send(ClientMessage::Ping {
@@ -227,7 +227,10 @@ impl Condr {
         connection_key: ConnectionKey,
         pane_id: PaneId,
     ) -> Option<&ClientTerminal> {
-        self.connection(connection_key)?.terminals.get(&pane_id)
+        self.connection(connection_key)?
+            .model
+            .terminals
+            .get(&pane_id)
     }
 
     pub(super) fn start_connect(&mut self, key: ConnectionKey) -> bool {
@@ -346,7 +349,7 @@ impl Condr {
         let mut paired = false;
         let first_bootstrap = self
             .connection(key)
-            .is_some_and(|connection| connection.server_id.is_none());
+            .is_some_and(|connection| connection.model.server_id.is_none());
         let application = if let Some(connection) = self.connection_mut(key) {
             connection.endpoint = endpoint;
             connection.refusal = refusal;

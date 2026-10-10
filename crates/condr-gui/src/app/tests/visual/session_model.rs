@@ -15,10 +15,10 @@ fn rejects_invalid_model(as_bootstrap: bool) {
                 .unwrap();
             let snapshot = session.snapshot();
             let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let runtime_epoch = connection.runtime_epoch.unwrap();
-            let session_id = connection.session_id.unwrap();
-            let sequence = connection.sequence;
+            let server_id = connection.model.server_id.unwrap();
+            let runtime_epoch = connection.model.runtime_epoch.unwrap();
+            let session_id = connection.model.session_id.unwrap();
+            let sequence = connection.model.sequence;
             connection.reconnect_deadline = Some(Instant::now() + TEST_TIMEOUT);
             let invalid = crate::app::tests::session_model::duplicate_workspaces(&snapshot);
             let incoming = if as_bootstrap {
@@ -59,7 +59,7 @@ fn rejects_invalid_model(as_bootstrap: bool) {
                     .contains("invalid Session snapshot")
             );
             assert_eq!(connection.session().unwrap().snapshot(), snapshot);
-            assert_eq!(connection.sequence, sequence);
+            assert_eq!(connection.model.sequence, sequence);
             assert!(connection.io.is_none());
             assert!(connection.reconnect_deadline.is_none());
             assert!(connection.bootstrap_resync_session_id.is_none());

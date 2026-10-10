@@ -213,7 +213,7 @@ fn terminal_contains(
     window.read(|app| {
         view.read(app)
             .connection(connection_key)
-            .and_then(|connection| connection.terminals.get(&pane_id))
+            .and_then(|connection| connection.model.terminals.get(&pane_id))
             .is_some_and(|terminal| {
                 terminal
                     .view

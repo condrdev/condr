@@ -27,34 +27,19 @@ pub(super) struct ServerConnection {
     pub(super) build_notice_dismissed: bool,
     /// This window already asked whether to restart a stale local Server; asked once.
     pub(super) update_restart_offered: bool,
-    pub(super) server_id: Option<ServerId>,
-    pub(super) runtime_epoch: Option<RuntimeEpoch>,
+    /// The Session, terminals and Agents this connection holds (ADR 0039).
+    pub(super) model: SessionModel,
     /// The Server process that said `ServerStopping`. It keeps accepting until it exits,
     /// so a reconnect can reach it again; its Bootstrap is refused.
     pub(super) stopping_runtime: Option<RuntimeEpoch>,
-    pub(super) session_id: Option<SessionId>,
-    pub(super) sequence: u64,
-    /// The last validated Server model; absent until the first Bootstrap.
-    session: Option<Session>,
     /// This Client's own view of the Session (ADR 0021): the Workspace it shows and, per
     /// Workspace, the Tab. Never sent to the Server. A choice that no longer exists falls
     /// back to the first Workspace or Tab; `reconcile_view` moves it to a neighbour first.
     pub(super) view_workspace: Option<WorkspaceId>,
     pub(super) view_tabs: HashMap<WorkspaceId, TabId>,
-    pub(super) terminals: HashMap<PaneId, ClientTerminal>,
-    pub(super) terminal_titles: HashMap<PaneId, String>,
-    pub(super) terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
-    pub(super) agents: HashMap<PaneId, AgentSnapshot>,
-    pub(super) agent_trackers: HashMap<PaneId, AgentTracker>,
-    /// Panes that rang BEL while not focused; cleared when the Terminal gains focus.
-    pub(super) attention: HashSet<PaneId>,
     /// Panes with a clipboard image still on its way to the Server; the header says so.
     pub(super) pasting_images: HashSet<PaneId>,
-    pub(super) workspace_git: HashMap<WorkspaceId, WorkspaceGitSnapshot>,
     pub(super) resources: WorkspaceResources,
-    pub(super) zoomed_panes: HashSet<PaneId>,
-    /// Server-owned preferences from the Bootstrap, kept current by events.
-    pub(super) settings: ServerSettings,
     /// The state of each agent's status hooks on the Server's machine, as last
     /// reported; requested when Settings shows this Server and after every action.
     pub(super) hooks: Vec<HooksReport>,
@@ -169,25 +154,12 @@ impl ServerConnection {
             server_build: None,
             build_notice_dismissed: false,
             update_restart_offered: false,
-            server_id: None,
-            runtime_epoch: None,
+            model: SessionModel::default(),
             stopping_runtime: None,
-            session_id: None,
-            sequence: 0,
-            session: None,
             view_workspace: None,
             view_tabs: HashMap::new(),
-            terminals: HashMap::new(),
-            terminal_titles: HashMap::new(),
-            terminal_hyperlinks: HashMap::new(),
-            agents: HashMap::new(),
-            agent_trackers: HashMap::new(),
-            attention: HashSet::new(),
             pasting_images: HashSet::new(),
-            workspace_git: HashMap::new(),
             resources: WorkspaceResources::default(),
-            zoomed_panes: HashSet::new(),
-            settings: ServerSettings::default(),
             hooks: Vec::new(),
             hooks_error: None,
             listen: None,
@@ -222,7 +194,7 @@ impl ServerConnection {
     }
 
     pub(super) fn reset_sync_state(&mut self) {
-        self.attention.clear();
+        self.model.attention.clear();
         self.pasting_images.clear();
         self.subscribed = false;
         self.subscription_pending = false;
@@ -238,7 +210,7 @@ impl ServerConnection {
     }
 
     pub(super) fn session(&self) -> Option<&Session> {
-        self.session.as_ref()
+        self.model.session()
     }
 
     /// The Session the window shows: kept while connected or retrying on its own, the
@@ -247,24 +219,22 @@ impl ServerConnection {
     /// (ADR 0020); `session` still holds it for the reconnect to land where it was.
     pub(super) fn presented_session(&self) -> Option<&Session> {
         (self.status == ConnectionStatus::Connected || self.reconnect_deadline.is_some())
-            .then_some(self.session.as_ref())
+            .then_some(self.model.session())
             .flatten()
     }
 
-    fn replace_session(&mut self, session: Session) {
-        if let Some(before) = self.session.take() {
-            self.reconcile_view(&before, &session);
+    /// Carries this Client's view across a structure the model just replaced.
+    fn carry_view(&mut self, previous: Option<Session>) {
+        if let Some(before) = previous
+            && let Some(after) = self.model.session().cloned()
+        {
+            self.reconcile_view(&before, &after);
         }
-        self.session = Some(session);
     }
 
     /// What a Pane is called: the title its program set, else its agent's name.
     pub(super) fn pane_title(&self, pane_id: PaneId) -> Option<String> {
-        self.terminal_titles.get(&pane_id).cloned().or_else(|| {
-            self.agents
-                .get(&pane_id)
-                .map(|agent| agent.kind.label().to_owned())
-        })
+        self.model.pane_title(pane_id)
     }
 
     /// The Workspace this Client shows: its choice while that exists, else the first.
@@ -297,7 +267,7 @@ impl ServerConnection {
     /// Shows `workspace_id`, and `tab_id` in it when given; an unknown id is ignored.
     /// Returns whether the view changed.
     pub(super) fn set_view(&mut self, workspace_id: WorkspaceId, tab_id: Option<TabId>) -> bool {
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.model.session() else {
             return false;
         };
         let before = self.viewed(session);
@@ -349,74 +319,26 @@ impl ServerConnection {
         &mut self,
         bootstrap: SessionBootstrap,
     ) -> Result<BootstrapApplication, String> {
-        // Validate before replacing any identity, cursor, terminal or view state.
-        let session = Session::restore(bootstrap.snapshot)
-            .map_err(|error| format!("invalid Session snapshot: {error}"))?;
         let previous_layout = self.dock_projection();
-        let authority_changed = self.server_id != Some(bootstrap.server_id)
-            || self.runtime_epoch != Some(bootstrap.runtime_epoch)
-            || self.session_id != Some(bootstrap.session_id);
         let resubscribe = self.bootstrap_resync_session_id.is_some() && !self.subscribed;
+        // Validated before any identity, cursor, terminal or view state changes.
+        let change = self.model.apply_bootstrap(bootstrap)?;
         let rejected_recovery = std::mem::take(&mut self.recover_after_bootstrap);
-        if authority_changed {
+        if change.authority_changed {
             self.subscribed = false;
             self.subscription_pending = false;
-            self.agent_trackers.clear();
-            self.attention.clear();
         }
-        self.server_id = Some(bootstrap.server_id);
-        self.runtime_epoch = Some(bootstrap.runtime_epoch);
-        self.session_id = Some(bootstrap.session_id);
-        self.sequence = bootstrap.sequence;
-        self.replace_session(session);
-        // Server-authoritative, like the rest of the Bootstrap.
-        self.attention = bootstrap
-            .terminals
-            .iter()
-            .filter_map(|terminal| terminal.attention.then_some(terminal.pane_id))
-            .collect();
-        self.terminals.clear();
-        self.terminal_titles.clear();
-        self.terminal_hyperlinks.clear();
-        for mut terminal in bootstrap.terminals {
-            let pane_id = terminal.pane_id;
-            if let Some(title) = terminal.title.take() {
-                self.terminal_titles.insert(pane_id, title);
-            }
-            self.terminal_hyperlinks
-                .insert(pane_id, TerminalHyperlinkBudget::new(&mut terminal.view));
-            self.terminals.insert(pane_id, terminal.into());
-        }
-        self.agents = bootstrap
-            .agents
-            .into_iter()
-            .map(|agent| (agent.pane_id, agent.agent))
-            .collect();
-        self.agent_trackers
-            .retain(|pane_id, _| self.agents.contains_key(pane_id));
-        for (&pane_id, agent) in &self.agents {
-            self.agent_trackers
-                .entry(pane_id)
-                .and_modify(|tracker| tracker.update(agent.state, false))
-                .or_insert_with(|| AgentTracker::new(agent.state));
-        }
+        self.carry_view(change.previous);
         self.resources.reset();
-        self.workspace_git = bootstrap
-            .workspace_git
-            .into_iter()
-            .map(|git| (git.workspace_id, git))
-            .collect();
-        self.zoomed_panes = bootstrap.zoomed_panes.into_iter().collect();
-        self.settings = bootstrap.settings;
         self.status = ConnectionStatus::Connected;
         self.bootstrap_resync_session_id = None;
         self.error = None;
         self.disconnected_at = None;
         Ok(BootstrapApplication {
             rebuild: previous_layout != self.dock_projection(),
-            resubscribe: resubscribe || authority_changed,
-            recovery: authority_changed || rejected_recovery,
-            authority_changed,
+            resubscribe: resubscribe || change.authority_changed,
+            recovery: change.authority_changed || rejected_recovery,
+            authority_changed: change.authority_changed,
         })
     }
 
@@ -426,36 +348,10 @@ impl ServerConnection {
         snapshot: SessionSnapshot,
         zoomed_panes: Vec<PaneId>,
     ) -> Result<bool, String> {
-        let session = Session::restore(snapshot)
-            .map_err(|error| format!("invalid Session snapshot: {error}"))?;
         let previous_layout = self.dock_projection();
         let previous_viewer = self.presented_viewer();
-        let live: HashSet<PaneId> = session
-            .workspaces()
-            .iter()
-            .flat_map(|workspace| workspace.tabs())
-            .flat_map(|tab| tab.panes())
-            .map(|pane| pane.id())
-            .collect();
-        let live_workspaces: HashSet<WorkspaceId> = session
-            .workspaces()
-            .iter()
-            .map(|workspace| workspace.id())
-            .collect();
-        self.replace_session(session);
-        self.zoomed_panes = zoomed_panes.into_iter().collect();
-        self.terminals.retain(|pane_id, _| live.contains(pane_id));
-        self.terminal_hyperlinks
-            .retain(|pane_id, _| live.contains(pane_id));
-        self.terminal_titles
-            .retain(|pane_id, _| live.contains(pane_id));
-        // The Server drops these with the Pane or Workspace without an event of their own.
-        self.agents.retain(|pane_id, _| live.contains(pane_id));
-        self.agent_trackers
-            .retain(|pane_id, _| live.contains(pane_id));
-        self.attention.retain(|pane_id| live.contains(pane_id));
-        self.workspace_git
-            .retain(|workspace_id, _| live_workspaces.contains(workspace_id));
+        let previous = self.model.apply_layout(snapshot, zoomed_panes)?;
+        self.carry_view(previous);
         // Retargeting a viewer also needs to refresh its Editor, even without a Dock.
         Ok(self.dock_projection() != previous_layout || self.presented_viewer() != previous_viewer)
     }
@@ -477,7 +373,8 @@ impl ServerConnection {
         let session = self.session()?;
         let (_, tab_id) = self.viewed(session)?;
         let tab = session.tab(tab_id)?;
-        self.zoomed_panes
+        self.model
+            .zoomed_panes
             .iter()
             .copied()
             .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
@@ -488,7 +385,8 @@ impl ServerConnection {
     /// Asks the Server to install, remove or report one agent's hooks on its machine.
     /// The reply comes back as an `AgentResult` and replaces that agent's row.
     pub(super) fn send_agent_hooks(&mut self, agent: AgentKind, action: HooksAction) {
-        let (Some(server_id), Some(session_id)) = (self.server_id, self.session_id) else {
+        let (Some(server_id), Some(session_id)) = (self.model.server_id, self.model.session_id)
+        else {
             return;
         };
         self.send(ClientMessage::Agent {
@@ -510,12 +408,12 @@ impl ServerConnection {
         if self.subscription_pending {
             return;
         }
-        let Some(session_id) = self.session_id else {
+        let Some(session_id) = self.model.session_id else {
             return;
         };
         if self.send(ClientMessage::Subscribe {
             session_id,
-            after_sequence: self.sequence,
+            after_sequence: self.model.sequence,
         }) {
             self.subscribed = false;
             self.subscription_pending = true;
@@ -523,7 +421,7 @@ impl ServerConnection {
     }
 
     pub(super) fn request_snapshot(&mut self) -> bool {
-        let Some(session_id) = self.session_id else {
+        let Some(session_id) = self.model.session_id else {
             return false;
         };
         self.request_snapshot_for(session_id)
@@ -546,7 +444,7 @@ impl ServerConnection {
         authoritative_session_id: SessionId,
         reason: String,
     ) -> bool {
-        if self.server_id != Some(server_id) || self.bootstrap_resync_session_id.is_none() {
+        if self.model.server_id != Some(server_id) || self.bootstrap_resync_session_id.is_none() {
             return false;
         }
         self.bootstrap_resync_session_id = None;
@@ -584,7 +482,7 @@ impl ServerConnection {
             }
             // It may have been a reply something waits on: recover as for a reply lost
             // to writer lag, which also clears projections and reacquires control.
-            UnknownMessage::Reply => match (self.server_id, self.session_id) {
+            UnknownMessage::Reply => match (self.model.server_id, self.model.session_id) {
                 (Some(server_id), Some(session_id)) => {
                     self.recover_rejected_subscription(server_id, session_id)
                 }
@@ -600,7 +498,7 @@ impl ServerConnection {
     ) -> bool {
         // Writer overflow may already have discarded a queued LayoutApplied,
         // so the rejection is actionable even while a visual-gap snapshot is in flight.
-        if self.server_id != Some(server_id) {
+        if self.model.server_id != Some(server_id) {
             return false;
         }
         self.subscription_pending = false;

@@ -387,7 +387,7 @@ impl Condr {
                 connection.key,
                 workspace_id,
                 workspace.name().to_owned(),
-                connection.workspace_git.get(&workspace_id).cloned(),
+                connection.model.workspace_git.get(&workspace_id).cloned(),
                 shown_diff,
                 shown_file,
             ))
@@ -878,7 +878,7 @@ impl Condr {
         let path_text = path.to_string();
         let git = self
             .connection(key)
-            .and_then(|connection| connection.workspace_git.get(&workspace_id));
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id));
         let against = git.map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
         let entry = git.and_then(|git| {
             shown_changes(git, against)
@@ -1141,12 +1141,13 @@ impl Condr {
     ) {
         let against = self
             .connection(key)
-            .and_then(|connection| connection.workspace_git.get(&workspace_id))
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        let (Some(server_id), Some(session_id)) = (connection.server_id, connection.session_id)
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
         else {
             return;
         };

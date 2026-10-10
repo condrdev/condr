@@ -183,7 +183,7 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .is_some_and(|c| c.settings.proxy.mode == ProxyMode::Manual)
+                .is_some_and(|c| c.model.settings.proxy.mode == ProxyMode::Manual)
         })
     }));
     settings.update(|window, cx| _ = window.draw(cx));
@@ -193,7 +193,7 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .is_some_and(|c| c.settings.proxy.url == "http://proxy:8080")
+                .is_some_and(|c| c.model.settings.proxy.url == "http://proxy:8080")
         })
     }));
 
@@ -204,7 +204,7 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
     window.update(|_, cx| {
         cx.set_global(HttpProxy(ProxySetting::default()));
         view.update(cx, |this, cx| {
-            this.connection_mut(2).unwrap().settings.proxy.mode = ProxyMode::None;
+            this.connection_mut(2).unwrap().model.settings.proxy.mode = ProxyMode::None;
             this.sync_local_settings(2, cx);
         });
     });
@@ -493,7 +493,7 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
             window.read(|app| {
                 view.read(app)
                     .connection(1)
-                    .is_some_and(|connection| connection.settings.shell == "nu")
+                    .is_some_and(|connection| connection.model.settings.shell == "nu")
             })
         }),
         "the Server must store the trimmed shell and publish it"
@@ -503,7 +503,7 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .is_some_and(|connection| connection.settings.shell.is_empty())
+                .is_some_and(|connection| connection.model.settings.shell.is_empty())
         })
     }));
 

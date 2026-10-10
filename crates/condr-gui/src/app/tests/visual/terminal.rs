@@ -365,6 +365,7 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                 view.read(app)
                     .connection(1)
                     .unwrap()
+                    .model
                     .terminals
                     .contains_key(&pane_id)
             })
@@ -400,9 +401,9 @@ fn scrollback_selection_tracks_authoritative_view_offset_for_copy() {
                 let connection = this.connection(1).unwrap();
                 (
                     connection.connect_generation,
-                    connection.server_id.unwrap(),
-                    connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.as_ref().clone(),
+                    connection.model.server_id.unwrap(),
+                    connection.model.session_id.unwrap(),
+                    connection.model.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             terminal_view.revision += 1;
@@ -570,9 +571,9 @@ fn terminal_right_click_reports_to_the_pty_and_shift_left_drag_selects_locally()
                 let connection = this.connection(1).unwrap();
                 (
                     connection.connect_generation,
-                    connection.server_id.unwrap(),
-                    connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.as_ref().clone(),
+                    connection.model.server_id.unwrap(),
+                    connection.model.session_id.unwrap(),
+                    connection.model.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             this.terminal_input.mouse_motion = Some(ReportedTerminalMouseMotion {
@@ -728,7 +729,7 @@ fn terminal_double_click_and_clipboard_shortcut_copy_a_word() {
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
             connection.subscribed = false;
-            connection.bootstrap_resync_session_id = connection.session_id;
+            connection.bootstrap_resync_session_id = connection.model.session_id;
         });
     });
     // Windows copies a selection with plain Ctrl+C, which Kit's Root also binds.
@@ -862,7 +863,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
             (
                 condr
                     .connection(1)
-                    .and_then(|connection| connection.terminals.get(&pane_id))
+                    .and_then(|connection| connection.model.terminals.get(&pane_id))
                     .is_some_and(|terminal| !terminal.exited),
                 condr
                     .panels
@@ -992,6 +993,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
             view.read(app)
                 .connection(key)
                 .unwrap()
+                .model
                 .terminals
                 .contains_key(&pane_id)
         }) && window.debug_bounds(terminal_selector(pane_id)).is_some()
@@ -1081,7 +1083,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         server_id, session_id, pane_id: target, bytes, ..
     }] if *target == pane_id && *bytes == image.bytes && window.read(|app| {
         let connection = view.read(app).connection(key).unwrap();
-        Some(*server_id) == connection.server_id && Some(*session_id) == connection.session_id
+        Some(*server_id) == connection.model.server_id && Some(*session_id) == connection.model.session_id
     })));
 
     window.update(|_, cx| {
@@ -1169,9 +1171,9 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                 let connection = this.connection(1).unwrap();
                 (
                     connection.connect_generation,
-                    connection.server_id.unwrap(),
-                    connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.as_ref().clone(),
+                    connection.model.server_id.unwrap(),
+                    connection.model.session_id.unwrap(),
+                    connection.model.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             assert!(usize::from(terminal_view.size.columns) >= uri.len());
@@ -1296,9 +1298,9 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
                 let connection = this.connection(1).unwrap();
                 (
                     connection.connect_generation,
-                    connection.server_id.unwrap(),
-                    connection.session_id.unwrap(),
-                    connection.terminals[&pane_id].view.as_ref().clone(),
+                    connection.model.server_id.unwrap(),
+                    connection.model.session_id.unwrap(),
+                    connection.model.terminals[&pane_id].view.as_ref().clone(),
                 )
             };
             // The Server re-detects links per frame, so the blanked cell loses its link too.
@@ -1398,7 +1400,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     });
     window.update(|window, cx| {
         view.update(cx, |this, cx| {
-            let session_id = this.connection(1).unwrap().session_id.unwrap();
+            let session_id = this.connection(1).unwrap().model.session_id.unwrap();
             this.connection_mut(1).unwrap().bootstrap_resync_session_id = Some(session_id);
             this.sync_terminal_focus(window, cx);
         });
@@ -1425,8 +1427,8 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
             connection.send(ClientMessage::Terminal {
-                server_id: connection.server_id.unwrap(),
-                session_id: connection.session_id.unwrap(),
+                server_id: connection.model.server_id.unwrap(),
+                session_id: connection.model.session_id.unwrap(),
                 pane_id,
                 // BEL first, then a marker split so the echoed command line never
                 // matches it. The shell is pwsh on Windows and a POSIX shell elsewhere.
@@ -1457,6 +1459,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             view.read(app)
                 .connection(1)
                 .unwrap()
+                .model
                 .attention
                 .contains(&pane_id)
         })
@@ -1477,9 +1480,9 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
                     let connection = this.connection(1).unwrap();
                     (
                         connection.connect_generation,
-                        connection.server_id.unwrap(),
-                        connection.session_id.unwrap(),
-                        connection.sequence + 1,
+                        connection.model.server_id.unwrap(),
+                        connection.model.session_id.unwrap(),
+                        connection.model.sequence + 1,
                     )
                 };
                 let effect = this.handle_incoming(
@@ -1505,6 +1508,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .read(app)
             .connection(1)
             .unwrap()
+            .model
             .attention
             .contains(&pane_id)),
         "a bell from the actually focused terminal must not create attention"
@@ -1531,6 +1535,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .read(app)
             .connection(1)
             .unwrap()
+            .model
             .attention
             .contains(&pane_id)),
         "a selected but unfocused terminal must retain bell attention"
@@ -1555,6 +1560,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .read(app)
             .connection(1)
             .unwrap()
+            .model
             .attention
             .contains(&pane_id)),
         "successfully reporting terminal focus must clear bell attention"
@@ -1575,6 +1581,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .read(app)
             .connection(1)
             .unwrap()
+            .model
             .attention
             .contains(&pane_id)),
         "the ordered focus clear must cancel a delayed pre-focus bell"

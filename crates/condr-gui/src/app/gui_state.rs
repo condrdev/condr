@@ -420,7 +420,8 @@ impl Condr {
     pub(super) fn collect_state(&self, cx: &App) -> GuiState {
         let mut servers = self.restored_state.servers.clone();
         for connection in &self.connections {
-            let (Some(server_id), Some(session)) = (connection.server_id, connection.session())
+            let (Some(server_id), Some(session)) =
+                (connection.model.server_id, connection.session())
             else {
                 continue;
             };
@@ -467,7 +468,7 @@ impl Condr {
             // file's answer stands rather than `None`.
             active_server: self
                 .active_connection()
-                .and_then(|connection| connection.server_id)
+                .and_then(|connection| connection.model.server_id)
                 .or(self.restored_state.active_server),
             servers,
         }
@@ -484,7 +485,8 @@ impl Condr {
         else {
             return;
         };
-        let (Some(server_id), Some(session)) = (connection.server_id, connection.session()) else {
+        let (Some(server_id), Some(session)) = (connection.model.server_id, connection.session())
+        else {
             return;
         };
         let Some(saved) = self.restored_state.servers.get(&server_id).cloned() else {

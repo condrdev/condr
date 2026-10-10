@@ -53,7 +53,7 @@ impl Condr {
         let body = [
             agent.blocked_on.clone(),
             workspace,
-            connection.terminal_titles.get(&pane_id).cloned(),
+            connection.model.terminal_titles.get(&pane_id).cloned(),
         ]
         .into_iter()
         .flatten()

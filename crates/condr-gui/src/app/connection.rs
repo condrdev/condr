@@ -1,8 +1,4 @@
-mod terminal_frames;
-
 use super::*;
-
-pub(super) use terminal_frames::*;
 
 pub(super) enum Incoming {
     Bootstrap(SessionBootstrap),
@@ -27,28 +23,14 @@ pub(super) struct ClientIo {
     pub(super) _incoming_task: Task<()>,
 }
 
-/// Why the connection ended, for the sidebar. A closed socket is the normal way a
-/// Server goes away and is said plainly; only genuine protocol faults keep their detail.
-fn disconnect_reason(error: &condr_core::protocol::FramingError) -> String {
-    use condr_core::protocol::FramingError;
-    match error {
-        FramingError::UnexpectedEof => "the device closed the connection".into(),
-        FramingError::Io(error) => match error.kind() {
-            std::io::ErrorKind::UnexpectedEof
-            | std::io::ErrorKind::ConnectionReset
-            | std::io::ErrorKind::ConnectionAborted
-            | std::io::ErrorKind::BrokenPipe
-            | std::io::ErrorKind::NotConnected => "the device closed the connection".into(),
-            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
-                "the device stopped answering".into()
-            }
-            std::io::ErrorKind::PermissionDenied => {
-                format!("the device refused this connection: {error}")
-            }
-            _ => format!("connection error: {error}"),
-        },
-        FramingError::Oversized { .. } | FramingError::Codec(_) => {
-            format!("protocol error: {error}")
+impl From<condr_client::Incoming> for Incoming {
+    fn from(incoming: condr_client::Incoming) -> Self {
+        match incoming {
+            condr_client::Incoming::Bootstrap(bootstrap) => Self::Bootstrap(bootstrap),
+            condr_client::Incoming::Message(message) => Self::Message(message),
+            condr_client::Incoming::VisualReady(generation) => Self::VisualReady(generation),
+            condr_client::Incoming::TerminalResync => Self::TerminalResync,
+            condr_client::Incoming::Disconnected(reason) => Self::Disconnected(reason),
         }
     }
 }
@@ -63,270 +45,69 @@ impl ClientIo {
         window: &Window,
         cx: &Context<Condr>,
     ) -> std::io::Result<Self> {
-        let reader = connection.into_stream();
-        let mut writer = reader.try_clone()?;
-        // Buffered here, where nothing hands the stream on any more (ADR 0028).
-        let mut reader = std::io::BufReader::new(reader);
-        let (outgoing, outgoing_rx) = mpsc::channel();
         let (incoming_tx, incoming_rx) = async_channel::bounded(SERVER_EVENT_BUFFER_CAPACITY);
-        let writer_events = incoming_tx.clone();
-        let visual_slot = Arc::new(TerminalVisualSlot::default());
-
-        thread::Builder::new()
-            .name("condr-client-writer".into())
-            .spawn(move || {
-                loop {
-                    let mut message =
-                        match outgoing_rx.recv_timeout(condr_core::protocol::HEARTBEAT_INTERVAL) {
-                            Ok(message) => message,
-                            // Idle, not gone: the Server drops a subscriber that stays silent
-                            // (ADR 0036). Here, not on the UI thread, so a stalled frame
-                            // cannot cost the connection.
-                            Err(mpsc::RecvTimeoutError::Timeout) => ClientMessage::Ping {
-                                server_id: initial_server_id,
-                                nonce: 0,
-                            },
-                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                        };
-                    let image_pane = match &mut message {
-                        ClientMessage::PasteImage {
-                            pane_id,
-                            format,
-                            bytes,
-                            ..
-                        } => {
-                            if let Err(message) =
-                                super::terminal_input::prepare_clipboard_image(format, bytes)
-                            {
-                                if writer_events
-                                    .send_blocking(Incoming::Message(ServerMessage::Error {
-                                        message,
-                                    }))
-                                    .is_err()
-                                    || writer_events
-                                        .send_blocking(Incoming::ImageSent(*pane_id))
-                                        .is_err()
-                                {
-                                    break;
-                                }
-                                continue;
-                            }
-                            Some(*pane_id)
-                        }
-                        _ => None,
-                    };
-                    if let Err(error) =
-                        condr_core::protocol::write_client_message(&mut writer, &message)
-                    {
-                        let _ = writer_events
-                            .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
-                        break;
-                    }
-                    // Nothing applies what comes back any more: the connection is over, and
-                    // dropping this half of the stream closes it, which a local pipe's
-                    // shutdown does not. The next send then finds the Client disconnected.
-                    if writer_events.is_closed() {
-                        break;
-                    }
-                    // ponytail: "sent" is the socket accepting the last byte, not the Server
-                    // pasting the path; add a Server ack if staging ever gets slow.
-                    if let Some(pane_id) = image_pane
-                        && writer_events
-                            .send_blocking(Incoming::ImageSent(pane_id))
-                            .is_err()
-                    {
-                        break;
-                    }
+        let deliver = {
+            let incoming_tx = incoming_tx.clone();
+            move |incoming: condr_client::Incoming| {
+                incoming_tx
+                    .send_blocking(Incoming::from(incoming))
+                    .map_err(drop)
+            }
+        };
+        let prepare_events = incoming_tx.clone();
+        // A clipboard image is converted on the writer thread, off the UI: one that cannot
+        // be sent becomes an error toast, and its "Pasting image…" indicator comes down.
+        let prepare = move |message: &mut ClientMessage| {
+            let ClientMessage::PasteImage {
+                pane_id,
+                format,
+                bytes,
+                ..
+            } = message
+            else {
+                return Ok(true);
+            };
+            match super::terminal_input::prepare_clipboard_image(format, bytes) {
+                Ok(()) => Ok(true),
+                Err(message) => {
+                    let closed = prepare_events
+                        .send_blocking(Incoming::Message(ServerMessage::Error { message }))
+                        .is_err()
+                        || prepare_events
+                            .send_blocking(Incoming::ImageSent(*pane_id))
+                            .is_err();
+                    if closed { Err(()) } else { Ok(false) }
                 }
-                let _ = writer.shutdown();
-            })?;
-        let reader_visual_slot = Arc::clone(&visual_slot);
-        thread::Builder::new()
-            .name("condr-client-reader".into())
-            .spawn(move || {
-                let mut server_id = initial_server_id;
-                let mut session_id = initial_session_id;
-                let mut resync_pending = false;
-                let mut terminal_chunk_assembly = None;
-                loop {
-                    let message = match condr_core::protocol::read_message(&mut reader) {
-                        Ok(message) => message,
-                        Err(error) => {
-                            let _ = incoming_tx
-                                .send_blocking(Incoming::Disconnected(disconnect_reason(&error)));
-                            break;
-                        }
-                    };
-                    if let Err(error) = enforce_terminal_chunk_reliable_fence(
-                        &mut terminal_chunk_assembly,
-                        &message,
-                    ) {
-                        match &message {
-                            ServerMessage::Bootstrap(_) | ServerMessage::ServerStopping => {}
-                            ServerMessage::BootstrapBatch(_) => {
-                                let _ = incoming_tx.send_blocking(Incoming::Disconnected(error));
-                                break;
-                            }
-                            _ => {
-                                if request_terminal_resync(
-                                    &reader_visual_slot,
-                                    &incoming_tx,
-                                    &mut resync_pending,
-                                )
-                                .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    match message {
-                        // A frame this build cannot read: the Server already counts it as
-                        // delivered, so the next delta would not apply. Drop what is
-                        // pending and resynchronize, then let the UI count it (ADR 0028).
-                        message @ ServerMessage::Unknown(UnknownMessage::TerminalFrame) => {
-                            terminal_chunk_assembly = None;
-                            if request_terminal_resync(
-                                &reader_visual_slot,
-                                &incoming_tx,
-                                &mut resync_pending,
-                            )
-                            .is_err()
-                                || incoming_tx
-                                    .send_blocking(Incoming::Message(message))
-                                    .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        ServerMessage::TerminalFrame(batch) => {
-                            if resync_pending {
-                                continue;
-                            }
-                            if terminal_chunk_assembly.is_some() {
-                                terminal_chunk_assembly = None;
-                                if request_terminal_resync(
-                                    &reader_visual_slot,
-                                    &incoming_tx,
-                                    &mut resync_pending,
-                                )
-                                .is_err()
-                                {
-                                    break;
-                                }
-                                continue;
-                            }
-                            if batch.server_id != server_id || batch.session_id != session_id {
-                                continue;
-                            }
-                            if publish_terminal_batch(
-                                &reader_visual_slot,
-                                &incoming_tx,
-                                &mut resync_pending,
-                                batch,
-                            )
-                            .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        ServerMessage::TerminalFrameChunk(chunk) => {
-                            if resync_pending {
-                                continue;
-                            }
-                            match terminal_chunk_identity_matches(
-                                &mut terminal_chunk_assembly,
-                                &chunk,
-                                server_id,
-                                session_id,
-                            ) {
-                                Ok(true) => {}
-                                Ok(false) => continue,
-                                Err(_) => {
-                                    if request_terminal_resync(
-                                        &reader_visual_slot,
-                                        &incoming_tx,
-                                        &mut resync_pending,
-                                    )
-                                    .is_err()
-                                    {
-                                        break;
-                                    }
-                                    continue;
-                                }
-                            }
-                            match assemble_terminal_frame_chunk(&mut terminal_chunk_assembly, chunk)
-                            {
-                                Ok(Some(pane)) => {
-                                    if publish_terminal_batch(
-                                        &reader_visual_slot,
-                                        &incoming_tx,
-                                        &mut resync_pending,
-                                        TerminalFrameBatch {
-                                            server_id,
-                                            session_id,
-                                            panes: vec![pane],
-                                        },
-                                    )
-                                    .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                                Ok(None) => {}
-                                Err(_) => {
-                                    terminal_chunk_assembly = None;
-                                    if request_terminal_resync(
-                                        &reader_visual_slot,
-                                        &incoming_tx,
-                                        &mut resync_pending,
-                                    )
-                                    .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        ServerMessage::Bootstrap(header) => {
-                            let bootstrap = match read_bootstrap_batches(&mut reader, header) {
-                                Ok(bootstrap) => bootstrap,
-                                Err(error) => {
-                                    let _ =
-                                        incoming_tx.send_blocking(Incoming::Disconnected(error));
-                                    break;
-                                }
-                            };
-                            server_id = bootstrap.server_id;
-                            session_id = bootstrap.session_id;
-                            resync_pending = false;
-                            terminal_chunk_assembly = None;
-                            reader_visual_slot.advance();
-                            if incoming_tx
-                                .send_blocking(Incoming::Bootstrap(bootstrap))
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        ServerMessage::BootstrapBatch(_) => {
-                            let _ = incoming_tx.send_blocking(Incoming::Disconnected(
-                                "unexpected Bootstrap batch without a header".into(),
-                            ));
-                            break;
-                        }
-                        message => {
-                            if incoming_tx
-                                .send_blocking(Incoming::Message(message))
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                    }
-                }
-                let _ = reader.get_ref().shutdown();
-            })?;
+            }
+        };
+        let written_events = incoming_tx;
+        let written = move |message: &ClientMessage| {
+            // Nothing applies what comes back any more: the connection is over, and
+            // dropping this half of the stream closes it, which a local pipe's shutdown
+            // does not. The next send then finds the Client disconnected.
+            if written_events.is_closed() {
+                return Err(());
+            }
+            // ponytail: "sent" is the socket accepting the last byte, not the Server
+            // pasting the path; add a Server ack if staging ever gets slow.
+            if let ClientMessage::PasteImage { pane_id, .. } = message {
+                written_events
+                    .send_blocking(Incoming::ImageSent(*pane_id))
+                    .map_err(drop)?;
+            }
+            Ok(())
+        };
+        let condr_client::ConnectionIo {
+            outgoing,
+            visual: visual_slot,
+        } = condr_client::ConnectionIo::start(
+            connection.into_stream(),
+            initial_server_id,
+            initial_session_id,
+            deliver,
+            prepare,
+            written,
+        )?;
 
         // Applies everything the Server sends in the window it was spawned in, the one that
         // owns this connection. `WeakEntity::update_in` would look up the window that last
@@ -386,4 +167,11 @@ impl ClientIo {
             _incoming_task: incoming_task,
         })
     }
+}
+
+pub(super) fn clear_pending_sizes_for_bootstrap(
+    pending_sizes: &mut HashMap<(ConnectionKey, PaneId), TerminalSize>,
+    key: ConnectionKey,
+) {
+    pending_sizes.retain(|(connection_key, _), _| *connection_key != key);
 }

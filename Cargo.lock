@@ -1408,6 +1408,7 @@ name = "condr-gui"
 version = "0.1.10"
 dependencies = [
  "async-channel",
+ "condr-client",
  "condr-core",
  "condr-server",
  "embed-resource",

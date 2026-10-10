@@ -38,17 +38,18 @@ fn invalid_models_preserve_the_last_valid_structure_and_terminal_state() {
     connection.apply_bootstrap(bootstrap(&session)).unwrap();
     connection.set_view(workspace_id, Some(tab_id));
     connection
+        .model
         .terminal_titles
         .insert(pane_id, "keep title".into());
-    connection.terminals.insert(
+    connection.model.terminals.insert(
         pane_id,
         ClientTerminal {
             view: std::sync::Arc::new(terminal_view(11, "keep terminal")),
             exited: false,
         },
     );
-    connection.zoomed_panes.insert(pane_id);
-    let terminal = connection.terminals[&pane_id].view.clone();
+    connection.model.zoomed_panes.insert(pane_id);
+    let terminal = connection.model.terminals[&pane_id].view.clone();
     let mut invalid = bootstrap(&session);
     invalid.server_id = ServerId(100);
     invalid.runtime_epoch = RuntimeEpoch(200);
@@ -60,16 +61,16 @@ fn invalid_models_preserve_the_last_valid_structure_and_terminal_state() {
     assert!(connection.apply_bootstrap(invalid).is_err());
     assert!(connection.apply_layout(invalid_layout, Vec::new()).is_err());
     assert_eq!(connection.session().unwrap().snapshot(), session.snapshot());
-    assert_eq!(connection.server_id, Some(ServerId(1)));
-    assert_eq!(connection.runtime_epoch, Some(RuntimeEpoch(2)));
-    assert_eq!(connection.session_id, Some(SessionId(3)));
-    assert_eq!(connection.sequence, 7);
+    assert_eq!(connection.model.server_id, Some(ServerId(1)));
+    assert_eq!(connection.model.runtime_epoch, Some(RuntimeEpoch(2)));
+    assert_eq!(connection.model.session_id, Some(SessionId(3)));
+    assert_eq!(connection.model.sequence, 7);
     assert_eq!(connection.view_workspace, Some(workspace_id));
     assert_eq!(connection.view_tabs.get(&workspace_id), Some(&tab_id));
-    assert!(connection.zoomed_panes.contains(&pane_id));
-    assert_eq!(connection.terminal_titles[&pane_id], "keep title");
+    assert!(connection.model.zoomed_panes.contains(&pane_id));
+    assert_eq!(connection.model.terminal_titles[&pane_id], "keep title");
     assert!(std::sync::Arc::ptr_eq(
-        &connection.terminals[&pane_id].view,
+        &connection.model.terminals[&pane_id].view,
         &terminal
     ));
 }
@@ -125,13 +126,13 @@ fn a_closed_pane_leaves_no_attention_behind() {
         .unwrap();
     let mut connection = connection_with_io();
     connection.apply_bootstrap(bootstrap(&session)).unwrap();
-    connection.attention.extend([pane_id, split]);
+    connection.model.attention.extend([pane_id, split]);
 
     session.close_pane(split).unwrap();
     connection
         .apply_layout(session.snapshot(), Vec::new())
         .unwrap();
-    assert_eq!(connection.attention, [pane_id].into());
+    assert_eq!(connection.model.attention, [pane_id].into());
 }
 
 /// Run manually with `cargo test -p condr-gui session_model_read_cost -- --ignored --nocapture`.

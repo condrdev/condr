@@ -14,9 +14,9 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
         view.update(cx, |this, cx| {
             let connection = this.connection(1).unwrap();
             let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
-            let sequence = connection.sequence;
+            let server_id = connection.model.server_id.unwrap();
+            let session_id = connection.model.session_id.unwrap();
+            let sequence = connection.model.sequence;
             let original = connection.session().unwrap().snapshot();
             let mut session = connection.session().unwrap().clone();
             session.create_workspace(std::env::temp_dir()).unwrap();
@@ -49,7 +49,14 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
                     cx,
                 );
             }
-            assert!(!this.connection(1).unwrap().terminals.contains_key(&pane_id));
+            assert!(
+                !this
+                    .connection(1)
+                    .unwrap()
+                    .model
+                    .terminals
+                    .contains_key(&pane_id)
+            );
             this.handle_incoming(
                 1,
                 generation,
@@ -67,10 +74,14 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
             );
             let connection = this.connection(1).unwrap();
             assert_eq!(
-                connection.terminal_titles.get(&pane_id).map(String::as_str),
+                connection
+                    .model
+                    .terminal_titles
+                    .get(&pane_id)
+                    .map(String::as_str),
                 Some("agent title")
             );
-            assert!(connection.terminals.contains_key(&pane_id));
+            assert!(connection.model.terminals.contains_key(&pane_id));
             assert!(connection.bootstrap_resync_session_id.is_none());
             this.handle_incoming(
                 1,
@@ -90,6 +101,7 @@ fn a_new_panes_title_survives_its_first_visual_frame_and_is_pruned_on_close() {
                 !this
                     .connection(1)
                     .unwrap()
+                    .model
                     .terminal_titles
                     .contains_key(&pane_id)
             );
@@ -141,13 +153,13 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
     cx.update(gpui_kit::init);
     let (view, window, _server) = connected_condr(&mut cx);
 
-    let original_sequence = window.read(|app| view.read(app).connection(1).unwrap().sequence);
+    let original_sequence = window.read(|app| view.read(app).connection(1).unwrap().model.sequence);
     window.update(|_, cx| {
         view.update(cx, |this, cx| {
             let connection = this.connection(1).unwrap();
             let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
+            let server_id = connection.model.server_id.unwrap();
+            let session_id = connection.model.session_id.unwrap();
             let snapshot = connection.session().unwrap().snapshot();
             assert!(connection.subscribed);
 
@@ -174,7 +186,7 @@ fn reliable_sequence_gap_bootstraps_and_restores_subscription() {
             let connection = this.connection(1).unwrap();
             assert_eq!(
                 connection.bootstrap_resync_session_id,
-                connection.session_id
+                connection.model.session_id
             );
             assert!(!connection.subscribed);
             assert!(!connection.can_mutate());
@@ -209,9 +221,9 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
         view.update(cx, |this, cx| {
             let connection = this.connection(1).unwrap();
             let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
-            let sequence = connection.sequence + 1;
+            let server_id = connection.model.server_id.unwrap();
+            let session_id = connection.model.session_id.unwrap();
+            let sequence = connection.model.sequence + 1;
             // The test Server starts empty; the event may announce a Workspace the GUI
             // has never seen, exactly like a `condr workspace create` from a Pane.
             let mut session = connection.session().unwrap().clone();
@@ -244,7 +256,7 @@ fn in_sequence_layout_change_applies_without_a_bootstrap_resync() {
                 snapshot,
                 "the event's structure is applied"
             );
-            assert_eq!(connection.sequence, sequence);
+            assert_eq!(connection.model.sequence, sequence);
             assert!(
                 connection.bootstrap_resync_session_id.is_none(),
                 "an in-sequence layout change must not request a Bootstrap"
@@ -398,9 +410,9 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
     let identity = window.read(|app| {
         let connection = view.read(app).connection(1).unwrap();
         (
-            connection.server_id,
-            connection.runtime_epoch,
-            connection.session_id,
+            connection.model.server_id,
+            connection.model.runtime_epoch,
+            connection.model.session_id,
         )
     });
 
@@ -471,9 +483,9 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
         window.read(|app| {
             let connection = view.read(app).connection(1).unwrap();
             (
-                connection.server_id,
-                connection.runtime_epoch,
-                connection.session_id,
+                connection.model.server_id,
+                connection.model.runtime_epoch,
+                connection.model.session_id,
             )
         }),
         identity,
@@ -546,8 +558,8 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
             .unwrap()
             .id();
         (
-            connection.server_id,
-            connection.runtime_epoch,
+            connection.model.server_id,
+            connection.model.runtime_epoch,
             connection.session().unwrap().snapshot(),
             pane_id,
         )
@@ -566,7 +578,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         window.read(|app| {
             view.read(app)
                 .connection(1)
-                .and_then(|connection| connection.terminals.get(&pane_id))
+                .and_then(|connection| connection.model.terminals.get(&pane_id))
                 .is_some_and(|terminal| {
                     terminal
                         .view
@@ -583,7 +595,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
             connection.send(ClientMessage::StopServer {
-                server_id: connection.server_id.unwrap(),
+                server_id: connection.model.server_id.unwrap(),
             });
         });
     });
@@ -617,13 +629,13 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
     window.read(|app| {
         let condr = view.read(app);
         let connection = condr.connection(1).unwrap();
-        assert_eq!(connection.server_id, server_id);
-        assert_ne!(connection.runtime_epoch, runtime_epoch);
+        assert_eq!(connection.model.server_id, server_id);
+        assert_ne!(connection.model.runtime_epoch, runtime_epoch);
         assert_eq!(connection.session().unwrap().snapshot(), expected_snapshot);
-        assert_eq!(connection.terminals.len(), 1);
-        assert!(connection.agents.is_empty());
+        assert_eq!(connection.model.terminals.len(), 1);
+        assert!(connection.model.agents.is_empty());
         assert!(
-            !connection.terminals[&pane_id]
+            !connection.model.terminals[&pane_id]
                 .view
                 .cells
                 .iter()
@@ -651,7 +663,7 @@ fn replacement_server_restores_structure_with_fresh_terminal_state() {
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
             connection.send(ClientMessage::StopServer {
-                server_id: connection.server_id.unwrap(),
+                server_id: connection.model.server_id.unwrap(),
             });
         });
     });
@@ -836,7 +848,7 @@ fn corrupt_snapshot_connects_to_an_operable_start_page() {
     assert!(window.read(|app| {
         view.read(app)
             .connection(1)
-            .is_some_and(|connection| connection.terminals.is_empty())
+            .is_some_and(|connection| connection.model.terminals.is_empty())
     }));
     window.update(|window, cx| _ = window.draw(cx));
     let new_workspace = window
@@ -1155,9 +1167,9 @@ fn an_unwatched_agent_completion_posts_a_system_notification_for_its_pane() {
         view.update(cx, |this, cx| {
             let connection = this.connection(1).unwrap();
             let generation = connection.connect_generation;
-            let server_id = connection.server_id.unwrap();
-            let session_id = connection.session_id.unwrap();
-            let sequence = connection.sequence;
+            let server_id = connection.model.server_id.unwrap();
+            let session_id = connection.model.session_id.unwrap();
+            let sequence = connection.model.sequence;
             let mut session = connection.session().unwrap().clone();
             session.create_workspace(std::env::temp_dir()).unwrap();
             let pane_id = session.workspaces()[0].tabs()[0]

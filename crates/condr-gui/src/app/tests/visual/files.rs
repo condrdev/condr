@@ -409,12 +409,12 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
                 .insert((workspace_id, relative_path::RelativePathBuf::new()), 42);
             let connection = this.connection(1).unwrap();
             let bootstrap = SessionBootstrap {
-                server_id: connection.server_id.unwrap(),
-                runtime_epoch: connection.runtime_epoch.unwrap(),
-                session_id: connection.session_id.unwrap(),
-                sequence: connection.sequence,
+                server_id: connection.model.server_id.unwrap(),
+                runtime_epoch: connection.model.runtime_epoch.unwrap(),
+                session_id: connection.model.session_id.unwrap(),
+                sequence: connection.model.sequence,
                 snapshot: connection.session().unwrap().snapshot(),
-                settings: connection.settings.clone(),
+                settings: connection.model.settings.clone(),
                 terminals: Vec::new(),
                 agents: Vec::new(),
                 workspace_git: Vec::new(),

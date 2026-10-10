@@ -1,28 +1,67 @@
-use super::*;
+//! What a Client does with terminal frames before it draws them (ADR 0004): reassembling
+//! chunked records, fencing them against reliable messages, merging bursts into the one
+//! visual slot, and applying a batch to the terminals it holds.
 
+// `Err(())` means one thing here: these frames cannot apply, so resynchronize. Nothing
+// about why changes what a Client does next.
+#![allow(clippy::result_unit_err)]
+
+use condr_core::protocol::{
+    BootstrapAssembler, BootstrapHeader, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE,
+    PaneTerminalFrame, PaneTerminalSnapshot, ServerId, ServerMessage, SessionBootstrap,
+    SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk, decode_pane_terminal_frame,
+};
+use condr_core::{
+    PaneId, TerminalCellRun, TerminalHyperlinkBudget, TerminalView, TerminalViewDelta,
+    TerminalViewFrame,
+};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+
+/// A Pane's terminal as a Client holds it. The view is shared with whatever paints it, so a
+/// redraw clones a pointer, not the cell grid; frames mutate it in place through
+/// `Arc::make_mut` once the previous frame's reader is gone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClientTerminal {
+    pub view: Arc<TerminalView>,
+    pub exited: bool,
+}
+
+impl From<PaneTerminalSnapshot> for ClientTerminal {
+    fn from(snapshot: PaneTerminalSnapshot) -> Self {
+        Self {
+            view: Arc::new(snapshot.view),
+            exited: snapshot.exited,
+        }
+    }
+}
+
+/// The one droppable visual slot between a connection's reader and its owner (ADR 0004):
+/// frames merge into it, and the owner hears once per generation that it holds something,
+/// however many batches arrive before it takes them.
 #[derive(Default)]
-pub(in crate::app) struct TerminalVisualSlot {
-    pub(in crate::app) state: Mutex<TerminalVisualSlotState>,
+pub struct TerminalVisualSlot {
+    state: Mutex<TerminalVisualSlotState>,
 }
 
 #[derive(Default)]
-pub(in crate::app) struct TerminalVisualSlotState {
-    pub(in crate::app) generation: u64,
-    pub(in crate::app) pending: Option<PendingTerminalVisual>,
-    pub(in crate::app) signaled: bool,
+struct TerminalVisualSlotState {
+    generation: u64,
+    pending: Option<PendingTerminalVisual>,
+    signaled: bool,
 }
 
-pub(in crate::app) struct PendingTerminalVisual {
-    pub(in crate::app) server_id: ServerId,
-    pub(in crate::app) session_id: SessionId,
-    pub(in crate::app) panes: HashMap<PaneId, TerminalViewFrame>,
+struct PendingTerminalVisual {
+    server_id: ServerId,
+    session_id: SessionId,
+    panes: HashMap<PaneId, TerminalViewFrame>,
 }
 
 impl TerminalVisualSlot {
     /// Merges a batch into the pending visual, all panes or none: a `take` racing with this
     /// call sees either the previous pending state or the fully merged one, never a batch
     /// with some panes committed and the failing pane removed.
-    pub(in crate::app) fn publish(&self, batch: TerminalFrameBatch) -> Result<Option<u64>, ()> {
+    pub fn publish(&self, batch: TerminalFrameBatch) -> Result<Option<u64>, ()> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending.as_ref().is_some_and(|pending| {
             pending.server_id != batch.server_id || pending.session_id != batch.session_id
@@ -73,7 +112,7 @@ impl TerminalVisualSlot {
         }
     }
 
-    pub(in crate::app) fn take(&self, generation: u64) -> Option<TerminalFrameBatch> {
+    pub fn take(&self, generation: u64) -> Option<TerminalFrameBatch> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if state.generation != generation {
             return None;
@@ -91,7 +130,7 @@ impl TerminalVisualSlot {
         })
     }
 
-    pub(in crate::app) fn advance(&self) {
+    pub fn advance(&self) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         state.generation = state.generation.wrapping_add(1);
         state.pending = None;
@@ -99,17 +138,18 @@ impl TerminalVisualSlot {
     }
 }
 
-pub(in crate::app) struct TerminalFrameChunkAssembly {
-    pub(in crate::app) server_id: ServerId,
-    pub(in crate::app) session_id: SessionId,
-    pub(in crate::app) pane_id: PaneId,
-    pub(in crate::app) revision: u64,
-    pub(in crate::app) next_chunk_index: u32,
-    pub(in crate::app) chunk_count: u32,
-    pub(in crate::app) payload: Vec<u8>,
+/// One terminal frame record arriving in chunks, until its last chunk.
+pub struct TerminalFrameChunkAssembly {
+    server_id: ServerId,
+    session_id: SessionId,
+    pane_id: PaneId,
+    revision: u64,
+    next_chunk_index: u32,
+    chunk_count: u32,
+    payload: Vec<u8>,
 }
 
-pub(in crate::app) fn read_bootstrap_batches(
+pub fn read_bootstrap_batches(
     reader: &mut impl std::io::Read,
     header: BootstrapHeader,
 ) -> Result<SessionBootstrap, String> {
@@ -126,7 +166,7 @@ pub(in crate::app) fn read_bootstrap_batches(
     assembler.finish()
 }
 
-pub(in crate::app) fn assemble_terminal_frame_chunk(
+pub fn assemble_terminal_frame_chunk(
     assembly: &mut Option<TerminalFrameChunkAssembly>,
     chunk: TerminalFrameChunk,
 ) -> Result<Option<PaneTerminalFrame>, String> {
@@ -188,7 +228,7 @@ pub(in crate::app) fn assemble_terminal_frame_chunk(
     Ok(Some(pane))
 }
 
-pub(in crate::app) fn terminal_chunk_identity_matches(
+pub fn terminal_chunk_identity_matches(
     assembly: &mut Option<TerminalFrameChunkAssembly>,
     chunk: &TerminalFrameChunk,
     server_id: ServerId,
@@ -203,7 +243,7 @@ pub(in crate::app) fn terminal_chunk_identity_matches(
     Ok(false)
 }
 
-pub(in crate::app) fn enforce_terminal_chunk_reliable_fence(
+pub fn enforce_terminal_chunk_reliable_fence(
     assembly: &mut Option<TerminalFrameChunkAssembly>,
     message: &ServerMessage,
 ) -> Result<(), String> {
@@ -230,29 +270,14 @@ pub(in crate::app) fn enforce_terminal_chunk_reliable_fence(
     Err("reliable server message interrupted a terminal frame record".into())
 }
 
-pub(in crate::app) fn terminal_view_frame_revision(frame: &TerminalViewFrame) -> u64 {
+pub fn terminal_view_frame_revision(frame: &TerminalViewFrame) -> u64 {
     match frame {
         TerminalViewFrame::Full(view) => view.revision,
         TerminalViewFrame::Delta(delta) => delta.revision,
     }
 }
 
-pub(in crate::app) fn publish_terminal_batch(
-    visual_slot: &TerminalVisualSlot,
-    incoming: &async_channel::Sender<Incoming>,
-    resync_pending: &mut bool,
-    batch: TerminalFrameBatch,
-) -> Result<(), ()> {
-    match visual_slot.publish(batch) {
-        Ok(Some(generation)) => incoming
-            .send_blocking(Incoming::VisualReady(generation))
-            .map_err(|_| ()),
-        Ok(None) => Ok(()),
-        Err(()) => request_terminal_resync(visual_slot, incoming, resync_pending),
-    }
-}
-
-pub(in crate::app) fn apply_terminal_frame_batch(
+pub fn apply_terminal_frame_batch(
     terminals: &mut HashMap<PaneId, ClientTerminal>,
     terminal_hyperlinks: &mut HashMap<PaneId, TerminalHyperlinkBudget>,
     panes: Vec<PaneTerminalFrame>,
@@ -310,27 +335,8 @@ pub(in crate::app) fn apply_terminal_frame_batch(
     Ok(pane_ids)
 }
 
-pub(in crate::app) fn clear_pending_sizes_for_bootstrap(
-    pending_sizes: &mut HashMap<(ConnectionKey, PaneId), TerminalSize>,
-    key: ConnectionKey,
-) {
-    pending_sizes.retain(|(connection_key, _), _| *connection_key != key);
-}
-
-pub(in crate::app) fn request_terminal_resync(
-    visual_slot: &TerminalVisualSlot,
-    incoming: &async_channel::Sender<Incoming>,
-    resync_pending: &mut bool,
-) -> Result<(), ()> {
-    visual_slot.advance();
-    *resync_pending = true;
-    incoming
-        .send_blocking(Incoming::TerminalResync)
-        .map_err(|_| ())
-}
-
 /// Whether [`merge_terminal_frames`] would succeed, without consuming either frame.
-pub(in crate::app) fn check_terminal_frame_merge(
+pub fn check_terminal_frame_merge(
     previous: &TerminalViewFrame,
     next: &TerminalViewFrame,
 ) -> Result<(), ()> {
@@ -361,7 +367,7 @@ fn check_terminal_delta_merge(
     Ok(())
 }
 
-pub(in crate::app) fn merge_terminal_frames(
+pub fn merge_terminal_frames(
     previous: TerminalViewFrame,
     next: TerminalViewFrame,
 ) -> Result<TerminalViewFrame, ()> {
@@ -392,7 +398,7 @@ pub(in crate::app) fn merge_terminal_frames(
     Ok(merged)
 }
 
-pub(in crate::app) fn merge_terminal_deltas(
+pub fn merge_terminal_deltas(
     previous: TerminalViewDelta,
     next: TerminalViewDelta,
 ) -> Result<TerminalViewDelta, ()> {
@@ -431,3 +437,6 @@ pub(in crate::app) fn merge_terminal_deltas(
         runs,
     })
 }
+
+#[cfg(test)]
+mod tests;

@@ -24,6 +24,7 @@ gpui-pre-http-client-tls.workspace = true
 futures-lite.workspace = true
 image = { workspace = true, features = ["gif", "webp"] }
 condr-core = { path = "../condr-core" }
+condr-client = { path = "../condr-client" }
 condr-server = { path = "../condr-server" }
 relative-path.workspace = true
 syntect.workspace = true
