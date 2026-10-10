@@ -37,9 +37,12 @@ The design bet: embed the vendor's own agent CLI as a subprocess instead of re-i
 Condr has been a separate server/client system from the first version. "Local" is not another backend: the GUI simply discovers or starts the same `condr server` on this machine and connects to it. One machine runs exactly one Server. It always listens on a local private socket and, when `[server] listen` is configured, on one extra TCP address; both serve the same Session (ADR 0013). All orchestration lives in the Server, so the CLI and the Server are the same binary `condr`. The GUI is a separate binary `condr-gui` and is just one Server client:
 
 ```
-crates/condr-core    # domain, protocol, PTY, VT, agent detection, Git — no GUI deps, testable headless
+crates/condr-core    # domain, protocol, PTY, VT, agent detection, Git — no GUI deps, testable headless; the `runtime` feature gates PTY, VT, Git, process table and the desktop's files
+crates/condr-client  # what a Client does with a Server short of drawing it: Device key, both ends of TCP (Noise) and Peer-to-peer, `ClientConnection`, the connection's threads and `SessionModel` (ADR 0039)
 crates/condr-server  # builds `condr`: the Server process (`condr server …`) and CLI subcommands; owns Session, terminal runtime, persistence and connections
 crates/condr-gui     # builds `condr-gui`: pure client, connects to one or more servers, renders with GPUI
+crates/condr-mobile  # the Companion's one library: a uniffi layer over `condr-client` that the iOS and Android apps link (ADR 0039)
+mobile/              # the Companion's apps: ios/ (SwiftUI, with the CondrKit package) and android/ (Compose); `script/build-mobile.sh` builds their library
 assets/              # one copy of everything the GUI, packaging, README and website share: brand/ (logo and its generated icons), agents/ (agent CLI marks), screenshots/
 ```
 

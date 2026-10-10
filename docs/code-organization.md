@@ -2,7 +2,7 @@
 
 ## 模块边界
 
-三个 crate 的职责保持不变：Core 提供领域模型和终端能力，Server 拥有运行时，GUI 是协议 Client。按功能拆分 crate 内部模块，不为文件拆分增加 crate 或依赖。
+五个 crate 各有职责：Core 提供领域模型和终端能力，`runtime` feature 之外只剩协议与领域类型；Client 是所有 Client 共用的连接与读取模型；Server 拥有运行时；GUI 和 Mobile 分别是桌面与手机的 Client（ADR 0039）。按功能拆分 crate 内部模块，不为文件拆分增加 crate 或依赖。
 
 | 入口 | 职责与主要子模块 |
 | --- | --- |
@@ -10,16 +10,20 @@
 | `crates/condr-core/src/protocol.rs` | 协议公共入口和限制；`messages` 定义消息，`framing` 编解码帧，`bootstrap` 组装分块快照 |
 | `crates/condr-core/src/agent/mod.rs` | Agent 领域类型和 `AgentKind::spec()`；每种 Agent 一个模块（如 `claude.rs`）放它的 `AgentSpec`（ADR 0035），`process` 识别进程，`event` 定义 Hook 事件，`detector` 更新状态，`hook` 发送 Hook，`hooks` 是各 Agent 共用的四类 Hook 安装格式 |
 | `crates/condr-core/src/terminal.rs` | 终端公共入口；`runtime` 集中管理 PTY 启动、失败回滚与关闭，`input_queue`/`pty_io`/`resize` 处理 I/O，`osc`/`notices` 截获上报，`probes` 探测进程与 cwd，`shell` 配置 Shell，`view`/`view_source` 生成和传输视图 |
-| `crates/condr-server/src/client.rs` | 公共 `ClientConnection`，供 GUI 和 CLI 使用 |
+| `crates/condr-client/src/connection.rs` | `ClientConnection<S>`、`Cancellation<S>` 与 `Refused`；`ServerStream`、`Connector` 两个 trait 把它们与具体传输分开，Server 的 `client.rs` 用别名接上桌面的 `Endpoint` |
+| `crates/condr-client/src/noise.rs` | Noise 握手与加密记录的两端；接受连接的一侧经 `Authority` 读取本机密钥和已配对 Device，`key` 定义密钥类型，`tcp` 定义 `TcpEndpoint` 与拨号 |
+| `crates/condr-client/src/p2p.rs` | `P2pNode`、`P2pStream` 与 `P2pEndpoint`：绑定、拨号、接受和流本身；Server 的 `p2p.rs` 只剩 `Tunnel` 的 `splice` |
+| `crates/condr-client/src/io.rs` | 一条连接的读写线程与心跳，`frames` 处理分块、栅栏、视觉槽与帧合并，`model` 是 `SessionModel`：校验后的 Session、终端、Agent 跟踪与「Needs you」 |
+| `crates/condr-mobile/src/companion.rs` | Companion 的 uniffi 接口：每个 Device 的连接与模型、合并通知（`changed` 加 `take_changes`）、一次性结果队列与终端命令；`views` 定义给 Swift/Kotlin 的记录 |
 | `crates/condr-server/src/logging.rs` | `tracing` subscriber、按天滚动的非阻塞文件层、`CONDR_LOG` 过滤和 panic hook；`condr server run` 与 GUI 共用（ADR 0019） |
 | `crates/condr-server/src/endpoint.rs` | 地址解析与选择；`local` 管理 socket/named pipe 的监听和所有权，`stream` 统一流操作与取消 |
 | `crates/condr-server/src/ssh.rs` | SSH 地址和远端命令；`stream` 管理 SSH 子进程及原生管道 |
-| `crates/condr-server/src/noise.rs` | 密钥类型与 TCP 安全传输入口；`identity` 管理身份、设备和 invite，`stream` 实现握手与加密记录 |
+| `crates/condr-server/src/noise.rs` | 本机身份目录：`device-key` 的读写，`identity` 管理已配对设备与 invite，并作为 `Authority` 回答 Noise 与 Peer-to-peer 的接受方 |
 | `crates/condr-server/src/server.rs` | Server 生命周期和权威 RuntimeState；`config` 配置，`recovery` 恢复，`client` 分发请求，`layout`/`agents` 执行操作，`subscriptions` 发布可靠事件，`terminal_stream` 集中处理视觉帧准备、分块与基线提交 |
 | `crates/condr-server/src/persistence.rs` | Session 快照写入与关闭时刷盘；`config` 提供跨进程 TOML 配置事务 |
 | `crates/condr-server/src/cli.rs` | CLI 连接与错误输出；`workspace`、`pane`、`agent` 各自定义参数、执行命令并组织结果 |
-| `crates/condr-gui/src/app.rs` | GUI 根实体与初始化；持有连接、Dock 和功能状态，协调窗口与呈现；`server_management` 管理连接生命周期，`connection` 处理 I/O，`events` 消费事件，`presentation` 同步布局呈现 |
-| `crates/condr-gui/src/app/server_connection.rs` | 一条连接的状态与最后一份已校验的 Session 读取模型；Bootstrap 和 LayoutChanged 在校验成功后替换模型，查询借用它，无效模型保留旧状态并交由连接层断开 |
+| `crates/condr-gui/src/app.rs` | GUI 根实体与初始化；持有连接、Dock 和功能状态，协调窗口与呈现；`server_management` 管理连接生命周期，`connection` 把 `condr-client` 的读写线程接到 GPUI 并处理剪贴板图片，`events` 消费事件，`presentation` 同步布局呈现 |
+| `crates/condr-gui/src/app/server_connection.rs` | 一条连接的 GUI 状态：视图、订阅、重连与 Settings 所需的 Server 状态，读取模型放在内嵌的 `SessionModel` 里；Bootstrap 和 LayoutChanged 由它校验后替换，无效时保留旧状态并交由连接层断开 |
 | `crates/condr-gui/src/app/workspace_resources.rs` | 连接持有的 `WorkspaceResources`；集中管理 Diff、目录、文件缓存及当前请求编号，处理响应匹配、刷新、折叠、Workspace 移除与连接重置 |
 | `crates/condr-gui/src/app/dock.rs` | Dock 布局投影；`terminal_panel.rs` 负责终端 Pane 的呈现、焦点和光标闪烁 |
 | `crates/condr-gui/src/app/terminal_input.rs` | 键盘输入与终端几何；`TerminalInputState` 管理目标、选择、链接、鼠标捕获、焦点、已转发按键和 IME 状态，统一按存活 Pane 清理；子模块处理鼠标、选择、剪贴板，`app/ime.rs` 处理输入法组合文本 |
