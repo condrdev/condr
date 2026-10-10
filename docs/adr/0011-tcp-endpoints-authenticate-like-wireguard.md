@@ -17,3 +17,5 @@ Deferred from the roadmap's M3 list: storing the device key in an OS keychain, c
 > ADR 0025 replaces the two X25519 files with one Ed25519 `device-key`, derives the Noise key from it and stores Ed25519 keys in `authorized-clients`; the handshake, record layer and store rules here are unchanged.
 
 > ADR 0033 moves `device-key`, `authorized-clients` and `pending-invite` from the configuration directory to the data directory, which `CONDR_DATA_DIR` overrides; the store rules are unchanged.
+
+> ADR 0040 pairs a Companion by QR code and keeps its key in the iOS Keychain or under an Android Keystore key. The OS keychain deferred here is the desktop's.

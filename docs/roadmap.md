@@ -42,7 +42,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"（ADR 0036 已去掉 controller 租约）。没有 capability，密钥也没有进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
 - Windows 代码签名（SmartScreen）。
 - 终端内搜索。
-- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。
+- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，移动端 Companion 只经 TestFlight 与 Android 内部测试分发（ADR 0041）。
 
 **已知限制**（出现摩擦再立 Issue）：
 
@@ -87,12 +87,12 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 1. ADR：0039 定客户端库的边界（`condr-core` 的 `runtime` feature、`condr-client`、`condr-mobile` 与 `mobile/` 目录），0040 定手机自己绑定 iroh endpoint、配对、前后台和密钥存放，0041 定手机在 Pane 里是又一个窗口：和桌面一样输入、滚动、选择并接管终端尺寸，不改 Session 结构。
 2. 客户端库：按 ADR 0039 拆出 crate 并加上 uniffi 绑定，产出 xcframework 与 AAR，CI 增加 iOS 与 Android 目标；按 ADR 0041 加 `WatchTerminals`，帧率上限和视口提示等实测后再定。
-3. 配对与连接：桌面 Settings 的 Invite 把链接显示成二维码，手机扫码配对，Server 照常记进 `authorized-clients`。走 Peer-to-peer 的 Server 要开启 `[server.p2p] enabled`，配对引导要提示这一步。App 只在前台保持连接，回到前台时重连并重新 Bootstrap；后台全靠推送。
+3. 配对与连接：桌面 Settings 的 Invite 把链接显示成二维码，TCP 的二维码先让用户选定手机能访问的地址（ADR 0040），手机扫码配对，Server 照常记进 `authorized-clients`。走 Peer-to-peer 的 Server 要开启 `[server.p2p] enabled`，配对引导要提示这一步。App 只在前台保持连接，回到前台时重连并重新 Bootstrap；后台全靠推送。
 4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、Pane 的终端视图（打开时接管尺寸）。
 5. 推送：中转上线，按客户端限速，并在 SECURITY.md 写明它保存配对关系和推送 token、看不到通知内容；Agent 完成或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。
 6. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
 
-**要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连。
+**要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连；手机不显示的 Git 与文件事件在蜂窝流量里占多少（ADR 0041）。
 
 **停在哪**：不把桌面 GUI 的全部功能搬到手机；`ssh://` 不在这一方向内，手机要内置 SSH 客户端，等有需求再议；不做 Web 客户端。
 

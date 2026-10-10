@@ -18,4 +18,4 @@ Two alternatives were declined. Keeping two keys per machine and sharing `client
 
 > ADR 0033 moves the identity directory from beside `config.toml` to the data directory; the first process that needs the key after the update moves the files, so the key and every pairing stay.
 
-> ADR 0040 adds the Companion, a phone app that runs no Server and binds its own iroh endpoint. It is the only process on its phone that holds the key, so the rule of one endpoint per key stands.
+> ADR 0040 adds the Companion, a phone app that runs no Server and binds its own iroh endpoint. It is the only process on its phone that binds an endpoint with that key; its notification extension reads the key but binds none, so the rule of one endpoint per key stands.

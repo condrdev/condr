@@ -5,7 +5,7 @@ Condr organizes terminal-first work across projects while recognizing agent CLI 
 ## Language
 
 **Server**:
-A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each machine runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015). Server is an engineering term: the interface never shows it, and presents a Server together with the machine it runs on as one Device.
+A long-lived Condr runtime that owns one or more Sessions and their Terminals. Each computer runs one Server: it always answers on a private local socket for the GUI and CLI on that machine, and on a configured TCP address as well for other Devices, as ADR 0013 describes. Closing a Client does not stop it or its work. Over TCP a Server accepts paired Devices (ADR 0011); SSH Clients access it with the remote login user’s permissions (ADR 0015). Server is an engineering term: the interface never shows it, and presents a Server together with the machine it runs on as one Device.
 
 **Build identity**:
 What one Condr binary is, as `<version>[+<12-character commit>]` (ADR 0027): the workspace version, plus the commit CI built from. `condr --version` and `condr-gui --version` (with `(nightly)` after a nightly's) and the Server's `Status` report it, `Hello` and `Welcome` exchange it, and the GUI marks a Device whose Server is another build than the window. A different protocol number is a refusal; a different build under the same protocol is only that mark.
@@ -102,7 +102,7 @@ A recognized agent CLI process running inside a Terminal. It does not own or cre
 _Avoid_: Pane
 
 **Done**:
-How a Client shows an Agent that went `Idle` after `Working` or `Blocked` while that Client was not showing its Pane (ADR 0014). It is presentation, not a wire state, and each Client keeps its own, so an Agent watched finishing on the desktop is still Done on the phone.
+How a Client shows an Agent that went `Idle` after `Working` or `Blocked` while that Client was not showing its Pane (ADR 0014). It is presentation, not a wire state, and each Client keeps its own, so an Agent watched finishing on the desktop is still Done on the phone. A Client marks only a finish it saw happen: an Agent that finished while the Client was away shows as `Idle` (ADR 0041).
 _Avoid_: Finished, Completed (as states)
 
 **Needs you**:
