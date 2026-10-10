@@ -233,6 +233,31 @@ impl P2pNode {
         }
     }
 
+    /// Closes the endpoint now, whatever still uses it; the next dial binds it again. A
+    /// Companion does this when it leaves the screen (ADR 0040).
+    pub fn close(&self) {
+        let Some(bound) = lock(&self.bound).take() else {
+            return;
+        };
+        if let Some(task) = bound.accept_task {
+            task.abort();
+        }
+        self.handle
+            .block_on(async move { bound.endpoint.close().await });
+    }
+
+    /// Tells the endpoint the network changed, which iroh cannot see for itself on
+    /// Android (ADR 0040).
+    pub fn network_changed(&self) {
+        let endpoint = lock(&self.bound)
+            .as_ref()
+            .map(|bound| bound.endpoint.clone());
+        if let Some(endpoint) = endpoint {
+            self.handle
+                .block_on(async move { endpoint.network_change().await });
+        }
+    }
+
     /// Dials `device` and presents `invite` when this machine is not paired with it yet.
     pub fn dial(
         self: &Arc<Self>,

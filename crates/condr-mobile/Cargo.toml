@@ -1,0 +1,40 @@
+[package]
+name = "condr-mobile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The one Rust library the Companion's apps link (ADR 0039): a static library inside the
+# iOS xcframework, a shared one JNA loads on Android.
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[features]
+# The binding generators `script/build-mobile.sh` runs on the host.
+bindgen = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "src/bin/uniffi-bindgen-swift.rs"
+required-features = ["bindgen"]
+
+[dependencies]
+condr-client = { path = "../condr-client" }
+condr-core = { path = "../condr-core", default-features = false }
+tokio.workspace = true
+tracing.workspace = true
+uniffi.workspace = true
+
+[dev-dependencies]
+condr-server = { path = "../condr-server" }
+
+[lints]
+workspace = true

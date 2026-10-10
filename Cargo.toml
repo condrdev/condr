@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/condr-core", "crates/condr-client", "crates/condr-server", "crates/condr-gui"]
+members = [
+    "crates/condr-core",
+    "crates/condr-client",
+    "crates/condr-server",
+    "crates/condr-gui",
+    "crates/condr-mobile",
+]
 resolver = "2"
 
 [workspace.package]
@@ -67,6 +73,8 @@ uuid = { version = "1", features = ["v4"] }
 notify = "7"
 portable-pty = "0.9.0"
 sysinfo = "0.31.4"
+# The Companion's one library (ADR 0039): Swift and Kotlin bindings from proc macros.
+uniffi = "0.32"
 tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
 # Logging (ADR 0019): the facade everywhere, the subscriber only in condr-server.
 tracing = "0.1"

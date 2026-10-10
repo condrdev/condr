@@ -3,9 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: ['website/**']
+    paths-ignore: ['website/**', 'mobile/**']
   pull_request:
-    paths-ignore: ['website/**']
+    paths-ignore: ['website/**', 'mobile/**']
 
 permissions:
   contents: read
@@ -68,3 +68,41 @@ jobs:
       - run: cargo clippy --workspace --all-targets --features condr-gui/test-support --locked -- -D warnings
       # Every test binary runs, so one run reports every failure.
       - run: cargo test --workspace --features condr-gui/test-support --locked --no-fail-fast
+
+  # The Companion's library builds for both phones on every change (ADR 0039): a protocol
+  # change that breaks it breaks both apps. The apps themselves build in mobile.yml.
+  mobile:
+    name: mobile library (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-ios
+            os: macos-15
+          - target: aarch64-linux-android
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # `condr-core` without its runtime is all the library takes of it.
+      - run: cargo check -p condr-core --no-default-features --target ${{ matrix.target }} --locked
+      - name: Build for iOS
+        if: matrix.target == 'aarch64-apple-ios'
+        run: cargo build -p condr-mobile --lib --target ${{ matrix.target }} --locked
+      - name: Build for Android
+        if: matrix.target == 'aarch64-linux-android'
+        env:
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+        run: |
+          cargo install cargo-ndk --locked --version 4.1.2
+          cargo ndk -t arm64-v8a build -p condr-mobile --lib --locked

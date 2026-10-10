@@ -1,0 +1,55 @@
+name: Mobile
+
+# The Companion's packages around its library (ADR 0039): the bindings generate, and the
+# Swift package compiles against them. ci.yml builds the library itself on every change.
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', 'crates/**', 'proto/**', 'script/build-mobile.sh', 'Cargo.toml', 'Cargo.lock']
+  pull_request:
+    paths: ['mobile/**', 'crates/**', 'proto/**', 'script/build-mobile.sh', 'Cargo.toml', 'Cargo.lock']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ios:
+    name: iOS
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: script/build-mobile.sh ios
+      - name: Compile CondrKit for the simulator
+        working-directory: mobile/ios/CondrKit
+        run: xcodebuild -scheme CondrKit -destination 'generic/platform=iOS Simulator' build
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo install cargo-ndk --locked --version 4.1.2
+      - run: script/build-mobile.sh android

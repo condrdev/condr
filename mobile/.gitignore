@@ -1,0 +1,7 @@
+# What script/build-mobile.sh builds and generates (ADR 0039).
+/ios/CondrKit/condr_mobileFFI.xcframework/
+/ios/CondrKit/Sources/CondrKit/condr_mobile.swift
+/ios/CondrKit/.build/
+/ios/CondrKit/.swiftpm/
+/android/condr/src/main/jniLibs/
+/android/condr/src/main/kotlin/
