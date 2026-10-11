@@ -5,3 +5,5 @@
 /ios/CondrKit/.swiftpm/
 /android/condr/src/main/jniLibs/
 /android/condr/src/main/kotlin/
+/ios/Condr.xcodeproj/xcuserdata/
+/ios/Condr.xcodeproj/project.xcworkspace/

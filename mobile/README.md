@@ -25,3 +25,15 @@ script/build-mobile.sh android   # android/condr/src/main：jniLibs 与 Kotlin �
 cd ios/CondrKit
 xcodebuild -scheme CondrKit -destination 'generic/platform=iOS Simulator' build
 ```
+
+## iOS 原型
+
+`ios/Condr.xcodeproj` 是 Companion 的可交互原型：界面、流程和交互都是正式 App 的设计，数据是 `Condr/Model.swift` 里的演示世界（三台 Device、六个 Agent），暂不链接 CondrKit。用 Xcode 打开后选 iPhone 模拟器运行即可，不需要先构建 Rust 库。
+
+- 首次启动：欢迎 → 配对码说明 → 扫码 → 给手机命名 → 局域网权限说明 → 配对成功。
+- 日常：Agents 首页顶部是 Score，每台电脑一列竖条，每个 Agent 一根，按紧急程度排序，点一列打开那台电脑；下面是 Needs you、Done、Working、Idle。Devices 列出每台电脑和它的迷你 Score，设备页顶部是这台电脑的 Score。进入 Pane 后可以用按键行和回复框操作，演示 Agent 会按输入推进。
+- 大约 16 秒后 Codex 完成、38 秒后另一个 Claude 需要你，用来演示应用内横幅。
+
+调试用的启动参数：`-scene <name>` 直接打开某一屏（`welcome` `pair` `scan` `name` `network` `connecting` `paired` `lock` `devices` `device` `offline` `terminal` `question` `codex` `shell` `settings` `empty` `banner` `error` `computer`，以及一台电脑跑 15 个 Agent 的 `crowd` `crowd-device`），`-static YES` 关掉自动推进，`-focus YES` 打开终端后聚焦回复框，`-press "down enter t:Ship_it"` 打开终端后依次输入。
+
+原型的最低版本是 iOS 26（用了 Liquid Glass），ADR 0039 定的是 iOS 17；正式 App 要么为旧系统补回退，要么上调下限。
