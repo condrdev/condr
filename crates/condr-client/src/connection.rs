@@ -510,8 +510,17 @@ impl<S: ServerStream> ClientConnection<S> {
     /// terminal view once for the probe and again for the real connection.
     pub fn welcome(mut stream: S, client_name: impl Into<String>) -> io::Result<(S, Welcome)> {
         // A refused handshake surfaces as an I/O error with its own kind; keep it so
-        // callers can tell "not authorized" from a framing problem.
+        // callers can tell "not authorized" from a framing problem. A read timeout is
+        // `WouldBlock` on macOS and iOS ("os error 35"), which says nothing to a person.
         let io_error = |error: FramingError| match error {
+            FramingError::Io(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                io::Error::new(io::ErrorKind::TimedOut, "the device did not answer")
+            }
             FramingError::Io(error) => error,
             other => io::Error::other(other.to_string()),
         };
@@ -589,3 +598,6 @@ impl<S: ServerStream> ClientConnection<S> {
         self.stream
     }
 }
+
+#[cfg(test)]
+mod tests;
