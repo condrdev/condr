@@ -147,37 +147,6 @@ fn shutdown_cwd_rejects_a_non_utf8_tail_report() {
     );
 }
 
-fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
-    let cells = text
-        .chars()
-        .map(|character| condr_core::TerminalCell {
-            text: character.to_string().into(),
-            foreground: condr_core::TerminalColor::Named(0),
-            background: condr_core::TerminalColor::Named(0),
-            flags: 0,
-            hyperlink: None,
-        })
-        .collect::<Vec<_>>();
-    TerminalView {
-        selection: None,
-        revision,
-        size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
-        display_offset: 0,
-        mouse_tracking: condr_core::TerminalMouseTracking::None,
-        cells,
-        cursor: None,
-    }
-}
-
-fn latest_terminal_view(mut view: TerminalView) -> LatestTerminalView {
-    let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
-    LatestTerminalView {
-        view: Arc::new(view),
-        hyperlinks,
-        producer_frame: None,
-    }
-}
-
 #[test]
 fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
     let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
@@ -201,7 +170,10 @@ fn bootstrap_retains_a_closing_terminal_without_inventing_an_exit() {
     let bootstrap = state.bootstrap();
     assert_eq!(bootstrap.terminals.len(), 1);
     assert!(!bootstrap.terminals[0].exited);
-    assert_eq!(view_text(&bootstrap.terminals[0].view), "tail");
+    assert_eq!(
+        view_text(bootstrap.terminals[0].view.as_ref().unwrap()),
+        "tail"
+    );
     assert_eq!(
         bootstrap.terminals[0].title.as_deref(),
         Some("still closing")
@@ -549,7 +521,7 @@ fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
         SessionId(1),
         vec![BootstrapRecord::Terminal(PaneTerminalSnapshot {
             pane_id,
-            view: current,
+            view: Some(current),
             exited: false,
             title: None,
             attention: false,
@@ -565,8 +537,9 @@ fn wire_projected_hyperlinks_are_committed_as_the_client_baseline() {
     else {
         panic!("the Bootstrap record must remain a Terminal");
     };
-    assert!(projected.view.cells[0].hyperlink.is_none());
-    assert_eq!(baselines[0].1.as_ref(), &projected.view);
+    let projected = projected.view.unwrap();
+    assert!(projected.cells[0].hyperlink.is_none());
+    assert_eq!(baselines[0].1.as_ref(), &projected);
 }
 
 #[test]
@@ -707,7 +680,7 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
     state.subscribers.insert(7, subscriber(writer));
     state.broadcast_clipboard(pane_id, "before".into());
     state.begin_bootstrap(7);
-    let framed = frame_bootstrap_messages(state.capture_bootstrap().materialize()).unwrap();
+    let framed = frame_bootstrap_messages(state.capture_bootstrap(None).materialize()).unwrap();
     assert!(state.finish_bootstrap(7, framed).is_ok());
     assert!(matches!(
         receiver.recv(),
@@ -721,7 +694,7 @@ fn bootstrap_fence_keeps_an_unsent_clipboard_copy_and_lets_newer_copies_replace_
     state.broadcast_clipboard(pane_id, "old".into());
     state.begin_bootstrap(8);
     state.broadcast_clipboard(pane_id, "newer".into());
-    let framed = frame_bootstrap_messages(state.capture_bootstrap().materialize()).unwrap();
+    let framed = frame_bootstrap_messages(state.capture_bootstrap(None).materialize()).unwrap();
     assert!(state.finish_bootstrap(8, framed).is_ok());
     assert!(matches!(
         receiver.recv(),
@@ -744,7 +717,7 @@ fn bootstrap_fence_queues_concurrent_events_after_the_complete_bootstrap() {
         .focused_pane()
         .unwrap()
         .id();
-    let capture = state.capture_bootstrap();
+    let capture = state.capture_bootstrap(None);
     let (writer, receiver) = ClientWriter::channel();
     state.subscribers.insert(
         7,
@@ -1017,14 +990,14 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
         terminals: vec![
             PaneTerminalSnapshot {
                 pane_id: first_pane,
-                view: large_view(1),
+                view: Some(large_view(1)),
                 exited: false,
                 title: None,
                 attention: false,
             },
             PaneTerminalSnapshot {
                 pane_id: second_pane,
-                view: large_view(2),
+                view: Some(large_view(2)),
                 exited: true,
                 title: None,
                 attention: false,

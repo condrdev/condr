@@ -1043,6 +1043,14 @@ pub(super) fn handle_client(
                 };
                 queue_message(&outbound, response)
             }
+            ClientMessage::WatchTerminals { panes } => {
+                state
+                    .lock()
+                    .expect("server state lock poisoned")
+                    .watch_terminals(client_id, panes);
+                flush_terminal_render(&state, client_id);
+                false
+            }
             ClientMessage::Detach => true,
         };
         if should_close {
@@ -1053,6 +1061,7 @@ pub(super) fn handle_client(
     let mut state = state.lock().expect("server state lock poisoned");
     state.agent_control.waiters.remove(&client_id);
     state.subscribers.remove(&client_id);
+    state.watched_terminals.remove(&client_id);
     if let Some(staged) = state.staged_images.remove(&client_id) {
         clipboard_image::remove(staged);
     }

@@ -542,6 +542,10 @@ struct RuntimeState {
     sizing_client: Option<u64>,
     events: std::collections::VecDeque<SequencedEvent>,
     subscribers: std::collections::HashMap<u64, ClientSubscriber>,
+    /// The Panes each connection limited its terminal frames to (ADR 0041). It is the
+    /// connection's, not its subscription's, so it outlives a `SubscriptionRejected`; a
+    /// Client absent here gets every Pane.
+    watched_terminals: std::collections::HashMap<u64, std::collections::HashSet<PaneId>>,
     /// Live remote peers by client id, so a revocation can drop their connections. Named
     /// for TCP but holds every remote transport, Peer-to-peer included (ADR 0025).
     tcp_peers: std::collections::HashMap<u64, (crate::noise::PublicKey, EndpointStream)>,
@@ -608,7 +612,8 @@ struct BootstrapCapture {
 
 struct BootstrapTerminalCapture {
     pane_id: PaneId,
-    view: Arc<TerminalView>,
+    /// Only for a Pane the requesting Client watches (ADR 0041).
+    view: Option<Arc<TerminalView>>,
     exited: bool,
     title: Option<String>,
     attention: bool,
@@ -628,7 +633,7 @@ impl BootstrapCapture {
                 .into_iter()
                 .map(|terminal| PaneTerminalSnapshot {
                     pane_id: terminal.pane_id,
-                    view: Arc::unwrap_or_clone(terminal.view),
+                    view: terminal.view.map(Arc::unwrap_or_clone),
                     exited: terminal.exited,
                     title: terminal.title,
                     attention: terminal.attention,
@@ -691,6 +696,7 @@ impl RuntimeState {
             sizing_client: None,
             events: std::collections::VecDeque::new(),
             subscribers: std::collections::HashMap::new(),
+            watched_terminals: std::collections::HashMap::new(),
             tcp_peers: std::collections::HashMap::new(),
             p2p: None,
             staged_images: std::collections::HashMap::new(),

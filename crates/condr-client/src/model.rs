@@ -9,9 +9,10 @@ use condr_core::protocol::{
 };
 use condr_core::{
     AgentDisplayState, AgentSnapshot, AgentState, AgentTracker, PaneId, Session, SessionSnapshot,
-    TerminalHyperlinkBudget, Workspace, WorkspaceId,
+    TerminalHyperlinkBudget, TerminalViewFrame, Workspace, WorkspaceId,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct SessionModel {
@@ -21,7 +22,13 @@ pub struct SessionModel {
     pub sequence: u64,
     /// The last validated structure; absent until the first Bootstrap.
     session: Option<Session>,
+    /// The terminals this Client holds a view of: every Pane's, or only the watched ones'
+    /// (ADR 0041).
     pub terminals: HashMap<PaneId, ClientTerminal>,
+    /// Panes whose terminal exited, whether this Client holds their view or not.
+    pub exited: HashSet<PaneId>,
+    /// The Panes this Client asked frames for with `WatchTerminals`; `None` is every Pane.
+    watched: Option<HashSet<PaneId>>,
     pub terminal_titles: HashMap<PaneId, String>,
     pub terminal_hyperlinks: HashMap<PaneId, TerminalHyperlinkBudget>,
     pub agents: HashMap<PaneId, AgentSnapshot>,
@@ -84,16 +91,31 @@ impl SessionModel {
             .filter_map(|terminal| terminal.attention.then_some(terminal.pane_id))
             .collect();
         self.terminals.clear();
+        self.exited.clear();
         self.terminal_titles.clear();
         self.terminal_hyperlinks.clear();
-        for mut terminal in bootstrap.terminals {
+        for terminal in bootstrap.terminals {
             let pane_id = terminal.pane_id;
-            if let Some(title) = terminal.title.take() {
+            if let Some(title) = terminal.title {
                 self.terminal_titles.insert(pane_id, title);
             }
-            self.terminal_hyperlinks
-                .insert(pane_id, TerminalHyperlinkBudget::new(&mut terminal.view));
-            self.terminals.insert(pane_id, terminal.into());
+            if terminal.exited {
+                self.exited.insert(pane_id);
+            }
+            // A view for a Pane the set dropped while the Bootstrap was on its way is stale:
+            // the Server keeps no baseline for it.
+            if let Some(mut view) = terminal.view
+                && self.watches(pane_id)
+            {
+                self.terminal_hyperlinks
+                    .insert(pane_id, TerminalHyperlinkBudget::new(&mut view));
+                self.terminals.insert(
+                    pane_id,
+                    ClientTerminal {
+                        view: Arc::new(view),
+                    },
+                );
+            }
         }
         self.agents = bootstrap
             .agents
@@ -146,6 +168,7 @@ impl SessionModel {
         let previous = self.session.replace(session);
         self.zoomed_panes = zoomed_panes.into_iter().collect();
         self.terminals.retain(|pane_id, _| live.contains(pane_id));
+        self.exited.retain(|pane_id| live.contains(pane_id));
         self.terminal_hyperlinks
             .retain(|pane_id, _| live.contains(pane_id));
         self.terminal_titles
@@ -159,13 +182,44 @@ impl SessionModel {
         Ok(previous)
     }
 
+    /// Limits this Client's terminals to `panes`, the set it sends in `WatchTerminals`
+    /// (ADR 0041). A Pane that leaves the set loses its view, since the Server drops its
+    /// baseline; one that joins has none until its full frame arrives.
+    pub fn watch_terminals(&mut self, panes: HashSet<PaneId>) {
+        self.terminals.retain(|pane_id, _| panes.contains(pane_id));
+        self.terminal_hyperlinks
+            .retain(|pane_id, _| panes.contains(pane_id));
+        self.watched = Some(panes);
+    }
+
+    /// The set `watch_terminals` last took; `None` is every Pane.
+    pub fn watched(&self) -> Option<&HashSet<PaneId>> {
+        self.watched.as_ref()
+    }
+
+    /// Whether this Client wants `pane_id`'s frames.
+    pub fn watches(&self, pane_id: PaneId) -> bool {
+        self.watched
+            .as_ref()
+            .is_none_or(|watched| watched.contains(&pane_id))
+    }
+
     /// Applies one batch of terminal frames, every Pane or none; the Panes it changed.
-    /// `Err(())` asks for a new Bootstrap, as [`crate::frames`] explains.
+    /// `Err(())` asks for a new Bootstrap, as [`crate::frames`] explains. With a watched
+    /// set, frames for other Panes are old ones still on the wire, and so is a delta for a
+    /// watched Pane whose full frame has not arrived: both are ignored, not a gap.
     #[allow(clippy::result_unit_err)]
     pub fn apply_terminal_frames(
         &mut self,
-        panes: Vec<PaneTerminalFrame>,
+        mut panes: Vec<PaneTerminalFrame>,
     ) -> Result<Vec<PaneId>, ()> {
+        if self.watched.is_some() {
+            panes.retain(|pane| {
+                self.watches(pane.pane_id)
+                    && (self.terminals.contains_key(&pane.pane_id)
+                        || matches!(pane.frame, TerminalViewFrame::Full(_)))
+            });
+        }
         apply_terminal_frame_batch(&mut self.terminals, &mut self.terminal_hyperlinks, panes)
     }
 
@@ -257,5 +311,147 @@ impl SessionModel {
                 Some((workspace, pane_id, agent))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use condr_core::{
+        TerminalCell, TerminalCellRun, TerminalColor, TerminalMouseTracking, TerminalSize,
+        TerminalView, TerminalViewDelta,
+    };
+
+    fn full(pane_id: PaneId, revision: u64) -> PaneTerminalFrame {
+        PaneTerminalFrame {
+            pane_id,
+            frame: TerminalViewFrame::Full(TerminalView {
+                selection: None,
+                revision,
+                size: TerminalSize::new(1, 1),
+                display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
+                cells: vec![cell()],
+                cursor: None,
+            }),
+        }
+    }
+
+    fn delta(pane_id: PaneId, base_revision: u64, revision: u64) -> PaneTerminalFrame {
+        PaneTerminalFrame {
+            pane_id,
+            frame: TerminalViewFrame::Delta(TerminalViewDelta {
+                selection: None,
+                base_revision,
+                revision,
+                display_offset: 0,
+                mouse_tracking: TerminalMouseTracking::None,
+                cursor: None,
+                runs: vec![TerminalCellRun {
+                    start: 0,
+                    cells: vec![cell()],
+                }],
+            }),
+        }
+    }
+
+    fn cell() -> TerminalCell {
+        TerminalCell {
+            text: "x".into(),
+            foreground: TerminalColor::Named(0),
+            background: TerminalColor::Named(0),
+            flags: 0,
+            hyperlink: None,
+        }
+    }
+
+    /// ADR 0041: after a change of set, frames for other Panes and a delta for a Pane
+    /// whose full frame has not come are old frames in flight, not a gap.
+    #[test]
+    fn frames_outside_the_set_and_an_old_delta_for_a_newly_watched_pane_are_ignored() {
+        let (first, second) = (PaneId::from_u64(1), PaneId::from_u64(2));
+        let mut model = SessionModel::default();
+        model.watch_terminals([first].into());
+        assert_eq!(
+            model.apply_terminal_frames(vec![full(first, 1), full(second, 1)]),
+            Ok(vec![first])
+        );
+        assert!(!model.terminals.contains_key(&second));
+
+        model.watch_terminals([first, second].into());
+        assert_eq!(
+            model.apply_terminal_frames(vec![delta(second, 1, 2)]),
+            Ok(Vec::new()),
+            "no Bootstrap for an old delta"
+        );
+        assert_eq!(
+            model.apply_terminal_frames(vec![full(second, 3)]),
+            Ok(vec![second])
+        );
+        assert_eq!(
+            model.apply_terminal_frames(vec![delta(second, 3, 4)]),
+            Ok(vec![second])
+        );
+
+        model.watch_terminals([second].into());
+        assert!(
+            !model.terminals.contains_key(&first),
+            "a Pane that left the set loses its view"
+        );
+        assert_eq!(
+            model.apply_terminal_frames(vec![delta(first, 1, 2)]),
+            Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn a_gap_on_a_watched_pane_with_a_view_still_asks_for_a_bootstrap() {
+        let pane_id = PaneId::from_u64(1);
+        let mut model = SessionModel::default();
+        model.watch_terminals([pane_id].into());
+        model.apply_terminal_frames(vec![full(pane_id, 1)]).unwrap();
+        assert_eq!(
+            model.apply_terminal_frames(vec![delta(pane_id, 5, 6)]),
+            Err(())
+        );
+    }
+
+    /// A record without a view still gives the Pane its title, exit and bell, and a view
+    /// for a Pane the set dropped while the Bootstrap was on its way is not kept.
+    #[test]
+    fn a_bootstrap_keeps_every_record_and_only_the_watched_views() {
+        let (first, second) = (PaneId::from_u64(1), PaneId::from_u64(2));
+        let TerminalViewFrame::Full(view) = full(first, 1).frame else {
+            unreachable!()
+        };
+        let record = |pane_id, view| condr_core::protocol::PaneTerminalSnapshot {
+            pane_id,
+            view,
+            exited: true,
+            title: Some("build".into()),
+            attention: true,
+        };
+        let mut model = SessionModel::default();
+        model.watch_terminals(HashSet::new());
+        model
+            .apply_bootstrap(SessionBootstrap {
+                server_id: ServerId(1),
+                runtime_epoch: RuntimeEpoch(1),
+                session_id: SessionId(1),
+                sequence: 0,
+                snapshot: Session::new().snapshot(),
+                settings: ServerSettings::default(),
+                terminals: vec![record(first, Some(view)), record(second, None)],
+                agents: Vec::new(),
+                workspace_git: Vec::new(),
+                zoomed_panes: Vec::new(),
+            })
+            .unwrap();
+        assert!(model.terminals.is_empty());
+        for pane_id in [first, second] {
+            assert!(model.exited.contains(&pane_id));
+            assert!(model.attention.contains(&pane_id));
+            assert_eq!(model.pane_title(pane_id).as_deref(), Some("build"));
+        }
     }
 }

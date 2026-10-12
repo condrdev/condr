@@ -599,12 +599,9 @@ fn server_restart_restores_structure_with_fresh_terminal_state() {
             && git.branch.as_deref() == Some("ph6-restore")
             && !git.linked_worktree
     }));
-    assert!(
-        bootstrap
-            .terminals
-            .iter()
-            .all(|terminal| { !view_text(&terminal.view).contains("CONDR_OLD_RUNTIME_MARKER") })
-    );
+    assert!(bootstrap.terminals.iter().all(|terminal| {
+        !view_text(terminal.view.as_ref().unwrap()).contains("CONDR_OLD_RUNTIME_MARKER")
+    }));
     let restored_session = Session::restore(bootstrap.snapshot.clone()).unwrap();
     assert_eq!(
         restored_session

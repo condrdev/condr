@@ -63,10 +63,19 @@ impl RuntimeState {
                 latest.producer_frame = Some(TerminalViewFrame::Delta(delta));
             }
         }
-        let client_ids = self.subscribers.keys().copied().collect::<Vec<_>>();
-        for subscriber in self.subscribers.values_mut() {
+        let mut client_ids = Vec::with_capacity(self.subscribers.len());
+        for (&client_id, subscriber) in &mut self.subscribers {
+            // Only Clients that watch the Pane hear of it (ADR 0041).
+            if self
+                .watched_terminals
+                .get(&client_id)
+                .is_some_and(|watched| !watched.contains(&pane_id))
+            {
+                continue;
+            }
             subscriber.pending_terminals.insert(pane_id);
             subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
+            client_ids.push(client_id);
         }
         Some(client_ids)
     }

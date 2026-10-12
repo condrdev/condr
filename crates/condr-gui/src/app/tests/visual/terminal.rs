@@ -861,10 +861,10 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         let (terminal_ready, focus) = window.read(|app| {
             let condr = view.read(app);
             (
-                condr
-                    .connection(1)
-                    .and_then(|connection| connection.model.terminals.get(&pane_id))
-                    .is_some_and(|terminal| !terminal.exited),
+                condr.connection(1).is_some_and(|connection| {
+                    connection.model.terminals.contains_key(&pane_id)
+                        && !connection.model.exited.contains(&pane_id)
+                }),
                 condr
                     .panels
                     .get(&(1, pane_id))

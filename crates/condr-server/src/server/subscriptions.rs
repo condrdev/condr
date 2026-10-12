@@ -94,7 +94,13 @@ impl RuntimeState {
         match self.subscribers.entry(client_id) {
             std::collections::hash_map::Entry::Occupied(_) => false,
             std::collections::hash_map::Entry::Vacant(entry) => {
-                let pending_terminals = self.terminals.keys().copied().collect();
+                let watched = self.watched_terminals.get(&client_id);
+                let pending_terminals = self
+                    .terminals
+                    .keys()
+                    .filter(|pane_id| watched.is_none_or(|watched| watched.contains(pane_id)))
+                    .copied()
+                    .collect();
                 entry.insert(ClientSubscriber {
                     writer,
                     terminal_baselines: std::collections::HashMap::new(),
@@ -119,6 +125,10 @@ impl RuntimeState {
         };
         subscriber.writer.clear_render();
         subscriber.terminal_baselines = framed.baselines.into_iter().collect();
+        // A set that changed while this Bootstrap was on its way applies now (ADR 0041).
+        if let Some(watched) = self.watched_terminals.get(&client_id) {
+            reconcile_watched_terminals(subscriber, watched, &self.terminal_views);
+        }
         subscriber.writer.send_reliable_batch(framed.frames)?;
         while let Some(data) = subscriber.deferred_reliable.pop_front() {
             subscriber.writer.send_reliable(data)?;
@@ -129,6 +139,22 @@ impl RuntimeState {
         subscriber.bootstrap_pending = false;
         subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
         Ok(())
+    }
+
+    /// Replaces the Panes `client_id` wants frames for (ADR 0041). A subscriber in the
+    /// middle of a Bootstrap takes the new set when that Bootstrap finishes.
+    pub(super) fn watch_terminals(
+        &mut self,
+        client_id: u64,
+        panes: std::collections::HashSet<PaneId>,
+    ) {
+        let watched = self.watched_terminals.entry(client_id).or_default();
+        *watched = panes;
+        if let Some(subscriber) = self.subscribers.get_mut(&client_id)
+            && !subscriber.bootstrap_pending
+        {
+            reconcile_watched_terminals(subscriber, watched, &self.terminal_views);
+        }
     }
 
     pub(super) fn abort_bootstrap(&mut self, client_id: u64) {
@@ -142,4 +168,26 @@ impl RuntimeState {
             subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
         }
     }
+}
+
+/// Fits a subscriber to its watched set: a Pane outside it is no longer marked and loses
+/// its baseline, and a watched Pane without one is marked, so the next render carries a
+/// full frame for it. A Pane that stays keeps its baseline (ADR 0041).
+fn reconcile_watched_terminals(
+    subscriber: &mut ClientSubscriber,
+    watched: &std::collections::HashSet<PaneId>,
+    views: &std::collections::HashMap<PaneId, LatestTerminalView>,
+) {
+    subscriber
+        .pending_terminals
+        .retain(|pane_id| watched.contains(pane_id));
+    subscriber
+        .terminal_baselines
+        .retain(|pane_id, _| watched.contains(pane_id));
+    for pane_id in watched {
+        if views.contains_key(pane_id) && !subscriber.terminal_baselines.contains_key(pane_id) {
+            subscriber.pending_terminals.insert(*pane_id);
+        }
+    }
+    subscriber.render_generation = subscriber.render_generation.wrapping_add(1);
 }

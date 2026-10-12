@@ -259,12 +259,7 @@ impl Condr {
         };
         // Focus is bookkeeping the Server must hear even for an exited Pane or mid-resync.
         if matches!(&command, TerminalCommand::Focus(_))
-            || (connection.can_mutate()
-                && !connection
-                    .model
-                    .terminals
-                    .get(&pane_id)
-                    .is_some_and(|terminal| terminal.exited))
+            || (connection.can_mutate() && !connection.model.exited.contains(&pane_id))
         {
             connection.send(ClientMessage::Terminal {
                 server_id,

@@ -299,7 +299,7 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
             snapshot: Session::new().snapshot(),
             terminals: vec![PaneTerminalSnapshot {
                 pane_id,
-                view: terminal_view(1, "bell"),
+                view: Some(terminal_view(1, "bell")),
                 exited: false,
                 title: None,
                 attention: true,
@@ -346,7 +346,7 @@ fn incomplete_bootstrap_batches_never_produce_a_partial_snapshot() {
         .id();
     let terminal = PaneTerminalSnapshot {
         pane_id,
-        view: terminal_view(3, "restore"),
+        view: Some(terminal_view(3, "restore")),
         exited: false,
         title: None,
         attention: false,

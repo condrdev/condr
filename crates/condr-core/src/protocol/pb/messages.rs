@@ -14,6 +14,7 @@ use crate::protocol::{
     ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionEvent, SessionId,
     SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
 };
+use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
     AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
     ProxyMode, ProxySetting, SessionSnapshot, TabId, TerminalCommand, TerminalView,
@@ -368,6 +369,11 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 })
             }
             ClientMessage::Detach => Message::Detach(Empty {}),
+            ClientMessage::WatchTerminals { panes } => {
+                Message::WatchTerminals(super::WatchTerminals {
+                    panes: panes.iter().map(|pane| pane.as_u64()).collect(),
+                })
+            }
             ClientMessage::Unknown => return Err("an unknown message cannot be sent".into()),
         };
         Ok(Self {
@@ -504,6 +510,12 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 command: required(admin.command, "admin command")?.try_into()?,
             },
             Message::Detach(_) => ClientMessage::Detach,
+            Message::WatchTerminals(watch) => {
+                bounded(watch.panes.len(), MAX_SNAPSHOT_PANES, "watched Panes")?;
+                ClientMessage::WatchTerminals {
+                    panes: watch.panes.into_iter().map(pane).collect(),
+                }
+            }
         })
     }
 }
@@ -1054,7 +1066,7 @@ impl From<&BootstrapRecord> for super::BootstrapRecord {
                 BootstrapRecord::Terminal(terminal) => {
                     Record::Terminal(super::PaneTerminalSnapshot {
                         pane_id: terminal.pane_id.as_u64(),
-                        view: Some((&terminal.view).into()),
+                        view: terminal.view.as_ref().map(Into::into),
                         exited: terminal.exited,
                         title: terminal.title.clone(),
                         attention: terminal.attention,
@@ -1079,7 +1091,7 @@ pub(crate) fn decode_bootstrap_record(
     Ok(Some(match record {
         Record::Terminal(terminal) => BootstrapRecord::Terminal(PaneTerminalSnapshot {
             pane_id: pane(terminal.pane_id),
-            view: TerminalView::try_from(required(terminal.view, "terminal view")?)?,
+            view: terminal.view.map(TerminalView::try_from).transpose()?,
             exited: terminal.exited,
             title: terminal.title,
             attention: terminal.attention,

@@ -32,7 +32,15 @@ message ClientMessage {
     ServerAdminRequest server_admin = 19;
     Empty detach = 20;
     BrowseDirectory browse_directory = 21;
+    WatchTerminals watch_terminals = 22;
   }
+}
+
+// The Panes whose terminal frames this connection wants (ADR 0041), replacing any earlier
+// set; a Client that never sends it gets every Pane. It belongs to the connection, so it
+// may come before `snapshot_request` and outlives a rejected subscription.
+message WatchTerminals {
+  repeated uint64 panes = 1;
 }
 
 message SessionRequest {
@@ -451,6 +459,7 @@ message BootstrapBatch {
 
 message PaneTerminalSnapshot {
   uint64 pane_id = 1;
+  // Absent for a Pane outside the Client's `WatchTerminals` (ADR 0041).
   TerminalView view = 2;
   bool exited = 3;
   optional string title = 4;

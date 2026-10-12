@@ -951,10 +951,10 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
         let (terminal_ready, focus) = window.read(|app| {
             let condr = view.read(app);
             (
-                condr
-                    .connection(1)
-                    .and_then(|connection| connection.model.terminals.get(&new_pane))
-                    .is_some_and(|terminal| !terminal.exited),
+                condr.connection(1).is_some_and(|connection| {
+                    connection.model.terminals.contains_key(&new_pane)
+                        && !connection.model.exited.contains(&new_pane)
+                }),
                 condr
                     .panels
                     .get(&(1, new_pane))
@@ -1028,8 +1028,8 @@ fn new_workspace_round_trip_updates_gui_from_real_server() {
                 connection
                     .model
                     .terminals
-                    .values()
-                    .any(|terminal| !terminal.exited)
+                    .keys()
+                    .any(|pane_id| !connection.model.exited.contains(pane_id))
             })
         }) && window.debug_bounds(initial_terminal).is_some()
     });

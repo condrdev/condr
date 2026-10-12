@@ -112,6 +112,7 @@ fn terminal_frame_chunks_survive_metadata_and_activation_interleaving_until_comp
                     chunk_count: 2,
                     payload: payload.to_vec(),
                 },
+                None,
             )
             .unwrap();
             if chunk_index == 0 {
@@ -141,6 +142,7 @@ fn terminal_chunk_identity_mismatch_aborts_the_in_progress_record() {
             chunk_count: 2,
             payload: vec![1],
         },
+        None,
     )
     .unwrap();
 
@@ -175,6 +177,7 @@ fn reliable_message_is_a_terminal_chunk_protocol_fence() {
             chunk_count: 2,
             payload: vec![1],
         },
+        None,
     )
     .unwrap();
 
@@ -196,23 +199,15 @@ fn terminal_frame_batch_is_atomic_when_a_later_pane_has_a_gap() {
     let mut terminals = std::collections::HashMap::from([
         (
             first_pane,
-            ClientTerminal::from(PaneTerminalSnapshot {
-                pane_id: first_pane,
-                view: first_view.clone(),
-                exited: false,
-                title: None,
-                attention: false,
-            }),
+            ClientTerminal {
+                view: std::sync::Arc::new(first_view.clone()),
+            },
         ),
         (
             second_pane,
-            ClientTerminal::from(PaneTerminalSnapshot {
-                pane_id: second_pane,
-                view: second_view.clone(),
-                exited: false,
-                title: None,
-                attention: false,
-            }),
+            ClientTerminal {
+                view: std::sync::Arc::new(second_view.clone()),
+            },
         ),
     ]);
     let batch = vec![
@@ -259,13 +254,9 @@ fn terminal_frame_batch_bounds_hyperlinks_across_retained_deltas() {
     let pane_id = pane_id();
     let mut terminals = std::collections::HashMap::from([(
         pane_id,
-        ClientTerminal::from(PaneTerminalSnapshot {
-            pane_id,
-            view: terminal_view(1, "x"),
-            exited: false,
-            title: None,
-            attention: false,
-        }),
+        ClientTerminal {
+            view: std::sync::Arc::new(terminal_view(1, "x")),
+        },
     )]);
     let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
     let mut linked = terminal_cell("x");
@@ -303,13 +294,9 @@ fn terminal_frame_batch_canonicalizes_links_across_retained_deltas() {
     view.cells[0].hyperlink = Some(uri.into());
     let mut terminals = std::collections::HashMap::from([(
         pane_id,
-        ClientTerminal::from(PaneTerminalSnapshot {
-            pane_id,
-            view,
-            exited: false,
-            title: None,
-            attention: false,
-        }),
+        ClientTerminal {
+            view: std::sync::Arc::new(view),
+        },
     )]);
     let mut terminal_hyperlinks = terminal_hyperlink_budgets(&mut terminals);
     let mut linked = terminal_cell("b");
@@ -541,4 +528,49 @@ fn delta_composition_keeps_later_cell_values_and_latest_metadata() {
     assert_eq!(merged.runs[0].start, 1);
     assert_eq!(merged.runs[0].cells[0].text.as_str(), "A");
     assert_eq!(merged.runs[0].cells[1].text.as_str(), "C");
+}
+
+/// ADR 0041: a record for a Pane outside the watched set is checked for order and dropped,
+/// and so is the rest of one whose Pane left the set, even if it returns before the end.
+#[test]
+fn a_record_for_an_unwatched_pane_is_read_to_its_end_and_dropped() {
+    let pane_id = pane_id();
+    let payload = encode_pane_terminal_frame(&PaneTerminalFrame {
+        pane_id,
+        frame: TerminalViewFrame::Full(terminal_view(7, "chunked")),
+    })
+    .unwrap();
+    let third = payload.len().div_ceil(3);
+    let chunks = payload.chunks(third).collect::<Vec<_>>();
+    let chunk = |chunk_index: usize| TerminalFrameChunk {
+        server_id: ServerId(1),
+        session_id: SessionId(1),
+        pane_id,
+        revision: 7,
+        chunk_index: chunk_index as u32,
+        chunk_count: chunks.len() as u32,
+        payload: chunks[chunk_index].to_vec(),
+    };
+    let nothing = std::collections::HashSet::new();
+    let only = std::collections::HashSet::from([pane_id]);
+
+    let mut assembly = None;
+    for index in 0..chunks.len() {
+        let assembled = assemble_terminal_frame_chunk(&mut assembly, chunk(index), Some(&nothing));
+        assert_eq!(assembled, Ok(None));
+    }
+    assert!(
+        assembly.is_none(),
+        "the dropped record ends with its last chunk"
+    );
+
+    let watched = [Some(&only), Some(&nothing), Some(&only)];
+    for (index, watched) in watched.into_iter().enumerate() {
+        let assembled = assemble_terminal_frame_chunk(&mut assembly, chunk(index), watched);
+        assert_eq!(assembled, Ok(None), "chunk {index}");
+    }
+    assert!(assembly.is_none());
+
+    // Out of order is still out of order.
+    assert!(assemble_terminal_frame_chunk(&mut assembly, chunk(1), Some(&nothing)).is_err());
 }

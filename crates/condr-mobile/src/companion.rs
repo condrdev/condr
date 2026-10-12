@@ -18,7 +18,7 @@ use condr_core::{
     PaneId, ProxySetting, TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
     TerminalScroll, TerminalSize,
 };
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
 use std::thread;
 
@@ -148,6 +148,17 @@ impl Device {
             pane_id,
             command,
         });
+    }
+
+    /// Frames only for `panes` from now on (ADR 0041): nothing when the phone shows no
+    /// Pane of this Device, the one Pane when it does. Once disconnected, the next
+    /// connection starts from the set kept here.
+    fn watch(&mut self, panes: HashSet<PaneId>) {
+        if self.model.watched() == Some(&panes) {
+            return;
+        }
+        self.model.watch_terminals(panes.clone());
+        self.send(ClientMessage::WatchTerminals { panes });
     }
 
     fn subscribe(&mut self) {
@@ -427,10 +438,7 @@ impl Companion {
                                 blocked_on: agent.blocked_on.clone(),
                             }),
                             attention: model.attention.contains(&pane_id),
-                            exited: model
-                                .terminals
-                                .get(&pane_id)
-                                .is_some_and(|terminal| terminal.exited),
+                            exited: model.exited.contains(&pane_id),
                         }
                     })
                     .collect(),
@@ -438,6 +446,8 @@ impl Companion {
             .collect()
     }
 
+    /// The Pane's screen, once its view has arrived; only the Pane on screen gets one
+    /// (ADR 0041).
     pub fn terminal(&self, address: String, pane: u64) -> Option<TerminalScreen> {
         let state = self.shared.lock();
         let terminal = state
@@ -457,13 +467,15 @@ impl Companion {
         let next = address.map(|address| (address, PaneId::from_u64(pane)));
         if let Some((address, pane_id)) = state.shown.take()
             && next.as_ref() != Some(&(address.clone(), pane_id))
-            && let Some(device) = state.devices.get(&address)
+            && let Some(device) = state.devices.get_mut(&address)
         {
             device.terminal(pane_id, TerminalCommand::Focus(false));
+            device.watch(HashSet::new());
         }
         if let Some((address, pane_id)) = &next
             && let Some(device) = state.devices.get_mut(address)
         {
+            device.watch(HashSet::from([*pane_id]));
             device.terminal(*pane_id, TerminalCommand::Focus(true));
             if rows > 0 && columns > 0 {
                 device.terminal(
@@ -587,6 +599,11 @@ impl Shared {
         };
         let mut state = self.lock();
         state.forget_events_of(address);
+        let shown = state
+            .shown
+            .as_ref()
+            .filter(|(shown, _)| shown == address)
+            .map(|(_, pane_id)| *pane_id);
         let Some(device) = state.devices.get_mut(address) else {
             return;
         };
@@ -605,6 +622,10 @@ impl Shared {
         };
         device.cancellation = Cancellation::default();
         device.status = DeviceStatus::Connecting;
+        // Outside a Pane the phone takes only reliable events (ADR 0041); a reconnect while
+        // a Pane of this Device is on screen keeps that Pane's frames.
+        let watched: HashSet<PaneId> = shown.into_iter().collect();
+        device.model.watch_terminals(watched.clone());
         let generation = device.generation;
         let cancellation = device.cancellation.clone();
         state.mark(Change::Devices);
@@ -615,12 +636,13 @@ impl Shared {
         let spawned = thread::Builder::new()
             .name("condr-connect".into())
             .spawn(move || {
-                let result = ClientConnection::connect_cancellable(
+                let result = ClientConnection::connect_watching(
                     &endpoint,
                     shared.name.clone(),
+                    watched.clone(),
                     cancellation,
                 );
-                shared.connected(&address, generation, result);
+                shared.connected(&address, generation, &watched, result);
             });
         if let Err(error) = spawned {
             tracing::warn!("could not start a connection: {error}");
@@ -631,6 +653,7 @@ impl Shared {
         self: &Arc<Self>,
         address: &str,
         generation: u64,
+        watched: &HashSet<PaneId>,
         result: std::io::Result<ClientConnection<RemoteStream>>,
     ) {
         let mut state = self.lock();
@@ -670,6 +693,11 @@ impl Shared {
                 let visual = Arc::clone(&io.visual);
                 device.io = Some(io);
                 device.status = DeviceStatus::Connected;
+                // The phone opened or left a Pane while this connection was being made.
+                if let Some(panes) = device.model.watched().filter(|panes| *panes != watched) {
+                    let panes = panes.clone();
+                    device.send(ClientMessage::WatchTerminals { panes });
+                }
                 device.subscribe();
                 let shared = Arc::clone(self);
                 let address = address.to_owned();
@@ -841,9 +869,7 @@ fn apply_message(
                     changes.push(device_change());
                 }
                 SessionEvent::TerminalExited { pane_id } => {
-                    if let Some(terminal) = model.terminals.get_mut(&pane_id) {
-                        terminal.exited = true;
-                    }
+                    model.exited.insert(pane_id);
                     changes.push(device_change());
                     changes.push(terminal_change(pane_id));
                 }

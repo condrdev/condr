@@ -461,7 +461,7 @@ fn chunked_record_codecs_reject_trailing_and_oversized_payloads() {
 
     let frame = PaneTerminalFrame {
         pane_id,
-        frame: TerminalViewFrame::Full(terminal_snapshot(pane_id, "frame".into()).view),
+        frame: TerminalViewFrame::Full(terminal_snapshot(pane_id, "frame".into()).view.unwrap()),
     };
     let encoded = encode_pane_terminal_frame(&frame).unwrap();
     assert_eq!(decode_pane_terminal_frame(&encoded).unwrap(), Some(frame));
@@ -555,7 +555,7 @@ fn bootstrap_header(batch_count: u32) -> (BootstrapHeader, PaneId, WorkspaceId) 
 fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
     PaneTerminalSnapshot {
         pane_id,
-        view: TerminalView {
+        view: Some(TerminalView {
             selection: None,
             revision: 11,
             size: condr_core::TerminalSize::new(1, 1),
@@ -569,7 +569,7 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
                 hyperlink: None,
             }],
             cursor: None,
-        },
+        }),
         exited: false,
         title: None,
         attention: false,
@@ -580,8 +580,9 @@ fn terminal_snapshot(pane_id: PaneId, text: String) -> PaneTerminalSnapshot {
 /// chunk, so its record spans several.
 fn large_terminal_snapshot(pane_id: PaneId) -> PaneTerminalSnapshot {
     let mut snapshot = terminal_snapshot(pane_id, String::new());
-    snapshot.view.size = condr_core::TerminalSize::new(64, 1024);
-    snapshot.view.cells = vec![
+    let view = snapshot.view.as_mut().unwrap();
+    view.size = condr_core::TerminalSize::new(64, 1024);
+    view.cells = vec![
         condr_core::TerminalCell {
             text: "x".repeat(40).into(),
             foreground: condr_core::TerminalColor::Named(0),
@@ -750,8 +751,9 @@ fn the_largest_terminal_record_fits_the_record_limit() {
         })
         .collect();
     let mut snapshot = terminal_snapshot(PaneId::from_u64(u64::MAX), "x".into());
-    snapshot.view.size = condr_core::TerminalSize::new(256, 256);
-    snapshot.view.cells = cells;
+    let view = snapshot.view.as_mut().unwrap();
+    view.size = condr_core::TerminalSize::new(256, 256);
+    view.cells = cells;
     snapshot.title = Some("t".repeat(4096));
     let encoded = encode_bootstrap_record(&BootstrapRecord::Terminal(snapshot)).unwrap();
     assert!(

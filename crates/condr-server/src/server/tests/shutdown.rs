@@ -538,7 +538,7 @@ fn disconnect_during_worktree_creation_ends_the_connection_and_starts_its_termin
     let mut views = bootstrap
         .terminals
         .iter()
-        .map(|terminal| (terminal.pane_id, terminal.view.clone()))
+        .map(|terminal| (terminal.pane_id, terminal.view.clone().unwrap()))
         .collect();
     let mut observer = connection.into_stream();
     observer

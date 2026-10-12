@@ -68,7 +68,7 @@ pub(super) fn queue_runtime_bootstrap(
             });
         }
         state.record_terminal_cwd_observations(observations);
-        let capture = state.capture_bootstrap();
+        let capture = state.capture_bootstrap(state.watched_terminals.get(&client_id));
         let fenced = state.subscribers.contains_key(&client_id);
         if fenced {
             state.begin_bootstrap(client_id);
@@ -219,8 +219,11 @@ pub(super) fn split_bootstrap_records(
     for (record_index, mut record) in records.into_iter().enumerate() {
         let record_index = u32::try_from(record_index)
             .map_err(|_| io::Error::other("too many Bootstrap records"))?;
-        if let BootstrapRecord::Terminal(terminal) = &mut record {
-            let _ = terminal.view.normalize_hyperlinks_for_wire();
+        if let BootstrapRecord::Terminal(PaneTerminalSnapshot {
+            view: Some(view), ..
+        }) = &mut record
+        {
+            let _ = view.normalize_hyperlinks_for_wire();
         }
         let payload = encode_bootstrap_record(&record).map_err(io::Error::other)?;
         total_payload_size = total_payload_size
@@ -262,8 +265,13 @@ pub(super) fn split_bootstrap_records(
                 "Bootstrap record encoded to an empty payload",
             ));
         }
-        if let BootstrapRecord::Terminal(terminal) = record {
-            baselines.push((terminal.pane_id, Arc::new(terminal.view)));
+        if let BootstrapRecord::Terminal(PaneTerminalSnapshot {
+            pane_id,
+            view: Some(view),
+            ..
+        }) = record
+        {
+            baselines.push((pane_id, Arc::new(view)));
         }
     }
     Ok((batches, baselines))
@@ -275,7 +283,12 @@ pub(super) fn send_framed(stream: &mut EndpointStream, data: &[u8]) -> io::Resul
 }
 
 impl RuntimeState {
-    pub(super) fn capture_bootstrap(&self) -> BootstrapCapture {
+    /// Every Pane's record, with a view only for the Panes in `watched` when a Client
+    /// limited its frames to them (ADR 0041).
+    pub(super) fn capture_bootstrap(
+        &self,
+        watched: Option<&std::collections::HashSet<PaneId>>,
+    ) -> BootstrapCapture {
         #[cfg(test)]
         self.bootstrap_captures.fetch_add(1, Ordering::Relaxed);
         let mut terminals = Vec::new();
@@ -288,7 +301,9 @@ impl RuntimeState {
                     {
                         terminals.push(BootstrapTerminalCapture {
                             pane_id: pane.id(),
-                            view: Arc::clone(&latest.view),
+                            view: watched
+                                .is_none_or(|watched| watched.contains(&pane.id()))
+                                .then(|| Arc::clone(&latest.view)),
                             exited: self.exited_terminals.contains(&pane.id()),
                             title: self.terminal_titles.get(&pane.id()).cloned(),
                             attention: self.pending_terminal_bells.contains(&pane.id()),
@@ -326,6 +341,6 @@ impl RuntimeState {
 
     #[cfg(test)]
     pub(super) fn bootstrap(&self) -> SessionBootstrap {
-        self.capture_bootstrap().materialize()
+        self.capture_bootstrap(None).materialize()
     }
 }

@@ -12,6 +12,7 @@ mod shutdown;
 mod subscriptions;
 mod unit;
 mod viewers;
+mod watch;
 
 use super::*;
 use crate::test_support::unique_suffix;
@@ -284,6 +285,37 @@ fn assert_layout_applied(
             && applied_request == request_id
             && applied_sequence == sequence
     ));
+}
+
+fn terminal_test_view(revision: u64, text: &str) -> TerminalView {
+    let cells = text
+        .chars()
+        .map(|character| condr_core::TerminalCell {
+            text: character.to_string().into(),
+            foreground: condr_core::TerminalColor::Named(0),
+            background: condr_core::TerminalColor::Named(0),
+            flags: 0,
+            hyperlink: None,
+        })
+        .collect::<Vec<_>>();
+    TerminalView {
+        selection: None,
+        revision,
+        size: TerminalSize::new(1, u16::try_from(cells.len()).unwrap()),
+        display_offset: 0,
+        mouse_tracking: condr_core::TerminalMouseTracking::None,
+        cells,
+        cursor: None,
+    }
+}
+
+fn latest_terminal_view(mut view: TerminalView) -> LatestTerminalView {
+    let hyperlinks = TerminalHyperlinkBudget::new(&mut view);
+    LatestTerminalView {
+        view: Arc::new(view),
+        hyperlinks,
+        producer_frame: None,
+    }
 }
 
 fn view_text(view: &condr_core::TerminalView) -> String {

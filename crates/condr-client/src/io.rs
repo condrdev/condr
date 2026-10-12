@@ -8,12 +8,14 @@ use crate::frames::{
     TerminalVisualSlot, assemble_terminal_frame_chunk, enforce_terminal_chunk_reliable_fence,
     read_bootstrap_batches, terminal_chunk_identity_matches,
 };
+use condr_core::PaneId;
 use condr_core::protocol::{
     ClientMessage, ServerId, ServerMessage, SessionBootstrap, SessionId, TerminalFrameBatch,
     UnknownMessage,
 };
+use std::collections::HashSet;
 use std::io;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 /// What the reader hands its owner, in the order the Server sent it.
@@ -53,6 +55,11 @@ impl ConnectionIo {
         let mut reader = io::BufReader::new(stream);
         let (outgoing, outgoing_rx) = mpsc::channel();
         let visual = Arc::new(TerminalVisualSlot::default());
+        // The Panes the last `WatchTerminals` sent here named, so the reader stops
+        // reassembling records for any other (ADR 0041). One sent before this connection's
+        // threads started needs no entry: until a change, the Server sends no other Pane.
+        let watched = Arc::new(Mutex::new(None::<HashSet<PaneId>>));
+        let writer_watched = Arc::clone(&watched);
         let writer_deliver = deliver.clone();
         thread::Builder::new()
             .name("condr-client-writer".into())
@@ -74,6 +81,12 @@ impl ConnectionIo {
                         Ok(true) => {}
                         Ok(false) => continue,
                         Err(()) => break,
+                    }
+                    if let ClientMessage::WatchTerminals { panes } = &message {
+                        *writer_watched
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(panes.clone());
                     }
                     if let Err(error) =
                         condr_core::protocol::write_client_message(&mut writer, &message)
@@ -183,8 +196,16 @@ impl ConnectionIo {
                                     continue;
                                 }
                             }
-                            match assemble_terminal_frame_chunk(&mut terminal_chunk_assembly, chunk)
-                            {
+                            let watched = watched
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let assembled = assemble_terminal_frame_chunk(
+                                &mut terminal_chunk_assembly,
+                                chunk,
+                                watched.as_ref(),
+                            );
+                            drop(watched);
+                            match assembled {
                                 Ok(Some(pane)) => {
                                     if publish_terminal_batch(
                                         &visual,

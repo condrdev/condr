@@ -8,8 +8,8 @@
 
 use condr_core::protocol::{
     BootstrapAssembler, BootstrapHeader, MAX_CHUNK_PAYLOAD_SIZE, MAX_CHUNKED_RECORD_SIZE,
-    PaneTerminalFrame, PaneTerminalSnapshot, ServerId, ServerMessage, SessionBootstrap,
-    SessionEvent, SessionId, TerminalFrameBatch, TerminalFrameChunk, decode_pane_terminal_frame,
+    PaneTerminalFrame, ServerId, ServerMessage, SessionBootstrap, SessionEvent, SessionId,
+    TerminalFrameBatch, TerminalFrameChunk, decode_pane_terminal_frame,
 };
 use condr_core::{
     PaneId, TerminalCellRun, TerminalHyperlinkBudget, TerminalView, TerminalViewDelta,
@@ -24,16 +24,6 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientTerminal {
     pub view: Arc<TerminalView>,
-    pub exited: bool,
-}
-
-impl From<PaneTerminalSnapshot> for ClientTerminal {
-    fn from(snapshot: PaneTerminalSnapshot) -> Self {
-        Self {
-            view: Arc::new(snapshot.view),
-            exited: snapshot.exited,
-        }
-    }
 }
 
 /// The one droppable visual slot between a connection's reader and its owner (ADR 0004):
@@ -147,6 +137,9 @@ pub struct TerminalFrameChunkAssembly {
     next_chunk_index: u32,
     chunk_count: u32,
     payload: Vec<u8>,
+    /// The Pane is outside the watched set, or left it during the record: the rest is
+    /// checked for order and dropped (ADR 0041).
+    discard: bool,
 }
 
 pub fn read_bootstrap_batches(
@@ -166,9 +159,13 @@ pub fn read_bootstrap_batches(
     assembler.finish()
 }
 
+/// Adds `chunk` to the record it belongs to and returns the record once complete. A record
+/// for a Pane outside `watched`, the Panes this Client limited its frames to, is read to
+/// its end and dropped, even if the Pane comes back into the set before then.
 pub fn assemble_terminal_frame_chunk(
     assembly: &mut Option<TerminalFrameChunkAssembly>,
     chunk: TerminalFrameChunk,
+    watched: Option<&HashSet<PaneId>>,
 ) -> Result<Option<PaneTerminalFrame>, String> {
     if chunk.chunk_count == 0 || chunk.chunk_index >= chunk.chunk_count {
         return Err("terminal frame chunk has an invalid range".into());
@@ -185,6 +182,7 @@ pub fn assemble_terminal_frame_chunk(
         next_chunk_index: 0,
         chunk_count: chunk.chunk_count,
         payload: Vec::new(),
+        discard: false,
     });
     if state.server_id != chunk.server_id
         || state.session_id != chunk.session_id
@@ -194,6 +192,17 @@ pub fn assemble_terminal_frame_chunk(
         || state.next_chunk_index != chunk.chunk_index
     {
         return Err("terminal frame chunks are not one contiguous record".into());
+    }
+    if watched.is_some_and(|watched| !watched.contains(&chunk.pane_id)) {
+        state.discard = true;
+        state.payload = Vec::new();
+    }
+    if state.discard {
+        state.next_chunk_index += 1;
+        if state.next_chunk_index == state.chunk_count {
+            *assembly = None;
+        }
+        return Ok(None);
     }
     let next_size = state
         .payload
@@ -305,19 +314,12 @@ pub fn apply_terminal_frame_batch(
         match pane.frame {
             TerminalViewFrame::Full(mut view) => {
                 terminal_hyperlinks.insert(pane.pane_id, TerminalHyperlinkBudget::new(&mut view));
-                let view = Arc::new(view);
-                match terminals.get_mut(&pane.pane_id) {
-                    Some(terminal) => terminal.view = view,
-                    None => {
-                        terminals.insert(
-                            pane.pane_id,
-                            ClientTerminal {
-                                view,
-                                exited: false,
-                            },
-                        );
-                    }
-                }
+                terminals.insert(
+                    pane.pane_id,
+                    ClientTerminal {
+                        view: Arc::new(view),
+                    },
+                );
             }
             TerminalViewFrame::Delta(delta) => {
                 let terminal = terminals

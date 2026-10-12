@@ -784,7 +784,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
         .find(|terminal| terminal.pane_id == pane_id)
         .expect("reconnect bootstrap contains the live Pane");
     assert!(!terminal.exited);
-    assert!(view_text(&terminal.view).contains("condr-pid="));
+    assert!(view_text(terminal.view.as_ref().unwrap()).contains("condr-pid="));
 
     let mut second = second_connection.into_stream();
     second
@@ -804,7 +804,7 @@ fn pane_terminal_survives_disconnect_and_reconnects_with_live_state() {
     let mut second_terminal_views = second_bootstrap
         .terminals
         .iter()
-        .map(|terminal| (terminal.pane_id, terminal.view.clone()))
+        .map(|terminal| (terminal.pane_id, terminal.view.clone().unwrap()))
         .collect();
 
     let reconnect_command = if cfg!(windows) {

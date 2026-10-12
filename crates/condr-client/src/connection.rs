@@ -8,6 +8,7 @@ use condr_core::protocol::{
     SessionOverview, Welcome,
 };
 use condr_core::{PaneId, Session, TerminalCommand};
+use std::collections::HashSet;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -202,7 +203,24 @@ impl<S: ServerStream> ClientConnection<S> {
         client_name: impl Into<String>,
         cancellation: Cancellation<S>,
     ) -> io::Result<Self> {
-        Self::connect_with_state(endpoint, client_name.into(), true, cancellation)
+        Self::connect_with_state(endpoint, client_name.into(), true, None, cancellation)
+    }
+
+    /// Like [`Self::connect_cancellable`], limiting this connection's terminal frames to
+    /// `panes` before the Bootstrap, which then carries views only for them (ADR 0041).
+    pub fn connect_watching<C: Connector<Stream = S>>(
+        endpoint: &C,
+        client_name: impl Into<String>,
+        panes: HashSet<PaneId>,
+        cancellation: Cancellation<S>,
+    ) -> io::Result<Self> {
+        Self::connect_with_state(
+            endpoint,
+            client_name.into(),
+            true,
+            Some(panes),
+            cancellation,
+        )
     }
 
     pub fn cancellation(&self) -> Cancellation<S> {
@@ -214,13 +232,20 @@ impl<S: ServerStream> ClientConnection<S> {
         endpoint: &C,
         client_name: impl Into<String>,
     ) -> io::Result<Self> {
-        Self::connect_with_state(endpoint, client_name.into(), false, Cancellation::default())
+        Self::connect_with_state(
+            endpoint,
+            client_name.into(),
+            false,
+            None,
+            Cancellation::default(),
+        )
     }
 
     fn connect_with_state<C: Connector<Stream = S>>(
         endpoint: &C,
         client_name: String,
         terminal_views: bool,
+        watched: Option<HashSet<PaneId>>,
         cancellation: Cancellation<S>,
     ) -> io::Result<Self> {
         let attempt = |endpoint: &C| {
@@ -229,6 +254,7 @@ impl<S: ServerStream> ClientConnection<S> {
                 stream,
                 client_name.clone(),
                 terminal_views,
+                watched.clone(),
                 cancellation.clone(),
             );
             if result.is_err() {
@@ -254,6 +280,7 @@ impl<S: ServerStream> ClientConnection<S> {
         stream: S,
         client_name: impl Into<String>,
         terminal_views: bool,
+        watched: Option<HashSet<PaneId>>,
         cancellation: Cancellation<S>,
     ) -> io::Result<Self> {
         let (mut stream, welcome) = Self::welcome(stream, client_name)?;
@@ -262,6 +289,18 @@ impl<S: ServerStream> ClientConnection<S> {
         // Authentication is complete. Bootstrap may be large: bound inactivity,
         // not total transfer time, just as socket read timeouts do.
         stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+        if let Some(panes) = watched {
+            // ADR 0041: the first stable release raises the protocol to 2 and refuses
+            // here, before anything is sent, a Server whose `welcome.protocol` predates
+            // `WatchTerminals`, so not one frame is fetched. Until then the protocol stays
+            // 1, and an older Server answers this with an `Error` that fails the Bootstrap
+            // read below.
+            condr_core::protocol::write_message(
+                &mut stream,
+                &ClientMessage::WatchTerminals { panes },
+            )
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        }
         let request = if terminal_views {
             ClientMessage::SnapshotRequest { session_id }
         } else {

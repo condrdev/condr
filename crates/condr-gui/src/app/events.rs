@@ -205,10 +205,9 @@ impl Condr {
                         };
                     }
                     SessionEvent::TerminalExited { pane_id } => {
-                        if let Some(terminal) =
-                            self.connections[index].model.terminals.get_mut(&pane_id)
-                        {
-                            terminal.exited = true;
+                        let model = &mut self.connections[index].model;
+                        if model.terminals.contains_key(&pane_id) {
+                            model.exited.insert(pane_id);
                             notify = true;
                         } else {
                             notify = self.connections[index].request_snapshot();

@@ -45,7 +45,6 @@ fn invalid_models_preserve_the_last_valid_structure_and_terminal_state() {
         pane_id,
         ClientTerminal {
             view: std::sync::Arc::new(terminal_view(11, "keep terminal")),
-            exited: false,
         },
     );
     connection.model.zoomed_panes.insert(pane_id);

@@ -124,6 +124,12 @@ pub enum ClientMessage {
         command: ServerAdminCommand,
     },
     Detach,
+    /// The Panes whose terminal frames this connection wants, replacing any earlier set
+    /// (ADR 0041). Without it a Client gets every Pane. It belongs to the connection: it
+    /// may precede `SnapshotRequest` and survives a `SubscriptionRejected`.
+    WatchTerminals {
+        panes: HashSet<PaneId>,
+    },
     /// A message from a newer Client that this Server does not know. It is answered with
     /// an error and the connection goes on (ADR 0028). Never sent.
     Unknown,
@@ -527,7 +533,8 @@ pub struct BootstrapBatch {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaneTerminalSnapshot {
     pub pane_id: PaneId,
-    pub view: TerminalView,
+    /// `None` for a Pane outside the Client's `WatchTerminals` (ADR 0041).
+    pub view: Option<TerminalView>,
     pub exited: bool,
     /// The OSC 0/2 title the Terminal last reported, already sanitized by the Server.
     pub title: Option<String>,

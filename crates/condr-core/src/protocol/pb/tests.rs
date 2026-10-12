@@ -120,7 +120,10 @@ fn unknown_enum_values_decode_to_their_fallback() {
     let Some(BootstrapRecord::Terminal(terminal)) = decode_bootstrap_record(record).unwrap() else {
         panic!("a Terminal record with a newer mouse mode is still applied");
     };
-    assert_eq!(terminal.view.mouse_tracking, TerminalMouseTracking::None);
+    assert_eq!(
+        terminal.view.unwrap().mouse_tracking,
+        TerminalMouseTracking::None
+    );
 
     let event = super::SessionEvent {
         event: Some(session_event::Event::AgentChanged(super::AgentChanged {
@@ -336,5 +339,27 @@ fn the_proxy_setting_round_trips_and_an_older_or_newer_peer_reads_as_system() {
     assert_eq!(
         ClientMessage::try_from(newer).unwrap(),
         ClientMessage::Unknown
+    );
+}
+
+#[test]
+fn a_watched_set_and_a_terminal_record_without_a_view_round_trip() {
+    let message = ClientMessage::WatchTerminals {
+        panes: [crate::PaneId::from_u64(3), crate::PaneId::from_u64(5)].into(),
+    };
+    let encoded = super::ClientMessage::try_from(&message).unwrap();
+    assert_eq!(ClientMessage::try_from(encoded).unwrap(), message);
+
+    // ADR 0041: a Pane outside the set still has its record, without a view.
+    let record = BootstrapRecord::Terminal(crate::protocol::PaneTerminalSnapshot {
+        pane_id: crate::PaneId::from_u64(3),
+        view: None,
+        exited: true,
+        title: Some("build".into()),
+        attention: true,
+    });
+    assert_eq!(
+        decode_bootstrap_record((&record).into()).unwrap(),
+        Some(record)
     );
 }

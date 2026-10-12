@@ -127,11 +127,8 @@ impl Condr {
             return false;
         };
         if !connection.can_mutate()
-            || connection
-                .model
-                .terminals
-                .get(&pane_id)
-                .is_none_or(|terminal| terminal.exited)
+            || !connection.model.terminals.contains_key(&pane_id)
+            || connection.model.exited.contains(&pane_id)
         {
             return false;
         }
