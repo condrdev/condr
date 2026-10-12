@@ -422,6 +422,7 @@ impl Companion {
             .map(|workspace| WorkspaceView {
                 id: workspace.id().as_u64(),
                 name: workspace.name().to_owned(),
+                root: workspace.root_directory().display().to_string(),
                 panes: workspace
                     .tabs()
                     .iter()

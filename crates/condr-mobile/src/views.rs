@@ -65,6 +65,8 @@ pub struct DeviceView {
 pub struct WorkspaceView {
     pub id: u64,
     pub name: String,
+    /// The root directory as the Server names it, for the Workspace's heading.
+    pub root: String,
     pub panes: Vec<PaneView>,
 }
 
