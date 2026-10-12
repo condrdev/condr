@@ -1168,7 +1168,7 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
         let input = settings_view.read(cx).invite_host.clone();
         input.update(cx, |input, cx| input.focus(window, cx));
     });
-    settings.simulate_keystrokes("cmd-a backspace");
+    settings.simulate_keystrokes("secondary-a backspace");
     settings.simulate_input("studio.lan");
     settings.run_until_parked();
     settings.update(|window, cx| _ = window.draw(cx));
@@ -1176,7 +1176,7 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
         tcp_link(settings).as_deref(),
         Some("tcp://key.secret@studio.lan:2637")
     );
-    settings.simulate_keystrokes("cmd-a backspace");
+    settings.simulate_keystrokes("secondary-a backspace");
     settings.run_until_parked();
     settings.update(|window, cx| _ = window.draw(cx));
     assert_eq!(tcp_link(settings), None);

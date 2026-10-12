@@ -162,11 +162,14 @@ impl ServerConfig {
         let client_key = DeviceKey::generate()?;
         let identity = ServerIdentity::ephemeral()?.with_authorized(client_key.public());
         // The low 64 bits carry the clock; the full epoch would push the path past the
-        // 104-byte `sun_path` limit under the macOS temporary directory.
+        // 104-byte `sun_path` limit under the macOS temporary directory. The clock ticks
+        // in microseconds there, so Servers started at once in one process also count.
+        static STARTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let socket_path = std::env::temp_dir().join(format!(
-            "condr-tcp-{}-{:x}.sock",
+            "condr-tcp-{}-{:x}-{}.sock",
             std::process::id(),
-            runtime_epoch() as u64
+            runtime_epoch() as u64,
+            STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         Ok(Self {
             socket_path,
