@@ -397,6 +397,7 @@ impl Companion {
                     device: device.label.clone(),
                     workspace: workspace.name().to_owned(),
                     pane: pane_id.as_u64(),
+                    kind: agent.kind.spec().id.to_owned(),
                     agent: agent.kind.label().to_owned(),
                     blocked_on: agent.blocked_on.clone(),
                 });
@@ -431,6 +432,7 @@ impl Companion {
                             id: pane_id.as_u64(),
                             title: model.pane_title(pane_id),
                             agent: model.agents.get(&pane_id).map(|agent| AgentView {
+                                kind: agent.kind.spec().id.to_owned(),
                                 label: agent.kind.label().to_owned(),
                                 status: model
                                     .agent_display_state(pane_id)
@@ -530,6 +532,15 @@ impl Companion {
             &address,
             pane,
             TerminalCommand::Scroll(TerminalScroll::Lines(lines)),
+        );
+    }
+
+    /// Back to the newest output, for every viewer (ADR 0036).
+    pub fn scroll_to_bottom(&self, address: String, pane: u64) {
+        self.shared.command(
+            &address,
+            pane,
+            TerminalCommand::Scroll(TerminalScroll::Bottom),
         );
     }
 }

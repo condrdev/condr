@@ -1,7 +1,7 @@
 //! The Companion's library against a real Server over TCP (ADR 0039).
 
-use condr_core::TerminalCommand;
 use condr_core::protocol::{LayoutCommand, LayoutResult};
+use condr_core::{TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers};
 use condr_mobile::{Change, Companion, DeviceStatus, Listener, SavedDevice};
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig};
 use std::sync::Arc;
@@ -182,6 +182,97 @@ fn outside_a_pane_the_companion_gets_events_but_no_terminal() {
             .any(|change| matches!(change, Change::Terminal { .. })),
         "no terminal changed on the phone"
     );
+
+    companion.close();
+    handle.stop();
+    drop(desktop);
+    server_thread.join().unwrap().unwrap();
+}
+
+/// Scrolling is the Pane's, shared by every viewer (ADR 0036): the screen says how far up
+/// the phone scrolled it, and "back to the newest" brings the offset to zero.
+#[test]
+fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let handle = server.handle();
+    let endpoint = server.endpoint().clone();
+    let Endpoint::Tcp(tcp) = &endpoint else {
+        panic!("an ephemeral TCP Server answers over TCP");
+    };
+    let address = format!("tcp://{}@{}", tcp.server_key, tcp.authority());
+    let seed = tcp.client_key.seed().to_vec();
+    let server_thread = std::thread::spawn(move || server.run());
+
+    let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
+    let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
+        .layout(LayoutCommand::CreateWorkspace {
+            root_directory: std::env::temp_dir(),
+            name: None,
+        })
+        .unwrap()
+    else {
+        panic!("the Workspace is created");
+    };
+    let pane = pane_id.as_u64();
+
+    let companion = Companion::new(
+        seed,
+        "phone".into(),
+        vec![SavedDevice {
+            address: address.clone(),
+            label: "desk".into(),
+        }],
+        Arc::new(Counter::default()),
+    )
+    .unwrap();
+    companion.resume();
+    wait_until("the connection", || {
+        companion.devices()[0].status == DeviceStatus::Connected
+    });
+    companion.show_pane(Some(address.clone()), pane, 12, 40);
+    wait_until("the Pane's terminal at the phone's size", || {
+        companion
+            .terminal(address.clone(), pane)
+            .is_some_and(|screen| screen.rows == 12)
+    });
+    assert_eq!(
+        companion
+            .terminal(address.clone(), pane)
+            .unwrap()
+            .scrolled_lines,
+        0
+    );
+
+    // Any shell prints a prompt per Enter, so forty of them leave history behind twelve rows.
+    for _ in 0..40 {
+        desktop
+            .terminal(
+                pane_id,
+                TerminalCommand::Key {
+                    key: TerminalKey::Enter,
+                    modifiers: TerminalModifiers::default(),
+                    kind: TerminalKeyEventKind::Press,
+                },
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait_until("the prompts to scroll the screen", || {
+        companion.scroll(address.clone(), pane, 5);
+        std::thread::sleep(Duration::from_millis(50));
+        companion
+            .terminal(address.clone(), pane)
+            .is_some_and(|screen| screen.scrolled_lines >= 5)
+    });
+
+    companion.scroll_to_bottom(address.clone(), pane);
+    wait_until("the viewport back at the bottom", || {
+        companion
+            .terminal(address.clone(), pane)
+            .is_some_and(|screen| screen.scrolled_lines == 0)
+    });
 
     companion.close();
     handle.stop();

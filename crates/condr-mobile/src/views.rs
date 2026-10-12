@@ -78,6 +78,9 @@ pub struct PaneView {
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct AgentView {
+    /// The Agent's stable id, `claude`, `codex` and so on, or `other` for a kind this build
+    /// does not know (ADR 0028); the app picks the mark by it.
+    pub kind: String,
     pub label: String,
     pub status: AgentStatus,
     pub blocked_on: Option<String>,
@@ -112,6 +115,8 @@ pub struct NeedsYouItem {
     pub device: String,
     pub workspace: String,
     pub pane: u64,
+    /// The Agent's stable id, as [`AgentView::kind`].
+    pub kind: String,
     pub agent: String,
     pub blocked_on: Option<String>,
 }
@@ -122,6 +127,9 @@ pub struct TerminalScreen {
     pub revision: u64,
     pub rows: u16,
     pub columns: u16,
+    /// How many lines above the newest output the viewport sits; 0 at the bottom (ADR
+    /// 0036: a Pane has one scroll position, shared by every viewer).
+    pub scrolled_lines: u32,
     /// Row by row; a wide character's second cell is empty.
     pub cells: Vec<ScreenCell>,
     pub cursor: Option<ScreenCursor>,
@@ -201,6 +209,7 @@ pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
         revision: view.revision,
         rows: view.size.rows,
         columns: view.size.columns,
+        scrolled_lines: view.display_offset,
         cells,
         cursor: view.cursor.map(|cursor| ScreenCursor {
             row: cursor.row,
@@ -227,5 +236,27 @@ fn color(color: TerminalColor, foreground: bool) -> u32 {
         TerminalColor::Named(258) => DEFAULT_CURSOR_COLOR,
         TerminalColor::Named(_) if foreground => DEFAULT_FOREGROUND_COLOR,
         TerminalColor::Named(_) => DEFAULT_BACKGROUND_COLOR,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use condr_core::{TerminalMouseTracking, TerminalSize};
+
+    #[test]
+    fn the_screen_carries_how_far_the_viewport_is_scrolled() {
+        let view = TerminalView {
+            revision: 3,
+            size: TerminalSize::new(2, 2),
+            display_offset: 7,
+            mouse_tracking: TerminalMouseTracking::None,
+            cells: Vec::new(),
+            cursor: None,
+            selection: None,
+        };
+        let screen = screen(&view);
+        assert_eq!(screen.scrolled_lines, 7);
+        assert_eq!((screen.rows, screen.columns), (2, 2));
     }
 }
