@@ -49,6 +49,9 @@ pub enum DeviceStatus {
     Failed {
         reason: String,
     },
+    /// The Server no longer knows this phone: it refused the handshake with
+    /// `NotAuthorized` or `DeviceRevoked` (ADR 0040). Only pairing again helps.
+    Revoked,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]

@@ -279,3 +279,43 @@ fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
     drop(desktop);
     server_thread.join().unwrap().unwrap();
 }
+
+/// A phone the Server does not know is told so, not "can't connect" (ADR 0040): the app
+/// offers pairing again instead of a retry.
+#[test]
+fn a_server_that_does_not_know_the_phone_marks_it_revoked() {
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let handle = server.handle();
+    let endpoint = server.endpoint().clone();
+    let Endpoint::Tcp(tcp) = &endpoint else {
+        panic!("an ephemeral TCP Server answers over TCP");
+    };
+    let address = format!("tcp://{}@{}", tcp.server_key, tcp.authority());
+    let server_thread = std::thread::spawn(move || server.run());
+
+    let stranger = condr_mobile::generate_seed().unwrap();
+    let companion = Companion::new(
+        stranger,
+        "phone".into(),
+        vec![SavedDevice {
+            address: address.clone(),
+            label: "desk".into(),
+        }],
+        Arc::new(Counter::default()),
+    )
+    .unwrap();
+    companion.resume();
+    wait_until("the refusal", || {
+        matches!(
+            companion.devices()[0].status,
+            DeviceStatus::Revoked | DeviceStatus::Failed { .. }
+        )
+    });
+    assert_eq!(companion.devices()[0].status, DeviceStatus::Revoked);
+
+    companion.close();
+    handle.stop();
+    server_thread.join().unwrap().unwrap();
+}

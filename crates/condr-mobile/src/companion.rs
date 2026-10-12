@@ -724,8 +724,15 @@ impl Shared {
                 }
             }
             Err(error) => {
-                device.status = DeviceStatus::Failed {
-                    reason: error.to_string(),
+                // A Server that no longer knows this phone refuses it: over TCP in the
+                // Noise handshake, otherwise with `NotAuthorized` or `DeviceRevoked`, all
+                // `PermissionDenied` (ADR 0040). The app offers pairing again, not a retry.
+                device.status = if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    DeviceStatus::Revoked
+                } else {
+                    DeviceStatus::Failed {
+                        reason: error.to_string(),
+                    }
                 };
             }
         }
