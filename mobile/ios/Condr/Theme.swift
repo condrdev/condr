@@ -68,6 +68,8 @@ extension AgentStatus {
 struct StatusGlyph: View {
     let status: AgentStatus
     var size: CGFloat = 9
+    /// A Blocked glyph ripples only where one wait is the subject: a terminal's title, a banner.
+    var ripple = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animating = false
 
@@ -86,14 +88,13 @@ struct StatusGlyph: View {
         }
         .frame(width: size, height: size)
         .background {
-            if !reduceMotion, status == .blocked {
+            if !reduceMotion, ripple, status == .blocked {
                 Circle()
                     .stroke(status.tint, lineWidth: 1.5)
                     .scaleEffect(animating ? 2.4 : 1)
                     .opacity(animating ? 0 : 0.8)
             }
         }
-        .opacity(!reduceMotion && status == .working && animating ? 0.45 : 1)
         .onAppear { animate() }
         .onChange(of: status) { animating = false; animate() }
         .accessibilityLabel(status.title)
@@ -102,8 +103,6 @@ struct StatusGlyph: View {
     private func animate() {
         guard !reduceMotion else { return }
         switch status {
-        case .working:
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { animating = true }
         case .blocked:
             withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { animating = true }
         default:
@@ -120,16 +119,25 @@ extension Array where Element == AgentStatus {
     }
 }
 
-/// Agents as the logo's bars: a blocked one full height, a finished one two thirds, a
-/// working one breathing around half, a resting one low and grey.
+/// Agents as the logo's bars, a height band per state so shape tells them apart as well as
+/// colour: a blocked one full height, a finished one three quarters, a working one
+/// breathing between a quarter and a half, a resting one low and grey. Every bar keeps the same
+/// clock and `first` places this run in a longer row, so working bars rise in one wave
+/// travelling left to right across every computer's column.
 struct Bars: View {
     let statuses: [AgentStatus]
     var tall: CGFloat
     var widest: CGFloat = 14
     var spacing: CGFloat = 6
     var animated = true
-    var phase: Double = 0
+    var first = 0
+    /// While someone scrubs the score: the bar under their finger here, or none of these.
+    var highlight: Int?? = nil
+    /// How far the header has folded as the screen scrolls, 1 open to 0.3 folded: heights
+    /// shrink, corners stay round.
+    var fold: CGFloat = 1
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var withoutColor
 
     /// The bar width and gap that fit `count` bars in `width`, no wider than `widest`.
     // ponytail: past 2 pt bars they overflow; draw one bar per state when a Device runs that many.
@@ -141,13 +149,30 @@ struct Bars: View {
     }
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion || !animated || !statuses.contains(.working))) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate + phase
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !animated || !statuses.contains(.working))) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
             HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(Array(statuses.enumerated()), id: \.offset) { index, status in
-                    RoundedRectangle(cornerRadius: min(4, widest * 0.26), style: .continuous)
-                        .fill(status == .idle || status == .unknown ? AnyShapeStyle(.quaternary) : AnyShapeStyle(status.tint.gradient))
-                        .frame(width: widest, height: height(status, time: time + Double(index) * 1.1))
+                    let shape = RoundedRectangle(cornerRadius: min(4, widest * 0.26), style: .continuous)
+                    Group {
+                        if withoutColor, status == .done, widest >= 6 {
+                            shape.strokeBorder(status.tint, lineWidth: 2)
+                        } else {
+                            shape.fill(status == .idle || status == .unknown ? AnyShapeStyle(.tertiary) : AnyShapeStyle(status.tint.gradient))
+                        }
+                    }
+                    .frame(width: widest, height: max(widest * 0.8, height(status, time: time - Double(first + index) * 0.32) * fold))
+                    .opacity(highlight.map { $0 == index } == false ? 0.28 : 1)
+                    .overlay(alignment: .bottom) {
+                        if highlight.map({ $0 == index }) == true {
+                            Capsule()
+                                .fill(.primary)
+                                .frame(width: max(8, widest + 4), height: 3)
+                                .offset(y: 7)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.snappy(duration: 0.15), value: highlight.map { $0 == index })
                 }
             }
             .frame(height: tall, alignment: .bottom)
@@ -158,9 +183,9 @@ struct Bars: View {
     private func height(_ status: AgentStatus, time: TimeInterval) -> CGFloat {
         switch status {
         case .blocked: tall
-        case .done: tall * 0.64
-        case .working: tall * (0.48 + (animated ? 0.18 * sin(time * 2.2) : 0))
-        case .idle, .unknown: max(3, tall * 0.21)
+        case .done: tall * 0.75
+        case .working: tall * (0.35 + (animated ? 0.10 * sin(time * 2.4) : 0))
+        case .idle, .unknown: min(tall * 0.2, max(3, tall * 0.12, widest * 2))
         }
     }
 }
@@ -175,15 +200,37 @@ func agentSummary(_ statuses: [AgentStatus]) -> Text {
         .joined(separator: " · ")
     guard blocked > 0 else {
         if !rest.isEmpty { return Text(rest) }
-        return Text(statuses.isEmpty ? "No Agents" : "\(statuses.count) idle")
+        return Text(statuses.isEmpty ? "No agents" : "\(statuses.count) idle")
     }
-    let need = Text("\(blocked) \(blocked == 1 ? "needs" : "need") you").foregroundStyle(.red)
+    let need = Text("\(blocked) \(blocked == 1 ? "needs" : "need") you").fontWeight(.semibold).foregroundStyle(.red)
     return rest.isEmpty ? need : Text("\(need) · \(rest)")
+}
+
+/// A computer it can't reach, everywhere the same: three bars of falling height toppled
+/// flat along the baseline.
+struct Fallen: View {
+    var width: CGFloat = 40
+
+    var body: some View {
+        let gap = max(2, width * 0.06)
+        let lengths: [CGFloat] = [1, 0.72, 0.44]
+        let unit = (width - gap * 2) / lengths.reduce(0, +)
+        HStack(spacing: gap) {
+            ForEach(lengths, id: \.self) { length in
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(.tertiary)
+                    .frame(width: unit * length, height: max(3, width * 0.05))
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .accessibilityHidden(true)
+    }
 }
 
 // MARK: - Marks and avatars
 
-/// An Agent's mark from `assets/agents`, in its brand colour where it has one; a shell
+/// An Agent's mark from `assets/agents`, in the text colour: on the phone colour means
+/// state alone, so Claude's terracotta would read as Working (the desktop keeps it). A shell
 /// gets the terminal symbol.
 struct AgentMark: View {
     let kind: AgentKind?
@@ -193,7 +240,7 @@ struct AgentMark: View {
             Image(kind.mark)
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(kind.brand.map { Color(hex: $0) } ?? Color.primary)
+                .foregroundStyle(Color.primary)
         } else {
             Image(systemName: "terminal")
                 .resizable()
@@ -211,6 +258,7 @@ struct AgentAvatar: View {
     var status: AgentStatus?
     var side: CGFloat = 40
     var surface: Color = Color(.systemBackground)
+    var ripple = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: side * 0.3, style: .continuous)
@@ -219,7 +267,7 @@ struct AgentAvatar: View {
             .frame(width: side, height: side)
             .overlay(alignment: .bottomTrailing) {
                 if let status {
-                    StatusGlyph(status: status, size: side * 0.27)
+                    StatusGlyph(status: status, size: side * 0.27, ripple: ripple)
                         .padding(side * 0.06)
                         .background(Circle().fill(surface))
                         .offset(x: side * 0.12, y: side * 0.12)
@@ -228,30 +276,23 @@ struct AgentAvatar: View {
     }
 }
 
-/// The desktop's Workspace avatar: the first letter on its identity colour.
+/// The desktop's Workspace avatar, the first letter, on a neutral tile where the desktop
+/// gives it an identity colour: on the phone colour means state alone.
 struct WorkspaceAvatar: View {
     let name: String
     var side: CGFloat = 22
 
     var body: some View {
         RoundedRectangle(cornerRadius: side * 0.26, style: .continuous)
-            .fill(identityColor(name))
+            .fill(.fill.secondary)
             .overlay {
                 Text(name.prefix(1).uppercased())
                     .font(.system(size: side * 0.56, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             .frame(width: side, height: side)
             .accessibilityHidden(true)
     }
-}
-
-/// The desktop sidebar's `IDENTITY_COLORS`, picked by a stable hash of `key`.
-func identityColor(_ key: String) -> Color {
-    let colors: [UInt32] = [0x7a6aa8, 0x3d7ea6, 0x388068, 0xa4673a, 0xb05c80, 0x6a70b8, 0x368080, 0xb06260, 0x8f7838, 0x5179b0]
-    var hash: UInt32 = 2_166_136_261
-    for byte in key.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
-    return Color(hex: colors[Int(hash % UInt32(colors.count))])
 }
 
 // MARK: - Logo

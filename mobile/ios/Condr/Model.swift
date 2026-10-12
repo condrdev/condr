@@ -16,8 +16,6 @@ enum AgentKind: String {
     }
 
     var mark: String { "agent-\(rawValue)" }
-    /// `AgentSpec::brand_color`.
-    var brand: UInt32? { self == .claude ? Palette.claude : nil }
 }
 
 enum AgentStatus: Hashable {
@@ -101,6 +99,8 @@ struct Banner: Identifiable, Equatable {
     let kind: AgentKind?
     let title: String
     let detail: String
+    /// Raised while the first screen is showing, which shows the change itself: felt, not shown.
+    var quiet = false
 }
 
 @Observable
@@ -138,23 +138,32 @@ final class Store {
                 }
             } } }
         }
+        if scene == "banner", let d = world.firstIndex(where: { $0.address == Demo.jpdev }) {
+            world[d].workspaces[0].panes[1].agent?.status = .blocked
+            world[d].workspaces[0].panes[1].agent?.blockedOn = "Bash: pnpm prisma migrate dev --name passkeys"
+            world[d].workspaces[0].panes[1].phase = 1
+        }
         live = !defaults.bool(forKey: "static")
         paired = isPaired
-        locked = scene == "lock"
+        locked = scene == "lock" || (scene.isEmpty && isPaired)
         devices = world
         switch scene {
         case "devices": tab = .devices
         case "device": tab = .devices; devicesPath = [.device(Demo.macmini)]
         case "offline": tab = .devices; devicesPath = [.device(Demo.studio)]
         case "settings": tab = .settings
-        case "error": error = "Couldn't send to macmini: the connection closed. Your text was not sent."
+        case "error": error = "Couldn't reach macmini: the connection closed while opening the Pane."
         case "terminal": agentsPath = [.pane(PaneRef(device: Demo.macmini, pane: 1))]
+        case "terminal-error":
+            agentsPath = [.pane(PaneRef(device: Demo.macmini, pane: 1))]
+            error = "Couldn't send to macmini: the connection closed. Your reply is still in the field."
         case "question": agentsPath = [.pane(PaneRef(device: Demo.jpdev, pane: 11))]
         case "codex": agentsPath = [.pane(PaneRef(device: Demo.macmini, pane: 2))]
         case "computer": agentsPath = [.device(Demo.macmini)]
         case "crowd-device": agentsPath = [.device(Demo.buildbox)]
         case "shell": tab = .devices; devicesPath = [.device(Demo.macmini), .pane(PaneRef(device: Demo.macmini, pane: 3))]
         case "banner":
+            tab = .devices
             banner = Banner(ref: PaneRef(device: Demo.jpdev, pane: 12), status: .blocked, kind: .claude,
                             title: "Claude needs you", detail: "Migrate auth to passkeys · jpdev")
         default: break
@@ -240,7 +249,8 @@ final class Store {
             banner = Banner(
                 ref: ref, status: shown, kind: agent.kind,
                 title: shown == .blocked ? "\(agent.kind.label) needs you" : "\(agent.kind.label) is done",
-                detail: "\(before.title) · \(place(workspace.name, device.label))")
+                detail: "\(before.title) · \(place(workspace.name, device.label))",
+                quiet: tab == .agents && agentsPath.isEmpty)
         }
     }
 

@@ -94,7 +94,6 @@ struct TerminalScreen: View {
                     }
             }
             .background(Color(hex: Palette.background))
-            .overlay(alignment: .top) { sizeHUD(device.label) }
             .overlay { veil(device) }
             .safeAreaBar(edge: .bottom) { inputBar(pane) }
             .simultaneousGesture(pinch)
@@ -104,8 +103,17 @@ struct TerminalScreen: View {
             .environment(\.colorScheme, .dark)
             .sheet(isPresented: $selecting) { SelectionSheet(lines: lines(pane, columns: 48, tick: 0)) }
             .sensoryFeedback(.impact(weight: .light, intensity: 0.6), trigger: keyTick)
+            // A send error lifts the input bar; once its spring settles the terminal is put
+            // back on its newest line, if that is where the person was.
+            .onChange(of: store.error, initial: true) {
+                let follow = atBottom
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if follow { withAnimation(.smooth) { position.scrollTo(edge: .bottom) } }
+                }
+            }
             .onAppear {
                 store.show(ref)
+                if UserDefaults.standard.string(forKey: "scene") == "terminal-error" { text = "Run it with --release too" }
                 if UserDefaults.standard.bool(forKey: "focus") { focused = true }
                 replay(UserDefaults.standard.string(forKey: "press"))
             }
@@ -175,16 +183,35 @@ struct TerminalScreen: View {
                     Text(pane.title)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                    HStack(spacing: 5) {
-                        if let agent = pane.agent {
-                            StatusGlyph(status: agent.status, size: 6)
-                            Text(agent.status.title)
-                                .foregroundStyle(agent.status == .idle ? .secondary : agent.status.tint)
-                            Text("·").foregroundStyle(.tertiary)
+                    Group {
+                        if let hud {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.left.and.right")
+                                    .font(.system(size: 8, weight: .bold))
+                                Text("Fitted to this iPhone · \(hud)")
+                                    .monospacedDigit()
+                            }
+                            .accessibilityLabel("\(device.label)'s terminal fitted to this iPhone, \(hud)")
+                            .transition(.push(from: .bottom))
+                        } else {
+                            HStack(spacing: 5) {
+                                if let agent = pane.agent {
+                                    StatusGlyph(status: agent.status, size: 6, ripple: true)
+                                    if agent.status == .blocked {
+                                        Text(agent.status.title).fontWeight(.semibold).foregroundStyle(.red)
+                                    } else {
+                                        Text(agent.status.title)
+                                    }
+                                    Text("·").foregroundStyle(.tertiary)
+                                }
+                                Text(place(workspace.name, device.label))
+                            }
+                            .transition(.push(from: .bottom))
                         }
-                        Text(place(workspace.name, device.label))
-                            .foregroundStyle(.secondary)
                     }
+                    // The outgoing line slides out of its own row, never over the title.
+                    .clipped()
+                    .foregroundStyle(.secondary)
                     .font(.caption2.weight(.medium))
                     .lineLimit(1)
                 }
@@ -206,27 +233,6 @@ struct TerminalScreen: View {
             } label: {
                 Image(systemName: "ellipsis")
             }
-        }
-    }
-
-    @ViewBuilder
-    private func sizeHUD(_ device: String) -> some View {
-        if let hud {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.left.and.right")
-                    .font(.caption2.weight(.bold))
-                Text("Fitted to this iPhone")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(hud)
-                    .font(.caption.monospacedDigit().weight(.semibold))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .glassEffect(.regular.tint(.black.opacity(0.45)), in: .capsule)
-            .padding(.top, 8)
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .accessibilityLabel("\(device)'s terminal fitted to this iPhone, \(hud)")
         }
     }
 
@@ -273,12 +279,14 @@ struct TerminalScreen: View {
 
     private func placeholder(_ pane: Pane) -> String {
         guard let agent = pane.agent else { return "Command" }
-        if agent.status == .blocked, pane.script.menu != nil { return "Choose 1–\(pane.script.menu!), or ↑ ↓ and return" }
+        if agent.status == .blocked { return "Reply, or pick with ↑ ↓ and return" }
         return "Message \(agent.kind.label)"
     }
 
     private func inputBar(_ pane: Pane) -> some View {
         VStack(spacing: 8) {
+            ErrorToast()
+                .padding(.horizontal, -12)
             keyRow
             HStack(spacing: 8) {
                 TextField(placeholder(pane), text: $text)
@@ -286,6 +294,8 @@ struct TerminalScreen: View {
                     .textInputAutocapitalization(pane.agent == nil ? .never : .sentences)
                     .autocorrectionDisabled(pane.agent == nil)
                     .submitLabel(.send)
+                    // A numbered menu waits for a digit: open the keyboard on its numbers.
+                    .keyboardType(pane.agent?.status == .blocked ? .numbersAndPunctuation : .default)
                     .focused($focused)
                     .onSubmit(submit)
                     .onChange(of: text) { _, new in
@@ -300,12 +310,12 @@ struct TerminalScreen: View {
                     Button(action: submit) {
                         Image(systemName: "arrow.up")
                             .font(.body.weight(.bold))
-                            .foregroundStyle(pane.agent?.kind.brand == nil ? Color.ink : .white)
+                            .foregroundStyle(Color.ink)
                             .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.glassProminent)
                     .buttonBorderShape(.circle)
-                    .tint(pane.agent?.kind.brand.map { Color(hex: $0) } ?? .accentColor)
+                    .tint(Color.paper)
                     .transition(.scale.combined(with: .opacity))
                     .accessibilityLabel("Send")
                 }
@@ -328,11 +338,11 @@ struct TerminalScreen: View {
                 } label: {
                     Text("ctrl")
                         .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .frame(minWidth: 46, minHeight: 36)
-                        .foregroundStyle(control ? Color.black : Color.primary)
+                        .frame(minWidth: 46, minHeight: 44)
+                        .foregroundStyle(control ? Color.ink : Color.primary)
                 }
                 .buttonStyle(.plain)
-                .glassEffect(control ? .regular.tint(.orange).interactive() : .regular.interactive(), in: .capsule)
+                .glassEffect(control ? .regular.tint(.paper).interactive() : .regular.interactive(), in: .capsule)
                 .accessibilityLabel("Control")
                 .accessibilityAddTraits(control ? .isSelected : [])
                 Spacer(minLength: 0)
@@ -352,7 +362,7 @@ struct TerminalScreen: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .frame(minWidth: 46, minHeight: 36)
+                .frame(minWidth: 46, minHeight: 44)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
@@ -362,7 +372,7 @@ struct TerminalScreen: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .semibold))
-                .frame(minWidth: 46, minHeight: 36)
+                .frame(minWidth: 46, minHeight: 44)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
@@ -373,7 +383,7 @@ struct TerminalScreen: View {
         Button { press(key) } label: {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .semibold))
-                .frame(width: 34, height: 36)
+                .frame(width: 36, height: 44)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)

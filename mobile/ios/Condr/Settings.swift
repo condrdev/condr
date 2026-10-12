@@ -10,7 +10,15 @@ struct SettingsView: View {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        AppMark(side: 52)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.fill.tertiary)
+                            .overlay {
+                                Image(systemName: "iphone")
+                                    .font(.system(size: 26, weight: .light))
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                            .frame(width: 52, height: 52)
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(store.phoneName)
                                 .font(.headline)
@@ -21,15 +29,18 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                     LabeledContent("Key") {
-                        Text(store.fingerprint.prefix(6) + "…" + store.fingerprint.suffix(6))
+                        // The whole key, as the computer's Paired devices shows it, cut in the middle to fit.
+                        Text(store.fingerprint)
                             .font(.callout.monospaced())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     .contextMenu {
                         Button("Copy Key", systemImage: "doc.on.doc") { UIPasteboard.general.string = store.fingerprint }
                     }
                 } footer: {
-                    Text("Your computers list this iPhone under Paired devices by this key. It never leaves this iPhone.")
+                    Text("Your computers list this iPhone under Paired devices by this key. Its private half never leaves this iPhone.")
                 }
 
                 Section("Terminal") {
@@ -44,9 +55,9 @@ struct SettingsView: View {
                         Slider(value: $store.fontSize, in: 8...20, step: 0.5) {
                             Text("Text Size")
                         } minimumValueLabel: {
-                            Image(systemName: "textformat.size.smaller")
+                            Text("A").font(.caption2)
                         } maximumValueLabel: {
-                            Image(systemName: "textformat.size.larger")
+                            Text("A").font(.title2)
                         }
                         preview
                     }
@@ -78,7 +89,7 @@ struct SettingsView: View {
                 Section {
                     Button("Replay First Launch") { store.devices = []; store.paired = false }
                     Button("Lock Now") { store.locked = true }
-                    Button("Show an Error") { store.error = "Couldn't send to macmini: the connection closed. Your text was not sent." }
+                    Button("Show an Error") { store.error = "Couldn't reach macmini: the connection closed while opening the Pane." }
                 } header: {
                     Text("Prototype")
                 }

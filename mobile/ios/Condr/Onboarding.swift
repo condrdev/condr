@@ -91,7 +91,13 @@ struct Welcome: View {
             }
             .opacity(stage >= 3 ? 1 : 0)
             .offset(y: stage >= 3 ? 0 : 14)
-            VStack(spacing: 14) {
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Color.paper)
+        .padding(.horizontal, 28)
+        .safeAreaBar(edge: .bottom) {
+            // The steps' footer, so the button sits where theirs do.
+            StepFooter {
                 Button(action: next) {
                     Text("Pair with Your Computer")
                         .font(.headline)
@@ -101,16 +107,13 @@ struct Welcome: View {
                 .buttonStyle(.glassProminent)
                 .tint(.paper)
                 .controlSize(.large)
+            } secondary: {
                 Text("Condr must be running on your computer.")
                     .font(.footnote)
                     .foregroundStyle(Color.paper.opacity(0.45))
             }
-            .padding(.top, 36)
             .opacity(stage >= 3 ? 1 : 0)
         }
-        .foregroundStyle(Color.paper)
-        .padding(.horizontal, 28)
-        .padding(.bottom, 10)
         .background(Color.ink.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
         .toolbarVisibility(.hidden, for: .navigationBar)
@@ -126,53 +129,77 @@ struct Welcome: View {
     }
 }
 
-/// A row of Agents as the score draws them, idling and working, while one after another
-/// rises to need you or settles as done, its mark and words floating over it.
+/// Three computers' Agents as the first screen's score draws them, a column each, idling
+/// and working, while one after another rises to need you or settles as done, its mark
+/// and words floating over it: the home screen's language, taught before it is seen.
 struct WelcomeStage: View {
     var playing: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var cue: Int?
 
-    private struct Story { let bar: Int; let status: AgentStatus; let kind: AgentKind; let words: String }
+    private struct Story { let column: Int; let bar: Int; let status: AgentStatus; let kind: AgentKind; let words: String }
     private let stories = [
-        Story(bar: 9, status: .blocked, kind: .claude, words: "Claude needs you"),
-        Story(bar: 3, status: .done, kind: .codex, words: "Codex is done"),
-        Story(bar: 12, status: .blocked, kind: .claude, words: "Claude asks a question"),
-        Story(bar: 6, status: .done, kind: .opencode, words: "OpenCode is done"),
+        Story(column: 0, bar: 2, status: .blocked, kind: .claude, words: "Claude needs you"),
+        Story(column: 1, bar: 4, status: .done, kind: .codex, words: "Codex is done"),
+        Story(column: 2, bar: 1, status: .blocked, kind: .claude, words: "Claude asks a question"),
+        Story(column: 1, bar: 0, status: .done, kind: .opencode, words: "OpenCode is done"),
     ]
+    private let computers = ["macmini", "jpdev", "buildbox"]
     /// Each bar's own state when no story uses it.
-    private let base: [AgentStatus] = [.idle, .working, .idle, .idle, .working, .idle, .idle, .working, .idle, .working, .idle, .idle, .working, .idle, .idle, .working, .idle, .idle]
+    private let base: [[AgentStatus]] = [
+        [.working, .idle, .working, .idle, .working, .idle],
+        [.working, .idle, .working, .working, .idle, .working, .idle],
+        [.idle, .working, .idle, .working, .idle],
+    ]
 
     var body: some View {
         GeometryReader { proxy in
-            let width: CGFloat = 16, gap: CGFloat = 10
-            let count = min(base.count, Int((proxy.size.width + gap) / (width + gap)))
-            let inset = (proxy.size.width - CGFloat(count) * (width + gap) + gap) / 2
-            let tall = proxy.size.height - 70
+            let margin: CGFloat = 26, gap: CGFloat = 30, spacing: CGFloat = 7
+            let count = base.reduce(0) { $0 + $1.count }
+            let width = (proxy.size.width - margin * 2 - gap * CGFloat(base.count - 1) - spacing * CGFloat(count - base.count)) / CGFloat(count)
+            let baseline = proxy.size.height - 30
+            let tall = baseline - 58
             let story = cue.map { stories[$0] }
-            TimelineView(.animation(paused: reduceMotion || !playing)) { timeline in
+            let origin = { (column: Int) -> CGFloat in
+                let before = base[..<column].reduce(0) { $0 + $1.count }
+                return margin + CGFloat(before) * width + CGFloat(before - column) * spacing + CGFloat(column) * gap
+            }
+            let status = { (column: Int, bar: Int) -> AgentStatus in
+                story.map { $0.column == column && $0.bar == bar } == true ? story!.status : base[column][bar]
+            }
+            let height = { (status: AgentStatus, wave: Double) -> CGFloat in
+                switch status {
+                case .blocked: tall
+                case .done: tall * 0.75
+                case .working: tall * (0.35 + 0.10 * wave)
+                default: tall * 0.12
+                }
+            }
+            TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !playing)) { timeline in
                 let time = timeline.date.timeIntervalSinceReferenceDate
-                ZStack(alignment: .bottomLeading) {
-                    ForEach(0..<count, id: \.self) { index in
-                        let status = story?.bar == index ? story!.status : base[index]
-                        let wave = (sin(time * 1.7 + Double(index) * 0.8) + 1) / 2
-                        let height: CGFloat = switch status {
-                        case .blocked: tall
-                        case .done: tall * 0.62
-                        case .working: tall * (0.28 + 0.22 * wave)
-                        default: 14 + 10 * wave
+                ZStack(alignment: .topLeading) {
+                    ForEach(base.indices, id: \.self) { column in
+                        ForEach(base[column].indices, id: \.self) { bar in
+                            let index = base[..<column].reduce(0) { $0 + $1.count } + bar
+                            let current = status(column, bar)
+                            let h = height(current, sin(time * 2.4 - Double(index) * 0.32))
+                            RoundedRectangle(cornerRadius: min(4, width * 0.28), style: .continuous)
+                                .fill(current == .idle ? AnyShapeStyle(Color.paper.opacity(0.14)) : AnyShapeStyle(current.tint.gradient))
+                                .frame(width: width, height: h)
+                                .position(x: origin(column) + CGFloat(bar) * (width + spacing) + width / 2, y: baseline - h / 2)
                         }
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(status == .idle ? AnyShapeStyle(Color.paper.opacity(0.13)) : AnyShapeStyle(status.tint.gradient))
-                            .frame(width: width, height: height)
-                            .offset(x: inset + CGFloat(index) * (width + gap))
+                        let columnWidth = CGFloat(base[column].count) * (width + spacing) - spacing
+                        Text(computers[column])
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.paper.opacity(0.42))
+                            .frame(width: columnWidth, alignment: .leading)
+                            .position(x: origin(column) + columnWidth / 2, y: baseline + 17)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
-            if let story, story.bar < count {
-                let height = story.status == .blocked ? tall : tall * 0.62
-                let x = inset + CGFloat(story.bar) * (width + gap) + width / 2
+            if let story {
+                let h = story.status == .blocked ? tall : tall * 0.75
+                let x = origin(story.column) + CGFloat(story.bar) * (width + spacing) + width / 2
                 HStack(spacing: 8) {
                     AgentMark(kind: story.kind)
                         .frame(width: 15, height: 15)
@@ -183,7 +210,7 @@ struct WelcomeStage: View {
                 .padding(.vertical, 9)
                 .glassEffect(.regular, in: .capsule)
                 .fixedSize()
-                .position(x: min(max(x, 100), proxy.size.width - 100), y: proxy.size.height - height - 30)
+                .position(x: min(max(x, 104), proxy.size.width - 104), y: baseline - h - 28)
                 .transition(.scale(scale: 0.6, anchor: .bottom).combined(with: .opacity))
                 .id(cue)
             }
@@ -228,14 +255,12 @@ struct InviteStep: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaBar(edge: .bottom) {
-            VStack(spacing: 6) {
+            StepFooter {
                 PrimaryButton("Scan Code", systemImage: "qrcode.viewfinder", action: scan)
+            } secondary: {
                 Button("Paste a Link Instead") { pasting = true }
                     .font(.subheadline.weight(.medium))
-                    .padding(.vertical, 8)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 8)
         }
         .sheet(isPresented: $pasting) {
             PasteLink { pasting = false; pasted() }
@@ -313,7 +338,7 @@ struct InviteIllustration: View {
                     VStack(spacing: 3) {
                         Text("Scan with Condr on your phone")
                             .font(.system(size: 10, weight: .medium))
-                        Text("Expires in 9:41")
+                        Text("Expires in 9:12")
                             .font(.system(size: 9).monospacedDigit())
                             .foregroundStyle(.white.opacity(0.5))
                     }
@@ -470,6 +495,7 @@ struct Reticle: Shape {
 struct NameStep: View {
     @Binding var name: String
     let next: () -> Void
+    @Environment(Store.self) private var store
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -493,20 +519,82 @@ struct NameStep: View {
             .padding(.horizontal, 18)
             .frame(minHeight: 60)
             .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 18, style: .continuous))
+            PairedPreview(name: trimmed.isEmpty ? "iPhone" : trimmed, key: store.fingerprint)
             Spacer()
         }
         .padding(.horizontal, 24)
         .padding(.top, 8)
         .safeAreaBar(edge: .bottom) {
-            PrimaryButton("Continue", action: next)
-            .disabled(trimmed.isEmpty)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 8)
+            StepFooter {
+                PrimaryButton("Continue", action: next)
+                    .disabled(trimmed.isEmpty)
+            } secondary: {
+                EmptyView()
+            }
         }
         .onAppear { focused = true }
     }
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespaces) }
+}
+
+/// The row the computer's Settings › Paired devices will show, drawn as the desktop draws
+/// it and following the name as it is typed.
+struct PairedPreview: View {
+    let name: String
+    let key: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Paired devices on your computer")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+            HStack(spacing: 12) {
+                Image(systemName: "iphone")
+                    .font(.system(size: 18, weight: .light))
+                    .frame(width: 30, height: 30)
+                    .background(.white.opacity(0.08), in: .rect(cornerRadius: 7, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .contentTransition(.interpolate)
+                        .animation(.snappy, value: name)
+                    Text(key)
+                        .font(.system(size: 10.5).monospaced())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                Text("Just now")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(14)
+        .background(Color(hex: 0x16181c), in: .rect(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1) }
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Your computer will list this iPhone as \(name)")
+    }
+}
+
+/// A step's footer: its one action, then a slot of fixed height for a second action or a
+/// note, so the button sits at the same place on every step.
+struct StepFooter<Primary: View, Secondary: View>: View {
+    @ViewBuilder let primary: Primary
+    @ViewBuilder let secondary: Secondary
+
+    var body: some View {
+        VStack(spacing: 6) {
+            primary
+            secondary
+                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
+        }
+        .padding(.horizontal, 24)
+    }
 }
 
 // MARK: - Local network
@@ -518,23 +606,23 @@ struct NetworkStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Nearby()
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
             StepTitle("Connect directly on your Wi-Fi",
                       "When this iPhone and your computer share a network, Condr connects straight to it: faster, and without the relay. iOS asks you to allow this next.")
-            Spacer()
+            Spacer(minLength: 12)
+            Nearby()
+                .frame(maxWidth: .infinity)
+            Spacer(minLength: 12)
         }
         .padding(.horizontal, 24)
+        .padding(.top, 8)
         .safeAreaBar(edge: .bottom) {
-            VStack(spacing: 12) {
+            StepFooter {
                 PrimaryButton("Continue") { asking = true }
+            } secondary: {
                 Text("Without it, Condr still connects, through the relay.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 8)
         }
         .alert("“Condr” would like to find and connect to devices on your local network.", isPresented: $asking) {
             Button("Don't Allow", role: .cancel) { next() }
@@ -547,32 +635,27 @@ struct NetworkStep: View {
 
 /// The phone and the computer on one network: Wi-Fi rings spreading between them.
 struct Nearby: View {
-    var connected = false
-    var computer: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion || connected)) { timeline in
+        TimelineView(.animation(paused: reduceMotion)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 ForEach(0..<4) { ring in
                     let progress = (time / 3.2 + Double(ring) / 4).truncatingRemainder(dividingBy: 1)
                     Circle()
-                        .stroke((connected ? Color.green : Color.primary).opacity((1 - progress) * (connected ? 0.18 : 0.28)), lineWidth: 1.2)
+                        .stroke(Color.primary.opacity((1 - progress) * 0.28), lineWidth: 1.2)
                         .frame(width: 70 + 220 * progress, height: 70 + 220 * progress)
                 }
-                Image(systemName: connected ? "checkmark" : "wifi")
+                Image(systemName: "wifi")
                     .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(connected ? Color.white : Color.primary)
-                    .contentTransition(.symbolEffect(.replace))
                     .frame(width: 64, height: 64)
-                    .background(connected ? Color.green : Color(.systemBackground), in: .circle)
-                    .overlay { Circle().strokeBorder(Color.primary.opacity(connected ? 0 : 0.12)) }
-                    .scaleEffect(connected ? 1.08 : 1)
+                    .background(Color(.systemBackground), in: .circle)
+                    .overlay { Circle().strokeBorder(Color.primary.opacity(0.12)) }
                 HStack {
-                    device("iphone", nil)
+                    device("iphone")
                     Spacer()
-                    device("desktopcomputer", computer)
+                    device("desktopcomputer")
                 }
             }
         }
@@ -581,21 +664,45 @@ struct Nearby: View {
         .accessibilityHidden(true)
     }
 
-    private func device(_ symbol: String, _ label: String?) -> some View {
+    private func device(_ symbol: String) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 42, weight: .light))
+            .symbolRenderingMode(.hierarchical)
             .frame(width: 92, height: 92)
             .background(Color(.systemBackground), in: .circle)
-            .overlay(alignment: .bottom) {
-                if let label {
-                    Text(label)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                        .offset(y: 10)
-                        .transition(.opacity)
+    }
+}
+
+/// A computer's score arriving: its bars rise one by one over its name.
+struct Rising: View {
+    let statuses: [AgentStatus]
+    let shown: Int
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .bottom, spacing: 9) {
+                ForEach(Array(statuses.enumerated()), id: \.offset) { index, status in
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(status == .idle || status == .unknown ? AnyShapeStyle(.tertiary) : AnyShapeStyle(status.tint.gradient))
+                        .frame(width: 24, height: index < shown ? height(status) : 0)
                 }
             }
+            .frame(height: 120, alignment: .bottom)
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func height(_ status: AgentStatus) -> CGFloat {
+        switch status {
+        case .blocked: 120
+        case .done: 90
+        case .working: 42
+        case .idle, .unknown: 14
+        }
     }
 }
 
@@ -606,17 +713,27 @@ struct ConnectingStep: View {
     let finish: () -> Void
     @State private var paired = UserDefaults.standard.string(forKey: "scene") == "paired"
     @State private var shown = 0
+    @State private var rose = 0
     private let found = Demo.devices[0].agents
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-            Nearby(connected: paired, computer: paired ? "macmini" : nil)
+            ZStack {
+                if paired {
+                    Rising(statuses: found.compactMap { $0.agent?.status }.byUrgency(), shown: rose, label: "macmini")
+                        .transition(.opacity)
+                } else {
+                    Nearby()
+                        .transition(.opacity)
+                }
+            }
+            .frame(height: 230)
             VStack(spacing: 10) {
                 Text(paired ? "Paired with macmini" : "Pairing…")
                     .font(.largeTitle.bold())
                     .contentTransition(.opacity)
-                Text(paired ? "Its Agents are on this iPhone now." : "Exchanging keys with your computer.")
+                Text(paired ? "Its agents show up here now." : "Exchanging keys with your computer.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -630,9 +747,15 @@ struct ConnectingStep: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(pane.title)
                                     .font(.subheadline.weight(.semibold))
-                                Text(pane.agent.map { "\($0.kind.label) · \($0.status.title)" } ?? "")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                Group {
+                                    if let agent = pane.agent, agent.status == .blocked {
+                                        Text("\(agent.kind.label) · \(Text("Needs you").fontWeight(.semibold).foregroundStyle(.red))")
+                                    } else {
+                                        Text(pane.agent.map { "\($0.kind.label) · \($0.status.title)" } ?? "")
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
                         }
@@ -656,16 +779,15 @@ struct ConnectingStep: View {
         .navigationBarBackButtonHidden()
         .safeAreaBar(edge: .bottom) {
             if paired {
-                VStack(spacing: 10) {
+                StepFooter {
                     PrimaryButton(firstLaunch ? "Show My Agents" : "Done", action: finish)
+                } secondary: {
                     if firstLaunch {
                         Text("Condr asks for Face ID when it opens.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 8)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -676,7 +798,11 @@ struct ConnectingStep: View {
                 withAnimation(.spring(duration: 0.6, bounce: 0.25)) { paired = true }
             }
             for index in found.indices {
-                try? await Task.sleep(for: .milliseconds(index == 0 ? 450 : 160))
+                try? await Task.sleep(for: .milliseconds(index == 0 ? 250 : 110))
+                withAnimation(.spring(duration: 0.55, bounce: 0.35)) { rose = index + 1 }
+            }
+            for index in found.indices {
+                try? await Task.sleep(for: .milliseconds(index == 0 ? 300 : 140))
                 withAnimation(.spring(duration: 0.5, bounce: 0.3)) { shown = index + 1 }
             }
         }

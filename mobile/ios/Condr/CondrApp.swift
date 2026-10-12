@@ -16,6 +16,7 @@ struct Root: View {
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var phase
     @State private var leftAt: Date?
+    @State private var curtain = Curtain()
 
     var body: some View {
         @Bindable var store = store
@@ -30,13 +31,14 @@ struct Root: View {
         }
         .animation(.smooth(duration: 0.6), value: store.paired)
         .overlay(alignment: .top) { BannerView() }
-        .overlay(alignment: .bottom) { ErrorToast() }
-        .overlay {
-            if store.locked {
-                LockView().transition(.opacity)
+        .overlay(alignment: .bottom) {
+            // Inside a Pane the toast sits over the input bar, from the terminal itself.
+            if store.showing == nil {
+                ErrorToast().padding(.bottom, 86)
             }
         }
-        .animation(.smooth, value: store.locked)
+        // The lock and the shield are drawn in a window of their own, over any sheet or menu.
+        .onChange(of: store.locked, initial: true) { _, _ in raiseCurtain() }
         .sheet(isPresented: $store.pairingAnother) {
             PairingFlow(firstLaunch: false)
         }
@@ -48,14 +50,91 @@ struct Root: View {
             }
         }
         .onChange(of: phase) { _, phase in
-            // The app lock (ADR 0041): on start, and after five minutes away.
+            // The app lock (ADR 0041): on start, and after five minutes away. Leaving the
+            // screen shields it at once, so the app switcher's snapshot shows only the mark.
             switch phase {
-            case .background: leftAt = .now
             case .active:
                 if let leftAt, Date.now.timeIntervalSince(leftAt) > 300, store.paired { store.locked = true }
                 leftAt = nil
-            default: break
+                raiseCurtain()
+            default:
+                if phase == .background, leftAt == nil { leftAt = .now }
+                // Before pairing there is nothing to hide, and a lock already hides it all:
+                // swapping it for the shield would rebuild it, and Face ID with it, every
+                // time its own prompt makes the app inactive.
+                if store.paired, !store.locked { curtain.show(.shield) { AnyView(Shield()) } }
             }
+        }
+    }
+}
+
+extension Root {
+    private func raiseCurtain() {
+        if store.locked {
+            curtain.show(.lock) { AnyView(LockView().environment(store)) }
+        } else {
+            curtain.hide()
+        }
+    }
+}
+
+/// A window over the app's own, for what must cover everything: the lock and the shield.
+/// It takes the keyboard and VoiceOver from the window beneath, appears at once and only
+/// fades away; showing the same thing again keeps it rather than building it anew.
+@MainActor
+final class Curtain {
+    enum Kind { case lock, shield }
+
+    private var window: UIWindow?
+    private var kind: Kind?
+    /// Bumped by every show and hide, so a fade that finishes late can't undo a newer show.
+    private var generation = 0
+
+    func show(_ kind: Kind, _ view: () -> AnyView) {
+        generation += 1
+        if let window, self.kind == kind {
+            // A fade already under way would show the app for a moment before snapping back.
+            window.layer.removeAllAnimations()
+            window.alpha = 1
+            window.isHidden = false
+            return
+        }
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        // Whatever had the keyboard gives it up, so no keystroke reaches the work behind.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        let window = window ?? UIWindow(windowScene: scene)
+        window.windowLevel = .alert + 1
+        window.rootViewController = UIHostingController(rootView: view())
+        window.alpha = 1
+        window.makeKeyAndVisible()
+        // VoiceOver reads this window alone: the app's own windows drop out until it goes.
+        window.accessibilityViewIsModal = true
+        for other in scene.windows where other !== window { other.accessibilityElementsHidden = true }
+        self.window = window
+        self.kind = kind
+    }
+
+    func hide() {
+        guard let window else { return }
+        generation += 1
+        let mine = generation
+        UIView.animate(withDuration: 0.35, animations: { window.alpha = 0 }) { _ in
+            guard self.generation == mine else { return }
+            window.isHidden = true
+            for other in window.windowScene?.windows ?? [] where other !== window { other.accessibilityElementsHidden = false }
+            window.windowScene?.windows.first { $0 !== window }?.makeKey()
+            self.window = nil
+            self.kind = nil
+        }
+    }
+}
+
+/// What the app switcher and a returning glance see: the mark, and nothing of the work.
+struct Shield: View {
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            AppMark(side: 80)
         }
     }
 }
@@ -87,10 +166,10 @@ struct BannerView: View {
 
     var body: some View {
         Group {
-            if let banner = store.banner, store.showing != banner.ref, !store.locked {
+            if let banner = store.banner, !banner.quiet, store.showing != banner.ref, !store.locked {
                 Button { store.open(banner.ref) } label: {
                     HStack(spacing: 12) {
-                        AgentAvatar(kind: banner.kind, status: banner.status, side: 38, surface: Color(.systemBackground))
+                        AgentAvatar(kind: banner.kind, status: banner.status, side: 38, surface: Color(.systemBackground), ripple: true)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(banner.title)
                                 .font(.subheadline.weight(.semibold))
@@ -143,16 +222,20 @@ struct ErrorToast: View {
                     Spacer(minLength: 0)
                     Button("Copy") { UIPasteboard.general.string = message }
                         .font(.subheadline.weight(.semibold))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
                     Button("Dismiss", systemImage: "xmark") { store.error = nil }
                         .labelStyle(.iconOnly)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.leading, 16)
+                .padding(.trailing, 6)
+                .padding(.vertical, 4)
                 .glassEffect(.regular, in: .rect(cornerRadius: 24, style: .continuous))
                 .padding(.horizontal, 12)
-                .padding(.bottom, 86)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -167,7 +250,7 @@ struct LockView: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.regularMaterial).ignoresSafeArea()
+            Color(.systemBackground).ignoresSafeArea()
             VStack(spacing: 0) {
                 Spacer()
                 AppMark(side: 80)

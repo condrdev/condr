@@ -37,58 +37,54 @@ struct DevicesView: View {
     }
 }
 
-/// A computer: the desktop symbol with its connection state in the corner.
-struct DeviceGlyph: View {
-    let status: DeviceStatus
-    var side: CGFloat = 40
+/// A computer drawn as its own score: its Agents' bars on a tile, so the Devices list
+/// speaks the first screen's language and green or red never stand for a connection. A
+/// computer it can't reach is the score's dashed placeholder.
+struct DeviceTile: View {
+    let device: Device
+    var side: CGFloat = 44
 
     var body: some View {
+        let statuses = device.agents.compactMap { $0.agent?.status }.byUrgency()
         RoundedRectangle(cornerRadius: side * 0.28, style: .continuous)
             .fill(.fill.tertiary)
             .overlay {
-                Image(systemName: "desktopcomputer")
-                    .font(.system(size: side * 0.45, weight: .medium))
-                    .foregroundStyle(status == .connected ? .primary : .secondary)
+                switch device.status {
+                case .connected where !statuses.isEmpty:
+                    let fit = Bars.fit(count: statuses.count, width: side * 0.66, widest: side * 0.13, spacing: side * 0.06)
+                    Bars(statuses: statuses, tall: side * 0.5, widest: fit.width, spacing: fit.spacing, animated: false)
+                case .connected:
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: side * 0.4, weight: .medium))
+                        .foregroundStyle(.secondary)
+                case .connecting:
+                    ProgressView().controlSize(.small)
+                case .failed, .revoked:
+                    Fallen(width: side * 0.6)
+                        .frame(height: side * 0.5, alignment: .bottom)
+                }
             }
             .frame(width: side, height: side)
-            .overlay(alignment: .bottomTrailing) {
-                Group {
-                    switch status {
-                    case .connected: Circle().fill(.green)
-                    case .connecting: ProgressView().controlSize(.mini)
-                    case .failed: Circle().fill(.red)
-                    case .revoked: Circle().fill(.orange)
-                    }
-                }
-                .frame(width: side * 0.26, height: side * 0.26)
-                .padding(side * 0.06)
-                .background(Circle().fill(Color(.secondarySystemGroupedBackground)))
-                .offset(x: side * 0.12, y: side * 0.12)
-            }
+            .accessibilityHidden(true)
     }
 }
 
-/// A computer: its name with its Agents drawn small beside it, and in words below.
+/// A computer: its score as the tile, its name, and its Agents in words.
 struct DeviceRow: View {
     let device: Device
 
     var body: some View {
         HStack(spacing: 14) {
-            DeviceGlyph(status: device.status)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    Text(device.label)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if device.status == .connected, !statuses.isEmpty {
-                        MiniScore(statuses: statuses)
-                    }
-                }
+            DeviceTile(device: device)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.label)
+                    .font(.headline)
+                    .lineLimit(1)
                 status
                     .font(.subheadline)
                     .lineLimit(1)
             }
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -101,19 +97,9 @@ struct DeviceRow: View {
         switch device.status {
         case .connected: agentSummary(statuses).foregroundStyle(.secondary)
         case .connecting: Text("Connecting…").foregroundStyle(.secondary)
-        case .failed: Text("Can't connect").foregroundStyle(.red)
-        case .revoked: Text("Needs pairing again").foregroundStyle(.orange)
+        case .failed: Text("Can't connect").foregroundStyle(.secondary)
+        case .revoked: Text("Needs pairing again").foregroundStyle(.secondary)
         }
-    }
-}
-
-/// A Device's Agents as the score draws them, small enough to sit beside its name.
-struct MiniScore: View {
-    let statuses: [AgentStatus]
-
-    var body: some View {
-        let fit = Bars.fit(count: statuses.count, width: 96, widest: 5, spacing: 3)
-        Bars(statuses: statuses.byUrgency(), tall: 20, widest: fit.width, spacing: fit.spacing, animated: false)
     }
 }
 
@@ -133,7 +119,6 @@ struct DeviceScreen: View {
                 }
             }
             .navigationTitle(device.label)
-            .navigationSubtitle(subtitle(device))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -150,15 +135,6 @@ struct DeviceScreen: View {
             } message: {
                 Text("This iPhone stops connecting to it. To revoke this iPhone as well, remove it under Paired devices in Condr's Settings on \(device.label).")
             }
-        }
-    }
-
-    private func subtitle(_ device: Device) -> String {
-        switch device.status {
-        case .connected: "Connected"
-        case .connecting: "Connecting…"
-        case .failed: "Can't connect"
-        case .revoked: "Needs pairing again"
         }
     }
 
@@ -213,7 +189,7 @@ struct DeviceScreen: View {
 
     private func unreachable(_ device: Device, reason: String) -> some View {
         ContentUnavailableView {
-            Label("Can't reach \(device.label)", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
+            Gone(title: "Can't reach \(device.label)")
         } description: {
             Text(reason)
         } actions: {
@@ -223,13 +199,13 @@ struct DeviceScreen: View {
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
             Button("Copy Error") { UIPasteboard.general.string = reason }
-                .buttonStyle(.glass)
+                .buttonStyle(.borderless)
         }
     }
 
     private func revoked(_ device: Device) -> some View {
         ContentUnavailableView {
-            Label("\(device.label) doesn't know this iPhone", systemImage: "person.badge.key")
+            Gone(title: "\(device.label) doesn't know this iPhone")
         } description: {
             Text("It was removed from Paired devices on \(device.label). Create an invite there and scan it to connect again.")
         } actions: {
@@ -238,6 +214,20 @@ struct DeviceScreen: View {
             }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
+        }
+    }
+}
+
+/// The head of a computer it can't reach: the score's fallen bars over what went wrong.
+struct Gone: View {
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 22) {
+            Fallen(width: 96)
+            Text(title)
+                .font(.title2.bold())
+                .multilineTextAlignment(.center)
         }
     }
 }
@@ -253,10 +243,17 @@ struct PaneRow: View {
                     .font(.body)
                     .lineLimit(1)
                 if let agent = pane.agent {
-                    Text(agent.status == .blocked ? (agent.blockedOn ?? agent.status.title) : agent.status.title)
-                        .font(.subheadline)
-                        .foregroundStyle(agent.status == .idle || agent.status == .unknown ? .secondary : agent.status.tint)
-                        .lineLimit(1)
+                    // The glyph carries the colour; only a wait is also said in red, in bold.
+                    Group {
+                        if agent.status == .blocked {
+                            Text("\(Text("Needs you").fontWeight(.semibold).foregroundStyle(.red))\(agent.blockedOn.map { " · \($0)" } ?? "")")
+                        } else {
+                            Text(agent.status.title)
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 } else {
                     Text("Shell")
                         .font(.subheadline)
@@ -267,7 +264,7 @@ struct PaneRow: View {
             if pane.attention {
                 Image(systemName: "bell.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
                     .accessibilityLabel("Rang the bell")
             }
         }
