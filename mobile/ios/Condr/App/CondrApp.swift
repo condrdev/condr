@@ -70,7 +70,8 @@ struct Stores {
         defaults.removePersistentDomain(forName: suite)
         let preferences = Preferences(defaults: defaults)
         let router = Router()
-        let alerts = Alerts()
+        // The demo world holds still, its banner too, however slowly a test finds it.
+        let alerts = Alerts(bannerLifetime: nil)
         let saved = SavedDeviceStore(defaults: defaults)
         let session = Session(
             client: DemoClient(scene: scene), fingerprint: DemoWorld.fingerprint, saved: saved,

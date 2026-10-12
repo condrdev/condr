@@ -141,3 +141,26 @@ struct DisplayTests {
         #expect(AgentMarks.resource(for: nil) == nil)
     }
 }
+
+struct AlertsTests {
+    static func banner() -> Banner {
+        Banner(
+            ref: Fixture.ref, status: .blocked, kind: "claude", title: "Claude needs you",
+            detail: "x")
+    }
+
+    @Test func aBannerGoesAfterItsLifetime() async throws {
+        let alerts = Alerts(bannerLifetime: .milliseconds(50))
+        alerts.raise(Self.banner())
+        #expect(alerts.banner != nil)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(alerts.banner == nil)
+    }
+
+    @Test func aBannerWithoutALifetimeStays() async throws {
+        let alerts = Alerts(bannerLifetime: nil)
+        alerts.raise(Self.banner())
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(alerts.banner != nil)
+    }
+}

@@ -26,11 +26,18 @@ final class Alerts {
     private(set) var banner: Banner?
     private(set) var error: String?
     private(set) var notice: String?
+    /// How long a banner stays unless dismissed; none keeps it, as a demo scene's does.
+    private let lifetime: Duration?
+
+    init(bannerLifetime: Duration? = Alerts.bannerLifetime) {
+        lifetime = bannerLifetime
+    }
 
     func raise(_ banner: Banner) {
         self.banner = banner
+        guard let lifetime else { return }
         Task {
-            try? await Task.sleep(for: Self.bannerLifetime)
+            try? await Task.sleep(for: lifetime)
             if self.banner?.id == banner.id { self.banner = nil }
         }
     }
