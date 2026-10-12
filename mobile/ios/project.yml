@@ -1,0 +1,135 @@
+# The Companion's Xcode project (ADR 0039, ADR 0042). `xcodegen generate` writes
+# Condr.xcodeproj, which is not committed; `mise use -g xcodegen` installs the tool.
+name: Condr
+
+options:
+  bundleIdPrefix: dev.condr
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+    TARGETED_DEVICE_FAMILY: "1"
+    DEVELOPMENT_TEAM: XN79X9928S
+    CODE_SIGN_STYLE: Automatic
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+    # The pre-build script runs cargo, which writes outside the project.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+packages:
+  CondrKit:
+    path: CondrKit
+  # The terminal renderer (MIT). Pinned: 1.99 is the 2.0 preview, taken deliberately.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.99.0
+
+targets:
+  Condr:
+    type: application
+    platform: iOS
+    sources:
+      - path: Condr
+        type: syncedFolder
+    dependencies:
+      - package: CondrKit
+      - package: SwiftTerm
+      # What the library's networking needs on iOS (ADR 0040).
+      - sdk: Network.framework
+      - sdk: SystemConfiguration.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.condr.companion
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Condr
+        INFOPLIST_KEY_NSCameraUsageDescription: Condr scans the pairing code your computer shows.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Condr locks with Face ID so only you can reach your computers.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: On the same Wi-Fi, Condr connects to your computer directly, faster and without the relay.
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+    entitlements:
+      path: Condr/Condr.entitlements
+      properties:
+        # The Device key's Keychain item, shared with the push extension later (ADR 0040).
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.condr.companion
+        # The paired-device list, beside the key (ADR 0040).
+        com.apple.security.application-groups:
+          - group.dev.condr.companion
+    preBuildScripts:
+      - name: Build CondrKit
+        shell: /bin/sh
+        basedOnDependencyAnalysis: false
+        script: |
+          # Xcode's SDKROOT would point cargo's host build at the iOS SDK.
+          unset SDKROOT
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cd "$SRCROOT/../.."
+          exec script/build-mobile.sh ios
+
+  CondrTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: CondrTests
+        type: syncedFolder
+    dependencies:
+      - target: Condr
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.condr.companion.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  CondrUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: CondrUITests
+        type: syncedFolder
+    dependencies:
+      - target: Condr
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.condr.companion.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        # XCTest's classes predate actors; the UI tests drive the app from outside anyway.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+
+schemes:
+  Condr:
+    build:
+      targets:
+        Condr: all
+        CondrTests: [test]
+        CondrUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CondrTests
+        - CondrUITests
+    archive:
+      config: Release

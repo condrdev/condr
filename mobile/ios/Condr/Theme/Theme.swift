@@ -1,3 +1,4 @@
+import CondrKit
 import SwiftUI
 
 // The thin Condr layer over the platform: what the desktop already decided, drawn natively.
@@ -18,49 +19,14 @@ extension Color {
     static let paper = Color(hex: 0xF5F5F7)
 }
 
-/// The terminal's default scheme, condr-core's `DEFAULT_*` colours.
+/// The terminal's default scheme, condr-core's `DEFAULT_*` colours, for what the app draws
+/// around the terminal: the Settings preview and the page behind the grid.
 enum Palette {
     static let background: UInt32 = 0x0d1117
     static let foreground: UInt32 = 0xc9d1d9
-    static let cursor: UInt32 = 0xf0f6fc
-    static let black: UInt32 = 0x484f58
-    static let red: UInt32 = 0xff7b72
     static let green: UInt32 = 0x3fb950
-    static let yellow: UInt32 = 0xd29922
-    static let blue: UInt32 = 0x58a6ff
-    static let magenta: UInt32 = 0xbc8cff
-    static let cyan: UInt32 = 0x39c5cf
-    static let white: UInt32 = 0xb1bac4
     static let gray: UInt32 = 0x6e7681
-    static let brightGreen: UInt32 = 0x56d364
-    static let brightYellow: UInt32 = 0xe3b341
-    static let brightBlue: UInt32 = 0x79c0ff
     static let brightWhite: UInt32 = 0xffffff
-    static let claude: UInt32 = 0xD97757
-}
-
-// MARK: - Agent status
-
-extension AgentStatus {
-    /// The desktop sidebar's tones (`agent_sidebar_status`), as the platform's semantic colours.
-    var tint: Color {
-        switch self {
-        case .working: .orange
-        case .blocked: .red
-        case .done: .green
-        case .idle, .unknown: .secondary
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .working: "Working"
-        case .blocked: "Needs you"
-        case .done: "Done"
-        case .idle: "Idle"
-        case .unknown: "Not reporting"
-        }
-    }
 }
 
 /// The status glyph the desktop tucks into an Agent mark's corner: a hollow circle for
@@ -96,7 +62,9 @@ struct StatusGlyph: View {
             }
         }
         .onAppear { animate() }
-        .onChange(of: status) { animating = false; animate() }
+        .onChange(of: status) {
+            animating = false; animate()
+        }
         .accessibilityLabel(status.title)
     }
 
@@ -104,18 +72,12 @@ struct StatusGlyph: View {
         guard !reduceMotion else { return }
         switch status {
         case .blocked:
-            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { animating = true }
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) {
+                animating = true
+            }
         default:
             break
         }
-    }
-}
-
-extension Array where Element == AgentStatus {
-    /// Most urgent first, the order a score draws them in, so each colour reads as a run.
-    func byUrgency() -> [AgentStatus] {
-        let rank: [AgentStatus: Int] = [.blocked: 0, .done: 1, .working: 2, .unknown: 3, .idle: 4]
-        return sorted { rank[$0]! < rank[$1]! }
     }
 }
 
@@ -141,7 +103,9 @@ struct Bars: View {
 
     /// The bar width and gap that fit `count` bars in `width`, no wider than `widest`.
     // ponytail: past 2 pt bars they overflow; draw one bar per state when a Device runs that many.
-    static func fit(count: Int, width: CGFloat, widest: CGFloat, spacing: CGFloat) -> (width: CGFloat, spacing: CGFloat) {
+    static func fit(count: Int, width: CGFloat, widest: CGFloat, spacing: CGFloat) -> (
+        width: CGFloat, spacing: CGFloat
+    ) {
         guard count > 0 else { return (widest, spacing) }
         let natural = (width - spacing * CGFloat(count - 1)) / CGFloat(count)
         if natural >= 4 { return (min(widest, natural), spacing) }
@@ -149,19 +113,32 @@ struct Bars: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !animated || !statuses.contains(.working))) { timeline in
+        TimelineView(
+            .animation(
+                minimumInterval: 1 / 30,
+                paused: reduceMotion || !animated || !statuses.contains(.working))
+        ) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(Array(statuses.enumerated()), id: \.offset) { index, status in
-                    let shape = RoundedRectangle(cornerRadius: min(4, widest * 0.26), style: .continuous)
+                    let shape = RoundedRectangle(
+                        cornerRadius: min(4, widest * 0.26), style: .continuous)
                     Group {
                         if withoutColor, status == .done, widest >= 6 {
                             shape.strokeBorder(status.tint, lineWidth: 2)
                         } else {
-                            shape.fill(status == .idle || status == .unknown ? AnyShapeStyle(.tertiary) : AnyShapeStyle(status.tint.gradient))
+                            shape.fill(
+                                status == .idle || status == .unknown
+                                    ? AnyShapeStyle(.tertiary) : AnyShapeStyle(status.tint.gradient)
+                            )
                         }
                     }
-                    .frame(width: widest, height: max(widest * 0.8, height(status, time: time - Double(first + index) * 0.32) * fold))
+                    .frame(
+                        width: widest,
+                        height: max(
+                            widest * 0.8,
+                            height(status, time: time - Double(first + index) * 0.32) * fold)
+                    )
                     .opacity(highlight.map { $0 == index } == false ? 0.28 : 1)
                     .overlay(alignment: .bottom) {
                         if highlight.map({ $0 == index }) == true {
@@ -182,10 +159,18 @@ struct Bars: View {
 
     private func height(_ status: AgentStatus, time: TimeInterval) -> CGFloat {
         switch status {
+        case .idle, .unknown: min(tall * 0.2, max(3, tall * 0.12, widest * 2))
+        default: Self.height(status, tall: tall, wave: animated ? sin(time * 2.4) : 0)
+        }
+    }
+
+    /// The band each state's bar stands in, `wave` in -1...1 breathing a working one.
+    static func height(_ status: AgentStatus, tall: CGFloat, wave: Double) -> CGFloat {
+        switch status {
         case .blocked: tall
         case .done: tall * 0.75
-        case .working: tall * (0.35 + (animated ? 0.10 * sin(time * 2.4) : 0))
-        case .idle, .unknown: min(tall * 0.2, max(3, tall * 0.12, widest * 2))
+        case .working: tall * (0.35 + 0.10 * wave)
+        case .idle, .unknown: tall * 0.12
         }
     }
 }
@@ -202,7 +187,8 @@ func agentSummary(_ statuses: [AgentStatus]) -> Text {
         if !rest.isEmpty { return Text(rest) }
         return Text(statuses.isEmpty ? "No agents" : "\(statuses.count) idle")
     }
-    let need = Text("\(blocked) \(blocked == 1 ? "needs" : "need") you").fontWeight(.semibold).foregroundStyle(.red)
+    let need = Text("\(blocked) \(blocked == 1 ? "needs" : "need") you").fontWeight(.semibold)
+        .foregroundStyle(AgentStatus.blocked.tint)
     return rest.isEmpty ? need : Text("\(need) · \(rest)")
 }
 
@@ -233,11 +219,12 @@ struct Fallen: View {
 /// state alone, so Claude's terracotta would read as Working (the desktop keeps it). A shell
 /// gets the terminal symbol.
 struct AgentMark: View {
-    let kind: AgentKind?
+    /// The Agent's kind id; none for a shell.
+    let kind: String?
 
     var body: some View {
-        if let kind {
-            Image(kind.mark)
+        if let mark = AgentMarks.resource(for: kind) {
+            Image(mark)
                 .resizable()
                 .scaledToFit()
                 .foregroundStyle(Color.primary)
@@ -254,7 +241,7 @@ struct AgentMark: View {
 /// A mark on a soft tile with its status glyph on a disc of the surface's colour, so a
 /// row reads by Agent first and by state second, as the desktop sidebar does.
 struct AgentAvatar: View {
-    let kind: AgentKind?
+    let kind: String?
     var status: AgentStatus?
     var side: CGFloat = 40
     var surface: Color = Color(.systemBackground)
@@ -298,18 +285,21 @@ struct WorkspaceAvatar: View {
 // MARK: - Logo
 
 /// The three bars of `assets/brand/condr.svg`, in its 128-unit square.
-struct LogoBar: Shape {
+nonisolated struct LogoBar: Shape {
     enum Part { case top, spine, bottom }
     let part: Part
 
     func path(in rect: CGRect) -> Path {
         let s = min(rect.width, rect.height) / 128
-        let r: CGRect = switch part {
-        case .top: CGRect(x: 48, y: 24, width: 42, height: 12)
-        case .spine: CGRect(x: 35.5, y: 36, width: 12, height: 56)
-        case .bottom: CGRect(x: 48, y: 92, width: 42, height: 12)
-        }
-        let scaled = CGRect(x: rect.minX + r.minX * s, y: rect.minY + r.minY * s, width: r.width * s, height: r.height * s)
+        let r: CGRect =
+            switch part {
+            case .top: CGRect(x: 48, y: 24, width: 42, height: 12)
+            case .spine: CGRect(x: 35.5, y: 36, width: 12, height: 56)
+            case .bottom: CGRect(x: 48, y: 92, width: 42, height: 12)
+            }
+        let scaled = CGRect(
+            x: rect.minX + r.minX * s, y: rect.minY + r.minY * s, width: r.width * s,
+            height: r.height * s)
         return Path(roundedRect: scaled, cornerRadius: 2 * s, style: .continuous)
     }
 }
@@ -353,29 +343,6 @@ struct AppMark: View {
             .frame(width: side, height: side)
     }
 }
-
-// MARK: - Text
-
-/// `blocked_on` as the hook wrote it (ADR 0024): "Tool: command" for a permission, else
-/// a question or the notification's text.
-struct BlockedOn {
-    let tool: String?
-    let text: String
-
-    init(_ raw: String) {
-        if let colon = raw.range(of: ": "),
-           raw[..<colon.lowerBound].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
-            tool = String(raw[..<colon.lowerBound])
-            text = String(raw[colon.upperBound...])
-        } else {
-            tool = nil
-            text = raw
-        }
-    }
-}
-
-/// "condr · macmini"
-func place(_ workspace: String, _ device: String) -> String { "\(workspace) · \(device)" }
 
 // MARK: - Actions
 

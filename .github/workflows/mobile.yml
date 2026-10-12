@@ -1,7 +1,8 @@
 name: Mobile
 
-# The Companion's packages around its library (ADR 0039): the bindings generate, and the
-# Swift package compiles against them. ci.yml builds the library itself on every change.
+# The Companion's packages around its library (ADR 0039): the bindings generate, the Swift
+# package compiles against them, and the iOS app's tests run on a simulator. ci.yml builds the
+# library itself on every change.
 on:
   push:
     branches: [main]
@@ -38,6 +39,23 @@ jobs:
       - name: Compile CondrKit for the simulator
         working-directory: mobile/ios/CondrKit
         run: xcodebuild -scheme CondrKit -destination 'generic/platform=iOS Simulator' build
+      - name: Lint the app's Swift
+        working-directory: mobile/ios
+        run: xcrun swift-format lint --strict --recursive Condr CondrTests CondrUITests
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+      - name: Generate the app's project
+        working-directory: mobile/ios
+        run: mise exec xcodegen@2.46.0 -- xcodegen generate
+      - name: Test the app on the simulator
+        working-directory: mobile/ios
+        # SwiftTerm ships a build plugin, which a command-line build must be told to trust.
+        run: >
+          xcodebuild test -project Condr.xcodeproj -scheme Condr
+          -destination 'platform=iOS Simulator,name=iPhone 17'
+          -skipPackagePluginValidation -skipMacroValidation
+          CODE_SIGNING_ALLOWED=NO
 
   android:
     name: Android
