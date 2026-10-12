@@ -76,6 +76,8 @@ fn handshake_frames_from_protocol_1_keep_decoding() {
             session_id: SessionId(1),
             refusal: Some(Refusal::IncompatibleProtocol),
             min_client_protocol: 1,
+            // Absent on the wire from a Server that predates it.
+            device_name: String::new(),
         }
     );
     let mut encoded = Vec::new();

@@ -125,7 +125,7 @@ pub(super) fn send_welcome(
         let state = state.lock().expect("server state lock poisoned");
         (state.server_id, state.session_id)
     };
-    let welcome = Welcome::new(server_id, session_id, refusal);
+    let welcome = Welcome::new(server_id, session_id, refusal, crate::noise::device_name());
     condr_core::protocol::write_message(stream, &welcome)
         .map_err(|error| io::Error::other(error.to_string()))
 }

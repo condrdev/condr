@@ -35,7 +35,8 @@ pub struct Companion {
 struct Shared {
     key: DeviceKey,
     /// What a Server records this phone as (ADR 0040).
-    name: String,
+    /// The name this phone goes by to a Server; a Server learns it at pairing (ADR 0040).
+    name: Mutex<String>,
     listener: Arc<dyn Listener>,
     runtime: tokio::runtime::Runtime,
     state: Mutex<State>,
@@ -223,7 +224,7 @@ impl Companion {
         };
         let shared = Arc::new(Shared {
             key,
-            name,
+            name: Mutex::new(name),
             listener,
             runtime,
             state: Mutex::new(state),
@@ -240,7 +241,7 @@ impl Companion {
     /// Pairs with the Device an Invite link names (ADR 0040) and returns what the app
     /// keeps of it; connects to it unless the app is in the background. Blocks for the
     /// handshake, so the app calls it off its main thread.
-    pub fn pair(&self, link: String, label: String) -> Result<SavedDevice, MobileError> {
+    pub fn pair(&self, link: String, label: Option<String>) -> Result<SavedDevice, MobileError> {
         let link = link.trim();
         let (endpoint, address) = if link.starts_with("p2p://") {
             let p2p = P2pEndpoint::parse(link).map_err(MobileError::invalid)?;
@@ -260,8 +261,17 @@ impl Companion {
             (RemoteEndpoint::Tcp(tcp), address)
         };
         // Reading this `Hello` is what records the pairing on the Server.
-        ClientConnection::connect_overview(&endpoint, self.shared.name.clone())
+        let connection = ClientConnection::connect_overview(&endpoint, self.shared.name())
             .map_err(|error| MobileError::Connection(error.to_string()))?;
+        // The Device is listed by the Server's machine name unless the app names it; a
+        // Server too old to say its name leaves the link's host or id.
+        let label = label
+            .filter(|label| !label.trim().is_empty())
+            .or_else(|| {
+                Some(connection.server_device_name().to_owned()).filter(|name| !name.is_empty())
+            })
+            .unwrap_or_else(|| device_label_fallback(&address));
+        drop(connection);
         let saved = SavedDevice {
             address: address.clone(),
             label,
@@ -278,6 +288,15 @@ impl Companion {
         }
         self.shared.wake.notify_one();
         Ok(saved)
+    }
+
+    /// The name this phone goes by from now on (ADR 0040): a Server learns it when the
+    /// phone pairs and lists the phone by it under Paired devices.
+    pub fn set_name(&self, name: String) {
+        let name = name.trim().to_owned();
+        if !name.is_empty() {
+            *self.shared.name.lock().expect("name lock poisoned") = name;
+        }
     }
 
     /// Stops using a Device here; revoking the phone is done on the Device (ADR 0040).
@@ -650,7 +669,7 @@ impl Shared {
             .spawn(move || {
                 let result = ClientConnection::connect_watching(
                     &endpoint,
-                    shared.name.clone(),
+                    shared.name(),
                     watched.clone(),
                     cancellation,
                 );
@@ -952,8 +971,43 @@ fn apply_message(
     }
 }
 
+impl Shared {
+    fn name(&self) -> String {
+        self.name.lock().expect("name lock poisoned").clone()
+    }
+}
+
+/// What to call a Device whose Server did not say: a TCP link's host, a Peer-to-peer
+/// link's id cut short.
+fn device_label_fallback(address: &str) -> String {
+    if let Some(rest) = address.strip_prefix("tcp://") {
+        let authority = rest.rsplit('@').next().unwrap_or(rest);
+        let host = authority
+            .rsplit_once(':')
+            .map_or(authority, |(host, _)| host);
+        host.trim_matches(|c| c == '[' || c == ']').to_owned()
+    } else {
+        address
+            .strip_prefix("p2p://")
+            .unwrap_or(address)
+            .chars()
+            .take(8)
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_device_without_a_name_from_its_server_is_called_by_its_link() {
+        assert_eq!(
+            device_label_fallback("tcp://key@studio.local:7417"),
+            "studio.local"
+        );
+        assert_eq!(device_label_fallback("tcp://key@[::1]:7417"), "::1");
+        assert_eq!(device_label_fallback("p2p://h7k2x9q4m3v8w1n6"), "h7k2x9q4");
+    }
+
     use super::*;
 
     #[test]

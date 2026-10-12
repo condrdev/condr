@@ -109,7 +109,11 @@ fn invalid_initial_bootstrap_stops_pending_reconnects_but_transport_failure_retr
     let peer = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
         let _: ClientHandshake = read_message(&mut stream).unwrap();
-        write_message(&mut stream, &Welcome::new(ServerId(91), SessionId(1), None)).unwrap();
+        write_message(
+            &mut stream,
+            &Welcome::new(ServerId(91), SessionId(1), None, "desk".into()),
+        )
+        .unwrap();
         let request: ClientMessage = read_message(&mut stream).unwrap();
         assert!(matches!(request, ClientMessage::SnapshotRequest { .. }));
         write_message(

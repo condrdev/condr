@@ -64,6 +64,7 @@ impl From<&Welcome> for super::Welcome {
             session_id: welcome.session_id.0,
             refusal: welcome.refusal.as_ref().map(super::Refusal::from),
             min_client_protocol: welcome.min_client_protocol,
+            device_name: welcome.device_name.clone(),
         }
     }
 }
@@ -79,6 +80,7 @@ impl TryFrom<super::Welcome> for Welcome {
             session_id: SessionId(welcome.session_id),
             refusal: welcome.refusal.map(Refusal::from),
             min_client_protocol: welcome.min_client_protocol,
+            device_name: welcome.device_name,
         })
     }
 }

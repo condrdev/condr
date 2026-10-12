@@ -58,11 +58,19 @@ pub struct Welcome {
     pub refusal: Option<Refusal>,
     /// The oldest Client protocol this Server works with.
     pub min_client_protocol: u32,
+    /// The machine's name as the Server sees it, for a Client to list this Device by
+    /// (ADR 0040); empty from a Server that predates it.
+    pub device_name: String,
 }
 
 impl Welcome {
-    /// A Server's answer with its own protocol range.
-    pub fn new(server_id: ServerId, session_id: SessionId, refusal: Option<Refusal>) -> Self {
+    /// A Server's answer with its own protocol range, from the machine named `device_name`.
+    pub fn new(
+        server_id: ServerId,
+        session_id: SessionId,
+        refusal: Option<Refusal>,
+        device_name: String,
+    ) -> Self {
         Self {
             protocol: PROTOCOL_VERSION,
             build: crate::build_identity().to_owned(),
@@ -70,6 +78,7 @@ impl Welcome {
             session_id,
             refusal,
             min_client_protocol: MIN_CLIENT_PROTOCOL,
+            device_name,
         }
     }
 }

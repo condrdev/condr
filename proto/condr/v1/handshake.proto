@@ -46,6 +46,9 @@ message Welcome {
   Refusal refusal = 5;
   // The oldest Client protocol this Server works with.
   uint32 min_client_protocol = 6;
+  // The machine's name as the Server sees it, for a Client to list this Device by
+  // (ADR 0040); empty from a Server that predates it.
+  string device_name = 7;
 }
 
 // Why a Server closes a connection after reading its handshake. Members are only added;

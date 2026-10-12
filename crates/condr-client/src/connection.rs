@@ -186,6 +186,8 @@ pub struct ClientConnection<S> {
     overview: SessionOverview,
     /// The Server's [`condr_core::build_identity`], from its `Welcome`.
     server_build: String,
+    /// The Server's machine name, from its `Welcome`; empty from an older Server.
+    server_device_name: String,
     next_request_id: u64,
 }
 
@@ -286,6 +288,7 @@ impl<S: ServerStream> ClientConnection<S> {
         let (mut stream, welcome) = Self::welcome(stream, client_name)?;
         let session_id = welcome.session_id;
         let server_build = welcome.build;
+        let server_device_name = welcome.device_name;
         // Authentication is complete. Bootstrap may be large: bound inactivity,
         // not total transfer time, just as socket read timeouts do.
         stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
@@ -347,6 +350,7 @@ impl<S: ServerStream> ClientConnection<S> {
             bootstrap,
             overview,
             server_build,
+            server_device_name,
             next_request_id: 1,
         })
     }
@@ -569,6 +573,12 @@ impl<S: ServerStream> ClientConnection<S> {
     /// Initial Bootstrap, present only for `connect`, which requests terminal views.
     pub fn server_build(&self) -> &str {
         &self.server_build
+    }
+
+    /// The Server's machine name, as a Client lists the Device (ADR 0040); empty from
+    /// a Server that predates it.
+    pub fn server_device_name(&self) -> &str {
+        &self.server_device_name
     }
 
     pub fn bootstrap(&self) -> Option<&SessionBootstrap> {
