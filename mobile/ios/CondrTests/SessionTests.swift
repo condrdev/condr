@@ -133,9 +133,11 @@ struct SessionTests {
     @Test func aBadLinkIsRefusedInTheLibrarysWords() async {
         let client = FakeClient()
         let (session, _, _, store) = Fixture.session(client)
-        await #expect(throws: MobileError.self) {
-            try await session.pair(link: "http://nope", phoneName: "x")
-        }
+        let pairing = Pairing(
+            session: session, preferences: Preferences(defaults: Fixture.defaults()),
+            link: "http://nope", name: "x")
+        while pairing.phase == .pairing { await Task.yield() }
+        #expect(pairing.phase == .failed("not a link"))
         #expect(store.devices.isEmpty)
     }
 

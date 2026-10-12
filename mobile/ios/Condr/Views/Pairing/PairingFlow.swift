@@ -58,13 +58,13 @@ struct PairingFlow: View {
                 case .name: NameStep(name: $name) { path.append(.network) }
                 case .network: NetworkStep(next: connect)
                 case .connecting:
-                    if let pairing {
-                        ConnectingStep(pairing: pairing, firstLaunch: firstLaunch) {
-                            finished()
-                        } back: {
-                            self.pairing = nil
-                            path.removeAll { $0 == .connecting }
-                        }
+                    // Through the binding: this closure can run with the flow's state from
+                    // before `connect()`, and `pairing` read here would still be nil.
+                    ConnectingDestination(pairing: $pairing, firstLaunch: firstLaunch) {
+                        finished()
+                    } back: {
+                        pairing = nil
+                        path.removeAll { $0 == .connecting }
                     }
                 }
             }
@@ -858,8 +858,23 @@ final class Pairing {
                 preferences.phoneName = name
                 withAnimation(.spring(duration: 0.6, bounce: 0.25)) { phase = .paired(device) }
             } catch {
-                withAnimation { phase = .failed(error.localizedDescription) }
+                let message = (error as? MobileError)?.message ?? error.localizedDescription
+                withAnimation { phase = .failed(message) }
             }
+        }
+    }
+}
+
+/// The last step once its handshake exists.
+struct ConnectingDestination: View {
+    @Binding var pairing: Pairing?
+    let firstLaunch: Bool
+    let finish: () -> Void
+    let back: () -> Void
+
+    var body: some View {
+        if let pairing {
+            ConnectingStep(pairing: pairing, firstLaunch: firstLaunch, finish: finish, back: back)
         }
     }
 }

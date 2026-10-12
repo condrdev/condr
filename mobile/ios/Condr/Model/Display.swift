@@ -118,9 +118,10 @@ struct BlockedOn {
     }
 }
 
-nonisolated extension MobileError: @retroactive LocalizedError {
-    /// The library's own words for what went wrong (ADR 0020).
-    public var errorDescription: String? {
+nonisolated extension MobileError {
+    /// The library's own words for what went wrong (ADR 0020). uniffi's own
+    /// `errorDescription` is the enum's debug dump, so a failure shows this instead.
+    var message: String {
         switch self {
         case .Invalid(let message), .Connection(let message): message
         }
