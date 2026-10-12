@@ -27,8 +27,8 @@ bindgen() {
 
 case "${1:-}" in
 ios)
-  # The C in ring and blake3 and the Rust around it link for one iOS, the app's oldest.
-  export IPHONEOS_DEPLOYMENT_TARGET=17.0
+  # The C in ring and blake3 and the Rust around it link for one iOS, the app's oldest (ADR 0042).
+  export IPHONEOS_DEPLOYMENT_TARGET=26.0
   device=aarch64-apple-ios
   simulator=aarch64-apple-ios-sim
   for target in "$device" "$simulator"; do

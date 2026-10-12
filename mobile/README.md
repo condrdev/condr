@@ -1,6 +1,6 @@
 # Condr Companion
 
-Condr 的 iOS 与 Android App（ADR 0039、0040、0041）。两端界面都是原生的：iOS 用 SwiftUI，最低 iOS 17；Android 用 Jetpack Compose，最低 API 29。连接、密钥、Session 模型和 Agent 状态只有一份 Rust 实现，即 `crates/condr-mobile`，两端各链接这一个库：iOS 是 xcframework 里的静态库，Android 是 JNA 加载的 `libcondr_mobile.so`。
+Condr 的 iOS 与 Android App（ADR 0039、0040、0041）。两端界面都是原生的：iOS 用 SwiftUI，最低 iOS 26（ADR 0042）；Android 用 Jetpack Compose，最低 API 29。连接、密钥、Session 模型和 Agent 状态只有一份 Rust 实现，即 `crates/condr-mobile`，两端各链接这一个库：iOS 是 xcframework 里的静态库，Android 是 JNA 加载的 `libcondr_mobile.so`。
 
 `ci.yml` 在每个 PR 上为两个平台编译这个库；`mobile.yml` 在 `mobile/**`、`crates/**` 或协议变化时生成绑定，并编译 `ios/CondrKit`。
 
@@ -35,5 +35,3 @@ xcodebuild -scheme CondrKit -destination 'generic/platform=iOS Simulator' build
 - 大约 16 秒后 Codex 完成、38 秒后另一个 Claude 需要你，用来演示应用内横幅。
 
 调试用的启动参数：`-scene <name>` 直接打开某一屏（`welcome` `pair` `scan` `name` `network` `connecting` `paired` `lock` `devices` `device` `offline` `terminal` `question` `codex` `shell` `settings` `empty` `banner` `error` `computer`，以及一台电脑跑 15 个 Agent 的 `crowd` `crowd-device`），`-static YES` 关掉自动推进，`-focus YES` 打开终端后聚焦回复框，`-press "down enter t:Ship_it"` 打开终端后依次输入。
-
-原型的最低版本是 iOS 26（用了 Liquid Glass），ADR 0039 定的是 iOS 17；正式 App 要么为旧系统补回退，要么上调下限。

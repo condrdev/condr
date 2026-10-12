@@ -77,14 +77,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # iOS 26 (ADR 0042) needs a 26 SDK, which macos-26's default Xcode has.
           - target: aarch64-apple-ios
-            os: macos-15
+            os: macos-26
           - target: aarch64-linux-android
             os: ubuntu-24.04
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
-      IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+      IPHONEOS_DEPLOYMENT_TARGET: '26.0'
     steps:
       - uses: actions/checkout@v7
         with:

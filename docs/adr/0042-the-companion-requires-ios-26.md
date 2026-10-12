@@ -1,0 +1,11 @@
+# The Companion Requires iOS 26
+
+Status: accepted 2026-10-12. Raises ADR 0039's iOS floor from 17 to 26; Android stays at API 29.
+
+The iOS app requires iOS 26 and later, and so do the library it links and the Swift package around it. ADR 0039 named iOS 17 before anything was drawn. The prototype in `mobile/ios`, which becomes the app, is drawn in iOS 26's own vocabulary: Liquid Glass on the navigation layer, the controls and the terminal's key row (`glassEffect`, `GlassEffectContainer`, the glass button styles), bars that inset a scroll view and carry its edge effect (`safeAreaBar`), a tab bar that minimizes as the list scrolls, and, from iOS 18, the zoom transition from a row into its Pane and the scroll geometry the Agents header folds with. Below 26 each of these needs a second drawing, materials for glass, a hand-made inset and fade for the input bar, a tab bar that stays put, so the app would have two looks to design, test and keep alike before it has a first user. Holding 17 and drawing only the older look was declined as well: on iOS 26 the system's own bars and controls take Liquid Glass regardless, and custom chrome drawn the old way would sit beside them unmatched.
+
+The floor costs little reach. iOS 26 runs on every iPhone since the iPhone 11 and the second-generation SE, and left out only the XS, XS Max and XR, phones from 2018. Until the first stable release the Companion ships only through TestFlight (ADR 0041), to testers who install the current build, and by then iOS 26 is the previous major version.
+
+The whole iOS build takes the one version. `script/build-mobile.sh` exports `IPHONEOS_DEPLOYMENT_TARGET=26.0`, which is what keeps the C in ring and blake3 and the Rust that links it targeting the same iOS (ADR 0039), and `ci.yml` builds the library with the same variable; CondrKit declares `.iOS(.v26)`, which needs Swift tools 6.2; the app's deployment target is 26.0. Building for it needs Xcode 26 or later, so the iOS jobs in `ci.yml` and `mobile.yml` run on `macos-26`, whose default Xcode is a 26 release; the desktop's macOS job keeps its own image. Android keeps API 29: nothing in this choice binds it.
+
+Lowering the floor later means writing that second drawing; the library itself uses nothing that needs iOS 26.

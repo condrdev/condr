@@ -22,7 +22,8 @@ env:
 jobs:
   ios:
     name: iOS
-    runs-on: macos-15
+    # iOS 26 (ADR 0042) needs a 26 SDK, which macos-26's default Xcode has.
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
