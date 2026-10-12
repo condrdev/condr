@@ -40,7 +40,14 @@ xcodebuild test -project Condr.xcodeproj -scheme Condr \
 xcrun swift-format lint --strict --recursive Condr CondrTests CondrUITests
 ```
 
-SwiftTerm 带一个构建插件，命令行构建要加 `-skipPackagePluginValidation`；Xcode 里第一次构建时点一次信任即可。
+SwiftTerm 带一个构建插件，命令行构建要加 `-skipPackagePluginValidation`；Xcode 里第一次构建时点一次信任即可。模拟器构建别关掉签名（`CODE_SIGNING_ALLOWED=NO`），Keychain 测试需要临时签名带上的 entitlements。
+
+连真实 Server 的端到端测试 `LivePairingUITests` 默认跳过；给它一个邀请就会在模拟器上走完配对、打开 Pane、输入命令、Forget：
+
+```sh
+TEST_RUNNER_CONDR_INVITE='tcp://…@127.0.0.1:7418' TEST_RUNNER_CONDR_DEVICE_NAME="$(hostname)" \
+  xcodebuild test … -only-testing:CondrUITests/LivePairingUITests
+```
 
 ### 结构
 

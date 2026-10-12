@@ -6,8 +6,9 @@ import XCTest
 final class LivePairingUITests: XCTestCase {
     @MainActor func testPairingOpeningAPaneAndForgetting() throws {
         let environment = ProcessInfo.processInfo.environment
-        let invite = try XCTUnwrap(
-            environment["CONDR_INVITE"], "set TEST_RUNNER_CONDR_INVITE to run")
+        guard let invite = environment["CONDR_INVITE"] else {
+            throw XCTSkip("set TEST_RUNNER_CONDR_INVITE to pair with a real Server")
+        }
         let deviceName = environment["CONDR_DEVICE_NAME"] ?? ""
         let app = XCUIApplication()
         app.launch()
