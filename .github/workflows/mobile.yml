@@ -51,11 +51,12 @@ jobs:
       - name: Test the app on the simulator
         working-directory: mobile/ios
         # SwiftTerm ships a build plugin, which a command-line build must be told to trust.
+        # Ad-hoc signing keeps the entitlements, which the Keychain test needs.
         run: >
           xcodebuild test -project Condr.xcodeproj -scheme Condr
           -destination 'platform=iOS Simulator,name=iPhone 17'
           -skipPackagePluginValidation -skipMacroValidation
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO
 
   android:
     name: Android
