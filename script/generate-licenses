@@ -58,7 +58,11 @@ trap 'rm -f "$TMP" "$ABOUT"' EXIT
     echo
 } > "$TMP"
 
-"$CARGO_ABOUT" generate -c script/licenses/about.toml -o "$ABOUT" script/licenses/template.md.hbs
+# The GUI's dependency graph holds every crate either desktop binary ships: condr-gui
+# depends on condr-server, which builds `condr`. The Companion's library (condr-mobile)
+# ships in the phone apps, not here.
+"$CARGO_ABOUT" generate -m crates/condr-gui/Cargo.toml -c script/licenses/about.toml \
+    -o "$ABOUT" script/licenses/template.md.hbs
 # cargo-about HTML-escapes the template output.
 sed -e 's/&quot;/"/g' -e "s/&#x27;/'/g" -e 's/&#x3D;/=/g' -e 's/&#x60;/`/g' \
     -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g' "$ABOUT" >> "$TMP"

@@ -4276,7 +4276,7 @@ https://www.jetbrains.com/idea/
 
 ## Overview of licenses
 
-* Apache License 2.0 (708)
+* Apache License 2.0 (710)
 * MIT License (209)
 * Unicode License v3 (19)
 * BSD 3-Clause "New" or "Revised" License (13)
@@ -5227,6 +5227,7 @@ Used by:
 * [miette 7.6.0](https://github.com/zkat/miette)
 * [nohash-hasher 0.2.0](https://github.com/paritytech/nohash-hasher)
 * [polycool 0.4.0](https://github.com/linebender/kurbo)
+* [qrcode 0.14.1](https://github.com/kennytm/qrcode-rust)
 * [raw-window-metal 1.1.0](https://github.com/rust-windowing/raw-window-metal)
 * [serdect 0.4.3](https://github.com/RustCrypto/formats)
 * [static_assertions 1.1.0](https://github.com/nvzqz/static-assertions-rs)
@@ -13532,6 +13533,7 @@ Used by:
 * [symlink 0.1.0](https://gitlab.com/chris-morgan/symlink)
 * [system-configuration-sys 0.6.0](https://github.com/mullvad/system-configuration-rs)
 * [system-configuration 0.6.1](https://github.com/mullvad/system-configuration-rs)
+* [system-configuration 0.7.0](https://github.com/mullvad/system-configuration-rs)
 * [system-configuration 0.8.0](https://github.com/mullvad/system-configuration-rs)
 * [tempfile 3.27.0](https://github.com/Stebalien/tempfile)
 * [tendril 0.4.3](https://github.com/servo/tendril)
