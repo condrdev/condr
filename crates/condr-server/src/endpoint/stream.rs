@@ -95,12 +95,13 @@ impl EndpointStream {
         }
     }
 
-    /// Records that a TCP peer connected now, for `condr server clients`.
-    pub fn record_peer_seen(&self) -> io::Result<()> {
+    /// Records that a TCP peer connected now under `client_name`, for `condr server
+    /// clients` and Paired devices.
+    pub fn record_peer_seen(&self, client_name: &str) -> io::Result<()> {
         match self {
             Self::Local(_) | Self::Ssh(_) | Self::Tunnel(_) => Ok(()),
-            Self::Tcp(stream) => stream.record_seen(),
-            Self::P2p(stream) => stream.record_seen(),
+            Self::Tcp(stream) => stream.record_seen(client_name),
+            Self::P2p(stream) => stream.record_seen(client_name),
         }
     }
 

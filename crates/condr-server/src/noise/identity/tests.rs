@@ -290,11 +290,19 @@ fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
     assert_eq!((clients[1].paired_at, clients[1].last_seen), (200, 300));
     assert_eq!(clients[1].name, "new laptop");
 
-    identity.record_seen(&old).unwrap();
+    identity.record_seen(&old, "").unwrap();
     let clients = read_authorized(&directory).unwrap();
     assert!(clients[0].last_seen >= now() - 5);
-    assert_eq!(clients[0].name, "old laptop", "rewriting keeps the name");
+    assert_eq!(clients[0].name, "old laptop", "no name keeps the old one");
     assert_eq!(clients[1].last_seen, 300, "other devices are untouched");
+
+    identity.record_seen(&old, " renamed\tlaptop ").unwrap();
+    let clients = read_authorized(&directory).unwrap();
+    assert_eq!(
+        clients[0].name, "renamed laptop",
+        "a renamed device is listed by it"
+    );
+    assert_eq!(clients[1].name, "new laptop");
     let _ = fs::remove_dir_all(directory);
 }
 

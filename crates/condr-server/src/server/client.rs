@@ -200,7 +200,7 @@ pub(super) fn handle_client(
                 });
                 drop(state_guard);
                 // Best effort: a failed bookkeeping write must not cost the connection.
-                let _ = stream.record_peer_seen();
+                let _ = stream.record_peer_seen(&hello.client_name);
             }
             Ok(false) => {
                 drop(state_guard);

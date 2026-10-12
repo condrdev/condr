@@ -32,8 +32,9 @@ pub trait Authority: Send + Sync {
     /// Records `device` as paired under `name`, provided `invite` is still the pending
     /// one: the first device to finish wins, and a stale invite cannot consume a newer one.
     fn complete_pairing(&self, device: PublicKey, name: &str, invite: &Secret) -> io::Result<()>;
-    /// Notes that `device` connected now.
-    fn record_seen(&self, device: &PublicKey) -> io::Result<()>;
+    /// Notes that `device` connected now, under the name its `Hello` gave: a device renamed
+    /// since it paired is listed by its new name.
+    fn record_seen(&self, device: &PublicKey, name: &str) -> io::Result<()>;
 }
 
 /// A key alone authorizes no one: what a Client that only dials hands its endpoint.
@@ -57,7 +58,7 @@ impl Authority for DeviceKey {
         ))
     }
 
-    fn record_seen(&self, _: &PublicKey) -> io::Result<()> {
+    fn record_seen(&self, _: &PublicKey, _: &str) -> io::Result<()> {
         Ok(())
     }
 }
@@ -241,14 +242,14 @@ impl NoiseStream {
         }
     }
 
-    /// Server side: records that the peer connected now.
-    pub fn record_seen(&self) -> io::Result<()> {
+    /// Server side: records that the peer connected now, under the name it gave.
+    pub fn record_seen(&self, name: &str) -> io::Result<()> {
         match &*lock(&self.noise) {
             Noise::Transport {
                 remote,
                 authority: Some(authority),
                 ..
-            } => authority.record_seen(remote),
+            } => authority.record_seen(remote, name),
             _ => Ok(()),
         }
     }
@@ -551,7 +552,7 @@ mod tests {
             Err(rejected("no invite"))
         }
 
-        fn record_seen(&self, _: &PublicKey) -> io::Result<()> {
+        fn record_seen(&self, _: &PublicKey, _: &str) -> io::Result<()> {
             Ok(())
         }
     }

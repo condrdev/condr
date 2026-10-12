@@ -99,8 +99,10 @@ impl ServerIdentity {
             .any(|client| client.key == *remote))
     }
 
-    /// Notes that `remote` connected now; a device the store does not list is ignored.
-    pub fn record_seen(&self, remote: &PublicKey) -> io::Result<()> {
+    /// Notes that `remote` connected now under `name`, so a device renamed since it paired
+    /// is listed by its new name; an empty name keeps the old one, and a device the store
+    /// does not list is ignored.
+    pub fn record_seen(&self, remote: &PublicKey, name: &str) -> io::Result<()> {
         let Some(store) = &self.store else {
             return Ok(());
         };
@@ -110,6 +112,10 @@ impl ServerIdentity {
                 return Ok(());
             };
             client.last_seen = now();
+            let name = single_spaced(name);
+            if !name.is_empty() {
+                client.name = name;
+            }
             write_authorized(store, &clients)
         })
     }
@@ -139,7 +145,7 @@ impl ServerIdentity {
                     key: remote,
                     paired_at,
                     last_seen: paired_at,
-                    name: name.split_whitespace().collect::<Vec<_>>().join(" "),
+                    name: single_spaced(name),
                 });
                 write_authorized(store, &clients)?;
             }
@@ -173,9 +179,14 @@ impl Authority for ServerIdentity {
         ServerIdentity::complete_pairing(self, device, name, invite)
     }
 
-    fn record_seen(&self, device: &PublicKey) -> io::Result<()> {
-        ServerIdentity::record_seen(self, device)
+    fn record_seen(&self, device: &PublicKey, name: &str) -> io::Result<()> {
+        ServerIdentity::record_seen(self, device, name)
     }
+}
+
+/// A device's name on one line, as the authorized list stores it.
+fn single_spaced(name: &str) -> String {
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The identity directory's identity, loaded on first use: a Server that neither listens on
@@ -216,8 +227,8 @@ impl Authority for LazyIdentity {
         self.get()?.complete_pairing(device, name, invite)
     }
 
-    fn record_seen(&self, device: &PublicKey) -> io::Result<()> {
-        self.get()?.record_seen(device)
+    fn record_seen(&self, device: &PublicKey, name: &str) -> io::Result<()> {
+        self.get()?.record_seen(device, name)
     }
 }
 

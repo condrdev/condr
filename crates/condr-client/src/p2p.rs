@@ -495,11 +495,11 @@ impl P2pStream {
         }
     }
 
-    pub fn record_seen(&self) -> io::Result<()> {
+    pub fn record_seen(&self, name: &str) -> io::Result<()> {
         match &*lock(&self.peer) {
             Peer::Server {
                 remote, authority, ..
-            } => authority.record_seen(remote),
+            } => authority.record_seen(remote, name),
             Peer::Client => Ok(()),
         }
     }
