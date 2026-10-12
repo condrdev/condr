@@ -30,6 +30,20 @@ impl Condr {
         connection.send(ClientMessage::ServerAdmin { server_id, command })
     }
 
+    /// The host picked or typed for the TCP invite's link (ADR 0040); whether it changed.
+    pub(in crate::app) fn set_invite_host(&mut self, key: ConnectionKey, host: String) -> bool {
+        match self
+            .connection_mut(key)
+            .and_then(|connection| connection.invite.as_mut())
+        {
+            Some(invite) if invite.host != host => {
+                invite.host = host;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(in crate::app) fn request_server_admin(&mut self, key: ConnectionKey) {
         self.server_admin(key, ServerAdminCommand::Status);
         self.server_admin(key, ServerAdminCommand::Clients);

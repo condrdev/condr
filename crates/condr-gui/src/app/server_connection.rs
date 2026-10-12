@@ -512,9 +512,55 @@ impl ServerConnection {
 /// One invite as the Server printed it: a link per enabled transport (ADR 0026).
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ServerInvite {
+    /// `tcp://<id>.<invite>@<host>:<port>`, its host left for the GUI to fill in.
     pub(super) tcp: Option<String>,
     pub(super) p2p: Option<String>,
     pub(super) expires_in_secs: u64,
+    /// What the Server offers for the TCP link's host, most likely first (ADR 0040).
+    pub(super) hosts: Vec<String>,
+    /// The host picked or typed for the TCP link; the likeliest one to begin with.
+    pub(super) host: String,
+}
+
+impl ServerInvite {
+    pub(super) fn new(
+        tcp: Option<String>,
+        p2p: Option<String>,
+        expires_in_secs: u64,
+        hosts: Vec<String>,
+    ) -> Self {
+        Self {
+            host: hosts.first().cloned().unwrap_or_default(),
+            tcp,
+            p2p,
+            expires_in_secs,
+            hosts,
+        }
+    }
+
+    /// The TCP link with its host filled in, an IPv6 address in brackets; none while
+    /// the host is empty or could not be one.
+    pub(super) fn tcp_link(&self) -> Option<String> {
+        let host = self.host.trim();
+        if host.is_empty() || host.contains(|c: char| c.is_whitespace() || "/@[]".contains(c)) {
+            return None;
+        }
+        let host = if host.contains(':') {
+            format!("[{host}]")
+        } else {
+            host.to_owned()
+        };
+        Some(self.tcp.as_ref()?.replace("<host>", &host))
+    }
+
+    /// What a new device pastes: the Peer-to-peer link, which needs no host, else the TCP
+    /// one with its host, else the TCP one as the Server printed it.
+    pub(super) fn paste_ready(&self) -> Option<String> {
+        self.p2p
+            .clone()
+            .or_else(|| self.tcp_link())
+            .or_else(|| self.tcp.clone())
+    }
 }
 
 /// Runtime figures from the Server's `Status` reply, shown on the General settings page.

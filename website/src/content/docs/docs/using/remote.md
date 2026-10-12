@@ -86,7 +86,7 @@ For servers with a fixed IP address, or ones directly reachable on an internal L
      condr server invite
      ```
 
-  3. **Copy the pairing link**: The console prints a link in the form `tcp://<device key>.<invite>@<host>:<port>`. Replace `<host>` with this device's IP. The link is valid for 10 minutes and can be used only once.
+  3. **Copy the pairing link**: The console prints a link in the form `tcp://<device key>.<invite>@<host>:<port>`, and under **Hosts** this device's addresses, most likely first. Replace `<host>` with one of them, or with a name that resolves to this device. The link is valid for 10 minutes and can be used only once.
   4. **Connect from the Client**: In the Condr Client, click **Connect Remote Device** → **TCP**, paste the link and confirm.
   5. **Complete the key handshake**: The Client and Server set up a secure point-to-point channel using the pre-shared key. Once pairing completes, Condr stores only the Device key and the address, not the invite.
 

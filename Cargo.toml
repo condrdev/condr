@@ -57,6 +57,10 @@ curve25519-dalek = { version = "4.1", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 # Peer-to-peer connections (ADR 0026): QUIC dialled by Device key, hole punching, relay.
 iroh = { version = "1.2", default-features = false, features = ["tls-ring"] }
+# This machine's network addresses for a TCP Invite's host (ADR 0040); already built for iroh.
+netwatch = "0.19"
+# The Invite drawn as a QR code for the Companion to scan (ADR 0040); no dependencies.
+qrcode = { version = "0.14", default-features = false }
 # The system proxy for the relay (ADR 0038); already built for iroh's reqwest.
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 url = "2"

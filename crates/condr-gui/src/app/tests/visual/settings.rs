@@ -1070,6 +1070,7 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
                     tcp: Some("tcp://key.secret@<host>:2637".into()),
                     p2p: Some("p2p://key.secret".into()),
                     expires_in_secs: 600,
+                    hosts: vec!["192.168.1.20".into(), "desk.local".into(), "fd00::5".into()],
                 })),
                 cx,
             );
@@ -1077,8 +1078,21 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
             assert_eq!(invite.tcp.as_deref(), Some("tcp://key.secret@<host>:2637"));
             assert_eq!(invite.p2p.as_deref(), Some("p2p://key.secret"));
             assert_eq!(invite.expires_in_secs, 600);
+            assert_eq!(
+                invite.tcp_link().as_deref(),
+                Some("tcp://key.secret@192.168.1.20:2637"),
+                "the likeliest host fills the TCP link"
+            );
         });
     });
+    assert_eq!(
+        settings
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .as_deref(),
+        Some("p2p://key.secret"),
+        "the Peer-to-peer link, which needs no host, goes to the clipboard"
+    );
     // The invite lives on the Paired devices page, this machine's eighth.
     settings.update(|_, cx| select_settings_page(&settings_view, 7, cx));
     settings.update(|window, cx| _ = window.draw(cx));
@@ -1087,6 +1101,91 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
             && settings.debug_bounds("server-invite-p2p").is_some(),
         "one link per enabled transport"
     );
+    // ADR 0040: each link is a code to scan, and the TCP one names a host the phone dials.
+    let p2p_qr = settings
+        .debug_bounds("server-invite-p2p-qr")
+        .expect("a code for the p2p link");
+    // Square, and at least version 1's 21 modules and the quiet zone at 3 px apiece.
+    assert!(
+        p2p_qr.size.width == p2p_qr.size.height && p2p_qr.size.width >= px(87.),
+        "{p2p_qr:?}"
+    );
+    assert!(settings.debug_bounds("server-invite-tcp-qr").is_some());
+    let tcp_link = |settings: &mut VisualTestContext| {
+        settings.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .invite
+                .clone()
+                .unwrap()
+                .tcp_link()
+        })
+    };
+
+    // Another offered address is a click away; an IPv6 one goes in brackets. The page
+    // scrolls the address into the test window first.
+    let ipv6 = settings
+        .debug_bounds("server-invite-host-2")
+        .expect("each offered host");
+    let viewport = settings.update(|window, _| window.viewport_size());
+    settings.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: ipv6
+            .center()
+            .min(&gpui_kit::point(ipv6.center().x, viewport.height - px(20.))),
+        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+            px(0.),
+            -(ipv6.bottom() - viewport.height + px(60.)),
+        )),
+        ..Default::default()
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    let ipv6 = settings.debug_bounds("server-invite-host-2").unwrap();
+    assert!(
+        ipv6.bottom() < viewport.height,
+        "{ipv6:?} within {viewport:?}"
+    );
+    settings.simulate_click(ipv6.center(), Modifiers::default());
+    settings.run_until_parked();
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        tcp_link(settings).as_deref(),
+        Some("tcp://key.secret@[fd00::5]:2637")
+    );
+    assert_eq!(
+        settings.read(|app| settings_view
+            .read(app)
+            .invite_host
+            .read(app)
+            .value()
+            .to_string()),
+        "fd00::5",
+        "the field shows the picked host"
+    );
+
+    // Any name typed in the field fills the link; clearing it leaves nothing to scan.
+    settings.update(|window, cx| {
+        let input = settings_view.read(cx).invite_host.clone();
+        input.update(cx, |input, cx| input.focus(window, cx));
+    });
+    settings.simulate_keystrokes("cmd-a backspace");
+    settings.simulate_input("studio.lan");
+    settings.run_until_parked();
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        tcp_link(settings).as_deref(),
+        Some("tcp://key.secret@studio.lan:2637")
+    );
+    settings.simulate_keystrokes("cmd-a backspace");
+    settings.run_until_parked();
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(tcp_link(settings), None);
+    assert!(
+        settings.debug_bounds("server-invite-tcp-qr").is_none()
+            && settings.debug_bounds("server-invite-tcp").is_none(),
+        "no code and no Copy without a host"
+    );
+    assert!(settings.debug_bounds("server-invite-p2p-qr").is_some());
 
     settings.update(|_, cx| {
         view.update(cx, |this, cx| {
@@ -1109,6 +1208,7 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
                     tcp: Some("tcp://key.secret@<host>:2637".into()),
                     p2p: None,
                     expires_in_secs: 600,
+                    hosts: Vec::new(),
                 })),
                 cx,
             );

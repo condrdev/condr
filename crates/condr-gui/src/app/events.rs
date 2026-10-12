@@ -566,17 +566,13 @@ impl Condr {
                         tcp,
                         p2p,
                         expires_in_secs,
+                        hosts,
                     } => {
-                        // The paste-ready link goes to the clipboard: a p2p link has no
-                        // `<host>` to fill in.
-                        if let Some(address) = p2p.as_ref().or(tcp.as_ref()) {
-                            cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
+                        let invite = ServerInvite::new(tcp, p2p, expires_in_secs, hosts);
+                        if let Some(address) = invite.paste_ready() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(address));
                         }
-                        connection.invite = Some(ServerInvite {
-                            tcp,
-                            p2p,
-                            expires_in_secs,
-                        });
+                        connection.invite = Some(invite);
                     }
                     // The stored listen address changed: a pending invite still points at
                     // the old port, and none can be issued without a listener.

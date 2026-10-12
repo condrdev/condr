@@ -28,7 +28,7 @@ Condr 采用分层配置架构：
 | **Shortcuts** | 本机 | 快捷键列表（只读） |
 | **Network** | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**System**、**None**，或选择 **Manual** 并填写 URL |
 | **Remote access** | 设备 | TCP 监听开关与地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需要重启才能生效，修改后按钮会变为 **Restart to apply** |
-| **Paired devices** | 设备 | 点击 **Generate invite** 生成单次配对邀请（包含 P2P 和 TCP 两种链接）。列表优先显示在线设备，点击每行的 **Revoke** 可解除配对 |
+| **Paired devices** | 设备 | 点击 **Generate invite** 生成单次配对邀请（包含 P2P 和 TCP 两种链接），每种链接都附有二维码，可用手机上的 Condr 扫描。TCP 链接默认使用这台电脑提供的地址，也可以改选其他地址或自行输入。列表优先显示在线设备，点击每行的 **Revoke** 可解除配对 |
 | **Agent integrations** | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
 | **Developer** | 本机 | 帧率监控开关，以及快速打开应用、配置、数据、状态和日志目录的按钮 |
 | **Licenses** | 本机 | 第三方开源依赖及开源协议 |

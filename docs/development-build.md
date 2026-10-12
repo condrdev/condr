@@ -208,7 +208,7 @@ condr server start --listen 0.0.0.0:4242
 condr server invite
 ```
 
-已启动的 Server 需要 `condr server restart` 才会应用新的 listen 地址。将 invite 打印的 `tcp://<server key>.<invite>@<host>:4242` 中 `<host>` 换成远端可达地址，粘贴到 Connect Remote Device。TCP 每次连接仍使用 Noise 双向认证与加密；首次 invite 配对成功后，重连只使用设备密钥。`condr server clients` 列出配对设备，`condr server revoke <key 前缀>` 撤销并断开设备。
+已启动的 Server 需要 `condr server restart` 才会应用新的 listen 地址。将 invite 打印的 `tcp://<server key>.<invite>@<host>:4242` 中 `<host>` 换成 `Hosts` 一行里的远端可达地址（或能解析到远端的名称），粘贴到 Connect Remote Device。TCP 每次连接仍使用 Noise 双向认证与加密；首次 invite 配对成功后，重连只使用设备密钥。`condr server clients` 列出配对设备，`condr server revoke <key 前缀>` 撤销并断开设备。
 
 ### 保存的 Server
 

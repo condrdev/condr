@@ -725,64 +725,160 @@ fn server_invite_group(
             .keywords(["invite", "pair"]),
     );
     if let Some(invite) = invite {
-        if let Some(address) = invite.p2p {
+        if let Some(address) = invite.p2p.clone() {
             group = group.item(invite_link_row(
                 "Peer-to-peer",
                 "server-invite-p2p",
-                address,
+                Some(address),
                 None,
+                "Scan with Condr on a phone, or paste on another computer. Works wherever this computer is.",
             ));
         }
-        if let Some(address) = invite.tcp {
+        if invite.tcp.is_some() {
             group = group.item(invite_link_row(
                 "TCP",
                 "server-invite-tcp",
-                address,
-                Some("Replace <host> with an address the new device can reach."),
+                invite.tcp_link(),
+                Some(settings.clone()),
+                "The new device dials this address: one of this computer's, or a name it resolves.",
             ));
         }
     }
     group
 }
 
-/// One transport's link under its name with its own Copy: too long for the field slot
-/// beside a title, so the row stacks.
+/// The side of a QR code's module: big enough for a phone across a desk to read.
+const INVITE_QR_MODULE: Pixels = px(3.);
+
+/// One transport's link: its QR code beside the link and its Copy, and for TCP the host
+/// field under them. Too long for the field slot beside a title, so the row stacks. A
+/// link without a host yet draws neither code nor Copy.
 fn invite_link_row(
     title: &'static str,
     id: &'static str,
-    address: String,
-    description: Option<&'static str>,
+    address: Option<String>,
+    host_of: Option<Entity<SettingsWindow>>,
+    description: &'static str,
 ) -> SettingItem {
-    let item = SettingItem::new(
+    SettingItem::new(
         title,
-        SettingField::render(move |_, _, _| {
+        SettingField::render(move |_, window, cx| {
+            let link = match &address {
+                Some(address) => h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .debug_selector(move || id.into())
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .font_family("monospace")
+                            .child(address.clone()),
+                    )
+                    .child(
+                        Clipboard::new(format!("{id}-copy"))
+                            .value(address.clone())
+                            .tooltip("Copy invite"),
+                    ),
+                None => h_flex().w_full().child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Enter the address the new device dials."),
+                ),
+            };
+            let host = host_of
+                .as_ref()
+                .and_then(|settings| invite_host_field(settings, window, cx));
             h_flex()
                 .w_full()
-                .gap_2()
-                .items_center()
+                .gap_4()
+                .items_start()
+                .when_some(address.as_deref(), |row, address| {
+                    row.child(qr::qr_code(
+                        if host_of.is_some() {
+                            "server-invite-tcp-qr"
+                        } else {
+                            "server-invite-p2p-qr"
+                        },
+                        address,
+                        INVITE_QR_MODULE,
+                    ))
+                })
                 .child(
-                    div()
-                        .debug_selector(move || id.into())
+                    v_flex()
                         .flex_1()
                         .min_w_0()
-                        .truncate()
-                        .text_sm()
-                        .font_family("monospace")
-                        .child(address.clone()),
-                )
-                .child(
-                    Clipboard::new(format!("{id}-copy"))
-                        .value(address.clone())
-                        .tooltip("Copy invite"),
+                        .gap_3()
+                        .child(link)
+                        .children(host),
                 )
         }),
     )
     .layout(Axis::Vertical)
-    .keywords(["invite"]);
-    match description {
-        Some(description) => item.description(description),
-        None => item,
+    .description(description)
+    .keywords(["invite", "qr"])
+}
+
+/// The TCP link's host: a field to type into and, under it, the addresses the Server
+/// offered, most likely first, to pick with a click (ADR 0040). The invite keeps the
+/// host; the field shows it, whichever way it changed.
+fn invite_host_field(
+    settings: &Entity<SettingsWindow>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let (input, key, owner, (host, hosts)) = {
+        let this = settings.read(cx);
+        let invite = this.selected_connection(cx, |connection| {
+            connection
+                .invite
+                .as_ref()
+                .map(|invite| (invite.host.clone(), invite.hosts.clone()))
+        })??;
+        (
+            this.invite_host.clone(),
+            this.selected_server,
+            this.owner.clone(),
+            invite,
+        )
+    };
+    if input.read(cx).value() != host {
+        input.update(cx, |input, cx| input.set_value(host.clone(), window, cx));
     }
+    let picks = hosts.into_iter().enumerate().map(|(index, candidate)| {
+        let owner = owner.clone();
+        let picked = candidate == host.trim();
+        Button::new(("server-invite-host", index))
+            .debug_selector(move || format!("server-invite-host-{index}"))
+            .label(candidate.clone())
+            .xsmall()
+            .when(picked, |button| button.primary())
+            .when(!picked, |button| button.outline())
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |owner, cx| {
+                    if owner.set_invite_host(key, candidate.clone()) {
+                        cx.notify();
+                    }
+                });
+            })
+    });
+    Some(
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().text_sm().child("Address"))
+                    .child(Input::new(&input).w_64()),
+            )
+            .child(h_flex().flex_wrap().gap_1().children(picks))
+            .into_any_element(),
+    )
 }
 
 /// One row per paired device, connected ones first: the name over its fingerprint (the

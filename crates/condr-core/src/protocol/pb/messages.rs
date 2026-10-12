@@ -1374,10 +1374,12 @@ impl From<&ServerAdminResponse> for super::ServerAdminResponse {
                     tcp,
                     p2p,
                     expires_in_secs,
+                    hosts,
                 } => Response::Invite(ServerInvite {
                     tcp: tcp.clone(),
                     p2p: p2p.clone(),
                     expires_in_secs: *expires_in_secs,
+                    hosts: hosts.clone(),
                 }),
                 ServerAdminResponse::Revoked { disconnected } => Response::Revoked(*disconnected),
             }),
@@ -1436,6 +1438,7 @@ impl TryFrom<super::ServerAdminResponse> for ServerAdminResponse {
                 tcp: invite.tcp,
                 p2p: invite.p2p,
                 expires_in_secs: invite.expires_in_secs,
+                hosts: invite.hosts,
             },
             Response::Revoked(disconnected) => Self::Revoked { disconnected },
         })

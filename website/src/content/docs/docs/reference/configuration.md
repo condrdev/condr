@@ -28,7 +28,7 @@ The Settings window configures one Device at a time. Use the picker at the top t
 | **Shortcuts** | This machine | Keyboard shortcuts reference (read-only) |
 | **Network** | Device | Proxy settings for Peer-to-peer connections and update checks: **System**, **None** or **Manual** with a custom URL |
 | **Remote access** | Device | TCP listener toggle and address, Peer-to-peer toggle, and the **Restart Condr** button. Changes take effect after a restart; until then the button reads **Restart to apply** |
-| **Paired devices** | Device | Click **Generate invite** to create a one-time pairing link (both P2P and TCP formats). Lists paired Devices with online ones first, with a **Revoke** button on each row to remove pairings |
+| **Paired devices** | Device | Click **Generate invite** to create a one-time pairing link (both P2P and TCP formats), each with a QR code that Condr on a phone scans. The TCP link uses an address this computer offers; pick another or type one. Lists paired Devices with online ones first, with a **Revoke** button on each row to remove pairings |
 | **Agent integrations** | Device | View hook status for each Agent, with one-click options to install, update or remove them |
 | **Developer** | This machine | Frame rate display toggle and quick-access buttons for application, config, data, state and log directories |
 | **Licenses** | This machine | Open-source dependencies and license details |

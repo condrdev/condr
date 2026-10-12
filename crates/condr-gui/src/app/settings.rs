@@ -1,4 +1,5 @@
 mod appearance;
+mod qr;
 mod server;
 mod shortcuts;
 mod text_field;
@@ -140,6 +141,9 @@ pub(super) struct SettingsWindow {
     pub(super) listen_refused: bool,
     /// Why the Proxy URL draft is not one, beside the field until it is.
     pub(super) proxy_url_refused: Option<SharedString>,
+    /// The host of the selected Device's TCP invite, as picked or typed (ADR 0040). The
+    /// invite keeps it; this only edits it.
+    pub(super) invite_host: Entity<InputState>,
     /// The page a Device's pages open on when first drawn; Kit keeps the selection from
     /// then on. Tests point it at a page they need to see.
     pub(super) initial_page: SelectIndex,
@@ -279,6 +283,19 @@ impl SettingsWindow {
             window,
             cx,
         );
+        let invite_host = cx.new(|cx| InputState::new(window, cx).placeholder("Address or name"));
+        cx.subscribe(&invite_host, |this, input, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let key = this.selected_server;
+                let host = input.read(cx).value().to_string();
+                let _ = this.owner.update(cx, |owner, cx| {
+                    if owner.set_invite_host(key, host) {
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
         // Connection status and admin replies live on `Condr`; the Server pages show them.
         if let Some(owner) = owner.upgrade() {
             cx.observe(&owner, |_, _, cx| cx.notify()).detach();
@@ -329,6 +346,7 @@ impl SettingsWindow {
             shell,
             listen,
             proxy_url,
+            invite_host,
             saved: None,
             _saved_clear: None,
             listen_refused: false,

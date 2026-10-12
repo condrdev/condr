@@ -297,3 +297,38 @@ fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
     assert_eq!(clients[1].last_seen, 300, "other devices are untouched");
     let _ = fs::remove_dir_all(directory);
 }
+
+/// A TCP Invite's host candidates (ADR 0040): the default route's address first, the
+/// `.local` name next, then the other addresses, of the families the listener takes.
+#[test]
+fn invite_hosts_put_the_likeliest_first_and_follow_the_listener() {
+    use std::net::IpAddr;
+    let ip = |text: &str| text.parse::<IpAddr>().unwrap();
+    let local = [ip("100.64.1.5"), ip("192.168.1.20"), ip("2001:db8::7")];
+
+    assert_eq!(
+        order_invite_hosts(
+            ip("10.0.0.3"),
+            Some(ip("192.168.1.20")),
+            "desk.local",
+            &local
+        ),
+        ["10.0.0.3"],
+        "a listener bound to one address is reached there"
+    );
+    assert_eq!(
+        order_invite_hosts(
+            ip("0.0.0.0"),
+            Some(ip("192.168.1.20")),
+            "desk.local",
+            &local
+        ),
+        ["192.168.1.20", "desk.local", "100.64.1.5"],
+        "an IPv4 listener lists no IPv6 address, and none twice"
+    );
+    assert_eq!(
+        order_invite_hosts(ip("::"), None, "desk", &local),
+        ["100.64.1.5", "192.168.1.20", "2001:db8::7"],
+        "a name no network resolves is not offered"
+    );
+}

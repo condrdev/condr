@@ -597,6 +597,11 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                         address.port()
                     ),
                 );
+                // What `<host>` may be, most likely first (ADR 0040).
+                let hosts = noise::invite_hosts(address);
+                if !hosts.is_empty() {
+                    field("Hosts", hosts.join(", "));
+                }
             }
             if config.p2p {
                 field(

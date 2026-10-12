@@ -858,6 +858,10 @@ pub enum ServerAdminResponse {
         /// `p2p://<id>.<invite>` when Peer-to-peer is enabled.
         p2p: Option<String>,
         expires_in_secs: u64,
+        /// What a new device might dial for the TCP link's `<host>`, most likely first
+        /// (ADR 0040): this machine's addresses, since a Server listening on `0.0.0.0`
+        /// cannot know which one another device reaches. Empty without a TCP link.
+        hosts: Vec<String>,
     },
     Revoked {
         disconnected: u32,

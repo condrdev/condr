@@ -741,6 +741,9 @@ message ServerInvite {
   optional string tcp = 1;
   optional string p2p = 2;
   uint64 expires_in_secs = 3;
+  // What a new device might dial for the TCP link's `<host>`, most likely first (ADR 0040);
+  // empty from a Server that predates it.
+  repeated string hosts = 4;
 }
 
 message ServerAdminResponse {

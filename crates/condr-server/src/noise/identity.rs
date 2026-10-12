@@ -307,6 +307,61 @@ pub fn load_device_key(directory: &Path) -> io::Result<DeviceKey> {
     load_or_create_key(&directory.join(DEVICE_KEY_FILE))
 }
 
+/// What a new device might dial for a TCP Invite listening on `listen`, most likely first
+/// (ADR 0040). A listener bound to one address is reached at that address. One bound to
+/// every address is reached at one of this machine's: the default route's first, then
+/// its `.local` name, which outlives the address a DHCP lease gives, then the rest, of
+/// the families the listener takes.
+pub fn invite_hosts(listen: std::net::SocketAddr) -> Vec<String> {
+    order_invite_hosts(
+        listen.ip(),
+        default_route_address(),
+        &device_name(),
+        &netwatch::ip::LocalAddresses::new().regular,
+    )
+}
+
+fn order_invite_hosts(
+    listen: std::net::IpAddr,
+    route: Option<std::net::IpAddr>,
+    name: &str,
+    local: &[std::net::IpAddr],
+) -> Vec<String> {
+    if !listen.is_unspecified() {
+        return vec![listen.to_string()];
+    }
+    // An IPv4 listener takes no IPv6 connection; `::` usually takes both.
+    let takes = |ip: &std::net::IpAddr| listen.is_ipv6() || ip.is_ipv4();
+    let mut hosts: Vec<String> = Vec::new();
+    let mut push = |host: String| {
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    };
+    if let Some(route) = route.filter(takes) {
+        push(route.to_string());
+    }
+    if name.ends_with(".local") {
+        push(name.to_owned());
+    }
+    for ip in local.iter().filter(|ip| takes(ip)) {
+        push(ip.to_string());
+    }
+    hosts
+}
+
+/// The IPv4 address this machine sends from on its default route: connecting a UDP
+/// socket picks it from the routing table without sending anything.
+fn default_route_address() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    // TEST-NET-1 (RFC 5737): routed like any public address, never answered.
+    socket
+        .connect((std::net::Ipv4Addr::new(192, 0, 2, 1), 9))
+        .ok()?;
+    let ip = socket.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+}
+
 /// Replaces the pending invite with a fresh one valid for [`INVITE_TTL`].
 pub fn create_invite(directory: &Path) -> io::Result<Invite> {
     let invite = Invite {

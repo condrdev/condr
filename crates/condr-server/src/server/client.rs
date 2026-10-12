@@ -1204,6 +1204,10 @@ fn server_admin(
                     .map(|address| format!("tcp://{id}.{secret}@<host>:{}", address.port())),
                 p2p: config.p2p.then(|| format!("p2p://{id}.{secret}")),
                 expires_in_secs: crate::noise::INVITE_TTL.as_secs(),
+                hosts: config
+                    .listen
+                    .map(crate::noise::invite_hosts)
+                    .unwrap_or_default(),
             })
         }
         ServerAdminCommand::Revoke { key } => {
