@@ -210,6 +210,7 @@ impl EntityInputHandler for Condr {
         {
             self.clear_selection(cx);
             self.restart_cursor_blink(key, pane_id, cx);
+            self.reclaim_terminal_sizing(key, pane_id, cx);
             self.terminal_command(key, pane_id, TerminalCommand::Text(text));
         }
     }

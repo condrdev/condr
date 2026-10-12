@@ -429,8 +429,10 @@ fn server_disconnect_reconnect_and_remove_preserve_runtime() {
                 .unwrap()
                 .clone();
             let rebuilds = this.dock_rebuild_count;
-            this.pending_sizes
-                .insert((1, pane_id), condr_core::TerminalSize::new(99, 199));
+            this.pending_sizes.insert(
+                (1, pane_id),
+                PendingSize::new(condr_core::TerminalSize::new(99, 199)),
+            );
             assert!(this.disconnect_server(1));
             this.refresh_target_pane(1);
             this.rebuild_dock(window, cx);

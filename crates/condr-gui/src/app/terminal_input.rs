@@ -12,6 +12,40 @@ pub(super) use mouse::next_hovered_link;
 pub(super) use mouse::{ReportedTerminalMouse, ReportedTerminalMouseMotion};
 pub(super) use selection::LocalTerminalSelection;
 
+/// A size this window sent for a Pane and has not yet seen a frame carry. The Server drops
+/// it while another Client holds the sizing (ADR 0036); past a heartbeat it was most likely
+/// dropped, and an active window sends it again (ADR 0041).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PendingSize {
+    pub(crate) size: TerminalSize,
+    sent: Instant,
+}
+
+impl PendingSize {
+    pub(crate) fn new(size: TerminalSize) -> Self {
+        Self {
+            size,
+            sent: Instant::now(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sent_at(size: TerminalSize, sent: Instant) -> Self {
+        Self { size, sent }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sent(&self) -> Instant {
+        self.sent
+    }
+
+    /// Whether this size still stands for the window: sent within the last heartbeat, or
+    /// the window is in the background, which sends nothing again (ADR 0041).
+    fn stands(&self, active: bool) -> bool {
+        !active || self.sent.elapsed() < condr_core::protocol::HEARTBEAT_INTERVAL
+    }
+}
+
 /// One window's terminal interaction state. Every retained owner is scoped to its Device.
 #[derive(Default)]
 pub(super) struct TerminalInputState {
@@ -83,10 +117,14 @@ impl Condr {
         key: ConnectionKey,
         pane_id: PaneId,
         size: TerminalSize,
+        active: bool,
         cx: &mut Context<Self>,
     ) {
         let pending_key = (key, pane_id);
-        if self.pending_sizes.get(&pending_key) == Some(&size)
+        if self
+            .pending_sizes
+            .get(&pending_key)
+            .is_some_and(|pending| pending.size == size && pending.stands(active))
             || self
                 .terminal(key, pane_id)
                 .is_some_and(|terminal| terminal.view.size == size)
@@ -94,8 +132,70 @@ impl Condr {
             return;
         }
         if self.terminal_command(key, pane_id, TerminalCommand::Resize(size)) {
-            self.pending_sizes.insert(pending_key, size);
+            self.pending_sizes
+                .insert(pending_key, PendingSize::new(size));
             cx.notify();
+        }
+    }
+
+    /// Repaints the Panels whose sent size has gone a heartbeat without a frame carrying
+    /// it, so they measure and send it again while this window is the active one.
+    pub(super) fn retry_dropped_sizes(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if !window.is_window_active() {
+            return;
+        }
+        let dropped: Vec<_> = self
+            .pending_sizes
+            .iter()
+            .filter(|&(&(key, pane_id), pending)| {
+                !pending.stands(true)
+                    && self
+                        .terminal(key, pane_id)
+                        .is_some_and(|terminal| terminal.view.size != pending.size)
+            })
+            .filter_map(|(pane, _)| self.panels.get(pane).cloned())
+            .collect();
+        for panel in dropped {
+            panel.update(cx, |_, cx| cx.notify());
+        }
+    }
+
+    /// A click or a key in this window's focused Pane takes the sizing back while a size
+    /// it sent that Server still waits on a frame (ADR 0041): another Client sized the
+    /// terminals, and the person is using this window now.
+    pub(super) fn reclaim_terminal_sizing(
+        &mut self,
+        key: ConnectionKey,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.terminal_input.reported_focus != Some((key, pane_id)) {
+            return;
+        }
+        let dropped = self
+            .pending_sizes
+            .iter()
+            .any(|(&(pending_key, pane), pending)| {
+                pending_key == key
+                    && self
+                        .terminal(key, pane)
+                        .is_some_and(|terminal| terminal.view.size != pending.size)
+            });
+        if dropped && self.terminal_command(key, pane_id, TerminalCommand::Focus(true)) {
+            self.measure_terminals_again(key, cx);
+        }
+    }
+
+    /// Reporting focus makes this window the one that sizes the Server's terminals (ADR
+    /// 0036). Sizes it sent while another Client held that were dropped, so every Panel
+    /// of that Server measures again and sends what differs.
+    fn measure_terminals_again(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
+        self.pending_sizes
+            .retain(|(pending_key, _), _| *pending_key != key);
+        for ((panel_key, _), panel) in &self.panels {
+            if *panel_key == key {
+                panel.update(cx, |_, cx| cx.notify());
+            }
         }
     }
 
@@ -131,9 +231,13 @@ impl Condr {
         bounds: Bounds<Pixels>,
         cell_size: Size<Pixels>,
         terminal_size: TerminalSize,
+        active: bool,
     ) -> bool {
         self.terminal_geometry.get(&(key, pane_id)) == Some(&TerminalGeometry { bounds, cell_size })
-            && (self.pending_sizes.get(&(key, pane_id)) == Some(&terminal_size)
+            && (self
+                .pending_sizes
+                .get(&(key, pane_id))
+                .is_some_and(|pending| pending.size == terminal_size && pending.stands(active))
                 || self
                     .terminal(key, pane_id)
                     .is_some_and(|terminal| terminal.view.size == terminal_size))
@@ -191,16 +295,7 @@ impl Condr {
             && self.terminal_command(key, pane_id, TerminalCommand::Focus(true))
         {
             self.terminal_input.reported_focus = Some((key, pane_id));
-            // Reporting focus makes this window the one that sizes the Server's terminals
-            // (ADR 0036). Sizes it sent while another window held that were dropped, so
-            // every Panel measures again and sends what differs.
-            self.pending_sizes
-                .retain(|(pending_key, _), _| *pending_key != key);
-            for ((panel_key, _), panel) in &self.panels {
-                if *panel_key == key {
-                    panel.update(cx, |_, cx| cx.notify());
-                }
-            }
+            self.measure_terminals_again(key, cx);
         }
     }
 
@@ -255,6 +350,7 @@ impl Condr {
         }
 
         self.clear_selection(cx);
+        self.reclaim_terminal_sizing(key, pane_id, cx);
         self.forward_key(
             key,
             pane_id,
@@ -368,6 +464,7 @@ impl Condr {
         if let Some(key_code) = key_code {
             self.clear_selection(cx);
             self.restart_cursor_blink(key, pane_id, cx);
+            self.reclaim_terminal_sizing(key, pane_id, cx);
             self.forward_key(
                 key,
                 pane_id,

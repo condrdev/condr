@@ -1545,7 +1545,7 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
     window.update(|_, cx| {
         view.update(cx, |this, _| {
             this.pending_sizes
-                .insert((1, pane_id), TerminalSize::new(1, 2));
+                .insert((1, pane_id), PendingSize::new(TerminalSize::new(1, 2)));
         });
     });
     window.update(|window, cx| terminal_focus.focus(window, cx));
@@ -1566,7 +1566,11 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
         "successfully reporting terminal focus must clear bell attention"
     );
     assert_ne!(
-        window.read(|app| view.read(app).pending_sizes.get(&(1, pane_id)).copied()),
+        window.read(|app| view
+            .read(app)
+            .pending_sizes
+            .get(&(1, pane_id))
+            .map(|pending| pending.size)),
         Some(TerminalSize::new(1, 2)),
         "reporting focus makes this window size the terminals, so it measures again"
     );
@@ -1585,6 +1589,225 @@ fn terminal_focus_changes_report_to_the_pty_without_leasing_the_focused_panel() 
             .attention
             .contains(&pane_id)),
         "the ordered focus clear must cancel a delayed pre-focus bell"
+    );
+}
+
+/// Creates a Workspace in a connected GUI and waits for its Pane's Panel to hold focus
+/// in the active window.
+fn focused_pane(view: &Entity<Condr>, window: &mut VisualTestContext) -> PaneId {
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut pane_id = None;
+    assert!(wait_until(window, |window| {
+        pane_id = window.read(|app| {
+            Some(
+                view.read(app)
+                    .active_session()?
+                    .workspaces()
+                    .first()?
+                    .tabs()
+                    .first()?
+                    .focused_pane()?
+                    .id(),
+            )
+        });
+        let Some(pane_id) = pane_id else {
+            return false;
+        };
+        let focus = window.read(|app| {
+            view.read(app)
+                .panels
+                .get(&(1, pane_id))
+                .map(|panel| panel.read(app).focus_handle.clone())
+        });
+        window.debug_bounds(terminal_selector(pane_id)).is_some()
+            && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
+            && window.read(|app| view.read(app).terminal(1, pane_id).is_some())
+    }));
+    let pane_id = pane_id.unwrap();
+    window.update(|window, _| window.activate_window());
+    window.run_until_parked();
+    assert_eq!(
+        window.read(|app| view.read(app).terminal_input.reported_focus),
+        Some((1, pane_id))
+    );
+    pane_id
+}
+
+/// The size this window measured for the Pane, once the Server carries it: no size of the
+/// window's is pending and two draws in a row see the same grid.
+fn settled_size(
+    view: &Entity<Condr>,
+    window: &mut VisualTestContext,
+    pane_id: PaneId,
+) -> TerminalSize {
+    let mut last = None;
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        let (size, pending) = window.read(|app| {
+            let this = view.read(app);
+            (
+                this.terminal(1, pane_id).map(|terminal| terminal.view.size),
+                this.pending_sizes.contains_key(&(1, pane_id)),
+            )
+        });
+        let settled = !pending && size.is_some() && size == last;
+        last = size;
+        settled
+    }));
+    last.unwrap()
+}
+
+fn terminal_size(
+    view: &Entity<Condr>,
+    window: &mut VisualTestContext,
+    pane_id: PaneId,
+) -> TerminalSize {
+    window.read(|app| {
+        view.read(app)
+            .terminal(1, pane_id)
+            .map(|terminal| terminal.view.size)
+            .unwrap()
+    })
+}
+
+/// ADR 0041: another Client (a phone) sizes the terminal and the Server drops this
+/// window's sizes; a key in the window's focused Pane takes the sizing back.
+#[test]
+fn a_key_takes_back_the_sizing_another_client_holds() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (server, endpoint) = start_server();
+    let (view, window, _server) = connected_condr_with(&mut cx, server, endpoint.clone());
+    let pane_id = focused_pane(&view, window);
+    let measured = settled_size(&view, window, pane_id);
+
+    let mut phone = ClientConnection::connect(&endpoint, "phone").unwrap();
+    phone
+        .terminal(pane_id, TerminalCommand::Focus(true))
+        .unwrap();
+    phone
+        .terminal(pane_id, TerminalCommand::Resize(TerminalSize::new(12, 50)))
+        .unwrap();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            terminal_size(&view, window, pane_id).columns == 50
+        }),
+        "the phone sizes the terminal"
+    );
+    for _ in 0..10 {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.executor().advance_clock(Duration::from_millis(20));
+        window.run_until_parked();
+    }
+    assert_eq!(
+        terminal_size(&view, window, pane_id).columns,
+        50,
+        "while the phone holds the sizing, this window's size is dropped"
+    );
+
+    window.simulate_keystrokes("a");
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            terminal_size(&view, window, pane_id) == measured
+        }),
+        "a key in the focused Pane takes the sizing back"
+    );
+    drop(phone);
+}
+
+/// ADR 0041: a size the Server has not carried for a heartbeat is sent again by an active
+/// window, never by one in the background, and the heartbeat's retry repaints only the
+/// Panels that need it.
+#[test]
+fn an_active_window_resends_a_size_dropped_for_a_heartbeat() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let pane_id = focused_pane(&view, window);
+    let measured = settled_size(&view, window, pane_id);
+    let stale = Instant::now()
+        .checked_sub(condr_core::protocol::HEARTBEAT_INTERVAL + Duration::from_secs(1))
+        .unwrap();
+    // Another Client sized the terminal and the Server dropped this window's size.
+    let set_aside = |window: &mut VisualTestContext, sent: Instant| {
+        window.update(|_, cx| {
+            view.update(cx, |this, _| {
+                let terminal = this
+                    .connection_mut(1)
+                    .unwrap()
+                    .model
+                    .terminals
+                    .get_mut(&pane_id)
+                    .unwrap();
+                std::sync::Arc::make_mut(&mut terminal.view).size = TerminalSize::new(8, 50);
+                this.pending_sizes
+                    .insert((1, pane_id), PendingSize::sent_at(measured, sent));
+            });
+        });
+    };
+    let sent = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .pending_sizes
+                .get(&(1, pane_id))
+                .map(PendingSize::sent)
+        })
+    };
+    let panel = window.read(|app| view.read(app).panels.get(&(1, pane_id)).cloned().unwrap());
+    let notified = Rc::new(std::cell::Cell::new(0));
+    let _observer = window.update(|_, cx| {
+        let notified = notified.clone();
+        cx.observe(&panel, move |_, _| notified.set(notified.get() + 1))
+    });
+    let retry = |window: &mut VisualTestContext| {
+        let before = notified.get();
+        window
+            .update(|window, cx| view.update(cx, |this, cx| this.retry_dropped_sizes(window, cx)));
+        window.run_until_parked();
+        notified.get() > before
+    };
+
+    // A size sent within the heartbeat still stands: nothing is retried.
+    set_aside(window, Instant::now());
+    assert!(!retry(window), "a size sent this heartbeat is not retried");
+
+    // In the background the window sends nothing again, on a retry or a repaint.
+    window.deactivate_window();
+    window.run_until_parked();
+    set_aside(window, stale);
+    assert!(!retry(window), "a background window does not retry");
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    // A frame may confirm the size meanwhile; it must not have been sent anew.
+    assert!(
+        sent(window).is_none_or(|sent| sent == stale),
+        "a background window must not resend"
+    );
+
+    // Active again, the heartbeat's retry repaints the Panel and it sends anew.
+    window.update(|window, _| window.activate_window());
+    window.run_until_parked();
+    set_aside(window, stale);
+    assert!(
+        retry(window),
+        "an active window retries a size dropped for a heartbeat"
+    );
+    window.update(|window, cx| _ = window.draw(cx));
+    window.run_until_parked();
+    assert!(
+        sent(window).is_none_or(|sent| sent > stale),
+        "the repainted Panel sends its size again"
     );
 }
 

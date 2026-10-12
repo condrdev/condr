@@ -130,6 +130,7 @@ impl Condr {
             window,
             cx,
         );
+        self.reclaim_terminal_sizing(key, pane_id, cx);
         cx.notify();
         true
     }

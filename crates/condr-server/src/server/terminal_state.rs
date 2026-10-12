@@ -88,7 +88,9 @@ impl RuntimeState {
 
     /// Records a Client's focus report and says whether the Pane should hear it. Focus
     /// moves to whoever reports it last; a Client that no longer holds the Pane's focus
-    /// cannot take it from the one that does.
+    /// cannot take it from the one that does. The Client holding the sizing gives it up
+    /// by looking away (ADR 0041): until someone reports focus again, any Client's
+    /// `Resize` applies, so a phone that went back to its list blocks no desktop window.
     pub(super) fn record_terminal_focus(
         &mut self,
         pane_id: PaneId,
@@ -106,11 +108,16 @@ impl RuntimeState {
             self.sizing_client = Some(client_id);
             self.clear_terminal_attention(pane_id);
             true
-        } else if self.focused_terminal == Some((pane_id, client_id)) {
-            self.focused_terminal = None;
-            true
         } else {
-            false
+            if self.sizing_client == Some(client_id) {
+                self.sizing_client = None;
+            }
+            if self.focused_terminal == Some((pane_id, client_id)) {
+                self.focused_terminal = None;
+                true
+            } else {
+                false
+            }
         }
     }
 

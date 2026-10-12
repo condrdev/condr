@@ -124,7 +124,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_input::TerminalGeometry;
+use terminal_input::{PendingSize, TerminalGeometry};
 #[cfg(test)]
 use terminal_input::{
     TerminalClipboardShortcut, should_defer_to_character_input, terminal_clipboard_shortcut,
@@ -245,6 +245,7 @@ pub(crate) struct Condr {
     next_connection_key: ConnectionKey,
     connect_results_tx: async_channel::Sender<ConnectionResult>,
     _connect_results_task: Task<()>,
+    _size_retry_task: Task<()>,
     dock_surfaces: HashMap<DockSurfaceKey, DockSurface>,
     active_dock_surface: Option<DockSurfaceKey>,
     #[cfg(feature = "test-support")]
@@ -253,7 +254,7 @@ pub(crate) struct Condr {
     workspace_size: Size<Pixels>,
     focus_handle: FocusHandle,
     terminal_input: terminal_input::TerminalInputState,
-    pending_sizes: HashMap<(ConnectionKey, PaneId), TerminalSize>,
+    pending_sizes: HashMap<(ConnectionKey, PaneId), PendingSize>,
     terminal_geometry: HashMap<(ConnectionKey, PaneId), TerminalGeometry>,
     window_handle: AnyWindowHandle,
     appearance: Appearance,
@@ -432,6 +433,7 @@ impl Condr {
             next_connection_key,
             connect_results_tx,
             _connect_results_task: Task::ready(()),
+            _size_retry_task: Task::ready(()),
             dock_surfaces: HashMap::new(),
             active_dock_surface: None,
             #[cfg(feature = "test-support")]
@@ -519,6 +521,22 @@ impl Condr {
                 });
                 if let Err(error) = handled.and_then(|handled| handled) {
                     tracing::warn!("stopped taking connection results: {error:#}");
+                    break;
+                }
+            }
+        });
+
+        // Once a heartbeat an active window sends again the sizes another Client's
+        // sizing dropped, so a Pane a phone let go returns to it unclicked (ADR 0041).
+        this._size_retry_task = cx.spawn_in(window, async move |owner, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(condr_core::protocol::HEARTBEAT_INTERVAL)
+                    .await;
+                let retried = cx.update(|window, cx| {
+                    owner.update(cx, |this, cx| this.retry_dropped_sizes(window, cx))
+                });
+                if retried.and_then(|retried| retried).is_err() {
                     break;
                 }
             }

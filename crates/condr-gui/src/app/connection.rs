@@ -170,7 +170,7 @@ impl ClientIo {
 }
 
 pub(super) fn clear_pending_sizes_for_bootstrap(
-    pending_sizes: &mut HashMap<(ConnectionKey, PaneId), TerminalSize>,
+    pending_sizes: &mut HashMap<(ConnectionKey, PaneId), PendingSize>,
     key: ConnectionKey,
 ) {
     pending_sizes.retain(|(connection_key, _), _| *connection_key != key);

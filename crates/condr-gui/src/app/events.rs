@@ -387,7 +387,11 @@ impl Condr {
                         .view
                         .size;
                     let pending_key = (key, *pane_id);
-                    if self.pending_sizes.get(&pending_key) == Some(&terminal_size) {
+                    if self
+                        .pending_sizes
+                        .get(&pending_key)
+                        .is_some_and(|pending| pending.size == terminal_size)
+                    {
                         self.pending_sizes.remove(&pending_key);
                     }
                 }

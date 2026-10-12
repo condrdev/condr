@@ -181,6 +181,98 @@ fn focus_follows_the_last_client_and_ends_when_it_leaves() {
     thread.join().unwrap().unwrap();
 }
 
+#[test]
+fn the_sizing_holder_looking_away_lets_any_client_resize() {
+    let (handle, endpoint, thread) = start();
+    let mut stream = connect_and_bootstrap(&endpoint);
+    let mut observer = connect_and_bootstrap(&endpoint);
+    let server_id = handle.server_id();
+    let session_id = handle.state.lock().unwrap().session_id;
+    subscribe(&mut stream, session_id, 0);
+    subscribe(&mut observer, session_id, 0);
+
+    condr_core::protocol::write_message(
+        &mut stream,
+        &ClientMessage::Layout {
+            server_id,
+            session_id,
+            request_id: 1,
+            command: LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            },
+        },
+    )
+    .unwrap();
+    let message = wait_for_message(&mut stream, |message| {
+        matches!(
+            message,
+            ServerMessage::Event {
+                event: SessionEvent::LayoutChanged { .. },
+                ..
+            }
+        )
+    });
+    let ServerMessage::Event { sequence, .. } = message else {
+        unreachable!("predicate only accepts LayoutChanged events");
+    };
+    assert_layout_applied(&mut stream, server_id, session_id, 1, sequence);
+    let pane_id = handle.state.lock().unwrap().session.workspaces()[0].tabs()[0]
+        .focused_pane()
+        .unwrap()
+        .id();
+
+    // The phone's part: it focuses the Pane and sizes it, then goes back to its list.
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Focus(true),
+    );
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Resize(TerminalSize::new(8, 50)),
+    );
+    let mut views = std::collections::HashMap::new();
+    wait_for_terminal(&mut stream, &mut views, pane_id, |view| {
+        view.size.columns == 50
+    });
+    send_terminal(
+        &mut stream,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Focus(false),
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while handle.state.lock().unwrap().sizing_client.is_some() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(handle.state.lock().unwrap().sizing_client, None);
+
+    // A desktop window that never reported focus again still sizes the terminal.
+    send_terminal(
+        &mut observer,
+        server_id,
+        session_id,
+        pane_id,
+        TerminalCommand::Resize(TerminalSize::new(8, 140)),
+    );
+    let mut observer_views = std::collections::HashMap::new();
+    wait_for_terminal(&mut observer, &mut observer_views, pane_id, |view| {
+        view.size.columns == 140
+    });
+
+    handle.stop();
+    drop(stream);
+    drop(observer);
+    thread.join().unwrap().unwrap();
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn the_focused_client_sizes_and_leaving_releases_its_mouse_before_its_focus() {

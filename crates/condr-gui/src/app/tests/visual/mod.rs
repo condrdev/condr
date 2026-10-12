@@ -22,7 +22,7 @@ use super::super::{
 use crate::app::config;
 use crate::app::gui_state;
 use crate::app::open_in::{OpenTarget, OpenTargetIcon};
-use crate::app::terminal_input::LocalTerminalSelection;
+use crate::app::terminal_input::{LocalTerminalSelection, PendingSize};
 use crate::terminal_element::{TerminalElement, TerminalElementProps, TerminalRenderCache};
 use condr_core::SplitDirection;
 use condr_core::protocol::{

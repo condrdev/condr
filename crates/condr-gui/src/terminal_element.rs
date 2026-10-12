@@ -167,12 +167,14 @@ impl Element for TerminalElement {
         let view = self.view.clone();
         let connection_key = self.props.connection_key;
         let pane_id = self.props.pane_id;
+        let active = window.is_window_active();
         if !view.read(cx).terminal_layout_is_current(
             connection_key,
             pane_id,
             bounds,
             cell_size,
             terminal_size,
+            active,
         ) {
             window.defer(cx, move |window, cx| {
                 view.update(cx, |view, cx| {
@@ -183,7 +185,7 @@ impl Element for TerminalElement {
                         cell_size,
                         window,
                     );
-                    view.resize_terminal(connection_key, pane_id, terminal_size, cx);
+                    view.resize_terminal(connection_key, pane_id, terminal_size, active, cx);
                 });
             });
         }

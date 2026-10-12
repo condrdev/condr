@@ -321,16 +321,16 @@ fn ordinary_runtime_bootstrap_keeps_subscription_baseline_and_attention() {
 fn authoritative_bootstrap_releases_pending_resize_for_retry() {
     let pane_id = pane_id();
     let mut pending_sizes = std::collections::HashMap::from([
-        ((1, pane_id), TerminalSize::new(40, 100)),
-        ((2, pane_id), TerminalSize::new(20, 80)),
+        ((1, pane_id), PendingSize::new(TerminalSize::new(40, 100))),
+        ((2, pane_id), PendingSize::new(TerminalSize::new(20, 80))),
     ]);
 
     clear_pending_sizes_for_bootstrap(&mut pending_sizes, 1);
 
     assert!(!pending_sizes.contains_key(&(1, pane_id)));
     assert_eq!(
-        pending_sizes.get(&(2, pane_id)),
-        Some(&TerminalSize::new(20, 80))
+        pending_sizes.get(&(2, pane_id)).map(|pending| pending.size),
+        Some(TerminalSize::new(20, 80))
     );
 }
 

@@ -8,8 +8,8 @@ mod visual;
 
 use super::ClientTerminal;
 use super::terminal_input::{
-    clipboard_image_format, is_image_paste_gesture, next_hovered_link, prepare_clipboard_image,
-    terminal_key_for,
+    PendingSize, clipboard_image_format, is_image_paste_gesture, next_hovered_link,
+    prepare_clipboard_image, terminal_key_for,
 };
 use super::{
     ActivateTab, BELL_SIDEBAR_STATUS, ClientIo, ClosePane, CondrAssets, ConnectionStatus,

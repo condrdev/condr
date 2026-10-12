@@ -201,7 +201,6 @@ fn wait_for_terminal_text(
     })
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn wait_for_terminal(
     stream: &mut EndpointStream,
     views: &mut std::collections::HashMap<PaneId, condr_core::TerminalView>,
@@ -232,7 +231,6 @@ fn wait_for_terminal(
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn wait_for_message(
     stream: &mut EndpointStream,
     predicate: impl Fn(&ServerMessage) -> bool,
