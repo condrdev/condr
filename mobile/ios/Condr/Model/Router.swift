@@ -10,6 +10,7 @@ enum DeviceRoute: Hashable {
 }
 
 enum SettingsRoute: Hashable {
+    case phoneName
     case lostPhone
 }
 

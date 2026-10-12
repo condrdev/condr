@@ -14,25 +14,29 @@ struct SettingsView: View {
         NavigationStack(path: $router.settingsPath) {
             Form {
                 Section {
-                    HStack(spacing: 14) {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(.fill.tertiary)
-                            .overlay {
-                                Image(systemName: "iphone")
-                                    .font(.system(size: 26, weight: .light))
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                            .frame(width: 52, height: 52)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(preferences.phoneName)
-                                .font(.headline)
-                            Text("Paired with ^[\(session.devices.count) computer](inflect: true)")
+                    NavigationLink(value: SettingsRoute.phoneName) {
+                        HStack(spacing: 14) {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(.fill.tertiary)
+                                .overlay {
+                                    Image(systemName: "iphone")
+                                        .font(.system(size: 26, weight: .light))
+                                        .symbolRenderingMode(.hierarchical)
+                                }
+                                .frame(width: 52, height: 52)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preferences.phoneName)
+                                    .font(.headline)
+                                Text(
+                                    "Paired with ^[\(session.devices.count) computer](inflect: true)"
+                                )
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
 
                 Section("Terminal") {
@@ -104,6 +108,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationDestination(for: SettingsRoute.self) { route in
                 switch route {
+                case .phoneName: PhoneName()
                 case .lostPhone: LostPhone()
                 }
             }
@@ -150,6 +155,47 @@ extension Bundle {
         let version = infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = infoDictionary?["CFBundleVersion"] as? String ?? "?"
         return "\(version) (\(build))"
+    }
+}
+
+/// This phone's name, as each computer's Paired devices lists it (ADR 0040).
+struct PhoneName: View {
+    @Environment(Preferences.self) private var preferences
+    @Environment(Session.self) private var session
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Form {
+            HStack {
+                TextField("Name", text: $draft)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .onSubmit { dismiss() }
+                if !draft.isEmpty {
+                    Button("Clear", systemImage: "xmark.circle.fill") { draft = "" }
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.tertiary)
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("Name")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            draft = preferences.phoneName
+            focused = true
+        }
+        // As the system's own name field does, leaving keeps what was typed.
+        .onDisappear(perform: save)
+    }
+
+    private func save() {
+        let name = draft.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != preferences.phoneName else { return }
+        preferences.phoneName = name
+        Task { await session.rename(name) }
     }
 }
 

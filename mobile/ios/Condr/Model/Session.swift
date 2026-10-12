@@ -139,6 +139,14 @@ final class Session {
         client.networkChanged()
     }
 
+    /// The phone's new name (ADR 0040). A Server takes the name each `Hello` carries, so
+    /// every connection is made again now and each computer lists the phone by it at once.
+    func rename(_ name: String) async {
+        client.setName(name: name)
+        await suspend()
+        resume()
+    }
+
     // MARK: Devices
 
     /// Pairs with the Device an Invite link names (ADR 0040), as the phone named

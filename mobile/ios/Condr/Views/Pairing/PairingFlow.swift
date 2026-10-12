@@ -3,8 +3,8 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 /// Pairing with a computer (ADR 0040): the computer shows an Invite as a code, the phone
-/// scans it or takes it pasted, names itself, explains the Local Network prompt before iOS
-/// shows it, and connects. On first launch a welcome comes first.
+/// scans it or takes it pasted, names itself the first time, and connects. On first launch
+/// a welcome comes first.
 struct PairingFlow: View {
     enum Step: String, Hashable { case code, scan, name, connecting }
 
@@ -86,10 +86,15 @@ struct PairingFlow: View {
         InviteStep(scan: { path.append(.scan) }, pasted: take)
     }
 
-    /// An Invite link, scanned or pasted, moves the flow on to naming.
+    /// An Invite link, scanned or pasted, moves the flow on to naming the phone, or
+    /// straight to pairing once it has a name.
     private func take(_ link: String) {
         self.link = link
-        if path.last != .name { path.append(.name) }
+        if preferences.named {
+            connect()
+        } else if path.last != .name {
+            path.append(.name)
+        }
     }
 }
 

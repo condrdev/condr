@@ -130,6 +130,14 @@ struct SessionTests {
         #expect(client.state.withLock { $0.pairs.map(\.1) } == [nil])
     }
 
+    @Test func aRenameReachesEveryComputerAtOnce() async {
+        let client = FakeClient()
+        let (session, _, _, _) = Fixture.session(client)
+        await session.rename("Rocky's iPhone")
+        #expect(client.state.withLock { $0.names } == ["Rocky's iPhone"])
+        #expect(client.state.withLock { $0.lifecycle } == ["suspend", "resume"])
+    }
+
     @Test func aBadLinkIsRefusedInTheLibrarysWords() async {
         let client = FakeClient()
         let (session, _, _, store) = Fixture.session(client)

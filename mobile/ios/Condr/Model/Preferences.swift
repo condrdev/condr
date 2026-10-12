@@ -15,6 +15,8 @@ final class Preferences {
     var phoneName: String {
         didSet { defaults.set(phoneName, forKey: Keys.phoneName) }
     }
+    /// Whether the phone has a name of its own yet: only the first pairing asks for one.
+    var named: Bool { defaults.string(forKey: Keys.phoneName) != nil }
 
     private let defaults: UserDefaults
 
