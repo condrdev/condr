@@ -35,14 +35,13 @@ final class LivePairingUITests: XCTestCase {
         XCTAssertTrue(pasted.contains("@"), "the link is in the field: \(pasted)")
         app.buttons["Continue"].tap()
 
+        // Only the first pairing names the phone.
         let name = app.textFields["Name"]
-        XCTAssertTrue(name.waitForExistence(timeout: 5))
-        if app.buttons["Clear"].exists { app.buttons["Clear"].tap() }
-        name.typeText("Live Test iPhone")
-        app.buttons["Continue"].tap()
-        XCTAssertTrue(
-            app.staticTexts["Connect directly on your Wi-Fi"].waitForExistence(timeout: 5))
-        app.buttons["Continue"].tap()
+        if name.waitForExistence(timeout: 5) {
+            if app.buttons["Clear"].exists { app.buttons["Clear"].tap() }
+            name.typeText("Live Test iPhone")
+            app.buttons["Continue"].tap()
+        }
 
         let paired = app.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH %@", "Paired with")

@@ -6,7 +6,7 @@ import SwiftUI
 /// scans it or takes it pasted, names itself, explains the Local Network prompt before iOS
 /// shows it, and connects. On first launch a welcome comes first.
 struct PairingFlow: View {
-    enum Step: String, Hashable { case code, scan, name, network, connecting }
+    enum Step: String, Hashable { case code, scan, name, connecting }
 
     var firstLaunch: Bool
     /// The flow ended: paired, or cancelled when it was a sheet.
@@ -23,14 +23,13 @@ struct PairingFlow: View {
         self.firstLaunch = firstLaunch
         self.finished = finished
         // A demo scene opens the flow on one of its steps.
-        let order: [Step] = [.code, .scan, .name, .network, .connecting]
+        let order: [Step] = [.code, .scan, .name, .connecting]
         let start: Int? =
             switch DemoScene.launched {
             case .pair: 0
             case .scan: 1
             case .name: 2
-            case .network: 3
-            case .connecting, .paired: 4
+            case .connecting, .paired: 3
             default: nil
             }
         _path = State(initialValue: start.map { Array(order[(firstLaunch ? 0 : 1)...$0]) } ?? [])
@@ -55,8 +54,7 @@ struct PairingFlow: View {
                 switch step {
                 case .code: inviteStep
                 case .scan: ScanStep(found: take)
-                case .name: NameStep(name: $name) { path.append(.network) }
-                case .network: NetworkStep(next: connect)
+                case .name: NameStep(name: $name, next: connect)
                 case .connecting:
                     // Through the binding: this closure can run with the flow's state from
                     // before `connect()`, and `pairing` read here would still be nil.
@@ -330,6 +328,10 @@ struct InviteStep: View {
                 pasting = false
                 pasted(link)
             }
+        }
+        // Pairing starts here: iOS's Local Network prompt now, not on the pairing dial.
+        .onAppear {
+            if DemoScene.launched == nil { LocalNetwork.ask() }
         }
     }
 
@@ -708,37 +710,7 @@ struct StepFooter<Primary: View, Secondary: View>: View {
     }
 }
 
-// MARK: - Local network
-
-/// The one screen before iOS's Local Network prompt, which can't be asked twice (ADR 0040).
-/// iOS asks when the library first reaches the local network, which pairing does next.
-struct NetworkStep: View {
-    let next: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            StepTitle(
-                "Connect directly on your Wi-Fi",
-                "When this iPhone and your computer share a network, Condr connects straight to it: faster, and without the relay. iOS asks you to allow this next."
-            )
-            Spacer(minLength: 12)
-            Nearby()
-                .frame(maxWidth: .infinity)
-            Spacer(minLength: 12)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 8)
-        .safeAreaBar(edge: .bottom) {
-            StepFooter {
-                PrimaryButton("Continue", action: next)
-            } secondary: {
-                Text("Without it, Condr still connects, through the relay.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
+// MARK: - Nearby
 
 /// The phone and the computer on one network: Wi-Fi rings spreading between them.
 struct Nearby: View {

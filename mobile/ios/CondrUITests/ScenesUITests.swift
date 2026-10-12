@@ -32,10 +32,6 @@ final class ScenesUITests: XCTestCase {
         assertLandmark("name") { $0.staticTexts["Name this iPhone"] }
     }
 
-    @MainActor func testTheNetworkStepComesBeforeThePrompt() {
-        assertLandmark("network") { $0.staticTexts["Connect directly on your Wi-Fi"] }
-    }
-
     @MainActor func testPairedShowsTheComputer() {
         assertLandmark("paired") { $0.staticTexts["Paired with macmini"] }
     }

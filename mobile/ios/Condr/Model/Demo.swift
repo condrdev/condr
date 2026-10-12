@@ -5,7 +5,7 @@ import Synchronization
 /// What `-scene <name>` opens, for design review and the UI tests: a world that holds
 /// still, drawn by the same views as the real one.
 nonisolated enum DemoScene: String {
-    case welcome, pair, scan, name, network, connecting, paired
+    case welcome, pair, scan, name, connecting, paired
     case lock, devices, device, offline, settings, empty, banner, error, computer
     case terminal, question, codex, shell
     case terminalError = "terminal-error"
@@ -20,7 +20,7 @@ nonisolated enum DemoScene: String {
     /// The pairing scenes start with no Device.
     var unpaired: Bool {
         switch self {
-        case .welcome, .pair, .scan, .name, .network, .connecting, .paired: true
+        case .welcome, .pair, .scan, .name, .connecting, .paired: true
         default: false
         }
     }

@@ -60,7 +60,7 @@ TEST_RUNNER_CONDR_INVITE='tcp://…@127.0.0.1:7418' TEST_RUNNER_CONDR_DEVICE_NAM
 
 ### 演示场景
 
-`-scene <name>` 启动参数让 App 跑在一个静止的演示世界上，供设计评审与 UI 测试：`welcome` `pair` `scan` `name` `network` `connecting` `paired` `lock` `devices` `device` `offline` `terminal` `terminal-error` `question` `codex` `shell` `settings` `empty` `banner` `error` `computer`，以及一台电脑跑 15 个 Agent 的 `crowd` `crowd-device` 和五台电脑的 `many`。`-focus YES` 打开终端后聚焦回复框，`-offset <pt>` 让首页一开始就滚过一段，`-scrub "<设备序号>:<条序号>"` 定住一次 Score 的滑动。
+`-scene <name>` 启动参数让 App 跑在一个静止的演示世界上，供设计评审与 UI 测试：`welcome` `pair` `scan` `name` `connecting` `paired` `lock` `devices` `device` `offline` `terminal` `terminal-error` `question` `codex` `shell` `settings` `empty` `banner` `error` `computer`，以及一台电脑跑 15 个 Agent 的 `crowd` `crowd-device` 和五台电脑的 `many`。`-focus YES` 打开终端后聚焦回复框，`-offset <pt>` 让首页一开始就滚过一段，`-scrub "<设备序号>:<条序号>"` 定住一次 Score 的滑动。
 
 ### 真机
 
