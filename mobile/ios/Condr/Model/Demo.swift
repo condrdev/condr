@@ -344,14 +344,13 @@ nonisolated final class DemoClient: CompanionProtocol {
     private struct State {
         var devices: [DeviceView]
         var workspaces: [String: [WorkspaceView]]
-        var shown: PaneRef?
     }
 
     private let state: Mutex<State>
 
     init(scene: DemoScene) {
         let world = DemoWorld.world(for: scene)
-        state = Mutex(State(devices: world.devices, workspaces: world.workspaces, shown: nil))
+        state = Mutex(State(devices: world.devices, workspaces: world.workspaces))
     }
 
     func close() {}
@@ -410,21 +409,15 @@ nonisolated final class DemoClient: CompanionProtocol {
         state.withLock { state in
             state.devices.removeAll { $0.address == address }
             state.workspaces[address] = nil
-            if state.shown?.address == address { state.shown = nil }
         }
     }
 
+    /// Like the library, whatever screen the Pane has, asked before or after it is shown.
     func terminal(address: String, pane: UInt64) -> TerminalScreen? {
-        state.withLock { state in
-            state.shown == PaneRef(address: address, pane: pane) ? DemoScreens.screen(pane) : nil
-        }
+        DemoScreens.screen(pane)
     }
 
-    func showPane(address: String?, pane: UInt64, rows: UInt16, columns: UInt16) {
-        state.withLock { state in
-            state.shown = address.map { PaneRef(address: $0, pane: pane) }
-        }
-    }
+    func showPane(address: String?, pane: UInt64, rows: UInt16, columns: UInt16) {}
 
     func sendText(address: String, pane: UInt64, text: String) {}
     func sendKey(address: String, pane: UInt64, key: Key, control: Bool) {}

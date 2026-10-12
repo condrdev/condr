@@ -17,10 +17,6 @@ struct DevicesView: View {
                             DeviceRow(device: device)
                         }
                     }
-                } footer: {
-                    Text(
-                        "This iPhone connects while Condr is open. In the background, your computers keep working."
-                    )
                 }
                 Section {
                     Button {
@@ -132,26 +128,26 @@ struct DeviceScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Section(address) {
-                            Button(
-                                "Forget \(device.label)", systemImage: "trash", role: .destructive
-                            ) {
-                                forgetting = true
-                            }
+                        Button("Forget \(device.label)", systemImage: "trash", role: .destructive) {
+                            forgetting = true
                         }
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                    // iOS 26 grows the dialog out of the view it hangs on: the button that asked.
+                    .confirmationDialog(
+                        "Forget \(device.label)?", isPresented: $forgetting,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Forget \(device.label)", role: .destructive) {
+                            session.forget(address)
+                        }
+                    } message: {
+                        Text(
+                            "This iPhone stops connecting to it. To revoke this iPhone as well, remove it under Paired devices in Condr's Settings on \(device.label)."
+                        )
+                    }
                 }
-            }
-            .confirmationDialog(
-                "Forget \(device.label)?", isPresented: $forgetting, titleVisibility: .visible
-            ) {
-                Button("Forget \(device.label)", role: .destructive) { session.forget(address) }
-            } message: {
-                Text(
-                    "This iPhone stops connecting to it. To revoke this iPhone as well, remove it under Paired devices in Condr's Settings on \(device.label)."
-                )
             }
         } else {
             // Forgotten while this screen was up: the stack is about to drop it.
@@ -197,14 +193,9 @@ struct DeviceScreen: View {
                 } header: {
                     HStack(spacing: 9) {
                         WorkspaceAvatar(name: workspace.name, side: 22)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(workspace.name)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(workspace.root)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                        }
+                        Text(workspace.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
                     }
                     .textCase(nil)
                     .padding(.bottom, 4)

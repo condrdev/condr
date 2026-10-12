@@ -33,23 +33,6 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    LabeledContent("Key") {
-                        // The whole key, as the computer's Paired devices shows it, cut in the middle to fit.
-                        Text(session.fingerprint)
-                            .font(.callout.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .contextMenu {
-                        Button("Copy Key", systemImage: "doc.on.doc") {
-                            UIPasteboard.general.string = session.fingerprint
-                        }
-                    }
-                } footer: {
-                    Text(
-                        "Your computers list this iPhone under Paired devices by this key. Its private half never leaves this iPhone."
-                    )
                 }
 
                 Section("Terminal") {
@@ -79,6 +62,19 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("App Lock", value: lock.available ? "On" : "Off")
+                    LabeledContent("Key") {
+                        // The whole key, as the computer's Paired devices shows it, cut in the middle to fit.
+                        Text(session.fingerprint)
+                            .font(.callout.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .contextMenu {
+                        Button("Copy Key", systemImage: "doc.on.doc") {
+                            UIPasteboard.general.string = session.fingerprint
+                        }
+                    }
                     NavigationLink("If You Lose This iPhone", value: SettingsRoute.lostPhone)
                 } header: {
                     Text("Security")

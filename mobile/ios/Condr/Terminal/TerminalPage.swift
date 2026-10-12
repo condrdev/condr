@@ -21,8 +21,6 @@ struct TerminalPage: View {
     @State private var text = ""
     @State private var control = false
     @State private var baseSize: Double?
-    @State private var hud: String?
-    @State private var hudTask: Task<Void, Never>?
     @State private var keyTick = 0
     @FocusState private var focused: Bool
 
@@ -60,7 +58,6 @@ struct TerminalPage: View {
                 guard !Task.isCancelled else { return }
                 session.show(
                     ref, rows: UInt16(clamping: grid.rows), columns: UInt16(clamping: grid.columns))
-                flash("\(grid.columns) × \(grid.rows)")
             }
             .onAppear {
                 session.show(ref, rows: 0, columns: 0)
@@ -87,37 +84,19 @@ struct TerminalPage: View {
                     Text(pane.name)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                    Group {
-                        if let hud {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.left.and.right")
-                                    .font(.system(size: 8, weight: .bold))
-                                Text("Fitted to this iPhone · \(hud)")
-                                    .monospacedDigit()
+                    HStack(spacing: 5) {
+                        if let agent = pane.agent {
+                            StatusGlyph(status: agent.status, size: 6, ripple: true)
+                            if agent.status == .blocked {
+                                Text(agent.status.title).fontWeight(.semibold)
+                                    .foregroundStyle(AgentStatus.blocked.tint)
+                            } else {
+                                Text(agent.status.title)
                             }
-                            .accessibilityLabel(
-                                "\(device.label)'s terminal fitted to this iPhone, \(hud)"
-                            )
-                            .transition(.push(from: .bottom))
-                        } else {
-                            HStack(spacing: 5) {
-                                if let agent = pane.agent {
-                                    StatusGlyph(status: agent.status, size: 6, ripple: true)
-                                    if agent.status == .blocked {
-                                        Text(agent.status.title).fontWeight(.semibold)
-                                            .foregroundStyle(AgentStatus.blocked.tint)
-                                    } else {
-                                        Text(agent.status.title)
-                                    }
-                                    Text("·").foregroundStyle(.tertiary)
-                                }
-                                Text(place(workspace.name, device.label))
-                            }
-                            .transition(.push(from: .bottom))
+                            Text("·").foregroundStyle(.tertiary)
                         }
+                        Text(place(workspace.name, device.label))
                     }
-                    // The outgoing line slides out of its own row, never over the title.
-                    .clipped()
                     .foregroundStyle(.secondary)
                     .font(.caption2.weight(.medium))
                     .lineLimit(1)
@@ -132,11 +111,6 @@ struct TerminalPage: View {
                         Button("Smaller", systemImage: "textformat.size.smaller") { resize(by: -1) }
                         Button("Larger", systemImage: "textformat.size.larger") { resize(by: 1) }
                     }
-                }
-                Section {
-                    Label(
-                        "\(device.label) fits its terminals to this iPhone while you're here",
-                        systemImage: "arrow.left.and.right")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -175,16 +149,6 @@ struct TerminalPage: View {
                 }
             }
             .transition(.opacity)
-        }
-    }
-
-    private func flash(_ size: String) {
-        withAnimation(.smooth) { hud = size }
-        hudTask?.cancel()
-        hudTask = Task {
-            try? await Task.sleep(for: .seconds(1.8))
-            guard !Task.isCancelled else { return }
-            withAnimation(.smooth) { hud = nil }
         }
     }
 

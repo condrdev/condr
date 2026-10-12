@@ -151,13 +151,11 @@ struct Welcome: View {
                 .tint(.paper)
                 .controlSize(.large)
             } secondary: {
-                Text("Condr must be running on your computer.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.paper.opacity(0.45))
             }
             .opacity(stage >= 3 ? 1 : 0)
         }
-        .background(Color.ink.ignoresSafeArea())
+        // Black like the steps after it in dark mode, so the cover hands over without a seam.
+        .background(Color.black.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
         .toolbarVisibility(.hidden, for: .navigationBar)
         .task {
@@ -299,10 +297,7 @@ struct InviteStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                StepTitle(
-                    "Show the pairing code on your computer",
-                    "The code works once, for ten minutes, and pairs this iPhone with that computer only."
-                )
+                StepTitle("Show the pairing code on your computer")
                 InviteIllustration()
                     .padding(.horizontal, 4)
                 VStack(alignment: .leading, spacing: 16) {
@@ -348,9 +343,9 @@ struct InviteStep: View {
 
 struct StepTitle: View {
     let title: LocalizedStringResource
-    let detail: LocalizedStringResource
+    let detail: LocalizedStringResource?
 
-    init(_ title: LocalizedStringResource, _ detail: LocalizedStringResource) {
+    init(_ title: LocalizedStringResource, _ detail: LocalizedStringResource? = nil) {
         self.title = title
         self.detail = detail
     }
@@ -361,10 +356,12 @@ struct StepTitle: View {
                 .font(.largeTitle.bold())
                 .tracking(-0.4)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(detail)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let detail {
+                Text(detail)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -937,11 +934,6 @@ struct ConnectingStep: View {
                 StepFooter {
                     PrimaryButton(firstLaunch ? "Show My Agents" : "Done", action: finish)
                 } secondary: {
-                    if firstLaunch {
-                        Text("Condr asks to unlock when it opens.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             case .failed:

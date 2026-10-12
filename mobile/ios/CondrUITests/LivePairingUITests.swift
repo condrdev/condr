@@ -78,10 +78,6 @@ final class LivePairingUITests: XCTestCase {
         // The keyboard changes the grid, and the page says so for a moment.
         let input = app.textFields.firstMatch
         input.tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)
-                .matching(NSPredicate(format: "label CONTAINS[c] %@", "fitted to this iPhone"))
-                .firstMatch.waitForExistence(timeout: 10), "the phone sized the Pane")
         // What the shell sees of the phone's grid, then a word to find.
         input.typeText("tput cols")
         app.buttons["sendReply"].tap()
