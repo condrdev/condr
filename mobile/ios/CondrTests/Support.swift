@@ -44,13 +44,17 @@ nonisolated final class FakeClient: CompanionProtocol {
     func suspend() { state.withLock { $0.lifecycle.append("suspend") } }
     func networkChanged() { state.withLock { $0.lifecycle.append("network") } }
     func takeChanges() -> [Change] {
-        state.withLock {
-            defer { $0.changes = [] }; return $0.changes
+        state.withLock { state in
+            let taken = state.changes
+            state.changes = []
+            return taken
         }
     }
     func takeEvents() -> [Event] {
-        state.withLock {
-            defer { $0.events = [] }; return $0.events
+        state.withLock { state in
+            let taken = state.events
+            state.events = []
+            return taken
         }
     }
     func devices() -> [DeviceView] { state.withLock { $0.devices } }
