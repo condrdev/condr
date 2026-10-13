@@ -18,8 +18,10 @@ pub(super) fn port_text_is_plausible(text: &str) -> bool {
 impl Condr {
     /// Shows a failure the user did not cause inside a dialog: a red toast on the main
     /// window that stays until dismissed, with a Copy button so the text can be pasted
-    /// into an issue. Deferred because the Window is unreachable during its own update.
+    /// into an issue. The same failure again replaces its toast instead of stacking a
+    /// new one. Deferred because the Window is unreachable during its own update.
     pub(super) fn report_error(&mut self, message: impl Into<String>, cx: &mut App) {
+        struct ErrorToast;
         let message = message.into();
         self.last_error = Some(message.clone());
         let message: SharedString = message.into();
@@ -27,16 +29,18 @@ impl Condr {
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 let copied = message.clone();
-                let note = Notification::error(message.clone()).action(move |_, _, _| {
-                    let text = copied.clone();
-                    Button::new("copy-error")
-                        .label("Copy")
-                        .small()
-                        .ghost()
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-                        })
-                });
+                let note = Notification::error(message.clone())
+                    .id1::<ErrorToast>(message.clone())
+                    .action(move |_, _, _| {
+                        let text = copied.clone();
+                        Button::new("copy-error")
+                            .label("Copy")
+                            .small()
+                            .ghost()
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                            })
+                    });
                 window.push_notification(note, cx);
             });
         });

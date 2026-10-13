@@ -400,7 +400,13 @@ impl TerminalRuntime {
                 Ok(None)
             }
             TerminalCommand::Mouse(event) => {
-                self.handle_mouse(event)?;
+                let lossy = !matches!(event, TerminalMouseEvent::Button { .. });
+                match self.handle_mouse(event) {
+                    // Motion and wheel reports are a stream the next one supersedes: a
+                    // program too busy to read them loses them, as in any terminal.
+                    Err(error) if lossy && error.kind() == io::ErrorKind::WouldBlock => {}
+                    result => result?,
+                }
                 Ok(None)
             }
             TerminalCommand::Focus(focused) => {

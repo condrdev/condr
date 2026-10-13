@@ -564,6 +564,52 @@ fn closing_one_pty_session_does_not_signal_another() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn backpressure_drops_mouse_motion_and_wheel_but_not_clicks() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        "stty raw -echo; printf 'motion-ready\\r\\n\\033[?1003h\\033[?1006h'; sleep 30",
+    ]);
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(5, 40)).unwrap();
+    wait_for_text(&runtime, "motion-ready");
+    assert_eq!(runtime.view().mouse_tracking, TerminalMouseTracking::Motion);
+    loop {
+        match runtime.write(vec![b'x'; 1024 * 1024]) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("unexpected terminal input failure: {error}"),
+        }
+    }
+
+    let position = TerminalMousePosition { row: 1, column: 1 };
+    let modifiers = TerminalModifiers::default();
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Motion {
+            button: None,
+            position,
+            modifiers,
+        }))
+        .unwrap();
+    runtime
+        .execute(TerminalCommand::Mouse(TerminalMouseEvent::Wheel {
+            direction: TerminalMouseWheel::Down,
+            amount: 1,
+            position,
+            modifiers,
+        }))
+        .unwrap();
+    let click = runtime.execute(TerminalCommand::Mouse(TerminalMouseEvent::Button {
+        button: TerminalMouseButton::Left,
+        pressed: true,
+        position,
+        modifiers,
+    }));
+    assert_eq!(click.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+    runtime.close().unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn close_cancels_a_blocked_terminal_writer() {
     let mut command = CommandBuilder::new("/bin/sh");
     command.args(["-c", "stty raw -echo; trap '' HUP; sleep 2"]);
