@@ -65,29 +65,28 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("App Lock", value: lock.available ? "On" : "Off")
-                    LabeledContent("Key") {
-                        // The whole key, as the computer's Paired devices shows it, cut in the middle to fit.
-                        Text(session.fingerprint)
-                            .font(.callout.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .contextMenu {
-                        Button("Copy Key", systemImage: "doc.on.doc") {
-                            UIPasteboard.general.string = session.fingerprint
+                    Toggle(
+                        "Lock with \(lock.method)",
+                        isOn: Binding(
+                            get: { lock.enabled && lock.available },
+                            set: { on in Task { await lock.setEnabled(on) } })
+                    )
+                    .disabled(!lock.available)
+                    // The start of the key is enough to tell this iPhone's row apart under a
+                    // computer's Paired devices, and for `condr server revoke` there.
+                    LabeledContent("Key", value: String(session.fingerprint.prefix(8)) + "…")
+                        .monospacedDigit()
+                        .contextMenu {
+                            Button("Copy Key", systemImage: "doc.on.doc") {
+                                UIPasteboard.general.string = session.fingerprint
+                            }
                         }
-                    }
+                        .accessibilityHint("Touch and hold to copy the whole key")
                     NavigationLink("If You Lose This iPhone", value: SettingsRoute.lostPhone)
                 } header: {
                     Text("Security")
                 } footer: {
-                    Text(
-                        lock.available
-                            ? "Condr asks for Face ID, Touch ID or your passcode when it opens and after five minutes away."
-                            : "Set a passcode on this iPhone and Condr locks when it opens and after five minutes away."
-                    )
+                    Text(lockFooter)
                 }
 
                 Section {
@@ -118,6 +117,16 @@ struct SettingsView: View {
                 screenWidth = $0
             }
         }
+    }
+
+    private var lockFooter: LocalizedStringResource {
+        if !lock.available {
+            return "Set a passcode on this iPhone to lock Condr."
+        }
+        if lock.enabled {
+            return "Condr asks for \(lock.method) when it opens and after five minutes away."
+        }
+        return "Anyone who can open this iPhone can open Condr and reach your computers."
     }
 
     /// Two lines of a terminal at the chosen size, and about how many columns the phone

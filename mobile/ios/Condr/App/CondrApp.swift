@@ -77,7 +77,8 @@ struct Stores {
         let session = Session(
             client: DemoClient(scene: scene), fingerprint: DemoWorld.fingerprint, saved: saved,
             alerts: alerts, router: router)
-        let lock = AppLock(authenticator: DemoAuthenticator(), paired: scene == .lock)
+        let lock = AppLock(
+            authenticator: DemoAuthenticator(), paired: scene == .lock, defaults: defaults)
         switch scene {
         case .devices: router.tab = .devices
         case .device:
@@ -121,8 +122,9 @@ struct Stores {
 /// A demo scene's lock opens on request, without the device's owner.
 struct DemoAuthenticator: Authenticator {
     var available: Bool { true }
+    var method: String { "Face ID" }
     var promptsOnAppear: Bool { false }
-    func authenticate() async -> Bool { true }
+    func authenticate(reason: String) async -> Bool { true }
 }
 
 /// The Keychain would not keep the Device key: nothing can be paired without it.

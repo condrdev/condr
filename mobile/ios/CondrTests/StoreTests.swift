@@ -30,11 +30,12 @@ struct AppLockTests {
         var available = true
         var promptsOnAppear = true
         var answer = true
-        func authenticate() async -> Bool { answer }
+        var method: String { "Face ID" }
+        func authenticate(reason: String) async -> Bool { answer }
     }
 
     @Test func aPairedPhoneStartsLockedAndTheOwnerOpensIt() async {
-        let lock = AppLock(authenticator: Owner(), paired: true)
+        let lock = AppLock(authenticator: Owner(), paired: true, defaults: Fixture.defaults())
         #expect(lock.locked)
         await lock.unlock()
         #expect(!lock.locked)
@@ -42,9 +43,11 @@ struct AppLockTests {
 
     @Test func fiveMinutesAwayLocksAgain() {
         var now = Date(timeIntervalSinceReferenceDate: 0)
-        let lock = AppLock(authenticator: Owner(), paired: true, now: { now })
+        let lock = AppLock(
+            authenticator: Owner(), paired: true, defaults: Fixture.defaults(), now: { now })
         lock.sceneBecameActive(paired: true)
-        let unlocked = AppLock(authenticator: Owner(), paired: false, now: { now })
+        let unlocked = AppLock(
+            authenticator: Owner(), paired: false, defaults: Fixture.defaults(), now: { now })
         #expect(!unlocked.locked)
 
         unlocked.sceneLeft()
@@ -60,14 +63,33 @@ struct AppLockTests {
     }
 
     @Test func withoutAPasscodeThereIsNoLock() {
-        let lock = AppLock(authenticator: Owner(available: false), paired: true)
+        let lock = AppLock(
+            authenticator: Owner(available: false), paired: true, defaults: Fixture.defaults())
         #expect(!lock.locked)
         lock.lock()
         #expect(!lock.locked)
     }
 
+    @Test func turningTheLockOffAsksTheOwnerAndLasts() async {
+        let defaults = Fixture.defaults()
+        let refused = AppLock(authenticator: Owner(answer: false), paired: true, defaults: defaults)
+        await refused.setEnabled(false)
+        #expect(refused.enabled, "a refused owner leaves the lock on")
+
+        let lock = AppLock(authenticator: Owner(), paired: true, defaults: defaults)
+        await lock.setEnabled(false)
+        #expect(!lock.enabled)
+        let next = AppLock(authenticator: Owner(), paired: true, defaults: defaults)
+        #expect(!next.locked, "a lock turned off does not lock the next start")
+        next.lock()
+        #expect(!next.locked, "nor later")
+        await next.setEnabled(true)
+        #expect(AppLock(authenticator: Owner(), paired: true, defaults: defaults).locked)
+    }
+
     @Test func aRefusedOwnerStaysLocked() async {
-        let lock = AppLock(authenticator: Owner(answer: false), paired: true)
+        let lock = AppLock(
+            authenticator: Owner(answer: false), paired: true, defaults: Fixture.defaults())
         await lock.unlock()
         #expect(lock.locked)
     }
