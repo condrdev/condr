@@ -322,7 +322,9 @@ pub fn load_device_key(directory: &Path) -> io::Result<DeviceKey> {
 /// (ADR 0040). A listener bound to one address is reached at that address. One bound to
 /// every address is reached at one of this machine's: the default route's first, then
 /// its `.local` name, which outlives the address a DHCP lease gives, then the rest, of
-/// the families the listener takes.
+/// the families the listener takes. An address in 198.18.0.0/15, the benchmarking range
+/// (RFC 2544) that proxies in TUN mode give their own interface and route through, is
+/// never offered: no other device reaches it.
 pub fn invite_hosts(listen: std::net::SocketAddr) -> Vec<String> {
     order_invite_hosts(
         listen.ip(),
@@ -342,7 +344,10 @@ fn order_invite_hosts(
         return vec![listen.to_string()];
     }
     // An IPv4 listener takes no IPv6 connection; `::` usually takes both.
-    let takes = |ip: &std::net::IpAddr| listen.is_ipv6() || ip.is_ipv4();
+    let takes = |ip: &std::net::IpAddr| {
+        (listen.is_ipv6() || ip.is_ipv4())
+            && !matches!(ip, std::net::IpAddr::V4(v4) if v4.octets()[0] == 198 && v4.octets()[1] & 0xfe == 18)
+    };
     let mut hosts: Vec<String> = Vec::new();
     let mut push = |host: String| {
         if !hosts.contains(&host) {

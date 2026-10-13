@@ -339,4 +339,14 @@ fn invite_hosts_put_the_likeliest_first_and_follow_the_listener() {
         ["100.64.1.5", "192.168.1.20", "2001:db8::7"],
         "a name no network resolves is not offered"
     );
+    assert_eq!(
+        order_invite_hosts(
+            ip("0.0.0.0"),
+            Some(ip("198.18.0.1")),
+            "desk.local",
+            &[ip("198.18.0.1"), ip("192.168.1.20")]
+        ),
+        ["desk.local", "192.168.1.20"],
+        "a proxy's TUN address is no way in, even on the default route"
+    );
 }
