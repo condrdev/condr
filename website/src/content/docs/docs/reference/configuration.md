@@ -21,20 +21,19 @@ The Settings window configures one Device at a time. Use the picker at the top t
 
 | Page | Applies to | Description |
 | :--- | :--- | :--- |
-| **General** | Device | **Status**: version, uptime, session metrics (Workspace and Pane counts) and recent errors. **Terminal**: default shell for new Panes (defaults to the system environment if left blank) |
+| **General** | Device | **Status**: version, uptime, session metrics (Workspace and Pane counts) and recent errors. **Terminal**: default shell for new Panes (defaults to the system environment if left blank). **Restart Condr** below them |
 | **Appearance** | This machine | Theme (follow system, light or dark), terminal fonts and colors, syntax highlighting and font sizes for Preview and Diff |
 | **Notifications** | This machine | System notification toggle and test notification button |
 | **Power** | This machine | Keep display awake (mirrors the coffee cup icon in the sidebar footer) |
 | **Shortcuts** | This machine | Keyboard shortcuts reference (read-only) |
 | **Network** | Device | Proxy settings for Peer-to-peer connections and update checks: **System**, **None** or **Manual** with a custom URL |
-| **Remote access** | Device | TCP listener toggle and address, Peer-to-peer toggle, and the **Restart Condr** button. Changes take effect after a restart; until then the button reads **Restart to apply** |
-| **Paired devices** | Device | Click **Generate invite** to create a one-time pairing link (both P2P and TCP formats), each with a QR code that Condr on a phone scans. The TCP link uses an address this computer offers; pick another or type one. Lists paired Devices with online ones first, with a **Revoke** button on each row to remove pairings |
+| **Paired devices** | Device | **Pair**: click **Show pairing code** for a one-time code that Condr on a phone scans, with **Copy link** for another computer; the code expires after 10 minutes and the card names the device once it pairs. With both Peer-to-peer and TCP on, choose which the code uses; the TCP code uses an address this computer offers, picked from the field's list or typed. **Devices**: paired Devices with online ones first, each with **Revoke**. **Connections**: the **Peer-to-peer** and **TCP** switches, TCP's listen address, and **Restart Condr** while a change waits for a restart |
 | **Agent integrations** | Device | View hook status for each Agent, with one-click options to install, update or remove them |
 | **Developer** | This machine | Frame rate display toggle and quick-access buttons for application, config, data, state and log directories |
 | **Licenses** | This machine | Open-source dependencies and license details |
 | **About** | This machine | Version details, update channel selection, manual update check and automatic check toggle |
 
-> **Access restriction**: when connected over TCP or P2P, settings that affect how other Devices connect to that Device (the proxy under `Network` and all options under `Remote access`, including **Restart Condr**) are disabled to prevent accidental disconnection. Hover over any disabled option to view details. Change them on the Device itself or over SSH. All other settings remain editable, including **Generate invite** and **Revoke** (for any Device except the one currently in use).
+> **Access restriction**: when connected over TCP or P2P, settings that affect how other Devices connect to that Device (the proxy under `Network` and everything under **Connections** on `Paired devices`, including **Restart Condr**) are disabled to prevent accidental disconnection. Hover over any disabled option to view details. Change them on the Device itself or over SSH. All other settings remain editable, including **Show pairing code** and **Remove** (for any Device except the one currently in use).
 
 ---
 
@@ -44,7 +43,7 @@ The GUI client, the background Server and the `condr` CLI share the `config.toml
 
 * **Writing**: Condr takes a file lock when writing the config to avoid concurrent writes, and keeps your comments and layout intact.
 * **When changes apply**:
-  * Changes made in the GUI apply immediately, except for network options on the `Remote access` page and the Peer-to-peer proxy.
+  * Changes made in the GUI apply immediately, except for the **Connections** options on the `Paired devices` page and the Peer-to-peer proxy.
   * After editing `[client]` or its sub-tables manually, restart the GUI window.
   * After editing `[server]` or its sub-tables manually, run `condr server restart` in a terminal.
   * After editing `[network]` manually, perform both steps.

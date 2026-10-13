@@ -21,20 +21,19 @@ Condr 采用分层配置架构：
 
 | 页面 | 作用于 | 说明 |
 | :--- | :--- | :--- |
-| **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境） |
+| **General** | 设备 | **Status**：版本、运行时间、会话指标（Workspace 和 Pane 数量）以及最近错误日志。**Terminal**：新 Pane 启动的默认 Shell（留空则继承系统环境）。最下方是 **Restart Condr** |
 | **Appearance** | 本机 | 外观主题（跟随系统、浅色、深色）、终端字体与配色，以及 Preview 和 Diff 的语法高亮与字号 |
 | **Notifications** | 本机 | 系统通知总开关及测试通知按钮 |
 | **Power** | 本机 | 保持屏幕常亮（与侧边栏底部的咖啡杯图标联动） |
 | **Shortcuts** | 本机 | 快捷键列表（只读） |
 | **Network** | 设备 | 该设备用于 Peer-to-peer 连接和检查更新的代理：**System**、**None**，或选择 **Manual** 并填写 URL |
-| **Remote access** | 设备 | TCP 监听开关与地址、Peer-to-peer 开关，以及重启 Server 的 **Restart Condr** 按钮。修改需要重启才能生效，修改后按钮会变为 **Restart to apply** |
-| **Paired devices** | 设备 | 点击 **Generate invite** 生成单次配对邀请（包含 P2P 和 TCP 两种链接），每种链接都附有二维码，可用手机上的 Condr 扫描。TCP 链接默认使用这台电脑提供的地址，也可以改选其他地址或自行输入。列表优先显示在线设备，点击每行的 **Revoke** 可解除配对 |
+| **Paired devices** | 设备 | **Pair**：点击 **Show pairing code** 显示一次性配对码，用手机上的 Condr 扫描；另一台电脑可点击 **Copy link** 复制链接。配对码 10 分钟后过期，设备配对成功后卡片会显示它的名字。同时开启 Peer-to-peer 和 TCP 时，可选择配对码使用哪一种；TCP 配对码使用这台电脑提供的地址，可从输入框的列表中选择，也可以自行输入。**Devices**：已配对设备，在线设备排在前面，每行都有 **Revoke**。**Connections**：**Peer-to-peer** 和 **TCP** 两个开关，以及 TCP 的监听地址；有修改等待重启时会出现 **Restart Condr** |
 | **Agent integrations** | 设备 | 查看各 Agent 的 Hook 状态，支持一键安装、更新或卸载 |
 | **Developer** | 本机 | 帧率监控开关，以及快速打开应用、配置、数据、状态和日志目录的按钮 |
 | **Licenses** | 本机 | 第三方开源依赖及开源协议 |
 | **About** | 本机 | 版本信息、更新通道选择、手动检查更新及自动检查开关 |
 
-> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`Network` 中的代理，以及 `Remote access` 中的所有项，包括 **Restart Condr**）会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **Generate invite**，以及对当前所用设备之外的任意设备执行 **Revoke**。
+> **权限限制**：通过 TCP 或 P2P 连接时，决定其他设备如何连入这台设备的设置（`Network` 中的代理，以及 `Paired devices` 页 **Connections** 中的所有项，包括 **Restart Condr**）会置灰禁用，以防止改动导致当前连接中断；悬停可查看说明。如需修改，请在该设备上操作或通过 SSH 连接修改。其余设置均可正常调整，包括 **Show pairing code**，以及对当前所用设备之外的任意设备执行 **Remove**。
 
 ---
 
@@ -44,7 +43,7 @@ GUI 客户端、后台 Server 与 `condr` CLI 共用位于配置目录下的 `co
 
 * **写入机制**：Condr 写入配置时使用文件锁规避并发竞争，并完整保留文件内的自定义注释与排版结构。
 * **生效规则**：
-  * 在图形界面修改的设置通常立即生效，但 `Remote access` 页面的网络设置和 Peer-to-peer 代理除外。
+  * 在图形界面修改的设置通常立即生效，但 `Paired devices` 页 **Connections** 中的设置和 Peer-to-peer 代理除外。
   * 手动编辑 `[client]` 及其子表后，重启 GUI 窗口生效。
   * 手动编辑 `[server]` 及其子表后，需在终端运行 `condr server restart` 重启 Server。
   * 手动编辑 `[network]` 后，上述两项操作均需执行。

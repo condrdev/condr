@@ -80,7 +80,7 @@ Condr's own server could not start on this device. Connect tries again.
 * **本机 Server 滞后于窗口**：完成 Condr 升级后，窗口客户端将弹出提示询问是否重启本机 Server。执行重启将销毁所有终端运行进程，随后重新载入当前的 Workspace 拓扑与 Agent 对话状态。
 * **协议底层不兼容**：连接将被远端阻断，连接面板呈现 `Condr there and here speak different protocol versions`，CLI 端同步抛出 `protocol_mismatch` 错误代码。该状态不可通过重试恢复，必须将两端程序版本升级至匹配状态。
 
-在两端均更新至匹配版本后，请转至目标设备并在外部终端执行 `condr server restart`，或在 GUI 的 **Settings** 顶部选中该设备、打开 **Remote access** 并点击 **Restart Condr**。该操作按钮仅在本地会话或底层通过 SSH 建立连接时可用。
+在两端均更新至匹配版本后，请转至目标设备并在外部终端执行 `condr server restart`，或在 GUI 的 **Settings** 顶部选中该设备、打开 **General** 并点击 **Restart Condr**。该操作按钮仅在本地会话或底层通过 SSH 建立连接时可用。
 
 ---
 
@@ -159,7 +159,7 @@ Condr 以纯非交互模式执行底层 `ssh` 进程，期间无法提供交互�
 
 ## 配置修改没有生效
 
-* **手动修改配置后生效方式**：修改 `[client]` 及其子表后，重启 GUI 窗口；修改 `[server]` 及其子表后，在终端运行 `condr server restart`；修改 `[network]` 后，两项操作都需要执行。在图形界面中修改的设置通常立即生效，但 Remote access 页面设置和 Peer-to-peer 代理除外。
+* **手动修改配置后生效方式**：修改 `[client]` 及其子表后，重启 GUI 窗口；修改 `[server]` 及其子表后，在终端运行 `condr server restart`；修改 `[network]` 后，两项操作都需要执行。在图形界面中修改的设置通常立即生效，但 Paired devices 页 Connections 中的设置和 Peer-to-peer 代理除外。
 * **配置文件语法损毁**：若 TOML 语法存在错误，窗口启动将拦截报错：`Failed to load … Device list changes are disabled; fix the file and restart Condr.`。此时系统回退至初始默认配置且禁止变更设备列表。修复格式后重启窗口即可恢复。
 * **Windows 系统外部编辑器变动告警**：在第三方编辑器抢占 `config.toml` 文件句柄时，若 Condr 触发了全量覆盖写入，外部编辑器通常会触发外部文件改动同步警报。
 

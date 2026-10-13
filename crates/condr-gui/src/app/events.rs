@@ -546,6 +546,19 @@ impl Condr {
                         connection.running_listen = running_listen;
                         connection.running_p2p = running_p2p;
                         connection.running_proxy = Some(running_proxy);
+                        // A connected device the list does not know has just paired: fetch
+                        // the list for its name.
+                        if connected.iter().any(|fingerprint| {
+                            !connection
+                                .clients
+                                .iter()
+                                .any(|client| client.fingerprint == *fingerprint)
+                        }) {
+                            connection.send(ClientMessage::ServerAdmin {
+                                server_id: connection.model.server_id.unwrap_or(ServerId(0)),
+                                command: ServerAdminCommand::Clients,
+                            });
+                        }
                         connection.connected_devices = connected;
                         connection.health = Some(ServerHealth {
                             version,
@@ -559,6 +572,19 @@ impl Condr {
                         });
                     }
                     ServerAdminResponse::Clients { clients, connected } => {
+                        // A device that was not listed while an invite showed paired with
+                        // it: the card says so, and the invite is spent (ADR 0040).
+                        if connection.invite.is_some()
+                            && let Some(paired) = clients.iter().find(|client| {
+                                !connection
+                                    .clients
+                                    .iter()
+                                    .any(|known| known.fingerprint == client.fingerprint)
+                            })
+                        {
+                            connection.just_paired = Some(paired.name.clone());
+                            connection.invite = None;
+                        }
                         connection.clients = clients;
                         connection.connected_devices = connected;
                     }
@@ -568,11 +594,9 @@ impl Condr {
                         expires_in_secs,
                         hosts,
                     } => {
-                        let invite = ServerInvite::new(tcp, p2p, expires_in_secs, hosts);
-                        if let Some(address) = invite.paste_ready() {
-                            cx.write_to_clipboard(ClipboardItem::new_string(address));
-                        }
-                        connection.invite = Some(invite);
+                        connection.invite =
+                            Some(ServerInvite::new(tcp, p2p, expires_in_secs, hosts));
+                        connection.just_paired = None;
                     }
                     // The stored listen address changed: a pending invite still points at
                     // the old port, and none can be issued without a listener.

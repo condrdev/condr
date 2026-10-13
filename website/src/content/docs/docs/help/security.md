@@ -10,7 +10,7 @@ Use this page to judge whether a Device is suitable for running Condr, and to se
 ## Local only by default
 
 * **Local socket**: a fresh Server listens only on a private local socket. On macOS and Linux the socket's permissions are `0600`, so only your user can connect; on Windows the named pipe admits only your user and SYSTEM.
-* **TCP port**: until `[server] listen` is configured, the Server opens no TCP port. That setting is written by `condr server start --listen` or under **Settings › Remote access**.
+* **TCP port**: until `[server] listen` is configured, the Server opens no TCP port. That setting is written by `condr server start --listen` or by the **TCP** switch under **Settings › Paired devices**.
 * **Peer-to-peer access**: until Peer-to-peer is turned on, other Devices cannot connect to this Server over P2P.
 * **Local connections have full rights**: any program running as your user can connect to the local socket and do everything, including managing the Server. Programs and Agents running in a Pane have the same rights, and they can use this Device's key to connect to paired remote Devices.
 
@@ -104,7 +104,7 @@ Pairing currently grants access to the whole Session. A Device connected over TC
 * Start Agent processes, and install Agent hooks through Settings.
 * Change the Server's default shell.
 * Read the Server's status, including its listen configuration, the fingerprints of connected Devices and recent errors.
-* Generate invites in Settings, view paired Devices and revoke any Device except the current one.
+* Show pairing codes in Settings, view paired Devices and revoke any Device except the current one.
 
 The following operations work only locally or over SSH. The first two could cut the TCP or Peer-to-peer connection they were made over:
 

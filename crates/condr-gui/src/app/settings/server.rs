@@ -1,8 +1,7 @@
+use super::sidebar::CondrIconName;
 use super::*;
-use gpui_kit::component::clipboard::Clipboard;
 use gpui_kit::component::setting::RenderOptions;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::tag::Tag;
 
 /// Why a TCP or Peer-to-peer window may not change how other devices reach a Device: the
 /// change could cut the very connection that made it (ADR 0038).
@@ -98,7 +97,10 @@ pub(in crate::app) fn select_server_shell(
     });
 }
 
-const DEFAULT_LISTEN: &str = "127.0.0.1:2637";
+/// What the local-network switch listens on before an address is typed: every network,
+/// since a phone on the Wi-Fi cannot dial a loopback port. Noise authenticates whoever
+/// connects (ADR 0011).
+const DEFAULT_LISTEN: &str = "0.0.0.0:2637";
 
 /// The first of a Device's own pages: what its Server is and how it is doing, plus its
 /// terminal defaults. `this` is the window being rendered, so it must not go through
@@ -116,10 +118,17 @@ pub(super) fn server_general_page(
             SettingGroup::new().title("Terminal").item(
                 SettingItem::new(
                     "Shell",
-                    text_field_row(settings, TextFieldId::Shell, "".into()),
+                    text_field_row(settings, TextFieldId::Shell, Some("".into())),
                 )
                 .description("Empty uses the system default."),
             ),
+        )
+        // Restart is the Device's own lifecycle, so it lives here for good, apart from
+        // the read-only Status; Connections repeats it only while a change waits for it.
+        .group(
+            SettingGroup::new()
+                .title("Restart")
+                .item(server_restart_row(this, settings, cx)),
         )
 }
 
@@ -178,7 +187,7 @@ pub(super) fn network_page(
         group = group.item(
             SettingItem::new(
                 "Proxy URL",
-                text_field_row(settings, TextFieldId::ProxyUrl, "".into()),
+                text_field_row(settings, TextFieldId::ProxyUrl, Some("".into())),
             )
             .description("http:// or https://, with user:password@ if the proxy asks.")
             .disabled(!allowed)
@@ -252,16 +261,8 @@ pub(in crate::app) fn set_proxy_url(
 
 /// How other devices reach this Server: the TCP listener and Peer-to-peer, and the
 /// restart that applies them.
-pub(super) fn server_remote_access_page(
-    this: &SettingsWindow,
-    settings: &Entity<SettingsWindow>,
-    cx: &App,
-) -> SettingPage {
-    SettingPage::new("Remote access")
-        .icon(Icon::new(super::sidebar::CondrIconName::Waypoints))
-        .group(server_network_group(this, settings, cx))
-}
-
+/// Everything about other devices reaching this one, in the order a person needs it: the
+/// card a new device pairs from, the devices already paired, then how they connect.
 pub(super) fn server_clients_page(
     this: &SettingsWindow,
     settings: &Entity<SettingsWindow>,
@@ -269,8 +270,9 @@ pub(super) fn server_clients_page(
 ) -> SettingPage {
     SettingPage::new("Paired devices")
         .icon(IconName::Network)
-        .group(server_invite_group(this, settings, cx))
+        .group(pairing_group(this, settings, cx))
         .group(server_devices_group(this, settings, cx))
+        .group(server_connections_group(this, settings, cx))
 }
 
 /// Whether this Client may change how other devices reach the selected Device: only a
@@ -360,9 +362,9 @@ impl SettingsWindow {
 }
 
 /// The strip under the title bar that says which Device the pages describe: the picker,
-/// how this window reaches it (a Server can run while this GUI is disconnected, so it
-/// never claims "running") and the connection state. Only the transport: the address
-/// mostly repeats the name, and the Edit dialog has it in full.
+/// then how this window reaches it and whether it is connected, as a dot and a word like
+/// the Device's mark in the sidebar. This machine needs no route; another Device names
+/// its transport, since the address mostly repeats the name and the Edit dialog has it.
 pub(super) fn server_header(
     this: &SettingsWindow,
     select: &Entity<ServerSelect>,
@@ -371,18 +373,18 @@ pub(super) fn server_header(
     let (status, route) = this
         .selected_connection(cx, |c| {
             let route = match &c.endpoint {
-                Endpoint::Local(_) => "Local",
-                Endpoint::Ssh(_) => "SSH",
-                Endpoint::Tcp(_) => "TCP",
-                Endpoint::P2p(_) => "Peer-to-peer",
+                Endpoint::Local(_) => None,
+                Endpoint::Ssh(_) => Some("over SSH"),
+                Endpoint::Tcp(_) => Some("over TCP"),
+                Endpoint::P2p(_) => Some("over Peer-to-peer"),
             };
             (c.status, route)
         })
-        .unwrap_or((ConnectionStatus::Disconnected, "Local"));
-    let (tag, state) = match status {
-        ConnectionStatus::Connected => (Tag::success(), "Connected"),
-        ConnectionStatus::Connecting => (Tag::warning(), "Connecting"),
-        ConnectionStatus::Disconnected => (Tag::secondary(), "Disconnected"),
+        .unwrap_or((ConnectionStatus::Disconnected, None));
+    let (color, state) = match status {
+        ConnectionStatus::Connected => (cx.theme().success, "Connected"),
+        ConnectionStatus::Connecting => (cx.theme().warning, "Connecting"),
+        ConnectionStatus::Disconnected => (cx.theme().muted_foreground, "Disconnected"),
     };
     h_flex()
         .gap_3()
@@ -399,12 +401,20 @@ pub(super) fn server_header(
                 .child(Select::new(select).small()),
         )
         .child(
-            div()
+            h_flex()
+                .debug_selector(|| "settings-server-status".into())
+                .gap_1p5()
+                .items_center()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(route),
+                .child(
+                    Icon::new(super::sidebar::CondrIconName::CircleFilled)
+                        .size_2()
+                        .text_color(color),
+                )
+                .child(state)
+                .children(route),
         )
-        .child(tag.outline().small().child(state))
 }
 
 /// What the Server last reported about itself: version, uptime, Session counts and the
@@ -464,10 +474,18 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
                 "Recent errors",
                 SettingField::render(move |_, _, cx| {
                     let muted = cx.theme().muted_foreground;
-                    v_flex()
-                        .gap_1()
-                        .text_sm()
-                        .children(errors.iter().rev().map(|record| {
+                    // Newest first, a repeat folded into its latest line.
+                    let mut lines: Vec<(&ServerLogRecord, usize)> = Vec::new();
+                    for record in errors.iter().rev() {
+                        match lines.iter_mut().find(|(seen, _)| {
+                            seen.level == record.level && seen.message == record.message
+                        }) {
+                            Some((_, repeats)) => *repeats += 1,
+                            None => lines.push((record, 1)),
+                        }
+                    }
+                    v_flex().gap_1().text_sm().children(lines.into_iter().map(
+                        |(record, repeats)| {
                             let color = if record.level == "ERROR" {
                                 cx.theme().danger
                             } else {
@@ -478,8 +496,12 @@ fn server_status_group(this: &SettingsWindow, cx: &App) -> SettingGroup {
                                 .items_start()
                                 .child(div().text_color(color).child(record.level.clone()))
                                 .child(div().text_color(muted).child(relative_age(record.at)))
-                                .child(record.message.clone())
-                        }))
+                                .child(div().flex_1().min_w_0().child(record.message.clone()))
+                                .when(repeats > 1, |line| {
+                                    line.child(div().text_color(muted).child(format!("×{repeats}")))
+                                })
+                        },
+                    ))
                 }),
             )
             .layout(Axis::Vertical)
@@ -505,6 +527,35 @@ fn restart_pending(this: &SettingsWindow, cx: &App) -> bool {
                 .is_some_and(|running| *running != c.model.settings.proxy)
     })
     .unwrap_or(false)
+}
+
+/// Asks before restarting the selected Device's Condr, which stops every Pane on it.
+fn confirm_restart(settings: &Entity<SettingsWindow>, window: &mut Window, cx: &mut App) {
+    let (owner, key) = {
+        let this = settings.read(cx);
+        (this.owner.clone(), this.selected_server)
+    };
+    window.defer(cx, move |window, cx| {
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let owner = owner.clone();
+            alert
+                .confirm()
+                .title("Restart Condr on this device?")
+                .description(
+                    "Every pane and agent on this device stops; Condr windows reconnect on \
+                     their own.",
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text("Restart")
+                        .ok_variant(ButtonVariant::Danger),
+                )
+                .on_ok(move |_, _, cx| {
+                    let _ = owner.update(cx, |owner, cx| owner.restart_server(key, cx));
+                    true
+                })
+        });
+    });
 }
 
 fn server_restart_row(
@@ -540,7 +591,7 @@ fn server_restart_row(
                         } else if pending {
                             "Restart to apply"
                         } else {
-                            "Restart Condr"
+                            "Restart"
                         })
                         .small()
                         .map(|button| {
@@ -552,48 +603,22 @@ fn server_restart_row(
                         })
                         .disabled(!allowed || restarting)
                         .when(!allowed, |button| button.tooltip(REACHABILITY_LOCKED))
-                        .on_click(move |_, window, cx| {
-                            let (owner, key) = {
-                                let this = settings.read(cx);
-                                (this.owner.clone(), this.selected_server)
-                            };
-                            window.defer(cx, move |window, cx| {
-                                window.open_alert_dialog(cx, move |alert, _, _| {
-                                    let owner = owner.clone();
-                                    alert
-                                        .confirm()
-                                        .title("Restart Condr on this device?")
-                                        .description(
-                                            "Every pane and agent on this device stops; Condr \
-                                         windows reconnect on their own.",
-                                        )
-                                        .button_props(
-                                            DialogButtonProps::default()
-                                                .ok_text("Restart")
-                                                .ok_variant(ButtonVariant::Danger),
-                                        )
-                                        .on_ok(move |_, _, cx| {
-                                            let _ = owner.update(cx, |owner, cx| {
-                                                owner.restart_server(key, cx)
-                                            });
-                                            true
-                                        })
-                                });
-                            });
-                        }),
+                        .on_click(move |_, window, cx| confirm_restart(&settings, window, cx)),
                 )
         }),
     )
     .description(if pending {
-        "The changes above are saved but not applied yet. Restarting stops every pane and \
-         agent on this device."
+        "Saved changes apply once Condr restarts. Every pane and agent on this device stops."
     } else {
-        "Applies the changes above. Stops every pane and agent on this device."
+        "Stops every pane and agent on this device."
     })
     .keywords(["restart", "apply"])
 }
 
-fn server_network_group(
+/// How other devices reach this one: over Peer-to-peer by its key, or over TCP at an
+/// address. Saved here, applied by a restart (ADR 0038), so the
+/// restart row shows only while a change waits for one.
+fn server_connections_group(
     this: &SettingsWindow,
     settings: &Entity<SettingsWindow>,
     cx: &App,
@@ -611,31 +636,9 @@ fn server_network_group(
                 .tooltip(REACHABILITY_LOCKED)
         }
     };
-    SettingGroup::new()
-        .item(reachability_item(
-            "TCP listener",
-            allowed,
-            SettingField::switch(
-                {
-                    let settings = settings.clone();
-                    move |cx| server_listen_enabled(&settings, cx)
-                },
-                {
-                    let settings = settings.clone();
-                    move |enabled, cx| set_server_listen_enabled(&settings, enabled, cx)
-                },
-            )
-            .default_value(false),
-            locked_switch("tcp-listener", listening),
-        ))
-        .item(
-            SettingItem::new(
-                "Listen address",
-                text_field_row(settings, TextFieldId::Listen, DEFAULT_LISTEN.into()),
-            )
-            .description("host:port")
-            .disabled(!allowed),
-        )
+    // No reset to defaults here: it would cut every device off at once.
+    let mut group = SettingGroup::new()
+        .title("Connections")
         .item(
             reachability_item(
                 "Peer-to-peer",
@@ -649,182 +652,410 @@ fn server_network_group(
                         let settings = settings.clone();
                         move |enabled, cx| set_server_p2p_enabled(&settings, enabled, cx)
                     },
-                )
-                .default_value(false),
+                ),
                 locked_switch("p2p", p2p),
             )
-            .description("Lets other devices reach this one by its key. No port to open.")
-            .keywords(["p2p", "peer-to-peer", "relay"]),
+            .description("Works from any network. No port to open.")
+            .keywords(["p2p", "peer-to-peer", "relay", "remote access"]),
         )
-        .item(server_restart_row(this, settings, cx))
-}
-
-/// The invite a new device pairs with. Its rows are the Kit's, one per transport link,
-/// so the page reads like the rest of Settings rather than a block of prose.
-fn server_invite_group(
-    this: &SettingsWindow,
-    settings: &Entity<SettingsWindow>,
-    cx: &App,
-) -> SettingGroup {
-    // Whether a device could reach this one now: what the process bound, not what is
-    // saved for the next restart.
-    let (reachable, pending, invite) = this
-        .selected_connection(cx, |c| {
-            (
-                c.running_listen.is_some() || c.running_p2p,
-                c.listen != c.running_listen || c.p2p != c.running_p2p,
-                c.invite.clone(),
-            )
-        })
-        .unwrap_or_default();
-    // The clipboard got the p2p link, or the TCP one without it (see the `Invite` reply).
-    let description: SharedString = match (&invite, reachable, pending) {
-        (Some(invite), _, _) => format!(
-            "The {} link is on the clipboard. Valid for {} minutes.",
-            if invite.p2p.is_some() {
-                "Peer-to-peer"
-            } else {
-                "TCP"
-            },
-            invite.expires_in_secs.div_ceil(60)
-        )
-        .into(),
-        (None, false, true) => "Restart Condr to apply the Remote access changes first.".into(),
-        (None, false, false) => {
-            "Turn on the TCP listener or Peer-to-peer under Remote access first.".into()
-        }
-        (None, true, _) => "A one-time address for Connect Remote Device on the new device.".into(),
-    };
-    let has_invite = invite.is_some();
-    let button = {
-        let settings = settings.clone();
-        SettingField::render(move |_, _, _| {
-            let settings = settings.clone();
-            Button::new("server-invite")
-                .label(if has_invite {
-                    "New invite"
-                } else {
-                    "Generate invite"
-                })
-                .small()
-                .outline()
-                .disabled(!reachable)
-                .on_click(move |_, _, cx| {
-                    settings.update(cx, |this, cx| {
-                        let key = this.selected_server;
-                        let _ = this.owner.update(cx, |owner, _| {
-                            owner.server_admin(key, ServerAdminCommand::Invite)
-                        });
-                    });
-                })
-        })
-    };
-    let mut group = SettingGroup::new().title("Invite").item(
-        SettingItem::new("Invite a device", button)
-            .description(description)
-            .keywords(["invite", "pair"]),
-    );
-    if let Some(invite) = invite {
-        if let Some(address) = invite.p2p.clone() {
-            group = group.item(invite_link_row(
-                "Peer-to-peer",
-                "server-invite-p2p",
-                Some(address),
-                None,
-                "Scan with Condr on a phone, or paste on another computer. Works wherever this computer is.",
-            ));
-        }
-        if invite.tcp.is_some() {
-            group = group.item(invite_link_row(
+        .item(
+            reachability_item(
                 "TCP",
-                "server-invite-tcp",
-                invite.tcp_link(),
-                Some(settings.clone()),
-                "The new device dials this address: one of this computer's, or a name it resolves.",
-            ));
-        }
+                allowed,
+                SettingField::switch(
+                    {
+                        let settings = settings.clone();
+                        move |cx| server_listen_enabled(&settings, cx)
+                    },
+                    {
+                        let settings = settings.clone();
+                        move |enabled, cx| set_server_listen_enabled(&settings, enabled, cx)
+                    },
+                ),
+                locked_switch("tcp-listener", listening),
+            )
+            .description("Devices dial this computer's address.")
+            .keywords(["tcp", "listener", "lan", "remote access"]),
+        );
+    if listening {
+        group = group.item(
+            SettingItem::new(
+                "Listen on",
+                text_field_row(settings, TextFieldId::Listen, None),
+            )
+            .description("0.0.0.0 answers on every network.")
+            .disabled(!allowed)
+            .keywords(["listen", "address", "port", "tcp"]),
+        );
+    }
+    if restart_pending(this, cx) {
+        group = group.item(server_restart_row(this, settings, cx));
     }
     group
 }
 
-/// The side of a QR code's module: big enough for a phone across a desk to read.
-const INVITE_QR_MODULE: Pixels = px(3.);
-
-/// One transport's link: its QR code beside the link and its Copy, and for TCP the host
-/// field under them. Too long for the field slot beside a title, so the row stacks. A
-/// link without a host yet draws neither code nor Copy.
-fn invite_link_row(
-    title: &'static str,
-    id: &'static str,
-    address: Option<String>,
-    host_of: Option<Entity<SettingsWindow>>,
-    description: &'static str,
-) -> SettingItem {
-    SettingItem::new(
-        title,
-        SettingField::render(move |_, window, cx| {
-            let link = match &address {
-                Some(address) => h_flex()
-                    .w_full()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        div()
-                            .debug_selector(move || id.into())
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_sm()
-                            .font_family("monospace")
-                            .child(address.clone()),
-                    )
-                    .child(
-                        Clipboard::new(format!("{id}-copy"))
-                            .value(address.clone())
-                            .tooltip("Copy invite"),
-                    ),
-                None => h_flex().w_full().child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Enter the address the new device dials."),
-                ),
-            };
-            let host = host_of
-                .as_ref()
-                .and_then(|settings| invite_host_field(settings, window, cx));
-            h_flex()
-                .w_full()
-                .gap_4()
-                .items_start()
-                .when_some(address.as_deref(), |row, address| {
-                    row.child(qr::qr_code(
-                        if host_of.is_some() {
-                            "server-invite-tcp-qr"
-                        } else {
-                            "server-invite-p2p-qr"
-                        },
-                        address,
-                        INVITE_QR_MODULE,
-                    ))
-                })
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_3()
-                        .child(link)
-                        .children(host),
-                )
-        }),
-    )
-    .layout(Axis::Vertical)
-    .description(description)
-    .keywords(["invite", "qr"])
+/// Where pairing stands on the selected Device; each state is one card (ADR 0040).
+#[derive(Clone)]
+enum Pairing {
+    /// The Device has not reported how it is reached yet.
+    Unknown,
+    /// Nothing listens and nothing is saved: no device could reach this one.
+    Closed {
+        allowed: bool,
+    },
+    /// A way in is saved and waits for a restart.
+    RestartPending {
+        allowed: bool,
+    },
+    Restarting,
+    /// A device could reach this one; no code is showing.
+    Ready,
+    Showing(ServerInvite),
+    Expired,
+    /// A device paired with the code that showed, by the name it gave.
+    Paired(String),
 }
 
-/// The TCP link's host: a field to type into and, under it, the addresses the Server
-/// offered, most likely first, to pick with a click (ADR 0040). The invite keeps the
+fn pairing_state(this: &SettingsWindow, cx: &App) -> Pairing {
+    let allowed = reach_allowed(this, cx);
+    this.selected_connection(cx, |c| {
+        if c.reconnect_deadline.is_some() {
+            return Pairing::Restarting;
+        }
+        if let Some(name) = &c.just_paired {
+            return Pairing::Paired(name.clone());
+        }
+        if c.health.is_none() {
+            return Pairing::Unknown;
+        }
+        // What the process bound, not what is saved for the next start.
+        if c.running_listen.is_none() && !c.running_p2p {
+            return if c.listen.is_some() || c.p2p {
+                Pairing::RestartPending { allowed }
+            } else {
+                Pairing::Closed { allowed }
+            };
+        }
+        match &c.invite {
+            Some(invite) if invite.remaining_secs() == 0 => Pairing::Expired,
+            Some(invite) => Pairing::Showing(invite.clone()),
+            None => Pairing::Ready,
+        }
+    })
+    .unwrap_or(Pairing::Ready)
+}
+
+/// The white tile a phone across a desk reads the code from, and the tile that stands in
+/// for it before there is one.
+const PAIRING_CODE_SIDE: Pixels = px(168.);
+
+/// The card a new device pairs from: one code to scan and its link to copy, or the one
+/// step that comes before them.
+fn pairing_group(
+    this: &SettingsWindow,
+    settings: &Entity<SettingsWindow>,
+    cx: &App,
+) -> SettingGroup {
+    let state = pairing_state(this, cx);
+    let settings = settings.clone();
+    SettingGroup::new().title("Pair").item(
+        SettingItem::render(move |_, window, cx| pairing_card(&state, &settings, window, cx))
+            .keywords(["invite", "pair", "qr", "code", "phone", "link"]),
+    )
+}
+
+fn pairing_card(
+    state: &Pairing,
+    settings: &Entity<SettingsWindow>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    let (tcp, copied) = {
+        let this = settings.read(cx);
+        (this.invite_tcp, this.invite_copied)
+    };
+    // The slot the code fills, so the card keeps its shape when the code appears.
+    let tile = |icon: Icon, color: Hsla, cx: &App| {
+        div()
+            .flex_none()
+            .size(PAIRING_CODE_SIDE)
+            .rounded(px(8.))
+            .border_1()
+            .border_dashed()
+            .border_color(cx.theme().border)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon.size(px(28.)).text_color(color))
+            .into_any_element()
+    };
+    let show_code = |label: &'static str, primary: bool| {
+        let settings = settings.clone();
+        Button::new("pairing-show-code")
+            .debug_selector(|| "pairing-show-code".into())
+            .label(label)
+            .small()
+            .map(|button| {
+                if primary {
+                    button.primary()
+                } else {
+                    button.outline()
+                }
+            })
+            .on_click(move |_, _, cx| request_invite(&settings, cx))
+            .into_any_element()
+    };
+    use gpui_kit::assets::IconName as Glyph;
+    let (code, title, body, detail, actions): (
+        AnyElement,
+        SharedString,
+        Option<&'static str>,
+        Vec<AnyElement>,
+        Vec<AnyElement>,
+    ) = match state {
+        Pairing::Closed { allowed } => (
+            tile(Icon::new(CondrIconName::QrCode), muted, cx),
+            "Add a phone or computer".into(),
+            Some(if *allowed {
+                "Other devices can't connect to this one yet."
+            } else {
+                "Other devices can't connect to this one yet. Allow it on the device itself."
+            }),
+            Vec::new(),
+            allowed
+                .then(|| {
+                    let settings = settings.clone();
+                    Button::new("pairing-allow")
+                        .debug_selector(|| "pairing-allow".into())
+                        .label("Allow connections")
+                        .small()
+                        .primary()
+                        .on_click(move |_, _, cx| set_server_p2p_enabled(&settings, true, cx))
+                        .into_any_element()
+                })
+                .into_iter()
+                .collect(),
+        ),
+        Pairing::RestartPending { allowed } => (
+            tile(Icon::new(Glyph::RefreshCw), muted, cx),
+            "Restart Condr to finish".into(),
+            Some(
+                "Devices can connect once Condr restarts. Every pane and agent on this device stops.",
+            ),
+            Vec::new(),
+            allowed
+                .then(|| {
+                    let settings = settings.clone();
+                    Button::new("pairing-restart")
+                        .debug_selector(|| "pairing-restart".into())
+                        .label("Restart")
+                        .small()
+                        .primary()
+                        .on_click(move |_, window, cx| confirm_restart(&settings, window, cx))
+                        .into_any_element()
+                })
+                .into_iter()
+                .collect(),
+        ),
+        Pairing::Unknown => (
+            tile(Icon::new(CondrIconName::QrCode), muted, cx),
+            "Add a phone or computer".into(),
+            None,
+            Vec::new(),
+            Vec::new(),
+        ),
+        Pairing::Restarting => (
+            tile(Icon::new(Glyph::RefreshCw), muted, cx),
+            "Restarting Condr…".into(),
+            None,
+            Vec::new(),
+            Vec::new(),
+        ),
+        Pairing::Ready => (
+            tile(Icon::new(CondrIconName::QrCode), muted, cx),
+            "Add a phone or computer".into(),
+            Some("Condr on your phone scans a code; another computer pastes its link."),
+            Vec::new(),
+            vec![show_code("Show pairing code", true)],
+        ),
+        Pairing::Expired => (
+            tile(Icon::new(CondrIconName::QrCode), muted, cx),
+            "The code expired".into(),
+            Some("Show a new one when the device is ready."),
+            Vec::new(),
+            vec![show_code("Show a new code", true)],
+        ),
+        Pairing::Paired(name) => (
+            tile(Icon::new(Glyph::CircleCheck), cx.theme().success, cx),
+            format!("{name} is paired").into(),
+            Some("It's listed under Devices and connects from now on."),
+            Vec::new(),
+            vec![show_code("Pair another device", false)],
+        ),
+        Pairing::Showing(invite) => {
+            let link = invite.link(tcp);
+            let code = match &link {
+                Some(link) => qr::qr_code("pairing-code", link, PAIRING_CODE_SIDE),
+                None => tile(Icon::new(CondrIconName::QrCode), muted, cx),
+            };
+            let mut detail = Vec::new();
+            if invite.p2p.is_some() && invite.tcp.is_some() {
+                detail.push(
+                    h_flex()
+                        .child(pairing_route(settings, tcp, cx))
+                        .into_any_element(),
+                );
+            }
+            if invite.shows_tcp(tcp) {
+                detail.extend(invite_host_field(settings, window, cx));
+            }
+            let copy = link.clone().map(|link| {
+                let settings = settings.clone();
+                Button::new("pairing-copy")
+                    .debug_selector(|| "pairing-copy".into())
+                    .label(if copied { "Copied" } else { "Copy link" })
+                    .icon(if copied { Glyph::Check } else { Glyph::Copy })
+                    .small()
+                    .outline()
+                    .on_click(move |_, _, cx| copy_invite(&settings, link.clone(), cx))
+                    .into_any_element()
+            });
+            let remaining = invite.remaining_secs();
+            let expires = div()
+                .text_xs()
+                .text_color(muted)
+                .child(format!(
+                    "Expires in {}:{:02}",
+                    remaining / 60,
+                    remaining % 60
+                ))
+                .into_any_element();
+            let new_code = {
+                let settings = settings.clone();
+                Button::new("pairing-new-code")
+                    .label("New code")
+                    .icon(Glyph::RefreshCw)
+                    .small()
+                    .ghost()
+                    .on_click(move |_, _, cx| request_invite(&settings, cx))
+                    .into_any_element()
+            };
+            (
+                code,
+                if link.is_some() {
+                    "Scan with Condr on your phone".into()
+                } else {
+                    "Choose the address the new device dials".into()
+                },
+                link.is_some()
+                    .then_some("Another computer can paste the link instead."),
+                detail,
+                copy.into_iter().chain([new_code, expires]).collect(),
+            )
+        }
+    };
+    h_flex()
+        .debug_selector(|| "pairing-card".into())
+        .w_full()
+        .gap_6()
+        .items_start()
+        .child(code)
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                // As tall as the TCP state, title to actions, so choosing a route moves
+                // nothing below the card.
+                .min_h(rems(12.75))
+                .gap_1()
+                .pt_1()
+                .child(div().font_medium().child(title))
+                .children(body.map(|body| div().text_sm().text_color(muted).child(body)))
+                .when(!detail.is_empty(), |column| {
+                    column.child(v_flex().gap_3().pt_3().children(detail))
+                })
+                .when(!actions.is_empty(), |column| {
+                    column.child(
+                        h_flex()
+                            .gap_2()
+                            .mt_auto()
+                            .pt_4()
+                            .items_center()
+                            .children(actions),
+                    )
+                }),
+        )
+        .into_any_element()
+}
+
+/// Which link the code holds when both transports are on: Peer-to-peer, the default,
+/// which needs no address, or TCP at one the new device dials.
+fn pairing_route(settings: &Entity<SettingsWindow>, tcp: bool, cx: &App) -> AnyElement {
+    let side = |id: &'static str, label: &'static str, side_tcp: bool| {
+        let settings = settings.clone();
+        Button::new(id)
+            .debug_selector(move || id.into())
+            .label(label)
+            .small()
+            .map(|button| {
+                if side_tcp == tcp {
+                    button.primary()
+                } else {
+                    button.ghost()
+                }
+            })
+            .on_click(move |_, _, cx| {
+                settings.update(cx, |this, cx| {
+                    this.invite_tcp = side_tcp;
+                    cx.notify();
+                });
+            })
+    };
+    h_flex()
+        .debug_selector(|| "pairing-route".into())
+        .flex_none()
+        .p_0p5()
+        .gap_0p5()
+        .rounded(cx.theme().radius)
+        .bg(cx.theme().muted)
+        .child(side("pairing-route-p2p", "Peer-to-peer", false))
+        .child(side("pairing-route-tcp", "TCP", true))
+        .into_any_element()
+}
+
+/// Asks the selected Device for a new invite; the card shows it when the reply lands.
+fn request_invite(settings: &Entity<SettingsWindow>, cx: &mut App) {
+    settings.update(cx, |this, cx| {
+        let key = this.selected_server;
+        this.invite_copied = false;
+        let _ = this.owner.update(cx, |owner, _| {
+            owner.server_admin(key, ServerAdminCommand::Invite)
+        });
+    });
+}
+
+/// Puts the shown link on the clipboard and says so on the button for a moment.
+fn copy_invite(settings: &Entity<SettingsWindow>, link: String, cx: &mut App) {
+    cx.write_to_clipboard(ClipboardItem::new_string(link));
+    settings.update(cx, |this, cx| {
+        this.invite_copied = true;
+        cx.notify();
+        this._invite_copied_reset = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(INVITE_COPIED_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                this.invite_copied = false;
+                cx.notify();
+            });
+        }));
+    });
+}
+
+/// How long the Copy button says "Copied".
+const INVITE_COPIED_FOR: Duration = Duration::from_secs(2);
+
+/// The TCP link's host: a field that takes any name or address, and beside it the ones
+/// the Server offered, most likely first, to pick from (ADR 0040). The invite keeps the
 /// host; the field shows it, whichever way it changed.
 fn invite_host_field(
     settings: &Entity<SettingsWindow>,
@@ -849,40 +1080,55 @@ fn invite_host_field(
     if input.read(cx).value() != host {
         input.update(cx, |input, cx| input.set_value(host.clone(), window, cx));
     }
-    let picks = hosts.into_iter().enumerate().map(|(index, candidate)| {
-        let owner = owner.clone();
-        let picked = candidate == host.trim();
-        Button::new(("server-invite-host", index))
-            .debug_selector(move || format!("server-invite-host-{index}"))
-            .label(candidate.clone())
-            .xsmall()
-            .when(picked, |button| button.primary())
-            .when(!picked, |button| button.outline())
-            .on_click(move |_, _, cx| {
-                let _ = owner.update(cx, |owner, cx| {
-                    if owner.set_invite_host(key, candidate.clone()) {
-                        cx.notify();
-                    }
-                });
-            })
-    });
+    let picker = Button::new("server-invite-hosts")
+        .debug_selector(|| "server-invite-hosts".into())
+        .icon(IconName::ChevronDown)
+        .ghost()
+        .xsmall()
+        .disabled(hosts.is_empty())
+        .dropdown_menu(move |menu, _, _| {
+            hosts.iter().fold(
+                menu.check_side(gpui_kit::component::Side::Right),
+                |menu, candidate| {
+                    let owner = owner.clone();
+                    let candidate = candidate.clone();
+                    menu.item(
+                        PopupMenuItem::new(candidate.clone())
+                            .checked(candidate == host.trim())
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |owner, cx| {
+                                    if owner.set_invite_host(key, candidate.clone()) {
+                                        cx.notify();
+                                    }
+                                });
+                            }),
+                    )
+                },
+            )
+        });
     Some(
         v_flex()
-            .gap_2()
+            .gap_1()
             .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(div().text_sm().child("Address"))
-                    .child(Input::new(&input).w_64()),
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Reach this computer at"),
             )
-            .child(h_flex().flex_wrap().gap_1().children(picks))
+            .child(
+                div()
+                    .debug_selector(|| "server-invite-host".into())
+                    .w_full()
+                    .max_w(rems(18.))
+                    .child(Input::new(&input).small().suffix(picker)),
+            )
             .into_any_element(),
     )
 }
 
-/// One row per paired device, connected ones first: the name over its fingerprint (the
-/// same one `condr server clients` prints), when it was last seen, and Revoke.
+/// One row per paired device, connected ones first: its name over whether it is
+/// connected or when it was last seen, the start of its fingerprint (the one `condr
+/// server clients` prints) to tell two of a name apart, and Revoke.
 fn server_devices_group(
     this: &SettingsWindow,
     settings: &Entity<SettingsWindow>,
@@ -907,7 +1153,7 @@ fn server_devices_group(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No paired devices yet.")
+                    .child("No devices yet. Pair one with the code above.")
             })
             .keywords(["clients", "devices"]),
         );
@@ -921,6 +1167,7 @@ fn server_devices_group(
         let keywords = [SharedString::from(client.name.clone()), "revoke".into()];
         group = group.item(
             SettingItem::render(move |_, _, cx| {
+                let muted = cx.theme().muted_foreground;
                 let seen: AnyElement = if is_connected {
                     h_flex()
                         .gap_1()
@@ -934,30 +1181,40 @@ fn server_devices_group(
                         .into_any_element()
                 } else {
                     div()
-                        .text_color(cx.theme().muted_foreground)
                         .child(relative_age(client.last_seen))
                         .into_any_element()
                 };
+                let short: String = client.fingerprint.chars().take(8).collect();
                 h_flex()
                     .w_full()
                     .gap_4()
                     .items_center()
-                    .text_sm()
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .child(client.name.clone())
+                            .gap_0p5()
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .font_family("monospace")
+                                    .text_sm()
+                                    .font_medium()
                                     .truncate()
-                                    .child(client.fingerprint.clone()),
+                                    .child(client.name.clone()),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(seen)
+                                    .child("·")
+                                    .child(div().font_family("monospace").child(short))
+                                    .when(is_this_device, |row| {
+                                        row.child("·").child("This window")
+                                    }),
                             ),
                     )
-                    .child(div().whitespace_nowrap().child(seen))
                     .child(revoke_button(&settings, &client, is_this_device))
             })
             .keywords(keywords),
@@ -979,7 +1236,9 @@ fn revoke_button(
         .small()
         .ghost()
         .disabled(this_device)
-        .when(this_device, |button| button.tooltip("This device"))
+        .when(this_device, |button| {
+            button.tooltip("It is how this window connects.")
+        })
         .on_click(move |_, window, cx| {
             let (owner, selected) = {
                 let this = settings.read(cx);
@@ -995,7 +1254,7 @@ fn revoke_button(
                         .confirm()
                         .title(format!("Revoke \u{201c}{name}\u{201d}?"))
                         .description(
-                            "Its connections close now, and it needs a new invite to pair again.",
+                            "It disconnects now and needs a new pairing code to connect again.",
                         )
                         .button_props(
                             DialogButtonProps::default()

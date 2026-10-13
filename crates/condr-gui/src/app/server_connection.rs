@@ -60,8 +60,11 @@ pub(super) struct ServerConnection {
     pub(super) clients: Vec<ServerClientInfo>,
     pub(super) connected_devices: Vec<String>,
     pub(super) admin_error: Option<String>,
-    /// The last invite this Server issued, for the Clients page to show and copy.
+    /// The last invite this Server issued, for the Paired devices page to show and copy.
     pub(super) invite: Option<ServerInvite>,
+    /// The device that paired with that invite while it showed, by the name it gave: the
+    /// pairing card says so until the next invite or Settings window.
+    pub(super) just_paired: Option<String>,
     pub(super) io: Option<ClientIo>,
     pub(super) cancellation: ConnectionCancellation,
     pub(super) connect_generation: u64,
@@ -172,6 +175,7 @@ impl ServerConnection {
             connected_devices: Vec::new(),
             admin_error: None,
             invite: None,
+            just_paired: None,
             reconnect_deadline: None,
             io: None,
             cancellation: ConnectionCancellation::default(),
@@ -520,6 +524,8 @@ pub(super) struct ServerInvite {
     pub(super) hosts: Vec<String>,
     /// The host picked or typed for the TCP link; the likeliest one to begin with.
     pub(super) host: String,
+    /// When the reply arrived, which `expires_in_secs` counts from.
+    pub(super) issued: std::time::Instant,
 }
 
 impl ServerInvite {
@@ -535,7 +541,14 @@ impl ServerInvite {
             p2p,
             expires_in_secs,
             hosts,
+            issued: std::time::Instant::now(),
         }
+    }
+
+    /// Whole seconds until the Server stops taking the invite.
+    pub(super) fn remaining_secs(&self) -> u64 {
+        self.expires_in_secs
+            .saturating_sub(self.issued.elapsed().as_secs())
     }
 
     /// The TCP link with its host filled in, an IPv6 address in brackets; none while
@@ -553,13 +566,19 @@ impl ServerInvite {
         Some(self.tcp.as_ref()?.replace("<host>", &host))
     }
 
-    /// What a new device pastes: the Peer-to-peer link, which needs no host, else the TCP
-    /// one with its host, else the TCP one as the Server printed it.
-    pub(super) fn paste_ready(&self) -> Option<String> {
-        self.p2p
-            .clone()
-            .or_else(|| self.tcp_link())
-            .or_else(|| self.tcp.clone())
+    /// The link the pairing card shows and copies: Peer-to-peer, which works from any
+    /// network, unless the person picked TCP or TCP is all there is. A TCP link waits for
+    /// its host.
+    pub(super) fn link(&self, tcp: bool) -> Option<String> {
+        match &self.p2p {
+            Some(p2p) if !tcp || self.tcp.is_none() => Some(p2p.clone()),
+            _ => self.tcp_link(),
+        }
+    }
+
+    /// Whether the card shows the TCP link, and so its host field.
+    pub(super) fn shows_tcp(&self, tcp: bool) -> bool {
+        self.tcp.is_some() && (tcp || self.p2p.is_none())
     }
 }
 

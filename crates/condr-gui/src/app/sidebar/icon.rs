@@ -44,6 +44,8 @@ pub(in crate::app) enum CondrIconName {
     SquareMinus,
     /// Lucide `file-text`: the Diff Tab's "Show File" button.
     FileText,
+    /// Lucide `qr-code`: the pairing card before its code shows.
+    QrCode,
     /// An agent CLI's mark, the file its spec names (assets/agents/NOTICE at the
     /// repository root), recolored to `currentColor` so it follows the text like every
     /// other icon. A kind a newer Server reported (ADR 0028) is a plain mark, no brand.
@@ -80,6 +82,7 @@ impl IconNamed for CondrIconName {
             Self::SquareDot => "icons/square-dot.svg",
             Self::SquareMinus => "icons/square-minus.svg",
             Self::FileText => "icons/file-text.svg",
+            Self::QrCode => "icons/qr-code.svg",
             Self::Agent(kind) => match kind.spec().mark {
                 "" => "icons/circle-filled.svg",
                 mark => return format!("icons/{mark}").into(),

@@ -12,6 +12,9 @@ pub(in crate::app) struct TextField {
     pub(super) input: Entity<InputState>,
     pub(super) draft: SharedString,
     pub(super) committed: SharedString,
+    /// The Server's value when the field last took one: a different one, from the first
+    /// `Status` after Settings opened or from another window, replaces an unedited field.
+    pub(super) seen: SharedString,
 }
 
 impl TextField {
@@ -22,7 +25,21 @@ impl TextField {
     /// Picking another Server replaces the value under the field.
     pub(super) fn reset(&mut self, value: SharedString) {
         self.draft = value.clone();
-        self.committed = value;
+        self.committed = value.clone();
+        self.seen = value;
+    }
+
+    /// Takes the Server's `value` if it changed since the field last saw it and nothing
+    /// typed waits in the field; a staged or half-typed draft stays.
+    pub(super) fn follow(&mut self, value: SharedString) {
+        if value == self.seen {
+            return;
+        }
+        if !self.dirty() {
+            self.draft = value.clone();
+            self.committed = value.clone();
+        }
+        self.seen = value;
     }
 }
 
@@ -75,7 +92,8 @@ impl SettingsWindow {
         TextField {
             input,
             draft: initial.clone(),
-            committed: initial,
+            committed: initial.clone(),
+            seen: initial,
         }
     }
 
@@ -155,12 +173,12 @@ impl SettingsWindow {
 pub(super) fn text_field_row(
     settings: &Entity<SettingsWindow>,
     id: TextFieldId,
-    default: SharedString,
+    default: Option<SharedString>,
 ) -> SettingField<SharedString> {
     let render = settings.clone();
     let dirty = settings.clone();
     let reset = settings.clone();
-    let default_dirty = default.clone();
+    let reset_to = default.clone();
     SettingField::render(move |options, window, cx| {
         let (input, draft, unsent, saved, refusal) = {
             let this = render.read(cx);
@@ -217,10 +235,17 @@ pub(super) fn text_field_row(
             )
     })
     .on_reset(
-        move |cx| dirty.read(cx).field(id).committed != default_dirty,
+        move |cx| {
+            default
+                .as_ref()
+                .is_some_and(|default| dirty.read(cx).field(id).committed != *default)
+        },
         move |_, cx| {
+            let Some(default) = reset_to.clone() else {
+                return;
+            };
             reset.update(cx, |this, cx| {
-                this.field_mut(id).draft = default.clone();
+                this.field_mut(id).draft = default;
                 this.commit(id, cx);
             });
         },

@@ -144,6 +144,15 @@ pub(super) struct SettingsWindow {
     /// The host of the selected Device's TCP invite, as picked or typed (ADR 0040). The
     /// invite keeps it; this only edits it.
     pub(super) invite_host: Entity<InputState>,
+    /// The pairing code holds the TCP link rather than the Peer-to-peer one; asked only
+    /// when a Device offers both.
+    pub(super) invite_tcp: bool,
+    /// The selected Device's connection the Server pages last asked about: a Settings
+    /// window opened before it connected, or that saw it reconnect, asks again.
+    asked: Option<(ConnectionKey, u64)>,
+    /// The Copy button says "Copied" for a moment after a click.
+    pub(super) invite_copied: bool,
+    pub(super) _invite_copied_reset: Option<Task<()>>,
     /// The page a Device's pages open on when first drawn; Kit keeps the selection from
     /// then on. Tests point it at a page they need to see.
     pub(super) initial_page: SelectIndex,
@@ -165,6 +174,8 @@ pub(super) struct SettingsWindow {
 
 /// How often the General page's health figures are refreshed while Settings is open.
 const STATUS_REFRESH: Duration = Duration::from_secs(5);
+/// How often they are while a pairing code shows.
+const PAIRING_REFRESH: Duration = Duration::from_secs(1);
 
 pub(super) type ServerSelect = SelectState<SearchableVec<SharedString>>;
 
@@ -301,8 +312,10 @@ impl SettingsWindow {
             cx.observe(&owner, |_, _, cx| cx.notify()).detach();
         }
         let _ = owner.update(cx, |owner, _| {
-            owner.request_agent_hooks(selected_server);
-            owner.request_server_admin(selected_server);
+            // A pairing reported in an earlier Settings window is old news.
+            for connection in &mut owner.connections {
+                connection.just_paired = None;
+            }
         });
         let (server_keys, server_labels) = server_choices(&owner, cx);
         let selected = server_keys
@@ -347,6 +360,10 @@ impl SettingsWindow {
             listen,
             proxy_url,
             invite_host,
+            invite_tcp: false,
+            asked: None,
+            invite_copied: false,
+            _invite_copied_reset: None,
             saved: None,
             _saved_clear: None,
             listen_refused: false,
@@ -359,7 +376,21 @@ impl SettingsWindow {
             licenses,
             _status_refresh: cx.spawn(async move |this, cx| {
                 loop {
-                    cx.background_executor().timer(STATUS_REFRESH).await;
+                    // Every second while a code shows: its countdown ticks, and a device
+                    // that pairs with it is noticed at once.
+                    let showing = this
+                        .update(cx, |this, cx| {
+                            this.selected_connection(cx, |c| c.invite.is_some())
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    cx.background_executor()
+                        .timer(if showing {
+                            PAIRING_REFRESH
+                        } else {
+                            STATUS_REFRESH
+                        })
+                        .await;
                     let refreshed = this.update(cx, |this, cx| {
                         let key = this.selected_server;
                         let _ = this.owner.update(cx, |owner, _| {
@@ -375,6 +406,35 @@ impl SettingsWindow {
     }
 
     /// Shows another Device and reloads its fields.
+    /// Lets each Device field follow its Server's value as it arrives or changes, and
+    /// asks a Device that connected since the last question for its status and hooks.
+    fn follow_server_values(&mut self, cx: &mut Context<Self>) {
+        let key = self.selected_server;
+        let connected = self
+            .selected_connection(cx, |c| {
+                (c.status == ConnectionStatus::Connected).then_some(c.connect_generation)
+            })
+            .flatten();
+        if let Some(generation) = connected
+            && self.asked != Some((key, generation))
+        {
+            self.asked = Some((key, generation));
+            let _ = self.owner.update(cx, |owner, _| {
+                owner.request_agent_hooks(key);
+                owner.request_server_admin(key);
+            });
+        }
+        let shell = connection_shell(&self.owner, key, cx);
+        let proxy_url = connection_proxy_url(&self.owner, key, cx);
+        self.shell.follow(shell);
+        self.proxy_url.follow(proxy_url);
+        // With the listener off the Server has no address; the field keeps the last one,
+        // staged for when it is switched on.
+        if let Some(listen) = self.selected_connection(cx, |c| c.listen.clone()).flatten() {
+            self.listen.follow(listen.into());
+        }
+    }
+
     fn select_server(&mut self, key: ConnectionKey, cx: &mut Context<Self>) {
         // Submission feedback belongs to the Device whose fields are being replaced.
         self.saved = None;
@@ -386,10 +446,7 @@ impl SettingsWindow {
             .reset(connection_proxy_url(&self.owner, key, cx));
         self.listen_refused = false;
         self.proxy_url_refused = None;
-        let _ = self.owner.update(cx, |owner, _| {
-            owner.request_agent_hooks(key);
-            owner.request_server_admin(key);
-        });
+        // The next render asks the Device for its status and hooks.
         cx.notify();
     }
 
@@ -459,6 +516,7 @@ fn licenses_page(licenses: &Entity<EditorState>) -> SettingPage {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_server_choices(window, cx);
+        self.follow_server_values(cx);
         let settings = cx.entity();
         let (local, connected) = self
             .selected_connection(cx, |c| {
@@ -486,7 +544,6 @@ impl Render for SettingsWindow {
         if connected {
             pages.extend([
                 network_page(self, &settings, cx),
-                server_remote_access_page(self, &settings, cx),
                 server_clients_page(self, &settings, cx),
                 agents_page(&settings, self.connection_hooks(cx)),
             ]);
@@ -523,8 +580,12 @@ impl Render for SettingsWindow {
                 self.selected_server, initial.page_ix
             )))
             .sidebar_width(SETTINGS_SIDEBAR_WIDTH)
+            .with_group_variant(gpui_kit::component::group_box::GroupBoxVariant::Outline)
             .default_selected_index(initial)
-            .pages(pages)
+            // Kit draws the page title at body size, level with the group titles.
+            .pages(pages.into_iter().map(|page| {
+                page.header_style(&StyleRefinement::default().text_lg().font_semibold())
+            }))
             .into_any_element()
         };
         let header = server_header(self, &self.server_select, cx);

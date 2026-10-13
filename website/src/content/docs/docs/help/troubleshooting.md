@@ -80,7 +80,7 @@ If you run `condr server stop` while the window is open, the window notices the 
 * **The local Server is older than the window**: after you update Condr, the window asks whether to restart the local Server. Restarting ends every process running in its terminals, then reopens the current Workspaces and Agent conversations.
 * **Incompatible protocols**: the connection is refused, the connection page shows `Condr there and here speak different protocol versions`, and the CLI returns the error code `protocol_mismatch`. Retrying does not help; both sides must be updated to matching versions.
 
-Once both sides run matching versions, go to the target Device and run `condr server restart` in a terminal outside Condr, or pick it at the top of **Settings**, open **Remote access** and click **Restart Condr**. That button is available only over a local or SSH connection.
+Once both sides run matching versions, go to the target Device and run `condr server restart` in a terminal outside Condr, or pick it at the top of **Settings**, open **General** and click **Restart Condr**. That button is available only over a local or SSH connection.
 
 ---
 
@@ -159,7 +159,7 @@ Condr runs `ssh` in fully non-interactive mode, so it cannot show a password pro
 
 ## A configuration change does not take effect
 
-* **Applying manual configuration changes**: after editing `[client]` or its sub-tables, restart the GUI window. After editing `[server]` or its sub-tables, run `condr server restart` in a terminal. After editing `[network]`, perform both steps. Changes made directly in the GUI apply immediately, except for settings on the Remote access page and the Peer-to-peer proxy.
+* **Applying manual configuration changes**: after editing `[client]` or its sub-tables, restart the GUI window. After editing `[server]` or its sub-tables, run `condr server restart` in a terminal. After editing `[network]`, perform both steps. Changes made directly in the GUI apply immediately, except for the Connections settings on the Paired devices page and the Peer-to-peer proxy.
 * **A broken configuration file**: if the TOML has a syntax error, the window reports `Failed to load … Device list changes are disabled; fix the file and restart Condr.` on startup. Every setting falls back to its default and the Device list cannot be changed. Fix the file and restart the window to recover.
 * **The editor warns the file changed on Windows**: while another editor holds `config.toml` open, Condr overwrites the file in place, and the editor usually warns that the file was changed outside it.
 

@@ -70,30 +70,37 @@ fn matrix(text: &str) -> Option<Rc<QrMatrix>> {
     })
 }
 
-/// `text` as a QR code, `module` a side, dark on white in any theme, quiet zone included.
-pub(super) fn qr_code(id: &'static str, text: &str, module: Pixels) -> AnyElement {
+/// `text` as a QR code on a white tile `side` across, dark on white in any theme. Its
+/// modules are whole device pixels, so a long link and a short one fill the same tile and
+/// both stay sharp; what is left over joins the quiet zone.
+pub(super) fn qr_code(id: &'static str, text: &str, side: Pixels) -> AnyElement {
     let Some(matrix) = matrix(text) else {
         return div().into_any_element();
     };
-    let side = module * (matrix.width + 2 * QUIET_ZONE) as f32;
+    let modules = (matrix.width + 2 * QUIET_ZONE) as f32;
     div()
         .debug_selector(move || id.into())
         .flex_none()
         .size(side)
-        .rounded(module)
+        .rounded(px(8.))
         .bg(white())
         .child(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
+                    let scale = window.scale_factor();
+                    let module = px((f32::from(side) * scale / modules).floor() / scale);
+                    let drawn = module * modules;
+                    let inset = ((side - drawn) / 2.).round();
+                    let origin = bounds.origin + point(inset, inset);
                     for (row, column, length) in matrix.runs() {
-                        let origin = bounds.origin
+                        let at = origin
                             + point(
                                 module * (QUIET_ZONE + column) as f32,
                                 module * (QUIET_ZONE + row) as f32,
                             );
                         window.paint_quad(fill(
-                            Bounds::new(origin, size(module * length as f32, module)),
+                            Bounds::new(at, size(module * length as f32, module)),
                             black(),
                         ));
                     }

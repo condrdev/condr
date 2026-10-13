@@ -288,7 +288,7 @@ pub(super) fn appearance_page(
                         text_field_row(
                             settings,
                             TextFieldId::FontFamily,
-                            default_font.family.clone(),
+                            Some(default_font.family.clone()),
                         ),
                     )
                     .description("Font family used by every terminal."),

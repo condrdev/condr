@@ -10,7 +10,7 @@ description: Condr 默认对外开放什么、每种连接方式信任谁、配�
 ## 默认只对本机开放
 
 * **本机 socket**：新安装的 Server 仅监听本机的私有 socket。在 macOS 和 Linux 上，socket 权限设为 `0600`，仅允许当前用户连接；在 Windows 上，命名管道仅允许当前用户和 SYSTEM 访问。
-* **TCP 端口**：在显式配置 `[server] listen` 之前，Server 不打开任何 TCP 端口。该配置可通过执行 `condr server start --listen` 或在 **Settings › Remote access** 中写入。
+* **TCP 端口**：在显式配置 `[server] listen` 之前，Server 不打开任何 TCP 端口。该配置可通过执行 `condr server start --listen` 或在 **Settings › Paired devices** 中打开 **TCP** 开关写入。
 * **Peer-to-peer 访问**：在手动开启 Peer-to-peer 之前，其他设备无法通过 P2P 方式连接当前 Server。
 * **本机连接权限边界**：以当前用户身份运行的任意程序均可连接本机 socket 并执行全部操作（包括管理 Server）。Pane 内运行的程序和 Agent 同样具备该权限，且能够使用当前设备的设备密钥连接已配对的远程设备。
 
@@ -104,7 +104,7 @@ Condr 不设用户账号体系，亦不收集遥测数据。运行期间仅访�
 * 启动 Agent 进程，并通过图形配置界面安装 Agent Hook。
 * 更改 Server 运行时的默认 Shell。
 * 读取 Server 运行状态信息，包括网络监听配置、已连接设备指纹及最近的系统错误记录。
-* 在设置中生成邀请、查看已配对设备，以及撤销除当前设备外的任意设备。
+* 在设置中显示配对码、查看已配对设备，以及撤销除当前设备外的任意设备。
 
 以下操作只能在本机或通过 SSH 连接执行。其中前两项若经 TCP 或 Peer-to-peer 连接执行，可能断开这条连接本身：
 

@@ -149,10 +149,10 @@ fn settings_pages_follow_the_device_and_the_proxy_reaches_only_this_machines_cli
         "Appearance comes next"
     );
 
-    // A remote Device has its own pages only, Agent integrations the fifth.
+    // A remote Device has its own pages only, Agent integrations the fourth.
     settings.update(|_, cx| {
         select_settings_server(&settings_view, 2, cx);
-        select_settings_page(&settings_view, 4, cx);
+        select_settings_page(&settings_view, 3, cx);
     });
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
@@ -251,8 +251,10 @@ fn listen_submission_distinguishes_invalid_unavailable_and_staged_addresses() {
             .and_then(|view| view.upgrade())
             .unwrap()
     });
+    // Paired devices: its Connections group, where the Address is, comes last, so the
+    // window is tall enough to draw it.
+    settings.simulate_resize(size(px(900.), px(1400.)));
     settings.update(|_, cx| {
-        // Remote access.
         select_settings_page(&settings_view, 6, cx);
         view.update(cx, |this, _| {
             let connection = this.connection_mut(1).unwrap();
@@ -261,8 +263,14 @@ fn listen_submission_distinguishes_invalid_unavailable_and_staged_addresses() {
             drop(receiver);
             connection.io.as_mut().unwrap().outgoing = outgoing;
         });
-        set_server_listen(&settings_view, "127.0.0.1:2638".into(), cx);
     });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        settings.read(|cx| server_listen(&settings_view, cx)),
+        "127.0.0.1:2637",
+        "an untouched field takes the address the Server reports after Settings opened"
+    );
+    settings.update(|_, cx| set_server_listen(&settings_view, "127.0.0.1:2638".into(), cx));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("settings-save-Listen").is_some());
     assert!(settings.debug_bounds("settings-saved-Listen").is_none());
@@ -559,7 +567,7 @@ fn the_terminal_settings_controls_drive_the_preferences_and_reset() {
         }),
         "every agent's hooks state must arrive from the Server"
     );
-    window.update(|_, cx| select_settings_page(&settings_view, 8, cx));
+    window.update(|_, cx| select_settings_page(&settings_view, 7, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     settings.run_until_parked();
 
@@ -1009,16 +1017,16 @@ fn the_agent_integrations_page_shows_each_agents_hooks_state() {
             .and_then(|view| view.upgrade())
             .unwrap()
     });
-    // Agent integrations is this machine's ninth page.
-    settings.update(|_, cx| select_settings_page(&settings_view, 8, cx));
+    // Agent integrations is this machine's eighth page.
+    settings.update(|_, cx| select_settings_page(&settings_view, 7, cx));
     settings.update(|window, cx| _ = window.draw(cx));
     assert!(settings.debug_bounds("agent-hooks-kimi-state").is_some());
     assert!(settings.debug_bounds("agent-hooks-claude-state").is_some());
 }
 
 #[test]
-fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_the_listener() {
-    use condr_core::protocol::{ServerAdminResponse, ServerMessage};
+fn the_pairing_card_shows_one_code_and_follows_the_route_the_host_and_the_device() {
+    use condr_core::protocol::{ServerAdminResponse, ServerClientInfo, ServerMessage};
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
     cx.update(|cx| {
@@ -1044,6 +1052,12 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
             .and_then(|view| view.upgrade())
             .unwrap()
     });
+    assert!(
+        wait_until_event_driven(window, |window| {
+            window.read(|app| view.read(app).connection(1).unwrap().health.is_some())
+        }),
+        "the Server reports its status to a Settings window"
+    );
 
     // A partial address stays in the field and never reaches the Server.
     let before = settings.read(|app| view.read(app).connection(1).unwrap().listen.clone());
@@ -1060,97 +1074,107 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
         "an incomplete address is not saved"
     );
 
-    settings.update(|_, cx| {
-        view.update(cx, |this, cx| {
+    // Nothing reaches this Device yet: the card offers to let devices in.
+    let reach = |settings: &mut VisualTestContext, listen: bool, p2p: bool| {
+        settings.update(|_, cx| {
+            view.update(cx, |this, _| {
+                let connection = this.connection_mut(1).unwrap();
+                connection.running_listen = listen.then(|| "0.0.0.0:2637".into());
+                connection.listen = connection.running_listen.clone();
+                connection.running_p2p = p2p;
+                connection.p2p = p2p;
+            });
+        });
+        settings.update(|window, cx| _ = window.draw(cx));
+    };
+    settings.update(|_, cx| select_settings_page(&settings_view, 6, cx));
+    reach(settings, false, false);
+    assert!(settings.debug_bounds("pairing-allow").is_some());
+    assert!(settings.debug_bounds("pairing-show-code").is_none());
+    reach(settings, true, true);
+    assert!(settings.debug_bounds("pairing-show-code").is_some());
+
+    let invite =
+        |this: &mut Condr, tcp: bool, p2p: bool, secs: u64, cx: &mut gpui_kit::Context<Condr>| {
             let generation = this.connection(1).unwrap().connect_generation;
             this.handle_incoming(
                 1,
                 generation,
                 Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::Invite {
-                    tcp: Some("tcp://key.secret@<host>:2637".into()),
-                    p2p: Some("p2p://key.secret".into()),
-                    expires_in_secs: 600,
+                    tcp: tcp.then(|| "tcp://key.secret@<host>:2637".into()),
+                    p2p: p2p.then(|| "p2p://key.secret".into()),
+                    expires_in_secs: secs,
                     hosts: vec!["192.168.1.20".into(), "desk.local".into(), "fd00::5".into()],
                 })),
                 cx,
             );
-            let invite = this.connection(1).unwrap().invite.clone().unwrap();
-            assert_eq!(invite.tcp.as_deref(), Some("tcp://key.secret@<host>:2637"));
-            assert_eq!(invite.p2p.as_deref(), Some("p2p://key.secret"));
-            assert_eq!(invite.expires_in_secs, 600);
-            assert_eq!(
-                invite.tcp_link().as_deref(),
-                Some("tcp://key.secret@192.168.1.20:2637"),
-                "the likeliest host fills the TCP link"
-            );
-        });
-    });
+        };
+    settings.update(|_, cx| view.update(cx, |this, cx| invite(this, true, true, 600, cx)));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert_eq!(
+        settings.read_from_clipboard().and_then(|item| item.text()),
+        None,
+        "a new code is shown, not copied behind the person's back"
+    );
+    // One code, the Peer-to-peer one, and a choice because both are on.
+    let code = settings.debug_bounds("pairing-code").expect("the code");
+    assert!(
+        code.size.width == code.size.height && code.size.width >= px(160.),
+        "{code:?}"
+    );
+    assert!(settings.debug_bounds("pairing-route").is_some());
+    assert!(
+        settings.debug_bounds("server-invite-host").is_none(),
+        "the Peer-to-peer link needs no address"
+    );
+    let copy = settings.debug_bounds("pairing-copy").unwrap();
+    settings.simulate_click(copy.center(), Modifiers::default());
+    settings.run_until_parked();
     assert_eq!(
         settings
             .read_from_clipboard()
             .and_then(|item| item.text())
             .as_deref(),
-        Some("p2p://key.secret"),
-        "the Peer-to-peer link, which needs no host, goes to the clipboard"
+        Some("p2p://key.secret")
     );
-    // The invite lives on the Paired devices page, this machine's eighth.
-    settings.update(|_, cx| select_settings_page(&settings_view, 7, cx));
+    assert!(settings.read(|app| settings_view.read(app).invite_copied));
+
+    // The TCP link names an address, the likeliest first.
+    let tcp = settings.debug_bounds("pairing-route-tcp").unwrap();
+    settings.simulate_click(tcp.center(), Modifiers::default());
+    settings.run_until_parked();
     settings.update(|window, cx| _ = window.draw(cx));
-    assert!(
-        settings.debug_bounds("server-invite-tcp").is_some()
-            && settings.debug_bounds("server-invite-p2p").is_some(),
-        "one link per enabled transport"
-    );
-    // ADR 0040: each link is a code to scan, and the TCP one names a host the phone dials.
-    let p2p_qr = settings
-        .debug_bounds("server-invite-p2p-qr")
-        .expect("a code for the p2p link");
-    // Square, and at least version 1's 21 modules and the quiet zone at 3 px apiece.
-    assert!(
-        p2p_qr.size.width == p2p_qr.size.height && p2p_qr.size.width >= px(87.),
-        "{p2p_qr:?}"
-    );
-    assert!(settings.debug_bounds("server-invite-tcp-qr").is_some());
-    let tcp_link = |settings: &mut VisualTestContext| {
+    assert!(settings.read(|app| settings_view.read(app).invite_tcp));
+    assert!(settings.debug_bounds("server-invite-host").is_some());
+    assert!(settings.debug_bounds("server-invite-hosts").is_some());
+    let shown = |settings: &mut VisualTestContext| {
         settings.read(|app| {
+            let tcp = settings_view.read(app).invite_tcp;
             view.read(app)
                 .connection(1)
                 .unwrap()
                 .invite
                 .clone()
                 .unwrap()
-                .tcp_link()
+                .link(tcp)
         })
     };
-
-    // Another offered address is a click away; an IPv6 one goes in brackets. The page
-    // scrolls the address into the test window first.
-    let ipv6 = settings
-        .debug_bounds("server-invite-host-2")
-        .expect("each offered host");
-    let viewport = settings.update(|window, _| window.viewport_size());
-    settings.simulate_event(gpui_kit::ScrollWheelEvent {
-        position: ipv6
-            .center()
-            .min(&gpui_kit::point(ipv6.center().x, viewport.height - px(20.))),
-        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
-            px(0.),
-            -(ipv6.bottom() - viewport.height + px(60.)),
-        )),
-        ..Default::default()
+    assert_eq!(
+        shown(settings).as_deref(),
+        Some("tcp://key.secret@192.168.1.20:2637")
+    );
+    settings.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            if this.set_invite_host(1, "fd00::5".into()) {
+                cx.notify();
+            }
+        })
     });
     settings.update(|window, cx| _ = window.draw(cx));
-    let ipv6 = settings.debug_bounds("server-invite-host-2").unwrap();
-    assert!(
-        ipv6.bottom() < viewport.height,
-        "{ipv6:?} within {viewport:?}"
-    );
-    settings.simulate_click(ipv6.center(), Modifiers::default());
-    settings.run_until_parked();
-    settings.update(|window, cx| _ = window.draw(cx));
     assert_eq!(
-        tcp_link(settings).as_deref(),
-        Some("tcp://key.secret@[fd00::5]:2637")
+        shown(settings).as_deref(),
+        Some("tcp://key.secret@[fd00::5]:2637"),
+        "an IPv6 address goes in brackets"
     );
     assert_eq!(
         settings.read(|app| settings_view
@@ -1160,10 +1184,10 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
             .value()
             .to_string()),
         "fd00::5",
-        "the field shows the picked host"
+        "the field shows the picked address"
     );
 
-    // Any name typed in the field fills the link; clearing it leaves nothing to scan.
+    // Any name typed fills the link; an empty field leaves nothing to scan or copy.
     settings.update(|window, cx| {
         let input = settings_view.read(cx).invite_host.clone();
         input.update(cx, |input, cx| input.focus(window, cx));
@@ -1173,22 +1197,56 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
     settings.run_until_parked();
     settings.update(|window, cx| _ = window.draw(cx));
     assert_eq!(
-        tcp_link(settings).as_deref(),
+        shown(settings).as_deref(),
         Some("tcp://key.secret@studio.lan:2637")
     );
     settings.simulate_keystrokes("secondary-a backspace");
     settings.run_until_parked();
     settings.update(|window, cx| _ = window.draw(cx));
-    assert_eq!(tcp_link(settings), None);
+    assert_eq!(shown(settings), None);
     assert!(
-        settings.debug_bounds("server-invite-tcp-qr").is_none()
-            && settings.debug_bounds("server-invite-tcp").is_none(),
-        "no code and no Copy without a host"
+        settings.debug_bounds("pairing-code").is_none()
+            && settings.debug_bounds("pairing-copy").is_none(),
+        "no code and no Copy without an address"
     );
-    assert!(settings.debug_bounds("server-invite-p2p-qr").is_some());
 
+    // A device the list did not know paired while the code showed: the card names it.
     settings.update(|_, cx| {
         view.update(cx, |this, cx| {
+            let generation = this.connection(1).unwrap().connect_generation;
+            let mut clients = this.connection(1).unwrap().clients.clone();
+            clients.push(ServerClientInfo {
+                name: "Rocky's iPhone".into(),
+                fingerprint: "phonefingerprint".into(),
+                last_seen: 0,
+            });
+            this.handle_incoming(
+                1,
+                generation,
+                Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::Clients {
+                    clients,
+                    connected: vec!["phonefingerprint".into()],
+                })),
+                cx,
+            );
+            let connection = this.connection(1).unwrap();
+            assert_eq!(connection.just_paired.as_deref(), Some("Rocky's iPhone"));
+            assert_eq!(connection.invite, None, "the code is spent");
+        });
+    });
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.debug_bounds("pairing-show-code").is_some());
+    assert!(settings.debug_bounds("pairing-code").is_none());
+
+    // An expired code asks for a new one; a Peer-to-peer change voids the shown one.
+    settings.update(|_, cx| view.update(cx, |this, cx| invite(this, false, true, 0, cx)));
+    settings.update(|window, cx| _ = window.draw(cx));
+    assert!(settings.read(|app| view.read(app).connection(1).unwrap().just_paired.is_none()));
+    assert!(settings.debug_bounds("pairing-code").is_none());
+    assert!(settings.debug_bounds("pairing-show-code").is_some());
+    settings.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            invite(this, true, true, 600, cx);
             let generation = this.connection(1).unwrap().connect_generation;
             this.handle_incoming(
                 1,
@@ -1198,20 +1256,12 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
                 })),
                 cx,
             );
-            let connection = this.connection(1).unwrap();
-            assert!(connection.p2p, "the p2p setting follows the Server's reply");
-            assert_eq!(connection.invite, None, "a p2p change voids the old invite");
-            this.handle_incoming(
-                1,
-                generation,
-                Incoming::Message(ServerMessage::ServerAdmin(ServerAdminResponse::Invite {
-                    tcp: Some("tcp://key.secret@<host>:2637".into()),
-                    p2p: None,
-                    expires_in_secs: 600,
-                    hosts: Vec::new(),
-                })),
-                cx,
+            assert_eq!(
+                this.connection(1).unwrap().invite,
+                None,
+                "a p2p change voids the old invite"
             );
+            invite(this, true, false, 600, cx);
             this.handle_incoming(
                 1,
                 generation,
@@ -1228,11 +1278,8 @@ fn the_remote_access_page_keeps_half_typed_addresses_local_and_invites_follow_th
         });
     });
     settings.update(|window, cx| _ = window.draw(cx));
-    assert!(
-        settings.debug_bounds("server-invite-tcp").is_none()
-            && settings.debug_bounds("server-invite-p2p").is_none(),
-        "no invite is shown after the listener changed"
-    );
+    assert!(settings.debug_bounds("pairing-code").is_none());
+    assert!(settings.debug_bounds("pairing-show-code").is_some());
 }
 
 #[test]
@@ -1261,7 +1308,7 @@ fn the_settings_window_draws_its_confirm_dialogs() {
             .and_then(|view| view.upgrade())
             .unwrap()
     });
-    // Remote access, where Restart is.
+    // Paired devices, where Restart shows while a change waits for it.
     settings.update(|_, cx| select_settings_page(&settings_view, 6, cx));
     settings.update(|window, cx| _ = window.draw(cx));
 

@@ -308,7 +308,7 @@ struct InviteStep: View {
                 VStack(alignment: .leading, spacing: 16) {
                     numbered(1, Text("Open **Condr** on your computer."))
                     numbered(2, Text("Go to **Settings › Paired devices**."))
-                    numbered(3, Text("Choose **Invite**."))
+                    numbered(3, Text("Choose **Show pairing code**."))
                 }
             }
             .padding(.horizontal, 24)
