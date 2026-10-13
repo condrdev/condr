@@ -71,3 +71,42 @@ fn device_key(seed: &[u8]) -> Result<DeviceKey, MobileError> {
         .map_err(|_| MobileError::Invalid("a Device key seed is 32 bytes".into()))?;
     Ok(DeviceKey::from_seed(seed))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use condr_client::PublicKey;
+
+    /// The seed the app hands in as bytes is the key a desktop derives from it: the
+    /// same fingerprint, and plain Ed25519, which iroh's identity also is (ADR 0040).
+    #[test]
+    fn a_seed_handed_in_as_bytes_is_the_key_a_desktop_derives() {
+        let desktop = DeviceKey::generate().unwrap();
+        assert_eq!(
+            fingerprint(desktop.seed().to_vec()).unwrap(),
+            desktop.public().to_string()
+        );
+
+        // RFC 8032, section 7.1, test 1.
+        let byte = |pair: &[u8]| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16);
+        let bytes = |text: &str| -> [u8; 32] {
+            let bytes: Vec<u8> = text
+                .as_bytes()
+                .chunks(2)
+                .map(|p| byte(p).unwrap())
+                .collect();
+            bytes.try_into().unwrap()
+        };
+        let seed = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        let public = bytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+        assert_eq!(
+            fingerprint(seed.to_vec()).unwrap(),
+            PublicKey::from_bytes(public).to_string()
+        );
+
+        assert!(matches!(
+            fingerprint(vec![0; 31]),
+            Err(MobileError::Invalid(_))
+        ));
+    }
+}

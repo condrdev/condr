@@ -38,7 +38,8 @@ const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum Network {
     /// Condr's relay and DNS.
     Condr,
-    /// Tests: loopback sockets only, Devices registered in one shared lookup.
+    /// Tests: loopback sockets only, accepting Devices registered in one shared lookup,
+    /// which stands in for DNS.
     Loopback(MemoryLookup),
 }
 
@@ -95,7 +96,7 @@ pub struct P2pNode {
 struct Bound {
     endpoint: IrohEndpoint,
     connections: Arc<AtomicUsize>,
-    accept_task: Option<tokio::task::JoinHandle<()>>,
+    accept_task: tokio::task::JoinHandle<()>,
 }
 
 impl P2pNode {
@@ -177,7 +178,10 @@ impl P2pNode {
             };
             builder.bind().await.map_err(other)
         })?;
-        if let Network::Loopback(lookup) = &self.network {
+        // An endpoint that only dials is findable nowhere, as it publishes nothing to DNS.
+        if let Network::Loopback(lookup) = &self.network
+            && enabled
+        {
             lookup.add_endpoint_info(EndpointAddr::from_parts(
                 endpoint.id(),
                 endpoint.bound_sockets().into_iter().map(TransportAddr::Ip),
@@ -189,7 +193,9 @@ impl P2pNode {
             proxy = proxy_address.as_deref(),
             "p2p endpoint bound"
         );
-        let accept_task = enabled.then(|| {
+        // Every endpoint answers what reaches it, a dial-only one with a refusal, so the
+        // other side is not left to time out.
+        let accept_task = {
             let endpoint = endpoint.clone();
             let node = Arc::downgrade(self);
             self.handle.spawn(async move {
@@ -202,7 +208,7 @@ impl P2pNode {
                     });
                 }
             })
-        });
+        };
         *bound = Some(Bound {
             endpoint: endpoint.clone(),
             connections: Arc::new(AtomicUsize::new(0)),
@@ -212,6 +218,10 @@ impl P2pNode {
     }
 
     async fn accept_connection(self: Arc<Self>, incoming: Incoming) -> io::Result<()> {
+        let Some(accept) = &self.accept else {
+            incoming.refuse();
+            return Err(rejected("this endpoint accepts nothing"));
+        };
         let conn = incoming.await.map_err(other)?;
         let remote = PublicKey::from_bytes(*conn.remote_id().as_bytes());
         let (send, recv) = conn.accept_bi().await.map_err(other)?;
@@ -227,10 +237,7 @@ impl P2pNode {
             },
             self.guard(),
         );
-        match &self.accept {
-            Some(accept) => accept(stream),
-            None => Err(rejected("this endpoint accepts nothing")),
-        }
+        accept(stream)
     }
 
     /// Closes the endpoint now, whatever still uses it; the next dial binds it again. A
@@ -239,9 +246,7 @@ impl P2pNode {
         let Some(bound) = lock(&self.bound).take() else {
             return;
         };
-        if let Some(task) = bound.accept_task {
-            task.abort();
-        }
+        bound.accept_task.abort();
         self.handle
             .block_on(async move { bound.endpoint.close().await });
     }
@@ -327,9 +332,7 @@ impl P2pNode {
             }
         };
         if let Some(released) = released {
-            if let Some(task) = released.accept_task {
-                task.abort();
-            }
+            released.accept_task.abort();
             tracing::info!("p2p endpoint released after idling");
             self.handle
                 .spawn(async move { released.endpoint.close().await });
@@ -617,6 +620,62 @@ fn rejected(reason: &str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DeviceKey;
+
+    /// A Companion's endpoint only dials: it makes itself findable nowhere, and a Device
+    /// that learns its address anyway is refused at once (ADR 0040).
+    #[test]
+    fn an_endpoint_that_only_dials_publishes_nothing_and_refuses_connections() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let lookup = MemoryLookup::new();
+        let node = |key: &Arc<DeviceKey>, accept: Option<Accept>| {
+            P2pNode::new(
+                runtime.handle().clone(),
+                key.clone(),
+                Network::Loopback(lookup.clone()),
+                ProxySetting::default(),
+                accept,
+            )
+        };
+        let phone_key = Arc::new(DeviceKey::generate().unwrap());
+        let phone = node(&phone_key, None);
+        let phone_endpoint = phone.endpoint().unwrap();
+        assert!(
+            lookup.get_endpoint_info(phone_endpoint.id()).is_none(),
+            "the phone publishes nothing"
+        );
+        let server_key = Arc::new(DeviceKey::generate().unwrap());
+        let server = node(&server_key, Some(Box::new(|_| Ok(()))));
+        server.start().unwrap();
+        let dialer = node(&Arc::new(DeviceKey::generate().unwrap()), None);
+        assert!(
+            dialer.dial(server_key.public(), None).is_ok(),
+            "an accepting endpoint is found and answers"
+        );
+
+        lookup.add_endpoint_info(EndpointAddr::from_parts(
+            phone_endpoint.id(),
+            phone_endpoint
+                .bound_sockets()
+                .into_iter()
+                .map(TransportAddr::Ip),
+        ));
+        let started = std::time::Instant::now();
+        assert!(dialer.dial(phone_key.public(), None).is_err());
+        assert!(
+            started.elapsed() < DIAL_TIMEOUT / 2,
+            "refused, not left to time out: {:?}",
+            started.elapsed()
+        );
+
+        for node in [phone, server, dialer] {
+            node.close();
+        }
+    }
 
     #[test]
     fn the_relay_proxy_follows_the_mode_and_keeps_system_credentials() {
