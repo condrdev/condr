@@ -28,7 +28,11 @@ use tracing_subscriber::{EnvFilter, Layer as _, fmt};
 
 /// Holds an `EnvFilter` directive string. It replaces the default; it does not extend it.
 pub const ENV_VAR: &str = "CONDR_LOG";
-const DEFAULT_DIRECTIVES: &str = "warn,condr_core=info,condr_server=info,condr_gui=info";
+/// iroh's address probes warn about every reply they find odd, every half a minute behind
+/// some NATs and proxies; only their errors are worth a line, or a place among the
+/// Server's recent errors.
+const DEFAULT_DIRECTIVES: &str =
+    "warn,condr_core=info,condr_server=info,condr_gui=info,iroh::net_report=error";
 const KEPT_FILES: usize = 7;
 const KEPT_ERRORS: usize = 20;
 
