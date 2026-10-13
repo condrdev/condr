@@ -6,6 +6,7 @@
 uniffi::setup_scaffolding!();
 
 mod companion;
+mod input;
 mod views;
 
 pub use companion::Companion;

@@ -2,7 +2,9 @@
 
 use condr_core::protocol::{LayoutCommand, LayoutResult};
 use condr_core::{TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers};
-use condr_mobile::{Change, Companion, DeviceStatus, Listener, SavedDevice};
+use condr_mobile::{
+    Change, Companion, DeviceStatus, Event, Key, Listener, SavedDevice, TerminalScreen,
+};
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -189,8 +191,8 @@ fn outside_a_pane_the_companion_gets_events_but_no_terminal() {
     server_thread.join().unwrap().unwrap();
 }
 
-/// Scrolling is the Pane's, shared by every viewer (ADR 0036): the screen says how far up
-/// the phone scrolled it, and "back to the newest" brings the offset to zero.
+/// Scrolling is the Pane's, shared by every viewer (ADR 0036): a swipe over a shell scrolls
+/// it, the screen says how far, and "back to the newest" brings the offset to zero.
 #[test]
 fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
     let server =
@@ -259,8 +261,9 @@ fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
             .unwrap();
         std::thread::sleep(Duration::from_millis(10));
     }
+    // A swipe is wheel motion; a shell does not track the mouse, so it scrolls.
     wait_until("the prompts to scroll the screen", || {
-        companion.scroll(address.clone(), pane, 5);
+        companion.wheel(address.clone(), pane, 4, 4, 5);
         std::thread::sleep(Duration::from_millis(50));
         companion
             .terminal(address.clone(), pane)
@@ -318,4 +321,188 @@ fn a_server_that_does_not_know_the_phone_marks_it_revoked() {
     companion.close();
     handle.stop();
     server_thread.join().unwrap().unwrap();
+}
+
+/// One Server with one shell Pane, and a phone showing it at `rows` × `columns`.
+struct Shown {
+    companion: Arc<Companion>,
+    address: String,
+    pane: u64,
+    handle: condr_server::ServerHandle,
+    thread: std::thread::JoinHandle<std::io::Result<()>>,
+}
+
+impl Shown {
+    fn start(rows: u16, columns: u16) -> Self {
+        let server =
+            BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+                .unwrap();
+        let handle = server.handle();
+        let endpoint = server.endpoint().clone();
+        let Endpoint::Tcp(tcp) = &endpoint else {
+            panic!("an ephemeral TCP Server answers over TCP");
+        };
+        let address = format!("tcp://{}@{}", tcp.server_key, tcp.authority());
+        let seed = tcp.client_key.seed().to_vec();
+        let thread = std::thread::spawn(move || server.run());
+        let mut desktop = ClientConnection::connect_overview(&endpoint, "desktop").unwrap();
+        let Ok(LayoutResult::WorkspaceCreated { pane_id, .. }) = desktop
+            .layout(LayoutCommand::CreateWorkspace {
+                root_directory: std::env::temp_dir(),
+                name: None,
+            })
+            .unwrap()
+        else {
+            panic!("the Workspace is created");
+        };
+        drop(desktop);
+        let companion = Companion::new(
+            seed,
+            "phone".into(),
+            vec![SavedDevice {
+                address: address.clone(),
+                label: "desk".into(),
+            }],
+            Arc::new(Counter::default()),
+        )
+        .unwrap();
+        companion.resume();
+        wait_until("the connection", || {
+            companion.devices()[0].status == DeviceStatus::Connected
+        });
+        let pane = pane_id.as_u64();
+        companion.show_pane(Some(address.clone()), pane, rows, columns);
+        wait_until("the Pane at the phone's size", || {
+            companion
+                .terminal(address.clone(), pane)
+                .is_some_and(|screen| screen.rows == rows && screen.columns == columns)
+        });
+        Self {
+            companion,
+            address,
+            pane,
+            handle,
+            thread,
+        }
+    }
+
+    fn screen(&self) -> Option<TerminalScreen> {
+        self.companion.terminal(self.address.clone(), self.pane)
+    }
+
+    fn stop(self) {
+        self.companion.close();
+        self.handle.stop();
+        self.thread.join().unwrap().unwrap();
+    }
+}
+
+fn row_text(screen: &TerminalScreen, row: u16) -> String {
+    let columns = usize::from(screen.columns);
+    screen.cells[usize::from(row) * columns..][..columns]
+        .iter()
+        .map(|cell| {
+            if cell.text.is_empty() {
+                " "
+            } else {
+                cell.text.as_str()
+            }
+        })
+        .collect()
+}
+
+/// Where `word` is on the screen, as (row, column).
+fn find(screen: &TerminalScreen, word: &str) -> Option<(u16, u16)> {
+    (0..screen.rows).find_map(|row| {
+        row_text(screen, row)
+            .find(word)
+            .map(|column| (row, column as u16))
+    })
+}
+
+/// A long press selects a word in the Pane's shared selection, shown in the selection's
+/// colours, and Copy brings its text back (ADR 0008, ADR 0041).
+#[test]
+fn a_long_press_selects_a_word_and_copy_returns_it() {
+    let shown = Shown::start(12, 60);
+    shown
+        .companion
+        .send_text(shown.address.clone(), shown.pane, "echo CONDRWORD".into());
+    shown
+        .companion
+        .send_key(shown.address.clone(), shown.pane, Key::Enter, false);
+    // The word is printed under the command line that typed it.
+    wait_until("the echoed word", || {
+        shown.screen().is_some_and(|screen| {
+            (0..screen.rows)
+                .filter(|row| row_text(&screen, *row).trim() == "CONDRWORD")
+                .count()
+                == 1
+        })
+    });
+    let screen = shown.screen().unwrap();
+    let row = (0..screen.rows)
+        .find(|row| row_text(&screen, *row).trim() == "CONDRWORD")
+        .unwrap();
+    let (_, column) = find(&screen, "CONDRWORD")
+        .filter(|(found, _)| *found == row)
+        .unwrap_or((row, 0));
+
+    shown
+        .companion
+        .select_word(shown.address.clone(), shown.pane, row, column + 2);
+    wait_until("the selection on screen", || {
+        shown.screen().is_some_and(|screen| {
+            screen.has_selection
+                && screen.cells
+                    [usize::from(row) * usize::from(screen.columns) + usize::from(column)]
+                .background
+                    != screen.background
+        })
+    });
+    shown.companion.take_events();
+    shown
+        .companion
+        .copy_selection(shown.address.clone(), shown.pane);
+    let mut copied = None;
+    wait_until("the copied text", || {
+        copied = shown
+            .companion
+            .take_events()
+            .into_iter()
+            .find_map(|event| match event {
+                Event::Copied { text } => Some(text),
+                _ => None,
+            });
+        copied.is_some()
+    });
+    assert_eq!(copied.as_deref(), Some("CONDRWORD"));
+
+    shown
+        .companion
+        .clear_selection(shown.address.clone(), shown.pane);
+    wait_until("the selection gone", || {
+        shown.screen().is_some_and(|screen| !screen.has_selection)
+    });
+    shown.stop();
+}
+
+/// Pasted text reaches the program as a paste, then Return runs it (ADR 0041).
+#[test]
+fn pasted_text_runs_once_return_is_pressed() {
+    let shown = Shown::start(12, 60);
+    shown.companion.paste(
+        shown.address.clone(),
+        shown.pane,
+        "echo CONDR_PASTED".into(),
+    );
+    shown
+        .companion
+        .send_key(shown.address.clone(), shown.pane, Key::Enter, false);
+    wait_until("the pasted command's output", || {
+        shown.screen().is_some_and(|screen| {
+            (0..screen.rows).any(|row| row_text(&screen, row).trim() == "CONDR_PASTED")
+        })
+    });
+    shown.stop();
 }

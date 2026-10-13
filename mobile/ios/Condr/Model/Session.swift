@@ -247,10 +247,57 @@ final class Session {
         client.sendKey(address: shown.address, pane: shown.pane, key: key, control: control)
     }
 
-    /// Scrolls the Pane for every viewer, as the desktop does (ADR 0036).
-    func scroll(lines: Int32) {
+    /// Pasted text, which the Server brackets when the program asked (ADR 0041).
+    func paste(text: String) {
         guard let shown else { return }
-        client.scroll(address: shown.address, pane: shown.pane, lines: lines)
+        client.paste(address: shown.address, pane: shown.pane, text: text)
+    }
+
+    /// A swipe of `lines` over a cell, positive towards what came before: wheel motion, as
+    /// the desktop sends a trackpad's. The Server gives it to a program that tracks the
+    /// mouse, turns it into arrow keys on an alternate screen, or scrolls the Pane for
+    /// every viewer (ADR 0036, ADR 0041).
+    func wheel(row: UInt16, column: UInt16, lines: Int32) {
+        guard let shown else { return }
+        client.wheel(
+            address: shown.address, pane: shown.pane, row: row, column: column, lines: lines)
+    }
+
+    /// A tap where the program tracks the mouse: a click on the cell (ADR 0041).
+    func click(row: UInt16, column: UInt16) {
+        guard let shown else { return }
+        client.click(address: shown.address, pane: shown.pane, row: row, column: column)
+    }
+
+    // MARK: The Pane's selection, the one every viewer shares (ADR 0008)
+
+    /// A long press: the word around the cell.
+    func selectWord(row: UInt16, column: UInt16) {
+        guard let shown else { return }
+        client.selectWord(address: shown.address, pane: shown.pane, row: row, column: column)
+        refresh()
+    }
+
+    /// A drag after a long press: the cells from one to the other.
+    func selectRange(from: (row: UInt16, column: UInt16), to: (row: UInt16, column: UInt16)) {
+        guard let shown else { return }
+        client.selectRange(
+            address: shown.address, pane: shown.pane, fromRow: from.row, fromColumn: from.column,
+            toRow: to.row, toColumn: to.column)
+        refresh()
+    }
+
+    func clearSelection() {
+        guard let shown else { return }
+        client.clearSelection(address: shown.address, pane: shown.pane)
+        refresh()
+    }
+
+    /// Copies the selection; its text comes back as an event, onto the clipboard.
+    func copySelection() {
+        guard let shown else { return }
+        client.copySelection(address: shown.address, pane: shown.pane)
+        refresh()
     }
 
     func scrollToBottom() {

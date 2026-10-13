@@ -74,7 +74,7 @@ final class LivePairingUITests: XCTestCase {
         XCTAssertTrue(pane.waitForExistence(timeout: 15), "the Workspace's Pane is listed")
         pane.tap()
 
-        XCTAssertTrue(app.buttons["esc"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Escape"].waitForExistence(timeout: 10))
         // The keyboard changes the grid, and the page says so for a moment.
         let input = app.textFields.firstMatch
         input.tap()

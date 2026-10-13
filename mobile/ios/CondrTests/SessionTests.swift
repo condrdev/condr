@@ -70,7 +70,7 @@ struct SessionTests {
         let screen = TerminalScreen(
             revision: 3, rows: 2, columns: 2, scrolledLines: 0, cells: [], cursor: nil,
             background: 0,
-            mouseTracking: false)
+            mouseTracking: false, hasSelection: false)
         client.update { state in
             state.screens[Fixture.ref] = screen
             state.changes = [.terminal(address: Fixture.address, pane: 7)]
@@ -157,11 +157,20 @@ struct SessionTests {
         session.show(Fixture.ref, rows: 10, columns: 40)
         session.send(key: .character(text: "c"), control: true)
         session.send(text: "yes")
-        session.scroll(lines: 3)
+        session.wheel(row: 2, column: 5, lines: 3)
         session.scrollToBottom()
+        session.paste(text: "a\nb")
+        session.click(row: 1, column: 2)
+        session.selectWord(row: 0, column: 4)
+        session.selectRange(from: (0, 4), to: (2, 1))
+        session.copySelection()
+        session.clearSelection()
         let state = client.state.withLock { $0 }
         #expect(state.keys.map(\.1) == [true])
         #expect(state.texts == ["yes"])
         #expect(state.scrolls == [3, 0])
+        #expect(state.pastes == ["a\nb"])
+        #expect(state.clicks.map { [$0.0, $0.1] } == [[1, 2]])
+        #expect(state.selections == ["word 0:4", "range 0:4-2:1", "copy", "clear"])
     }
 }

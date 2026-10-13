@@ -66,12 +66,12 @@ final class ScenesUITests: XCTestCase {
         XCTAssertTrue(banner.waitForExistence(timeout: 15))
         banner.tap()
         XCTAssertTrue(app.staticTexts["Migrate auth to passkeys"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["esc"].exists)
+        XCTAssertTrue(app.buttons["Escape"].exists)
     }
 
     @MainActor func testTheTerminalTakesAReply() {
         let app = launch("terminal", ["-focus", "YES"])
-        XCTAssertTrue(app.buttons["esc"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Escape"].waitForExistence(timeout: 15))
         app.buttons["Down"].tap()
         app.buttons["Return"].tap()
         let field = app.textFields.firstMatch
@@ -91,5 +91,34 @@ final class ScenesUITests: XCTestCase {
 
     @MainActor func testACrowdedComputerStillFitsItsScore() {
         assertLandmark("crowd-device") { $0.staticTexts["buildbox"] }
+    }
+
+    /// A long press selects the word under it; Copy from the menu puts it on the clipboard
+    /// and says so (ADR 0041).
+    @MainActor func testALongPressSelectsAndCopies() {
+        let app = launch("terminal")
+        let terminal = app.descendants(matching: .any)["terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 15))
+        // "Bash" starts the first row, two cells in.
+        terminal.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: 8))
+            .press(forDuration: 1)
+        let copy =
+            app.menuItems["Copy"].waitForExistence(timeout: 3)
+            ? app.menuItems["Copy"] : app.buttons["Copy"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 3), "the edit menu offers Copy")
+        copy.tap()
+        XCTAssertTrue(app.staticTexts["Copied to clipboard"].waitForExistence(timeout: 5))
+    }
+
+    /// The key row goes on past the arrows: Shift-Tab, Paste and the page keys (ADR 0041).
+    @MainActor func testTheKeyRowHasTheKeysAgentsUse() {
+        let app = launch("terminal")
+        XCTAssertTrue(app.buttons["Escape"].waitForExistence(timeout: 15))
+        for key in [
+            "Tab", "Control", "Up", "Down", "Shift-Tab", "Home", "End", "Page Up", "Page Down",
+            "Return",
+        ] {
+            XCTAssertTrue(app.buttons[key].exists, "the key row has \(key)")
+        }
     }
 }

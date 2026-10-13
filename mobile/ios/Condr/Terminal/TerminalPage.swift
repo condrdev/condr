@@ -31,7 +31,7 @@ struct TerminalPage: View {
             TerminalHost(
                 screen: session.screen, fontSize: preferences.fontSize,
                 grid: { rows, columns in grid = Grid(rows: rows, columns: columns) },
-                scroll: { session.scroll(lines: $0) },
+                session: session,
                 open: { UIApplication.shared.open($0) }
             )
             .padding(.horizontal, Self.gutter)
@@ -183,9 +183,13 @@ struct TerminalPage: View {
 
     private func inputBar(_ pane: PaneView) -> some View {
         VStack(spacing: 8) {
+            NoticeToast()
             ErrorToast()
                 .padding(.horizontal, -12)
-            KeyRow(control: $control, press: press)
+            KeyRow(control: $control, press: press) { text in
+                keyTick += 1
+                session.paste(text: text)
+            }
             HStack(spacing: 8) {
                 TextField(placeholder(pane), text: $text)
                     .font(.body)
@@ -235,12 +239,16 @@ struct TerminalPage: View {
         control = false
     }
 
-    /// Send is the line: the field's text as typed, then Return, which a shell or an
-    /// Agent's prompt needs to take it. An empty send is Return alone, which is how a
-    /// prompt is answered after picking with the arrows.
+    /// Send is the line: the field's text, then Return, which a shell or an Agent's prompt
+    /// needs to take it. Text pasted with line breaks goes as a paste, so they stay inside
+    /// the reply rather than each sending a line. An empty send is Return alone, which is
+    /// how a prompt is answered after picking with the arrows.
     private func submit() {
         keyTick += 1
-        if !text.isEmpty {
+        if text.contains(where: \.isNewline) {
+            session.paste(text: text)
+            text = ""
+        } else if !text.isEmpty {
             session.send(text: text)
             text = ""
         }

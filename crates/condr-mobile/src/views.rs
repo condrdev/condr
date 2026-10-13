@@ -141,6 +141,9 @@ pub struct TerminalScreen {
     pub background: u32,
     /// The program tracks the mouse: a tap is a click, a swipe is wheel motion.
     pub mouse_tracking: bool,
+    /// Part of the screen is the Pane's selection, shared with every viewer (ADR 0008);
+    /// its cells come in the selection's colours.
+    pub has_selection: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -167,12 +170,21 @@ pub enum Key {
     Enter,
     Escape,
     Tab,
+    /// Shift-Tab, which Agents bind to switching their mode.
+    BackTab,
     Backspace,
+    Delete,
     Up,
     Down,
     Left,
     Right,
-    Character { text: String },
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Character {
+        text: String,
+    },
 }
 
 // The cell flags the Server sends: alacritty's bits.
@@ -184,15 +196,28 @@ const WIDE_CHAR_SPACER: u16 = 1 << 6;
 const HIDDEN: u16 = 1 << 8;
 const LEADING_WIDE_CHAR_SPACER: u16 = 1 << 10;
 
+/// The default scheme's selection, GitHub Dark Default's: what the desktop draws there too.
+const SELECTION_BACKGROUND: u32 = 0xe6edf3;
+const SELECTION_TEXT: u32 = 0x0d1117;
+
 pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
+    let columns = view.size.columns.max(1);
     let cells = view
         .cells
         .iter()
-        .map(|cell| {
+        .enumerate()
+        .map(|(index, cell)| {
             let mut foreground = color(cell.foreground, true);
             let mut background = color(cell.background, false);
             if cell.flags & INVERSE != 0 {
                 std::mem::swap(&mut foreground, &mut background);
+            }
+            let (row, column) = (index / usize::from(columns), index % usize::from(columns));
+            if view.selection.is_some_and(|selection| {
+                selection.contains_cell(row as u16, column as u16, columns)
+            }) {
+                foreground = SELECTION_TEXT;
+                background = SELECTION_BACKGROUND;
             }
             let blank = cell.flags & (HIDDEN | WIDE_CHAR_SPACER | LEADING_WIDE_CHAR_SPACER) != 0;
             ScreenCell {
@@ -223,6 +248,7 @@ pub(crate) fn screen(view: &TerminalView) -> TerminalScreen {
         }),
         background: DEFAULT_BACKGROUND_COLOR,
         mouse_tracking: view.mouse_tracking != condr_core::TerminalMouseTracking::None,
+        has_selection: view.selection.is_some(),
     }
 }
 

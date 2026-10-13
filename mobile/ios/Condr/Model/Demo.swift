@@ -335,7 +335,7 @@ nonisolated enum DemoScreens {
         return TerminalScreen(
             revision: 1, rows: rows, columns: columns, scrolledLines: 0, cells: cells,
             cursor: cursor,
-            background: background, mouseTracking: false)
+            background: background, mouseTracking: false, hasSelection: false)
     }
 }
 
@@ -344,7 +344,15 @@ nonisolated final class DemoClient: CompanionProtocol {
     private struct State {
         var devices: [DeviceView]
         var workspaces: [String: [WorkspaceView]]
+        /// The demo Pane's selection, as cell indices, both included.
+        var selection: (pane: UInt64, cells: ClosedRange<Int>)?
+        var changes: [Change] = []
+        var events: [Event] = []
     }
+
+    /// The default scheme's selection, as the library colours it.
+    private static let selectionBackground: UInt32 = 0xe6edf3
+    private static let selectionText: UInt32 = 0x0d1117
 
     private let state: Mutex<State>
 
@@ -357,8 +365,20 @@ nonisolated final class DemoClient: CompanionProtocol {
     func resume() {}
     func suspend() {}
     func networkChanged() {}
-    func takeChanges() -> [Change] { [] }
-    func takeEvents() -> [Event] { [] }
+
+    func takeChanges() -> [Change] {
+        state.withLock { state in
+            defer { state.changes = [] }
+            return state.changes
+        }
+    }
+
+    func takeEvents() -> [Event] {
+        state.withLock { state in
+            defer { state.events = [] }
+            return state.events
+        }
+    }
 
     func devices() -> [DeviceView] {
         state.withLock { $0.devices }
@@ -412,15 +432,76 @@ nonisolated final class DemoClient: CompanionProtocol {
         }
     }
 
-    /// Like the library, whatever screen the Pane has, asked before or after it is shown.
+    /// Like the library, whatever screen the Pane has, asked before or after it is shown,
+    /// its selection in the selection's colours.
     func terminal(address: String, pane: UInt64) -> TerminalScreen? {
-        DemoScreens.screen(pane)
+        var screen = DemoScreens.screen(pane)
+        guard let selection = state.withLock({ $0.selection }), selection.pane == pane else {
+            return screen
+        }
+        for index in selection.cells where screen.cells.indices.contains(index) {
+            screen.cells[index].foreground = Self.selectionText
+            screen.cells[index].background = Self.selectionBackground
+        }
+        screen.hasSelection = true
+        return screen
     }
 
     func showPane(address: String?, pane: UInt64, rows: UInt16, columns: UInt16) {}
 
     func sendText(address: String, pane: UInt64, text: String) {}
     func sendKey(address: String, pane: UInt64, key: Key, control: Bool) {}
-    func scroll(address: String, pane: UInt64, lines: Int32) {}
+    func paste(address: String, pane: UInt64, text: String) {}
+    func wheel(address: String, pane: UInt64, row: UInt16, column: UInt16, lines: Int32) {}
+    func click(address: String, pane: UInt64, row: UInt16, column: UInt16) {}
     func scrollToBottom(address: String, pane: UInt64) {}
+
+    /// The run of non-blank cells around the one pressed, as the Server picks a word.
+    func selectWord(address: String, pane: UInt64, row: UInt16, column: UInt16) {
+        let screen = DemoScreens.screen(pane)
+        let width = Int(screen.columns)
+        let start = Int(row) * width
+        let pressed = start + Int(column)
+        guard screen.cells.indices.contains(pressed), screen.cells[pressed].text != " " else {
+            return
+        }
+        var first = pressed
+        var last = pressed
+        while first > start, screen.cells[first - 1].text != " " { first -= 1 }
+        while last + 1 < start + width, screen.cells[last + 1].text != " " { last += 1 }
+        select(pane: pane, address: address, cells: first...last)
+    }
+
+    func selectRange(
+        address: String, pane: UInt64, fromRow: UInt16, fromColumn: UInt16, toRow: UInt16,
+        toColumn: UInt16
+    ) {
+        let width = Int(DemoScreens.columns)
+        let from = Int(fromRow) * width + Int(fromColumn)
+        let to = Int(toRow) * width + Int(toColumn)
+        select(pane: pane, address: address, cells: min(from, to)...max(from, to))
+    }
+
+    func clearSelection(address: String, pane: UInt64) {
+        state.withLock { state in
+            state.selection = nil
+            state.changes.append(.terminal(address: address, pane: pane))
+        }
+    }
+
+    func copySelection(address: String, pane: UInt64) {
+        let screen = DemoScreens.screen(pane)
+        state.withLock { state in
+            guard let selection = state.selection, selection.pane == pane else { return }
+            let text = selection.cells.map { screen.cells[$0].text }.joined()
+            state.events.append(.copied(text: text.trimmingCharacters(in: .whitespaces)))
+        }
+    }
+
+    private func select(pane: UInt64, address: String, cells: ClosedRange<Int>) {
+        state.withLock { state in
+            state.selection = (pane, cells)
+            state.changes.append(.terminal(address: address, pane: pane))
+        }
+    }
 }

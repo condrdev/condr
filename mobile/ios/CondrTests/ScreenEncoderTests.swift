@@ -41,7 +41,8 @@ struct ScreenEncoderTests {
         return TerminalScreen(
             revision: revision, rows: UInt16(rows.count), columns: UInt16(columns),
             scrolledLines: scrolled,
-            cells: cells, cursor: cursor, background: background, mouseTracking: false)
+            cells: cells, cursor: cursor, background: background, mouseTracking: false,
+            hasSelection: false)
     }
 
     static func text(_ string: String, fg: UInt32 = foreground, bold: Bool = false) -> [ScreenCell]

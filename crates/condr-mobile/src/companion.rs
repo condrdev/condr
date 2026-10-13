@@ -6,7 +6,7 @@ use crate::views::{
     AgentView, Change, DeviceStatus, DeviceView, Event, Key, NeedsYouItem, PaneView, SavedDevice,
     TerminalScreen, WorkspaceView, screen,
 };
-use crate::{Listener, MobileError};
+use crate::{Listener, MobileError, input};
 use condr_client::frames::TerminalVisualSlot;
 use condr_client::p2p::Network;
 use condr_client::{
@@ -15,8 +15,8 @@ use condr_client::{
 };
 use condr_core::protocol::{ClientMessage, ServerMessage, SessionEvent};
 use condr_core::{
-    PaneId, ProxySetting, TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
-    TerminalScroll, TerminalSize,
+    PaneId, ProxySetting, TerminalCommand, TerminalPosition, TerminalScroll, TerminalSelectionUnit,
+    TerminalSide, TerminalSize,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
@@ -519,40 +519,86 @@ impl Companion {
             .command(&address, pane, TerminalCommand::Text(text));
     }
 
+    /// Pasted text, which the Server brackets when the program asked, so a pasted line
+    /// break does not submit what is half typed (ADR 0041).
+    pub fn paste(&self, address: String, pane: u64, text: String) {
+        self.shared
+            .command(&address, pane, TerminalCommand::Paste(text));
+    }
+
     /// A key from the row above the soft keyboard, with its sticky Ctrl (ADR 0041).
     pub fn send_key(&self, address: String, pane: u64, key: Key, control: bool) {
-        let key = match key {
-            Key::Enter => TerminalKey::Enter,
-            Key::Escape => TerminalKey::Escape,
-            Key::Tab => TerminalKey::Tab,
-            Key::Backspace => TerminalKey::Backspace,
-            Key::Up => TerminalKey::Up,
-            Key::Down => TerminalKey::Down,
-            Key::Left => TerminalKey::Left,
-            Key::Right => TerminalKey::Right,
-            Key::Character { text } => TerminalKey::Character(text),
-        };
+        self.shared
+            .command(&address, pane, input::key(key, control));
+    }
+
+    /// A swipe of `lines` over the cell at `row`, `column`, positive towards what came
+    /// before: wheel motion, which the Server gives to a program that tracks the mouse,
+    /// turns into arrow keys on an alternate screen that asks, or uses to scroll the
+    /// Pane for every viewer (ADR 0036, ADR 0041).
+    pub fn wheel(&self, address: String, pane: u64, row: u16, column: u16, lines: i32) {
+        if let Some(command) = input::wheel(row, column, lines) {
+            self.shared.command(&address, pane, command);
+        }
+    }
+
+    /// A tap where the program tracks the mouse: a click on the cell (ADR 0041).
+    pub fn click(&self, address: String, pane: u64, row: u16, column: u16) {
+        for command in input::click(row, column) {
+            self.shared.command(&address, pane, command);
+        }
+    }
+
+    /// A long press: the word around the cell becomes the Pane's selection, the one every
+    /// viewer shares (ADR 0008, ADR 0041).
+    pub fn select_word(&self, address: String, pane: u64, row: u16, column: u16) {
+        let display_offset = self.shared.display_offset(&address, pane);
         self.shared.command(
             &address,
             pane,
-            TerminalCommand::Key {
-                key,
-                modifiers: TerminalModifiers {
-                    control,
-                    ..TerminalModifiers::default()
+            TerminalCommand::SelectAt {
+                position: TerminalPosition {
+                    row,
+                    column,
+                    side: TerminalSide::Left,
                 },
-                kind: TerminalKeyEventKind::Press,
+                display_offset,
+                unit: TerminalSelectionUnit::Word,
             },
         );
     }
 
-    /// Scrolls the Pane for every viewer, as the desktop does (ADR 0036, ADR 0041).
-    pub fn scroll(&self, address: String, pane: u64, lines: i32) {
+    /// A drag after a long press: the cells from one to the other become the selection.
+    pub fn select_range(
+        &self,
+        address: String,
+        pane: u64,
+        from_row: u16,
+        from_column: u16,
+        to_row: u16,
+        to_column: u16,
+    ) {
+        let display_offset = self.shared.display_offset(&address, pane);
         self.shared.command(
             &address,
             pane,
-            TerminalCommand::Scroll(TerminalScroll::Lines(lines)),
+            TerminalCommand::Select(Some(input::range(
+                (from_row, from_column),
+                (to_row, to_column),
+                display_offset,
+            ))),
         );
+    }
+
+    pub fn clear_selection(&self, address: String, pane: u64) {
+        self.shared
+            .command(&address, pane, TerminalCommand::Select(None));
+    }
+
+    /// Copies the Pane's selection; its text comes back as [`Event::Copied`].
+    pub fn copy_selection(&self, address: String, pane: u64) {
+        self.shared
+            .command(&address, pane, TerminalCommand::Copy { selection: None });
     }
 
     /// Back to the newest output, for every viewer (ADR 0036).
@@ -617,6 +663,16 @@ impl Shared {
         if let Some(device) = self.lock().devices.get(address) {
             device.terminal(PaneId::from_u64(pane), command);
         }
+    }
+
+    /// How far the Pane's viewport sits above the newest output, as the phone last saw it;
+    /// a selection names its cells against it.
+    fn display_offset(&self, address: &str, pane: u64) -> u32 {
+        self.lock()
+            .devices
+            .get(address)
+            .and_then(|device| device.model.terminals.get(&PaneId::from_u64(pane)))
+            .map_or(0, |terminal| terminal.view.display_offset)
     }
 
     fn connect(self: &Arc<Self>, address: &str) {
@@ -1009,6 +1065,30 @@ mod tests {
     }
 
     use super::*;
+
+    /// OSC 52 copies reach every subscribed Client (ADR 0007); the phone applies only
+    /// those from the Pane it shows (ADR 0041).
+    #[test]
+    fn only_the_pane_on_screen_reaches_the_clipboard() {
+        let mut device = Device::new("desk".into());
+        let (shown, other) = (PaneId::from_u64(3), PaneId::from_u64(4));
+        let mut changes = Vec::new();
+        let mut events = Vec::new();
+        for (pane_id, text) in [(other, "elsewhere"), (shown, "here")] {
+            apply_message(
+                &mut device,
+                "tcp://desk",
+                Some(shown),
+                ServerMessage::TerminalClipboard {
+                    pane_id,
+                    text: text.into(),
+                },
+                &mut changes,
+                &mut events,
+            );
+        }
+        assert_eq!(events, [Event::Clipboard { text: "here".into() }]);
+    }
 
     #[test]
     fn changes_notify_once_until_the_app_takes_them() {

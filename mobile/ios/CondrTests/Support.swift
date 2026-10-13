@@ -26,6 +26,9 @@ nonisolated final class FakeClient: CompanionProtocol {
         var pairs: [(String, String?)] = []
         var names: [String] = []
         var scrolls: [Int32] = []
+        var clicks: [(UInt16, UInt16)] = []
+        var pastes: [String] = []
+        var selections: [String] = []
         var lifecycle: [String] = []
     }
 
@@ -120,8 +123,31 @@ nonisolated final class FakeClient: CompanionProtocol {
     func sendKey(address: String, pane: UInt64, key: Key, control: Bool) {
         state.withLock { $0.keys.append((key, control)) }
     }
-    func scroll(address: String, pane: UInt64, lines: Int32) {
+    func wheel(address: String, pane: UInt64, row: UInt16, column: UInt16, lines: Int32) {
         state.withLock { $0.scrolls.append(lines) }
+    }
+    func click(address: String, pane: UInt64, row: UInt16, column: UInt16) {
+        state.withLock { $0.clicks.append((row, column)) }
+    }
+    func paste(address: String, pane: UInt64, text: String) {
+        state.withLock { $0.pastes.append(text) }
+    }
+    func selectWord(address: String, pane: UInt64, row: UInt16, column: UInt16) {
+        state.withLock { $0.selections.append("word \(row):\(column)") }
+    }
+    func selectRange(
+        address: String, pane: UInt64, fromRow: UInt16, fromColumn: UInt16, toRow: UInt16,
+        toColumn: UInt16
+    ) {
+        state.withLock {
+            $0.selections.append("range \(fromRow):\(fromColumn)-\(toRow):\(toColumn)")
+        }
+    }
+    func clearSelection(address: String, pane: UInt64) {
+        state.withLock { $0.selections.append("clear") }
+    }
+    func copySelection(address: String, pane: UInt64) {
+        state.withLock { $0.selections.append("copy") }
     }
     func scrollToBottom(address: String, pane: UInt64) { state.withLock { $0.scrolls.append(0) } }
 }
