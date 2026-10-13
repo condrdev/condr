@@ -85,6 +85,8 @@ targets:
           # Xcode's SDKROOT would point cargo's host build at the iOS SDK.
           unset SDKROOT
           export PATH="$HOME/.cargo/bin:$PATH"
+          # An archive ships the optimized library.
+          if [ "$CONFIGURATION" = Release ]; then export CONDR_MOBILE_PROFILE=release; fi
           cd "$SRCROOT/../.."
           exec script/build-mobile.sh ios
 
