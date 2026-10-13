@@ -364,6 +364,7 @@ nonisolated final class DemoClient: CompanionProtocol {
     func close() {}
     func resume() {}
     func suspend() {}
+    func setActive(active: Bool) {}
     func networkChanged() {}
 
     func takeChanges() -> [Change] {

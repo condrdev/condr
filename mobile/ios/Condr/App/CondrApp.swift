@@ -201,8 +201,10 @@ struct Root: View {
                 lock.sceneBecameActive(paired: session.paired)
                 raiseCurtain()
                 session.resume()
+                session.setActive(true)
                 network.start { session.networkChanged() }
             case .inactive:
+                session.setActive(false)
                 // Leaving the screen shields it at once, so the app switcher's snapshot
                 // shows only the mark. Before pairing there is nothing to hide, and a lock
                 // already hides it all: swapping it for the shield would rebuild it, and

@@ -1,11 +1,14 @@
 //! The Companion's library against a real Server over TCP (ADR 0039).
 
 use condr_core::protocol::{LayoutCommand, LayoutResult};
-use condr_core::{TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers};
+use condr_core::{
+    PaneId, TerminalCommand, TerminalKey, TerminalKeyEventKind, TerminalModifiers, TerminalSize,
+};
 use condr_mobile::{
     Change, Companion, DeviceStatus, Event, Key, Listener, SavedDevice, TerminalScreen,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig};
+use std::io::Read as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -328,6 +331,7 @@ struct Shown {
     companion: Arc<Companion>,
     address: String,
     pane: u64,
+    endpoint: Endpoint,
     handle: condr_server::ServerHandle,
     thread: std::thread::JoinHandle<std::io::Result<()>>,
 }
@@ -381,6 +385,7 @@ impl Shown {
             companion,
             address,
             pane,
+            endpoint,
             handle,
             thread,
         }
@@ -388,6 +393,44 @@ impl Shown {
 
     fn screen(&self) -> Option<TerminalScreen> {
         self.companion.terminal(self.address.clone(), self.pane)
+    }
+
+    fn status(&self) -> DeviceStatus {
+        self.companion.devices()[0].status.clone()
+    }
+
+    /// The Pane's size as a fresh Bootstrap tells it.
+    fn server_size(&self) -> Option<TerminalSize> {
+        let desktop = ClientConnection::connect(&self.endpoint, "check").unwrap();
+        let bootstrap = desktop.bootstrap().unwrap();
+        let terminal = bootstrap
+            .terminals
+            .iter()
+            .find(|terminal| terminal.pane_id.as_u64() == self.pane)?;
+        terminal.view.as_ref().map(|view| view.size)
+    }
+
+    /// A desktop window that never reported focus sizes the Pane, which it can only once
+    /// the phone has given the size back (ADR 0036).
+    fn desktop_resizes(&self, rows: u16, columns: u16) {
+        let size = TerminalSize::new(rows, columns);
+        let mut desktop = ClientConnection::connect_overview(&self.endpoint, "desktop").unwrap();
+        wait_until("the phone to give the size back", || {
+            desktop
+                .terminal(PaneId::from_u64(self.pane), TerminalCommand::Resize(size))
+                .unwrap();
+            self.server_size() == Some(size)
+        });
+    }
+
+    fn desktop_types(&self, text: &str) {
+        let mut desktop = ClientConnection::connect_overview(&self.endpoint, "desktop").unwrap();
+        desktop
+            .terminal(
+                PaneId::from_u64(self.pane),
+                TerminalCommand::Text(text.into()),
+            )
+            .unwrap();
     }
 
     fn stop(self) {
@@ -505,4 +548,110 @@ fn pasted_text_runs_once_return_is_pressed() {
         })
     });
     shown.stop();
+}
+
+/// Leaving the screen gives the shown Pane's size back at once, and coming back takes it
+/// again with a fresh Bootstrap, even when the two follow each other at once (ADR 0040).
+#[test]
+fn suspend_gives_the_size_back_and_resume_takes_it_again() {
+    let shown = Shown::start(12, 60);
+    shown.companion.suspend();
+    assert_eq!(shown.status(), DeviceStatus::Suspended);
+    shown.desktop_resizes(30, 100);
+    shown.desktop_types("echo while-away\r");
+
+    shown.companion.resume();
+    wait_until("the phone's size again", || {
+        shown.server_size() == Some(TerminalSize::new(12, 60))
+    });
+    wait_until("what happened while away", || {
+        shown.screen().is_some_and(|screen| {
+            (screen.rows, screen.columns) == (12, 60) && find(&screen, "while-away").is_some()
+        })
+    });
+
+    shown.companion.suspend();
+    shown.companion.resume();
+    wait_until("the connection again", || {
+        shown.status() == DeviceStatus::Connected
+    });
+    wait_until("the phone's size again", || {
+        shown.server_size() == Some(TerminalSize::new(12, 60))
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        shown.status(),
+        DeviceStatus::Connected,
+        "the closed connection does not mark the new one"
+    );
+    shown.stop();
+}
+
+/// Under Control Center or the app switcher the phone stays connected but gives the shown
+/// Pane's size back, and takes it again, at the size it measured meanwhile, once the app
+/// is active (ADR 0041).
+#[test]
+fn an_inactive_app_gives_the_size_back_until_it_is_active_again() {
+    let shown = Shown::start(12, 60);
+    shown.companion.set_active(false);
+    shown.desktop_resizes(30, 100);
+    wait_until("the phone to follow the desktop's size", || {
+        shown.screen().is_some_and(|screen| screen.columns == 100)
+    });
+    shown
+        .companion
+        .show_pane(Some(shown.address.clone()), shown.pane, 14, 60);
+
+    shown.companion.set_active(true);
+    wait_until("the phone's size again", || {
+        shown.server_size() == Some(TerminalSize::new(14, 60))
+    });
+    shown.stop();
+}
+
+/// Leaving the screen breaks off a dial still in its handshake: the socket closes at once
+/// rather than when the handshake times out, and no failure turns up later (ADR 0040).
+#[test]
+fn suspend_breaks_off_a_dial_in_progress() {
+    // A Server that takes the connection and never answers the handshake.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let server_key = condr_mobile::fingerprint(condr_mobile::generate_seed().unwrap()).unwrap();
+    let address = format!("tcp://{server_key}@{}", listener.local_addr().unwrap());
+    let companion = Companion::new(
+        condr_mobile::generate_seed().unwrap(),
+        "phone".into(),
+        vec![SavedDevice {
+            address,
+            label: "desk".into(),
+        }],
+        Arc::new(Counter::default()),
+    )
+    .unwrap();
+    companion.resume();
+    let (mut socket, _) = listener.accept().unwrap();
+    let mut first = [0; 1];
+    socket.read_exact(&mut first).unwrap();
+
+    let started = Instant::now();
+    companion.suspend();
+    assert_eq!(companion.devices()[0].status, DeviceStatus::Suspended);
+    socket
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut rest = Vec::new();
+    socket
+        .read_to_end(&mut rest)
+        .expect("the phone closes the socket");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "closed at once, not when the handshake timed out: {:?}",
+        started.elapsed()
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        companion.devices()[0].status,
+        DeviceStatus::Suspended,
+        "no failure turns up later"
+    );
+    companion.close();
 }

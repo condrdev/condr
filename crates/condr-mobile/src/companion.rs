@@ -50,6 +50,12 @@ struct State {
     /// The Pane on screen: it takes the terminal's size and focus (ADR 0041), its Agent's
     /// idle is seen, and only its OSC 52 copies reach the clipboard.
     shown: Option<(String, PaneId)>,
+    /// The grid the shown Pane last measured, sent again whenever the phone takes the
+    /// size back: after a reconnect, or when the app is active again.
+    shown_size: Option<TerminalSize>,
+    /// The app is on screen but not active, under the app switcher, a call or Control
+    /// Center: the shown Pane's focus and size are given back until it is (ADR 0041).
+    inactive: bool,
     changes: BTreeSet<Change>,
     /// A `changed` is owed or delivered and `take_changes` has not run since.
     notified: bool,
@@ -149,6 +155,15 @@ impl Device {
             pane_id,
             command,
         });
+    }
+
+    /// The phone takes the Pane, as a window that comes to the front does (ADR 0036,
+    /// ADR 0041): focus, then the grid it measured, if it has measured one.
+    fn take_terminal(&self, pane_id: PaneId, size: Option<TerminalSize>) {
+        self.terminal(pane_id, TerminalCommand::Focus(true));
+        if let Some(size) = size {
+            self.terminal(pane_id, TerminalCommand::Resize(size));
+        }
     }
 
     /// Frames only for `panes` from now on (ADR 0041): nothing when the phone shows no
@@ -321,10 +336,22 @@ impl Companion {
     /// The app came to the foreground: connect to every Device, each with a fresh
     /// Bootstrap (ADR 0040).
     pub fn resume(&self) {
+        // A Device still connected, or still being reached, is left alone: returning from
+        // an inactive moment, or retrying one Device, costs the others nothing.
         let addresses: Vec<String> = {
             let mut state = self.shared.lock();
             state.suspended = false;
-            state.devices.keys().cloned().collect()
+            state
+                .devices
+                .iter()
+                .filter(|(_, device)| {
+                    !matches!(
+                        device.status,
+                        DeviceStatus::Connected | DeviceStatus::Connecting
+                    )
+                })
+                .map(|(address, _)| address.clone())
+                .collect()
         };
         for address in addresses {
             self.shared.connect(&address);
@@ -487,6 +514,12 @@ impl Companion {
     pub fn show_pane(&self, address: Option<String>, pane: u64, rows: u16, columns: u16) {
         let mut state = self.shared.lock();
         let next = address.map(|address| (address, PaneId::from_u64(pane)));
+        let size = (rows > 0 && columns > 0).then(|| TerminalSize::new(rows, columns));
+        if state.shown != next {
+            state.shown_size = None;
+        }
+        state.shown_size = size.or(state.shown_size);
+        let (inactive, shown_size) = (state.inactive, state.shown_size);
         if let Some((address, pane_id)) = state.shown.take()
             && next.as_ref() != Some(&(address.clone(), pane_id))
             && let Some(device) = state.devices.get_mut(&address)
@@ -498,12 +531,9 @@ impl Companion {
             && let Some(device) = state.devices.get_mut(address)
         {
             device.watch(HashSet::from([*pane_id]));
-            device.terminal(*pane_id, TerminalCommand::Focus(true));
-            if rows > 0 && columns > 0 {
-                device.terminal(
-                    *pane_id,
-                    TerminalCommand::Resize(TerminalSize::new(rows, columns)),
-                );
+            // An inactive app keeps the measure for when it is active again.
+            if !inactive {
+                device.take_terminal(*pane_id, shown_size);
             }
             device.model.mark_seen(*pane_id);
             let address = address.clone();
@@ -512,6 +542,26 @@ impl Companion {
         state.shown = next;
         drop(state);
         self.shared.wake.notify_one();
+    }
+
+    /// The app became active, or inactive while still on screen: under the app switcher,
+    /// a call or Control Center. An inactive app gives the shown Pane's focus and size
+    /// back, and takes both again once it is active (ADR 0041).
+    pub fn set_active(&self, active: bool) {
+        let mut state = self.shared.lock();
+        if state.inactive != active {
+            return;
+        }
+        state.inactive = !active;
+        if let Some((address, pane_id)) = &state.shown
+            && let Some(device) = state.devices.get(address)
+        {
+            if active {
+                device.take_terminal(*pane_id, state.shown_size);
+            } else {
+                device.terminal(*pane_id, TerminalCommand::Focus(false));
+            }
+        }
     }
 
     pub fn send_text(&self, address: String, pane: u64, text: String) {
@@ -744,6 +794,12 @@ impl Shared {
         result: std::io::Result<ClientConnection<RemoteStream>>,
     ) {
         let mut state = self.lock();
+        // The Pane on screen when this Device's connection was made, if the app is active.
+        let reclaim = state
+            .shown
+            .as_ref()
+            .filter(|(shown, _)| shown == address && !state.inactive)
+            .map(|(_, pane_id)| (*pane_id, state.shown_size));
         let Some(device) = state.devices.get_mut(address) else {
             return;
         };
@@ -786,6 +842,11 @@ impl Shared {
                     device.send(ClientMessage::WatchTerminals { panes });
                 }
                 device.subscribe();
+                // The Server gave the shown Pane's focus and size back when the old
+                // connection ended; the phone takes them again (ADR 0041).
+                if let Some((pane_id, size)) = reclaim {
+                    device.take_terminal(pane_id, size);
+                }
                 let shared = Arc::clone(self);
                 let address = address.to_owned();
                 let spawned = thread::Builder::new()

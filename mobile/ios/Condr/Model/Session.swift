@@ -139,6 +139,13 @@ final class Session {
         client.networkChanged()
     }
 
+    /// The app is on screen but not active, under Control Center, a call or the app
+    /// switcher: the shown Pane's focus and size go back until it is active again, and
+    /// are taken back then (ADR 0041).
+    func setActive(_ active: Bool) {
+        client.setActive(active: active)
+    }
+
     /// The phone's new name (ADR 0040). A Server takes the name each `Hello` carries, so
     /// every connection is made again now and each computer lists the phone by it at once.
     func rename(_ name: String) async {
