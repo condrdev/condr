@@ -1087,7 +1087,12 @@ mod tests {
                 &mut events,
             );
         }
-        assert_eq!(events, [Event::Clipboard { text: "here".into() }]);
+        assert_eq!(
+            events,
+            [Event::Clipboard {
+                text: "here".into()
+            }]
+        );
     }
 
     #[test]
