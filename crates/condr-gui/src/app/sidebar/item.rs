@@ -559,10 +559,13 @@ impl SidebarItem for CondrSidebarSection {
             .items_center()
             .justify_between()
             .pl_1()
+            // A Device heading stands apart from the Workspace rows' detail lines, which
+            // share its size, by weight alone.
             .text_xs()
+            .font_semibold()
             .text_color(cx.theme().sidebar_foreground.opacity(0.7))
             .when(self.active, |this| {
-                this.font_medium().text_color(cx.theme().sidebar_foreground)
+                this.text_color(cx.theme().sidebar_foreground)
             })
             .child(
                 div()
