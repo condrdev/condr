@@ -8,3 +8,5 @@
 # xcodegen generates them from ios/project.yml.
 /ios/Condr.xcodeproj/
 /ios/Condr/Condr.entitlements
+# Xcode writes the strings it extracts into it on every build; track it again once the app is translated.
+/ios/Condr/Resources/Localizable.xcstrings
