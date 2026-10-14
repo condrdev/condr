@@ -746,8 +746,9 @@ fn pairing_state(this: &SettingsWindow, cx: &App) -> Pairing {
 }
 
 /// The white tile a phone across a desk reads the code from, and the tile that stands in
-/// for it before there is one.
-const PAIRING_CODE_SIDE: Pixels = px(168.);
+/// for it before there is one. In rems, since the column beside it, title to actions, is
+/// text that must fit its height.
+const PAIRING_CODE_SIDE: Rems = rems(12.);
 
 /// The card a new device pairs from: one code to scan and its link to copy, or the one
 /// step that comes before them.
@@ -775,11 +776,12 @@ fn pairing_card(
         let this = settings.read(cx);
         (this.invite_tcp, this.invite_copied)
     };
+    let side = PAIRING_CODE_SIDE.to_pixels(window.rem_size());
     // The slot the code fills, so the card keeps its shape when the code appears.
     let tile = |icon: Icon, color: Hsla, cx: &App| {
         div()
             .flex_none()
-            .size(PAIRING_CODE_SIDE)
+            .size(side)
             .rounded(px(8.))
             .border_1()
             .border_dashed()
@@ -896,7 +898,7 @@ fn pairing_card(
         Pairing::Showing(invite) => {
             let link = invite.link(tcp);
             let code = match &link {
-                Some(link) => qr::qr_code("pairing-code", link, PAIRING_CODE_SIDE),
+                Some(link) => qr::qr_code("pairing-code", link, side),
                 None => tile(Icon::new(CondrIconName::QrCode), muted, cx),
             };
             let mut detail = Vec::new();
@@ -907,8 +909,13 @@ fn pairing_card(
                         .into_any_element(),
                 );
             }
-            if invite.shows_tcp(tcp) {
-                detail.extend(invite_host_field(settings, window, cx));
+            if invite.tcp.is_some() {
+                detail.extend(invite_host_field(
+                    settings,
+                    invite.shows_tcp(tcp),
+                    window,
+                    cx,
+                ));
             }
             let copy = link.clone().map(|link| {
                 let settings = settings.clone();
@@ -948,8 +955,7 @@ fn pairing_card(
                 } else {
                     "Choose the address the new device dials".into()
                 },
-                link.is_some()
-                    .then_some("Another computer can paste the link instead."),
+                None,
                 detail,
                 copy.into_iter().chain([new_code, expires]).collect(),
             )
@@ -965,11 +971,10 @@ fn pairing_card(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                // As tall as the TCP state, title to actions, so choosing a route moves
-                // nothing below the card.
-                .min_h(rems(12.75))
+                // As tall as the tile: the title sits on its top edge and the actions on
+                // its bottom one, whatever the state.
+                .min_h(side)
                 .gap_1()
-                .pt_1()
                 .child(div().font_medium().child(title))
                 .children(body.map(|body| div().text_sm().text_color(muted).child(body)))
                 .when(!detail.is_empty(), |column| {
@@ -980,7 +985,7 @@ fn pairing_card(
                         h_flex()
                             .gap_2()
                             .mt_auto()
-                            .pt_4()
+                            .pt_3()
                             .items_center()
                             .children(actions),
                     )
@@ -1056,9 +1061,12 @@ const INVITE_COPIED_FOR: Duration = Duration::from_secs(2);
 
 /// The TCP link's host: a field that takes any name or address, and beside it the ones
 /// the Server offered, most likely first, to pick from (ADR 0040). The invite keeps the
-/// host; the field shows it, whichever way it changed.
+/// host; the field shows it, whichever way it changed. While the Peer-to-peer link is the
+/// one shown the field keeps its place unseen, so the actions below it stay put when the
+/// route changes.
 fn invite_host_field(
     settings: &Entity<SettingsWindow>,
+    shown: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<AnyElement> {
@@ -1081,7 +1089,9 @@ fn invite_host_field(
         input.update(cx, |input, cx| input.set_value(host.clone(), window, cx));
     }
     let picker = Button::new("server-invite-hosts")
-        .debug_selector(|| "server-invite-hosts".into())
+        .when(shown, |picker| {
+            picker.debug_selector(|| "server-invite-hosts".into())
+        })
         .icon(IconName::ChevronDown)
         .ghost()
         .xsmall()
@@ -1109,6 +1119,7 @@ fn invite_host_field(
     Some(
         v_flex()
             .gap_1()
+            .when(!shown, |field| field.invisible())
             .child(
                 div()
                     .text_xs()
@@ -1117,7 +1128,10 @@ fn invite_host_field(
             )
             .child(
                 div()
-                    .debug_selector(|| "server-invite-host".into())
+                    // Recorded even when hidden, so only an offered field carries it.
+                    .when(shown, |field| {
+                        field.debug_selector(|| "server-invite-host".into())
+                    })
                     .w_full()
                     .max_w(rems(18.))
                     .child(Input::new(&input).small().suffix(picker)),

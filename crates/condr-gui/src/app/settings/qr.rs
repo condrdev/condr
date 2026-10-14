@@ -70,9 +70,10 @@ fn matrix(text: &str) -> Option<Rc<QrMatrix>> {
     })
 }
 
-/// `text` as a QR code on a white tile `side` across, dark on white in any theme. Its
-/// modules are whole device pixels, so a long link and a short one fill the same tile and
-/// both stay sharp; what is left over joins the quiet zone.
+/// `text` as a QR code on a white tile `side` across, dark on white in any theme. The
+/// code fills the tile, quiet zone included, whatever its length, so the tile is one size
+/// on every display; each module edge snaps to a device pixel, so a module is a pixel
+/// wider or narrower rather than blurred, as a browser scales an SVG code.
 pub(super) fn qr_code(id: &'static str, text: &str, side: Pixels) -> AnyElement {
     let Some(matrix) = matrix(text) else {
         return div().into_any_element();
@@ -89,18 +90,18 @@ pub(super) fn qr_code(id: &'static str, text: &str, side: Pixels) -> AnyElement 
                 |_, _, _| {},
                 move |bounds, _, window, _| {
                     let scale = window.scale_factor();
-                    let module = px((f32::from(side) * scale / modules).floor() / scale);
-                    let drawn = module * modules;
-                    let inset = ((side - drawn) / 2.).round();
-                    let origin = bounds.origin + point(inset, inset);
+                    let module = f32::from(side) * scale / modules;
+                    let edge = |modules: usize| px((modules as f32 * module).round() / scale);
                     for (row, column, length) in matrix.runs() {
-                        let at = origin
-                            + point(
-                                module * (QUIET_ZONE + column) as f32,
-                                module * (QUIET_ZONE + row) as f32,
-                            );
+                        let left = edge(QUIET_ZONE + column);
+                        let top = edge(QUIET_ZONE + row);
+                        let right = edge(QUIET_ZONE + column + length);
+                        let bottom = edge(QUIET_ZONE + row + 1);
                         window.paint_quad(fill(
-                            Bounds::new(at, size(module * length as f32, module)),
+                            Bounds::new(
+                                bounds.origin + point(left, top),
+                                size(right - left, bottom - top),
+                            ),
                             black(),
                         ));
                     }
