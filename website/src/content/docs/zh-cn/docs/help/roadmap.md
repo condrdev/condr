@@ -9,25 +9,25 @@ Condr 0.1 正处于公开预览阶段。本页列出后续准备开发的功能�
 
 ## 接下来
 
-### 1. 更多官方支持的 Agent CLI
+### 手机端（iOS 与 Android）
 
-Condr 将官方支持更多常用的 Agent CLI，并按[支持级别](/zh-cn/docs/using/agents/#支持级别)标明完整支持或仅识别。如果你常用的 CLI 尚未列出，欢迎提交 Issue 或 PR。
-
-### 2. 终端内搜索
-
-支持在当前 Pane 的终端缓冲区中搜索，包括已滚出可视区域的内容。匹配项会自动高亮，并支持跳转定位。
-
-### 3. 手机端（iOS 与 Android）
-
-离开电脑时，可通过手机查看各设备上的 Workspace、Agent 状态、Needs you 列表以及只读的终端画面。当 Agent 完成任务或需要人工介入时，手机会收到推送通知。推送内容由 Server 使用手机公钥端到端加密，中转推送的服务器以及 Apple 和 Google 均无法解密。
+**进行中**。离开电脑时，可通过手机查看各设备上的 Workspace、Agent 状态、Needs you 列表以及只读的终端画面。当 Agent 完成任务或需要人工介入时，手机会收到推送通知。推送内容由 Server 使用手机公钥端到端加密，中转推送的服务器以及 Apple 和 Google 均无法解密。
 
 手机端支持扫码配对，仅通过 Peer-to-peer 或 TCP 连接设备，不支持 SSH 连接。手机端能执行哪些操作目前仍在设计中。
 
-### 4. 端口探测与转发
+### 更多官方支持的 Agent CLI
+
+Condr 将官方支持更多常用的 Agent CLI，并按[支持级别](/zh-cn/docs/using/agents/#支持级别)标明完整支持或仅识别。如果你常用的 CLI 尚未列出，欢迎提交 Issue 或 PR。
+
+### 终端内搜索
+
+支持在当前 Pane 的终端缓冲区中搜索，包括已滚出可视区域的内容。匹配项会自动高亮，并支持跳转定位。
+
+### 端口探测与转发
 
 Agent 在 Workspace 中启动 dev server 后，Condr 会在对应的 Workspace 和 Pane 上标出其监听的端口。对于经由 SSH 连接的设备，点击端口即可转发至本机并在浏览器中打开。
 
-### 5. GitHub 集成
+### GitHub 集成
 
 Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结果，点击可直接在浏览器中查看。支持输入 PR 编号或链接，将该 PR 检出为独立的 Managed Worktree。PR 合并后，Condr 会提示清理对应的 worktree，但不会自动删除。
 
@@ -42,7 +42,7 @@ Workspace 将展示当前分支关联的 GitHub PR、PR 状态及 CI 检查结�
 - **从 Diff Tab 跳到编辑器**：支持在 Diff Tab 中直接调用外部编辑器打开当前文件。
 - **在 GUI 中启动 Agent**：列出设备上已安装的 Agent，点击即可在 Pane 中启动。
 - **定时任务**：按预设时间启动 Agent，或定时向运行中的 Agent 投递提示词。
-- **TCP 与 Peer-to-peer 设备的端口转发**：将第 4 项的端口转发能力扩展至非 SSH 连接的设备。
+- **TCP 与 Peer-to-peer 设备的端口转发**：将端口转发扩展至非 SSH 连接的设备。
 
 ---
 
