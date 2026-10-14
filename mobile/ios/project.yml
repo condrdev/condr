@@ -21,7 +21,6 @@ settings:
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     SWIFT_STRICT_CONCURRENCY: complete
-    TARGETED_DEVICE_FAMILY: "1"
     DEVELOPMENT_TEAM: XN79X9928S
     CODE_SIGN_STYLE: Automatic
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
@@ -54,6 +53,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.condr.companion
+        # iPhone only; at the project level XcodeGen's iOS target preset overrides it with "1,2".
+        TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
