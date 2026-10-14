@@ -165,13 +165,17 @@ fn subscribe(stream: &mut EndpointStream, session_id: SessionId, after_sequence:
         },
     )
     .unwrap();
-    // Terminal frames ride a per-client stream apart from the reliable replies, so one a
-    // live Pane produced since Bootstrap may land ahead of `Subscribed`.
-    let reply = wait_for_message(stream, |message| {
-        !matches!(
-            message,
-            ServerMessage::TerminalFrame(_) | ServerMessage::TerminalFrameChunk(_)
-        )
+    // The Server replays the events since `after_sequence` ahead of `Subscribed`, and a
+    // Pane that is live between Bootstrap and Subscribe, as on Windows, has some.
+    let reply = wait_for_message(stream, |message| match message {
+        ServerMessage::Event { sequence, .. } => {
+            assert!(
+                *sequence > after_sequence,
+                "replayed event {sequence} is not new"
+            );
+            false
+        }
+        _ => true,
     });
     assert!(
         matches!(reply, ServerMessage::Subscribed { .. }),
