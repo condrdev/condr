@@ -1478,3 +1478,64 @@ fn a_device_that_cannot_be_reached_gets_its_own_page_with_connect_and_edit() {
     );
     assert!(window.debug_bounds("connect-server-2").is_some());
 }
+
+#[test]
+fn a_device_named_by_its_address_takes_the_name_its_server_reports() {
+    let _serial_guard = acquire_visual_test_lock();
+    let directory = TestDirectory::new("reported-name");
+    let config_path = directory.0.join("config.toml");
+    let (_local, endpoint) = start_server();
+    let (remote_server, remote) = start_tcp_server();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let initial = ClientConnection::connect(&endpoint, "condr-test").unwrap();
+    let view_holder = Rc::new(RefCell::new(None));
+    let holder = view_holder.clone();
+    let (_root, window) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| {
+            Condr::new(
+                endpoint.clone(),
+                Some(Ok(initial)),
+                config::LoadedConfig::read(Some(config_path.clone())),
+                gui_state::LoadedState::default(),
+                window,
+                cx,
+            )
+        });
+        holder.borrow_mut().replace(view.clone());
+        Root::new(view, window, cx)
+    });
+    let view = view_holder.borrow_mut().take().unwrap();
+    let address = ServerConnection::default_label(&remote).unwrap();
+    let key = window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            let key = this.next_connection_key;
+            this.next_connection_key += 1;
+            this.connections
+                .push(ServerConnection::new(key, address.clone(), remote.clone()));
+            this.start_connect(key);
+            key
+        })
+    });
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .connection(key)
+                .is_some_and(|connection| connection.status == ConnectionStatus::Connected)
+        })
+    }));
+    window.run_until_parked();
+    let label = window.read(|app| view.read(app).connection(key).unwrap().label.clone());
+    assert_eq!(
+        label,
+        condr_server::noise::device_name(),
+        "the address {address} gives way to the machine's name"
+    );
+    assert!(
+        std::fs::read_to_string(&config_path)
+            .unwrap()
+            .contains(&format!("name = \"{label}\"")),
+        "saved under the new name"
+    );
+    drop(remote_server);
+}

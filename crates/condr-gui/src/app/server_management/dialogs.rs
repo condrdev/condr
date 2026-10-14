@@ -150,11 +150,10 @@ impl Condr {
                 let key = self.next_connection_key;
                 self.next_connection_key += 1;
                 let label = match &endpoint {
-                    Endpoint::Tcp(tcp) => tcp.authority(),
                     Endpoint::Ssh(ssh) => ssh.destination().to_owned(),
-                    // The short id is the default name; Edit renames it.
-                    Endpoint::P2p(p2p) => format!("p2p {}", &p2p.device.to_string()[..8]),
                     Endpoint::Local(_) => unreachable!("remote address parser"),
+                    _ => ServerConnection::default_label(&endpoint)
+                        .expect("TCP and Peer-to-peer addresses have a default name"),
                 };
                 self.connections
                     .push(ServerConnection::new(key, label, endpoint));

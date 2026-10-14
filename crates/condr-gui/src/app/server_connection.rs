@@ -23,6 +23,9 @@ pub(super) struct ServerConnection {
     pub(super) status: ConnectionStatus,
     /// The Server's build identity from its last `Welcome` (ADR 0027).
     pub(super) server_build: Option<String>,
+    /// The machine's name the Server gave in `Welcome` (ADR 0040); empty until it
+    /// connects, or from a Server that predates it.
+    pub(super) device_name: String,
     /// The person closed the "different build" mark for the current `server_build`.
     pub(super) build_notice_dismissed: bool,
     /// This window already asked whether to restart a stale local Server; asked once.
@@ -148,6 +151,17 @@ impl ServerConnection {
             })
     }
 
+    /// The name a remote Device goes by until its Server says its own or Edit renames
+    /// it: its address, so it is recognizably provisional. SSH keeps its destination,
+    /// which the person chose.
+    pub(super) fn default_label(endpoint: &Endpoint) -> Option<String> {
+        match endpoint {
+            Endpoint::Tcp(tcp) => Some(tcp.authority()),
+            Endpoint::P2p(p2p) => Some(format!("p2p {}", &p2p.device.to_string()[..8])),
+            Endpoint::Local(_) | Endpoint::Ssh(_) => None,
+        }
+    }
+
     pub(super) fn new(key: ConnectionKey, label: String, endpoint: Endpoint) -> Self {
         Self {
             key,
@@ -155,6 +169,7 @@ impl ServerConnection {
             endpoint,
             status: ConnectionStatus::Disconnected,
             server_build: None,
+            device_name: String::new(),
             build_notice_dismissed: false,
             update_restart_offered: false,
             model: SessionModel::default(),

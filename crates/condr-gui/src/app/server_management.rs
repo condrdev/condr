@@ -196,6 +196,7 @@ impl Condr {
         let application = connection
             .apply_bootstrap(bootstrap)
             .map_err(ConnectionInstallError::InvalidSession)?;
+        connection.device_name = client.server_device_name().to_owned();
         if connection.server_build.as_deref() != Some(client.server_build()) {
             connection.server_build = Some(client.server_build().to_owned());
             connection.build_notice_dismissed = false;
@@ -341,6 +342,30 @@ impl Condr {
         cx.notify();
     }
 
+    /// A Device still named by its address takes the name its Server reports (ADR 0040),
+    /// unless another Device already goes by it; Edit can rename it from there.
+    fn take_reported_name(&mut self, key: ConnectionKey) -> bool {
+        let reported = match self.connection(key) {
+            Some(connection)
+                if ServerConnection::default_label(&connection.endpoint).as_deref()
+                    == Some(connection.label.as_str()) =>
+            {
+                connection.device_name.trim().to_owned()
+            }
+            _ => return false,
+        };
+        if reported.is_empty() || self.connections.iter().any(|other| other.label == reported) {
+            return false;
+        }
+        match self.connection_mut(key) {
+            Some(connection) => {
+                connection.label = reported;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub(super) fn handle_connection_result(
         &mut self,
         result: ConnectionResult,
@@ -393,7 +418,8 @@ impl Condr {
         } else {
             None
         };
-        if paired {
+        let renamed = application.is_some() && self.take_reported_name(key);
+        if paired || renamed {
             self.save_servers(cx);
         }
         if application.is_some() {
