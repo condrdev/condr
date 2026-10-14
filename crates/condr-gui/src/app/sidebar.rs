@@ -225,7 +225,6 @@ impl Condr {
                             let summary = agent_status_summary(statuses);
                             let owner = owner.clone();
                             let menu_owner = owner.clone();
-                            let agent_selected = agents.iter().any(|agent| agent.active);
                             CondrSidebarTreeItem::new(
                                 format!("sidebar-workspace-{key}-{}", workspace_id.as_u64()),
                                 format!("workspace-{key}-{}", workspace_id.as_u64()),
@@ -237,11 +236,9 @@ impl Condr {
                                 &workspace.root_directory().to_string_lossy(),
                                 format!("workspace-icon-{key}-{}", workspace_id.as_u64()),
                             ))
-                            .active(
-                                active_server
-                                    && active_workspace == Some(workspace_id)
-                                    && !agent_selected,
-                            )
+                            // Lit beside its selected agent too: folded, the row is the only
+                            // sign of which Workspace is shown.
+                            .active(active_server && active_workspace == Some(workspace_id))
                             .tree_parent(
                                 format!("workspace-toggle-{key}-{}", workspace_id.as_u64()),
                                 self.sidebar_workspace_open[&(key, workspace_id)].clone(),
