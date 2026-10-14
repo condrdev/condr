@@ -482,7 +482,14 @@ fn server_settings_are_stored_published_and_reloaded() {
         thread::sleep(Duration::from_millis(5));
     }
     let waiting_for_config = settings_write.try_lock().is_err();
-    let session_available = handle.state.try_lock().is_ok();
+    // Another thread may hold the Session lock for a moment of its own; what must not
+    // happen is holding it for the whole config transaction, so one free moment is proof.
+    let probe = Instant::now() + Duration::from_secs(5);
+    let mut session_available = handle.state.try_lock().is_ok();
+    while !session_available && Instant::now() < probe {
+        thread::sleep(Duration::from_millis(5));
+        session_available = handle.state.try_lock().is_ok();
+    }
     drop(config_lock);
     assert!(
         waiting_for_config,
