@@ -24,7 +24,7 @@ Get the package for your platform from the [download center](/download/):
 
 | Platform | Architecture | Package |
 | :--- | :--- | :--- |
-| macOS | x86_64 / Apple Silicon | `.dmg` |
+| macOS | Apple Silicon | `.dmg` |
 | Windows | x86_64 | `.exe` |
 | Linux | x86_64 / arm64 | `.AppImage` |
 

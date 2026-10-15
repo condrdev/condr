@@ -31,7 +31,7 @@ Condr 采用客户端与服务端分离（Client/Server）的架构设计：
 | 操作系统 | 安装命令 |
 | :--- | :--- |
 | **Linux**（x86_64 / arm64） | `curl -fsSL https://condr.dev/install.sh \| sh` |
-| **macOS**（Apple Silicon / Intel） | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| **macOS**（Apple Silicon） | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | **Windows**（x86_64） | `irm https://condr.dev/install.ps1 \| iex` |
 
 安装完成后，可以在远程终端运行 `condr --version` 确认安装是否成功。

@@ -6,7 +6,7 @@
 
 ## 产物
 
-- 每次发布生成所有平台的 desktop 安装包与 headless 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 ZIP,macOS x86_64/arm64 `.dmg` 与 tar.gz。
+- 每次发布生成所有平台的 desktop 安装包与 headless 归档:Linux x86_64/arm64 AppImage 与 tar.gz,Windows x86_64 安装器与 headless ZIP,macOS Apple Silicon `.dmg` 与 tar.gz。Intel Mac 没有包。
 - 所有 artifacts 必须来自同一 commit。文件名、release notes 和包内 `BUILD-COMMIT` 都记录该 SHA。
 - Client 和 Server 没有跨构建兼容承诺,必须一起更新。
 
@@ -112,16 +112,16 @@ Server 不受此限制 —— 每个 endpoint 本来就由 socket/named pipe 的
 
 ## Windows
 
-在 PowerShell 中下载并解压最新 nightly bundle：
+在 PowerShell 中下载最新 nightly 安装器，静默装进一个独立目录（不建快捷方式）：
 
 ```powershell
 New-Item -ItemType Directory -Force .\condr-download | Out-Null
-gh release download nightly --repo condrdev/condr --dir .\condr-download --pattern 'condr-[0-9]*-windows-x86_64.zip' --clobber
-$archive = Get-ChildItem .\condr-download\*.zip | Where-Object { $_.Name -like 'condr-[0-9]*-windows-x86_64.zip' } | Select-Object -First 1
-Expand-Archive -LiteralPath $archive.FullName -DestinationPath .\condr-dev -Force
+gh release download nightly --repo condrdev/condr --dir .\condr-download --pattern 'condr-[0-9]*-windows-x86_64.exe' --clobber
+$installer = Get-ChildItem .\condr-download\condr-[0-9]*-windows-x86_64.exe | Select-Object -First 1
+& $installer.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS "/DIR=$PWD\condr-dev"
 ```
 
-运行 `condr-dev\condr\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr\condr.exe server start|restart|status|stop|run`。
+运行 `condr-dev\condr-gui.exe` 启动 GUI。`condr.exe` 必须保留在同一目录；GUI 会发现已有本地 Server，或者用它启动一个新的 Server。需要显式管理 Server 时，使用 `condr-dev\condr.exe server start|restart|status|stop|run`。
 
 headless 安装可直接运行仓库内脚本（PowerShell 会写入当前用户 PATH）：
 
@@ -129,11 +129,11 @@ headless 安装可直接运行仓库内脚本（PowerShell 会写入当前用户
 powershell -ExecutionPolicy Bypass -File script\install-condr.ps1 -From .\condr-headless-<version>-<short_sha>-windows-x86_64.zip
 ```
 
-desktop 安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器与 GUI ZIP 共用打包输入目录，没有组件选择：始终安装两个相邻的 EXE 以及 `LICENSE` 和 `BUILD-COMMIT`。向导只有目标目录、附加任务（默认都勾选加入 PATH 和桌面快捷方式）和完成页的启动选项；升级时先执行已安装的 `condr.exe server stop` 并等待 Server 退出再覆盖文件，PATH 只注册一次，卸载时同样先停 Server 并移除 PATH 项。只需要 headless 版本时不用安装器，直接用上面的脚本。
+desktop 安装器工程在 `packaging/condr.iss`，通过 `powershell -File script\package-windows.ps1 -Commit <commit>` 构建。安装器从打包输入目录构建，没有组件选择：始终安装两个相邻的 EXE 以及 `LICENSE` 和 `BUILD-COMMIT`。向导只有目标目录、附加任务（默认都勾选加入 PATH 和桌面快捷方式）和完成页的启动选项；升级时先执行已安装的 `condr.exe server stop` 并等待 Server 退出再覆盖文件，PATH 只注册一次，卸载时同样先停 Server 并移除 PATH 项。只需要 headless 版本时不用安装器，直接用上面的脚本。
 
-`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 desktop ZIP、headless ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，重复安装确认 PATH 不重复，并验证 headless 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
+`powershell -File script\check-windows-package.ps1` 检查 `dist` 中的 headless ZIP 和 `.exe`，实际安装 GUI 包，核对安装目录中的 `BUILD-COMMIT` 和 `LICENSE`，重复安装确认 PATH 不重复，并验证 headless 安装、覆盖确认、PATH 注册和 GUI 文件保留，最后卸载测试安装并还原 PATH。此检查应在独立测试用户或 CI runner 下运行。
 
-更新前先运行 `condr.exe server stop`，再将新版覆盖解压到同一个 `condr-dev`。运行数据位于平台目录，替换二进制不会影响它们。删除 bundle 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
+更新时把新版安装器装到同一个 `condr-dev`，它会先停止已安装的 Server。运行数据位于平台目录，替换二进制不会影响它们。安装目录里的 `unins000.exe` 只卸载程序；需要清空 Condr 时，再删除上表中对应平台的 config、data、state、log 和 runtime 目录。
 
 ## Linux Server
 

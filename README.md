@@ -58,7 +58,7 @@ Download the installer for your platform from the [latest release](https://githu
 | Platform             | Package  |
 | -------------------- | -------- |
 | Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.dmg`   |
+| macOS Apple Silicon  | `.dmg`   |
 | Windows x86_64       | `.exe`   |
 
 ### Headless Server
@@ -70,7 +70,7 @@ Run the install command in a terminal:
 | Platform             | Install command                                 |
 | -------------------- | ----------------------------------------------- |
 | Linux x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
-| macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| macOS Apple Silicon  | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
 
 ## Quick Start

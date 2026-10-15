@@ -55,6 +55,9 @@ main() {
             aarch64|arm64) arch=arm64 ;;
             *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
         esac
+        if [ "$platform-$arch" = macos-x86_64 ]; then
+            echo "Condr runs on Apple Silicon Macs; there is no Intel build" >&2; exit 1
+        fi
         case "$version" in
             latest) api="https://api.github.com/repos/$repo/releases/latest" ;;
             *) api="https://api.github.com/repos/$repo/releases/tags/$version" ;;

@@ -9,11 +9,9 @@ if [ "${CONDR_RELEASE:-0}" != 1 ]; then
     package_version="$package_version-$(printf '%s' "$CONDR_COMMIT" | cut -c 1-12)"
 fi
 
-for target in linux-x86_64.AppImage linux-arm64.AppImage \
-    macos-x86_64.dmg macos-arm64.dmg windows-x86_64.exe windows-x86_64.zip; do
+for target in linux-x86_64.AppImage linux-arm64.AppImage macos-arm64.dmg windows-x86_64.exe; do
     test -s "$dist/condr-${package_version}-${target}"
 done
-for target in linux-x86_64.tar.gz linux-arm64.tar.gz \
-    macos-x86_64.tar.gz macos-arm64.tar.gz windows-x86_64.zip; do
+for target in linux-x86_64.tar.gz linux-arm64.tar.gz macos-arm64.tar.gz windows-x86_64.zip; do
     test -s "$dist/condr-headless-${package_version}-${target}"
 done

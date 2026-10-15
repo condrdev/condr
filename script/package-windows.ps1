@@ -19,7 +19,6 @@ $fullStage = Join-Path $Dist 'condr'
 New-Item -ItemType Directory -Force -Path $fullStage | Out-Null
 Copy-Item target\release\condr-gui.exe, target\release\condr.exe, LICENSE $fullStage
 Set-Content -Encoding ascii -Path (Join-Path $fullStage BUILD-COMMIT) -Value $Commit
-Compress-Archive -Path $fullStage -DestinationPath (Join-Path $Dist "condr-$packageVersion-windows-x86_64.zip") -Force
 
 $headlessStage = Join-Path $Dist 'condr-headless'
 New-Item -ItemType Directory -Force -Path $headlessStage | Out-Null

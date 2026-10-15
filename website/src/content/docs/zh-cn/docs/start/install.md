@@ -24,7 +24,7 @@ Condr 0.1 目前处于公开预览（Public Preview）阶段，功能与配置�
 
 | 平台 | 架构 | 安装包类型 |
 | :--- | :--- | :--- |
-| macOS | x86_64 / Apple Silicon | `.dmg` |
+| macOS | Apple Silicon | `.dmg` |
 | Windows | x86_64 | `.exe` |
 | Linux | x86_64 / arm64 | `.AppImage` |
 

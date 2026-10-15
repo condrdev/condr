@@ -31,7 +31,7 @@ In a terminal, run the install command for the remote device's operating system:
 | Operating system | Install command |
 | :--- | :--- |
 | **Linux** (x86_64 / arm64) | `curl -fsSL https://condr.dev/install.sh \| sh` |
-| **macOS** (Apple Silicon / Intel) | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| **macOS** (Apple Silicon) | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | **Windows** (x86_64) | `irm https://condr.dev/install.ps1 \| iex` |
 
 After installation, run `condr --version` in the remote terminal to confirm it succeeded.
