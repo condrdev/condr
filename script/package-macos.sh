@@ -111,5 +111,12 @@ if [ -n "$notary" ]; then
         [ -z "$id" ] || xcrun notarytool log "$id" $notary >&2
         exit 1
     fi
-    xcrun stapler staple "$dmg"
+    # The ticket reaches Apple's CDN a little after "Accepted", and the lookup itself
+    # drops now and then on a runner, so stapling gets a few tries.
+    for attempt in 1 2 3 4 5; do
+        xcrun stapler staple "$dmg" && break
+        [ "$attempt" -lt 5 ] || exit 1
+        echo "stapling failed (attempt $attempt), retrying in 15 s" >&2
+        sleep 15
+    done
 fi
