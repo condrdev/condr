@@ -30,6 +30,8 @@ Condr has two parts:
 - **Server**: a service that stays running in the background. It hosts every terminal process and every agent's state, so background work never hangs up, even when you close the window or the network drops.
 - **Client**: a fast, native desktop app. It's a view you can attach at any time, and it connects to and manages several Servers from one place.
 
+A **mobile app** is also in development.
+
 ## Features
 
 - **Stays running** — Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.

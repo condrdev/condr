@@ -32,7 +32,7 @@ const methods = [
 ];
 ---
 
-<Site title="Condr — Agents that never hang up" description="Agents that never hang up. One window for every agent, local and remote. Disconnect anytime, pick up where you left off.">
+<Site title="Condr — Agents that never hang up" description="One window for every agent, local and remote. Native apps for Windows, macOS and Linux, with a mobile app in development.">
   <section class="hero shell">
     <canvas class="hero-mark" aria-hidden="true"></canvas>
     <h1>Agents that<br />never<br />hang up.</h1>
@@ -87,8 +87,15 @@ const methods = [
   <script is:inline>
     // Inline so the buttons name the visitor's platform before the first paint.
     {
-      const name = { macos: "macOS", windows: "Windows", linux: "Linux" }[document.documentElement.dataset.os];
-      if (name) for (const a of document.querySelectorAll("[data-download]")) a.textContent = `Download for ${name}`;
+      const os = document.documentElement.dataset.os;
+      const name = { macos: "macOS", windows: "Windows", linux: "Linux" }[os];
+      for (const a of document.querySelectorAll("[data-download]")) {
+        if (os === "ios") {
+          a.textContent = "Download for desktop";
+        } else if (name) {
+          a.textContent = `Download for ${name}`;
+        }
+      }
     }
   </script>
 

@@ -118,9 +118,10 @@ code { font-family: var(--mono); font-size: .875em; }
 .download-links span { display: block; color: var(--grey); font-size: .8125rem; }
 /* The first rule lines up with the cap height of the headline, .09em below its line box. */
 .download-main { grid-column: 7 / 13; grid-row: 1 / 3; margin-top: calc(var(--display) * .09); }
-.download-platform { padding-top: 16px; border-top: 2px solid var(--ink); }
+.download-platform { padding-top: 16px; border-top: 2px solid var(--ink); scroll-margin-top: 88px; }
 .download-platform + .download-platform { margin-top: 40px; border-top: 1px solid var(--line); }
 .download-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
+.download-status { color: var(--grey); font-size: .875rem; font-weight: 500; letter-spacing: 0; }
 .download-choice { display: flex; border: 1px solid var(--line); }
 .download-choice label { position: relative; cursor: pointer; }
 .download-choice input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }

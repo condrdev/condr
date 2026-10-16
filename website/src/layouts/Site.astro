@@ -25,15 +25,17 @@ const github = 'https://github.com/condrdev/condr';
       // itself as a Mac, so a Mac with touch points is an iPad.
       {
         const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
-        const os = /android/i.test(navigator.userAgent)
-          ? ""
-          : platform.startsWith("mac")
-            ? navigator.maxTouchPoints > 1 ? "" : "macos"
-            : platform.startsWith("win")
-              ? "windows"
-              : platform.startsWith("linux")
-                ? "linux"
-                : "";
+        const os = /iphone/i.test(navigator.userAgent)
+          ? "ios"
+          : /android/i.test(navigator.userAgent)
+            ? ""
+            : platform.startsWith("mac")
+              ? navigator.maxTouchPoints > 1 ? "" : "macos"
+              : platform.startsWith("win")
+                ? "windows"
+                : platform.startsWith("linux")
+                  ? "linux"
+                  : "";
         if (os) document.documentElement.dataset.os = os;
       }
     </script>

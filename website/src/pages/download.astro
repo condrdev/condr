@@ -36,7 +36,7 @@ const commands = [
 ];
 ---
 
-<Site title="Condr — Download" description={`Download Condr ${version} for macOS, Windows and Linux.`}>
+<Site title="Condr — Download" description={`Download Condr ${version} for macOS, Windows and Linux. The mobile app is in development.`}>
     <section class="download shell">
         <div class="download-intro">
             <h1>Download Condr</h1>
@@ -82,6 +82,12 @@ const commands = [
                     )}
                 </div>
             ))}
+            <div class="download-platform" id="ios" data-os="ios">
+                <div class="download-head">
+                    <span>Mobile App</span>
+                    <span class="download-status">In development</span>
+                </div>
+            </div>
             <script is:inline>
                 // Inline so the visitor's platform moves to the top before the first paint.
                 {
