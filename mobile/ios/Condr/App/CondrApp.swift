@@ -64,9 +64,10 @@ struct Stores {
 
     /// A scene for review or a UI test: the demo world, a store that forgets between
     /// launches, and a lock that opens on request.
-    private static func demo(_ scene: DemoScene) -> Stores {
-        let suite = "dev.condr.companion.demo"
-        let defaults = UserDefaults(suiteName: suite) ?? .standard
+    static func demo(_ scene: DemoScene, suite: String = "dev.condr.companion.demo") -> Stores {
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            preconditionFailure("Could not open the demo preferences")
+        }
         defaults.removePersistentDomain(forName: suite)
         let preferences = Preferences(defaults: defaults)
         let router = Router()

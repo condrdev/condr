@@ -60,7 +60,9 @@ TEST_RUNNER_CONDR_INVITE='tcp://…@127.0.0.1:7418' TEST_RUNNER_CONDR_DEVICE_NAM
 
 ### 演示场景
 
-`-scene <name>` 启动参数让 App 跑在一个静止的演示世界上，供设计评审与 UI 测试：`welcome` `pair` `scan` `name` `connecting` `paired` `lock` `devices` `device` `offline` `terminal` `terminal-error` `question` `codex` `shell` `settings` `empty` `banner` `error` `computer`，以及一台电脑跑 15 个 Agent 的 `crowd` `crowd-device` 和五台电脑的 `many`。`-focus YES` 打开终端后聚焦回复框，`-offset <pt>` 让首页一开始就滚过一段，`-scrub "<设备序号>:<条序号>"` 定住一次 Score 的滑动。
+首次配对的二维码说明页在 **Scan Code**、**Paste a Link Instead** 下方提供 **No computer to pair? Try Demo** 入口；已配对用户从 Devices 页添加电脑时不显示。点击演示入口后可浏览示例 Agents、Devices 和终端，顶部始终注明示例数据并提供 **Exit Demo**；退出或点击 **Pair a Computer** 会关闭演示，回到真实配对页。演示独立保存临时偏好，不连接真实设备，也不修改已有配对。当前沿用设计评审的静态场景，终端输入不执行命令，不代表完整的联网审核流程。
+
+`-scene <name>` 启动参数让 App 跑在一个静止的演示世界上，供设计评审与 UI 测试：`welcome` `pair` `scan` `name` `connecting` `paired` `agents` `lock` `devices` `device` `offline` `terminal` `terminal-error` `question` `codex` `shell` `settings` `empty` `banner` `error` `computer`，以及一台电脑跑 15 个 Agent 的 `crowd` `crowd-device` 和五台电脑的 `many`。`-focus YES` 打开终端后聚焦回复框，`-offset <pt>` 让首页一开始就滚过一段，`-scrub "<设备序号>:<条序号>"` 定住一次 Score 的滑动。
 
 ### 真机
 

@@ -6,6 +6,7 @@ import Synchronization
 /// still, drawn by the same views as the real one.
 nonisolated enum DemoScene: String {
     case welcome, pair, scan, name, connecting, paired
+    case agents
     case lock, devices, device, offline, settings, empty, banner, error, computer
     case terminal, question, codex, shell
     case terminalError = "terminal-error"

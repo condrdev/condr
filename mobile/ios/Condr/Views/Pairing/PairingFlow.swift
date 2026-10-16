@@ -83,7 +83,7 @@ struct PairingFlow: View {
     }
 
     private var inviteStep: some View {
-        InviteStep(scan: { path.append(.scan) }, pasted: take)
+        InviteStep(offersDemo: firstLaunch, scan: { path.append(.scan) }, pasted: take)
     }
 
     /// An Invite link, scanned or pasted, moves the flow on to naming the phone, or
@@ -199,7 +199,7 @@ struct WelcomeStage: View {
         Story(column: 2, bar: 1, status: .blocked, kind: "claude", words: "Claude asks a question"),
         Story(column: 1, bar: 0, status: .done, kind: "opencode", words: "OpenCode is done"),
     ]
-    private let computers = ["macmini", "jpdev", "buildbox"]
+    private let computers = ["macmini", "buildbox", "thinkbook"]
     /// Each bar's own state when no story uses it.
     private let base: [[AgentStatus]] = [
         [.working, .idle, .working, .idle, .working, .idle],
@@ -295,9 +295,11 @@ struct WelcomeStage: View {
 // MARK: - Showing the code
 
 struct InviteStep: View {
+    let offersDemo: Bool
     let scan: () -> Void
     let pasted: (String) -> Void
     @State private var pasting = false
+    @State private var showingDemo = false
 
     var body: some View {
         ScrollView {
@@ -316,11 +318,29 @@ struct InviteStep: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaBar(edge: .bottom) {
-            StepFooter {
-                PrimaryButton("Scan Code", systemImage: "qrcode.viewfinder", action: scan)
-            } secondary: {
-                Button("Paste a Link Instead") { pasting = true }
-                    .font(.subheadline.weight(.medium))
+            VStack(spacing: 0) {
+                StepFooter {
+                    PrimaryButton("Scan Code", systemImage: "qrcode.viewfinder", action: scan)
+                } secondary: {
+                    Button("Paste a Link Instead") { pasting = true }
+                        .font(.subheadline.weight(.medium))
+                }
+                if offersDemo {
+                    Button {
+                        showingDemo = true
+                    } label: {
+                        Text(
+                            "No computer to pair? \(Text("Try Demo").foregroundStyle(Color.accentColor))"
+                        )
+                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                    .accessibilityIdentifier("tryDemo")
+                }
             }
         }
         .sheet(isPresented: $pasting) {
@@ -329,6 +349,7 @@ struct InviteStep: View {
                 pasted(link)
             }
         }
+        .fullScreenCover(isPresented: $showingDemo) { DemoExperience() }
         // Pairing starts here: iOS's Local Network prompt now, not on the pairing dial.
         .onAppear {
             if DemoScene.launched == nil { LocalNetwork.ask() }
