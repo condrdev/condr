@@ -1,7 +1,16 @@
 ---
 import { Image } from 'astro:assets';
 import hero from '../../../assets/screenshots/hero.png';
+import phoneWelcome from '../../../assets/screenshots/phone-welcome.png';
+import phoneAgents from '../../../assets/screenshots/phone-agents.png';
+import phoneDevice from '../../../assets/screenshots/phone-device.png';
 import Site from '../layouts/Site.astro';
+
+const phones = [
+  { src: phoneWelcome, alt: "The Companion's welcome page: Every agent, within reach, and a button to pair with your computer" },
+  { src: phoneAgents, alt: 'The Agents page: what each agent on macmini and jpdev needs you for, has finished or is working on' },
+  { src: phoneDevice, alt: "The macmini page: its Workspaces, each agent's state and the shell beside them" },
+];
 
 const features = [
   { title: 'Stays running', copy: 'Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.' },
@@ -32,7 +41,7 @@ const methods = [
 ];
 ---
 
-<Site title="Condr — Agents that never hang up" description="One window for every agent, local and remote. Native apps for Windows, macOS and Linux, with a mobile app in development.">
+<Site title="Condr — Agents that never hang up" description="One window for every agent, local and remote. Native apps for Windows, macOS and Linux, with a mobile app for iOS and Android coming soon.">
   <section class="hero shell">
     <canvas class="hero-mark" aria-hidden="true"></canvas>
     <h1>Agents that<br />never<br />hang up.</h1>
@@ -44,8 +53,15 @@ const methods = [
         <a class="text-link" href="/docs/start/getting-started/">Get started</a>
       </div>
     </div>
-    <figure class="hero-shot">
+    <div class="hero-switch" role="radiogroup" aria-label="Screenshots of">
+      <label><input type="radio" name="shot" id="shot-desktop" checked /><span>Desktop</span></label>
+      <label><input type="radio" name="shot" id="shot-mobile" /><span>Mobile <small class="badge">Coming soon</small></span></label>
+    </div>
+    <figure class="hero-shot hero-shot-desktop">
       <Image src={hero} alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" loading="eager" widths={[640, 960, 1280, hero.width]} sizes="(max-width: 1280px) 100vw, 1280px" />
+    </figure>
+    <figure class="hero-shot hero-shot-mobile">
+      {phones.map((phone) => <Image src={phone.src} alt={phone.alt} loading="lazy" widths={[400, 800, phone.src.width]} sizes="(max-width: 760px) 72vw, 340px" />)}
     </figure>
   </section>
 

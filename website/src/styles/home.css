@@ -37,6 +37,7 @@ code { font-family: var(--mono); font-size: .875em; }
 .button:hover { background: var(--accent); color: var(--paper); }
 .text-link, .download a:not([class]), .methods a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .text-link:hover, .download a:not([class]):hover, .methods a:hover { color: var(--accent); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: var(--paper); font-size: .6875rem; font-weight: 600; letter-spacing: 0; line-height: 1.4; white-space: nowrap; }
 
 /* Hero: the lede and actions fill the space the two short last lines of the headline leave,
    hanging from the baseline of its second line; the screenshot runs full width below. */
@@ -50,14 +51,30 @@ code { font-family: var(--mono); font-size: .875em; }
 /* The dot-matrix logo fills the space the headline's first line leaves on the right, from the hero's top
    padding to 24px above the lede's rule, which centres the C on that line. */
 .hero-mark { grid-column: 9 / 13; grid-row: 1; width: 100%; height: calc(var(--display) * 1.562 + 32px); margin-top: -56px; }
-.hero-shot { grid-column: 1 / -1; margin-top: 96px; }
+/* Two buttons under the hero switch the screenshot between the desktop app and the Companion, three
+   phone screens, cropped under the status bar, side by side a little under life size. Pure CSS, through :has(). */
+.hero-switch { grid-column: 1 / -1; display: flex; justify-content: center; gap: 12px; margin-top: 72px; }
+.hero-switch label { position: relative; cursor: pointer; }
+.hero-switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+/* Quiet tabs: grey words, and a pill with a hairline around the chosen one. */
+.hero-switch span { display: block; padding: 8px 28px; border: 1px solid transparent; border-radius: 999px; color: var(--grey); font-size: 1.0625rem; }
+.hero-switch label:hover span { color: var(--ink); }
+.hero-switch input:checked + span { background: rgba(255, 255, 255, .07); border-color: rgba(255, 255, 255, .3); color: var(--ink); }
+.hero-switch .badge { display: none; position: absolute; top: -9px; right: -4px; }
+.hero-switch input:checked + span .badge { display: block; }
+.hero-switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hero-shot { grid-column: 1 / -1; margin-top: 24px; }
 .hero-shot img { display: block; width: 100%; height: auto; }
+.hero-shot-mobile { grid-column: 2 / 12; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--gap); }
+.hero-shot-mobile img { border: 1px solid var(--line); border-radius: 16px; }
+.hero:has(#shot-mobile:checked) .hero-shot-desktop, .hero:has(#shot-desktop:checked) .hero-shot-mobile { display: none; }
 @media (max-width: 1180px) {
   .hero-side { grid-column: 7 / 13; }
 }
 /* Narrower, the block no longer fits under the first line, so it moves below the headline. */
 @media (max-width: 1000px) {
   .hero-side { grid-column: 1 / 8; grid-row: 2; align-self: start; margin: 40px 0 0; }
+  .hero-shot-mobile { grid-column: 1 / -1; }
 }
 
 /* Content rows: a heading on the left half, its copy on the right half. */
@@ -121,7 +138,9 @@ code { font-family: var(--mono); font-size: .875em; }
 .download-platform { padding-top: 16px; border-top: 2px solid var(--ink); scroll-margin-top: 88px; }
 .download-platform + .download-platform { margin-top: 40px; border-top: 1px solid var(--line); }
 .download-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
-.download-status { color: var(--grey); font-size: .875rem; font-weight: 500; letter-spacing: 0; }
+/* The two mobile platforms, in the download button's place but inert and grey. */
+.download-stores { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.download-stores span { display: flex; justify-content: center; align-items: center; height: 52px; box-shadow: inset 0 0 0 1px var(--line); color: var(--grey); font-weight: 600; }
 .download-choice { display: flex; border: 1px solid var(--line); }
 .download-choice label { position: relative; cursor: pointer; }
 .download-choice input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
@@ -153,7 +172,10 @@ code { font-family: var(--mono); font-size: .875em; }
   .hero h1 { font-size: clamp(3rem, 16vw, 5.5rem); }
   .hero-mark { display: none; }
   .hero-side { margin-top: 40px; }
-  .hero-shot { margin-top: 40px; }
+  .hero-switch { margin-top: 40px; }
+  /* The phones bleed to the screen's edges and snap one at a time. */
+  .hero-shot-mobile { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 72%; margin-inline: -16px; padding-inline: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
+  .hero-shot-mobile img { border-radius: 12px; scroll-snap-align: start; }
   .row { padding-top: 88px; }
   .row-copy, .agents, .features, .methods { margin-top: 32px; }
   .agents, .features, .methods > div { grid-template-columns: minmax(0, 1fr); }
