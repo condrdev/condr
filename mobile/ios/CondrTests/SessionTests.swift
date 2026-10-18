@@ -160,6 +160,7 @@ struct SessionTests {
         session.wheel(row: 2, column: 5, lines: 3)
         session.scrollToBottom()
         session.paste(text: "a\nb")
+        session.submit(text: "ship it\nplease")
         session.click(row: 1, column: 2)
         session.selectWord(row: 0, column: 4)
         session.selectRange(from: (0, 4), to: (2, 1))
@@ -170,6 +171,7 @@ struct SessionTests {
         #expect(state.texts == ["yes"])
         #expect(state.scrolls == [3, 0])
         #expect(state.pastes == ["a\nb"])
+        #expect(state.submits == ["ship it\nplease"])
         #expect(state.clicks.map { [$0.0, $0.1] } == [[1, 2]])
         #expect(state.selections == ["word 0:4", "range 0:4-2:1", "copy", "clear"])
     }

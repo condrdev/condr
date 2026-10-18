@@ -280,6 +280,7 @@ impl From<&TerminalCommand> for super::TerminalCommand {
             }),
             TerminalCommand::Text(text) => Command::Text(text.clone()),
             TerminalCommand::Paste(text) => Command::Paste(text.clone()),
+            TerminalCommand::Submit(text) => Command::Submit(text.clone()),
             TerminalCommand::Mouse(event) => Command::Mouse(encode_mouse(*event)),
             TerminalCommand::Focus(focused) => Command::Focus(*focused),
             TerminalCommand::Resize(size) => Command::Resize(super::TerminalSize {
@@ -323,6 +324,7 @@ impl TryFrom<super::TerminalCommand> for TerminalCommand {
             },
             Command::Text(text) => Self::Text(text),
             Command::Paste(text) => Self::Paste(text),
+            Command::Submit(text) => Self::Submit(text),
             Command::Mouse(event) => Self::Mouse(decode_mouse(event)?),
             Command::Focus(focused) => Self::Focus(focused),
             Command::Resize(size) => Self::Resize(decode_size(size)?),

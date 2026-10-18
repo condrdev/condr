@@ -260,6 +260,13 @@ final class Session {
         client.paste(address: shown.address, pane: shown.pane, text: text)
     }
 
+    /// The field's draft: a paste, then Return once the program has taken it, as the
+    /// Server submits an agent prompt (ADR 0041).
+    func submit(text: String) {
+        guard let shown else { return }
+        client.submit(address: shown.address, pane: shown.pane, text: text)
+    }
+
     /// A swipe of `lines` over a cell, positive towards what came before: wheel motion, as
     /// the desktop sends a trackpad's. The Server gives it to a program that tracks the
     /// mouse, turns it into arrow keys on an alternate screen, or scrolls the Pane for

@@ -550,6 +550,24 @@ fn pasted_text_runs_once_return_is_pressed() {
     shown.stop();
 }
 
+/// Send is a paste and a Return the program has had time to take, in one command
+/// (ADR 0041).
+#[test]
+fn a_submitted_draft_runs_without_a_separate_return() {
+    let shown = Shown::start(12, 60);
+    shown.companion.submit(
+        shown.address.clone(),
+        shown.pane,
+        "echo CONDR_SUBMITTED".into(),
+    );
+    wait_until("the submitted command's output", || {
+        shown.screen().is_some_and(|screen| {
+            (0..screen.rows).any(|row| row_text(&screen, row).trim() == "CONDR_SUBMITTED")
+        })
+    });
+    shown.stop();
+}
+
 /// Leaving the screen gives the shown Pane's size back at once, and coming back takes it
 /// again with a fresh Bootstrap, even when the two follow each other at once (ADR 0040).
 #[test]

@@ -32,7 +32,8 @@ struct TerminalPage: View {
                 screen: session.screen, fontSize: preferences.fontSize,
                 grid: { rows, columns in grid = Grid(rows: rows, columns: columns) },
                 session: session,
-                open: { UIApplication.shared.open($0) }
+                open: { UIApplication.shared.open($0) },
+                idleTap: { focused = false }
             )
             .padding(.horizontal, Self.gutter)
             .background(Color(hex: Palette.background))
@@ -186,47 +187,53 @@ struct TerminalPage: View {
             NoticeToast()
             ErrorToast()
                 .padding(.horizontal, -12)
-            KeyRow(control: $control, press: press) { text in
-                keyTick += 1
-                session.paste(text: text)
-            }
-            HStack(spacing: 8) {
-                TextField(placeholder(pane), text: $text)
+            KeyRow(control: $control, press: press)
+            HStack(alignment: .bottom, spacing: 8) {
+                // The keyboard moves only when asked, since every appearance resizes the
+                // Pane for every viewer (ADR 0041).
+                if focused {
+                    Button {
+                        focused = false
+                    } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel("Hide Keyboard")
+                }
+                // A draft of as many lines as the reply needs; Return is a line break, and
+                // the terminal's Return is on the key row.
+                TextField(placeholder(pane), text: $text, axis: .vertical)
+                    .lineLimit(1...5)
                     .font(.body)
                     .textInputAutocapitalization(pane.agent == nil ? .never : .sentences)
                     .autocorrectionDisabled(pane.agent == nil)
-                    .submitLabel(.send)
-                    // A numbered menu waits for a digit: open the keyboard on its numbers.
-                    .keyboardType(
-                        pane.agent?.status == .blocked ? .numbersAndPunctuation : .default
-                    )
                     .focused($focused)
-                    .onSubmit(submit)
-                    .onChange(of: text) { _, new in
-                        guard control, let last = new.last else { return }
-                        press(.character(text: String(last)))
-                        text = ""
-                    }
+                    .onChange(of: text) { old, new in typedWithControl(old, new) }
                     .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                     .frame(minHeight: 44)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                if !text.isEmpty {
-                    Button(action: submit) {
-                        Image(systemName: "arrow.up")
-                            .font(.body.weight(.bold))
-                            .foregroundStyle(Color.ink)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.glassProminent)
-
-                    .accessibilityIdentifier("sendReply")
-                    .buttonBorderShape(.circle)
-                    .tint(Color.paper)
-                    .transition(.scale.combined(with: .opacity))
-                    .accessibilityLabel("Send")
+                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+                    .accessibilityIdentifier("draft")
+                Button(action: submit) {
+                    Image(systemName: "arrow.up")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(text.isEmpty ? Color.secondary : Color.ink)
+                        .frame(width: 44, height: 44)
                 }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    text.isEmpty ? .regular.interactive() : .regular.tint(.paper).interactive(),
+                    in: .circle
+                )
+                .disabled(text.isEmpty)
+                .accessibilityIdentifier("sendReply")
+                .accessibilityLabel("Send")
             }
-            .animation(.snappy, value: text.isEmpty)
+            .animation(.snappy, value: focused)
         }
         .padding(.horizontal, 12)
         .padding(.top, 6)
@@ -239,21 +246,23 @@ struct TerminalPage: View {
         control = false
     }
 
-    /// Send is the line: the field's text, then Return, which a shell or an Agent's prompt
-    /// needs to take it. Text pasted with line breaks goes as a paste, so they stay inside
-    /// the reply rather than each sending a line. An empty send is Return alone, which is
-    /// how a prompt is answered after picking with the arrows.
-    private func submit() {
-        keyTick += 1
-        if text.contains(where: \.isNewline) {
-            session.paste(text: text)
-            text = ""
-        } else if !text.isEmpty {
-            session.send(text: text)
-            text = ""
+    /// With Ctrl on, the key just typed goes as Ctrl+key and the draft stays as it was.
+    private func typedWithControl(_ old: String, _ new: String) {
+        guard control, new.count > old.count else { return }
+        let kept = zip(old, new).prefix { $0 == $1 }.count
+        if let typed = new.dropFirst(kept).first {
+            press(.character(text: String(typed)))
         }
-        session.send(key: .enter)
+        text = old
+    }
+
+    /// Send is the draft as the Server submits an agent prompt: a paste, then Return once
+    /// the program has taken it. The keyboard stays where it is (ADR 0041).
+    private func submit() {
+        guard !text.isEmpty else { return }
+        keyTick += 1
+        session.submit(text: text)
+        text = ""
         control = false
-        focused = true
     }
 }

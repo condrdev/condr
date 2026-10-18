@@ -556,19 +556,9 @@ fn pane(
         }
         PaneCommand::Run { pane_id, command } => {
             find_pane(&client.session()?, pane_id)?;
-            // Paste, so a program with bracketed paste on sees one unit of text, then Enter.
-            send(
-                client,
-                pane_id,
-                [
-                    TerminalCommand::Paste(command),
-                    TerminalCommand::Key {
-                        key: TerminalKey::Enter,
-                        modifiers: TerminalModifiers::default(),
-                        kind: TerminalKeyEventKind::Press,
-                    },
-                ],
-            )?;
+            // A paste, then Enter once the program has taken it: an Enter that follows at
+            // once is absorbed by a TUI's paste detector (Codex), leaving the line unrun.
+            send(client, pane_id, [TerminalCommand::Submit(command)])?;
             Ok(json!({ "ok": true }))
         }
     }

@@ -252,5 +252,8 @@ message TerminalCommand {
     TerminalSelectionCommand select = 8;
     TerminalSelectAtCommand select_at = 9;
     TerminalSelectionCommand copy = 10;
+    // Text as a paste, then Return once the program has had time to take it, as one
+    // unit no other input can split.
+    string submit = 11;
   }
 }

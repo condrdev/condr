@@ -15,6 +15,8 @@ struct TerminalHost: UIViewRepresentable {
     /// Where the touches go.
     let session: Session
     let open: @MainActor (URL) -> Void
+    /// A tap that hit no selection, link or mouse-tracking program.
+    let idleTap: @MainActor () -> Void
 
     final class Surface: TerminalView {
         override var canBecomeFirstResponder: Bool { false }
@@ -183,7 +185,8 @@ struct TerminalHost: UIViewRepresentable {
             anchor == nil
         }
 
-        /// A tap ends a selection, opens a link, or clicks where the program tracks the mouse.
+        /// A tap ends a selection, opens a link, clicks where the program tracks the mouse,
+        /// or, hitting none of those, is the page's.
         @objc func tap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended, let view = gesture.view as? Surface,
                 let screen = shown, let at = cell(at: gesture.location(in: view), in: view)
@@ -200,6 +203,8 @@ struct TerminalHost: UIViewRepresentable {
                 host.open(url)
             } else if screen.mouseTracking {
                 host.session.click(row: at.row, column: at.column)
+            } else {
+                host.idleTap()
             }
         }
 

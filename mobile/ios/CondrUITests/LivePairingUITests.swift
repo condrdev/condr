@@ -76,7 +76,7 @@ final class LivePairingUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Escape"].waitForExistence(timeout: 10))
         // The keyboard changes the grid, and the page says so for a moment.
-        let input = app.textFields.firstMatch
+        let input = app.descendants(matching: .any).matching(identifier: "draft").firstMatch
         input.tap()
         // What the shell sees of the phone's grid, then a word to find.
         input.typeText("tput cols")

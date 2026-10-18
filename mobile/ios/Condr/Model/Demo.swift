@@ -454,6 +454,7 @@ nonisolated final class DemoClient: CompanionProtocol {
     func sendText(address: String, pane: UInt64, text: String) {}
     func sendKey(address: String, pane: UInt64, key: Key, control: Bool) {}
     func paste(address: String, pane: UInt64, text: String) {}
+    func submit(address: String, pane: UInt64, text: String) {}
     func wheel(address: String, pane: UInt64, row: UInt16, column: UInt16, lines: Int32) {}
     func click(address: String, pane: UInt64, row: UInt16, column: UInt16) {}
     func scrollToBottom(address: String, pane: UInt64) {}

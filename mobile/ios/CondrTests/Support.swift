@@ -28,6 +28,7 @@ nonisolated final class FakeClient: CompanionProtocol {
         var scrolls: [Int32] = []
         var clicks: [(UInt16, UInt16)] = []
         var pastes: [String] = []
+        var submits: [String] = []
         var selections: [String] = []
         var lifecycle: [String] = []
     }
@@ -134,6 +135,9 @@ nonisolated final class FakeClient: CompanionProtocol {
     }
     func paste(address: String, pane: UInt64, text: String) {
         state.withLock { $0.pastes.append(text) }
+    }
+    func submit(address: String, pane: UInt64, text: String) {
+        state.withLock { $0.submits.append(text) }
     }
     func selectWord(address: String, pane: UInt64, row: UInt16, column: UInt16) {
         state.withLock { $0.selections.append("word \(row):\(column)") }

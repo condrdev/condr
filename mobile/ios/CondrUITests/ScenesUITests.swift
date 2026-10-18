@@ -73,14 +73,29 @@ final class ScenesUITests: XCTestCase {
         let app = launch("terminal", ["-focus", "YES"])
         XCTAssertTrue(app.buttons["Escape"].waitForExistence(timeout: 15))
         app.buttons["Down"].tap()
-        app.buttons["Return"].tap()
-        let field = app.textFields.firstMatch
+        app.buttons["terminalReturn"].tap()
+        let field = app.descendants(matching: .any).matching(identifier: "draft").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.typeText("Ship it")
-        XCTAssertTrue(app.buttons["sendReply"].waitForExistence(timeout: 3))
-        app.buttons["sendReply"].tap()
+        let send = app.buttons["sendReply"]
+        XCTAssertFalse(send.isEnabled, "an empty draft has nothing to send")
+        // Return in the field is a line break; the terminal's Return is on the key row.
+        field.tap()
+        field.typeText("Ship it\nplease")
+        XCTAssertEqual(field.value as? String, "Ship it\nplease")
+        XCTAssertTrue(send.isEnabled)
+        // The terminal's Backspace, tapped and held, touches neither the draft nor Send.
+        let backspace = app.buttons["terminalBackspace"]
+        backspace.tap()
+        backspace.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).tap()
+        backspace.press(forDuration: 1.2)
+        XCTAssertEqual(field.value as? String, "Ship it\nplease", "Backspace left the draft alone")
+        XCTAssertTrue(send.isEnabled)
+        send.tap()
+        expectation(for: NSPredicate(format: "isEnabled == NO"), evaluatedWith: send)
+        waitForExpectations(timeout: 2)
+        app.buttons["Hide Keyboard"].tap()
         XCTAssertFalse(
-            app.buttons["sendReply"].waitForExistence(timeout: 2), "the reply left the field")
+            app.buttons["Hide Keyboard"].waitForExistence(timeout: 2), "the keyboard went")
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10))
     }

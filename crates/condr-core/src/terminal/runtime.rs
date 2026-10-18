@@ -399,6 +399,10 @@ impl TerminalRuntime {
                 self.write(encode_paste(&text, bracketed))?;
                 Ok(None)
             }
+            TerminalCommand::Submit(text) => {
+                self.submit(&text)?;
+                Ok(None)
+            }
             TerminalCommand::Mouse(event) => {
                 let lossy = !matches!(event, TerminalMouseEvent::Button { .. });
                 match self.handle_mouse(event) {

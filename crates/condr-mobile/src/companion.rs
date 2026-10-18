@@ -576,6 +576,14 @@ impl Companion {
             .command(&address, pane, TerminalCommand::Paste(text));
     }
 
+    /// The field's draft: a paste, then Return once the program has taken it, as the
+    /// Server submits an agent prompt. A Return sent right after plain text is absorbed
+    /// by a TUI's paste detector (Codex), leaving the draft in its composer (ADR 0041).
+    pub fn submit(&self, address: String, pane: u64, text: String) {
+        self.shared
+            .command(&address, pane, TerminalCommand::Submit(text));
+    }
+
     /// A key from the row above the soft keyboard, with its sticky Ctrl (ADR 0041).
     pub fn send_key(&self, address: String, pane: u64, key: Key, control: bool) {
         self.shared

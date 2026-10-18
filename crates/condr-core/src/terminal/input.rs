@@ -99,6 +99,10 @@ pub enum TerminalCommand {
     },
     Text(String),
     Paste(String),
+    /// `Paste`, then Return once the program has had time to take the paste, as one unit
+    /// no other input can split: a TUI's paste detector absorbs a Return that follows at
+    /// once, leaving the text in its composer unsubmitted.
+    Submit(String),
     Mouse(TerminalMouseEvent),
     Focus(bool),
     Resize(TerminalSize),

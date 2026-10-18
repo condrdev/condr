@@ -363,3 +363,10 @@ fn a_watched_set_and_a_terminal_record_without_a_view_round_trip() {
         Some(record)
     );
 }
+
+#[test]
+fn a_submitted_draft_round_trips() {
+    let command = crate::TerminalCommand::Submit("echo one\necho two".into());
+    let wire = super::TerminalCommand::from(&command);
+    assert_eq!(crate::TerminalCommand::try_from(wire).unwrap(), command);
+}
