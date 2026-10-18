@@ -171,6 +171,16 @@ final class Session {
         return device
     }
 
+    /// The name this iPhone shows a Device under from now on; a blank one changes nothing.
+    func rename(_ address: String, to label: String) {
+        let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { return }
+        client.rename(address: address, label: label)
+        saved.rename(address, to: label)
+        devices = client.devices()
+        needsYou = client.needsYou()
+    }
+
     /// Stops using a Device here; revoking the phone is done on the Device (ADR 0040).
     func forget(_ address: String) {
         if shown?.address == address {

@@ -451,6 +451,7 @@ nonisolated final class DemoClient: CompanionProtocol {
 
     func showPane(address: String?, pane: UInt64, rows: UInt16, columns: UInt16) {}
 
+    func rename(address: String, label: String) {}
     func sendText(address: String, pane: UInt64, text: String) {}
     func sendKey(address: String, pane: UInt64, key: Key, control: Bool) {}
     func paste(address: String, pane: UInt64, text: String) {}

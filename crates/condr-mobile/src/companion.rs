@@ -314,6 +314,28 @@ impl Companion {
         }
     }
 
+    /// The name this phone shows a Device under from now on; a blank one changes
+    /// nothing. The app keeps it with the Device (ADR 0040).
+    pub fn rename(&self, address: String, label: String) {
+        let label = label.trim();
+        if label.is_empty() {
+            return;
+        }
+        let mut state = self.shared.lock();
+        let Some(device) = state.devices.get_mut(&address) else {
+            return;
+        };
+        if device.label == label {
+            return;
+        }
+        device.label = label.to_owned();
+        state.mark(Change::Devices);
+        // "Needs you" names the Device beside each Agent.
+        state.mark(Change::NeedsYou);
+        drop(state);
+        self.shared.wake.notify_one();
+    }
+
     /// Stops using a Device here; revoking the phone is done on the Device (ADR 0040).
     pub fn forget(&self, address: String) {
         let mut state = self.shared.lock();

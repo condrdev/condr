@@ -550,6 +550,26 @@ fn pasted_text_runs_once_return_is_pressed() {
     shown.stop();
 }
 
+/// A Device goes by the name the person gives it on the phone; a blank name changes nothing.
+#[test]
+fn a_device_is_renamed_on_the_phone() {
+    let shown = Shown::start(12, 60);
+    let label = |companion: &Companion| {
+        companion
+            .devices()
+            .into_iter()
+            .find(|device| device.address == shown.address)
+            .map(|device| device.label)
+    };
+    shown
+        .companion
+        .rename(shown.address.clone(), "  studio  ".into());
+    assert_eq!(label(&shown.companion).as_deref(), Some("studio"));
+    shown.companion.rename(shown.address.clone(), "   ".into());
+    assert_eq!(label(&shown.companion).as_deref(), Some("studio"));
+    shown.stop();
+}
+
 /// Send is a paste and a Return the program has had time to take, in one command
 /// (ADR 0041).
 #[test]

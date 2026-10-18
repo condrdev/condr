@@ -54,6 +54,12 @@ final class SavedDeviceStore {
         save()
     }
 
+    func rename(_ address: String, to label: String) {
+        guard let index = devices.firstIndex(where: { $0.address == address }) else { return }
+        devices[index].label = label
+        save()
+    }
+
     private func save() {
         defaults.set(try? JSONEncoder().encode(devices), forKey: Self.key)
     }

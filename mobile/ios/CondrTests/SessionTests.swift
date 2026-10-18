@@ -118,6 +118,21 @@ struct SessionTests {
         #expect(client.state.withLock { $0.forgotten } == [Fixture.address])
     }
 
+    @Test func renamingADeviceRenamesItEverywhereAndKeepsABlankNameOut() {
+        let client = FakeClient(Fixture.world(.working))
+        let store = SavedDeviceStore(defaults: Fixture.defaults())
+        store.add(SavedDevice(address: Fixture.address, label: "desk"))
+        let (session, _, _, _) = Fixture.session(client, saved: store)
+
+        session.rename(Fixture.address, to: "  studio ")
+        #expect(session.device(Fixture.address)?.label == "studio")
+        #expect(store.devices.map(\.label) == ["studio"])
+
+        session.rename(Fixture.address, to: "   ")
+        #expect(session.device(Fixture.address)?.label == "studio")
+        #expect(store.devices.map(\.label) == ["studio"])
+    }
+
     @Test func pairingKeepsTheDevice() async throws {
         let client = FakeClient()
         let (session, _, _, store) = Fixture.session(client)

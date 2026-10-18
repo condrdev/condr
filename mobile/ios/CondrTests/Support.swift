@@ -111,6 +111,15 @@ nonisolated final class FakeClient: CompanionProtocol {
         }
     }
 
+    func rename(address: String, label: String) {
+        state.withLock { state in
+            guard let index = state.devices.firstIndex(where: { $0.address == address }) else {
+                return
+            }
+            state.devices[index].label = label
+        }
+    }
+
     func terminal(address: String, pane: UInt64) -> TerminalScreen? {
         state.withLock { $0.screens[PaneRef(address: address, pane: pane)] }
     }

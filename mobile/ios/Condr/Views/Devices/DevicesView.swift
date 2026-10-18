@@ -113,6 +113,8 @@ struct DeviceScreen: View {
     @Environment(Session.self) private var session
     @Environment(Router.self) private var router
     @State private var forgetting = false
+    @State private var renaming = false
+    @State private var newLabel = ""
 
     var body: some View {
         if let device = session.device(address) {
@@ -128,11 +130,23 @@ struct DeviceScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button("Rename…", systemImage: "pencil") {
+                            newLabel = device.label
+                            renaming = true
+                        }
                         Button("Forget \(device.label)", systemImage: "trash", role: .destructive) {
                             forgetting = true
                         }
                     } label: {
                         Image(systemName: "ellipsis")
+                    }
+                    .alert("Rename \(device.label)", isPresented: $renaming) {
+                        TextField("Name", text: $newLabel)
+                            .textInputAutocapitalization(.words)
+                        Button("Rename") { session.rename(address, to: newLabel) }
+                            .disabled(
+                                newLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Cancel", role: .cancel) {}
                     }
                     // iOS 26 grows the dialog out of the view it hangs on: the button that asked.
                     .confirmationDialog(
