@@ -955,7 +955,7 @@ done
             &runtime,
             AgentSnapshot {
                 kind: AgentKind::Codex,
-                state: AgentState::Idle,
+                state: AgentState::Done,
                 session_id: Some("first".into()),
                 detail: None,
             },

@@ -391,7 +391,7 @@ nonisolated final class DemoClient: CompanionProtocol {
             state.devices.filter { $0.status == .connected }.flatMap { device in
                 (state.workspaces[device.address] ?? []).flatMap { workspace in
                     workspace.panes.compactMap { pane -> NeedsYouItem? in
-                        guard let agent = pane.agent, agent.status == .blocked || agent.status == .error
+                        guard let agent = pane.agent, agent.status.needsYou
                         else { return nil }
                         return NeedsYouItem(
                             address: device.address, device: device.label,
