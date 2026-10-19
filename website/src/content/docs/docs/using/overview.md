@@ -73,12 +73,13 @@ Agent state shows in the **badges in the left sidebar**, the **Workspace counter
 | :--- | :--- |
 | **Working** | Running a task (thinking, generating text or calling tools). |
 | **Blocked** | Waiting for your input or approval (listed in Needs you). |
+| **Error** | The turn failed and the Agent halted (listed in Needs you with the reason). |
 | **Done** | Finished in the background. Resets to Idle once focus returns to its Pane. |
 | **Idle** | Idle: the turn is over and it waits for the next instruction. |
-| **Unknown** | A plain shell session, or an Agent without Condr hooks. |
+| **Unknown** | A plain shell session, or an Agent that has not reported. |
 | **Bell** | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
 
-> **Tip**: when an Agent in the background finishes or becomes blocked, Condr sends a native system notification; clicking it goes straight to that Pane. To turn on state tracking, see [Agent integrations](/docs/using/agents/).
+> **Tip**: when an Agent in the background finishes, fails or becomes blocked, Condr sends a native system notification; clicking it goes straight to that Pane. To turn on state tracking, see [Agent integrations](/docs/using/agents/).
 
 ---
 

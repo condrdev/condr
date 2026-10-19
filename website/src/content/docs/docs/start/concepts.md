@@ -11,7 +11,7 @@ Condr is a unified workbench that is **terminal-centric and built for multi-Agen
 
 - **Terminal first, native execution**: no rebuilt chat UI and no takeover of the conversation loop. Agents such as Claude Code and Codex run as native subprocesses in a PTY, keeping their context compaction, local configuration and tool ecosystem intact.
 - **Runtime decoupled from view**: the server (`condr-server`) hosts the terminal processes, Agent states and layout snapshot, and is the single source of truth; a client window is only a projection of it. Closing a window does not affect background tasks, and several clients can connect at the same time without interfering with each other.
-- **Deterministic state awareness**: no fragile regex scraping of screen text. Agents report precise states and the reason they are waiting only through their official lifecycle Hooks, using an in-band control sequence (OSC 777).
+- **Deterministic state awareness**: no fragile regex scraping of screen text. Condr only relies on what the Agent itself reports: precise states and why it is waiting come over the terminal Program Status Protocol (OSC 7501) or through official lifecycle Hooks (OSC 777).
 
 ---
 
@@ -66,9 +66,10 @@ When several Agents change the same project at once, code and Git conflicts are 
 | :--- | :--- |
 | **Working** | Running a task (thinking, generating text or calling tools). |
 | **Blocked** | Waiting for your input or approval (listed in Needs you). |
+| **Error** | The turn failed and the Agent halted (listed in Needs you with the reason). |
 | **Done** | Finished in the background. Resets to Idle once focus returns to its Pane. |
 | **Idle** | Idle: the turn is over and it waits for the next instruction. |
-| **Unknown** | A plain shell session, or an Agent without Condr hooks. |
+| **Unknown** | A plain shell session, or an Agent that has not reported. |
 | **Bell** | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
 
 ---

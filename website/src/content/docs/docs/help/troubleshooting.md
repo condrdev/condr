@@ -86,7 +86,7 @@ Once both sides run matching versions, go to the target Device and run `condr se
 
 ## Agent state stays Unknown
 
-Agent state comes entirely from hooks. Check these in order:
+Agent state comes only from the Agent itself. An Agent that supports the Program Status Protocol reports state without installing anything (supported versions are listed under [Install Hooks for accurate states](/docs/using/agents/#install-hooks-for-accurate-states)). All other Agents, plus Claude Code and Pi on a Windows Server, report through hooks. For those, check these in order:
 
 1. **Are hooks installed?** Run `condr agent hooks status <agent>` (for example, `condr agent hooks status claude`). `missing` means they need to be installed; `outdated` means they need to be reinstalled; `unsupported` means the Agent is recognition only, so Condr does not install hooks and its state stays Unknown (see [Support levels](/docs/using/agents/#support-levels)). For a remote Device, select it at the top of **Settings** and open **Agent integrations**; the `agent hooks` command only works on the local machine.
 2. **Is the Agent running in a Condr Pane?** Hooks report only in terminal sessions where `CONDR_ENV=1` is set. Condr cannot see Agents running in other terminals.

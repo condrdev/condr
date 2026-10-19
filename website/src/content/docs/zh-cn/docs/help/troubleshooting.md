@@ -86,7 +86,7 @@ Condr's own server could not start on this device. Connect tries again.
 
 ## Agent 状态一直是 Unknown
 
-Agent 状态变更完全依赖 Hook 上报机制。请按序核验以下环节：
+Agent 状态只来自 Agent 自身。支持 Program Status Protocol 的 Agent 无需额外安装即可直接上报（支持的版本见[安装 Hook 监听精准状态](/zh-cn/docs/using/agents/#安装-hook-监听精准状态)）；其余 Agent 以及 Windows Server 上的 Claude Code 和 Pi 均通过 Hook 上报。对于后者，请依次排查：
 
 1. **检查 Hook 状态**：运行 `condr agent hooks status <agent>`（例如 `condr agent hooks status claude`）。显示 `missing` 时需要安装；显示 `outdated` 时需要重新安装；显示 `unsupported` 表示该 Agent 仅识别，Condr 不会为其安装 Hook，状态会保持 Unknown，详见[支持级别](/zh-cn/docs/using/agents/#支持级别)。对于远程设备，请在 **Settings** 顶部选择该设备并打开 **Agent integrations** 查看；命令行 `agent hooks` 仅对本机生效。
 2. **确认运行环境位于 Condr Pane 内部**：Hook 仅在环境变量预注入 `CONDR_ENV=1` 的终端会话中触发上报。Condr 无法监视外部独立终端中运行的 Agent 进程。

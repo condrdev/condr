@@ -73,12 +73,13 @@ Agent 运行状态集中展示在**左侧栏角标**、**Workspace 计数器**�
 | :--- | :--- |
 | **Working** | 正在执行任务（推理思考、生成文本或调用工具）。 |
 | **Blocked** | 阻塞状态，等待用户输入或授权（在 Needs you 中列出）。 |
+| **Error** | 本轮失败，Agent 已停住（在 Needs you 中列出，并显示原因）。 |
 | **Done** | 后台执行完毕。当焦点切回该 Pane 时自动重置为 Idle。 |
 | **Idle** | 空闲状态，当前轮次完成，等待新指令。 |
-| **Unknown** | 原生 Shell 会话，或未接入 Condr Hook 的 Agent。 |
+| **Unknown** | 原生 Shell 会话，或尚未上报的 Agent。 |
 | **Bell** | 终端发出响铃提醒（Bell 优先级高于常规生命周期状态）。 |
 
-> **提示**：当处于后台的 Agent 完成任务或触发阻塞时，Condr 会推送系统原生通知，点击直接定位至相应窗格。要启用状态跟踪，请参阅 [Agent 集成文档](/zh-cn/docs/using/agents/)。
+> **提示**：当处于后台的 Agent 完成任务、失败或触发阻塞时，Condr 会推送系统原生通知，点击直接定位至相应窗格。要启用状态跟踪，请参阅 [Agent 集成文档](/zh-cn/docs/using/agents/)。
 
 ---
 
