@@ -134,8 +134,8 @@ impl TerminalAgentProbe {
             if notices.agent_stopping {
                 return None;
             }
-            let unnamed_reporter =
-                !notices.agent_events.is_empty() && notices.agent.agent().is_none();
+            let unnamed_reporter = notices.agent.agent().is_none()
+                && notices.agent_events.iter().any(AgentNotice::names_agent);
             let force = foreground_changed || unnamed_reporter;
             (
                 notices
@@ -168,7 +168,7 @@ impl TerminalAgentProbe {
         let count = event_count.min(notices.agent_events.len());
         let events = notices.agent_events.drain(..count).collect::<Vec<_>>();
         for event in events {
-            match notices.agent.observe_event(&event) {
+            match event.apply(&mut notices.agent) {
                 AgentPublish::Nothing => {}
                 next => publish = next,
             }

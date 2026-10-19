@@ -295,14 +295,14 @@ struct PaneRow: View {
     }
 }
 
-/// An Agent's state in words. The glyph carries the colour; only a wait is also said in
-/// red, in bold, with what it waits for.
+/// An Agent's state in words. The glyph carries the colour; only a wait or a failure is
+/// also said in red, in bold, with what it waits for or why it halted.
 func agentStatusLine(_ agent: AgentView, kind: Bool = false) -> Text {
     let prefix = kind ? Text("\(agent.label) · ") : Text("")
-    if agent.status == .blocked {
-        let need = Text(AgentStatus.blocked.title).fontWeight(.semibold).foregroundStyle(
-            AgentStatus.blocked.tint)
-        let on = agent.blockedOn.map { " · \($0)" } ?? ""
+    if agent.status.needsYou {
+        let need = Text(agent.status.title).fontWeight(.semibold).foregroundStyle(
+            agent.status.tint)
+        let on = agent.detail.map { " · \($0)" } ?? ""
         return Text("\(prefix)\(need)\(on)")
     }
     return Text("\(prefix)\(agent.status.title)")

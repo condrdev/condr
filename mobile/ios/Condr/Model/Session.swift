@@ -106,14 +106,19 @@ final class Session {
         for item in agents {
             seen[item.ref] = item.agent.status
             guard let before = statuses[item.ref], before != item.agent.status,
-                item.agent.status == .blocked || item.agent.status == .done,
+                item.agent.status.needsYou || item.agent.status == .done,
                 shown != item.ref
             else { continue }
+            let title =
+                switch item.agent.status {
+                case .blocked: "\(item.agent.label) needs you"
+                case .error: "\(item.agent.label) failed"
+                default: "\(item.agent.label) is done"
+                }
             alerts.raise(
                 Banner(
                     ref: item.ref, status: item.agent.status, kind: item.agent.kind,
-                    title: item.agent.status == .blocked
-                        ? "\(item.agent.label) needs you" : "\(item.agent.label) is done",
+                    title: title,
                     detail:
                         "\(item.pane.name(fallback: item.agent.label)) · \(place(item.workspace, item.device))",
                     quiet: router.showsHome))

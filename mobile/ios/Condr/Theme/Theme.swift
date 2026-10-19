@@ -168,6 +168,7 @@ struct Bars: View {
     static func height(_ status: AgentStatus, tall: CGFloat, wave: Double) -> CGFloat {
         switch status {
         case .blocked: tall
+        case .error: tall * 0.9
         case .done: tall * 0.75
         case .working: tall * (0.35 + 0.10 * wave)
         case .idle, .unknown: tall * 0.12
@@ -179,7 +180,7 @@ struct Bars: View {
 func agentSummary(_ statuses: [AgentStatus]) -> Text {
     let count = { (status: AgentStatus) in statuses.filter { $0 == status }.count }
     let blocked = count(.blocked)
-    let rest = [(count(.working), "working"), (count(.done), "done")]
+    let rest = [(count(.error), "failed"), (count(.working), "working"), (count(.done), "done")]
         .filter { $0.0 > 0 }
         .map { "\($0.0) \($0.1)" }
         .joined(separator: " · ")

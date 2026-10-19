@@ -132,7 +132,7 @@ fn unknown_enum_values_decode_to_their_fallback() {
                 session_id: None,
                 kind: 99,
                 state: 99,
-                blocked_on: None,
+                detail: None,
             }),
         })),
     };
@@ -175,7 +175,7 @@ fn an_unset_enum_is_malformed() {
         session_id: None,
         kind: 0,
         state: 1,
-        blocked_on: None,
+        detail: None,
     };
     assert!(matches!(
         crate::AgentSnapshot::try_from(agent),

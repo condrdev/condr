@@ -299,7 +299,7 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
                 session_id: None,
                 kind: condr_core::AgentKind::Codex,
                 state: condr_core::AgentState::Working,
-                blocked_on: None,
+                detail: None,
             },
         }),
         BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {
@@ -481,7 +481,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
                 session_id: None,
                 kind: condr_core::AgentKind::Claude,
                 state: condr_core::AgentState::Idle,
-                blocked_on: None,
+                detail: None,
             },
         }),
         BootstrapRecord::WorkspaceGit(WorkspaceGitSnapshot {

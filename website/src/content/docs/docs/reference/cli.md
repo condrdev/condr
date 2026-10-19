@@ -251,13 +251,13 @@ condr pane run <id> <command>
 # Scan and list the installed, supported Agent CLI tools on the Server's PATH
 condr agent available
 
-# Query every active Agent process, its state, blocking reason (blocked_on) and native session ID
+# Query every active Agent process, its state, what blocks it or why it failed (detail) and native session ID
 condr agent list
 
 # Initialize and start an Agent in an idle Pane and wait until it is ready; default timeout 30 s (30000ms)
 condr agent start <name> --kind <kind> --pane <id> [--timeout <ms>] [-- extra args...]
 
-# Issue a task prompt; --wait blocks until the Agent returns the target state (by default idle or blocked)
+# Issue a task prompt; --wait blocks until the Agent returns the target state (by default idle, done, blocked or error)
 # --until and --timeout require --wait
 condr agent prompt <target> <text> [--wait] [--until <state>] [--timeout <ms>]
 

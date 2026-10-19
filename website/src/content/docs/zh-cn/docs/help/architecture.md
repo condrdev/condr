@@ -29,7 +29,7 @@ Condr 把运行时和界面分成两个进程。Server 托管终端、Agent 和 
 ## 终端画面
 
 1. Server 调用 `portable-pty` 创建 PTY。Windows 环境使用 ConPTY，各终端进程归入独立的 Job Object 管理，关闭 Pane 时关联进程一并结束。
-2. PTY 输出进入终端模拟器前先经过 OSC 扫描：OSC 7 等序列用于更新当前工作目录，OSC 777 中的 Agent 事件被提取并从原始输出中剥离。
+2. PTY 输出进入终端模拟器前先经过 OSC 扫描：OSC 7 等序列用于更新当前工作目录，OSC 7501 中的 Program Status Protocol 上报被读取，OSC 777 中的 Agent 事件被提取并从原始输出中剥离。
 3. 剩余字节交由 `alacritty_terminal` 解析。
 4. Server 采用 60 Hz 频率合并唤醒并读取一次变动区域：整屏变动时生成完整画面，局部变动时仅生成发生变化的单元格。
 5. Server 结合各客户端现存的画面生成对应的帧，经由协议发送。
@@ -47,12 +47,12 @@ Condr 把运行时和界面分成两个进程。Server 托管终端、Agent 和 
 
 ## Agent 状态
 
-1. 运行 `condr agent hooks install` 将 Hook 写入对应 Agent 的自身配置。
-2. Agent 触发 Hook 时执行 `condr agent-hook <agent> <event>`。该命令读取 Agent 输出的 JSON 数据，将其转化为 OSC 777 序列写回当前终端。
-3. Server 从 PTY 输出流中拦截该序列，据此更新对应 Pane 的 Agent 状态为 Unknown、Idle、Working 或 Blocked。处于 Blocked 状态时可附带 `blocked_on` 字段，说明等待条件。
+1. 支持 Program Status Protocol 的 Agent 先用 `OSC 7501 ; ?` 询问终端；Server 抢在终端模拟器回复其后紧跟的设备属性查询之前作答，此后 Agent 每次状态变化都在自己的 PTY 上写一条 OSC 7501 序列。
+2. 其余 Agent 由 `condr agent hooks install` 将 Hook 写入其自身配置。Agent 触发 Hook 时执行 `condr agent-hook <agent> <event>`，该命令读取 Agent 输出的 JSON 数据，将其转化为 OSC 777 序列写回当前终端。
+3. Server 从 PTY 输出流中拦截这两种序列，据此更新对应 Pane 的 Agent 状态为 Unknown、Idle、Working、Blocked、Done 或 Error。Agent 一旦通过 OSC 7501 上报过，其 Hook 就只提供重启后恢复会话所需的会话 ID。Blocked 和 Error 可附带 `detail` 字段：它在等什么，或为何失败。
 4. 若 Agent 未曾上报数据，状态保持为 Unknown。Condr 不通过分析屏幕文本推断 Agent 状态。
 
-Done 状态仅在窗口层维护：当 Agent 状态转为 Idle 且当前焦点处于其他位置时，窗口将其呈现为 Done。
+Done 是 Agent 自己在一轮结束后报告的状态。每个窗口再加一位自己的信息，即有没有看过：看着它到来、或此后打开过其 Pane 的 Done，显示为 Idle。
 
 ---
 

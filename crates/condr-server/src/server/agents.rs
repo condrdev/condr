@@ -436,10 +436,10 @@ impl RuntimeState {
                 // once; from then on its state is reported.
                 let first_turn = info.agent.state == AgentState::Unknown
                     && !info.agent.kind.spec().reports_at_startup;
-                if info.launch_pending || (info.agent.state != AgentState::Idle && !first_turn) {
+                if info.launch_pending || (!info.agent.state.at_prompt() && !first_turn) {
                     return Err(error(
                         "agent_not_ready",
-                        "agent must be idle before accepting a prompt",
+                        "agent must be at its prompt before accepting one",
                     ));
                 }
                 let runtime = &self.terminals[&info.pane_id];
@@ -527,7 +527,7 @@ impl RuntimeState {
                 session_id: None,
                 kind,
                 state: AgentState::Unknown,
-                blocked_on: None,
+                detail: None,
             });
         Some(AgentInfo {
             pane_id,
@@ -678,10 +678,11 @@ impl RuntimeState {
                     "agent process exited before becoming ready",
                 )));
             }
-            if wait.starting && info.agent.state == AgentState::Blocked {
+            if wait.starting && matches!(info.agent.state, AgentState::Blocked | AgentState::Error)
+            {
                 return Some(Err(error(
                     "agent_not_ready",
-                    "agent started but needs input; its name remains available",
+                    "agent started but needs input or failed; its name remains available",
                 )));
             }
             return Some(Ok(AgentResponse::Ready(info)));
@@ -776,7 +777,7 @@ impl RuntimeState {
 /// The states that end a launch: the agent reported a turn boundary or a request, or it
 /// is one whose hooks say nothing until prompted and its process has been identified.
 fn ready_states(kind: AgentKind) -> Vec<AgentState> {
-    let mut states = vec![AgentState::Idle, AgentState::Blocked];
+    let mut states = AgentState::SETTLED.to_vec();
     if !kind.spec().reports_at_startup {
         states.push(AgentState::Unknown);
     }
@@ -814,10 +815,10 @@ fn deadline(timeout_ms: u64) -> Result<Instant, AgentError> {
 }
 
 fn validate_until(until: Option<&[AgentState]>) -> Result<(), AgentError> {
-    if until.is_some_and(|until| until.is_empty() || until.len() > 4) {
+    if until.is_some_and(|until| until.is_empty() || until.len() > 6) {
         return Err(error(
             "invalid_agent_state",
-            "wait requires between one and four states",
+            "wait requires between one and six states",
         ));
     }
     Ok(())

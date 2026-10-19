@@ -17,19 +17,54 @@ pub(super) struct TerminalNotices {
     pub(super) title_changed: bool,
     pub(super) bells: u64,
     pub(super) clipboard: Option<String>,
-    /// Hook events since the agent probe last drained them, oldest first.
-    pub(super) agent_events: Vec<AgentEvent>,
+    /// What the agent said since the agent probe last drained them, oldest first.
+    pub(super) agent_events: Vec<AgentNotice>,
     pub(super) agent: AgentDetector,
     pub(super) agent_stopping: bool,
 }
 
 pub(super) type SharedTerminalNotices = Arc<Mutex<TerminalNotices>>;
 
-/// More queued hook events than this means nobody is draining them; the oldest go.
+/// One thing the PTY reader scanned out for the agent detector, applied on the probe's
+/// tick so it is ordered against the process table like a hook event.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum AgentNotice {
+    Hook(AgentEvent),
+    Status(ProgramStatus),
+    PromptStart,
+    Reset,
+}
+
+impl AgentNotice {
+    /// Whether the notice names a known agent, so one arriving while the process table
+    /// shows none is worth a fresh look at the table: a hook always does, a report only
+    /// through its `app`, and a `brew` that learned the protocol never.
+    pub(super) fn names_agent(&self) -> bool {
+        match self {
+            Self::Hook(_) => true,
+            Self::Status(status) => status
+                .app
+                .as_deref()
+                .is_some_and(|app| AgentKind::parse_label(app).is_some()),
+            Self::PromptStart | Self::Reset => false,
+        }
+    }
+
+    pub(super) fn apply(&self, agent: &mut AgentDetector) -> AgentPublish {
+        match self {
+            Self::Hook(event) => agent.observe_event(event),
+            Self::Status(status) => agent.observe_status(status),
+            Self::PromptStart => agent.observe_prompt_start(),
+            Self::Reset => agent.observe_reset(),
+        }
+    }
+}
+
+/// More queued notices than this means nobody is draining them; the oldest go.
 const MAX_QUEUED_AGENT_EVENTS: usize = 64;
 
 impl TerminalNotices {
-    pub(super) fn record_agent_event(&mut self, event: AgentEvent) {
+    pub(super) fn record_agent_event(&mut self, event: AgentNotice) {
         if self.agent_events.len() == MAX_QUEUED_AGENT_EVENTS {
             self.agent_events.remove(0);
         }

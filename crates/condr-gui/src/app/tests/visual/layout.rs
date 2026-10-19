@@ -335,7 +335,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Idle,
-            blocked_on: None,
+            detail: None,
         }),
     );
     assert_eq!(window.update(|window, cx| window.focused(cx)), focus_before);
@@ -404,7 +404,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
                 session_id: None,
                 kind: AgentKind::Codex,
                 state,
-                blocked_on: None,
+                detail: None,
             }),
         );
         assert!(
@@ -412,7 +412,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             "status changes must respect a manual collapse"
         );
     }
-    // A replacement process may be detected without a separate removal event.
+    // An agent that lost its record (ADR 0044) is the same process: the fold stays.
     agent_changed(
         window,
         &view,
@@ -421,18 +421,14 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         }),
     );
-    assert!(window.debug_bounds(agent_selector).is_some());
-    let toggle_center = window
-        .debug_bounds(workspace_toggle_selector)
-        .unwrap()
-        .center();
-    window.simulate_click(toggle_center, Modifiers::default());
-    window.run_until_parked();
-    window.update(|window, cx| _ = window.draw(cx));
-    assert!(window.debug_bounds(agent_selector).is_none());
+    assert!(
+        window.debug_bounds(agent_selector).is_none(),
+        "a cleared record must respect a manual collapse"
+    );
+    // A new process, after the old one left, reopens the row.
     agent_changed(window, &view, pane_id, None);
     agent_changed(
         window,
@@ -442,7 +438,7 @@ fn sidebar_header_and_tree_controls_match_the_prototype() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         }),
     );
     assert!(window.debug_bounds(agent_selector).is_some());
@@ -844,12 +840,12 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
         "nothing blocked, no section"
     );
 
-    let snapshot = |state, blocked_on: Option<&str>| {
+    let snapshot = |state, detail: Option<&str>| {
         Some(AgentSnapshot {
             session_id: None,
             kind: AgentKind::Claude,
             state,
-            blocked_on: blocked_on.map(str::to_owned),
+            detail: detail.map(str::to_owned),
         })
     };
     agent_changed(window, &view, pane_id, snapshot(AgentState::Working, None));
@@ -895,6 +891,31 @@ fn a_blocked_agent_is_listed_under_needs_you_with_what_it_waits_for() {
         window.debug_bounds(row_selector).is_none()
             && window.debug_bounds("needs-you-heading").is_none(),
         "a Working agent leaves the list"
+    );
+
+    // A failed agent needs the person too, and its row says why (ADR 0044).
+    agent_changed(
+        window,
+        &view,
+        pane_id,
+        snapshot(AgentState::Error, Some("Rate limited")),
+    );
+    assert!(
+        window.debug_bounds(row_selector).is_some(),
+        "an Error agent is listed under Needs you"
+    );
+    assert!(
+        window
+            .debug_bounds(leaked_selector(format!(
+                "needs-you-status-1-{}",
+                pane_id.as_u64()
+            )))
+            .is_some()
+    );
+    agent_changed(window, &view, pane_id, snapshot(AgentState::Done, None));
+    assert!(
+        window.debug_bounds(row_selector).is_none(),
+        "a Done agent leaves the list"
     );
 }
 
@@ -1069,7 +1090,7 @@ fn closing_a_pane_with_a_running_agent_asks_first() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Working,
-            blocked_on: None,
+            detail: None,
         }),
     );
     close_focused(window);

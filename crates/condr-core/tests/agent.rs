@@ -72,8 +72,8 @@ fn a_delayed_grok_completion_cannot_finish_a_newer_prompt() {
         AgentPublish::Snapshot(AgentSnapshot {
             kind: AgentKind::Grok,
             session_id: Some("root".into()),
-            state: AgentState::Idle,
-            blocked_on: None,
+            state: AgentState::Done,
+            detail: None,
         })
     );
 }
@@ -174,7 +174,7 @@ fn a_new_agent_is_unknown_until_it_reports_and_a_restart_is_a_new_agent() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         })
     );
     assert_eq!(
@@ -197,7 +197,7 @@ fn a_new_agent_is_unknown_until_it_reports_and_a_restart_is_a_new_agent() {
             session_id: None,
             kind: AgentKind::Claude,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         })
     );
 }
@@ -254,14 +254,16 @@ fn hook_events_drive_the_state_and_round_trip_through_the_wire() {
         apply(AgentState::Blocked, ToolComplete, None),
         AgentState::Working
     );
-    assert_eq!(apply(AgentState::Working, Stop, None), AgentState::Idle);
+    // A turn ending is Done, a failed one Error; an interrupt puts the agent back at its
+    // prompt, which is Idle (ADR 0044).
+    assert_eq!(apply(AgentState::Working, Stop, None), AgentState::Done);
     assert_eq!(
         apply(AgentState::Working, Interrupt, None),
         AgentState::Idle
     );
     assert_eq!(
         apply(AgentState::Blocked, StopFailure, None),
-        AgentState::Idle
+        AgentState::Error
     );
 
     let encoded = event(SessionStart, Some("resume")).encode();
@@ -303,12 +305,12 @@ fn a_blocked_agent_says_what_it_waits_for_until_it_moves_on() {
         event.detail = detail.map(str::to_owned);
         event
     };
-    let snapshot = |state, blocked_on: Option<&str>| {
+    let snapshot = |state, detail: Option<&str>| {
         AgentPublish::Snapshot(AgentSnapshot {
             session_id: Some("root".into()),
             kind: AgentKind::Claude,
             state,
-            blocked_on: blocked_on.map(str::to_owned),
+            detail: detail.map(str::to_owned),
         })
     };
     assert_eq!(
@@ -392,8 +394,8 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
         AgentPublish::Snapshot(AgentSnapshot {
             session_id: None,
             kind: AgentKind::Codex,
-            state: AgentState::Idle,
-            blocked_on: None,
+            state: AgentState::Done,
+            detail: None,
         })
     );
     assert_eq!(detector.observe_event(&stop), AgentPublish::Nothing);
@@ -410,7 +412,7 @@ fn events_only_count_for_the_agent_the_process_table_shows() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         })
     );
 }
@@ -433,7 +435,7 @@ fn an_agent_behind_an_opaque_launcher_is_named_by_its_own_events() {
             session_id: None,
             kind: AgentKind::Claude,
             state: AgentState::Idle,
-            blocked_on: None,
+            detail: None,
         })
     );
     assert_eq!(detector.agent(), Some(AgentKind::Claude));
@@ -486,7 +488,7 @@ fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
                 kind: AgentKind::Claude,
                 state: AgentState::Idle,
                 session_id: Some(id.into()),
-                blocked_on: None,
+                detail: None,
             })
         );
     }
@@ -511,7 +513,7 @@ fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
             kind: AgentKind::Claude,
             state: AgentState::Working,
             session_id: Some("third".into()),
-            blocked_on: None,
+            detail: None,
         })
     );
     assert_eq!(
@@ -524,7 +526,7 @@ fn native_conversations_update_even_without_a_state_change_and_reset_on_exit() {
             kind: AgentKind::Claude,
             state: AgentState::Unknown,
             session_id: None,
-            blocked_on: None,
+            detail: None,
         })
     );
     for id in ["--last", "../conversation", "a;exit"] {
@@ -612,5 +614,193 @@ fn resume_seeding_never_overrides_a_new_session_and_any_process_exit_clears_it()
         detector.resume(),
         Some(None),
         "every observed exit cancels recovery"
+    );
+}
+
+/// A report as the detector sees it: already validated, root record unless `id` says.
+fn report(state: ProgramState) -> ProgramStatus {
+    ProgramStatus {
+        state,
+        id: None,
+        kind: None,
+        app: None,
+        msg: None,
+    }
+}
+
+#[test]
+fn program_status_reports_take_over_from_hooks_and_follow_their_lifetime() {
+    let mut detector = AgentDetector::new();
+    let now = Instant::now();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now);
+    let hook = |kind, session: Option<&str>| {
+        AgentEvent::new(AgentKind::Claude, kind, None, session.map(str::to_owned))
+    };
+    let snapshot = |state, session: Option<&str>, detail: Option<&str>| {
+        AgentPublish::Snapshot(AgentSnapshot {
+            session_id: session.map(str::to_owned),
+            kind: AgentKind::Claude,
+            state,
+            detail: detail.map(str::to_owned),
+        })
+    };
+    // Hooks drive the state until the agent reports through the protocol.
+    assert_eq!(
+        detector.observe_event(&hook(AgentEventKind::PromptSubmit, Some("s1"))),
+        snapshot(AgentState::Working, Some("s1"), None)
+    );
+    let mut blocked = report(ProgramState::Blocked);
+    blocked.kind = Some(BlockedKind::Permission);
+    blocked.msg = Some("Run cargo test?".into());
+    blocked.app = Some("claude-code".into());
+    assert_eq!(
+        detector.observe_status(&blocked),
+        snapshot(AgentState::Blocked, Some("s1"), Some("Run cargo test?"))
+    );
+    // From then on a hook only names the conversation; its state is not applied.
+    assert_eq!(
+        detector.observe_event(&hook(AgentEventKind::Stop, Some("s2"))),
+        snapshot(AgentState::Blocked, Some("s2"), Some("Run cargo test?"))
+    );
+    assert_eq!(
+        detector.observe_event(&hook(AgentEventKind::Stop, Some("s2"))),
+        AgentPublish::Nothing
+    );
+    // Without a message the kind says what blocks; a login is a kind of its own.
+    blocked.msg = None;
+    blocked.kind = Some(BlockedKind::Auth);
+    assert_eq!(
+        detector.observe_status(&blocked),
+        snapshot(AgentState::Blocked, Some("s2"), Some("Login"))
+    );
+    // Another program's report, and a child record, are not this agent's.
+    let mut nested = report(ProgramState::Working);
+    nested.app = Some("codex".into());
+    assert_eq!(detector.observe_status(&nested), AgentPublish::Nothing);
+    nested.app = Some("cargo".into());
+    assert_eq!(detector.observe_status(&nested), AgentPublish::Nothing);
+    let mut child = report(ProgramState::Working);
+    child.id = Some("task-1".into());
+    assert_eq!(detector.observe_status(&child), AgentPublish::Nothing);
+    // Done and Error are states of their own; only Error keeps its message.
+    let mut done = report(ProgramState::Done);
+    done.msg = Some("Edited 3 files".into());
+    assert_eq!(
+        detector.observe_status(&done),
+        snapshot(AgentState::Done, Some("s2"), None)
+    );
+    let mut error = report(ProgramState::Error);
+    error.msg = Some("Rate limited".into());
+    assert_eq!(
+        detector.observe_status(&error),
+        snapshot(AgentState::Error, Some("s2"), Some("Rate limited"))
+    );
+    // A shell prompt drops only a working or blocked record.
+    assert_eq!(detector.observe_prompt_start(), AgentPublish::Nothing);
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Working)),
+        snapshot(AgentState::Working, Some("s2"), None)
+    );
+    assert_eq!(
+        detector.observe_prompt_start(),
+        snapshot(AgentState::Unknown, Some("s2"), None)
+    );
+    // Clear deletes the record; a reset removes them all, and hooks count again.
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Idle)),
+        snapshot(AgentState::Idle, Some("s2"), None)
+    );
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Clear)),
+        snapshot(AgentState::Unknown, Some("s2"), None)
+    );
+    assert_eq!(
+        detector.observe_event(&hook(AgentEventKind::Stop, None)),
+        AgentPublish::Nothing
+    );
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Working)),
+        snapshot(AgentState::Working, Some("s2"), None)
+    );
+    assert_eq!(
+        detector.observe_reset(),
+        snapshot(AgentState::Unknown, Some("s2"), None)
+    );
+    assert_eq!(
+        detector.observe_event(&hook(AgentEventKind::Stop, None)),
+        snapshot(AgentState::Done, Some("s2"), None)
+    );
+
+    // Before the protocol reported, its lifetime events mean nothing to hook state.
+    let mut detector = AgentDetector::new();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now);
+    detector.observe_event(&hook(AgentEventKind::PromptSubmit, None));
+    assert_eq!(detector.observe_prompt_start(), AgentPublish::Nothing);
+    assert_eq!(detector.observe_reset(), AgentPublish::Nothing);
+
+    // A report whose app names an agent the process table cannot see names it, as a
+    // hook does; one from a recognized-only agent counts, its root record being its own.
+    let mut detector = AgentDetector::new();
+    detector.observe_process(ProcessProbeResult::Unidentified, now);
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Working)),
+        AgentPublish::Nothing
+    );
+    let mut named = report(ProgramState::Working);
+    named.app = Some("claude-code".into());
+    assert_eq!(
+        detector.observe_status(&named),
+        snapshot(AgentState::Working, None, None)
+    );
+    let mut detector = AgentDetector::new();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Kimi), now);
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Working)),
+        AgentPublish::Snapshot(AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Kimi,
+            state: AgentState::Working,
+            detail: None,
+        })
+    );
+
+    // A bare `clear` from an agent that never reported a state leaves its hooks speaking.
+    let mut detector = AgentDetector::new();
+    detector.observe_process(ProcessProbeResult::Agent(AgentKind::Claude), now);
+    assert_eq!(
+        detector.observe_status(&report(ProgramState::Clear)),
+        AgentPublish::Nothing
+    );
+    assert!(!detector.reports_program_status());
+    assert_eq!(
+        detector.observe_event(&hook(AgentEventKind::Stop, None)),
+        snapshot(AgentState::Done, None, None)
+    );
+}
+
+#[test]
+fn a_client_shows_done_until_it_looked_and_error_until_the_agent_moves_on() {
+    let mut tracker = AgentTracker::new(AgentState::Working);
+    assert_eq!(tracker.display_state(), AgentDisplayState::Working);
+    // Done arriving while another Client shows the Pane stays Done here.
+    tracker.update(AgentState::Done, false);
+    assert_eq!(tracker.display_state(), AgentDisplayState::Done);
+    tracker.mark_seen();
+    assert_eq!(tracker.display_state(), AgentDisplayState::Idle);
+    // A Done watched arrive is seen at once; the agent's own Idle needs no look.
+    tracker.update(AgentState::Working, false);
+    tracker.update(AgentState::Done, true);
+    assert_eq!(tracker.display_state(), AgentDisplayState::Idle);
+    tracker.update(AgentState::Working, false);
+    tracker.update(AgentState::Done, false);
+    tracker.update(AgentState::Idle, false);
+    assert_eq!(tracker.display_state(), AgentDisplayState::Idle);
+    // Error shows whether or not it was looked at.
+    tracker.update(AgentState::Error, true);
+    assert_eq!(tracker.display_state(), AgentDisplayState::Error);
+    // A Client learning of a Done agent sees the Done the agent still reports.
+    assert_eq!(
+        AgentTracker::new(AgentState::Done).display_state(),
+        AgentDisplayState::Done
     );
 }

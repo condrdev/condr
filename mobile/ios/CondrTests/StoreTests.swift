@@ -145,7 +145,7 @@ struct DisplayTests {
     }
 
     @Test func aPaneIsNamedByItsTitleThenItsAgent() {
-        let agent = AgentView(kind: "codex", label: "Codex", status: .idle, blockedOn: nil)
+        let agent = AgentView(kind: "codex", label: "Codex", status: .idle, detail: nil)
         #expect(
             PaneView(id: 1, title: "Fix it", agent: agent, attention: false, exited: false).name
                 == "Fix it")

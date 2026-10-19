@@ -12,7 +12,7 @@ struct SessionTests {
 
         client.update { state in
             state.workspaces[Fixture.address]?[0].panes[0].agent?.status = .blocked
-            state.workspaces[Fixture.address]?[0].panes[0].agent?.blockedOn = "Bash: rm -rf build"
+            state.workspaces[Fixture.address]?[0].panes[0].agent?.detail = "Bash: rm -rf build"
             state.changes = [.device(address: Fixture.address)]
         }
         session.refresh()
@@ -24,7 +24,7 @@ struct SessionTests {
     }
 
     @Test func anAgentFirstSeenBlockedRaisesNothing() {
-        let client = FakeClient(Fixture.world(.blocked, blockedOn: "Bash: cargo test"))
+        let client = FakeClient(Fixture.world(.blocked, detail: "Bash: cargo test"))
         let (session, _, alerts, _) = Fixture.session(client)
         client.update { $0.changes = [.device(address: Fixture.address)] }
         session.refresh()
@@ -165,7 +165,7 @@ struct SessionTests {
     }
 
     @Test func inputGoesToTheShownPane() {
-        let client = FakeClient(Fixture.world(.blocked, blockedOn: "Bash: ls"))
+        let client = FakeClient(Fixture.world(.blocked, detail: "Bash: ls"))
         let (session, _, _, _) = Fixture.session(client)
         session.send(key: .enter)
         #expect(client.state.withLock { $0.keys.isEmpty }, "nothing is sent before a Pane is shown")

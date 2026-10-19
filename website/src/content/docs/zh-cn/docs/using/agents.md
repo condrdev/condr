@@ -33,7 +33,7 @@ Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退�
 
 ## 安装 Hook 监听精准状态
 
-传统的终端管理工具依赖屏幕文本正则匹配，容易因输出变动导致误判。Condr 采用原生的 Hook 机制，由 Agent 主动上报，实现 100% 准确的状态感知。
+传统的终端管理工具依赖屏幕文本正则匹配，容易因输出变动导致误判。Condr 只采信 Agent 自己说的话。支持终端 [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status)（OSC 7501）的 Agent 会直接向 Condr 的终端上报状态，无需任何安装：Claude Code 2.1.295、Codex 0.163、Pi 1.1、Oh My Pi 18.8.7、Grok Build 1.0.52、Antigravity CLI 1.4 及更新版本都支持。Hook 仍然有用：它记录 Server 重启后恢复会话所需的会话 ID，负责其余 Agent 的状态上报；在 Windows Server 上，Claude Code 和 Pi 对该协议的探测会失败，由 Hook 顶上。
 
 - **一键安装 Hook**：执行命令 `condr agent hooks install <agent>`（例如 `condr agent hooks install claude`）。
 - **图形化管理界面**：前往 **Settings › Agent integrations** 直接安装。
@@ -41,18 +41,19 @@ Condr 从进程识别此类 Agent：运行时侧边栏会显示其图标，退�
 
 ## Agent 状态指示
 
-安装 Hook 后，侧边栏会自动显示各个窗格（Pane）中 Agent 的实时运行状态：
+Agent 上报后，侧边栏会显示各个窗格（Pane）中 Agent 的实时运行状态：
 
 | 状态标识 | 状态说明 |
 | :--- | :--- |
 | **Working** | 正在执行任务（推理思考、生成文本或调用工具）。 |
-| **Blocked** | 阻塞状态，等待用户输入或授权（在 Needs you 中列出）。 |
-| **Done** | 后台执行完毕。当焦点切回该 Pane 时自动重置为 Idle。 |
+| **Blocked** | 阻塞状态，等待用户输入、授权或登录（在 Needs you 中列出，并显示它在等什么）。 |
+| **Error** | 本轮失败，Agent 已停住（在 Needs you 中列出，并显示原因）。 |
+| **Done** | 完成了一轮你还没看过的工作。打开其 Pane，或 Agent 发现你回来后，显示为 Idle。 |
 | **Idle** | 空闲状态，当前轮次完成，等待新指令。 |
-| **Unknown** | 原生 Shell 会话，或未接入 Condr Hook 的 Agent。 |
+| **Unknown** | 原生 Shell 会话，或尚未上报的 Agent。 |
 | **Bell** | 终端发出响铃提醒（Bell 优先级高于常规生命周期状态）。 |
 
-> **提示**：当处于后台的 Agent 完成任务或触发阻塞时，Condr 会推送系统原生通知，点击直接定位至相应窗格。
+> **提示**：当处于后台的 Agent 完成任务、失败或触发阻塞时，Condr 会推送系统原生通知，点击直接定位至相应窗格。
 
 ## 常见 Agent 配置须知
 

@@ -120,6 +120,12 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
             SidebarIconTone::Success,
             "done",
         ),
+        (
+            AgentDisplayState::Error,
+            SidebarGlyph::Circle,
+            SidebarIconTone::Danger,
+            "error",
+        ),
     ];
     for (state, glyph, tone, key) in agent_cases {
         let visual = agent_sidebar_status(state);
@@ -130,7 +136,7 @@ fn sidebar_status_visuals_follow_the_prototype_semantics() {
 #[test]
 fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
     use AgentDisplayState::*;
-    let statuses = [Working, Done, Unknown, Idle, Done, Blocked]
+    let statuses = [Working, Done, Unknown, Idle, Error, Done, Blocked]
         .into_iter()
         .map(agent_sidebar_status)
         .chain([BELL_SIDEBAR_STATUS]);
@@ -143,6 +149,7 @@ fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
         [
             ("bell", 1),
             ("blocked", 1),
+            ("error", 1),
             ("done", 2),
             ("working", 1),
             ("idle", 2)

@@ -167,11 +167,12 @@ pub(super) struct PaneInfo {
     pub(super) exited: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) agent: Option<&'static str>,
-    /// `idle`, `working`, `blocked`, or `unknown` for a plain shell.
+    /// `idle`, `working`, `blocked`, `done`, `error`, or `unknown` for a plain shell.
     pub(super) agent_status: &'static str,
-    /// What a `blocked` agent waits for, when its hook said (ADR 0024).
+    /// What a `blocked` agent waits for, or why an `error` one halted, when the agent
+    /// said (ADR 0024, ADR 0044).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) blocked_on: Option<String>,
+    pub(super) detail: Option<String>,
 }
 
 pub(super) fn pane_info(
@@ -206,13 +207,10 @@ pub(super) fn pane_info(
         title: terminal.and_then(|terminal| terminal.title.clone()),
         exited: terminal.is_some_and(|terminal| terminal.exited),
         agent: agent.map(|agent| agent.kind.id()),
-        agent_status: match agent.map(|agent| agent.state) {
-            Some(AgentState::Idle) => "idle",
-            Some(AgentState::Working) => "working",
-            Some(AgentState::Blocked) => "blocked",
-            Some(AgentState::Unknown) | None => "unknown",
-        },
-        blocked_on: agent.and_then(|agent| agent.blocked_on.clone()),
+        agent_status: agent
+            .map_or(AgentState::Unknown, |agent| agent.state)
+            .name(),
+        detail: agent.and_then(|agent| agent.detail.clone()),
     }
 }
 

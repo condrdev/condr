@@ -251,13 +251,13 @@ condr pane run <id> <命令>
 # 扫描并列出 Server PATH 中已安装且被支持的 Agent CLI 工具
 condr agent available
 
-# 查询所有活动 Agent 进程、运行状态、阻塞原因（blocked_on）及原生会话 ID
+# 查询所有活动 Agent 进程、运行状态、阻塞或失败原因（detail）及原生会话 ID
 condr agent list
 
 # 在空闲 Pane 中初始化并启动 Agent，等待其就绪；默认超时 30 秒（30000ms）
 condr agent start <名称> --kind <种类> --pane <id> [--timeout <毫秒>] [-- 附加参数...]
 
-# 下发任务提示；--wait 阻塞直至 Agent 返回目标状态（默认等到 idle 或 blocked）
+# 下发任务提示；--wait 阻塞直至 Agent 返回目标状态（默认等到 idle、done、blocked 或 error）
 # --until 与 --timeout 需配合 --wait 使用
 condr agent prompt <目标> <内容> [--wait] [--until <状态>] [--timeout <毫秒>]
 

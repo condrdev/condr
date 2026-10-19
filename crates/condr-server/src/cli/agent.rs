@@ -197,37 +197,38 @@ pub(super) fn agent_info(info: condr_core::protocol::AgentInfo) -> Value {
         "pane_id": info.pane_id.as_u64(),
         "name": info.name,
         "agent": info.agent.kind.id(),
-        "agent_status": agent_state_name(info.agent.state),
-        "blocked_on": info.agent.blocked_on,
+        "agent_status": info.agent.state.name(),
+        "detail": info.agent.detail,
         "session_id": info.agent.session_id,
         "launch_pending": info.launch_pending,
     })
 }
 
-pub(super) fn agent_state_name(state: AgentState) -> &'static str {
-    match state {
-        AgentState::Unknown => "unknown",
-        AgentState::Idle => "idle",
-        AgentState::Working => "working",
-        AgentState::Blocked => "blocked",
-    }
-}
+const AGENT_STATES: [AgentState; 6] = [
+    AgentState::Unknown,
+    AgentState::Idle,
+    AgentState::Working,
+    AgentState::Blocked,
+    AgentState::Done,
+    AgentState::Error,
+];
 
 fn parse_until(values: &[String]) -> Result<Vec<AgentState>, CliError> {
     if values.is_empty() {
-        return Ok(vec![AgentState::Idle, AgentState::Blocked]);
+        return Ok(AgentState::SETTLED.to_vec());
     }
     values
         .iter()
-        .map(|value| match value.as_str() {
-            "unknown" => Ok(AgentState::Unknown),
-            "idle" => Ok(AgentState::Idle),
-            "working" => Ok(AgentState::Working),
-            "blocked" => Ok(AgentState::Blocked),
-            _ => Err(CliError::new(
-                "invalid_agent_state",
-                format!("unknown agent state {value}"),
-            )),
+        .map(|value| {
+            AGENT_STATES
+                .into_iter()
+                .find(|state| state.name() == value)
+                .ok_or_else(|| {
+                    CliError::new(
+                        "invalid_agent_state",
+                        format!("unknown agent state {value}"),
+                    )
+                })
         })
         .collect()
 }

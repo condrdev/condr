@@ -223,8 +223,8 @@ impl SessionModel {
         apply_terminal_frame_batch(&mut self.terminals, &mut self.terminal_hyperlinks, panes)
     }
 
-    /// Applies an `AgentChanged`. `visible` is whether this Client shows the Pane, so an
-    /// `Idle` it watched happen is not Done.
+    /// Applies an `AgentChanged`. `visible` is whether this Client shows the Pane, so a
+    /// `Done` it watched arrive is seen.
     pub fn apply_agent(
         &mut self,
         pane_id: PaneId,
@@ -239,17 +239,16 @@ impl SessionModel {
             };
         };
         let previous = self.agents.insert(pane_id, agent.clone());
-        // The Server only publishes changed snapshots, so Unknown here is a new process,
-        // not a repeat.
+        // A new process arrives after a `Cleared` or as another kind. Unknown alone is
+        // not one: an agent that cleared its record, or lost it to a shell prompt or a
+        // reset, is the same process (ADR 0044).
         let started = previous
             .as_ref()
-            .is_none_or(|previous| previous.kind != agent.kind)
-            || agent.state == AgentState::Unknown;
+            .is_none_or(|previous| previous.kind != agent.kind);
         self.agent_trackers
             .entry(pane_id)
             .and_modify(|tracker| {
-                // Unknown is only published for a new process; it must not carry the
-                // previous generation's done.
+                // Nothing is seen of an agent with no record, whichever way it lost it.
                 if agent.state == AgentState::Unknown {
                     *tracker = AgentTracker::new(agent.state);
                 } else {
@@ -287,9 +286,10 @@ impl SessionModel {
         })
     }
 
-    /// The "Needs you" entries of this connection (ADR 0024): every `Blocked` Agent, with
-    /// the Workspace it runs in, in Session order.
-    pub fn blocked_agents(&self) -> Vec<(&Workspace, PaneId, &AgentSnapshot)> {
+    /// The "Needs you" entries of this connection (ADR 0024, ADR 0044): every Agent that
+    /// needs the person, Blocked on an answer or halted on an Error, with the Workspace
+    /// it runs in, in Session order.
+    pub fn agents_needing_you(&self) -> Vec<(&Workspace, PaneId, &AgentSnapshot)> {
         let Some(session) = &self.session else {
             return Vec::new();
         };
@@ -304,10 +304,9 @@ impl SessionModel {
                     .map(move |pane| (workspace, pane.id()))
             })
             .filter_map(|(workspace, pane_id)| {
-                let agent = self
-                    .agents
-                    .get(&pane_id)
-                    .filter(|agent| agent.state == AgentState::Blocked)?;
+                let agent = self.agents.get(&pane_id).filter(|agent| {
+                    matches!(agent.state, AgentState::Blocked | AgentState::Error)
+                })?;
                 Some((workspace, pane_id, agent))
             })
             .collect()
@@ -453,5 +452,50 @@ mod tests {
             assert!(model.attention.contains(&pane_id));
             assert_eq!(model.pane_title(pane_id).as_deref(), Some("build"));
         }
+    }
+
+    /// ADR 0044: an agent that cleared its record is the same process with nothing to
+    /// show, not a new one; only a `Cleared` or another kind starts one.
+    #[test]
+    fn losing_a_record_is_not_a_new_process() {
+        let mut model = SessionModel::default();
+        let pane_id = PaneId::from_u64(7);
+        let snapshot = |state| {
+            Some(AgentSnapshot {
+                session_id: None,
+                kind: condr_core::AgentKind::Codex,
+                state,
+                detail: None,
+            })
+        };
+        assert!(
+            model
+                .apply_agent(pane_id, snapshot(AgentState::Unknown), false)
+                .started
+        );
+        assert!(
+            !model
+                .apply_agent(pane_id, snapshot(AgentState::Done), false)
+                .started
+        );
+        assert_eq!(
+            model.agent_display_state(pane_id),
+            Some(AgentDisplayState::Done)
+        );
+        assert!(
+            !model
+                .apply_agent(pane_id, snapshot(AgentState::Unknown), false)
+                .started
+        );
+        assert_eq!(
+            model.agent_display_state(pane_id),
+            Some(AgentDisplayState::Unknown)
+        );
+        assert!(!model.apply_agent(pane_id, None, false).started);
+        assert!(
+            model
+                .apply_agent(pane_id, snapshot(AgentState::Unknown), false)
+                .started
+        );
     }
 }

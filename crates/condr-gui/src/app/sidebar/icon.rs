@@ -163,7 +163,7 @@ pub(in crate::app) fn status_badge(
 pub(in crate::app) fn agent_status_summary(
     statuses: impl IntoIterator<Item = SidebarStatusVisual>,
 ) -> Vec<(SidebarStatusVisual, usize)> {
-    const ORDER: [&str; 5] = ["bell", "blocked", "done", "working", "idle"];
+    const ORDER: [&str; 6] = ["bell", "blocked", "error", "done", "working", "idle"];
     let rank = |status: &SidebarStatusVisual| ORDER.iter().position(|key| *key == status.key);
     let mut summary: Vec<(SidebarStatusVisual, usize)> = Vec::new();
     let statuses = statuses.into_iter().map(|status| {
@@ -226,6 +226,13 @@ pub(in crate::app) fn agent_sidebar_status(state: AgentDisplayState) -> SidebarS
             tone: SidebarIconTone::Success,
             key: "done",
             label: "Done",
+        },
+        // Halted: the ring of Idle in the red of Blocked.
+        AgentDisplayState::Error => SidebarStatusVisual {
+            glyph: SidebarGlyph::Circle,
+            tone: SidebarIconTone::Danger,
+            key: "error",
+            label: "Error",
         },
     }
 }

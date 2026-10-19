@@ -29,14 +29,21 @@ impl Condr {
         }
         // Blocked to Blocked is a new question or request: the Server publishes only
         // changed snapshots. It replaces the toast without asking for attention again.
+        // An Idle straight after work is a finish too: an agent that reports no `done`
+        // (Codex before 0.164) ends its turns that way.
         let (title, attention) = match (previous, agent.state) {
-            (Some(AgentState::Working | AgentState::Blocked), AgentState::Idle) => {
-                (format!("{} finished", agent.kind.label()), true)
+            (
+                Some(AgentState::Working | AgentState::Blocked),
+                AgentState::Done | AgentState::Idle,
+            ) => (format!("{} finished", agent.kind.label()), true),
+            (Some(AgentState::Working | AgentState::Blocked), AgentState::Error) => {
+                (format!("{} failed", agent.kind.label()), true)
             }
-            (Some(AgentState::Working), AgentState::Blocked) => {
+            // Blocked from anywhere else: a login prompt arrives straight from Idle.
+            (Some(previous), AgentState::Blocked) if previous != AgentState::Blocked => {
                 (format!("{} needs your input", agent.kind.label()), true)
             }
-            (Some(AgentState::Blocked), AgentState::Blocked) if agent.blocked_on.is_some() => {
+            (Some(AgentState::Blocked), AgentState::Blocked) if agent.detail.is_some() => {
                 (format!("{} needs your input", agent.kind.label()), false)
             }
             _ => return,
@@ -49,9 +56,10 @@ impl Condr {
                 .workspace_for_pane(pane_id)
                 .map(|workspace| workspace.name().to_owned())
         });
-        // What it waits for comes first (ADR 0024): that is what decides whether to come.
+        // What it waits for, or why it failed, comes first (ADR 0024): that is what
+        // decides whether to come.
         let body = [
-            agent.blocked_on.clone(),
+            agent.detail.clone(),
             workspace,
             connection.model.terminal_titles.get(&pane_id).cloned(),
         ]

@@ -49,7 +49,7 @@ extension AgentStatus {
     var tint: Color {
         switch self {
         case .working: .orange
-        case .blocked: .red
+        case .blocked, .error: .red
         case .done: .green
         case .idle, .unknown: .secondary
         }
@@ -59,20 +59,25 @@ extension AgentStatus {
         switch self {
         case .working: String(localized: "Working")
         case .blocked: String(localized: "Needs you")
+        case .error: String(localized: "Failed")
         case .done: String(localized: "Done")
         case .idle: String(localized: "Idle")
         case .unknown: String(localized: "Not reporting")
         }
     }
 
+    /// Waiting for an answer or halted on a failure: the person has to come (ADR 0044).
+    var needsYou: Bool { self == .blocked || self == .error }
+
     /// Most urgent first, the order a score draws them in, so each colour reads as a run.
     var urgency: Int {
         switch self {
         case .blocked: 0
-        case .done: 1
-        case .working: 2
-        case .unknown: 3
-        case .idle: 4
+        case .error: 1
+        case .done: 2
+        case .working: 3
+        case .unknown: 4
+        case .idle: 5
         }
     }
 }
@@ -99,8 +104,8 @@ extension Array where Element == AgentItem {
 /// "condr · macmini"
 func place(_ workspace: String, _ device: String) -> String { "\(workspace) · \(device)" }
 
-/// `blocked_on` as the hook wrote it (ADR 0024): "Tool: command" for a permission, else
-/// a question or the notification's text.
+/// A Blocked Agent's `detail` as the agent wrote it (ADR 0024): "Tool: command" for a
+/// permission, else a question or the notification's text.
 struct BlockedOn {
     let tool: String?
     let text: String

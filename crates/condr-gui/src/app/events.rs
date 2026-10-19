@@ -26,6 +26,12 @@ impl Condr {
                     // Retrying would fetch the same invalid model; reconnect by hand.
                     Err(error) => return self.mark_protocol_error(key, index, error),
                 };
+                // The Pane the user is in is being looked at: its Done is seen.
+                if let Some((target_key, pane_id)) = self.terminal_input.target
+                    && target_key == key
+                {
+                    self.connections[index].model.mark_seen(pane_id);
+                }
                 if self
                     .terminal_input
                     .hovered_link

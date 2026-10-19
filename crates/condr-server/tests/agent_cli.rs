@@ -447,7 +447,7 @@ fn discovers_on_server_starts_once_and_prompts_by_name() {
         "--timeout",
         "8000",
     ]);
-    assert_eq!(prompted["agent"]["agent_status"], "idle");
+    assert_eq!(prompted["agent"]["agent_status"], "done");
     assert_eq!(
         std::fs::read_to_string(server.root.join("prompts")).unwrap(),
         "hello\n"
@@ -631,7 +631,7 @@ fn a_codex_that_says_nothing_at_startup_is_ready_once_identified_and_takes_a_fir
         "--timeout",
         "8000",
     ]);
-    assert_eq!(prompted["agent"]["agent_status"], "idle");
+    assert_eq!(prompted["agent"]["agent_status"], "done");
     assert_eq!(
         std::fs::read_to_string(server.root.join("prompts")).unwrap(),
         "first\n"

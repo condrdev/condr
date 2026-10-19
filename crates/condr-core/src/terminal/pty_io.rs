@@ -42,12 +42,33 @@ pub(super) fn read_loop(io: TerminalReadLoop) -> io::Result<()> {
         match reader.read(&mut bytes) {
             Ok(0) => break Ok(()),
             Ok(read) => {
-                let filtered = scanner.advance(&bytes[..read], |osc| match osc {
-                    OscReport::Cwd(cwd) => record_reported_cwd(&reported_cwd, cwd),
-                    OscReport::Agent(event) => notices
-                        .lock()
-                        .expect("terminal notices lock poisoned")
-                        .record_agent_event(event),
+                let filtered = scanner.advance(&bytes[..read], |osc| {
+                    let notice = match osc {
+                        OscReport::Cwd(cwd) => return record_reported_cwd(&reported_cwd, cwd),
+                        OscReport::Agent(event) => AgentNotice::Hook(event),
+                        // Queued ahead of the VT reading this chunk, so the answer leaves
+                        // before any DA1 reply the program sent as its no-answer sentinel.
+                        OscReport::ProgramStatus(ProgramStatusReport::Query) => {
+                            return pending_replies
+                                .lock()
+                                .expect("terminal reply queue lock poisoned")
+                                .push(PendingTerminalReply::Bytes(PROGRAM_STATUS_REPLY.to_vec()));
+                        }
+                        OscReport::ProgramStatus(ProgramStatusReport::Status(status)) => {
+                            AgentNotice::Status(status)
+                        }
+                        OscReport::PromptStart => AgentNotice::PromptStart,
+                        OscReport::Reset => AgentNotice::Reset,
+                    };
+                    let mut notices = notices.lock().expect("terminal notices lock poisoned");
+                    // A prompt or a reset only matters to records the protocol keeps; a
+                    // plain shell's prompt marks must not wake the process probe.
+                    if matches!(notice, AgentNotice::PromptStart | AgentNotice::Reset)
+                        && !notices.agent.reports_program_status()
+                    {
+                        return;
+                    }
+                    notices.record_agent_event(notice);
                 });
                 let mut terminal_guard = terminal.lock().expect("terminal state lock poisoned");
                 parser.advance(&mut *terminal_guard, &filtered);

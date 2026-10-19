@@ -88,9 +88,9 @@ struct TerminalPage: View {
                     HStack(spacing: 5) {
                         if let agent = pane.agent {
                             StatusGlyph(status: agent.status, size: 6, ripple: true)
-                            if agent.status == .blocked {
+                            if agent.status.needsYou {
                                 Text(agent.status.title).fontWeight(.semibold)
-                                    .foregroundStyle(AgentStatus.blocked.tint)
+                                    .foregroundStyle(agent.status.tint)
                             } else {
                                 Text(agent.status.title)
                             }

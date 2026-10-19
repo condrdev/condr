@@ -71,12 +71,13 @@ nonisolated final class FakeClient: CompanionProtocol {
             state.devices.filter { $0.status == .connected }.flatMap { device in
                 (state.workspaces[device.address] ?? []).flatMap { workspace in
                     workspace.panes.compactMap { pane -> NeedsYouItem? in
-                        guard let agent = pane.agent, agent.status == .blocked else { return nil }
+                        guard let agent = pane.agent, agent.status == .blocked || agent.status == .error
+                        else { return nil }
                         return NeedsYouItem(
                             address: device.address, device: device.label,
                             workspace: workspace.name,
                             pane: pane.id, kind: agent.kind, agent: agent.label,
-                            blockedOn: agent.blockedOn)
+                            detail: agent.detail)
                     }
                 }
             }
@@ -173,7 +174,7 @@ enum Fixture {
     static let address = "tcp://server@127.0.0.1:1"
     static let ref = PaneRef(address: address, pane: 7)
 
-    static func world(_ status: AgentStatus, blockedOn: String? = nil) -> FakeClient.State {
+    static func world(_ status: AgentStatus, detail: String? = nil) -> FakeClient.State {
         var state = FakeClient.State()
         state.devices = [DeviceView(address: address, label: "desk", status: .connected)]
         state.workspaces = [
@@ -185,7 +186,7 @@ enum Fixture {
                             id: 7, title: "Fix the thing",
                             agent: AgentView(
                                 kind: "claude", label: "Claude", status: status,
-                                blockedOn: blockedOn),
+                                detail: detail),
                             attention: false, exited: false)
                     ])
             ]

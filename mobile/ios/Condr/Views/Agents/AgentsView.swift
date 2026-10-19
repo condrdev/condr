@@ -51,7 +51,7 @@ struct AgentsView: View {
     }
 
     private var needsYou: some View {
-        let items = session.agents(.blocked)
+        let items = session.agents(.blocked, .error)
         return VStack(alignment: .leading, spacing: 10) {
             SectionTitle("Needs you", count: items.count, tint: AgentStatus.blocked.tint)
             if items.isEmpty {
@@ -163,9 +163,13 @@ struct NeedsYouCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AgentHeading(item: item, status: .blocked, side: 42, titleFont: .headline)
-            if let raw = item.agent.blockedOn {
-                BlockedOnView(blockedOn: BlockedOn(raw))
+            AgentHeading(item: item, status: item.agent.status, side: 42, titleFont: .headline)
+            if let raw = item.agent.detail {
+                if item.agent.status == .error {
+                    FailedView(text: raw)
+                } else {
+                    BlockedOnView(detail: BlockedOn(raw))
+                }
             }
         }
         .padding(16)
@@ -210,17 +214,34 @@ struct AgentHeading: View {
     }
 }
 
-/// What a Blocked Agent waits for: a tool and its command, or a question.
-struct BlockedOnView: View {
-    let blockedOn: BlockedOn
+/// Why an Error Agent halted, in its own words (ADR 0044).
+struct FailedView: View {
+    let text: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(blockedOn.tool == nil ? "ASKS" : "WANTS TO RUN")
+            Text("FAILED")
                 .font(.caption2.weight(.semibold))
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
-            if let tool = blockedOn.tool {
+            Text(text)
+                .font(.body.weight(.medium))
+                .lineLimit(3)
+        }
+    }
+}
+
+/// What a Blocked Agent waits for: a tool and its command, or a question.
+struct BlockedOnView: View {
+    let detail: BlockedOn
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(detail.tool == nil ? "ASKS" : "WANTS TO RUN")
+                .font(.caption2.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+            if let tool = detail.tool {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(tool)
                         .font(.caption.weight(.semibold))
@@ -228,12 +249,12 @@ struct BlockedOnView: View {
                         .padding(.vertical, 2)
                         .background(.fill.secondary, in: .rect(cornerRadius: 5, style: .continuous))
                         .foregroundStyle(.secondary)
-                    Text(blockedOn.text)
+                    Text(detail.text)
                         .font(.system(.callout, design: .monospaced))
                         .lineLimit(3)
                 }
             } else {
-                Text(blockedOn.text)
+                Text(detail.text)
                     .font(.body.weight(.medium))
                     .lineLimit(3)
             }

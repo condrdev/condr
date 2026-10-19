@@ -33,7 +33,7 @@ Before you run an Agent in Condr, make sure the Condr Server can find the matchi
 
 ## Install Hooks for accurate states
 
-Traditional terminal managers match screen text against regular expressions, so a change in the output easily leads them to the wrong state. Condr uses the Agents' native Hook mechanism instead: the Agent reports its own state, which makes Condr's view of it 100% accurate.
+Traditional terminal managers match screen text against regular expressions, so a change in the output easily leads them to the wrong state. Condr only takes what the Agent itself says. An Agent that speaks the terminal [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) (OSC 7501) reports its state to Condr's terminal directly, with nothing to install: Claude Code 2.1.295, Codex 0.163, Pi 1.1, Oh My Pi 18.8.7, Grok Build 1.0.52 and Antigravity CLI 1.4 or newer do. The Hooks still matter: they record the session ID a Server restart resumes with, they report the state of every other Agent, and on a Windows Server they stand in for Claude Code and Pi, whose detection of the protocol fails there.
 
 - **Install a Hook in one step**: run `condr agent hooks install <agent>` (for example `condr agent hooks install claude`).
 - **Manage Hooks in the GUI**: go to **Settings › Agent integrations** and install them there.
@@ -41,18 +41,19 @@ Traditional terminal managers match screen text against regular expressions, so 
 
 ## Agent state indicators
 
-Once the Hook is installed, the sidebar automatically shows the live state of the Agent in each Pane:
+Once the Agent reports, the sidebar shows the live state of the Agent in each Pane:
 
 | State | Meaning |
 | :--- | :--- |
 | **Working** | Running a task (thinking, generating text or calling tools). |
-| **Blocked** | Waiting for your input or approval (listed in Needs you). |
-| **Done** | Finished in the background. Resets to Idle once focus returns to its Pane. |
+| **Blocked** | Waiting for your input, approval or sign-in (listed in Needs you with what it waits for). |
+| **Error** | The turn failed and the Agent halted (listed in Needs you with the reason). |
+| **Done** | Finished a turn you have not looked at yet. Shows as Idle once you open its Pane, or once the Agent sees you back. |
 | **Idle** | Idle: the turn is over and it waits for the next instruction. |
-| **Unknown** | A plain shell session, or an Agent without Condr hooks. |
+| **Unknown** | A plain shell session, or an Agent that has not reported. |
 | **Bell** | The terminal rang its bell (Bell takes priority over the regular lifecycle states). |
 
-> **Tip**: when an Agent in the background finishes or becomes blocked, Condr sends a native system notification; clicking it goes straight to that Pane.
+> **Tip**: when an Agent in the background finishes, fails or becomes blocked, Condr sends a native system notification; clicking it goes straight to that Pane.
 
 ## Notes on configuring common Agents
 

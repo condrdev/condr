@@ -88,7 +88,8 @@ pub struct AgentView {
     pub kind: String,
     pub label: String,
     pub status: AgentStatus,
-    pub blocked_on: Option<String>,
+    /// What a Blocked Agent waits for, or why an Error one halted (ADR 0024, ADR 0044).
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
@@ -97,8 +98,10 @@ pub enum AgentStatus {
     Idle,
     Working,
     Blocked,
-    /// Went idle after work this phone did not watch (ADR 0041).
+    /// Finished work this phone has not looked at (ADR 0041, ADR 0044).
     Done,
+    /// A turn failed and the Agent halted.
+    Error,
 }
 
 impl From<AgentDisplayState> for AgentStatus {
@@ -109,11 +112,12 @@ impl From<AgentDisplayState> for AgentStatus {
             AgentDisplayState::Working => Self::Working,
             AgentDisplayState::Blocked => Self::Blocked,
             AgentDisplayState::Done => Self::Done,
+            AgentDisplayState::Error => Self::Error,
         }
     }
 }
 
-/// One "Needs you" row (ADR 0024): a Blocked Agent and what it waits for.
+/// One "Needs you" row (ADR 0024): a Blocked or Error Agent and what it waits for.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct NeedsYouItem {
     pub address: String,
@@ -123,7 +127,7 @@ pub struct NeedsYouItem {
     /// The Agent's stable id, as [`AgentView::kind`].
     pub kind: String,
     pub agent: String,
-    pub blocked_on: Option<String>,
+    pub detail: Option<String>,
 }
 
 /// A Pane's screen as the Server's grid has it, colours resolved to `0xRRGGBB`.

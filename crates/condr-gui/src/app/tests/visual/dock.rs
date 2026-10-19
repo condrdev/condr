@@ -670,7 +670,7 @@ fn clicking_a_workspace_row_switches_before_it_toggles() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Idle,
-            blocked_on: None,
+            detail: None,
         }),
     );
     let open = |window: &mut VisualTestContext| {

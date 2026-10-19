@@ -17,3 +17,5 @@ Not in scope: answering for the user. No approve or deny goes over the wire, no 
 Tests cover the hook's extraction and bounding from recorded native payloads, the OSC round trip with and without `detail`, the Server clearing `blocked_on` on the way out of `Blocked` and publishing when only the detail changes, the CLI JSON field, the OpenCode and Pi/OMP plugin harnesses carrying `detail`, and a GUI visual test where a blocked Agent appears under "Needs you" ahead of the Devices, a click on its row selects the Pane, and Working removes it.
 
 > ADR 0041 puts the "Needs you" list on the Companion's first screen as well, built the same way from state it holds; a tap opens the Pane and still answers nothing.
+
+> ADR 0044 renames `blocked_on` to `detail`, which an `Error` Agent carries too, and puts `Error` Agents on the "Needs you" list beside `Blocked` ones.

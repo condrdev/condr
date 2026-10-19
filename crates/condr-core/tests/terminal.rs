@@ -250,6 +250,29 @@ stty size"#,
     assert!(runtime.shutdown().is_err());
 }
 
+/// A program detecting the Program Status Protocol sends its query and then primary
+/// device attributes, and takes a DA1 answer arriving first as "unsupported" (ADR 0044).
+/// Condr's answer is queued as the scanner reads the query, ahead of the VT's DA1 reply
+/// to the same chunk.
+#[cfg(unix)]
+#[test]
+fn the_program_status_query_is_answered_before_primary_device_attributes() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.arg("-c");
+    command.arg(
+        r#"stty raw -echo
+printf '\033]7501;?\033\\\033[c'
+reply=$(dd bs=1 count=15 2>/dev/null | od -An -tx1 | tr -d ' \n')
+stty sane
+printf '\r\nreply=%s\r\n' "$reply""#,
+    );
+    command.cwd(std::env::temp_dir());
+    let mut runtime = TerminalRuntime::spawn(command, TerminalSize::new(24, 80)).unwrap();
+    // `ESC ] 7501 ; ? ESC \` then `ESC [ ? 6 c`.
+    wait_for_text(&runtime, "reply=1b5d373530313b3f1b5c1b5b3f3663");
+    assert!(runtime.wait().unwrap().success());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn terminal_modes_route_mouse_focus_and_alternate_scroll() {
@@ -786,7 +809,7 @@ fn foreground_agent_process_produces_an_unknown_snapshot() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         },
         "agent process was not detected",
     );
@@ -816,7 +839,7 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
             session_id: None,
             kind: AgentKind::Codex,
             state,
-            blocked_on: None,
+            detail: None,
         })
     };
     let events = std::env::temp_dir().join(format!(
@@ -860,7 +883,7 @@ fn hook_events_written_to_the_pty_drive_the_agent_state_and_never_reach_the_scre
     );
     wait_for(
         &mut probe,
-        snapshot(AgentState::Idle),
+        snapshot(AgentState::Done),
         "stop event did not reach the agent state",
     );
     assert!(!runtime.visible_text().contains("condr://agent"));
@@ -934,7 +957,7 @@ done
                 kind: AgentKind::Codex,
                 state: AgentState::Idle,
                 session_id: Some("first".into()),
-                blocked_on: None,
+                detail: None,
             },
             "first hook was not detected",
         );
@@ -1009,7 +1032,7 @@ fn foreground_agent_survives_its_process_group_leader_exiting() {
             session_id: None,
             kind: AgentKind::Codex,
             state: AgentState::Unknown,
-            blocked_on: None,
+            detail: None,
         },
         "agent process was not detected after the pipeline leader exited",
     );

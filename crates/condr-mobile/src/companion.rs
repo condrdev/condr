@@ -451,7 +451,7 @@ impl Companion {
             .collect()
     }
 
-    /// Every Blocked Agent on every connected Device (ADR 0024).
+    /// Every Blocked or Error Agent on every connected Device (ADR 0024, ADR 0044).
     pub fn needs_you(&self) -> Vec<NeedsYouItem> {
         let state = self.shared.lock();
         let mut items = Vec::new();
@@ -459,7 +459,7 @@ impl Companion {
             if device.status != DeviceStatus::Connected {
                 continue;
             }
-            for (workspace, pane_id, agent) in device.model.blocked_agents() {
+            for (workspace, pane_id, agent) in device.model.agents_needing_you() {
                 items.push(NeedsYouItem {
                     address: address.clone(),
                     device: device.label.clone(),
@@ -467,7 +467,7 @@ impl Companion {
                     pane: pane_id.as_u64(),
                     kind: agent.kind.spec().id.to_owned(),
                     agent: agent.kind.label().to_owned(),
-                    blocked_on: agent.blocked_on.clone(),
+                    detail: agent.detail.clone(),
                 });
             }
         }
@@ -506,7 +506,7 @@ impl Companion {
                                 status: model
                                     .agent_display_state(pane_id)
                                     .map_or(crate::AgentStatus::Unknown, Into::into),
-                                blocked_on: agent.blocked_on.clone(),
+                                detail: agent.detail.clone(),
                             }),
                             attention: model.attention.contains(&pane_id),
                             exited: model.exited.contains(&pane_id),
@@ -935,6 +935,10 @@ impl Shared {
             Incoming::Bootstrap(bootstrap) => {
                 match device.model.apply_bootstrap(bootstrap) {
                     Ok(change) => {
+                        // The Pane on screen is being looked at: its Done is seen.
+                        if let Some(pane_id) = shown {
+                            device.model.mark_seen(pane_id);
+                        }
                         device.snapshot_pending = false;
                         if change.authority_changed {
                             device.subscription = Subscription::None;

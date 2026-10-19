@@ -12,7 +12,7 @@ struct MainTabs: View {
             } label: {
                 Label("Agents", image: .tabAgents)
             }
-            .badge(session.agents(.blocked).count)
+            .badge(session.agents(.blocked, .error).count)
             Tab("Devices", systemImage: "desktopcomputer", value: AppTab.devices) {
                 DevicesView()
             }

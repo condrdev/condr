@@ -572,7 +572,7 @@ impl TerminalRuntime {
         let mut notices = self.notices.lock().expect("terminal notices lock poisoned");
         if notices.agent_stopping {
             for event in std::mem::take(&mut notices.agent_events) {
-                notices.agent.observe_event(&event);
+                event.apply(&mut notices.agent);
             }
         }
         notices.agent.resume()

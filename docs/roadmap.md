@@ -28,7 +28,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | --- | --- |
 | 运行时 | 一机一 Server（ADR 0013）；GUI 断开不影响 PTY 和 Agent；重连先取权威 Bootstrap 再订阅事件；Server 重启按 Session Snapshot 恢复结构并 resume 原生会话；当前 Workspace 和 Tab 是每个客户端自己的视图（ADR 0021），GUI 重启后恢复窗口、侧栏与视图（ADR 0023）；Windows 上每个 Terminal 的进程归属由 Job Object 决定（ADR 0030），Server 与 GUI 以桌面 shell 给的进程状态运行（ADR 0031） |
 | 终端 | `alacritty_terminal` + 自绘 GPUI 元素；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
-| Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 hooks，经 OSC 777 回写（ADR 0014）；`Blocked` 带 `blocked_on`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成或需输入时发 OS 通知 |
+| Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
 | Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；两种 Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032）；Preview Tab 渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037） |
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备；新建 Workspace 时可浏览远程 Device 的目录；机器唤醒后 GUI 重新探测每条连接 |
@@ -58,7 +58,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 **状态**：进行中。
 
-**为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `blocked_on`，把它们带到手机上是这一层能做、单个厂商不会做的事。
+**为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `detail`，把它们带到手机上是这一层能做、单个厂商不会做的事。
 
 **已定**：
 
@@ -66,7 +66,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - 客户端逻辑只有一份 Rust 实现，经 uniffi 生成 Swift 与 Kotlin 绑定。iroh、Noise 和 Condr 协议编进同一个库，每个平台只链接这一个库，所以不用 iroh 官方的 Swift 与 Kotlin 绑定：同一工具链构建的两个 Rust 静态库会因标准库和分配器的内部符号重复而链接失败，两个 uniffi framework 还会在 `RustBuffer` 上冲突（ADR 0039）。
 - 手机支持 `p2p://` 与 `tcp://`，和桌面共用同一份连接与握手代码。
 - 推送要自建中转。原生 App 的推送经 APNs 和 FCM，它们的凭据只能放在 Condr 运营的服务端，不能放进每个用户的 Server。
-- 推送正文带 `blocked_on`，由 Server 用手机的设备公钥加密，中转、苹果和谷歌都看不到。这把公钥 Server 在配对时已经记进 `authorized-clients`，不需要另外约定密钥；手机端解密需要读到 device key，iOS 上 Notification Service Extension 要和 App 共享它。
+- 推送正文带 `detail`，由 Server 用手机的设备公钥加密，中转、苹果和谷歌都看不到。这把公钥 Server 在配对时已经记进 `authorized-clients`，不需要另外约定密钥；手机端解密需要读到 device key，iOS 上 Notification Service Extension 要和 App 共享它。
 - 推送中转用设备 key 认证，和 relay 一样不需要登录。手机用自己的 device key 签名，登记推送 token，以及允许哪些 Server 给它推送；Server 用自己的 device key 签名推送请求，请求带时间戳防重放，签名内容加专用前缀，不能挪到其他协议里冒用。Server 和手机都不新增凭据，协议也不用为推送加消息。代价是中转要落盘保存哪些 Server 和哪部手机配对，以 Device id 记录。
 
 **做到哪**（按顺序）：
@@ -161,7 +161,7 @@ ADR 要回答三个问题：
 | --- | --- | --- |
 | 遥测（opt-in） | 有外部用户，且本地日志已不足以排障 | 诊断数据默认不含终端内容；先有本地日志再谈上报 |
 | 团队协作、账号与 RBAC | 出现多人共用一个 Server 的真实需求 | observe/control capability（见摩擦记录）扩展为多用户；审计日志 |
-| 替用户批准 Agent 的权限请求（现在只做"看见并跳转"） | 厂商开放外部审批接口；Claude Code 的远程审批仍是 [open feature request](https://github.com/anthropics/claude-code/issues/38299)，Codex 的审批只在它自己的 app-server 客户端里 | `Blocked` 与 `blocked_on`（ADR 0024） |
+| 替用户批准 Agent 的权限请求（现在只做"看见并跳转"） | 厂商开放外部审批接口；Claude Code 的远程审批仍是 [open feature request](https://github.com/anthropics/claude-code/issues/38299)，Codex 的审批只在它自己的 app-server 客户端里 | `Blocked` 与 `detail`（ADR 0024、ADR 0044） |
 | 编辑器、内置浏览器、任务看板等 IDE 化能力 | dogfood 中反复出现"为了这件事必须离开 Condr" | 逐项立 ADR，不成套引入 |
 
 不做的三件事：**Web 客户端**（Condr 是原生 GUI，不把控制面搬进浏览器；异地需求由 Peer-to-peer 和移动端 Companion 承接）；**自建对话或工具循环、绑定单一模型厂商**（Condr 编排原生 Agent CLI，不替代它；因此也不在界面上另做输入框、模型选择或语音对话，这些交给各个 CLI 自己）；**用户自定义 Agent 和插件 SDK**（ADR 0035：Agent 种类变化不频繁，官方支持常见的 CLI 就够了；每种集成都需要声明写不出来的 hook 代码和真实会话验证；未支持的 CLI 通过 Issue 或 PR 加入）。

@@ -36,12 +36,12 @@ nonisolated enum DemoWorld {
     static let gpu = "p2p://g4p8u1x6c3n9m2v7b5z0q4w8e1r6t3y9"
     static let fingerprint = "q3Zr8wX0bH4nT1sVd9cK2mLp7fYg5jQe6uRa0iWo-Lk"
 
-    static func agent(_ kind: String, _ status: AgentStatus, _ blockedOn: String? = nil)
+    static func agent(_ kind: String, _ status: AgentStatus, _ detail: String? = nil)
         -> AgentView
     {
         let labels = ["claude": "Claude", "codex": "Codex", "opencode": "OpenCode"]
         return AgentView(
-            kind: kind, label: labels[kind] ?? kind, status: status, blockedOn: blockedOn)
+            kind: kind, label: labels[kind] ?? kind, status: status, detail: detail)
     }
 
     static func pane(_ id: UInt64, _ title: String, _ agent: AgentView? = nil) -> PaneView {
@@ -183,7 +183,7 @@ nonisolated enum DemoWorld {
                         var pane = pane
                         if pane.agent?.status == .blocked {
                             pane.agent?.status = .working
-                            pane.agent?.blockedOn = nil
+                            pane.agent?.detail = nil
                         }
                         return pane
                     }
@@ -391,12 +391,13 @@ nonisolated final class DemoClient: CompanionProtocol {
             state.devices.filter { $0.status == .connected }.flatMap { device in
                 (state.workspaces[device.address] ?? []).flatMap { workspace in
                     workspace.panes.compactMap { pane -> NeedsYouItem? in
-                        guard let agent = pane.agent, agent.status == .blocked else { return nil }
+                        guard let agent = pane.agent, agent.status == .blocked || agent.status == .error
+                        else { return nil }
                         return NeedsYouItem(
                             address: device.address, device: device.label,
                             workspace: workspace.name,
                             pane: pane.id, kind: agent.kind, agent: agent.label,
-                            blockedOn: agent.blockedOn)
+                            detail: agent.detail)
                     }
                 }
             }

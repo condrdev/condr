@@ -371,3 +371,49 @@ fn parsed_cwd_reports_advance_the_observation_generation() {
     );
     let _ = std::fs::remove_dir_all(directory);
 }
+
+#[test]
+fn program_status_reports_prompt_starts_and_resets_are_reported_and_reach_the_vt() {
+    let mut scanner = OscScanner::default();
+    let mut reported = Vec::new();
+    let stream = b"a\x1b]7501;?\x1b\\b\x1b]7501;state=working:app=codex\x07c\x1b]133;A;cl=m\x07d\x1b]7501;state=napping\x07e\x1bcf";
+    // vte drops the OSCs it does not know and resets on RIS; the scanner only reads.
+    let filtered = scanner.advance(stream, |osc| reported.push(osc));
+    assert!(matches!(filtered, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(
+        reported,
+        [
+            OscReport::ProgramStatus(ProgramStatusReport::Query),
+            OscReport::ProgramStatus(ProgramStatusReport::Status(ProgramStatus {
+                state: crate::ProgramState::Working,
+                id: None,
+                kind: None,
+                app: Some("codex".into()),
+                msg: None,
+            })),
+            OscReport::PromptStart,
+            OscReport::Reset,
+        ]
+    );
+
+    // Split across reads, and ended by a bare ESC that itself starts a RIS.
+    let mut scanner = OscScanner::default();
+    let mut reported = Vec::new();
+    for chunk in b"\x1b]7501;state=do".chunks(3) {
+        scanner.advance(chunk, |osc| reported.push(osc));
+    }
+    scanner.advance(b"ne\x1bc", |osc| reported.push(osc));
+    assert_eq!(
+        reported,
+        [
+            OscReport::ProgramStatus(ProgramStatusReport::Status(ProgramStatus {
+                state: crate::ProgramState::Done,
+                id: None,
+                kind: None,
+                app: None,
+                msg: None,
+            })),
+            OscReport::Reset,
+        ]
+    );
+}

@@ -191,6 +191,7 @@ struct Root: View {
         .sensoryFeedback(trigger: alerts.banner) { _, banner in
             switch banner?.status {
             case .blocked?: .warning
+            case .error?: .error
             case .done?: .success
             default: nil
             }

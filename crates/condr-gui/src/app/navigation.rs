@@ -36,7 +36,7 @@ impl Condr {
         self.retain_dock_cache(key, &tab_ids, &pane_ids);
     }
 
-    /// The user selected this Pane: drop its unseen-completion marker.
+    /// The user selected this Pane: a Done it shows is seen.
     pub(super) fn mark_pane_seen(&mut self, key: ConnectionKey, pane_id: PaneId) {
         let Some(connection) = self.connection_mut(key) else {
             return;

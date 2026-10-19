@@ -26,13 +26,18 @@ pub(super) enum OscState {
     ControlStringEscape,
 }
 
-/// The OSC payloads Condr reads itself because vte drops them: cwd reports as OSC 7
-/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`, and the OSC 777
-/// agent events `condr agent-hook` writes (ADR 0014). This scanner runs over the raw bytes.
+/// What Condr reads from the raw bytes itself because vte drops it: cwd reports as OSC 7
+/// `file://` URIs, ConEmu `9;9;<cwd>` and iTerm2 `1337;CurrentDir=<cwd>`; the OSC 777
+/// agent events `condr agent-hook` writes (ADR 0014); the Program Status Protocol's OSC
+/// 7501 reports and the two events its records live by, a shell prompt starting (OSC 133
+/// `A`) and a full reset (`ESC c`) (ADR 0044).
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum OscReport {
     Cwd(PathBuf),
     Agent(AgentEvent),
+    ProgramStatus(ProgramStatusReport),
+    PromptStart,
+    Reset,
 }
 
 /// What the VT gets from one read: the bytes as they came, or a copy with the agent
@@ -176,7 +181,7 @@ impl OscScanner {
                         self.state = OscState::Escape;
                     }
                 }
-                OscState::Escape => self.after_escape(byte, index, &mut vt),
+                OscState::Escape => self.after_escape(byte, index, &mut vt, &mut report),
                 OscState::Payload => match byte {
                     0x07 => self.finish(index, Terminator::Proper, &mut vt, &mut report),
                     0x1b => {
@@ -191,7 +196,7 @@ impl OscScanner {
                     b'\\' => self.finish(index, Terminator::Proper, &mut vt, &mut report),
                     _ => {
                         self.finish(index, Terminator::Escape, &mut vt, &mut report);
-                        self.after_escape(byte, index, &mut vt);
+                        self.after_escape(byte, index, &mut vt, &mut report);
                     }
                 },
                 OscState::Discard | OscState::ControlString => match byte {
@@ -213,7 +218,7 @@ impl OscScanner {
                     }
                     _ => {
                         self.reset();
-                        self.after_escape(byte, index, &mut vt);
+                        self.after_escape(byte, index, &mut vt, &mut report);
                     }
                 },
             }
@@ -224,11 +229,23 @@ impl OscScanner {
     }
 
     /// The byte after a held `ESC` decides what it started.
-    fn after_escape(&mut self, byte: u8, index: usize, vt: &mut VtFilter<'_, '_>) {
+    fn after_escape(
+        &mut self,
+        byte: u8,
+        index: usize,
+        vt: &mut VtFilter<'_, '_>,
+        report: &mut impl FnMut(OscReport),
+    ) {
         match byte {
             b']' => {
                 self.payload.clear();
                 self.state = OscState::Payload;
+            }
+            b'c' => {
+                // RIS: the VT resets, and so do the Program Status Protocol's records.
+                report(OscReport::Reset);
+                vt.release(index + 1);
+                self.state = OscState::Ground;
             }
             0x1b => {
                 // ESC ESC: the first one was nothing; this one may start something.
@@ -282,8 +299,17 @@ impl OscScanner {
             if let Some(event) = AgentEvent::decode(&self.payload) {
                 report(OscReport::Agent(event));
             }
+        } else if self
+            .payload
+            .starts_with(PROGRAM_STATUS_OSC_PREFIX.as_bytes())
+        {
+            if let Some(status) = ProgramStatusReport::parse(&self.payload) {
+                report(OscReport::ProgramStatus(status));
+            }
         } else if let Ok(payload) = std::str::from_utf8(&self.payload) {
-            if let Some(cwd) = payload.strip_prefix("9;9;") {
+            if payload == "133;A" || payload.starts_with("133;A;") {
+                report(OscReport::PromptStart);
+            } else if let Some(cwd) = payload.strip_prefix("9;9;") {
                 let cwd = cwd
                     .strip_prefix('"')
                     .and_then(|cwd| cwd.strip_suffix('"'))

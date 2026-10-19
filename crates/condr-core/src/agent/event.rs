@@ -113,17 +113,19 @@ impl AgentEvent {
         .then_some(event)
     }
 
-    /// The state after this event, from `state`. Turn boundaries map to Idle and
-    /// Working; a request for the user maps to Blocked; a tool starting or completing
-    /// maps to Working, which is what ends a Blocked once the user answered. A session
-    /// start caused by compaction happens mid-turn and changes nothing.
+    /// The state after this event, from `state`, the way the Program Status Protocol
+    /// would report the same moments (ADR 0044). A turn starting maps to Working and a
+    /// turn ending to Done, or Error when it failed; an interrupt and a session start
+    /// map to Idle, the agent back at its prompt; a request for the user maps to
+    /// Blocked; a tool starting or completing maps to Working, which is what ends a
+    /// Blocked once the user answered. A session start caused by compaction happens
+    /// mid-turn and changes nothing.
     pub fn apply(&self, state: AgentState) -> AgentState {
         match self.event {
             AgentEventKind::SessionStart if self.source.as_deref() == Some("compact") => state,
-            AgentEventKind::SessionStart
-            | AgentEventKind::Stop
-            | AgentEventKind::Interrupt
-            | AgentEventKind::StopFailure => AgentState::Idle,
+            AgentEventKind::SessionStart | AgentEventKind::Interrupt => AgentState::Idle,
+            AgentEventKind::Stop => AgentState::Done,
+            AgentEventKind::StopFailure => AgentState::Error,
             AgentEventKind::PromptSubmit
             | AgentEventKind::ToolStart
             | AgentEventKind::ToolComplete => AgentState::Working,

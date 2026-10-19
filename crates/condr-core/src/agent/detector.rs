@@ -40,15 +40,19 @@ pub enum AgentPublish {
     Cleared,
 }
 
-/// Per-terminal agent tracking: which agent the process table shows, the state its hooks
-/// last reported, and when to look at the process table again.
+/// Per-terminal agent tracking: which agent the process table shows, the state it last
+/// reported, and when to look at the process table again.
 #[derive(Debug, Default)]
 pub struct AgentDetector {
     agent: Option<AgentKind>,
     state: Option<AgentState>,
     session_id: Option<String>,
     prompt_id: Option<String>,
-    blocked_on: Option<String>,
+    detail: Option<String>,
+    /// The agent reports through the Program Status Protocol (ADR 0044): from its first
+    /// report on, its hooks only name its conversation, and the protocol's lifetime
+    /// rules apply to its state.
+    program_status: bool,
     /// No observation yet / cleared / the current native conversation. Kept alongside
     /// the live state so shutdown can read a hook before its monitor commits it.
     resume: Option<Option<AgentResume>>,
@@ -76,7 +80,13 @@ impl AgentDetector {
         self.resume.clone()
     }
 
-    /// Seed only the process we are about to resume; hooks remain authoritative.
+    /// Whether the agent's state comes from the Program Status Protocol (ADR 0044).
+    pub fn reports_program_status(&self) -> bool {
+        self.program_status
+    }
+
+    /// Seed only the process we are about to resume; what the agent reports remains
+    /// authoritative.
     pub fn restore(&mut self, resume: AgentResume) {
         self.resume = Some(Some(resume.clone()));
         self.restoring = Some(resume);
@@ -135,7 +145,8 @@ impl AgentDetector {
                 }
                 self.agent = Some(agent);
                 self.prompt_id = None;
-                self.blocked_on = None;
+                self.detail = None;
+                self.program_status = false;
                 self.session_id = self
                     .restoring
                     .take()
@@ -151,7 +162,7 @@ impl AgentDetector {
                     session_id: self.session_id.clone(),
                     kind: agent,
                     state: AgentState::Unknown,
-                    blocked_on: None,
+                    detail: None,
                 })
             }
             ProcessProbeResult::ShellOnly | ProcessProbeResult::Unidentified => {
@@ -174,7 +185,8 @@ impl AgentDetector {
                 self.agent = None;
                 self.session_id = None;
                 self.prompt_id = None;
-                self.blocked_on = None;
+                self.detail = None;
+                self.program_status = false;
                 self.resume = Some(None);
                 self.restoring = None;
                 self.state = None;
@@ -194,14 +206,11 @@ impl AgentDetector {
     /// shell (`ShellOnly`) has no agent to name, and the event is dropped. So is every
     /// event from an agent recognized only, whose hooks the person may have configured by
     /// hand: they cannot report a state worth trusting, so it stays `Unknown` (ADR 0035).
+    /// Once the agent reports through the Program Status Protocol, its hooks only name
+    /// its conversation (ADR 0044).
     pub fn observe_event(&mut self, event: &AgentEvent) -> AgentPublish {
-        if event.agent.spec().hooks().is_none() {
+        if event.agent.spec().hooks().is_none() || !self.seed(event.agent) {
             return AgentPublish::Nothing;
-        }
-        if self.agent.is_none() && self.last_probe == Some(ProcessProbeResult::Unidentified) {
-            self.agent = Some(event.agent);
-            self.seeded = true;
-            self.state = Some(AgentState::Unknown);
         }
         let (Some(agent), Some(state)) = (self.agent, self.state) else {
             return AgentPublish::Nothing;
@@ -226,7 +235,6 @@ impl AgentDetector {
                 _ => {}
             }
         }
-        let next = event.apply(state);
         let session_id = event.session_id.clone().or_else(|| {
             (event.event != AgentEventKind::SessionStart
                 || event.source.as_deref() == Some("compact"))
@@ -243,22 +251,123 @@ impl AgentDetector {
                 session_id: id.clone(),
             }));
         }
-        // What blocks is only what the blocking event said; leaving Blocked, or a second
-        // Blocked without a detail, clears it (ADR 0024).
-        let blocked_on = (next == AgentState::Blocked)
-            .then(|| event.detail.clone())
-            .flatten();
-        if next == state && session_id == self.session_id && blocked_on == self.blocked_on {
+        let (next, detail) = if self.program_status {
+            (state, self.detail.clone())
+        } else {
+            let next = event.apply(state);
+            // What blocks is only what the blocking event said; leaving Blocked, or a
+            // second Blocked without a detail, clears it (ADR 0024).
+            let detail = (next == AgentState::Blocked)
+                .then(|| event.detail.clone())
+                .flatten();
+            (next, detail)
+        };
+        self.commit(next, session_id, detail)
+    }
+
+    /// Feeds a Program Status Protocol report (ADR 0044). The root record is the agent;
+    /// a child record (a subagent, a background task) is ignored. A report whose `app`
+    /// names another program than the process table shows is a nested reporter's and is
+    /// dropped; one without `app` is the Pane's agent's. `clear` deletes the record, and
+    /// the agent is `Unknown` again until it reports.
+    pub fn observe_status(&mut self, status: &ProgramStatus) -> AgentPublish {
+        if status.id.is_some() {
+            return AgentPublish::Nothing;
+        }
+        let app = status.app.as_deref().map(AgentKind::parse_label);
+        if let Some(Some(reporter)) = app
+            && !self.seed(reporter)
+        {
+            return AgentPublish::Nothing;
+        }
+        let Some(agent) = self.agent else {
+            return AgentPublish::Nothing;
+        };
+        if app.is_some_and(|reporter| reporter != Some(agent)) {
+            return AgentPublish::Nothing;
+        }
+        // A state makes the protocol the agent's voice; a bare `clear` from one that
+        // never reported leaves its hooks speaking.
+        if !self.program_status && status.state != ProgramState::Clear {
+            tracing::info!(
+                agent = agent.id(),
+                "agent reports through the Program Status Protocol"
+            );
+            self.program_status = true;
+        }
+        let next = match status.state {
+            ProgramState::Idle => AgentState::Idle,
+            ProgramState::Working => AgentState::Working,
+            ProgramState::Done => AgentState::Done,
+            ProgramState::Blocked => AgentState::Blocked,
+            ProgramState::Error => AgentState::Error,
+            ProgramState::Clear => AgentState::Unknown,
+        };
+        let detail = match next {
+            AgentState::Blocked => status
+                .msg
+                .clone()
+                .or_else(|| status.kind.map(|kind| kind.label().to_owned())),
+            AgentState::Error => status.msg.clone(),
+            _ => None,
+        };
+        self.commit(next, self.session_id.clone(), detail)
+    }
+
+    /// A new shell prompt (OSC 133 `A`): a `working` or `blocked` record is stale, the
+    /// protocol says, while `idle`, `done` and `error` outlive it. Only state the protocol
+    /// reported follows its rules; hook state ends with the process (ADR 0014).
+    pub fn observe_prompt_start(&mut self) -> AgentPublish {
+        if !self.program_status
+            || !matches!(self.state, Some(AgentState::Working | AgentState::Blocked))
+        {
+            return AgentPublish::Nothing;
+        }
+        self.commit(AgentState::Unknown, self.session_id.clone(), None)
+    }
+
+    /// A full reset (`RIS`) removes every record: the agent is `Unknown` until it reports
+    /// again, and its hooks count again until it does.
+    pub fn observe_reset(&mut self) -> AgentPublish {
+        if !self.program_status {
+            return AgentPublish::Nothing;
+        }
+        self.program_status = false;
+        self.commit(AgentState::Unknown, self.session_id.clone(), None)
+    }
+
+    /// Names the agent from its own report when the process table shows a foreground job
+    /// Condr cannot name. Whether there is an agent to attribute the report to afterwards.
+    fn seed(&mut self, reporter: AgentKind) -> bool {
+        if self.agent.is_none() && self.last_probe == Some(ProcessProbeResult::Unidentified) {
+            self.agent = Some(reporter);
+            self.seeded = true;
+            self.state = Some(AgentState::Unknown);
+        }
+        self.agent.is_some()
+    }
+
+    /// Publishes the snapshot when anything in it changed.
+    fn commit(
+        &mut self,
+        next: AgentState,
+        session_id: Option<String>,
+        detail: Option<String>,
+    ) -> AgentPublish {
+        let (Some(agent), Some(state)) = (self.agent, self.state) else {
+            return AgentPublish::Nothing;
+        };
+        if next == state && session_id == self.session_id && detail == self.detail {
             return AgentPublish::Nothing;
         }
         self.state = Some(next);
         self.session_id = session_id;
-        self.blocked_on = blocked_on;
+        self.detail = detail;
         AgentPublish::Snapshot(AgentSnapshot {
             session_id: self.session_id.clone(),
             kind: agent,
             state: next,
-            blocked_on: self.blocked_on.clone(),
+            detail: self.detail.clone(),
         })
     }
 }

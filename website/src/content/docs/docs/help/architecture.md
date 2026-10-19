@@ -29,7 +29,7 @@ Condr splits the runtime and the interface into two processes. The Server hosts 
 ## Terminal frames
 
 1. The Server creates the PTY through `portable-pty`. On Windows it uses ConPTY, and each terminal's processes go into their own Job Object, so closing a Pane ends them together.
-2. Before reaching the terminal emulator, PTY output passes an OSC scan: sequences such as OSC 7 update the current working directory, and Agent events in OSC 777 are extracted and stripped from the raw output.
+2. Before reaching the terminal emulator, PTY output passes an OSC scan: sequences such as OSC 7 update the current working directory, Program Status Protocol reports in OSC 7501 are read, and Agent events in OSC 777 are extracted and stripped from the raw output.
 3. The remaining bytes are parsed by `alacritty_terminal`.
 4. The Server coalesces wakeups at 60 Hz and reads the changed region once: a full-screen change produces a complete frame, a partial change produces only the changed cells.
 5. The Server builds each client's frame against the frame that client already has, and sends it over the protocol.
@@ -47,12 +47,12 @@ Condr splits the runtime and the interface into two processes. The Server hosts 
 
 ## Agent state
 
-1. `condr agent hooks install` writes the hooks into the Agent's own configuration.
-2. When the Agent fires a hook, it runs `condr agent-hook <agent> <event>`. That command reads the JSON the Agent passes and writes it back to the current terminal as an OSC 777 sequence.
-3. The Server intercepts the sequence in the PTY output and updates that Pane's Agent state to Unknown, Idle, Working or Blocked. A Blocked state can carry a `blocked_on` field that says what it waits for.
+1. An Agent that speaks the Program Status Protocol asks the terminal with `OSC 7501 ; ?`; the Server answers before the terminal emulator's own reply to the device-attributes query the Agent sends behind it, and the Agent then reports every state change as an OSC 7501 sequence on its own PTY.
+2. For the other Agents, `condr agent hooks install` writes the hooks into the Agent's own configuration. When the Agent fires a hook, it runs `condr agent-hook <agent> <event>`, which reads the JSON the Agent passes and writes it back to the current terminal as an OSC 777 sequence.
+3. The Server intercepts both in the PTY output and updates that Pane's Agent state to Unknown, Idle, Working, Blocked, Done or Error. Once an Agent has reported over OSC 7501, its hooks only supply the session ID a restart resumes with. Blocked and Error carry a `detail` field: what the Agent waits for, or why it failed.
 4. If the Agent has never reported, its state stays Unknown. Condr does not infer Agent state from screen text.
 
-Done exists only in the window: when an Agent turns Idle while focus is elsewhere, the window shows it as Done.
+Done is the Agent's own state after a finished turn. Each window adds whether it looked: a Done it watched arrive, or whose Pane it has opened since, shows as Idle.
 
 ---
 

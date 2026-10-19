@@ -347,6 +347,8 @@ impl From<AgentState> for super::AgentState {
             AgentState::Idle => Self::Idle,
             AgentState::Working => Self::Working,
             AgentState::Blocked => Self::Blocked,
+            AgentState::Done => Self::Done,
+            AgentState::Error => Self::Error,
         }
     }
 }
@@ -359,6 +361,8 @@ pub(crate) fn agent_state(raw: i32) -> WireResult<AgentState> {
             super::AgentState::Idle => AgentState::Idle,
             super::AgentState::Working => AgentState::Working,
             super::AgentState::Blocked => AgentState::Blocked,
+            super::AgentState::Done => AgentState::Done,
+            super::AgentState::Error => AgentState::Error,
         },
     )
 }
@@ -369,7 +373,7 @@ impl From<&AgentSnapshot> for super::AgentSnapshot {
             session_id: agent.session_id.clone(),
             kind: super::AgentKind::from(agent.kind) as i32,
             state: super::AgentState::from(agent.state) as i32,
-            blocked_on: agent.blocked_on.clone(),
+            detail: agent.detail.clone(),
         }
     }
 }
@@ -382,7 +386,7 @@ impl TryFrom<super::AgentSnapshot> for AgentSnapshot {
             session_id: agent.session_id,
             kind: agent_kind(agent.kind)?,
             state: agent_state(agent.state)?,
-            blocked_on: agent.blocked_on,
+            detail: agent.detail,
         })
     }
 }

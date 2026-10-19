@@ -1,6 +1,7 @@
 //! Which agent runs in a terminal and what it is doing.
 //!
-//! The process table names the agent; the agent's own hooks report its state (ADR 0014).
+//! The process table names the agent; the agent itself reports its state, through the
+//! Program Status Protocol (OSC 7501, ADR 0044) or the hooks Condr installs (ADR 0014).
 //! Condr never classifies the screen. Until an agent reports, it is [`AgentState::Unknown`],
 //! and it stays that way rather than being guessed at.
 
@@ -20,6 +21,7 @@ mod opencode;
 mod pi;
 #[cfg(feature = "runtime")]
 mod process;
+pub mod program_status;
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -32,6 +34,9 @@ pub use event::{AgentEvent, AgentEventKind};
 pub(crate) use process::is_shell;
 #[cfg(feature = "runtime")]
 pub use process::{ProcessInfo, identify_agent_among, identify_agent_process};
+#[cfg(feature = "runtime")]
+pub(crate) use program_status::ProgramStatusReport;
+pub use program_status::{BlockedKind, ProgramState, ProgramStatus};
 
 /// Everything Condr knows about one supported agent CLI (ADR 0035). Each agent's module
 /// holds its one `SPEC`; no field has a default, so an agent added without a thought for
@@ -174,16 +179,46 @@ impl AgentKind {
     }
 }
 
+/// What an agent last said it is doing (ADR 0014, ADR 0044). The Program Status
+/// Protocol's five states map one to one; hooks report `Done` for a turn that ended,
+/// `Error` for one that failed, and `Idle` for a session start or an interrupt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AgentState {
     /// Plain shell or unrecognized program, or the agent has not reported yet.
     Unknown,
-    /// Agent finished its turn, nothing happening.
+    /// Resting at its prompt, awaiting the next command.
     Idle,
     /// Agent is actively working.
     Working,
     /// Agent needs human input.
     Blocked,
+    /// A turn finished and the agent has not seen the user come back for the result.
+    Done,
+    /// A turn failed and the agent halted.
+    Error,
+}
+
+impl AgentState {
+    /// What `agent wait` waits for unless told otherwise: the agent sits at its prompt
+    /// or waits for the user.
+    pub const SETTLED: [Self; 4] = [Self::Idle, Self::Done, Self::Blocked, Self::Error];
+
+    /// The agent sits at its prompt, where a new prompt goes in.
+    pub const fn at_prompt(self) -> bool {
+        matches!(self, Self::Idle | Self::Done | Self::Error)
+    }
+
+    /// The wire spelling, which the CLI prints and takes for `--until`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Idle => "idle",
+            Self::Working => "working",
+            Self::Blocked => "blocked",
+            Self::Done => "done",
+            Self::Error => "error",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -192,9 +227,10 @@ pub struct AgentSnapshot {
     pub session_id: Option<String>,
     pub kind: AgentKind,
     pub state: AgentState,
-    /// What a `Blocked` agent waits for, from the hook that blocked it (ADR 0024);
-    /// `None` in every other state or when the hook had nothing to say.
-    pub blocked_on: Option<String>,
+    /// What a `Blocked` agent waits for, or why an `Error` one halted, from the report
+    /// that put it there (ADR 0024, ADR 0044); `None` in every other state or when the
+    /// agent had nothing to say.
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -204,6 +240,7 @@ pub enum AgentDisplayState {
     Working,
     Blocked,
     Done,
+    Error,
 }
 
 impl AgentDisplayState {
@@ -214,48 +251,49 @@ impl AgentDisplayState {
             Self::Working => "working",
             Self::Blocked => "blocked",
             Self::Done => "done",
+            Self::Error => "error",
         }
     }
 }
 
+/// How one Client shows an Agent (ADR 0041, ADR 0044): its state, except that a `Done`
+/// this Client has looked at shows as `Idle`. Each Client keeps its own, so an Agent
+/// watched finishing on the desktop is still Done on the phone, and the Agent's own
+/// `Idle`, once it sees the user back, clears it everywhere.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AgentTracker {
     state: AgentState,
-    unseen_completion: bool,
+    seen: bool,
 }
 
 impl AgentTracker {
     pub const fn new(state: AgentState) -> Self {
-        Self {
-            state,
-            unseen_completion: false,
-        }
+        Self { state, seen: false }
     }
 
+    /// `visible` is whether this Client shows the Pane: a Done it watched arrive is seen.
     pub fn update(&mut self, state: AgentState, visible: bool) {
-        if matches!(self.state, AgentState::Working | AgentState::Blocked)
-            && state == AgentState::Idle
-            && !visible
-        {
-            self.unseen_completion = true;
+        if state != self.state {
+            self.seen = false;
         }
         self.state = state;
         if visible {
-            self.unseen_completion = false;
+            self.seen = true;
         }
     }
 
     pub fn mark_seen(&mut self) {
-        self.unseen_completion = false;
+        self.seen = true;
     }
 
     pub const fn display_state(self) -> AgentDisplayState {
-        match (self.state, self.unseen_completion) {
-            (AgentState::Idle, true) => AgentDisplayState::Done,
+        match (self.state, self.seen) {
+            (AgentState::Done, true) | (AgentState::Idle, _) => AgentDisplayState::Idle,
+            (AgentState::Done, false) => AgentDisplayState::Done,
             (AgentState::Unknown, _) => AgentDisplayState::Unknown,
-            (AgentState::Idle, _) => AgentDisplayState::Idle,
             (AgentState::Working, _) => AgentDisplayState::Working,
             (AgentState::Blocked, _) => AgentDisplayState::Blocked,
+            (AgentState::Error, _) => AgentDisplayState::Error,
         }
     }
 }

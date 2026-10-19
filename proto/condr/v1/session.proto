@@ -112,13 +112,16 @@ enum AgentState {
   AGENT_STATE_IDLE = 2;
   AGENT_STATE_WORKING = 3;
   AGENT_STATE_BLOCKED = 4;
+  AGENT_STATE_DONE = 5;
+  AGENT_STATE_ERROR = 6;
 }
 
 message AgentSnapshot {
   optional string session_id = 1;
   AgentKind kind = 2;
   AgentState state = 3;
-  optional string blocked_on = 4;
+  // What a BLOCKED agent waits for, or why an ERROR one halted.
+  optional string detail = 4;
 }
 
 message AgentResume {

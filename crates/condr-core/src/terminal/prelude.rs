@@ -28,7 +28,8 @@ pub(super) use super::view::{blank_cell, terminal_cell_text};
 pub(super) use super::view_source::TerminalDamageBaseline;
 pub(super) use crate::agent::{
     AGENT_EVENT_OSC_PREFIX, AgentDetector, AgentEvent, AgentPublish, ProcessInfo,
-    ProcessProbeResult, identify_agent_process,
+    ProcessProbeResult, ProgramStatus, ProgramStatusReport, identify_agent_process,
+    program_status::{PROGRAM_STATUS_OSC_PREFIX, PROGRAM_STATUS_REPLY},
 };
 pub(super) use crate::{AgentKind, AgentSnapshot, PaneId};
 pub(super) use alacritty_terminal::Term;

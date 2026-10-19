@@ -98,15 +98,15 @@ The other view of the right sidebar: the presented Workspace's directory tree un
 The interactive command-line environment presented by a Pane. A Terminal remains useful whether or not it currently contains an Agent. Closing a Terminal, or its shell exiting, ends every process started in it except one that detached on purpose: its own session on Unix, a breakaway from the Terminal's Job on Windows (ADR 0030).
 
 **Agent**:
-A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`) comes only from hooks Condr installed into that CLI, delivered in-band as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed. A `Blocked` Agent may carry `blocked_on`, what its hook said it waits for (a tool and command, or a question), cleared with the state (ADR 0024).
-_Avoid_: Pane
+A recognized agent CLI process running inside a Terminal. It does not own or create the Pane that presents it. Its state (`Unknown`, `Idle`, `Working`, `Blocked`, `Done`, `Error`) comes only from the CLI itself, in-band on its own PTY: its Program Status Protocol reports, OSC 7501, once it sends one (ADR 0044), otherwise hooks Condr installed into it, delivered as OSC 777 (ADR 0014); an Agent that has not reported is `Unknown`, never guessed. A `Blocked` or `Error` Agent may carry `detail`, what it said it waits for (a tool and command, a question, a login) or why it halted, cleared with the state (ADR 0024, ADR 0044).
+_Avoid_: Pane, blocked_on
 
 **Done**:
-How a Client shows an Agent that went `Idle` after `Working` or `Blocked` while that Client was not showing its Pane (ADR 0014). It is presentation, not a wire state, and each Client keeps its own, so an Agent watched finishing on the desktop is still Done on the phone. A Client marks only a finish it saw happen: an Agent that finished while the Client was away shows as `Idle` (ADR 0041).
+An Agent's state once a turn finished and it has not seen the user come back for the result (ADR 0044); its own `Idle` ends it everywhere. Each Client adds one bit of its own, whether it looked: a `Done` this Client watched arrive, or whose Pane it opened since, shows as `Idle`, so an Agent watched finishing on the desktop is still Done on the phone (ADR 0041).
 _Avoid_: Finished, Completed (as states)
 
 **Needs you**:
-The list of every `Blocked` Agent on every connected Device, with its `blocked_on`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything.
+The list of every `Blocked` or `Error` Agent on every connected Device, with its `detail`, at the top of the GUI's sidebar and on the Companion's first screen (ADR 0024, ADR 0044). Each Client builds it from state it already holds; it is not a Server feature, and choosing a row opens the Pane without answering anything.
 _Avoid_: inbox, queue
 
 **Agent Conversation**:

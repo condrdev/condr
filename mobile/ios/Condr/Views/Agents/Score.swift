@@ -269,8 +269,8 @@ struct Score: View {
         switch device.status {
         case .connected:
             let parts = [
-                (AgentStatus.blocked, "need you"), (.working, "working"), (.done, "done"),
-                (.idle, "idle"),
+                (AgentStatus.blocked, "need you"), (.error, "failed"), (.working, "working"),
+                (.done, "done"), (.idle, "idle"),
             ]
             .map { status, words in (statuses.filter { $0 == status }.count, words) }
             .filter { $0.0 > 0 }

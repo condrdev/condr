@@ -202,8 +202,9 @@ impl Condr {
                                             ),
                                             format!("{agent_label}: {}", status.label),
                                         ))
-                                        // What a Blocked agent waits for (ADR 0024).
-                                        .when_some(agent.blocked_on.clone(), |item, text| {
+                                        // What a Blocked agent waits for, or why an
+                                        // Error one halted (ADR 0024, ADR 0044).
+                                        .when_some(agent.detail.clone(), |item, text| {
                                             item.detail(text)
                                         })
                                         .active(
@@ -664,20 +665,25 @@ impl Condr {
             .into_any_element()
     }
 
-    /// One row per Blocked agent across all connections: its mark, the Workspace (and
-    /// the Device once there is more than one), and what it waits for. A click lands in
-    /// the Pane, as the OS notification's click does.
+    /// One row per Blocked or Error agent across all connections: its mark, the
+    /// Workspace (and the Device once there is more than one), and what it waits for or
+    /// why it halted. A click lands in the Pane, as the OS notification's click does.
     fn needs_you_items(&self, cx: &mut Context<Self>) -> Vec<CondrSidebarTreeItem> {
         let owner = cx.weak_entity();
         let several_devices = self.connections.len() > 1;
-        let status = agent_sidebar_status(AgentDisplayState::Blocked);
         let mut items = Vec::new();
         for connection in &self.connections {
             let key = connection.key;
             if connection.presented_session().is_none() {
                 continue;
             }
-            for (workspace, pane_id, agent) in connection.model.blocked_agents() {
+            for (workspace, pane_id, agent) in connection.model.agents_needing_you() {
+                let status = agent_sidebar_status(
+                    connection
+                        .model
+                        .agent_display_state(pane_id)
+                        .unwrap_or(AgentDisplayState::Blocked),
+                );
                 let label = if several_devices {
                     format!("{} · {}", workspace.name(), connection.label)
                 } else {
@@ -697,7 +703,7 @@ impl Condr {
                         format!("needs-you-status-{key}-{}", pane_id.as_u64()),
                         format!("{}: {}", agent.kind.label(), status.label),
                     ))
-                    .when_some(agent.blocked_on.clone(), |item, text| item.detail(text))
+                    .when_some(agent.detail.clone(), |item, text| item.detail(text))
                     .disable(!connection.can_mutate())
                     .on_click(move |_, window, cx| {
                         let _ =
