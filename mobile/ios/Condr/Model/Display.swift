@@ -67,7 +67,8 @@ extension AgentStatus {
     }
 
     /// Waiting for an answer or halted on a failure: the person has to come (ADR 0044).
-    var needsYou: Bool { self == .blocked || self == .error }
+    /// Read off the main actor too, by the demo world and the tests' fake client.
+    nonisolated var needsYou: Bool { self == .blocked || self == .error }
 
     /// Most urgent first, the order a score draws them in, so each colour reads as a run.
     var urgency: Int {
