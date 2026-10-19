@@ -36,6 +36,9 @@ jobs:
           format: false
           breaking: true
           push: false
+          # Findings reach the run as annotations; the pull request comment would need a
+          # token that can write, which Dependabot's cannot.
+          pr_comment: false
 
   test:
     name: clippy and test (${{ matrix.os }})
