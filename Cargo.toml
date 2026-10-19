@@ -101,6 +101,8 @@ prost = { opt-level = 3 }
 gpui-pre = { opt-level = 3 }
 gpui-pre-platform = { opt-level = 3 }
 gpui-pre-windows = { opt-level = 3 }
+gpui-pre-apple = { opt-level = 3 }
+gpui-pre-macos = { opt-level = 3 }
 gpui-base = { opt-level = 3 }
 gpui-component = { opt-level = 3 }
 gpui-kit = { opt-level = 3 }
