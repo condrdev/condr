@@ -27,9 +27,11 @@ pub(super) struct FilesViewState {
     /// others compare against `HEAD`. This Client's view, remembered in the state file.
     pub(super) changes_against_base: HashSet<(ConnectionKey, WorkspaceId)>,
     pub(super) collapsed_changes_sections: HashSet<ChangesSection>,
-    /// Directories folded shut in the Changes tree, by connection, Workspace and
-    /// repository path; Workspace ids repeat across Servers.
-    pub(super) collapsed_change_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
+    /// Directories folded shut in the Changes tree, by connection, Workspace, section and
+    /// repository path; Workspace ids repeat across Servers, and a directory with both a
+    /// tracked change and a new file is a row in two sections.
+    pub(super) collapsed_change_dirs:
+        HashSet<(ConnectionKey, WorkspaceId, ChangesSection, RelativePathBuf)>,
     /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
     pub(super) diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
     /// Which view the right sidebar shows per Workspace (ADR 0018), remembered in the
@@ -68,7 +70,7 @@ impl FilesViewState {
         self.expanded_dirs
             .retain(|(connection, id, _)| workspace_live(*connection, *id));
         self.collapsed_change_dirs
-            .retain(|(connection, id, _)| workspace_live(*connection, *id));
+            .retain(|(connection, id, _, _)| workspace_live(*connection, *id));
         self.sidebar_views
             .retain(|(connection, id), _| workspace_live(*connection, *id));
         self.last_terminal_tabs.retain(|(connection, id), tab_id| {

@@ -353,3 +353,68 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
 
     let _ = std::fs::remove_dir_all(&repository);
 }
+
+/// A directory with a tracked change and an untracked file is a row in two sections.
+/// Each row folds on its own.
+#[test]
+fn a_directory_listed_in_two_sections_folds_from_either_row() {
+    let _serial_guard = acquire_visual_test_lock();
+    let repository = std::env::temp_dir().join(format!(
+        "condr-gui-changes-dup-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&repository);
+    std::fs::create_dir_all(repository.join("src/app")).unwrap();
+    run_git(&repository, ["init", "-q", "-b", "main"]);
+    run_git(&repository, ["config", "user.email", "condr@example.com"]);
+    run_git(&repository, ["config", "user.name", "Condr"]);
+    run_git(&repository, ["config", "commit.gpgsign", "false"]);
+    std::fs::write(repository.join("src/app/a.txt"), "alpha\n").unwrap();
+    run_git(&repository, ["add", "src/app/a.txt"]);
+    run_git(&repository, ["commit", "-q", "-m", "a"]);
+    std::fs::write(repository.join("src/app/a.txt"), "ALPHA\n").unwrap();
+    std::fs::write(repository.join("src/app/b.txt"), "new\n").unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = repository.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+    window.run_until_parked();
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("change-src/app/a.txt").is_some()
+            && window.debug_bounds("change-src/app/b.txt").is_some()
+    }));
+
+    let row = window
+        .debug_bounds("changes-untracked-dir-src/app")
+        .unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds("change-src/app/b.txt").is_none(),
+        "clicking the Untracked src/app row should fold it"
+    );
+    assert!(
+        window.debug_bounds("change-src/app/a.txt").is_some(),
+        "the Tracked src/app row stays open"
+    );
+
+    let _ = std::fs::remove_dir_all(&repository);
+}

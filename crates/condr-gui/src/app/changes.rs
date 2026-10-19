@@ -194,6 +194,7 @@ fn change_tree<'a>(entries: &[&'a GitChangeEntry]) -> Vec<ChangeNode<'a>> {
 struct TreeContext<'a> {
     key: ConnectionKey,
     workspace_id: WorkspaceId,
+    section: ChangesSection,
     /// The file the Diff Tab shows, drawn selected.
     shown: Option<&'a RelativePath>,
 }
@@ -701,6 +702,7 @@ impl Condr {
             let context = TreeContext {
                 key,
                 workspace_id,
+                section,
                 shown: shown.as_deref(),
             };
             self.render_change_tree(&context, &tree, 0, &mut elements, cx);
@@ -727,6 +729,7 @@ impl Condr {
                     let collapsed = self.files_view.collapsed_change_dirs.contains(&(
                         context.key,
                         context.workspace_id,
+                        context.section,
                         path.clone(),
                     ));
                     list.push(
@@ -753,10 +756,12 @@ impl Condr {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (key, workspace_id) = (context.key, context.workspace_id);
+        let (key, workspace_id, section) = (context.key, context.workspace_id, context.section);
         let theme = cx.theme();
         let path_text = path.to_string();
-        let selector: SharedString = format!("change-dir-{path_text}").into();
+        // The section is part of the id: the same directory in two sections is two rows,
+        // and rows sharing an id would share one click state.
+        let selector: SharedString = format!("{}-dir-{path_text}", section.selector()).into();
         let id = selector.clone();
         let owner = cx.weak_entity();
         let toggle_path = path.to_relative_path_buf();
@@ -776,7 +781,7 @@ impl Condr {
             .hover(|this| this.bg(theme.sidebar_accent.opacity(0.8)))
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| {
-                    let dir = (key, workspace_id, toggle_path.clone());
+                    let dir = (key, workspace_id, section, toggle_path.clone());
                     if !this.files_view.collapsed_change_dirs.remove(&dir) {
                         this.files_view.collapsed_change_dirs.insert(dir);
                     }
