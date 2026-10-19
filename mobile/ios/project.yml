@@ -56,7 +56,7 @@ targets:
         # iPhone only; at the project level XcodeGen's iOS target preset overrides it with "1,2".
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Condr
         INFOPLIST_KEY_NSCameraUsageDescription: Condr scans the pairing code your computer shows.
