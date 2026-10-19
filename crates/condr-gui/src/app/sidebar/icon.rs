@@ -158,15 +158,22 @@ pub(in crate::app) fn status_badge(
 }
 
 /// A Workspace's agents rolled up by state, ordered by how urgently each wants a person.
-/// States with nothing to report (unknown, idle) are left out, so a quiet Workspace shows
-/// nothing.
+/// An agent with nothing to report still counts, as idle: folded, the row is the only
+/// sign of where a conversation is waiting, so a quiet Workspace is not an empty one.
 pub(in crate::app) fn agent_status_summary(
     statuses: impl IntoIterator<Item = SidebarStatusVisual>,
 ) -> Vec<(SidebarStatusVisual, usize)> {
-    const ORDER: [&str; 4] = ["bell", "blocked", "done", "working"];
+    const ORDER: [&str; 5] = ["bell", "blocked", "done", "working", "idle"];
     let rank = |status: &SidebarStatusVisual| ORDER.iter().position(|key| *key == status.key);
     let mut summary: Vec<(SidebarStatusVisual, usize)> = Vec::new();
-    for status in statuses.into_iter().filter(|status| rank(status).is_some()) {
+    let statuses = statuses.into_iter().map(|status| {
+        if status.key == "unknown" {
+            agent_sidebar_status(AgentDisplayState::Idle)
+        } else {
+            status
+        }
+    });
+    for status in statuses.filter(|status| rank(status).is_some()) {
         match summary.iter_mut().find(|(seen, _)| seen.key == status.key) {
             Some((_, count)) => *count += 1,
             None => summary.push((status, 1)),

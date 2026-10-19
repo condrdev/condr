@@ -140,9 +140,15 @@ fn workspace_row_summarizes_agents_by_urgency_and_upstream_by_divergence() {
         .collect::<Vec<_>>();
     assert_eq!(
         summary,
-        [("bell", 1), ("blocked", 1), ("done", 2), ("working", 1)]
+        [
+            ("bell", 1),
+            ("blocked", 1),
+            ("done", 2),
+            ("working", 1),
+            ("idle", 2)
+        ]
     );
-    assert!(agent_status_summary([agent_sidebar_status(Idle)]).is_empty());
+    assert!(agent_status_summary([]).is_empty());
 
     let label = |ahead, behind| upstream_label(condr_core::GitUpstream { ahead, behind });
     assert_eq!(label(0, 0), None);
