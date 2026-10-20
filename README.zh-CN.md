@@ -109,12 +109,11 @@ cargo test --workspace --features condr-gui/test-support
 
 ## 致谢
 
-Condr 建立在这些项目和社区之上：
+Condr 建立在这些项目之上：
 
 - **[GPUI](https://www.gpui.rs)**：Zed 团队的 UI 框架。
 - **[GPUI Kit](https://github.com/longbridge/gpui-kit)**：Condr 依赖的组件库。
 - **[Alacritty](https://github.com/alacritty/alacritty)**：其 `alacritty_terminal` crate 是终端模拟的核心。
-- **[LINUX DO](https://linux.do)**
 
 ## 许可证
 
