@@ -42,6 +42,7 @@ export default defineConfig({
             { slug: 'docs/using/agents' },
             { slug: 'docs/using/changes' },
             { slug: 'docs/using/remote' },
+            { slug: 'docs/using/mobile' },
             { slug: 'docs/using/automation' },
             { slug: 'docs/using/preferences' },
           ],
@@ -57,6 +58,7 @@ export default defineConfig({
           items: [
             { slug: 'docs/help/troubleshooting' },
             { slug: 'docs/help/security' },
+            { slug: 'docs/help/privacy' },
             { slug: 'docs/help/architecture' },
             { slug: 'docs/help/roadmap' },
           ],

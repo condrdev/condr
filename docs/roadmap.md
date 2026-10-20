@@ -42,7 +42,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"（ADR 0036 已去掉 controller 租约）。没有 capability，密钥也没有进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
 - Windows 代码签名（SmartScreen）。
 - 终端内搜索。
-- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，移动端 Companion 只经 TestFlight 与 Android 内部测试分发（ADR 0041）。
+- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，iOS 的 Companion 经 TestFlight 公开链接分发，Android 以签名 APK 在 GitHub Releases 发布；App Store 与 Google Play 随首个正式版上架（ADR 0041）。
 
 **已知限制**（出现摩擦再立 Issue）：
 
@@ -56,7 +56,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 移动端 Companion（iOS 与 Android）
 
-**状态**：进行中。
+**状态**：下述 1–5 步已在 iOS 完成，iOS 经 TestFlight 公开测试（第 6 步）；接下来实现推送，然后是 Android。
 
 **为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `detail`，把它们带到手机上是这一层能做、单个厂商不会做的事。
 
@@ -75,8 +75,10 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 2. 客户端库：按 ADR 0039 拆出 crate 并加上 uniffi 绑定，产出 xcframework 与 AAR，CI 增加 iOS 与 Android 目标；按 ADR 0041 加 `WatchTerminals`，帧率上限和视口提示等实测后再定。
 3. 配对与连接：桌面 Settings 的 Invite 把链接显示成二维码，TCP 的二维码先让用户选定手机能访问的地址（ADR 0040），手机扫码配对，Server 照常记进 `authorized-clients`。走 Peer-to-peer 的 Server 要开启 `[server.p2p] enabled`，配对引导要提示这一步。App 只在前台保持连接，回到前台时重连并重新 Bootstrap；后台全靠推送。
 4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、Pane 的终端视图（打开时接管尺寸）。
-5. 推送：中转上线，按客户端限速，并在 SECURITY.md 写明它保存配对关系和推送 token、看不到通知内容；Agent 完成或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。
-6. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
+5. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
+6. iOS 公开测试：TestFlight 公开链接，要求桌面端 0.1.13 或更新；只在手机端或协议变化时上传新 build；Beta App Review 用 App 内的静态 Demo。官网文档加手机端与隐私政策两页，联系邮箱 `hello@condr.dev`。
+7. 推送：先单独写推送 ADR。中转上线，按客户端限速，并在 SECURITY.md 与隐私政策页写明它保存配对关系和推送 token、看不到通知内容；Agent 完成或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。只接 APNs 与 FCM，不接国内厂商通道或聚合推送：没有 GMS 的 Android 手机只在前台更新。
+8. Android：推送之后开工，不等需求信号；终端渲染等实现开工时单独定。正式版之前以签名 APK 在 GitHub Releases 发布，Google Play 随首个正式版。
 
 **要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连；手机不显示的 Git 与文件事件在蜂窝流量里占多少（ADR 0041）。
 

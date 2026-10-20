@@ -11,9 +11,12 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 
 ### Mobile apps (iOS and Android)
 
-**In progress.** Away from your computer, see the Workspaces and Agent states on each of your Devices, the Needs you list, and a read-only view of each terminal on your phone. Your phone gets a push notification when an Agent finishes or needs you. The Server encrypts each notification end to end with your phone's public key, so neither the server that relays it nor Apple or Google can read it.
+**iPhone in public beta.** The iPhone app is available through TestFlight; see [Mobile app](/docs/using/mobile/). It shows the Agents on each of your Devices and the Needs you list, and opens Panes so you can read and reply. Next, in this order:
 
-The phone pairs by scanning a QR code and connects over Peer-to-peer or TCP; SSH connections are not supported. Which actions the phone can take is still being designed.
+1. **Push notifications**: your phone gets a notification when an Agent finishes or needs you. The Server encrypts each one end to end with your phone's public key, so neither the server that relays it nor Apple or Google can read it. On Android they arrive only through Google's push service; a phone without Google services updates only while the app is open.
+2. **The Android app**, with the same features as the iPhone app. Until the first stable release it is published as a signed APK on GitHub Releases.
+
+Condr comes to the App Store and Google Play with its first stable release.
 
 ### More officially supported Agent CLIs
 
