@@ -59,7 +59,7 @@ Condr 由两部分组成：
 | 平台                 | 安装包   |
 | -------------------- | -------- |
 | Linux x86_64 / arm64 | AppImage |
-| macOS x86_64 / arm64 | `.dmg`   |
+| macOS Apple Silicon  | `.dmg`   |
 | Windows x86_64       | `.exe`   |
 
 ### Headless Server
@@ -71,7 +71,7 @@ Condr 由两部分组成：
 | 平台                 | 安装命令                                        |
 | -------------------- | ----------------------------------------------- |
 | Linux x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
-| macOS x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
+| macOS Apple Silicon  | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
 
 ## 快速上手
@@ -106,6 +106,15 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --features condr-gui/test-support -- -D warnings
 cargo test --workspace --features condr-gui/test-support
 ```
+
+## 致谢
+
+Condr 建立在这些项目和社区之上：
+
+- **[GPUI](https://www.gpui.rs)**：Zed 团队的 UI 框架。
+- **[GPUI Kit](https://github.com/longbridge/gpui-kit)**：Condr 依赖的组件库。
+- **[Alacritty](https://github.com/alacritty/alacritty)**：其 `alacritty_terminal` crate 是终端模拟的核心。
+- **[LINUX DO](https://linux.do)**
 
 ## 许可证
 

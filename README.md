@@ -108,6 +108,15 @@ cargo clippy --workspace --all-targets --features condr-gui/test-support -- -D w
 cargo test --workspace --features condr-gui/test-support
 ```
 
+## Acknowledgements
+
+Condr stands on these projects and communities:
+
+- **[GPUI](https://www.gpui.rs)**: the UI framework from the Zed team.
+- **[GPUI Kit](https://github.com/longbridge/gpui-kit)**: the component library Condr builds on.
+- **[Alacritty](https://github.com/alacritty/alacritty)**: its `alacritty_terminal` crate is the terminal emulation core.
+- **[LINUX DO](https://linux.do)**
+
 ## License
 
 [Apache License 2.0](LICENSE)
