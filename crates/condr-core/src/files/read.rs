@@ -92,6 +92,10 @@ pub fn read_file(root: &Path, relative: &RelativePath) -> Result<FileContent, St
     if meta.is_dir() {
         return Err("is a directory".into());
     }
+    // A FIFO would block the read and a device has no end (ADR 0045).
+    if !meta.is_file() {
+        return Err("not a regular file".into());
+    }
     let image = is_image(relative);
     let limit = if image {
         MAX_IMAGE_BYTES
@@ -113,7 +117,18 @@ pub fn read_file(root: &Path, relative: &RelativePath) -> Result<FileContent, St
     if bytes[..bytes.len().min(BINARY_PROBE_BYTES)].contains(&0) {
         return Ok(FileContent::Binary);
     }
-    Ok(FileContent::Text {
-        text: String::from_utf8_lossy(&bytes).into_owned(),
+    let version = file_version(&bytes);
+    Ok(match String::from_utf8(bytes) {
+        Ok(text) => FileContent::Text {
+            text,
+            version: Some(version),
+            lossy: false,
+        },
+        // Shown, but saving the decoded text would rewrite the replaced bytes.
+        Err(error) => FileContent::Text {
+            text: String::from_utf8_lossy(error.as_bytes()).into_owned(),
+            version: None,
+            lossy: true,
+        },
     })
 }

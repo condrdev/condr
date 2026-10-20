@@ -7,6 +7,8 @@ mod dialogs;
 mod directory_browser;
 mod dock;
 mod events;
+mod file_edits;
+mod file_entries;
 pub(crate) mod file_icons;
 mod files;
 mod gui_state;
@@ -67,6 +69,8 @@ use connection::*;
 use dialogs::accepted_text_input;
 use directory_browser::{DirectoryBrowser, browser_field, render_directory_browser};
 use dock::*;
+use file_edits::*;
+use file_entries::*;
 use files::*;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -178,7 +182,8 @@ actions!(
         ShowAllApps,
         MinimizeWindow,
         ZoomWindow,
-        ToggleFullScreen
+        ToggleFullScreen,
+        SaveFile
     ]
 );
 
@@ -341,6 +346,24 @@ impl Condr {
         } = state;
         let (connect_results_tx, connect_results_rx) =
             async_channel::bounded(CONNECTION_RESULT_BUFFER_CAPACITY);
+        // Closing the window takes every Preview Tab's unsaved text with it (ADR 0045).
+        let owner = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            owner
+                .update(cx, |this, cx| {
+                    if !this.files_view.has_unsaved() {
+                        return true;
+                    }
+                    this.confirm_unsaved(
+                        UnsavedScope::All,
+                        Box::new(|_, window, _| window.remove_window()),
+                        window,
+                        cx,
+                    );
+                    false
+                })
+                .unwrap_or(true)
+        });
         let mut connection = ServerConnection::new(1, "Local".into(), endpoint);
         // Without a ready connection the window opens first and connects like any
         // other device, so a slow or absent local Server never holds it back.

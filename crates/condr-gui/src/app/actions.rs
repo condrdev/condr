@@ -12,6 +12,23 @@ impl Condr {
         }
         self.activate_tab_at_index(action.index, window, cx);
     }
+
+    /// Quitting takes every Preview Tab's unsaved text with it, so it asks first (ADR
+    /// 0045). Handled here, the global handler only quits.
+    // ponytail: Cmd+Q from the Settings window reaches only the global handler.
+    pub(super) fn action_quit_app(
+        &mut self,
+        _: &QuitApp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm_unsaved(
+            UnsavedScope::All,
+            Box::new(|_, _, cx| cx.quit()),
+            window,
+            cx,
+        );
+    }
 }
 
 macro_rules! action_handlers {

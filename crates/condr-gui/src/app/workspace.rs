@@ -686,6 +686,7 @@ impl Condr {
 
 impl Render for Condr {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ask_file_prompts(window, cx);
         let workspace_owner = cx.weak_entity();
         let sidebar_toggle_owner = cx.weak_entity();
         let WorkspaceChrome {
@@ -732,6 +733,7 @@ impl Render for Condr {
             .on_action(cx.listener(Self::action_close_pane))
             .on_action(cx.listener(Self::action_close_tab))
             .on_action(cx.listener(Self::action_close_workspace))
+            .on_action(cx.listener(Self::action_quit_app))
             .on_action(cx.listener(Self::action_next_tab))
             .on_action(cx.listener(Self::action_previous_tab))
             .on_action(cx.listener(Self::action_activate_tab))

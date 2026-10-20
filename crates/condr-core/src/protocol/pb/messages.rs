@@ -16,9 +16,9 @@ use crate::protocol::{
 };
 use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
-    AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, PaneId,
-    ProxyMode, ProxySetting, SessionSnapshot, TabId, TerminalCommand, TerminalView,
-    TerminalViewFrame, WorkspaceId,
+    AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, FileKind,
+    FileMutation, FileMutationResult, PaneId, ProxyMode, ProxySetting, SessionSnapshot, TabId,
+    TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -31,6 +31,56 @@ fn tab(id: u64) -> TabId {
 
 fn workspace(id: u64) -> WorkspaceId {
     WorkspaceId::from_u64(id)
+}
+
+fn encode_mutation(mutation: &FileMutation) -> file_mutation_request::Mutation {
+    use file_mutation_request::Mutation;
+    match mutation {
+        FileMutation::Write { path, text, base } => Mutation::Write(super::WriteFile {
+            path: path.to_string(),
+            text: text.clone(),
+            base: *base,
+        }),
+        FileMutation::Create { path, kind } => Mutation::Create(CreateEntry {
+            path: path.to_string(),
+            kind: match kind {
+                FileKind::Directory => super::FileKind::Directory,
+                FileKind::File => super::FileKind::File,
+            } as i32,
+        }),
+        FileMutation::Rename { from, to } => Mutation::Rename(RenameEntry {
+            from: from.to_string(),
+            to: to.to_string(),
+        }),
+        FileMutation::Delete { path } => Mutation::Delete(path.to_string()),
+    }
+}
+
+fn decode_mutation(mutation: file_mutation_request::Mutation) -> WireResult<FileMutation> {
+    use file_mutation_request::Mutation;
+    Ok(match mutation {
+        Mutation::Write(write) => FileMutation::Write {
+            path: relative_path(write.path)?,
+            text: write.text,
+            base: write.base,
+        },
+        // No fallback: creating a kind this build does not know is not creating a file.
+        Mutation::Create(create) => FileMutation::Create {
+            path: relative_path(create.path)?,
+            kind: match enum_value(create.kind, "file kind")? {
+                super::FileKind::Unspecified => unreachable!("enum_value rejects 0"),
+                super::FileKind::Directory => FileKind::Directory,
+                super::FileKind::File => FileKind::File,
+            },
+        },
+        Mutation::Rename(rename) => FileMutation::Rename {
+            from: relative_path(rename.from)?,
+            to: relative_path(rename.to)?,
+        },
+        Mutation::Delete(path) => FileMutation::Delete {
+            path: relative_path(path)?,
+        },
+    })
 }
 
 fn encode_kind(kind: AgentKind) -> i32 {
@@ -327,6 +377,19 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 workspace_id,
                 path,
             )),
+            ClientMessage::MutateFile {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                mutation,
+            } => Message::MutateFile(FileMutationRequest {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                mutation: Some(encode_mutation(mutation)),
+            }),
             ClientMessage::BrowseDirectory { request_id, path } => {
                 Message::BrowseDirectory(super::BrowseDirectory {
                     request_id: *request_id,
@@ -476,6 +539,13 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
                 path: relative_path(request.path)?,
+            },
+            Message::MutateFile(request) => ClientMessage::MutateFile {
+                server_id: ServerId(request.server_id),
+                session_id: SessionId(request.session_id),
+                request_id: request.request_id,
+                workspace_id: workspace(request.workspace_id),
+                mutation: decode_mutation(member(request.mutation)?)?,
             },
             Message::BrowseDirectory(request) => ClientMessage::BrowseDirectory {
                 request_id: request.request_id,
@@ -1612,6 +1682,26 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                     Err(error) => file_content_reply::Result::Err(error.clone()),
                 }),
             }),
+            ServerMessage::FileMutated {
+                request_id,
+                workspace_id,
+                result,
+            } => Message::FileMutated(FileMutationReply {
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                result: Some(match result {
+                    FileMutationResult::Done { version } => {
+                        file_mutation_reply::Result::Done(FileMutationDone { version: *version })
+                    }
+                    FileMutationResult::Conflict => file_mutation_reply::Result::Conflict(Empty {}),
+                    FileMutationResult::Invalid(reason) => {
+                        file_mutation_reply::Result::Invalid(reason.clone())
+                    }
+                    FileMutationResult::Failed(error) => {
+                        file_mutation_reply::Result::Failed(error.clone())
+                    }
+                }),
+            }),
             ServerMessage::BrowsedDirectory { request_id, result } => {
                 Message::BrowsedDirectory(BrowsedDirectoryReply {
                     request_id: *request_id,
@@ -1790,6 +1880,18 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             result: match member(reply.result)? {
                 file_content_reply::Result::Ok(content) => Ok(FileContent::try_from(content)?),
                 file_content_reply::Result::Err(error) => Err(error),
+            },
+        },
+        Message::FileMutated(reply) => ServerMessage::FileMutated {
+            request_id: reply.request_id,
+            workspace_id: workspace(reply.workspace_id),
+            result: match member(reply.result)? {
+                file_mutation_reply::Result::Done(done) => FileMutationResult::Done {
+                    version: done.version,
+                },
+                file_mutation_reply::Result::Conflict(_) => FileMutationResult::Conflict,
+                file_mutation_reply::Result::Invalid(reason) => FileMutationResult::Invalid(reason),
+                file_mutation_reply::Result::Failed(error) => FileMutationResult::Failed(error),
             },
         },
         Message::BrowsedDirectory(reply) => ServerMessage::BrowsedDirectory {

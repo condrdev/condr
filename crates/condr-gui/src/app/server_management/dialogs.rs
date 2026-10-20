@@ -452,8 +452,16 @@ impl Condr {
                             .ok_variant(ButtonVariant::Danger)
                             .show_cancel(true)
                             .on_ok(move |_, window, cx| {
-                                let _ = owner
-                                    .update(cx, |this, cx| this.remove_server(key, window, cx));
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.confirm_unsaved(
+                                        UnsavedScope::Device(key),
+                                        Box::new(move |this, window, cx| {
+                                            this.remove_server(key, window, cx)
+                                        }),
+                                        window,
+                                        cx,
+                                    )
+                                });
                                 true
                             }),
                     )

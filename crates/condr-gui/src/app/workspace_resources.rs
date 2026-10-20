@@ -133,7 +133,11 @@ mod tests {
     };
 
     fn text(value: &str) -> Result<FileContent, String> {
-        Ok(FileContent::Text { text: value.into() })
+        Ok(FileContent::Text {
+            text: value.into(),
+            version: None,
+            lossy: false,
+        })
     }
 
     #[test]

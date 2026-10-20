@@ -2,20 +2,25 @@
 //! file's content, text or an image's bytes (ADR 0037), read by the Server and answered
 //! over the protocol. Plain filesystem reads: browsing a Workspace does not need it to be
 //! a repository. Also the subdirectories of any absolute path, for choosing a Root
-//! Directory on another Device.
+//! Directory on another Device. And the edits ADR 0045 lets a Client make: writing a
+//! file, creating, renaming and deleting entries.
 
 use std::path::PathBuf;
 
-use relative_path::RelativePath;
+use relative_path::{RelativePath, RelativePathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::valid_diff_path;
 
 #[cfg(feature = "runtime")]
 mod read;
+#[cfg(feature = "runtime")]
+mod write;
 
 #[cfg(feature = "runtime")]
 pub use read::{browse_directory, list_directory, read_file};
+#[cfg(feature = "runtime")]
+pub use write::mutate_file;
 
 /// The largest file the Preview Tab shows; larger ones yield a placeholder like a diff.
 pub const MAX_FILE_BYTES: u64 = crate::MAX_DIFF_BYTES;
@@ -69,8 +74,15 @@ pub struct BrowsedDirectory {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum FileContent {
+    /// A Server with ADR 0045 sets exactly one of `version` and `lossy`; neither is a
+    /// Server older than that.
     Text {
         text: String,
+        /// What a write must start from: present only when `text` is exactly the file's
+        /// bytes, so it can be saved back.
+        version: Option<u64>,
+        /// The bytes were not valid UTF-8 and were decoded with replacements.
+        lossy: bool,
     },
     /// A file [`is_image`] names, undecoded: the Client decodes it.
     Image {
@@ -80,6 +92,52 @@ pub enum FileContent {
     TooLarge {
         bytes: u64,
     },
+}
+
+/// A change to a Workspace's files (ADR 0045), answered with a [`FileMutationResult`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FileMutation {
+    /// Replaces the file's bytes with `text`, creating it when its directory exists. With
+    /// `base`, only while the file still has that version; without, unconditionally.
+    Write {
+        path: RelativePathBuf,
+        text: String,
+        base: Option<u64>,
+    },
+    /// Never replaces an existing entry.
+    Create {
+        path: RelativePathBuf,
+        kind: FileKind,
+    },
+    /// Within one directory, never onto another entry.
+    Rename {
+        from: RelativePathBuf,
+        to: RelativePathBuf,
+    },
+    /// Permanently, a directory with everything in it.
+    Delete { path: RelativePathBuf },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FileMutationResult {
+    /// For a write, the version of the bytes written.
+    Done {
+        version: Option<u64>,
+    },
+    /// A write whose file no longer has the version it started from, or no longer exists.
+    Conflict,
+    /// A problem with the name, which a dialog shows under its field (ADR 0020).
+    Invalid(String),
+    Failed(String),
+}
+
+/// The version [`FileContent::Text`] reports for `bytes`: a fixed hash, the same for the
+/// life of a Server.
+pub fn file_version(bytes: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::hash::DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
 }
 
 /// The Workspace root itself, or a directory inside it.

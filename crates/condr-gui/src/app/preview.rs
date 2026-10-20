@@ -340,13 +340,24 @@ impl Condr {
                 }
                 continue;
             };
+            // Rendered draws unsaved text from the Editor instead (ADR 0045).
+            if self.files_view.file_editors.values().any(|editor| {
+                editor.dirty
+                    && editor.workspace_id == workspace_id
+                    && editor
+                        .shown
+                        .as_ref()
+                        .is_some_and(|(shown, _)| *shown == path)
+            }) {
+                continue;
+            }
             let image_key = (key, workspace_id, path);
             if !self.files_view.images.feed(&image_key, generation) {
                 continue;
             }
             let decodable = match (answer, image_format(&image_key.2)) {
                 (Ok(FileContent::Image { bytes }), Some(format)) => Ok((bytes, format)),
-                (Ok(FileContent::Text { text }), Some(ImageFormat::Svg)) => {
+                (Ok(FileContent::Text { text, .. }), Some(ImageFormat::Svg)) => {
                     Ok((text.into_bytes(), ImageFormat::Svg))
                 }
                 (Ok(FileContent::TooLarge { bytes }), _) => Err(format!(
@@ -369,36 +380,62 @@ impl Condr {
                     continue;
                 }
             };
-            let mut hasher = DefaultHasher::new();
-            bytes.hash(&mut hasher);
-            let digest = hasher.finish();
-            if self.files_view.images.digest(&image_key) == Some(digest) {
-                continue;
-            }
-            let svg = cx.svg_renderer();
-            cx.spawn(async move |this, cx| {
-                let decoded = cx
-                    .background_spawn(async move { decode(bytes, format, svg) })
-                    .await;
-                this.update(cx, |this, cx| {
-                    let shown = decoded.map(Arc::new).map_err(SharedString::from);
-                    let replaced =
-                        this.files_view
-                            .images
-                            .land(&image_key, generation, Some(digest), shown);
-                    release_images(replaced.into_iter().collect(), cx);
-                    // Kit keeps the size a Markdown image was first laid out at.
-                    for editor in this.files_view.file_editors.values() {
-                        if let Some(markdown) = &editor.markdown {
-                            markdown.update(cx, |state, cx| state.invalidate_inline_layout(cx));
-                        }
-                    }
-                    cx.notify();
-                })
-                .ok();
-            })
-            .detach();
+            self.decode_image(image_key, generation, bytes, format, cx);
         }
+    }
+
+    /// Rendered draws the Editor's text, saved or not (ADR 0045): an unsaved SVG is
+    /// decoded from it rather than from the file's answer.
+    pub(super) fn feed_unsaved_svg(
+        &mut self,
+        image_key: ImageKey,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        // No answer has this generation, so the file's next answer replaces the drawing.
+        const UNSAVED: u64 = u64::MAX;
+        self.files_view.images.feed(&image_key, UNSAVED);
+        self.decode_image(image_key, UNSAVED, text.into_bytes(), ImageFormat::Svg, cx);
+    }
+
+    /// Decodes `bytes` off the main thread and shows them, unless they are what is shown.
+    fn decode_image(
+        &mut self,
+        image_key: ImageKey,
+        generation: u64,
+        bytes: Vec<u8>,
+        format: ImageFormat,
+        cx: &mut Context<Self>,
+    ) {
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        let digest = hasher.finish();
+        if self.files_view.images.digest(&image_key) == Some(digest) {
+            return;
+        }
+        let svg = cx.svg_renderer();
+        cx.spawn(async move |this, cx| {
+            let decoded = cx
+                .background_spawn(async move { decode(bytes, format, svg) })
+                .await;
+            this.update(cx, |this, cx| {
+                let shown = decoded.map(Arc::new).map_err(SharedString::from);
+                let replaced =
+                    this.files_view
+                        .images
+                        .land(&image_key, generation, Some(digest), shown);
+                release_images(replaced.into_iter().collect(), cx);
+                // Kit keeps the size a Markdown image was first laid out at.
+                for editor in this.files_view.file_editors.values() {
+                    if let Some(markdown) = &editor.markdown {
+                        markdown.update(cx, |state, cx| state.invalidate_inline_layout(cx));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// A rendered Markdown file: GPUI Kit's TextView over the Tab's state, its text centred

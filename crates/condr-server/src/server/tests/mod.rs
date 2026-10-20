@@ -1,5 +1,6 @@
 #[cfg(target_os = "linux")]
 mod clipboard_image;
+mod files;
 mod hooks;
 // Layout tests run only where CI exercises the Server's worktree and PTY paths.
 #[cfg(any(target_os = "linux", target_os = "windows"))]

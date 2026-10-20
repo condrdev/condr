@@ -686,6 +686,15 @@ impl Condr {
                     ..IncomingEffect::default()
                 }
             }
+            ServerMessage::FileMutated {
+                request_id, result, ..
+            } => {
+                self.file_mutated(key, request_id, result, cx);
+                IncomingEffect {
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
             ServerMessage::BrowsedDirectory { request_id, result } => {
                 self.apply_browsed_directory(key, request_id, result, cx);
                 IncomingEffect {

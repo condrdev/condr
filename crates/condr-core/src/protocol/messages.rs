@@ -88,6 +88,15 @@ pub enum ClientMessage {
         /// Relative to the Workspace root.
         path: RelativePathBuf,
     },
+    /// Writes a file, or creates, renames or deletes an entry (ADR 0045); answered with
+    /// [`ServerMessage::FileMutated`].
+    MutateFile {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        mutation: crate::FileMutation,
+    },
     /// The subdirectories of an absolute path on the Server's machine, or of its home
     /// directory when `path` is empty, for choosing a Root Directory; answered with
     /// [`ServerMessage::BrowsedDirectory`].
@@ -770,6 +779,12 @@ pub enum ServerMessage {
         /// Relative to the Workspace root, as requested.
         path: RelativePathBuf,
         result: Result<crate::FileContent, String>,
+    },
+    /// The reply to [`ClientMessage::MutateFile`].
+    FileMutated {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        result: crate::FileMutationResult,
     },
     /// The reply to [`ClientMessage::BrowseDirectory`].
     BrowsedDirectory {

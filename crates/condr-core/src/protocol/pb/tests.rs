@@ -370,3 +370,85 @@ fn a_submitted_draft_round_trips() {
     let wire = super::TerminalCommand::from(&command);
     assert_eq!(crate::TerminalCommand::try_from(wire).unwrap(), command);
 }
+
+#[test]
+fn file_mutations_and_their_replies_round_trip() {
+    use crate::{FileKind, FileMutation, FileMutationResult, WorkspaceId};
+    let mutations = [
+        FileMutation::Write {
+            path: "plan.md".into(),
+            text: "one\r\n".into(),
+            base: Some(0),
+        },
+        FileMutation::Write {
+            path: "plan.md".into(),
+            text: String::new(),
+            base: None,
+        },
+        FileMutation::Create {
+            path: "docs".into(),
+            kind: FileKind::Directory,
+        },
+        FileMutation::Rename {
+            from: "a.txt".into(),
+            to: "A.txt".into(),
+        },
+        FileMutation::Delete {
+            path: "build".into(),
+        },
+    ];
+    for mutation in mutations {
+        let message = ClientMessage::MutateFile {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 3,
+            workspace_id: WorkspaceId::from_u64(4),
+            mutation,
+        };
+        let encoded = super::ClientMessage::try_from(&message).unwrap();
+        assert_eq!(ClientMessage::try_from(encoded).unwrap(), message);
+    }
+    // A version of zero is a version, not its absence.
+    for result in [
+        FileMutationResult::Done { version: Some(0) },
+        FileMutationResult::Done { version: None },
+        FileMutationResult::Conflict,
+        FileMutationResult::Invalid("already exists".into()),
+        FileMutationResult::Failed("disk full".into()),
+    ] {
+        let message = ServerMessage::FileMutated {
+            request_id: 3,
+            workspace_id: WorkspaceId::from_u64(4),
+            result,
+        };
+        let encoded = super::ServerMessage::try_from(&message).unwrap();
+        assert_eq!(ServerMessage::try_from(encoded).unwrap(), message);
+    }
+    let text = crate::FileContent::Text {
+        text: "x".into(),
+        version: Some(0),
+        lossy: false,
+    };
+    assert_eq!(
+        crate::FileContent::try_from(super::FileContent::from(&text)).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn the_largest_legal_write_fits_one_frame() {
+    // Three-byte characters up to the limit, under a long path.
+    let text = "€".repeat(crate::MAX_FILE_BYTES as usize / 3);
+    let message = ClientMessage::MutateFile {
+        server_id: crate::protocol::ServerId(u64::MAX),
+        session_id: crate::protocol::SessionId(u64::MAX),
+        request_id: u64::MAX,
+        workspace_id: crate::WorkspaceId::from_u64(u64::MAX),
+        mutation: crate::FileMutation::Write {
+            path: "a/".repeat(2000).into(),
+            text,
+            base: Some(u64::MAX),
+        },
+    };
+    assert!(crate::protocol::encode_frame(&message, message.frame_limit()).is_ok());
+}

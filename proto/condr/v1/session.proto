@@ -260,4 +260,8 @@ message FileContent {
     // An image file's undecoded bytes (ADR 0037).
     bytes image = 4;
   }
+  // Text only (ADR 0045). A Server that has them sets exactly one: `version` when the
+  // text is the file's exact bytes, `lossy` when decoding replaced some.
+  optional uint64 version = 5;
+  bool lossy = 6;
 }

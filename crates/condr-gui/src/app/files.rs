@@ -1,7 +1,7 @@
 //! The Files sidebar and the Preview Tab (ADR 0018): the presented Workspace's directory
-//! tree, one level per Server answer, and one file's content in GPUI Kit's read-only
-//! Editor, or rendered when it is Markdown or an image (ADR 0037). Like the Changes
-//! sidebar, everything shown is Server data.
+//! tree, one level per Server answer, and one file's content in GPUI Kit's Editor, or
+//! rendered when it is Markdown or an image (ADR 0037). The Editor saves what it edits
+//! back to the Server (ADR 0045); `file_edits` holds that side.
 
 use super::changes::{empty_state, status_color, status_glyph, tree_indent};
 use super::preview::{
@@ -51,9 +51,24 @@ pub(super) struct FilesViewState {
     pub(super) pending_file_line: Option<(ConnectionKey, WorkspaceId, RelativePathBuf, u32)>,
     /// The images the Preview Tabs show, decoded (ADR 0037).
     pub(super) images: PreviewImages,
+    /// Saves in flight, by connection and request (ADR 0045).
+    pub(super) saves: HashMap<(ConnectionKey, u64), PendingSave>,
+    /// Creates, renames and deletes in flight, by connection and request.
+    pub(super) entry_requests: HashMap<(ConnectionKey, u64), EntryRequest>,
+    /// Questions that arrived without a window, asked one at a time from `render`.
+    pub(super) prompts: std::collections::VecDeque<FilePrompt>,
+    pub(super) prompt_open: bool,
+    /// What waits for a window: the action a landed save let through, or a dialog to
+    /// open again with the Server's answer.
+    pub(super) deferred: Vec<Continuation>,
 }
 
 impl FilesViewState {
+    /// Whether any Preview Tab holds text it has not saved.
+    pub(super) fn has_unsaved(&self) -> bool {
+        self.file_editors.values().any(|editor| editor.dirty)
+    }
+
     /// Hands back the images it dropped, for `release_images` to free from the atlas.
     pub(super) fn retain_session(
         &mut self,
@@ -189,8 +204,28 @@ fn land_on_line(
 /// The Preview Tab's Editor and what it currently shows.
 pub(super) struct FileEditor {
     pub(super) state: Entity<EditorState>,
+    pub(super) workspace_id: WorkspaceId,
+    /// The Workspace's root when the Tab opened, so unsaved text is never saved into a
+    /// different Workspace that took over its id.
+    pub(super) root: PathBuf,
+    /// What a save starts from (ADR 0045); `None` keeps the Editor read-only.
+    pub(super) version: Option<u64>,
+    /// Why the Editor is read-only, for the header.
+    readonly_reason: Option<&'static str>,
+    /// The text as last read or saved: anything else in the Editor is unsaved.
+    pub(super) base_text: String,
+    pub(super) dirty: bool,
+    /// The file as read had only `\r\n` line breaks, so saving keeps it that way.
+    pub(super) crlf: bool,
+    /// The save in flight, by request.
+    pub(super) saving: Option<u64>,
+    /// A different file was read while the text was unsaved.
+    pub(super) disk_changed: bool,
+    /// What waits on the save in flight leaving nothing unsaved.
+    pub(super) after_save: Option<Continuation>,
+    _changes: Subscription,
     /// The path and the generation of the cached answer the Editor text was built from.
-    shown: Option<(RelativePathBuf, u64)>,
+    pub(super) shown: Option<(RelativePathBuf, u64)>,
     pub(super) content: FileViewContent,
     /// The file rendered, while it is Markdown (ADR 0037).
     pub(super) markdown: Option<Entity<TextViewState>>,
@@ -268,7 +303,13 @@ impl Condr {
             Some(Ok(listing)) => listing.clone(),
         };
         if listing.entries.is_empty() {
-            return empty_state("Empty directory", cx);
+            return div()
+                .id("condr-files-empty")
+                .flex_1()
+                .flex()
+                .context_menu(self.root_context_menu(key, workspace_id, cx))
+                .child(empty_state("Empty directory", cx))
+                .into_any_element();
         }
         let context = FilesContext {
             key,
@@ -296,7 +337,17 @@ impl Condr {
         if listing.truncated {
             list = list.child(truncated_note(cx));
         }
-        list.children(rows).into_any_element()
+        // The empty area below the tree creates in the Root Directory.
+        list.children(rows)
+            .child(
+                div()
+                    .id("condr-files-root-area")
+                    .debug_selector(|| "condr-files-root-area".into())
+                    .flex_1()
+                    .min_h(rems(2.))
+                    .context_menu(self.root_context_menu(key, workspace_id, cx)),
+            )
+            .into_any_element()
     }
 
     /// Asks for `path`'s listing once it is neither known nor on its way. Rendering
@@ -410,6 +461,7 @@ impl Condr {
         let selector: SharedString = format!("file-dir-{}", path.as_str()).into();
         let id = selector.clone();
         let owner = cx.weak_entity();
+        let menu = self.directory_context_menu(context.key, context.workspace_id, path, cx);
         let (key, workspace_id, toggle_path) = (
             context.key,
             context.workspace_id,
@@ -444,6 +496,7 @@ impl Condr {
                     this.toggle_files_directory(key, workspace_id, toggle_path.clone(), cx);
                 });
             })
+            .context_menu(menu)
             .child(
                 Icon::new(IconName::ChevronRight)
                     .size_3p5()
@@ -550,11 +603,24 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The right-click menu of a file row in either view (ADR 0018): the read-only
-    /// actions a path affords. Opening runs on the GUI's machine, so it needs a local
-    /// Server like "Open in"; inserting goes to the Workspace's terminal on any Server.
-    /// `show_file` is `Some(enabled)` in the Changes view, whose click opens the diff, so
-    /// the menu offers the Preview Tab (ADR 0017); the Files view's click already does.
+    /// Whether the Workspace is on this machine, so its paths can be opened here.
+    fn local_root(&self, key: ConnectionKey, workspace_id: WorkspaceId) -> Option<PathBuf> {
+        let connection = self.connection(key)?;
+        connection.endpoint.as_local_path()?;
+        let root = connection
+            .session()?
+            .workspace(workspace_id)?
+            .root_directory()
+            .to_path_buf();
+        root.is_absolute().then_some(root)
+    }
+
+    /// The right-click menu of a file row in either view (ADR 0018): the actions a path
+    /// affords, then the edits ADR 0045 adds. Opening and revealing run on the GUI's
+    /// machine, so they need a local Server like "Open in"; inserting goes to the
+    /// Workspace's terminal on any Server. `show_file` is `Some(enabled)` in the Changes
+    /// view, whose click opens the diff, so the menu offers the Preview Tab (ADR 0017);
+    /// the Files view's click already does. Disabled there, the file is gone from disk.
     pub(super) fn file_context_menu(
         &self,
         key: ConnectionKey,
@@ -589,6 +655,16 @@ impl Condr {
             ))
         });
         let absolute = root.map(|root| absolute_path(&root, path));
+        let reveal = self
+            .local_root(key, workspace_id)
+            .map(|root| absolute_path(&root, path));
+        let exists = show_file != Some(false);
+        // The Files view creates beside a file; Changes does not create.
+        let create_in = show_file.is_none().then(|| {
+            path.parent()
+                .map(RelativePath::to_relative_path_buf)
+                .unwrap_or_default()
+        });
         move |menu, _, _| {
             let copy_relative = relative.clone();
             let copy_absolute = absolute.clone();
@@ -644,7 +720,7 @@ impl Condr {
                 }
                 None => menu.item(PopupMenuItem::new("Open in Editor").disabled(true)),
             };
-            menu.item(
+            let menu = menu.item(
                 PopupMenuItem::new("Insert Path into Terminal")
                     .disabled(target_pane.is_none())
                     .on_click(move |_, window, cx| {
@@ -660,6 +736,118 @@ impl Condr {
                             this.activate_tab_on(key, tab_id, window, cx);
                         });
                     }),
+            );
+            let menu = reveal_item(menu, reveal.clone(), exists, owner.clone()).separator();
+            Condr::entry_edit_items(
+                menu,
+                key,
+                workspace_id,
+                &show_path,
+                FileKind::File,
+                create_in.clone(),
+                exists,
+                owner.clone(),
+            )
+        }
+    }
+
+    /// The right-click menu of a directory row in the Files view: create inside it, the
+    /// actions its path affords, and its own rename and delete.
+    fn directory_context_menu(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+        cx: &Context<Self>,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let owner = cx.weak_entity();
+        let path = path.to_relative_path_buf();
+        let root = self
+            .connection(key)
+            .and_then(|connection| connection.session())
+            .and_then(|session| session.workspace(workspace_id))
+            .map(|workspace| workspace.root_directory().to_path_buf());
+        let absolute = root.map(|root| absolute_path(&root, &path));
+        let reveal = self
+            .local_root(key, workspace_id)
+            .map(|root| absolute_path(&root, &path));
+        move |menu, _, _| {
+            let menu = Condr::entry_edit_items(
+                menu,
+                key,
+                workspace_id,
+                &path,
+                FileKind::Directory,
+                Some(path.clone()),
+                true,
+                owner.clone(),
+            )
+            .separator();
+            let copy_relative = path.to_string();
+            let copy_absolute = absolute.clone();
+            let menu = menu
+                .item(
+                    PopupMenuItem::new("Copy Relative Path").on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_relative.clone()));
+                    }),
+                )
+                .item(
+                    PopupMenuItem::new("Copy Path")
+                        .disabled(copy_absolute.is_none())
+                        .on_click(move |_, _, cx| {
+                            if let Some(absolute) = &copy_absolute {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    absolute.display().to_string(),
+                                ));
+                            }
+                        }),
+                );
+            reveal_item(menu, reveal.clone(), true, owner.clone())
+        }
+    }
+
+    /// The menu of the empty area below the tree: creating in the Root Directory.
+    fn root_context_menu(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        cx: &Context<Self>,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let owner = cx.weak_entity();
+        move |menu, _, _| {
+            let menu = menu.item(PopupMenuItem::new("New File…").on_click({
+                let owner = owner.clone();
+                move |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.prompt_new_entry(
+                            key,
+                            workspace_id,
+                            RelativePathBuf::new(),
+                            FileKind::File,
+                            String::new(),
+                            None,
+                            window,
+                            cx,
+                        )
+                    });
+                }
+            }));
+            let owner = owner.clone();
+            menu.item(
+                PopupMenuItem::new("New Folder…").on_click(move |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.prompt_new_entry(
+                            key,
+                            workspace_id,
+                            RelativePathBuf::new(),
+                            FileKind::Directory,
+                            String::new(),
+                            None,
+                            window,
+                            cx,
+                        )
+                    });
+                }),
             )
         }
     }
@@ -757,12 +945,24 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.send_presenting_layout_to(
-            key,
-            LayoutCommand::ShowFile { workspace_id, path },
-            window,
-            cx,
-        );
+        // Showing another file takes the Preview Tab's unsaved text away (ADR 0045).
+        let preview = self
+            .connection(key)
+            .and_then(|connection| connection.session()?.file_tab(workspace_id))
+            .filter(|tab| tab.file().is_some_and(|file| file.path() != path))
+            .map(Tab::id);
+        let show: Continuation = Box::new(move |this, window, cx| {
+            this.send_presenting_layout_to(
+                key,
+                LayoutCommand::ShowFile { workspace_id, path },
+                window,
+                cx,
+            );
+        });
+        match preview {
+            Some(tab_id) => self.confirm_unsaved(UnsavedScope::Tab(key, tab_id), show, window, cx),
+            None => show(self, window, cx),
+        }
     }
 
     /// The Preview Tab's body: one file's content, rendered when it can be, or why there
@@ -810,6 +1010,10 @@ impl Condr {
                 let theme = cx.theme();
                 div()
                     .debug_selector(|| "file-body".into())
+                    .key_context("CondrPreview")
+                    .on_action(cx.listener(move |this, _: &SaveFile, window, cx| {
+                        this.save_file(key, tab_id, None, window, cx);
+                    }))
                     .flex_1()
                     .min_h_0()
                     .w_full()
@@ -820,7 +1024,7 @@ impl Condr {
                     )
                     .child(
                         Editor::new(&editor.state)
-                            .readonly(true)
+                            .readonly(editor.version.is_none())
                             .appearance(false)
                             .bordered(false)
                             .font_family(self.terminal_font.family.clone())
@@ -876,7 +1080,30 @@ impl Condr {
             Some(Ok(image)) => Some(image_summary(image)),
             _ => None,
         });
+        let editor = self.files_view.file_editors.get(&(key, tab_id));
+        let dirty = editor.is_some_and(|editor| editor.dirty);
+        // What the person should know about editing it, most pressing first.
+        let note = editor.and_then(|editor| {
+            let gone = self
+                .connection(key)
+                .and_then(|connection| {
+                    connection
+                        .resources
+                        .files
+                        .get(&(workspace_id, path.to_relative_path_buf()))
+                })
+                .is_some_and(|(_, answer)| answer.is_err());
+            match () {
+                _ if editor.disk_changed && gone => Some(("No longer on disk", true)),
+                _ if editor.disk_changed => Some(("Changed on disk", true)),
+                _ if editor.content == FileViewContent::Text => {
+                    editor.readonly_reason.map(|reason| (reason, false))
+                }
+                _ => None,
+            }
+        });
         let owner = cx.weak_entity();
+        let toggle_path = path.to_relative_path_buf();
         let toggle = rendering.map(|_| {
             ButtonGroup::new("file-view-mode")
                 .ghost()
@@ -898,6 +1125,16 @@ impl Condr {
                     let _ = owner.update(cx, |this, cx| {
                         if let Some(editor) = this.files_view.file_editors.get_mut(&(key, tab_id)) {
                             editor.source = source;
+                            // Rendered draws the Editor's text, saved or not (ADR 0045).
+                            if !source && editor.dirty {
+                                let text = editor.state.read(cx).value();
+                                if let Some(markdown) = &editor.markdown {
+                                    markdown.update(cx, |state, cx| state.set_text(&text, cx));
+                                } else if rendering == Some(Rendering::Svg) {
+                                    let image = (key, workspace_id, toggle_path.clone());
+                                    this.feed_unsaved_svg(image, text.to_string(), cx);
+                                }
+                            }
                             cx.notify();
                         }
                     });
@@ -926,6 +1163,36 @@ impl Condr {
                     .font_medium()
                     .child(path.to_string()),
             )
+            .when(dirty, |this| {
+                this.child(
+                    div()
+                        .debug_selector(|| "file-unsaved".into())
+                        .id("file-unsaved")
+                        .flex_none()
+                        .size(px(8.))
+                        .rounded_full()
+                        .bg(theme.foreground)
+                        .tooltip(|window, cx| {
+                            Tooltip::new("Unsaved")
+                                .action(&SaveFile, Some("CondrPreview"))
+                                .build(window, cx)
+                        }),
+                )
+            })
+            .when_some(note, |this, (note, warning)| {
+                this.child(
+                    div()
+                        .debug_selector(|| "file-note".into())
+                        .flex_none()
+                        .text_xs()
+                        .text_color(if warning {
+                            theme.warning
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .child(note),
+                )
+            })
             .when_some(summary, |this, summary| {
                 this.child(
                     div()
@@ -976,6 +1243,11 @@ impl Condr {
             .files
             .get(&(workspace_id, path.clone()))
             .cloned();
+        let root = connection
+            .session()
+            .and_then(|session| session.workspace(workspace_id))
+            .map(|workspace| workspace.root_directory().to_path_buf())
+            .unwrap_or_default();
         if answer.is_none()
             && !connection
                 .resources
@@ -985,6 +1257,18 @@ impl Condr {
             self.request_file(key, workspace_id, path.clone());
         }
 
+        if let Some(editor) = self.files_view.file_editors.get(&(key, tab_id))
+            && let Some((shown, _)) = &editor.shown
+            && *shown != path
+        {
+            // A rename of this Client's moves the Tab and its text together once the
+            // Server answers; until then the Tab keeps the text it had.
+            if self.rename_in_flight(key, workspace_id, shown) {
+                return;
+            }
+            // Another Client showed something else here (ADR 0045).
+            self.keep_unsaved(key, tab_id, cx);
+        }
         let editor = self
             .files_view
             .file_editors
@@ -1003,8 +1287,24 @@ impl Condr {
                     state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
                     state
                 });
+                let changes = cx.subscribe(&state, move |this, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.file_text_changed(key, tab_id, cx);
+                    }
+                });
                 FileEditor {
                     state,
+                    workspace_id,
+                    root,
+                    version: None,
+                    readonly_reason: None,
+                    base_text: String::new(),
+                    dirty: false,
+                    crlf: false,
+                    saving: None,
+                    disk_changed: false,
+                    after_save: None,
+                    _changes: changes,
                     shown: None,
                     content: FileViewContent::Loading,
                     markdown: None,
@@ -1022,6 +1322,7 @@ impl Condr {
                 editor.shown = None;
                 editor.markdown = None;
                 editor.source = false;
+                editor.version = None;
                 // The images of the file shown before go with it.
                 let shown = (key, workspace_id, path.clone());
                 release_images(self.files_view.images.retain_shown(&shown), cx);
@@ -1049,6 +1350,25 @@ impl Condr {
             .shown
             .as_ref()
             .is_some_and(|(shown, _)| *shown == path);
+        let (version, lossy) = match &answer {
+            Ok(FileContent::Text { version, lossy, .. }) => (*version, *lossy),
+            _ => (None, false),
+        };
+        if same_file {
+            // A read that overlapped a save may hold the file half written; the save's
+            // reply reads it again.
+            if editor.saving.is_some() {
+                return;
+            }
+            // `WorkspaceFilesChanged` names no file, so only a different version says
+            // this one changed. Unsaved text is never replaced, nor its version moved on.
+            let unchanged = version.is_some() && version == editor.version;
+            if unchanged || editor.dirty {
+                editor.shown = Some((path, generation));
+                editor.disk_changed |= !unchanged;
+                return;
+            }
+        }
         editor.shown = Some((path, generation));
         let (text, content) = match answer {
             Err(reason) => (String::new(), FileViewContent::Failed(reason)),
@@ -1057,11 +1377,23 @@ impl Condr {
             Ok(FileContent::TooLarge { bytes }) => {
                 (String::new(), FileViewContent::TooLarge { bytes })
             }
-            Ok(FileContent::Text { text }) => (text, FileViewContent::Text),
+            Ok(FileContent::Text { text, .. }) => (text, FileViewContent::Text),
         };
         let text_to_text = same_file
             && editor.content == FileViewContent::Text
             && content == FileViewContent::Text;
+        editor.version = version.filter(|_| content == FileViewContent::Text);
+        editor.readonly_reason = match (&content, version) {
+            (FileViewContent::Text, Some(_)) => None,
+            (FileViewContent::Text, None) if lossy => Some("Not valid UTF-8; read-only"),
+            (FileViewContent::Text, None) => Some("Update this device's Server to edit"),
+            _ => None,
+        };
+        editor.crlf = super::file_edits::crlf_only(&text);
+        // Set before the Editor changes, so its change event finds nothing unsaved.
+        editor.base_text = text.clone();
+        editor.dirty = false;
+        editor.disk_changed = false;
         let land = (content == FileViewContent::Text)
             .then(|| {
                 take_pending_line(
@@ -1128,6 +1460,19 @@ impl Condr {
                 land_on_line(state, line, window, cx);
             }
         });
+    }
+
+    /// The Editor's text moved: it is unsaved while it differs from what was read.
+    fn file_text_changed(&mut self, key: ConnectionKey, tab_id: TabId, cx: &mut Context<Self>) {
+        let Some(editor) = self.files_view.file_editors.get_mut(&(key, tab_id)) else {
+            return;
+        };
+        let dirty =
+            editor.version.is_some() && editor.state.read(cx).value().as_ref() != editor.base_text;
+        if dirty != editor.dirty {
+            editor.dirty = dirty;
+            cx.notify();
+        }
     }
 
     pub(super) fn request_directory(
@@ -1243,6 +1588,24 @@ impl Condr {
 
     /// The same retention rules handle a closed Workspace and a replaced connection.
     pub(super) fn prune_files_state(&mut self, key: ConnectionKey, cx: &mut App) {
+        let session = self
+            .connection(key)
+            .and_then(|connection| connection.session());
+        let closing: Vec<TabId> = self
+            .files_view
+            .file_editors
+            .keys()
+            .filter(|(editor_key, tab_id)| {
+                *editor_key == key
+                    && !session.is_some_and(|session| {
+                        session.tab(*tab_id).is_some_and(|tab| tab.file().is_some())
+                    })
+            })
+            .map(|(_, tab_id)| *tab_id)
+            .collect();
+        for tab_id in closing {
+            self.keep_unsaved(key, tab_id, cx);
+        }
         let Some(connection) = self
             .connections
             .iter_mut()
@@ -1264,9 +1627,39 @@ impl Condr {
     }
 
     pub(super) fn clear_files_state(&mut self, key: ConnectionKey, cx: &mut App) {
+        let closing: Vec<TabId> = self
+            .files_view
+            .file_editors
+            .keys()
+            .filter(|(editor_key, _)| *editor_key == key)
+            .map(|(_, tab_id)| *tab_id)
+            .collect();
+        for tab_id in closing {
+            self.keep_unsaved(key, tab_id, cx);
+        }
         release_images(self.files_view.retain_session(key, None), cx);
         self.clear_pending_requests(key);
     }
+}
+
+/// "Reveal in Finder" and its counterparts, only for a Workspace on this machine.
+fn reveal_item(
+    menu: PopupMenu,
+    absolute: Option<PathBuf>,
+    enabled: bool,
+    owner: WeakEntity<Condr>,
+) -> PopupMenu {
+    let Some(absolute) = absolute else {
+        return menu;
+    };
+    menu.item(
+        PopupMenuItem::new(reveal_label())
+            .disabled(!enabled)
+            .on_click(move |_, window, cx| {
+                let path = absolute.clone();
+                let _ = owner.update(cx, |this, cx| this.reveal_entry(path, window, cx));
+            }),
+    )
 }
 
 fn failed_state(reason: String, cx: &App) -> AnyElement {

@@ -819,6 +819,37 @@ pub(super) fn handle_client(
                     },
                 )
             }
+            ClientMessage::MutateFile {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                mutation,
+            } => {
+                // A recursive delete or a slow mount can take long: off this loop, which
+                // also carries the Client's terminal input (ADR 0045).
+                let state = Arc::clone(&state);
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    let result = match workspace_root(&state, server_id, session_id, workspace_id) {
+                        Ok(root) => {
+                            let result = condr_core::mutate_file(&root, &mutation);
+                            files_mutated(&state, workspace_id, &mutation, &result);
+                            result
+                        }
+                        Err(error) => FileMutationResult::Failed(error),
+                    };
+                    queue_message(
+                        &outbound,
+                        ServerMessage::FileMutated {
+                            request_id,
+                            workspace_id,
+                            result,
+                        },
+                    )
+                });
+                false
+            }
             ClientMessage::BrowseDirectory { request_id, path } => {
                 // Any path may be a slow or hung mount, so it is read off this loop, which
                 // also carries the Client's terminal input.
@@ -1095,6 +1126,38 @@ fn workspace_root(
             .workspace(workspace_id)
             .map(|workspace| workspace.root_directory().to_path_buf())
             .ok_or_else(|| "unknown Workspace".into())
+    }
+}
+
+/// What every Client learns after a file mutation that may have changed the disk, even
+/// partway: a rename moves the Preview Tab with its file, and a forced scan publishes
+/// `WorkspaceFilesChanged` and Git status, since the watcher skips ignored paths.
+pub(super) fn files_mutated(
+    state: &Arc<Mutex<RuntimeState>>,
+    workspace_id: WorkspaceId,
+    mutation: &FileMutation,
+    result: &FileMutationResult,
+) {
+    if matches!(
+        result,
+        FileMutationResult::Conflict | FileMutationResult::Invalid(_)
+    ) {
+        return;
+    }
+    let mut state = state.lock().expect("server state lock poisoned");
+    if let (FileMutation::Rename { from, to }, FileMutationResult::Done { .. }) = (mutation, result)
+    {
+        let mut candidate = state.session.clone();
+        // A layout change that asks no Client to show it.
+        if candidate.follow_rename(workspace_id, from, to) {
+            match commit_layout_candidate(&mut state, candidate, None, None) {
+                Ok(effect) => state.publish_background(effect.event),
+                Err(error) => tracing::warn!("the Preview Tab did not follow a rename: {error}"),
+            }
+        }
+    }
+    if let Some(watcher) = &state.git_watcher {
+        watcher.refresh(workspace_id);
     }
 }
 

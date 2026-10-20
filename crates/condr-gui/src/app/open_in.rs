@@ -415,6 +415,17 @@ pub(super) fn reveal(path: &Path) -> io::Result<()> {
     launch(&file_manager(Platform::current()), path)
 }
 
+/// Shows `path`, a file or a directory, selected in its folder in the platform's file
+/// manager (ADR 0045). A dangling link cannot be selected, so its folder opens instead.
+pub(super) fn reveal_entry(path: &Path) -> io::Result<()> {
+    let target = file_manager(Platform::current());
+    if path.exists() {
+        return spawn(select_command(&target, path));
+    }
+    std::fs::symlink_metadata(path)?;
+    launch(&target, path.parent().unwrap_or(path))
+}
+
 /// Starts the program on `path`, a directory or a file, and returns once it has been
 /// spawned. The child
 /// is reaped on a helper thread so a CLI that exits at once leaves no zombie behind.
@@ -425,7 +436,10 @@ pub(super) fn launch(target: &OpenTarget, path: &Path) -> io::Result<()> {
             format!("{} does not exist", path.display()),
         ));
     }
-    let mut command = launch_command(target, path);
+    spawn(launch_command(target, path))
+}
+
+fn spawn(mut command: std::process::Command) -> io::Result<()> {
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -447,12 +461,19 @@ pub(super) fn launch(target: &OpenTarget, path: &Path) -> io::Result<()> {
 /// The program and arguments `launch` runs. Every file manager opens a file it is handed
 /// in that file's default program, so a file is shown selected in its folder instead.
 fn launch_command(target: &OpenTarget, path: &Path) -> std::process::Command {
+    if target.icon == OpenTargetIcon::FileManager && !path.is_dir() {
+        return select_command(target, path);
+    }
     let mut command = std::process::Command::new(&target.program);
     command.args(&target.args);
-    if target.icon != OpenTargetIcon::FileManager || path.is_dir() {
-        command.arg(path);
-        return command;
-    }
+    command.arg(path);
+    command
+}
+
+/// The file manager showing `path`, a file or a directory, selected in its folder.
+fn select_command(target: &OpenTarget, path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(&target.program);
+    command.args(&target.args);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;

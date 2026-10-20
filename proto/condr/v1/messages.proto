@@ -33,6 +33,7 @@ message ClientMessage {
     Empty detach = 20;
     BrowseDirectory browse_directory = 21;
     WatchTerminals watch_terminals = 22;
+    FileMutationRequest mutate_file = 23;
   }
 }
 
@@ -123,6 +124,37 @@ message PathRequest {
   uint64 request_id = 3;
   uint64 workspace_id = 4;
   string path = 5;
+}
+
+// A change to a Workspace's files (ADR 0045), answered with FileMutationReply.
+message FileMutationRequest {
+  uint64 server_id = 1;
+  uint64 session_id = 2;
+  uint64 request_id = 3;
+  uint64 workspace_id = 4;
+  oneof mutation {
+    WriteFile write = 5;
+    CreateEntry create = 6;
+    RenameEntry rename = 7;
+    string delete = 8;
+  }
+}
+
+message WriteFile {
+  string path = 1;
+  string text = 2;
+  // The version the text started from; absent writes unconditionally.
+  optional uint64 base = 3;
+}
+
+message CreateEntry {
+  string path = 1;
+  FileKind kind = 2;
+}
+
+message RenameEntry {
+  string from = 1;
+  string to = 2;
 }
 
 // An absolute path on the Server's machine; empty for its home directory.
@@ -366,6 +398,7 @@ message ServerMessage {
     ServerAdminResponse server_admin = 27;
     string error = 28;
     BrowsedDirectoryReply browsed_directory = 29;
+    FileMutationReply file_mutated = 30;
   }
 }
 
@@ -657,6 +690,24 @@ message FileContentReply {
     FileContent ok = 4;
     string err = 5;
   }
+}
+
+message FileMutationReply {
+  uint64 request_id = 1;
+  uint64 workspace_id = 2;
+  oneof result {
+    FileMutationDone done = 3;
+    // A write whose file no longer has the version it started from.
+    Empty conflict = 4;
+    // A problem with the name.
+    string invalid = 5;
+    string failed = 6;
+  }
+}
+
+message FileMutationDone {
+  // For a write, the version of the bytes written.
+  optional uint64 version = 1;
 }
 
 message AgentInstallations {

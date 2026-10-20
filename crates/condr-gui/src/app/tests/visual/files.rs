@@ -15,6 +15,8 @@ fn readme_answer(this: &mut Condr, workspace_id: WorkspaceId, text: &str) -> Inc
         path: relative_path::RelativePathBuf::from("README.md"),
         result: Ok(condr_core::FileContent::Text {
             text: text.to_owned(),
+            version: Some(condr_core::file_version(text.as_bytes())),
+            lossy: false,
         }),
     })
 }
@@ -644,6 +646,364 @@ fn preview_tab_renders_images_and_the_images_markdown_draws() {
         &decoded,
         &image(window, "shot.png").unwrap().unwrap()
     ));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The Preview Tab edits the file it shows (ADR 0045): typing marks it unsaved, Save
+/// writes it back with its CRLF line breaks, a change on disk under unsaved text leaves
+/// the text alone and makes the next Save ask, and text another action takes away is
+/// asked about rather than lost.
+#[test]
+fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = std::env::temp_dir().join(format!(
+        "condr-gui-edit-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("plan.txt"), "one\r\ntwo\r\n").unwrap();
+    std::fs::write(root.join("notes.txt"), "notes\n").unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = root.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("file-plan.txt").is_some()
+    }));
+    let plan = window.debug_bounds("file-plan.txt").unwrap();
+    window.simulate_click(plan.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.update(|_, cx| {
+            view.read(cx)
+                .files_view
+                .file_editors
+                .values()
+                .any(|editor| editor.version.is_some())
+        })
+    }));
+    let (tab_id, editor) = window.read(|app| {
+        let (&(_, tab_id), editor) = view
+            .read(app)
+            .files_view
+            .file_editors
+            .iter()
+            .next()
+            .unwrap();
+        (tab_id, editor.state.clone())
+    });
+    let dirty = |window: &mut VisualTestContext| {
+        window.read(|app| view.read(app).files_view.file_editors[&(1, tab_id)].dirty)
+    };
+    let type_at_end = |window: &mut VisualTestContext, text: &str| {
+        window.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                let end = state.value().len();
+                state.set_selected_range(end..end, cx);
+                state.replace(text.to_owned(), window, cx);
+            });
+            _ = window.draw(cx);
+        });
+    };
+
+    // Typing marks the text unsaved; Enter's `\n` is saved as the file's `\r\n`.
+    type_at_end(window, "three\n");
+    assert!(dirty(window));
+    assert!(window.debug_bounds("file-unsaved").is_some());
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.save_file(1, tab_id, None, window, cx));
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            !dirty(window)
+                && std::fs::read(root.join("plan.txt")).unwrap() == b"one\r\ntwo\r\nthree\r\n"
+        }),
+        "Save should write the text back with the file's own line breaks"
+    );
+    assert!(window.debug_bounds("file-unsaved").is_none());
+
+    // The agent writes the file under unsaved text: the text stays, the header says so,
+    // and Save asks before it overwrites.
+    type_at_end(window, "mine\n");
+    std::fs::write(root.join("plan.txt"), "agent\r\n").unwrap();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.read(|app| view.read(app).files_view.file_editors[&(1, tab_id)].disk_changed)
+        }),
+        "a newer file under unsaved text should be noticed, not applied"
+    );
+    assert!(window.read(|app| editor.read(app).value().contains("mine")));
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.save_file(1, tab_id, None, window, cx));
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("file-choice-Overwrite").is_some()
+        }),
+        "a save from a stale version should ask"
+    );
+    assert_eq!(std::fs::read(root.join("plan.txt")).unwrap(), b"agent\r\n");
+    let overwrite = window.debug_bounds("file-choice-Overwrite").unwrap();
+    window.simulate_click(overwrite.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        !dirty(window)
+            && std::fs::read_to_string(root.join("plan.txt"))
+                .unwrap()
+                .contains("mine")
+    }));
+
+    // Showing another file from this Client asks first; Cancel keeps everything.
+    type_at_end(window, "kept\n");
+    let notes = window.debug_bounds("file-notes.txt").unwrap();
+    window.simulate_click(notes.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("file-choice-Don't Save").is_some()
+    }));
+    let cancel = window.debug_bounds("file-choice-Cancel").unwrap();
+    window.simulate_click(cancel.center(), Modifiers::default());
+    window.run_until_parked();
+    assert!(dirty(window));
+
+    // Something else retargets the Tab: the text is asked about, and Copy keeps it.
+    let workspace_id =
+        window.read(|app| view.read(app).files_view.file_editors[&(1, tab_id)].workspace_id);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout_to(
+                1,
+                LayoutCommand::ShowFile {
+                    workspace_id,
+                    path: "notes.txt".into(),
+                },
+            );
+        });
+    });
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("file-choice-Copy").is_some()
+        }),
+        "text whose Tab moved on should be asked about"
+    );
+    let copy = window.debug_bounds("file-choice-Copy").unwrap();
+    window.simulate_click(copy.center(), Modifiers::default());
+    window.run_until_parked();
+    assert!(
+        window
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .is_some_and(|text| text.contains("kept"))
+    );
+    assert!(!window.read(|app| view.read(app).files_view.has_unsaved()));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The Files view creates, renames and deletes (ADR 0045): a new file opens in the
+/// Preview Tab, renaming its directory carries the Tab and its unsaved text along, a name
+/// already taken stays in its dialog with the reason, and Delete asks first.
+#[test]
+fn files_view_creates_renames_and_deletes_entries() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = std::env::temp_dir().join(format!(
+        "condr-gui-entries-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/taken.md"), "taken\n").unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = root.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("file-dir-docs").is_some()
+    }));
+    let docs = window.debug_bounds("file-dir-docs").unwrap();
+    window.simulate_click(docs.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("file-docs/taken.md").is_some()
+    }));
+    let workspace_id =
+        window.read(|app| view.read(app).active_session().unwrap().workspaces()[0].id());
+    let type_name = |window: &mut VisualTestContext, name: &str| {
+        window.simulate_input(name);
+        let create = window.debug_bounds("dialog-primary-action").unwrap();
+        window.simulate_click(create.center(), Modifiers::default());
+        window.run_until_parked();
+        window.update(|window, cx| _ = window.draw(cx));
+    };
+
+    // A name the listing holds stays in the dialog with the reason.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.prompt_new_entry(
+                1,
+                workspace_id,
+                "docs".into(),
+                condr_core::FileKind::File,
+                String::new(),
+                None,
+                window,
+                cx,
+            )
+        });
+    });
+    window.run_until_parked();
+    type_name(window, "taken.md");
+    assert!(window.debug_bounds("dialog-primary-action").is_some());
+    // Replace the name: select all, then type the new one.
+    window.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    });
+    type_name(window, "plan.md");
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            root.join("docs/plan.md").is_file()
+                && window.read(|app| {
+                    view.read(app).active_session().is_some_and(|session| {
+                        session
+                            .file_tab(workspace_id)
+                            .and_then(|tab| tab.file())
+                            .is_some_and(|file| {
+                                file.path() == relative_path::RelativePath::new("docs/plan.md")
+                            })
+                    })
+                })
+        }),
+        "a new file is created and opens in the Preview Tab"
+    );
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.read(|app| {
+            view.read(app)
+                .files_view
+                .file_editors
+                .values()
+                .any(|editor| editor.version.is_some())
+        })
+    }));
+
+    // Unsaved text follows its directory's rename.
+    let (tab_id, editor) = window.read(|app| {
+        let (&(_, tab_id), editor) = view
+            .read(app)
+            .files_view
+            .file_editors
+            .iter()
+            .next()
+            .unwrap();
+        (tab_id, editor.state.clone())
+    });
+    window.update(|window, cx| {
+        editor.update(cx, |state, cx| {
+            state.replace("draft\n".to_owned(), window, cx)
+        });
+    });
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.prompt_rename_entry(
+                1,
+                workspace_id,
+                "docs".into(),
+                condr_core::FileKind::Directory,
+                "docs".into(),
+                None,
+                window,
+                cx,
+            )
+        });
+    });
+    window.run_until_parked();
+    type_name(window, "notes");
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            root.join("notes/plan.md").is_file()
+                && window.read(|app| {
+                    let this = view.read(app);
+                    let editor = &this.files_view.file_editors[&(1, tab_id)];
+                    editor.dirty
+                        && editor
+                            .shown
+                            .as_ref()
+                            .is_some_and(|(path, _)| path == "notes/plan.md")
+                })
+        }),
+        "the Preview Tab and its unsaved text follow the rename"
+    );
+    assert!(window.read(|app| editor.read(app).value().contains("draft")));
+    assert!(window.debug_bounds("file-choice-Copy").is_none());
+
+    // Delete asks, then removes.
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.confirm_delete_entry(
+                1,
+                workspace_id,
+                "notes/taken.md".into(),
+                condr_core::FileKind::File,
+                window,
+                cx,
+            )
+        });
+    });
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        root.join("notes/taken.md").exists(),
+        "nothing goes before the answer"
+    );
+    window.simulate_keystrokes("enter");
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        !root.join("notes/taken.md").exists()
+    }));
 
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -35,11 +35,11 @@ use condr_core::protocol::{
     terminal_batch_overhead,
 };
 use condr_core::{
-    AgentSnapshot, GitRepository, PaneEnvironment, PaneId, Session, TerminalAgentProbe,
-    TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget, TerminalNoticeBatch,
-    TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate, TerminalView,
-    TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree, discover_repository,
-    open_worktree, remove_worktree, validate_worktree_removal,
+    AgentSnapshot, FileMutation, FileMutationResult, GitRepository, PaneEnvironment, PaneId,
+    Session, TerminalAgentProbe, TerminalCommand, TerminalCwdProbe, TerminalHyperlinkBudget,
+    TerminalNoticeBatch, TerminalNoticeProbe, TerminalRuntime, TerminalSize, TerminalUpdate,
+    TerminalView, TerminalViewFrame, TerminalViewSource, WorkspaceId, create_worktree,
+    discover_repository, open_worktree, remove_worktree, validate_worktree_removal,
 };
 use config::{load_shell, load_worktree_root, save_proxy, save_shell};
 use layout::*;

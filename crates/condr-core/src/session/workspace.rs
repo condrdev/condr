@@ -164,6 +164,37 @@ impl Session {
         Some(tab_id)
     }
 
+    /// Points the Workspace's Preview Tab at `to` when it shows `from` or a path under it,
+    /// after a rename (ADR 0045). `false` when no Tab changed.
+    pub fn follow_rename(
+        &mut self,
+        workspace_id: WorkspaceId,
+        from: &RelativePath,
+        to: &RelativePath,
+    ) -> bool {
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return false;
+        };
+        let mut changed = false;
+        for tab in &mut workspace.tabs {
+            if let TabContent::File(file) = &mut tab.content
+                && let Ok(rest) = file.path.strip_prefix(from)
+            {
+                file.path = if rest.as_str().is_empty() {
+                    to.to_owned()
+                } else {
+                    to.join(rest)
+                };
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub fn associate_worktree(
         &mut self,
         workspace_id: WorkspaceId,

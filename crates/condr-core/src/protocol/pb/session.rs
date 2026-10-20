@@ -719,13 +719,19 @@ impl TryFrom<super::DirectoryListing> for DirectoryListing {
 impl From<&FileContent> for super::FileContent {
     fn from(content: &FileContent) -> Self {
         use file_content::Content;
+        let (version, lossy) = match content {
+            FileContent::Text { version, lossy, .. } => (*version, *lossy),
+            _ => (None, false),
+        };
         Self {
             content: Some(match content {
-                FileContent::Text { text } => Content::Text(text.clone()),
+                FileContent::Text { text, .. } => Content::Text(text.clone()),
                 FileContent::Image { bytes } => Content::Image(bytes.clone()),
                 FileContent::Binary => Content::Binary(Empty {}),
                 FileContent::TooLarge { bytes } => Content::TooLarge(*bytes),
             }),
+            version,
+            lossy,
         }
     }
 }
@@ -736,7 +742,11 @@ impl TryFrom<super::FileContent> for FileContent {
     fn try_from(content: super::FileContent) -> WireResult<Self> {
         use file_content::Content;
         Ok(match member(content.content)? {
-            Content::Text(text) => Self::Text { text },
+            Content::Text(text) => Self::Text {
+                text,
+                version: content.version,
+                lossy: content.lossy,
+            },
             Content::Image(bytes) => Self::Image { bytes },
             Content::Binary(_) => Self::Binary,
             Content::TooLarge(bytes) => Self::TooLarge { bytes },

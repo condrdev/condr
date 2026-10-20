@@ -542,6 +542,36 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A Preview Tab's unsaved text is asked about first (ADR 0045). A Pane close that
+        // ends its Workspace leaves a single terminal Tab, so no Preview Tab with it.
+        let scope = match command {
+            LayoutCommand::CloseTab { tab_id } => Some(UnsavedScope::Tab(key, tab_id)),
+            LayoutCommand::CloseWorkspace { workspace_id } => {
+                Some(UnsavedScope::Workspace(key, workspace_id))
+            }
+            _ => None,
+        };
+        match scope {
+            Some(scope) => self.confirm_unsaved(
+                scope,
+                Box::new(move |this, window, cx| {
+                    this.confirm_close_now(key, command, closes_workspace, window, cx)
+                }),
+                window,
+                cx,
+            ),
+            None => self.confirm_close_now(key, command, closes_workspace, window, cx),
+        }
+    }
+
+    fn confirm_close_now(
+        &mut self,
+        key: ConnectionKey,
+        command: LayoutCommand,
+        closes_workspace: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let prompt = if closes_workspace {
             Some((
                 "Close Workspace?",

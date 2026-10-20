@@ -38,7 +38,7 @@ Device (physical or virtual machine, holds a unique Ed25519 key)
 | **Device / Server** | The abstraction of a machine running Condr. Each device holds a unique cryptographic identity (Device Key); closing the client does not affect the Server. |
 | **Session** | The layout topology the server maintains. Layout changes are written to the snapshot in real time, and after a Server restart the structure and Agent session contexts are restored automatically. |
 | **Workspace** | A unit of project work, anchored to a unique absolute **root directory**. An isolated **Managed Worktree** Workspace can be derived from it using Git Worktree. |
-| **Tab** | A page inside a Workspace. Either a **terminal Tab** (holds split Panes, switchable with the `1~9` shortcuts) or a **viewer Tab** (read-only Diff / Preview review pages). |
+| **Tab** | A page inside a Workspace. Either a **terminal Tab** (holds split Panes, switchable with the `1~9` shortcuts) or a **viewer Tab** (the Diff review page, or the Preview page that also edits the file). |
 | **Pane / Terminal** | A leaf of the layout and the virtual terminal engine (based on the Rust `alacritty_terminal`). Supports horizontal and vertical splits, zoom, and safe cascading exit of the process tree. |
 | **Agent** | A recognized command-line program running inside a Pane. Its state is synced to the sidebar in real time, including the reason it is blocked. |
 

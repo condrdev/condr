@@ -489,6 +489,7 @@ impl Condr {
         connection.io = None;
         let active_projection_cleared = self.clear_pending_projections_for(key);
         clear_pending_sizes_for_bootstrap(&mut self.pending_sizes, key);
+        self.forget_file_saves(key);
         IncomingEffect {
             rebuild: self.active_connection == key && active_projection_cleared,
             rebuild_active: false,
