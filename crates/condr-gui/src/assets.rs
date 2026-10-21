@@ -56,6 +56,9 @@ const CONDR_ICON_PATHS: [&str; 29] = [
     "icons/intellij.svg",
 ];
 
+// Lucide icons Kit bundles but does not load by default.
+gpui_kit::assets::icon_assets!(KitIcons, [Rows2, Columns2]);
+
 pub(super) struct CondrAssets {
     pub(super) base: Assets,
 }
@@ -166,7 +169,10 @@ impl AssetSource for CondrAssets {
             "icons/intellij.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/intellij.svg"
             )))),
-            _ => self.base.load(path),
+            _ => match KitIcons.load(path)? {
+                Some(bytes) => Ok(Some(bytes)),
+                None => self.base.load(path),
+            },
         }
     }
 
@@ -181,6 +187,7 @@ impl AssetSource for CondrAssets {
                 .filter(|asset| asset.starts_with(path))
                 .map(SharedString::from),
         );
+        assets.extend(KitIcons.list(path)?);
         assets.extend(
             crate::app::file_icons::icon_paths()
                 .filter(|asset| asset.starts_with(path))

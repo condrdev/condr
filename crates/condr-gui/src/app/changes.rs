@@ -1067,13 +1067,17 @@ impl Condr {
                         .child(
                             Button::new("diff-mode-split")
                                 .debug_selector(|| "diff-mode-split".into())
-                                .label("Split")
+                                .icon(Icon::new(gpui_kit::assets::IconName::Columns2))
+                                .tooltip("Split")
+                                .accessibility_label("Split")
                                 .selected(!unified),
                         )
                         .child(
                             Button::new("diff-mode-unified")
                                 .debug_selector(|| "diff-mode-unified".into())
-                                .label("Unified")
+                                .icon(Icon::new(gpui_kit::assets::IconName::Rows2))
+                                .tooltip("Unified")
+                                .accessibility_label("Unified")
                                 .selected(unified),
                         )
                         .on_click(move |selected, _, cx| {
