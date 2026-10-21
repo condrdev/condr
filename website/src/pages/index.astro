@@ -104,14 +104,8 @@ const methods = [
     // Inline so the buttons name the visitor's platform before the first paint.
     {
       const os = document.documentElement.dataset.os;
-      const name = { macos: "macOS", windows: "Windows", linux: "Linux" }[os];
-      for (const a of document.querySelectorAll("[data-download]")) {
-        if (os === "ios") {
-          a.textContent = "Download for desktop";
-        } else if (name) {
-          a.textContent = `Download for ${name}`;
-        }
-      }
+      const name = { macos: "macOS", windows: "Windows", linux: "Linux", ios: "iOS", android: "Android" }[os];
+      if (name) for (const a of document.querySelectorAll("[data-download]")) a.textContent = `Download for ${name}`;
     }
   </script>
 

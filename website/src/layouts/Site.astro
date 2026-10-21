@@ -28,7 +28,7 @@ const github = 'https://github.com/condrdev/condr';
         const os = /iphone/i.test(navigator.userAgent)
           ? "ios"
           : /android/i.test(navigator.userAgent)
-            ? ""
+            ? "android"
             : platform.startsWith("mac")
               ? navigator.maxTouchPoints > 1 ? "" : "macos"
               : platform.startsWith("win")

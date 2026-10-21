@@ -82,7 +82,7 @@ const commands = [
                     )}
                 </div>
             ))}
-            <div class="download-platform" id="ios" data-os="ios">
+            <div class="download-platform" id="ios" data-os="ios android">
                 <div class="download-head">
                     <span>Mobile App</span>
                     <span class="badge">Coming soon</span>
@@ -96,7 +96,7 @@ const commands = [
                 // Inline so the visitor's platform moves to the top before the first paint.
                 {
                     const os = document.documentElement.dataset.os;
-                    const current = os && document.querySelector(`.download-platform[data-os="${os}"]`);
+                    const current = os && document.querySelector(`.download-platform[data-os~="${os}"]`);
                     if (current) {
                         current.classList.add("is-current");
                         document.querySelector(".download-platform").before(current);
