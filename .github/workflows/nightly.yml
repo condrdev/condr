@@ -53,6 +53,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The whole history and every tag, so git-cliff finds the latest release.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Write the changes since the latest release
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --unreleased --strip header --output changes.md
       - uses: actions/download-artifact@v8
         with:
           name: condr-dist
@@ -62,7 +71,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          notes="Nightly build of \`main\` at commit \`${GITHUB_SHA}\` ($(date -u +%Y-%m-%d)). This release and the \`nightly\` tag are mutable; all platform installers are rebuilt together. Client and Server must use the same build."
+          latest=$(git describe --tags --abbrev=0 --match 'v[0-9]*')
+          {
+            echo "Nightly build of \`main\` at commit \`${GITHUB_SHA}\` ($(date -u +%Y-%m-%d)). This release and the \`nightly\` tag are mutable; all platform installers are rebuilt together. Client and Server must use the same build."
+            echo
+            echo "Changes since ${latest}; [every commit](https://github.com/${GH_REPO}/compare/${latest}...${GITHUB_SHA})."
+            cat changes.md
+          } > notes.md
 
           # GITHUB_TOKEN may not push a tag at a commit that touches .github/workflows,
           # so let the Releases API create the tag instead of git push.
@@ -70,6 +85,6 @@ jobs:
           gh release create nightly dist/* \
             --target "$GITHUB_SHA" \
             --title "Nightly" \
-            --notes "$notes" \
+            --notes-file notes.md \
             --prerelease \
             --latest=false

@@ -1,6 +1,7 @@
 # Release notes from the commits since the previous `v*` tag (docs/releases.md).
 # `release.yml` runs `git cliff --latest --strip header`; preview the next release with
-# `git cliff --unreleased --tag v<next> --strip header`.
+# `git cliff --unreleased --tag v<next> --strip header`. `nightly.yml` runs
+# `git cliff --unreleased --strip header`, which has no version and so no Update section.
 
 [changelog]
 body = """
@@ -10,12 +11,14 @@ body = """
 - {{ commit.message | upper_first }}\
 {% endfor %}
 {% endfor %}
+{% if version -%}
 ## Update
 
 Update the app and every Device's Server to {{ version | trim_start_matches(pat="v") }}.
 
 - Desktop: download the installer below.
 - Headless Server: `curl -fsSL https://condr.dev/install.sh | sh`, or on Windows `irm https://condr.dev/install.ps1 | iex`.
+{% endif -%}
 """
 trim = true
 
