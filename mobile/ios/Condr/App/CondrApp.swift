@@ -55,20 +55,28 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     /// In the foreground a notification shows only while its Device is not connected here.
+    /// The completion handler is called on the main thread: the async form of these
+    /// methods finishes on a background thread, and UIKit aborts the app for it.
     nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler completionHandler:
+            @escaping @Sendable (UNNotificationPresentationOptions) -> Void
+    ) {
         let pushed = PushedPane(notification.request.content.userInfo)
-        return await presents(pushed) ? [.banner, .list, .sound] : []
+        Task { @MainActor in
+            completionHandler(presents(pushed) ? [.banner, .list, .sound] : [])
+        }
     }
 
     nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
-    ) async {
-        guard let pushed = PushedPane(response.notification.request.content.userInfo) else {
-            return
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping @Sendable () -> Void
+    ) {
+        let pushed = PushedPane(response.notification.request.content.userInfo)
+        Task { @MainActor in
+            if let pushed { open(pushed) }
+            completionHandler()
         }
-        await open(pushed)
     }
 
     private func presents(_ pushed: PushedPane?) -> Bool {
