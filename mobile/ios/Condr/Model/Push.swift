@@ -55,8 +55,10 @@ final class Push {
     }
 
     /// The notification permission and the Devices paired now, as the app last found them.
+    /// A registration that failed, or whose answer never came, is tried again on the next
+    /// call even when nothing changed, so the flag does not stay off until something does.
     func update(status: UNAuthorizationStatus, servers: [String]) async {
-        guard status != self.status || servers != self.servers else { return }
+        guard status != self.status || servers != self.servers || !on else { return }
         self.status = status
         self.servers = servers
         await register()
@@ -140,6 +142,8 @@ final class Push {
         guard let base = URL(string: cloud) else { preconditionFailure("Bad Condr Cloud URL") }
         var request = URLRequest(url: base.appending(path: "api/push/device"))
         request.httpMethod = method
+        // A request whose answer is lost holds up every one queued after it.
+        request.timeoutInterval = 15
         request.setValue("1", forHTTPHeaderField: "API-Version")
         request.setValue("Condr \(authorization)", forHTTPHeaderField: "Authorization")
         if let body {

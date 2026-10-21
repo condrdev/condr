@@ -93,6 +93,19 @@ struct PushTests {
         #expect(cloud.methods == ["PUT", "PUT"])
     }
 
+    @Test func aFailedRegistrationIsTriedAgainEvenWhenNothingChanged() async {
+        let push = push()
+        await push.received(token: Data([1]))
+        cloud.status.withLock { $0 = 500 }
+        await push.update(status: .authorized, servers: ["mac-id"])
+        #expect(!push.on)
+
+        cloud.status.withLock { $0 = 200 }
+        await push.update(status: .authorized, servers: ["mac-id"])
+        #expect(push.on, "the next return to the foreground registers again")
+        #expect(cloud.methods == ["PUT", "PUT"])
+    }
+
     @Test func losingPermissionOrTheLastDeviceRemovesTheRegistration() async {
         let push = push()
         await push.received(token: Data([1]))
