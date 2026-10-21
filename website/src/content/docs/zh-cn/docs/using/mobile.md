@@ -17,7 +17,7 @@ iPhone 版 Condr 可显示所有已配对电脑上的 Agent，将等待你处理
 ## 安装
 
 1. 从 App Store 安装 [TestFlight](https://apps.apple.com/app/testflight/id899247664)。
-2. 在 iPhone 上打开 [Condr 测试邀请](https://testflight.apple.com/join/TODO)，轻点 **Accept**，然后轻点 **Install**。
+2. 在 iPhone 上打开 [Condr 测试邀请](https://testflight.apple.com/join/6qQE7Pbx)，轻点 **Accept**，然后轻点 **Install**。
 
 新测试版发布后，可在 TestFlight 中直接更新。每个测试版的有效期为 90 天，通常在此之前就会推出新版本。
 

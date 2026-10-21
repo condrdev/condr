@@ -17,7 +17,7 @@ Condr for iPhone shows every Agent on the computers you pair with it, lists the 
 ## Install
 
 1. Install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store.
-2. On the iPhone, open the [Condr beta invitation](https://testflight.apple.com/join/TODO) and tap **Accept**, then **Install**.
+2. On the iPhone, open the [Condr beta invitation](https://testflight.apple.com/join/6qQE7Pbx) and tap **Accept**, then **Install**.
 
 When a new beta comes out, update the app in TestFlight. Each beta expires after 90 days, usually after a newer one is out.
 
