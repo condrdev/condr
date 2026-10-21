@@ -15,7 +15,7 @@ Which published builds the GUI's update check follows (ADR 0029): `stable`, the 
 _Avoid_: release track, update ring
 
 **Device**:
-A machine running Condr, identified by its one persistent key: `device-key` in the data directory on a computer (ADR 0025, ADR 0033), the platform's secure storage on a phone (ADR 0040). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. A computer's Device runs a Server, and Device is the interface's name for the whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. A phone running the Companion is a Device without a Server: it is paired like any other and appears under Paired devices, never in the sidebar. The Device key is also this machine's Peer-to-peer endpoint, so one pairing is honored over TCP and Peer-to-peer alike (ADR 0026). A Device reaching a Server over TCP or Peer-to-peer is paired once through an Invite and listed in that Server's `authorized-clients` until revoked; local and SSH Clients need no pairing.
+A machine running Condr, identified by its one persistent key: `device-key` in the data directory on a computer (ADR 0025, ADR 0033), the platform's secure storage on a phone (ADR 0040). That key is the machine's identity whether its Server is being connected to or its GUI or CLI connects out, so a Device has one fingerprint and appears once in any authorized list. A computer's Device runs a Server, and Device is the interface's name for the whole machine, its Server included, so people learn one concept for both what they connect to and what connects: the sidebar lists Devices, and Connect Remote Device adds one. A phone running the Companion is a Device without a Server: it is paired like any other and appears under Paired devices, never in the sidebar. The Device key is also this machine's Peer-to-peer endpoint, so one pairing is honored over TCP and Peer-to-peer alike (ADR 0026). A Device reaching a Server over TCP or Peer-to-peer is paired once through an Invite and listed in that Server's `authorized-clients.json` until revoked (ADR 0047); local and SSH Clients need no pairing.
 
 **Invite**:
 A one-time secret that `condr server invite` creates for ten minutes, independent of connection method. Pasted into Connect Remote Device with the Server's Device key, as `tcp://<id>.<invite>@host:port` or a `p2p://<id>.<invite>` link, it lets one unknown Device complete the handshake and become authorized over either transport; it is never stored by the Client.
@@ -29,12 +29,16 @@ _Avoid_: iroh, Relay (as the name of the method)
 A Condr-hosted service that helps Peer-to-peer connections hole-punch and forwards end-to-end-encrypted bytes when a direct path fails. It never sees terminal contents and keeps nothing on disk; its outage affects only Peer-to-peer, never TCP or SSH.
 _Avoid_: proxy, gateway
 
+**Condr Cloud**:
+A Condr-hosted service that forwards a Server's push for an Agent that finished or needs its person to the Companion through APNs or FCM (ADR 0047). It stores which phones accept pushes from which Devices and their push tokens, and sees the notification's text but never terminal contents. It has nothing to do with the Relay; its outage stops only pushes.
+_Avoid_: push relay, 推送中转, push server, hub
+
 **Client**:
 The GUI, the CLI or the Companion connecting to a Server to inspect or change its Sessions. The native GUI and the Companion can present several Servers; the CLI reaches one per call, its own Pane's Server by default or a saved Device named with `--device` (ADR 0022); no Client owns Terminal processes.
 _Avoid_: Server, runtime owner
 
 **Companion**:
-Condr's iOS and Android app (ADR 0039, ADR 0040, ADR 0041): a Client, and a Device without a Server. Paired through an Invite and connected only while in the foreground, it shows every paired Device's Workspaces, Agents and "Needs you"; inside a Pane it is one more window, sizing the terminal it shows. It changes no Session structure. Companion is an engineering term: the interface names the phone by the name given at pairing.
+Condr's iOS and Android app (ADR 0039, ADR 0040, ADR 0041): a Client, and a Device without a Server. Paired through an Invite and connected only while in the foreground and reached by pushes through Condr Cloud otherwise, it shows every paired Device's Workspaces, Agents and "Needs you"; inside a Pane it is one more window, sizing the terminal it shows. It changes no Session structure. Companion is an engineering term: the interface names the phone by the name given at pairing.
 _Avoid_: mobile client, mobile app (as a name)
 
 **Session**:

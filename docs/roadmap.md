@@ -56,7 +56,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 移动端 Companion（iOS 与 Android）
 
-**状态**：下述 1–5 步已在 iOS 完成，iOS 经 TestFlight 公开测试（第 6 步）；接下来实现推送，然后是 Android。
+**状态**：下述 1–5 步已在 iOS 完成，iOS 经 TestFlight 公开测试（第 6 步）；推送已定案（ADR 0047），接下来实现它，然后是 Android。
 
 **为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `detail`，把它们带到手机上是这一层能做、单个厂商不会做的事。
 
@@ -65,9 +65,9 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - 两端 UI 都用原生开发。
 - 客户端逻辑只有一份 Rust 实现，经 uniffi 生成 Swift 与 Kotlin 绑定。iroh、Noise 和 Condr 协议编进同一个库，每个平台只链接这一个库，所以不用 iroh 官方的 Swift 与 Kotlin 绑定：同一工具链构建的两个 Rust 静态库会因标准库和分配器的内部符号重复而链接失败，两个 uniffi framework 还会在 `RustBuffer` 上冲突（ADR 0039）。
 - 手机支持 `p2p://` 与 `tcp://`，和桌面共用同一份连接与握手代码。
-- 推送要自建中转。原生 App 的推送经 APNs 和 FCM，它们的凭据只能放在 Condr 运营的服务端，不能放进每个用户的 Server。
-- 推送正文带 `detail`，由 Server 用手机的设备公钥加密，中转、苹果和谷歌都看不到。这把公钥 Server 在配对时已经记进 `authorized-clients`，不需要另外约定密钥；手机端解密需要读到 device key，iOS 上 Notification Service Extension 要和 App 共享它。
-- 推送中转用设备 key 认证，和 relay 一样不需要登录。手机用自己的 device key 签名，登记推送 token，以及允许哪些 Server 给它推送；Server 用自己的 device key 签名推送请求，请求带时间戳防重放，签名内容加专用前缀，不能挪到其他协议里冒用。Server 和手机都不新增凭据，协议也不用为推送加消息。代价是中转要落盘保存哪些 Server 和哪部手机配对，以 Device id 记录。
+- 推送经 Condr 运营的 Condr Cloud。原生 App 的推送经 APNs 和 FCM，它们的凭据只能放在 Condr 运营的服务端，不能放进每个用户的 Server（ADR 0047）。
+- 推送正文是明文：Agent 名称与状态、`detail`、Workspace、终端标题和 Server 名称。Condr Cloud、苹果和谷歌都看得到这些，但看不到终端内容。手机端没有 Notification Service Extension。
+- Condr Cloud 用设备 key 认证，和 relay 一样不需要登录。Server 和手机各用自己的 device key 签一个五分钟有效的令牌；手机凭它登记推送 token，以及允许哪些 Server 给它推送，Server 凭它推送。Server 和手机都不新增凭据，协议只在 `Hello` 里加一个字段。代价是 Condr Cloud 要落盘保存哪些 Server 可以推给哪部手机，以 Device id 记录。
 
 **做到哪**（按顺序）：
 
@@ -77,7 +77,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 4. 查看：各 Device 的 Workspace 与 Agent 状态、「Needs you」列表、Pane 的终端视图（打开时接管尺寸）。
 5. 终端交互：按 ADR 0041 实现输入、按键排、滚动、选择与鼠标模式。
 6. iOS 公开测试：TestFlight 公开链接，要求桌面端 0.1.13 或更新；只在手机端或协议变化时上传新 build；Beta App Review 用 App 内的静态 Demo。官网文档加手机端与隐私政策两页，联系邮箱 `hello@condr.dev`。
-7. 推送：先单独写推送 ADR。中转上线，按客户端限速，并在 SECURITY.md 与隐私政策页写明它保存配对关系和推送 token、看不到通知内容；Agent 完成或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。只接 APNs 与 FCM，不接国内厂商通道或聚合推送：没有 GMS 的 Android 手机只在前台更新。
+7. 推送：ADR 0047 已定。Condr Cloud 上线，按来源 IP 和调用方限速，并在 SECURITY.md 与隐私政策页写明：它保存 Device id、推送 token、允许推送的 Server 和最后登记时间；它、苹果和谷歌看得到通知正文，看不到终端内容。Agent 完成、失败或进入 Blocked 时推送，点开后重新拉取 Server 的权威状态。只接 APNs 与 FCM，不接国内厂商通道或聚合推送：没有 GMS 的 Android 手机只在前台更新。
 8. Android：推送之后开工，不等需求信号；终端渲染等实现开工时单独定。正式版之前以签名 APK 在 GitHub Releases 发布，Google Play 随首个正式版。
 
 **要实测的风险**：蜂窝网络下打洞可能更常失败，流量更多经 relay.condr.dev 转发，会推高带宽成本，也会碰到 relay 对每个客户端的限速；Wi-Fi 与蜂窝切换时连接能否保住（iroh 1.0 支持 QUIC multipath，未验证），保不住就走第 3 步的重连；手机不显示的 Git 与文件事件在蜂窝流量里占多少（ADR 0041）。

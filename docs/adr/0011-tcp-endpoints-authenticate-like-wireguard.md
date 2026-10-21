@@ -19,3 +19,5 @@ Deferred from the roadmap's M3 list: storing the device key in an OS keychain, c
 > ADR 0033 moves `device-key`, `authorized-clients` and `pending-invite` from the configuration directory to the data directory, which `CONDR_DATA_DIR` overrides; the store rules are unchanged.
 
 > ADR 0040 pairs a Companion by QR code and keeps its key in the iOS Keychain or under an Android Keystore key. The OS keychain deferred here is the desktop's.
+
+> ADR 0047 replaces the lines of `authorized-clients` with `authorized-clients.json`, a JSON array that also records whether each Client accepts pushes; the store rules are unchanged.

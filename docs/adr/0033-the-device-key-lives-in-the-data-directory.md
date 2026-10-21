@@ -11,3 +11,5 @@ The directory decides where the file lives, not who may read it. Any process of 
 Both accommodations are transitional and marked `compat(0.1.6)` in `crates/condr-server/src/noise/identity.rs`, its tests and the `Win32_Security_Authorization` feature in `crates/condr-server/Cargo.toml`: the move from beside `config.toml`, and the DACL repair on read. Once 0.1.6 installs no longer update in place, the first minor release after this is a fair point, delete them, which leaves `identity_directory()` a plain lookup and `read_secret_file` without a Windows branch, and drop the sentences in the configuration and security pages that describe them. A person updating across that boundary pairs again, as ADR 0025 already asks of anyone holding an older key.
 
 > ADR 0040: a Companion keeps its key in the iOS Keychain, or encrypted under an Android Keystore key, and hands it to the library; no data directory is involved.
+
+> ADR 0047 renames `authorized-clients` to `authorized-clients.json`. The move above keeps moving the old name, and the identity store converts it to the new one afterwards.
