@@ -140,6 +140,14 @@ pub enum ClientMessage {
     WatchTerminals {
         panes: HashSet<PaneId>,
     },
+    /// Rescans a Workspace's files and Git status now, as its watcher would (ADR 0046).
+    /// There is no reply: [`SessionEvent::WorkspaceFilesChanged`] follows the scan, and
+    /// [`SessionEvent::WorkspaceGitChanged`] when something moved.
+    RefreshWorkspace {
+        server_id: ServerId,
+        session_id: SessionId,
+        workspace_id: WorkspaceId,
+    },
     /// A message from a newer Client that this Server does not know. It is answered with
     /// an error and the connection goes on (ADR 0028). Never sent.
     Unknown,

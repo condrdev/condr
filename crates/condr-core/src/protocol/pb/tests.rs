@@ -452,3 +452,26 @@ fn the_largest_legal_write_fits_one_frame() {
     };
     assert!(crate::protocol::encode_frame(&message, message.frame_limit()).is_ok());
 }
+
+#[test]
+fn a_refresh_and_a_full_context_diff_round_trip() {
+    for message in [
+        ClientMessage::RefreshWorkspace {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            workspace_id: crate::WorkspaceId::from_u64(3),
+        },
+        ClientMessage::GitDiff {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 4,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            path: "src/lib.rs".into(),
+            against: crate::protocol::DiffBase::MergeBase,
+            full_context: true,
+        },
+    ] {
+        let encoded = super::ClientMessage::try_from(&message).unwrap();
+        assert_eq!(ClientMessage::try_from(encoded).unwrap(), message);
+    }
+}

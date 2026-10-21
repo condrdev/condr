@@ -37,6 +37,9 @@ pub(super) struct FilesViewState {
     /// Every Diff Tab shows one column rather than two (ADR 0046): how this person reads
     /// diffs, remembered in the state file.
     pub(super) diff_unified: bool,
+    /// Refreshes the user asked for and the Server has not answered yet (ADR 0046), each
+    /// with the timer that gives up on it.
+    pub(super) refreshing: HashMap<(ConnectionKey, WorkspaceId), Task<()>>,
     /// Which view the right sidebar shows per Workspace (ADR 0018), remembered in the
     /// GUI state file. Others open on Changes, or Files outside a repository.
     pub(super) sidebar_views: HashMap<(ConnectionKey, WorkspaceId), SidebarView>,

@@ -392,6 +392,15 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 workspace_id: workspace_id.as_u64(),
                 mutation: Some(encode_mutation(mutation)),
             }),
+            ClientMessage::RefreshWorkspace {
+                server_id,
+                session_id,
+                workspace_id,
+            } => Message::RefreshWorkspace(super::RefreshWorkspace {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                workspace_id: workspace_id.as_u64(),
+            }),
             ClientMessage::BrowseDirectory { request_id, path } => {
                 Message::BrowseDirectory(super::BrowseDirectory {
                     request_id: *request_id,
@@ -549,6 +558,11 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                 request_id: request.request_id,
                 workspace_id: workspace(request.workspace_id),
                 mutation: decode_mutation(member(request.mutation)?)?,
+            },
+            Message::RefreshWorkspace(refresh) => ClientMessage::RefreshWorkspace {
+                server_id: ServerId(refresh.server_id),
+                session_id: SessionId(refresh.session_id),
+                workspace_id: workspace(refresh.workspace_id),
             },
             Message::BrowseDirectory(request) => ClientMessage::BrowseDirectory {
                 request_id: request.request_id,

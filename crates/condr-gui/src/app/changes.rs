@@ -466,7 +466,32 @@ impl Condr {
             SidebarView::Files => 0,
             SidebarView::Changes => 1,
         };
-        let stat = total.map(|total| div().pr_3().child(diff_stat(total, cx)));
+        let refresh = target.map(|(key, workspace_id)| {
+            let owner = cx.weak_entity();
+            Button::new("sidebar-refresh")
+                .ghost()
+                .xsmall()
+                .icon(Icon::new(IconName::RefreshCw))
+                .debug_selector(|| "sidebar-refresh".into())
+                .tooltip("Refresh")
+                .accessibility_label("Refresh")
+                .loading(
+                    self.files_view
+                        .refreshing
+                        .contains_key(&(key, workspace_id)),
+                )
+                .on_click(move |_, _, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.refresh_workspace(key, workspace_id, cx);
+                    });
+                })
+        });
+        let suffix = h_flex()
+            .pr_2()
+            .gap_1()
+            .items_center()
+            .when_some(total, |this, total| this.child(diff_stat(total, cx)))
+            .children(refresh);
         TabBar::new("condr-sidebar-view")
             .selected_index(selected)
             .on_click(move |index, _, cx| {
@@ -492,8 +517,50 @@ impl Condr {
                     })
                     .debug_selector(|| "sidebar-view-changes".into()),
             ])
-            .when_some(stat, |this, stat| this.suffix(stat))
+            .suffix(suffix)
             .into_any_element()
+    }
+
+    /// The sidebar's refresh button (ADR 0046): asks the Server to rescan the Workspace,
+    /// for when its watcher missed something. The button spins until the scan's
+    /// `WorkspaceFilesChanged` arrives, or for five seconds when none does: a failed scan
+    /// or an older Server, which answers with an error instead.
+    fn refresh_workspace(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
+        else {
+            return;
+        };
+        if connection.status != ConnectionStatus::Connected
+            || !connection.send(ClientMessage::RefreshWorkspace {
+                server_id,
+                session_id,
+                workspace_id,
+            })
+        {
+            return;
+        }
+        let timeout = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(5))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.files_view.refreshing.remove(&(key, workspace_id));
+                cx.notify();
+            });
+        });
+        self.files_view
+            .refreshing
+            .insert((key, workspace_id), timeout);
+        cx.notify();
     }
 
     /// What a Workspace's Changes and Diff Tab compare against (ADR 0034): the base when

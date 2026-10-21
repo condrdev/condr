@@ -857,6 +857,14 @@ pub(super) fn handle_client(
                 });
                 false
             }
+            ClientMessage::RefreshWorkspace {
+                server_id,
+                session_id,
+                workspace_id,
+            } => match refresh_workspace(&state, server_id, session_id, workspace_id) {
+                Ok(()) => false,
+                Err(message) => queue_message(&outbound, ServerMessage::Error { message }),
+            },
             ClientMessage::BrowseDirectory { request_id, path } => {
                 // Any path may be a slow or hung mount, so it is read off this loop, which
                 // also carries the Client's terminal input.
@@ -1134,6 +1142,25 @@ fn workspace_root(
             .map(|workspace| workspace.root_directory().to_path_buf())
             .ok_or_else(|| "unknown Workspace".into())
     }
+}
+
+/// `RefreshWorkspace` (ADR 0046): the forced scan a file mutation asks for (ADR 0045), so
+/// Files and Changes catch up with whatever the watcher missed.
+pub(super) fn refresh_workspace(
+    state: &Arc<Mutex<RuntimeState>>,
+    server_id: ServerId,
+    session_id: SessionId,
+    workspace_id: WorkspaceId,
+) -> Result<(), String> {
+    workspace_root(state, server_id, session_id, workspace_id)?;
+    if let Some(watcher) = &state
+        .lock()
+        .expect("server state lock poisoned")
+        .git_watcher
+    {
+        watcher.refresh(workspace_id);
+    }
+    Ok(())
 }
 
 /// What every Client learns after a file mutation that may have changed the disk, even

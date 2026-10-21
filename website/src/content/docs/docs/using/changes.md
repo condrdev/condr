@@ -17,6 +17,8 @@ The Changes view sorts modified files into three groups by Git status:
 
 Each file shows how many lines were added and deleted, and the top sums up the total number of changed lines.
 
+The list follows the disk on its own. If it ever falls behind, for example on a network drive, click **Refresh** at the top right of the sidebar to have the Device scan the Workspace again; it refreshes Files and the open diff too.
+
 ## Compare against HEAD or the base branch
 
 The button above the list names what the changes are compared against, such as `Against main`, and its menu switches it:

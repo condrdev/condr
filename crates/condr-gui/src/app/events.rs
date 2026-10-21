@@ -274,6 +274,17 @@ impl Condr {
                     SessionEvent::WorkspaceFilesChanged { workspace_id } => {
                         // Listings and previews keep showing while fresh ones are fetched.
                         self.refresh_workspace_files(key, workspace_id);
+                        // A refresh the user asked for has landed; it refetches the shown
+                        // diff too, which a scan that found no change would leave (ADR 0046).
+                        if self
+                            .files_view
+                            .refreshing
+                            .remove(&(key, workspace_id))
+                            .is_some()
+                        {
+                            self.forget_workspace_diffs(key, workspace_id);
+                            git_changed = true;
+                        }
                         notify = true;
                     }
                     SessionEvent::TerminalTitleChanged { pane_id, title } => {

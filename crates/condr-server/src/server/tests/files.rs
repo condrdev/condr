@@ -66,3 +66,50 @@ fn a_rename_moves_the_preview_tab_and_refreshes_files_without_notify() {
     drop(state);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// ADR 0046: the sidebar's refresh button asks for the same forced scan, which publishes
+/// `WorkspaceFilesChanged` even when nothing moved and the Workspace is no repository.
+#[test]
+fn a_refresh_rescans_the_workspace_and_refuses_an_unknown_one() {
+    let root = std::env::temp_dir().join(format!(
+        "condr-server-refresh-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut state = RuntimeState::new(test_endpoint().as_local_path().unwrap());
+    let workspace_id = state.session.create_workspace(root.clone()).unwrap();
+    let (server_id, session_id) = (state.server_id, state.session_id);
+    let state = Arc::new(Mutex::new(state));
+    {
+        let mut locked = state.lock().unwrap();
+        let watcher = GitWatcher::without_filesystem(Arc::downgrade(&state));
+        watcher.watch(workspace_id, root.clone(), None);
+        locked.git_watcher = Some(watcher);
+    }
+    let files_changed = |state: &Arc<Mutex<RuntimeState>>| {
+        state
+            .lock()
+            .unwrap()
+            .events
+            .iter()
+            .filter(|event| matches!(event.event, SessionEvent::WorkspaceFilesChanged { .. }))
+            .count()
+    };
+    let before = files_changed(&state);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    refresh_workspace(&state, server_id, session_id, workspace_id).unwrap();
+    while files_changed(&state) == before {
+        assert!(
+            Instant::now() < deadline,
+            "a refresh must publish WorkspaceFilesChanged"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(refresh_workspace(&state, server_id, session_id, WorkspaceId::from_u64(999)).is_err());
+
+    let watcher = state.lock().unwrap().git_watcher.take().unwrap();
+    watcher.shutdown();
+    drop(state);
+    let _ = std::fs::remove_dir_all(root);
+}

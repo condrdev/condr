@@ -70,6 +70,24 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     );
     assert!(window.debug_bounds("changes-tracked").is_some());
     assert!(window.debug_bounds("changes-untracked").is_some());
+
+    // Refresh asks the Server to rescan, and spins until its `WorkspaceFilesChanged`
+    // arrives (ADR 0046).
+    let refresh = window
+        .debug_bounds("sidebar-refresh")
+        .expect("the sidebar header should offer Refresh");
+    window.simulate_click(refresh.center(), Modifiers::default());
+    assert!(
+        window.read(|app| !view.read(app).files_view.refreshing.is_empty()),
+        "the click should start a refresh"
+    );
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| view.read(app).files_view.refreshing.is_empty())
+        }),
+        "the Server's rescan should end the refresh"
+    );
+
     let changes = window.debug_bounds("condr-changes-column").unwrap();
     let row = window.debug_bounds("change-notes.txt").unwrap();
     assert!(

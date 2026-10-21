@@ -34,7 +34,16 @@ message ClientMessage {
     BrowseDirectory browse_directory = 21;
     WatchTerminals watch_terminals = 22;
     FileMutationRequest mutate_file = 23;
+    RefreshWorkspace refresh_workspace = 24;
   }
+}
+
+// Rescans a Workspace's files and Git status now, as its watcher would (ADR 0046). There
+// is no reply: `WorkspaceFilesChanged` follows the scan.
+message RefreshWorkspace {
+  uint64 server_id = 1;
+  uint64 session_id = 2;
+  uint64 workspace_id = 3;
 }
 
 // The Panes whose terminal frames this connection wants (ADR 0041), replacing any earlier
