@@ -18,7 +18,7 @@ Use this page to judge whether a Device is suitable for running Condr, and to se
 
 ## Network services Condr contacts
 
-Condr has no user accounts and collects no telemetry. It contacts only these four external services:
+Condr has no user accounts and collects no telemetry. It contacts only these five external services:
 
 | Service | When | Purpose |
 | :--- | :--- | :--- |
@@ -26,6 +26,7 @@ Condr has no user accounts and collects no telemetry. It contacts only these fou
 | `api.github.com` | Same as above, on the nightly channel | Checks for updates, as above |
 | `relay.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Helps with NAT hole punching, and relays encrypted traffic when a direct connection cannot be established |
 | `dns.condr.dev` | When the Server has Peer-to-peer turned on, or this machine is dialling a `p2p://` connection | Publishes and looks up the relay address each Device currently uses |
+| `push.condr.dev` | When an Agent finishes, fails or needs you, and a paired phone takes notifications | Condr Cloud: forwards the notification to the phone through Apple or Google; see [Push notifications](#push-notifications) |
 
 ---
 
@@ -40,7 +41,7 @@ Condr has no user accounts and collects no telemetry. It contacts only these fou
 
 ### Replacing the key
 
-Stop the Server, delete both `device-key` and `authorized-clients` from the data directory, then restart the Server. Condr generates a brand-new key, and every earlier pairing has to be set up again.
+Stop the Server, delete both `device-key` and `authorized-clients.json` from the data directory, then restart the Server. Condr generates a brand-new key, and every earlier pairing has to be set up again.
 
 If you delete only `device-key`, the window may generate a new key before the Server does, leaving the old authorized list behind.
 
@@ -69,7 +70,7 @@ If you delete only `device-key`, the window may generate a new key before the Se
 
 * **The invite**: 32 random bytes, valid for 10 minutes, usable once. Only one invite is valid at any time, and generating a new one invalidates the previous one. It is stored in the `pending-invite` file in the data directory, with the same access permissions as the Device key.
 * **Who can use it**: the first Device to complete the handshake uses up the invite. Anyone holding the invite can pair, so share it only through trusted channels.
-* **What pairing records**: after pairing, the Server appends a line to the `authorized-clients` file with the other side's Device key, the pairing time, the last-seen time and its host name.
+* **What pairing records**: after pairing, the Server adds an entry to the `authorized-clients.json` file with the other side's Device key, the pairing time, the last-seen time, its host name, and whether it takes push notifications (`push`), which the mobile app turns on when you allow notifications.
 * **What the client keeps**: the client stores only the Server's Device key and network address in `config.toml`, never the invite.
 
 ---
@@ -85,11 +86,22 @@ If you delete only `device-key`, the window may generate a new key before the Se
 
 ---
 
+## Push notifications
+
+The Server pushes to every paired phone whose entry has `push` set, through Condr Cloud (`push.condr.dev`, a Cloudflare Worker), which forwards the notification to Apple or Google.
+
+* **What it sees**: Condr Cloud and Cloudflare, which runs it, Apple and Google see the Agent's name and state, the Workspace, the Agent's `detail`, the terminal title, the Server's name and both Device keys, never terminal contents. Pushes are plain text, not end-to-end encrypted.
+* **What it stores**: each phone's Device key and push token, which Devices may push to it, and when it last registered. A registration not refreshed in 90 days is purged, and a token is deleted when Apple or Google reports it invalid.
+* **Authentication**: every request is signed with the caller's Device key. There are no accounts.
+* **Turning it off**: a phone whose owner declined notifications never contacts Condr Cloud. Turning notifications off on the phone stops pushes, and revoking the phone stops this Server's pushes to it.
+
+---
+
 ## Revoking a Device
 
 Run `condr server revoke <fingerprint or prefix>`, or open **Settings › Paired devices** and click **Revoke**.
 
-* **Takes effect at once**: Condr immediately removes the Device's line from `authorized-clients` and cuts all of its active connections.
+* **Takes effect at once**: Condr immediately removes the Device's entry from `authorized-clients.json` and cuts all of its active connections.
 * **Later attempts**: a later TCP connection is stopped during the Noise handshake; a Peer-to-peer connection is refused after the QUIC handshake completes.
 
 ---
@@ -120,7 +132,7 @@ So pair only your own Devices with the Server. Read-only and control permissions
 
 * **Writing the clipboard**: a program running in a Pane can silently overwrite this machine's clipboard with an OSC 52 escape sequence, and so can a program on a remote Device. Every connected window applies the write, with no confirmation prompt. Programs cannot read the system clipboard back.
 * **Links**: when you hold Cmd or Ctrl and click a link in the terminal, Condr opens it with the operating system's default handler, with no allowlist of URL schemes. A program can use an OSC 8 escape sequence to print a link whose visible text differs from its real target, so check the target URL before clicking.
-* **Agent state can be forged**: any process inside a Pane can construct a fake Agent state event. Agent state is only for display in the interface and must not be used for authentication or security decisions.
+* **Agent state can be forged**: any process inside a Pane can construct a fake Agent state event, and with it a push notification. Agent state is only for display in the interface and must not be used for authentication or security decisions.
 * **Images pasted to a remote Device**: when you paste an image on a remote Device, the file is written to a private directory on that Device. On Linux and macOS the directory's permissions are `0700` and the file's are `0600`. The files are removed when the window disconnects or the Server process exits, and leftovers are deleted after 24 hours. On Windows that temporary directory inherits its parent folder's permissions.
 
 ---
@@ -131,7 +143,7 @@ So pair only your own Devices with the Server. Read-only and control permissions
 | :--- | :--- | :--- |
 | `device-key`, `pending-invite` | `0600`; refused when permissions are too broad | Only the owner and SYSTEM |
 | `config.toml`, the Session snapshot, the Server's `.stderr` file | `0600` | Inherits the parent folder's ACL |
-| `authorized-clients`, log files | Created with the system default umask | Inherits the parent folder's ACL |
+| `authorized-clients.json`, log files | Created with the system default umask | Inherits the parent folder's ACL |
 
 For where these files live, see [Configuration and settings](/docs/reference/configuration/).
 
