@@ -45,7 +45,7 @@ Each Workspace remembers its own choice.
 Switch the right sidebar to **History** to see the commits of the Workspace's current branch, newest first, as `git log` lists them:
 
 - **Each row** shows the commit's subject, short ID, author and age. When an Agent commits, the new commit appears at the top on its own.
-- **Click a commit** to unfold the files it changed, with how many lines each added and deleted. Click a file to open it in the Diff Tab as that commit changed it; the header shows the commit's subject, and the arrow next to it shows the rest of the message.
+- **Click a commit** to list the files it changed in a pane below the commits, with how many lines each added and deleted; drag the line between them to resize, and click the commit again to hide the pane. Click a file to open it in the Diff Tab as that commit changed it; the header shows the commit's subject, and the arrow next to it shows the rest of the message.
 - **Copy the commit ID** from the Diff Tab header or a commit's right-click menu.
 - **Show more** at the end of the list loads the next 100 commits.
 

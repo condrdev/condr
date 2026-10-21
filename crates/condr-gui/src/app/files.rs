@@ -40,8 +40,8 @@ pub(super) struct FilesViewState {
     /// The commit each Workspace's Diff Tab shows, chosen in History (ADR 0046); this
     /// Client's view, never remembered.
     pub(super) diff_commits: HashMap<(ConnectionKey, WorkspaceId), super::history::DiffCommit>,
-    /// Commits unfolded in History.
-    pub(super) expanded_commits: HashSet<(ConnectionKey, WorkspaceId, String)>,
+    /// The commit each Workspace's History lists the files of, below its commits.
+    pub(super) selected_commits: HashMap<(ConnectionKey, WorkspaceId), String>,
     /// The Diff Tab shows a commit's whole message, not only its subject.
     pub(super) commit_message_open: bool,
     /// Refreshes the user asked for and the Server has not answered yet (ADR 0046), each
@@ -103,8 +103,8 @@ impl FilesViewState {
             .retain(|(connection, id), _| workspace_live(*connection, *id));
         self.diff_commits
             .retain(|(connection, id), _| workspace_live(*connection, *id));
-        self.expanded_commits
-            .retain(|(connection, id, _)| workspace_live(*connection, *id));
+        self.selected_commits
+            .retain(|(connection, id), _| workspace_live(*connection, *id));
         self.last_terminal_tabs.retain(|(connection, id), tab_id| {
             workspace_live(*connection, *id)
                 && (*connection != key

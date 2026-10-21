@@ -526,7 +526,7 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         "History lists the latest commit"
     );
 
-    // Unfolding asks for the commit's files; one of them opens in the Diff Tab.
+    // Selecting asks for the commit's files, listed below; one of them opens in the Diff Tab.
     let row = window.debug_bounds(commit_row).unwrap();
     window.simulate_click(row.center(), Modifiers::default());
     let file_row: &'static str = format!("commit-file-{second}-notes.txt").leak();
@@ -535,7 +535,7 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds(file_row).is_some()
         }),
-        "an unfolded commit lists its files"
+        "a selected commit lists its files"
     );
     let file = window.debug_bounds(file_row).unwrap();
     window.simulate_click(file.center(), Modifiers::default());
@@ -567,6 +567,15 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
     window.simulate_click(message.center(), Modifiers::default());
     window.update(|window, cx| _ = window.draw(cx));
     assert!(window.debug_bounds("diff-commit-body").is_some());
+
+    // Another click on the commit lets it go, and its files go with it.
+    let row = window.debug_bounds(commit_row).unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(
+        window.debug_bounds(file_row).is_none(),
+        "a second click hides the commit's files"
+    );
 
     // A commit made elsewhere moves HEAD, and History lists it without a refresh.
     run_git(&repository, ["commit", "-q", "-am", "third"]);

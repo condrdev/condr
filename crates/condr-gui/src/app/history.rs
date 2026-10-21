@@ -1,12 +1,13 @@
-//! History (ADR 0046): the presented Workspace's commits in the right sidebar, each unfolding
-//! into the files it changed, and one of those files in the Workspace's Diff Tab. It reads
-//! only; nothing here acts on the repository.
+//! History (ADR 0046): the presented Workspace's commits in the right sidebar, below them
+//! the files a selected one changed, and one of those files in the Workspace's Diff Tab. It
+//! reads only; nothing here acts on the repository.
 
-use super::changes::{diff_stat, empty_state, status_glyph, tree_indent};
+use super::changes::{diff_stat, empty_state, status_glyph};
 use super::*;
 use condr_core::protocol::{DiffBase, relative_age};
 use condr_core::{GitChangeEntry, GitChangeStatus, HISTORY_PAGE, MAX_GIT_CHANGES};
 use gpui_kit::base::text::TextView;
+use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::scroll::ScrollableElement as _;
 
 /// The commit this Client's Diff Tab shows for one path, chosen in History. Any other path
@@ -18,7 +19,7 @@ pub(super) struct DiffCommit {
 
 impl Condr {
     /// History's body: the commits loaded so far, newest first, and "Show more" while the
-    /// Server says there are more.
+    /// Server says there are more; below them, while one is selected, the files it changed.
     pub(super) fn render_history(
         &self,
         key: ConnectionKey,
@@ -51,33 +52,20 @@ impl Condr {
             .get(&(key, workspace_id))
             .filter(|chosen| shown_diff == Some(chosen.path.as_relative_path()))
             .map(|chosen| (chosen.commit.id.as_str(), chosen.path.as_relative_path()));
+        let selected = self
+            .files_view
+            .selected_commits
+            .get(&(key, workspace_id))
+            .and_then(|id| log.commits.iter().find(|commit| commit.id == *id));
         let mut list = v_flex()
             .id("condr-history-list")
-            .flex_1()
-            .min_h_0()
-            .w_full()
+            .size_full()
             .px_1()
             .py_1()
             .overflow_y_scrollbar();
         for commit in &log.commits {
-            let expanded =
-                self.files_view
-                    .expanded_commits
-                    .contains(&(key, workspace_id, commit.id.clone()));
-            list = list.child(self.render_commit_row(key, workspace_id, commit, expanded, cx));
-            if expanded {
-                list = list.children(
-                    self.render_commit_files(
-                        key,
-                        workspace_id,
-                        commit,
-                        shown
-                            .filter(|(id, _)| *id == commit.id)
-                            .map(|(_, path)| path),
-                        cx,
-                    ),
-                );
-            }
+            let is_selected = selected.is_some_and(|selected| selected.id == commit.id);
+            list = list.child(self.render_commit_row(key, workspace_id, commit, is_selected, cx));
         }
         if log.more {
             let loading = resources.pending_logs.contains_key(&workspace_id);
@@ -100,17 +88,38 @@ impl Condr {
                 ),
             );
         }
-        list.into_any_element()
+        let body = div().flex_1().min_h_0().w_full();
+        match selected {
+            Some(commit) => body.child(
+                v_resizable("condr-history")
+                    .child(resizable_panel().child(list))
+                    .child(
+                        resizable_panel().child(
+                            self.render_commit_files(
+                                key,
+                                workspace_id,
+                                commit,
+                                shown
+                                    .filter(|(id, _)| *id == commit.id)
+                                    .map(|(_, path)| path),
+                                cx,
+                            ),
+                        ),
+                    ),
+            ),
+            None => body.child(list),
+        }
+        .into_any_element()
     }
 
-    /// Two lines: the subject, then the short id, the author and the age. A click unfolds
-    /// the commit; its menu copies the id.
+    /// Two lines: the subject, then the short id, the author and the age. A click selects
+    /// the commit, and another on it lets go; its menu copies the id.
     fn render_commit_row(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         commit: &CommitSummary,
-        expanded: bool,
+        selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
@@ -123,20 +132,29 @@ impl Condr {
             .debug_selector(move || selector.to_string())
             .w_full()
             .min_w_0()
-            .pl(tree_indent(0, false))
-            .pr_2()
+            .px_2()
             .py_1()
-            .gap_1()
-            .items_start()
             .cursor_pointer()
             .rounded(theme.radius)
-            .hover(|this| {
-                this.bg(theme.sidebar_accent.opacity(0.8))
+            .when(!selected, |this| {
+                this.hover(|this| {
+                    this.bg(theme.sidebar_accent.opacity(0.8))
+                        .text_color(theme.sidebar_accent_foreground)
+                })
+            })
+            .when(selected, |this| {
+                this.bg(theme.tokens.sidebar_accent)
                     .text_color(theme.sidebar_accent_foreground)
             })
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| {
-                    this.toggle_commit(key, workspace_id, id.clone(), cx);
+                    let selected = &mut this.files_view.selected_commits;
+                    if selected.get(&(key, workspace_id)) == Some(&id) {
+                        selected.remove(&(key, workspace_id));
+                    } else {
+                        selected.insert((key, workspace_id), id.clone());
+                    }
+                    cx.notify();
                 });
             })
             .context_menu(move |menu, _, _| {
@@ -147,17 +165,6 @@ impl Condr {
                     }),
                 )
             })
-            .child(
-                div().flex_none().pt(px(2.)).child(
-                    Icon::new(if expanded {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    })
-                    .xsmall()
-                    .text_color(theme.muted_foreground),
-                ),
-            )
             .child(
                 v_flex()
                     .min_w_0()
@@ -179,7 +186,7 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The files an unfolded commit changed, as Changes draws its rows.
+    /// The files the selected commit changed, as Changes draws its rows, under a count.
     fn render_commit_files(
         &self,
         key: ConnectionKey,
@@ -187,44 +194,81 @@ impl Condr {
         commit: &CommitSummary,
         shown: Option<&RelativePath>,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    ) -> AnyElement {
+        let (muted, danger, warning) = {
+            let theme = cx.theme();
+            (theme.muted_foreground, theme.danger, theme.warning)
+        };
         let note = |text: String, color: Hsla| {
             div()
-                .pl(tree_indent(1, true))
-                .pr_2()
+                .px_2()
                 .py_1()
                 .text_xs()
                 .text_color(color)
                 .child(text)
                 .into_any_element()
         };
-        let muted = cx.theme().muted_foreground;
-        let details = self.connection(key).and_then(|connection| {
-            connection
-                .resources
-                .commits
-                .get(&(workspace_id, commit.id.clone()))
-        });
-        let details = match details {
-            None => return vec![note("Loading…".into(), muted)],
-            Some(Err(error)) => return vec![note(error.clone(), cx.theme().danger)],
+        let slot = (workspace_id, commit.id.clone());
+        let Some(connection) = self.connection(key) else {
+            return empty_state("No Workspace", cx);
+        };
+        let resources = &connection.resources;
+        let details = match resources.commits.get(&slot) {
+            None => {
+                // Asked here rather than on the click, so a reconnect that dropped the
+                // answer asks again.
+                if !resources.pending_commits.contains_key(&slot) {
+                    let owner = cx.weak_entity();
+                    let id = commit.id.clone();
+                    cx.defer(move |cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.request_commit(key, workspace_id, id);
+                            cx.notify();
+                        });
+                    });
+                }
+                return empty_state("Loading…", cx);
+            }
+            Some(Err(error)) => return note(error.clone(), danger),
             Some(Ok(details)) => details,
         };
-        let mut rows = Vec::new();
+        let mut list = v_flex()
+            .id("condr-commit-files")
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .px_1()
+            .pb_1()
+            .overflow_y_scrollbar();
         if details.changes.entries.is_empty() {
-            rows.push(note("No file changes".into(), muted));
+            list = list.child(note("No file changes".into(), muted));
         }
         for entry in &details.changes.entries {
             let selected = shown == Some(entry.path.as_relative_path());
-            rows.push(self.render_commit_file(key, workspace_id, commit, entry, selected, cx));
+            list =
+                list.child(self.render_commit_file(key, workspace_id, commit, entry, selected, cx));
         }
         if details.changes.truncated {
-            rows.push(note(
+            list = list.child(note(
                 format!("Only the first {MAX_GIT_CHANGES} files are listed."),
-                cx.theme().warning,
+                warning,
             ));
         }
-        rows
+        v_flex()
+            .size_full()
+            .child(
+                div()
+                    .flex_none()
+                    .h_7()
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(format!("Changed files ({})", details.changes.entries.len())),
+            )
+            .child(list)
+            .into_any_element()
     }
 
     fn render_commit_file(
@@ -258,8 +302,7 @@ impl Condr {
             .h_7()
             .w_full()
             .min_w_0()
-            .pl(tree_indent(1, true))
-            .pr_2()
+            .px_2()
             .gap_2()
             .items_center()
             .cursor_pointer()
@@ -439,21 +482,6 @@ impl Condr {
             .get(&(key, workspace_id))
             .filter(|chosen| chosen.path == path)
             .map(|chosen| &chosen.commit)
-    }
-
-    fn toggle_commit(
-        &mut self,
-        key: ConnectionKey,
-        workspace_id: WorkspaceId,
-        id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let slot = (key, workspace_id, id.clone());
-        if !self.files_view.expanded_commits.remove(&slot) {
-            self.files_view.expanded_commits.insert(slot);
-            self.request_commit(key, workspace_id, id);
-        }
-        cx.notify();
     }
 
     /// Shows `path` as `commit` changed it in the Workspace's Diff Tab: the ordinary
