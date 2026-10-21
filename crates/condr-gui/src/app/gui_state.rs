@@ -269,7 +269,7 @@ mod wire {
         workspaces: HashMap<u64, Workspace>,
     }
 
-    /// `sidebar_view` 1 Changes, 2 Files.
+    /// `sidebar_view` 1 Changes, 2 Files, 3 History.
     #[derive(Clone, PartialEq, prost::Message)]
     struct Workspace {
         #[prost(uint64, optional, tag = "1")]
@@ -321,6 +321,7 @@ mod wire {
                                     sidebar_view: state.sidebar_view.map(|view| match view {
                                         SidebarView::Changes => 1,
                                         SidebarView::Files => 2,
+                                        SidebarView::History => 3,
                                     }),
                                     against_base: state.against_base,
                                 };
@@ -375,6 +376,7 @@ mod wire {
                                     sidebar_view: state.sidebar_view.and_then(|view| match view {
                                         1 => Some(SidebarView::Changes),
                                         2 => Some(SidebarView::Files),
+                                        3 => Some(SidebarView::History),
                                         _ => None,
                                     }),
                                     against_base: state.against_base,

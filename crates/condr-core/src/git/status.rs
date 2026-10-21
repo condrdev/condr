@@ -20,7 +20,7 @@ use relative_path::{RelativePath, RelativePathBuf};
 use super::changes::*;
 use super::repository::{GitBase, GitError, GitRepository, git_error};
 
-const DIFF_CONTEXT_LINES: u32 = 3;
+pub(super) const DIFF_CONTEXT_LINES: u32 = 3;
 
 impl GitRepository {
     /// The working tree against `HEAD`, and against `base`'s merge base when there is one
@@ -195,7 +195,7 @@ fn status_rank(status: GitChangeStatus) -> u8 {
 }
 
 /// `git` spells repository paths with `/`, exactly as a [`RelativePathBuf`] does.
-fn git_path(path: &BStr) -> RelativePathBuf {
+pub(super) fn git_path(path: &BStr) -> RelativePathBuf {
     RelativePathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 
@@ -330,7 +330,7 @@ fn fold_status_item(item: gix::status::Item) -> Option<FoldedStatus> {
 
 /// The diff as hunks with `context` lines around each change, or the placeholder for hunks
 /// past the size limit.
-fn hunks_content(
+pub(super) fn hunks_content(
     diff: &Diff,
     input: &InternedInput<&[u8]>,
     context: u32,
@@ -356,17 +356,49 @@ fn hunks_content(
     Ok(FileDiffContent::Text { hunks })
 }
 
-/// Diffs the blobs of `HEAD`, or of a base's merge base, against worktree files.
-struct Differ<'repo> {
+/// Diffs the blobs of `HEAD`, or of a base's merge base, against worktree files; or a
+/// commit's blobs against its first parent's (ADR 0046).
+pub(super) struct Differ<'repo> {
     repo: &'repo gix::Repository,
-    /// `None` on an unborn branch: everything is new.
+    /// `None` on an unborn branch or for a root commit: everything is new.
     head_tree: Option<gix::Tree<'repo>>,
+    /// The commit's tree; `None` compares against the worktree.
+    new_tree: Option<gix::Tree<'repo>>,
     cache: gix::diff::blob::Platform,
     workdir: PathBuf,
 }
 
 impl<'repo> Differ<'repo> {
-    fn new(repo: &'repo gix::Repository, base: Option<&GitBase>) -> Result<Self, GitError> {
+    /// `commit` against its first parent, both from the object database.
+    pub(super) fn commit(
+        repo: &'repo gix::Repository,
+        commit: &gix::Commit<'repo>,
+    ) -> Result<Self, GitError> {
+        let head_tree = match commit.parent_ids().next() {
+            Some(parent) => Some(
+                parent
+                    .object()
+                    .map_err(git_error)?
+                    .peel_to_tree()
+                    .map_err(git_error)?,
+            ),
+            None => None,
+        };
+        Ok(Self {
+            repo,
+            head_tree,
+            new_tree: Some(commit.tree().map_err(git_error)?),
+            cache: repo
+                .diff_resource_cache_for_tree_diff()
+                .map_err(git_error)?,
+            workdir: PathBuf::new(),
+        })
+    }
+
+    pub(super) fn new(
+        repo: &'repo gix::Repository,
+        base: Option<&GitBase>,
+    ) -> Result<Self, GitError> {
         let workdir = repo
             .workdir()
             .ok_or_else(|| GitError("repository has no work tree".into()))?
@@ -387,17 +419,18 @@ impl<'repo> Differ<'repo> {
         Ok(Self {
             repo,
             head_tree,
+            new_tree: None,
             cache,
             workdir,
         })
     }
 
-    /// The `HEAD` side of `path`: its blob and mode, or `None` when HEAD lacks the path.
-    fn head_entry(
-        &self,
+    /// `path` in `tree`: its blob and mode, or `None` when the tree lacks the path.
+    fn tree_entry(
+        tree: Option<&gix::Tree<'repo>>,
         path: &RelativePath,
     ) -> Result<Option<(gix::ObjectId, EntryKind)>, GitError> {
-        let Some(tree) = &self.head_tree else {
+        let Some(tree) = tree else {
             return Ok(None);
         };
         let Some(entry) = tree
@@ -430,7 +463,7 @@ impl<'repo> Differ<'repo> {
 
     /// Runs `render` over the internal diff of `path`, or returns the placeholder that says
     /// why there is none. `old_path` is where `HEAD` has the file when it was renamed.
-    fn diff<T>(
+    pub(super) fn diff<T>(
         &mut self,
         path: &RelativePath,
         old_path: Option<&RelativePath>,
@@ -442,11 +475,16 @@ impl<'repo> Differ<'repo> {
         use gix::diff::blob::platform::prepare_diff::Operation;
         use gix::diff::blob::platform::resource::Data;
 
-        let head = self.head_entry(old_path.unwrap_or(path))?;
-        let worktree = self.worktree_kind(path);
-        if head.is_none() && worktree.is_none() {
+        let head = Self::tree_entry(self.head_tree.as_ref(), old_path.unwrap_or(path))?;
+        let new = match &self.new_tree {
+            Some(tree) => Self::tree_entry(Some(tree), path)?,
+            None => self
+                .worktree_kind(path)
+                .map(|kind| (gix::ObjectId::null(self.repo.object_hash()), kind)),
+        };
+        if head.is_none() && new.is_none() {
             return Err(GitError(format!(
-                "{} is neither in HEAD nor in the work tree",
+                "{} is on neither side of the diff",
                 path.as_str()
             )));
         }
@@ -463,11 +501,13 @@ impl<'repo> Differ<'repo> {
                 &self.repo.objects,
             )
             .map_err(git_error)?;
-        // A null id with a worktree root reads the file from disk.
+        // A null id with a worktree root reads the file from disk; without one, from a
+        // commit's tree, it is a missing side.
+        let (new_id, new_kind) = new.unwrap_or((null, EntryKind::Blob));
         self.cache
             .set_resource(
-                null,
-                worktree.unwrap_or(EntryKind::Blob),
+                new_id,
+                new_kind,
                 rela_path.as_ref(),
                 ResourceKind::NewOrDestination,
                 &self.repo.objects,
@@ -493,7 +533,7 @@ impl<'repo> Differ<'repo> {
         }
     }
 
-    fn stat(&mut self, entry: &GitChangeEntry) -> Result<Option<GitDiffStat>, GitError> {
+    pub(super) fn stat(&mut self, entry: &GitChangeEntry) -> Result<Option<GitDiffStat>, GitError> {
         if entry.status == GitChangeStatus::Conflicted {
             return Ok(None);
         }

@@ -1,0 +1,672 @@
+//! History (ADR 0046): the presented Workspace's commits in the right sidebar, each unfolding
+//! into the files it changed, and one of those files in the Workspace's Diff Tab. It reads
+//! only; nothing here acts on the repository.
+
+use super::changes::{diff_stat, empty_state, status_glyph, tree_indent};
+use super::*;
+use condr_core::protocol::{DiffBase, relative_age};
+use condr_core::{GitChangeEntry, GitChangeStatus, HISTORY_PAGE, MAX_GIT_CHANGES};
+use gpui_kit::base::text::TextView;
+use gpui_kit::component::scroll::ScrollableElement as _;
+
+/// The commit this Client's Diff Tab shows for one path, chosen in History. Any other path
+/// in the Tab, whoever put it there, is the working tree's.
+pub(super) struct DiffCommit {
+    pub(super) path: RelativePathBuf,
+    pub(super) commit: CommitSummary,
+}
+
+impl Condr {
+    /// History's body: the commits loaded so far, newest first, and "Show more" while the
+    /// Server says there are more.
+    pub(super) fn render_history(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        shown_diff: Option<&RelativePath>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(connection) = self.connection(key) else {
+            return empty_state("No Workspace", cx);
+        };
+        let resources = &connection.resources;
+        let Some(log) = resources.logs.get(&workspace_id) else {
+            if !resources.pending_logs.contains_key(&workspace_id) {
+                let owner = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        this.request_log(key, workspace_id, 0);
+                        cx.notify();
+                    });
+                });
+            }
+            return empty_state("Loading history…", cx);
+        };
+        if log.commits.is_empty() {
+            return empty_state("No commits yet", cx);
+        }
+        let shown = self
+            .files_view
+            .diff_commits
+            .get(&(key, workspace_id))
+            .filter(|chosen| shown_diff == Some(chosen.path.as_relative_path()))
+            .map(|chosen| (chosen.commit.id.as_str(), chosen.path.as_relative_path()));
+        let mut list = v_flex()
+            .id("condr-history-list")
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .px_1()
+            .py_1()
+            .overflow_y_scrollbar();
+        for commit in &log.commits {
+            let expanded =
+                self.files_view
+                    .expanded_commits
+                    .contains(&(key, workspace_id, commit.id.clone()));
+            list = list.child(self.render_commit_row(key, workspace_id, commit, expanded, cx));
+            if expanded {
+                list = list.children(
+                    self.render_commit_files(
+                        key,
+                        workspace_id,
+                        commit,
+                        shown
+                            .filter(|(id, _)| *id == commit.id)
+                            .map(|(_, path)| path),
+                        cx,
+                    ),
+                );
+            }
+        }
+        if log.more {
+            let loading = resources.pending_logs.contains_key(&workspace_id);
+            let owner = cx.weak_entity();
+            let skip = log.commits.len() as u32;
+            list = list.child(
+                div().px_2().py_1().child(
+                    Button::new("history-more")
+                        .debug_selector(|| "history-more".into())
+                        .ghost()
+                        .xsmall()
+                        .label("Show more")
+                        .loading(loading)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.request_log(key, workspace_id, skip);
+                                cx.notify();
+                            });
+                        }),
+                ),
+            );
+        }
+        list.into_any_element()
+    }
+
+    /// Two lines: the subject, then the short id, the author and the age. A click unfolds
+    /// the commit; its menu copies the id.
+    fn render_commit_row(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        commit: &CommitSummary,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let selector: SharedString = format!("commit-{}", short_id(&commit.id)).into();
+        let owner = cx.weak_entity();
+        let id = commit.id.clone();
+        let copy_id = commit.id.clone();
+        h_flex()
+            .id(selector.clone())
+            .debug_selector(move || selector.to_string())
+            .w_full()
+            .min_w_0()
+            .pl(tree_indent(0, false))
+            .pr_2()
+            .py_1()
+            .gap_1()
+            .items_start()
+            .cursor_pointer()
+            .rounded(theme.radius)
+            .hover(|this| {
+                this.bg(theme.sidebar_accent.opacity(0.8))
+                    .text_color(theme.sidebar_accent_foreground)
+            })
+            .on_click(move |_, _, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    this.toggle_commit(key, workspace_id, id.clone(), cx);
+                });
+            })
+            .context_menu(move |menu, _, _| {
+                let copy_id = copy_id.clone();
+                menu.item(
+                    PopupMenuItem::new("Copy Commit ID").on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
+                    }),
+                )
+            })
+            .child(
+                div().flex_none().pt(px(2.)).child(
+                    Icon::new(if expanded {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .xsmall()
+                    .text_color(theme.muted_foreground),
+                ),
+            )
+            .child(
+                v_flex()
+                    .min_w_0()
+                    .flex_1()
+                    .child(div().text_sm().truncate().child(commit.subject.clone()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(theme.muted_foreground)
+                            .child(format!(
+                                "{} · {} · {}",
+                                short_id(&commit.id),
+                                commit.author,
+                                age(commit.time)
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The files an unfolded commit changed, as Changes draws its rows.
+    fn render_commit_files(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        commit: &CommitSummary,
+        shown: Option<&RelativePath>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let note = |text: String, color: Hsla| {
+            div()
+                .pl(tree_indent(1, true))
+                .pr_2()
+                .py_1()
+                .text_xs()
+                .text_color(color)
+                .child(text)
+                .into_any_element()
+        };
+        let muted = cx.theme().muted_foreground;
+        let details = self.connection(key).and_then(|connection| {
+            connection
+                .resources
+                .commits
+                .get(&(workspace_id, commit.id.clone()))
+        });
+        let details = match details {
+            None => return vec![note("Loading…".into(), muted)],
+            Some(Err(error)) => return vec![note(error.clone(), cx.theme().danger)],
+            Some(Ok(details)) => details,
+        };
+        let mut rows = Vec::new();
+        if details.changes.entries.is_empty() {
+            rows.push(note("No file changes".into(), muted));
+        }
+        for entry in &details.changes.entries {
+            let selected = shown == Some(entry.path.as_relative_path());
+            rows.push(self.render_commit_file(key, workspace_id, commit, entry, selected, cx));
+        }
+        if details.changes.truncated {
+            rows.push(note(
+                format!("Only the first {MAX_GIT_CHANGES} files are listed."),
+                cx.theme().warning,
+            ));
+        }
+        rows
+    }
+
+    fn render_commit_file(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        commit: &CommitSummary,
+        entry: &GitChangeEntry,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let selector: SharedString =
+            format!("commit-file-{}-{}", short_id(&commit.id), entry.path).into();
+        let owner = cx.weak_entity();
+        let path = entry.path.clone();
+        let commit = commit.clone();
+        let name = entry
+            .path
+            .file_name()
+            .unwrap_or(entry.path.as_str())
+            .to_owned();
+        let directory = entry
+            .path
+            .parent()
+            .map(|parent| parent.to_string())
+            .filter(|parent| !parent.is_empty());
+        h_flex()
+            .id(selector.clone())
+            .debug_selector(move || selector.to_string())
+            .h_7()
+            .w_full()
+            .min_w_0()
+            .pl(tree_indent(1, true))
+            .pr_2()
+            .gap_2()
+            .items_center()
+            .cursor_pointer()
+            .rounded(theme.radius)
+            .text_sm()
+            .when(!selected, |this| {
+                this.hover(|this| {
+                    this.bg(theme.sidebar_accent.opacity(0.8))
+                        .text_color(theme.sidebar_accent_foreground)
+                })
+            })
+            .when(selected, |this| {
+                this.bg(theme.tokens.sidebar_accent)
+                    .text_color(theme.sidebar_accent_foreground)
+            })
+            .on_click(move |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    this.show_commit_diff(
+                        key,
+                        workspace_id,
+                        commit.clone(),
+                        path.clone(),
+                        window,
+                        cx,
+                    );
+                });
+            })
+            .child(status_glyph(entry.status, cx))
+            .child(
+                h_flex()
+                    .min_w_0()
+                    .flex_1()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex_none()
+                            .when(entry.status == GitChangeStatus::Deleted, |this| {
+                                this.line_through().text_color(theme.muted_foreground)
+                            })
+                            .child(name),
+                    )
+                    .when_some(directory, |this, directory| {
+                        this.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(directory),
+                        )
+                    }),
+            )
+            .when_some(entry.stat, |this, stat| this.child(diff_stat(stat, cx)))
+            .into_any_element()
+    }
+
+    /// The Diff Tab's second header row for a commit: its subject, short id, author and
+    /// age, Copy Commit ID, and the rest of the message behind a disclosure.
+    pub(super) fn render_commit_header(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        commit: &CommitSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let body = self
+            .connection(key)
+            .and_then(|connection| {
+                connection
+                    .resources
+                    .commits
+                    .get(&(workspace_id, commit.id.clone()))
+            })
+            .and_then(|details| details.as_ref().ok())
+            .map(|details| message_body(&details.message))
+            .filter(|body| !body.is_empty());
+        let open = self.files_view.commit_message_open;
+        let owner = cx.weak_entity();
+        let copy_id = commit.id.clone();
+        let row = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_sm()
+                    .font_medium()
+                    .child(commit.subject.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(format!(
+                        "{} · {} · {}",
+                        short_id(&commit.id),
+                        commit.author,
+                        age(commit.time)
+                    )),
+            )
+            .child(
+                Button::new("diff-copy-commit")
+                    .ghost()
+                    .xsmall()
+                    .icon(Icon::new(IconName::Copy))
+                    .debug_selector(|| "diff-copy-commit".into())
+                    .tooltip("Copy Commit ID")
+                    .accessibility_label("Copy Commit ID")
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()));
+                    }),
+            )
+            .when(body.is_some(), |this| {
+                this.child(
+                    Button::new("diff-commit-message")
+                        .ghost()
+                        .xsmall()
+                        .icon(Icon::new(if open {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
+                        }))
+                        .debug_selector(|| "diff-commit-message".into())
+                        .tooltip(if open { "Hide Message" } else { "Show Message" })
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |this, cx| {
+                                this.files_view.commit_message_open ^= true;
+                                cx.notify();
+                            });
+                        }),
+                )
+            });
+        v_flex()
+            .debug_selector(|| "diff-commit-header".into())
+            .flex_none()
+            .w_full()
+            .px_3()
+            .py_1()
+            .gap_1()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(row)
+            .when_some(body.filter(|_| open), |this, body| {
+                this.child(
+                    div()
+                        .id("diff-commit-body")
+                        .debug_selector(|| "diff-commit-body".into())
+                        .max_h(rems(12.))
+                        .overflow_y_scrollbar()
+                        .text_sm()
+                        .child(
+                            TextView::markdown(
+                                SharedString::from(format!("commit-body-{}", commit.id)),
+                                escaped_markdown(&body),
+                            )
+                            .selectable(true),
+                        ),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// The commit the Diff Tab shows for `path`, when this Client chose one in History.
+    pub(super) fn diff_commit(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+    ) -> Option<&CommitSummary> {
+        self.files_view
+            .diff_commits
+            .get(&(key, workspace_id))
+            .filter(|chosen| chosen.path == path)
+            .map(|chosen| &chosen.commit)
+    }
+
+    fn toggle_commit(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let slot = (key, workspace_id, id.clone());
+        if !self.files_view.expanded_commits.remove(&slot) {
+            self.files_view.expanded_commits.insert(slot);
+            self.request_commit(key, workspace_id, id);
+        }
+        cx.notify();
+    }
+
+    /// Shows `path` as `commit` changed it in the Workspace's Diff Tab: the ordinary
+    /// `ShowDiff`, with the commit as this Client's own choice (ADR 0046).
+    fn show_commit_diff(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        commit: CommitSummary,
+        path: RelativePathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_diff_on(key, workspace_id, path.clone(), window, cx);
+        self.files_view
+            .diff_commits
+            .insert((key, workspace_id), DiffCommit { path, commit });
+        // A Tab already on this path gets no layout change to resync it.
+        self.rebuild_dock(window, cx);
+        cx.notify();
+    }
+
+    /// Asks for a page of History: the first replaces what is shown once it lands, a later
+    /// one walks on from where the first began.
+    pub(super) fn request_log(&mut self, key: ConnectionKey, workspace_id: WorkspaceId, skip: u32) {
+        let Some(connection) = self.connection(key) else {
+            return;
+        };
+        if connection
+            .resources
+            .pending_logs
+            .contains_key(&workspace_id)
+        {
+            return;
+        }
+        let from = (skip > 0)
+            .then(|| connection.resources.logs.get(&workspace_id)?.from.clone())
+            .flatten();
+        if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
+            ClientMessage::GitLog {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                from,
+                skip,
+                limit: HISTORY_PAGE,
+            }
+        }) && let Some(connection) = self.connection_mut(key)
+        {
+            connection
+                .resources
+                .pending_logs
+                .insert(workspace_id, (request_id, skip));
+        }
+    }
+
+    /// History's first page again, once `HEAD` moved or the user refreshed; only for a
+    /// Workspace whose History was loaded, and the old list stays until the new one lands.
+    pub(super) fn reload_history(&mut self, key: ConnectionKey, workspace_id: WorkspaceId) {
+        let Some(connection) = self.connection_mut(key) else {
+            return;
+        };
+        if !connection.resources.logs.contains_key(&workspace_id) {
+            return;
+        }
+        // A newer first page wins over a later page in flight.
+        connection.resources.pending_logs.remove(&workspace_id);
+        self.request_log(key, workspace_id, 0);
+    }
+
+    fn request_commit(&mut self, key: ConnectionKey, workspace_id: WorkspaceId, commit: String) {
+        let slot = (workspace_id, commit.clone());
+        if self.connection(key).is_none_or(|connection| {
+            connection.resources.commits.contains_key(&slot)
+                || connection.resources.pending_commits.contains_key(&slot)
+        }) {
+            return;
+        }
+        if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
+            ClientMessage::GitCommit {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                commit,
+            }
+        }) && let Some(connection) = self.connection_mut(key)
+        {
+            connection
+                .resources
+                .pending_commits
+                .insert(slot, request_id);
+        }
+    }
+
+    /// One file of one commit for the Diff Tab, with every line as context.
+    pub(super) fn request_commit_diff(
+        &mut self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        commit: String,
+        path: RelativePathBuf,
+    ) {
+        let slot = (workspace_id, commit.clone(), path.clone());
+        if self.connection(key).is_none_or(|connection| {
+            connection.resources.commit_diffs.contains_key(&slot)
+                || connection
+                    .resources
+                    .pending_commit_diffs
+                    .values()
+                    .any(|pending| *pending == slot)
+        }) {
+            return;
+        }
+        // The message's body for the header comes with the commit's own details.
+        self.request_commit(key, workspace_id, commit.clone());
+        if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
+            ClientMessage::GitDiff {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path,
+                against: DiffBase::Head,
+                full_context: true,
+                commit: Some(commit),
+            }
+        }) && let Some(connection) = self.connection_mut(key)
+        {
+            connection
+                .resources
+                .pending_commit_diffs
+                .insert(request_id, slot);
+        }
+    }
+
+    /// Sends what `build` makes of the connection's ids and a fresh request id, and returns
+    /// that id once it is on its way.
+    fn send_request(
+        &mut self,
+        key: ConnectionKey,
+        build: impl FnOnce(ServerId, SessionId, u64) -> ClientMessage,
+    ) -> Option<u64> {
+        let connection = self.connection_mut(key)?;
+        let (Some(server_id), Some(session_id)) =
+            (connection.model.server_id, connection.model.session_id)
+        else {
+            return None;
+        };
+        if connection.status != ConnectionStatus::Connected {
+            return None;
+        }
+        let request_id = connection.next_layout_request_id;
+        connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
+        connection
+            .send(build(server_id, session_id, request_id))
+            .then_some(request_id)
+    }
+}
+
+pub(super) fn short_id(id: &str) -> &str {
+    &id[..id.len().min(7)]
+}
+
+fn age(time: i64) -> String {
+    relative_age(u64::try_from(time).unwrap_or_default())
+}
+
+/// A message without its subject line and the blank line after it.
+fn message_body(message: &str) -> String {
+    let mut lines = message.lines();
+    lines.next();
+    lines
+        .skip_while(|line| line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_owned()
+}
+
+/// `text` as Markdown that renders it as written: every punctuation character escaped and
+/// every line break kept, since a commit message is plain text (ADR 0046).
+fn escaped_markdown(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len() * 2);
+    for (index, line) in text.lines().enumerate() {
+        if index > 0 {
+            escaped.push_str("\\\n");
+        }
+        for character in line.chars() {
+            if character.is_ascii_punctuation() {
+                escaped.push('\\');
+            }
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{escaped_markdown, message_body};
+
+    #[test]
+    fn a_message_body_drops_the_subject_and_escapes_as_written() {
+        assert_eq!(
+            message_body("Fix the parser\n\n- keeps *tokens*\n- drops none\n"),
+            "- keeps *tokens*\n- drops none"
+        );
+        assert_eq!(message_body("Only a subject\n"), "");
+        assert_eq!(
+            escaped_markdown("- keeps *tokens*\n# not a heading"),
+            "\\- keeps \\*tokens\\*\\\n\\# not a heading"
+        );
+    }
+}

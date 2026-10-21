@@ -469,9 +469,83 @@ fn a_refresh_and_a_full_context_diff_round_trip() {
             path: "src/lib.rs".into(),
             against: crate::protocol::DiffBase::MergeBase,
             full_context: true,
+            commit: Some("8f3c".into()),
+        },
+        ClientMessage::GitLog {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 5,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            from: Some("8f3c".into()),
+            skip: 100,
+            limit: 100,
+        },
+        ClientMessage::GitCommit {
+            server_id: crate::protocol::ServerId(1),
+            session_id: crate::protocol::SessionId(2),
+            request_id: 6,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            commit: "8f3c".into(),
         },
     ] {
         let encoded = super::ClientMessage::try_from(&message).unwrap();
         assert_eq!(ClientMessage::try_from(encoded).unwrap(), message);
+    }
+}
+
+#[test]
+fn history_replies_round_trip() {
+    let changes = crate::GitChanges {
+        entries: vec![crate::GitChangeEntry {
+            path: "src/new.rs".into(),
+            old_path: Some("src/old.rs".into()),
+            status: crate::GitChangeStatus::Renamed,
+            stat: Some(crate::GitDiffStat {
+                added: 2,
+                deleted: 1,
+            }),
+        }],
+        truncated: false,
+    };
+    for message in [
+        crate::protocol::ServerMessage::GitLog {
+            request_id: 5,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            result: Ok(crate::GitLog {
+                from: Some("8f3c".into()),
+                commits: vec![crate::CommitSummary {
+                    id: "8f3c".into(),
+                    subject: "Fix the parser".into(),
+                    author: "Ada".into(),
+                    time: 1_700_000_000,
+                }],
+                more: true,
+            }),
+        },
+        crate::protocol::ServerMessage::GitCommit {
+            request_id: 6,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            commit: "8f3c".into(),
+            result: Ok(crate::CommitDetails {
+                id: "8f3c".into(),
+                parents: vec!["1a2b".into()],
+                author: "Ada".into(),
+                time: 1_700_000_000,
+                message: "Fix the parser\n\nIt dropped the last token.\n".into(),
+                changes,
+            }),
+        },
+        crate::protocol::ServerMessage::GitCommit {
+            request_id: 7,
+            workspace_id: crate::WorkspaceId::from_u64(3),
+            commit: "dead".into(),
+            result: Err("not a commit".into()),
+        },
+    ] {
+        let encoded = super::ServerMessage::try_from(&message).unwrap();
+        assert_eq!(
+            crate::protocol::ServerMessage::try_from(encoded).unwrap(),
+            message
+        );
     }
 }

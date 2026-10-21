@@ -20,6 +20,8 @@ pub(super) enum SidebarView {
     #[default]
     Changes,
     Files,
+    /// The commits reachable from `HEAD` (ADR 0046).
+    History,
 }
 
 pub(super) const INITIAL_CHANGES_WIDTH: Pixels = px(300.);
@@ -211,8 +213,9 @@ pub(super) fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
 /// The Diff Tab's Kit `Diff` and what it currently shows (ADR 0046).
 pub(super) struct DiffViewer {
     pub(super) state: Entity<DiffState>,
-    /// The path and the connection's diff generation the state was built from.
-    shown: Option<(RelativePathBuf, u64)>,
+    /// The path, the commit when History chose one, and the connection's diff generation
+    /// the state was built from.
+    shown: Option<((RelativePathBuf, Option<String>), u64)>,
     /// The patch last handed to the state. A refetch that writes the same one leaves the
     /// view alone, since `set_files` resets its scrolling and folds.
     pub(super) patch: String,
@@ -283,12 +286,22 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The working tree's, unless History puts its commit back right after (ADR 0046).
+        let left_commit = self
+            .files_view
+            .diff_commits
+            .remove(&(key, workspace_id))
+            .is_some();
         self.send_presenting_layout_to(
             key,
             LayoutCommand::ShowDiff { workspace_id, path },
             window,
             cx,
         );
+        // Retargeting the Tab to its own path changes no layout, so nothing else resyncs it.
+        if left_commit {
+            self.rebuild_dock(window, cx);
+        }
     }
 
     /// The title bar's toggle for the right sidebar, next to "Open in". Only a Workspace
@@ -403,11 +416,16 @@ impl Condr {
         let Some((key, workspace_id, workspace_name, git, shown_diff, shown_file)) = presented
         else {
             return column
-                .child(self.sidebar_header(None, SidebarView::Changes, None, None, cx))
+                .child(self.sidebar_header(None, SidebarView::Changes, None, None, false, cx))
                 .child(empty_state("No Workspace", cx))
                 .into_any_element();
         };
-        let view = self.sidebar_view_for(key, workspace_id, git.is_some());
+        // A Server that sends `head` serves History (ADR 0046).
+        let history = git.as_ref().is_some_and(|git| git.head.is_some());
+        let view = match self.sidebar_view_for(key, workspace_id, git.is_some()) {
+            SidebarView::History if !history => SidebarView::Changes,
+            view => view,
+        };
         let against = git
             .as_ref()
             .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
@@ -423,7 +441,8 @@ impl Condr {
                     deleted: sum.deleted + stat.deleted,
                 })
         });
-        let header = self.sidebar_header(Some((key, workspace_id)), view, count, total, cx);
+        let header =
+            self.sidebar_header(Some((key, workspace_id)), view, count, total, history, cx);
         let body = match view {
             SidebarView::Files => {
                 self.render_files_list(key, workspace_id, shown_file.as_deref(), cx)
@@ -444,6 +463,9 @@ impl Condr {
                     .into_any_element(),
                 None => empty_state(format!("{workspace_name} is not a Git repository"), cx),
             },
+            SidebarView::History => {
+                self.render_history(key, workspace_id, shown_diff.as_deref(), cx)
+            }
         };
         column.child(header).child(body).into_any_element()
     }
@@ -457,6 +479,7 @@ impl Condr {
         view: SidebarView,
         count: Option<usize>,
         total: Option<GitDiffStat>,
+        history: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // GPUI Kit's own tab strip, as the Kit gallery shows it; the count rides in the
@@ -465,6 +488,7 @@ impl Condr {
         let selected = match view {
             SidebarView::Files => 0,
             SidebarView::Changes => 1,
+            SidebarView::History => 2,
         };
         let refresh = target.map(|(key, workspace_id)| {
             let owner = cx.weak_entity();
@@ -495,10 +519,10 @@ impl Condr {
         TabBar::new("condr-sidebar-view")
             .selected_index(selected)
             .on_click(move |index, _, cx| {
-                let view = if *index == 1 {
-                    SidebarView::Changes
-                } else {
-                    SidebarView::Files
+                let view = match *index {
+                    1 => SidebarView::Changes,
+                    2 => SidebarView::History,
+                    _ => SidebarView::Files,
                 };
                 let _ = owner.update(cx, |this, cx| {
                     if let Some((key, workspace_id)) = target {
@@ -517,6 +541,13 @@ impl Condr {
                     })
                     .debug_selector(|| "sidebar-view-changes".into()),
             ])
+            .when(history, |this| {
+                this.child(
+                    Tab::new()
+                        .label("History")
+                        .debug_selector(|| "sidebar-view-history".into()),
+                )
+            })
             .suffix(suffix)
             .into_any_element()
     }
@@ -560,6 +591,7 @@ impl Condr {
         self.files_view
             .refreshing
             .insert((key, workspace_id), timeout);
+        self.reload_history(key, workspace_id);
         cx.notify();
     }
 
@@ -959,16 +991,37 @@ impl Condr {
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id));
         let against = git.map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
-        let entry = git.and_then(|git| {
-            shown_changes(git, against)
-                .entries
-                .iter()
-                .find(|entry| entry.path == path)
-        });
-        let comparison = git.map_or_else(
-            || "Against HEAD".to_owned(),
-            |git| comparison_label(git, against),
-        );
+        let commit = self.diff_commit(key, workspace_id, path);
+        let entry = match commit {
+            // The commit's own entry, once History has its details.
+            Some(commit) => self
+                .connection(key)
+                .and_then(|connection| {
+                    connection
+                        .resources
+                        .commits
+                        .get(&(workspace_id, commit.id.clone()))
+                })
+                .and_then(|details| details.as_ref().ok())
+                .and_then(|details| {
+                    details
+                        .changes
+                        .entries
+                        .iter()
+                        .find(|entry| entry.path == path)
+                }),
+            None => git.and_then(|git| {
+                shown_changes(git, against)
+                    .entries
+                    .iter()
+                    .find(|entry| entry.path == path)
+            }),
+        };
+        let comparison = match (commit, git) {
+            (Some(commit), _) => format!("Commit {}", super::history::short_id(&commit.id)),
+            (None, Some(git)) => comparison_label(git, against),
+            (None, None) => "Against HEAD".to_owned(),
+        };
         let viewer = self.files_view.diff_viewers.get(&(key, tab_id));
         let content = viewer.map_or(DiffContent::Loading, |viewer| viewer.content.clone());
         let header = h_flex()
@@ -1110,6 +1163,9 @@ impl Condr {
             .debug_selector(|| "diff-tab".into())
             .size_full()
             .child(header)
+            .when_some(commit.cloned(), |this, commit| {
+                this.child(self.render_commit_header(key, workspace_id, &commit, cx))
+            })
             .child(body)
             .into_any_element()
     }
@@ -1126,6 +1182,12 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A commit's line numbers say nothing about today's file, so it opens at its top.
+        if self.diff_commit(key, workspace_id, &path).is_some() {
+            self.files_view.pending_file_line = None;
+            self.show_file_on(key, workspace_id, path, window, cx);
+            return;
+        }
         let clicked = self
             .files_view
             .diff_viewers
@@ -1161,33 +1223,61 @@ impl Condr {
         path: RelativePathBuf,
         cx: &mut Context<Self>,
     ) {
+        let commit = self
+            .diff_commit(key, workspace_id, &path)
+            .map(|commit| commit.id.clone());
         let Some(connection) = self.connection(key) else {
             return;
         };
-        let generation = connection.resources.diffs_generation;
-        let answer = connection
-            .resources
-            .diffs
-            .get(&(workspace_id, path.clone()));
+        let resources = &connection.resources;
+        // A commit's answer never changes, so it needs no generation.
+        let (answer, generation, status) = match &commit {
+            Some(commit) => (
+                resources
+                    .commit_diffs
+                    .get(&(workspace_id, commit.clone(), path.clone()))
+                    .cloned(),
+                0,
+                resources
+                    .commits
+                    .get(&(workspace_id, commit.clone()))
+                    .and_then(|details| details.as_ref().ok())
+                    .and_then(|details| {
+                        details
+                            .changes
+                            .entries
+                            .iter()
+                            .find(|entry| entry.path == path)
+                    })
+                    .map(|entry| entry.status),
+            ),
+            None => (
+                resources.diffs.get(&(workspace_id, path.clone())).cloned(),
+                resources.diffs_generation,
+                connection
+                    .model
+                    .workspace_git
+                    .get(&workspace_id)
+                    .and_then(|git| {
+                        shown_changes(git, self.diff_base(key, workspace_id, git))
+                            .entries
+                            .iter()
+                            .find(|entry| entry.path == path)
+                            .map(|entry| entry.status)
+                    }),
+            ),
+        };
         let request = answer.is_none()
-            && !connection
-                .resources
+            && commit.is_none()
+            && !resources
                 .pending_diffs
                 .contains_key(&(workspace_id, path.clone()));
-        let answer = answer.cloned();
-        let status = connection
-            .model
-            .workspace_git
-            .get(&workspace_id)
-            .and_then(|git| {
-                shown_changes(git, self.diff_base(key, workspace_id, git))
-                    .entries
-                    .iter()
-                    .find(|entry| entry.path == path)
-                    .map(|entry| entry.status)
-            });
-        if request {
-            self.request_diff(key, workspace_id, path.clone());
+        match &commit {
+            Some(commit) if answer.is_none() => {
+                self.request_commit_diff(key, workspace_id, commit.clone(), path.clone());
+            }
+            _ if request => self.request_diff(key, workspace_id, path.clone()),
+            _ => {}
         }
 
         let mode = diff_mode(self.files_view.diff_unified);
@@ -1202,25 +1292,26 @@ impl Condr {
                 content: DiffContent::Loading,
                 clicked: None,
             });
+        let source = (path, commit);
         let Some(answer) = answer else {
             if viewer
                 .shown
                 .as_ref()
-                .is_none_or(|(shown, _)| *shown != path)
+                .is_none_or(|(shown, _)| *shown != source)
             {
                 viewer.content = DiffContent::Loading;
                 viewer.shown = None;
             }
             return;
         };
-        if viewer.shown.as_ref() == Some(&(path.clone(), generation)) {
+        if viewer.shown.as_ref() == Some(&(source.clone(), generation)) {
             return;
         }
         let retargeted = viewer
             .shown
             .as_ref()
-            .is_none_or(|(shown, _)| *shown != path);
-        viewer.shown = Some((path, generation));
+            .is_none_or(|(shown, _)| *shown != source);
+        viewer.shown = Some((source, generation));
         if retargeted {
             viewer.clicked = None;
         }
@@ -1310,6 +1401,7 @@ impl Condr {
             path: path.clone(),
             against,
             full_context: true,
+            commit: None,
         }) {
             connection
                 .resources

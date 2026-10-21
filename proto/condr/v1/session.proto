@@ -198,6 +198,38 @@ message GitChanges {
   bool truncated = 2;
 }
 
+// Where a Workspace's HEAD points (ADR 0046). A Server that sends it serves History.
+message GitHead {
+  // The commit as hex; absent while HEAD is unborn.
+  optional string commit = 1;
+}
+
+// One commit as History lists it (ADR 0046).
+message CommitSummary {
+  string id = 1;
+  string subject = 2;
+  string author = 3;
+  // The author's time, in seconds since the Unix epoch.
+  int64 time = 4;
+}
+
+message GitLog {
+  // The commit the walk started from; absent for an unborn HEAD.
+  optional string from = 1;
+  repeated CommitSummary commits = 2;
+  bool more = 3;
+}
+
+// One commit against its first parent (ADR 0046).
+message CommitDetails {
+  string id = 1;
+  repeated string parents = 2;
+  string author = 3;
+  int64 time = 4;
+  string message = 5;
+  GitChanges changes = 6;
+}
+
 // Unknown decodes to CONTEXT.
 enum DiffLineKind {
   DIFF_LINE_KIND_UNSPECIFIED = 0;

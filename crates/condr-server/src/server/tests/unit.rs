@@ -1011,6 +1011,7 @@ fn bootstrap_dynamic_records_are_split_and_reassembled() {
             upstream: None,
             changes: Default::default(),
             base: None,
+            head: None,
         }],
         zoomed_panes: vec![first_pane],
     };

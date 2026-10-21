@@ -43,6 +43,8 @@ pub struct GitRepository {
     /// fetch or push rewrites under the common directory.
     upstream_ref: Option<PathBuf>,
     upstream: Option<GitUpstream>,
+    /// The commit `HEAD` points at, as hex; `None` while `HEAD` is unborn (ADR 0046).
+    head: Option<String>,
 }
 
 impl GitRepository {
@@ -66,6 +68,10 @@ impl GitRepository {
 
     pub fn upstream(&self) -> Option<GitUpstream> {
         self.upstream
+    }
+
+    pub fn head(&self) -> Option<&str> {
+        self.head.as_deref()
     }
 
     /// `None` only when a HEAD file is unreadable; the other files are optional and their
@@ -191,6 +197,8 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
         None => (None, None),
     };
 
+    let head = repo.head_id().ok().map(|id| id.to_string());
+
     Ok(Some(GitRepository {
         root,
         git_directory,
@@ -199,6 +207,7 @@ pub fn discover_repository(path: impl AsRef<Path>) -> Result<Option<GitRepositor
         branch,
         upstream_ref,
         upstream,
+        head,
     }))
 }
 

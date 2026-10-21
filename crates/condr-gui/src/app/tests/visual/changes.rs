@@ -431,3 +431,153 @@ fn a_directory_listed_in_two_sections_folds_from_either_row() {
 
     let _ = std::fs::remove_dir_all(&repository);
 }
+
+/// History lists the real Server's commits, a commit unfolds into its files, a file opens
+/// in the Diff Tab as that commit changed it, and a new commit appears on its own (ADR 0046).
+#[test]
+fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
+    let _serial_guard = acquire_visual_test_lock();
+    let repository = std::env::temp_dir().join(format!(
+        "condr-gui-history-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&repository);
+    std::fs::create_dir_all(&repository).unwrap();
+    run_git(&repository, ["init", "-q", "-b", "main"]);
+    run_git(&repository, ["config", "user.email", "condr@example.com"]);
+    run_git(&repository, ["config", "user.name", "Condr"]);
+    run_git(&repository, ["config", "commit.gpgsign", "false"]);
+    std::fs::write(repository.join("notes.txt"), "alpha\nbeta\n").unwrap();
+    run_git(&repository, ["add", "notes.txt"]);
+    run_git(&repository, ["commit", "-q", "-m", "first"]);
+    std::fs::write(repository.join("notes.txt"), "alpha\nBETA\n").unwrap();
+    run_git(
+        &repository,
+        ["commit", "-q", "-am", "second\n\nUppercase the beta."],
+    );
+    let short_head = |repository: &std::path::Path| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repository)
+            .args(["rev-parse", "--short=7", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    let second = short_head(&repository);
+    // Uncommitted, so the Diff Tab first shows notes.txt from the working tree.
+    std::fs::write(repository.join("notes.txt"), "alpha\nBETA\ngamma\n").unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|window, cx| _ = window.draw(cx));
+    let button = window.debug_bounds("open-project").unwrap();
+    window.simulate_click(button.center(), Modifiers::default());
+    let selected_root = repository.clone();
+    window.simulate_path_prompt_response(move |_| Some(vec![selected_root]));
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            view.read(app)
+                .active_session()
+                .is_some_and(|session| !session.workspaces().is_empty())
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let toggle = window.debug_bounds("toggle-changes").unwrap();
+    window.simulate_click(toggle.center(), Modifiers::default());
+    assert!(wait_until(window, |window| {
+        window.update(|window, cx| _ = window.draw(cx));
+        window.debug_bounds("change-notes.txt").is_some()
+    }));
+    let change = window.debug_bounds("change-notes.txt").unwrap();
+    window.simulate_click(change.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.read(|app| {
+                view.read(app)
+                    .files_view
+                    .diff_viewers
+                    .values()
+                    .any(|viewer| viewer.patch.contains("+gamma"))
+            })
+        }),
+        "the Diff Tab first shows the working tree"
+    );
+
+    // The tab appears once the Server's Git snapshot names `HEAD`.
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("sidebar-view-history").is_some()
+        }),
+        "a Server that sends HEAD offers History"
+    );
+    let tab = window.debug_bounds("sidebar-view-history").unwrap();
+    window.simulate_click(tab.center(), Modifiers::default());
+    // `debug_bounds` takes a static name.
+    let commit_row: &'static str = format!("commit-{second}").leak();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds(commit_row).is_some()
+        }),
+        "History lists the latest commit"
+    );
+
+    // Unfolding asks for the commit's files; one of them opens in the Diff Tab.
+    let row = window.debug_bounds(commit_row).unwrap();
+    window.simulate_click(row.center(), Modifiers::default());
+    let file_row: &'static str = format!("commit-file-{second}-notes.txt").leak();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds(file_row).is_some()
+        }),
+        "an unfolded commit lists its files"
+    );
+    let file = window.debug_bounds(file_row).unwrap();
+    window.simulate_click(file.center(), Modifiers::default());
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds("diff-commit-header").is_some()
+                && window.read(|app| {
+                    view.read(app)
+                        .files_view
+                        .diff_viewers
+                        .values()
+                        .any(|viewer| {
+                            viewer.patch.contains("-beta") && viewer.patch.contains("+BETA")
+                        })
+                })
+        }),
+        "the same path's Diff Tab switches to the file as the commit changed it"
+    );
+    assert!(window.read(|app| {
+        view.read(app)
+            .files_view
+            .diff_viewers
+            .values()
+            .all(|viewer| !viewer.patch.contains("gamma"))
+    }));
+    assert!(window.debug_bounds("diff-copy-commit").is_some());
+    let message = window.debug_bounds("diff-commit-message").unwrap();
+    window.simulate_click(message.center(), Modifiers::default());
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.debug_bounds("diff-commit-body").is_some());
+
+    // A commit made elsewhere moves HEAD, and History lists it without a refresh.
+    run_git(&repository, ["commit", "-q", "-am", "third"]);
+    let third: &'static str = format!("commit-{}", short_head(&repository)).leak();
+    assert!(
+        wait_until(window, |window| {
+            window.update(|window, cx| _ = window.draw(cx));
+            window.debug_bounds(third).is_some() && window.debug_bounds(commit_row).is_some()
+        }),
+        "a new commit should appear above the others"
+    );
+
+    let _ = std::fs::remove_dir_all(&repository);
+}

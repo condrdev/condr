@@ -636,3 +636,196 @@ fn the_fingerprint_moves_with_the_base_ref() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Commits `message` with every file staged, at `time` seconds, so commit-time order is
+/// what the test says.
+fn commit_all_at(root: &Path, message: &str, time: u64) {
+    git(root, ["add", "-A"]);
+    let date = format!("@{time} +0000");
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["commit", "-q", "--allow-empty", "-m", message])
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn history_pages_from_a_fixed_commit_while_head_moves() {
+    let root = scratch_repository("history");
+    let repository = discover_repository(&root).unwrap().unwrap();
+    assert_eq!(repository.head(), None, "an unborn HEAD names no commit");
+    assert_eq!(
+        repository.log(None, 0, 10).unwrap(),
+        condr_core::GitLog::default()
+    );
+
+    for (index, subject) in ["first", "second", "third", "fourth", "fifth"]
+        .iter()
+        .enumerate()
+    {
+        fs::write(root.join("log.txt"), format!("{index}\n")).unwrap();
+        commit_all_at(
+            &root,
+            &format!("{subject}\n\nbody of {subject}"),
+            1_000 + index as u64,
+        );
+    }
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let head = repository.head().unwrap().to_owned();
+    let subjects = |log: &condr_core::GitLog| {
+        log.commits
+            .iter()
+            .map(|commit| commit.subject.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let first = repository.log(None, 0, 2).unwrap();
+    assert_eq!(first.from.as_deref(), Some(head.as_str()));
+    assert_eq!(subjects(&first), ["fifth", "fourth"]);
+    assert!(first.more);
+    assert_eq!(first.commits[0].author, "Condr");
+    assert_eq!(first.commits[0].time, 1_004);
+
+    // A new commit moves HEAD; the next page still walks from where the first began.
+    fs::write(root.join("log.txt"), "sixth\n").unwrap();
+    commit_all_at(&root, "sixth", 1_010);
+    let second = repository.log(first.from.as_deref(), 2, 2).unwrap();
+    assert_eq!(subjects(&second), ["third", "second"]);
+    let last = repository.log(first.from.as_deref(), 4, 2).unwrap();
+    assert_eq!(subjects(&last), ["first"]);
+    assert!(!last.more);
+    assert_eq!(
+        subjects(
+            &discover_repository(&root)
+                .unwrap()
+                .unwrap()
+                .log(None, 0, 1)
+                .unwrap()
+        ),
+        ["sixth"]
+    );
+}
+
+#[test]
+fn a_commit_lists_its_files_against_its_first_parent() {
+    let root = scratch_repository("commit");
+    fs::write(root.join("kept.txt"), "one\ntwo\n").unwrap();
+    fs::write(root.join("moved.txt"), "a\nb\nc\nd\ne\n").unwrap();
+    commit_all_at(&root, "root", 1_000);
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let root_commit = repository.head().unwrap().to_owned();
+    let details = repository.commit(&root_commit).unwrap();
+    assert!(details.parents.is_empty());
+    assert_eq!(
+        summary(&details.changes),
+        [
+            ("kept.txt", GitChangeStatus::Added),
+            ("moved.txt", GitChangeStatus::Added)
+        ]
+    );
+    assert_eq!(details.message, "root\n");
+
+    // A rename beside an edit, then a merge that brings in a side branch's file.
+    git(&root, ["mv", "moved.txt", "renamed.txt"]);
+    fs::write(root.join("kept.txt"), "one\nTWO\n").unwrap();
+    commit_all_at(&root, "rename", 1_001);
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let rename = repository.head().unwrap().to_owned();
+    let details = repository.commit(&rename).unwrap();
+    assert_eq!(
+        summary(&details.changes),
+        [
+            ("kept.txt", GitChangeStatus::Modified),
+            ("renamed.txt", GitChangeStatus::Renamed)
+        ]
+    );
+    let renamed = &details.changes.entries[1];
+    assert_eq!(
+        renamed.old_path.as_deref(),
+        Some(RelativePath::new("moved.txt"))
+    );
+    assert_eq!(
+        details.changes.entries[0].stat,
+        Some(GitDiffStat {
+            added: 1,
+            deleted: 1
+        })
+    );
+    let diff = repository
+        .commit_file_diff(&rename, &renamed.path, true)
+        .unwrap();
+    assert_eq!(
+        diff.content,
+        FileDiffContent::Text { hunks: Vec::new() },
+        "renamed unchanged"
+    );
+    let FileDiffContent::Text { hunks } = repository
+        .commit_file_diff(&rename, RelativePath::new("kept.txt"), true)
+        .unwrap()
+        .content
+    else {
+        panic!("kept.txt diffs as text");
+    };
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(
+        hunks[0].lines.len(),
+        3,
+        "one context line, one removed, one added"
+    );
+
+    git(&root, ["checkout", "-q", "-b", "side", &root_commit]);
+    fs::write(root.join("side.txt"), "side\n").unwrap();
+    commit_all_at(&root, "side", 1_002);
+    git(&root, ["checkout", "-q", "main"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["merge", "-q", "--no-ff", "-m", "merge side", "side"])
+        .env("GIT_AUTHOR_DATE", "@1003 +0000")
+        .env("GIT_COMMITTER_DATE", "@1003 +0000")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let merge = repository.commit(repository.head().unwrap()).unwrap();
+    assert_eq!(merge.parents.len(), 2);
+    assert_eq!(merge.parents[0], rename);
+    assert_eq!(
+        summary(&merge.changes),
+        [("side.txt", GitChangeStatus::Added)]
+    );
+
+    assert!(repository.commit("not a commit").is_err());
+}
+
+#[test]
+fn a_commit_past_the_change_cap_is_truncated_without_line_counts() {
+    let root = scratch_repository("commit-cap");
+    for index in 0..=condr_core::MAX_GIT_CHANGES {
+        fs::write(root.join(format!("{index:04}.txt")), "x\n").unwrap();
+    }
+    commit_all_at(&root, "many", 1_000);
+    let repository = discover_repository(&root).unwrap().unwrap();
+    let details = repository.commit(repository.head().unwrap()).unwrap();
+    assert!(details.changes.truncated);
+    assert_eq!(details.changes.entries.len(), condr_core::MAX_GIT_CHANGES);
+    assert!(
+        details
+            .changes
+            .entries
+            .iter()
+            .all(|entry| entry.stat.is_none())
+    );
+}

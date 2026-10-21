@@ -35,7 +35,29 @@ message ClientMessage {
     WatchTerminals watch_terminals = 22;
     FileMutationRequest mutate_file = 23;
     RefreshWorkspace refresh_workspace = 24;
+    GitLogRequest git_log = 25;
+    GitCommitRequest git_commit = 26;
   }
+}
+
+// A page of a Workspace's History (ADR 0046), walking from `from` or from HEAD.
+message GitLogRequest {
+  uint64 server_id = 1;
+  uint64 session_id = 2;
+  uint64 request_id = 3;
+  uint64 workspace_id = 4;
+  optional string from = 5;
+  uint32 skip = 6;
+  uint32 limit = 7;
+}
+
+// One commit's message and files (ADR 0046).
+message GitCommitRequest {
+  uint64 server_id = 1;
+  uint64 session_id = 2;
+  uint64 request_id = 3;
+  uint64 workspace_id = 4;
+  string commit = 5;
 }
 
 // Rescans a Workspace's files and Git status now, as its watcher would (ADR 0046). There
@@ -127,6 +149,8 @@ message GitDiffRequest {
   DiffBase against = 6;
   // Every line as context, so the viewer folds unchanged runs itself (ADR 0046).
   bool full_context = 7;
+  // The path as this commit changed it, against its first parent; `against` is ignored.
+  optional string commit = 8;
 }
 
 message PathRequest {
@@ -410,6 +434,8 @@ message ServerMessage {
     string error = 28;
     BrowsedDirectoryReply browsed_directory = 29;
     FileMutationReply file_mutated = 30;
+    GitLogReply git_log = 31;
+    GitCommitReply git_commit = 32;
   }
 }
 
@@ -517,6 +543,7 @@ message WorkspaceGitSnapshot {
   GitUpstream upstream = 4;
   GitChanges changes = 5;
   GitBaseChanges base = 6;
+  GitHead head = 7;
 }
 
 // One chunked Bootstrap record. A record of a kind this build does not know is skipped.
@@ -664,6 +691,25 @@ message GitDiffReply {
   string path = 3;
   oneof result {
     FileDiff ok = 4;
+    string err = 5;
+  }
+}
+
+message GitLogReply {
+  uint64 request_id = 1;
+  uint64 workspace_id = 2;
+  oneof result {
+    GitLog ok = 3;
+    string err = 4;
+  }
+}
+
+message GitCommitReply {
+  uint64 request_id = 1;
+  uint64 workspace_id = 2;
+  string commit = 3;
+  oneof result {
+    CommitDetails ok = 4;
     string err = 5;
   }
 }

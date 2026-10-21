@@ -40,6 +40,17 @@ Each Workspace remembers its own choice.
 
 > **Tip**: For very large binary files, or any single file over 1 MiB, the detailed comparison is hidden automatically to protect performance.
 
+## Browse commit history (History)
+
+Switch the right sidebar to **History** to see the commits of the Workspace's current branch, newest first, as `git log` lists them:
+
+- **Each row** shows the commit's subject, short ID, author and age. When an Agent commits, the new commit appears at the top on its own.
+- **Click a commit** to unfold the files it changed, with how many lines each added and deleted. Click a file to open it in the Diff Tab as that commit changed it; the header shows the commit's subject, and the arrow next to it shows the rest of the message.
+- **Copy the commit ID** from the Diff Tab header or a commit's right-click menu.
+- **Show more** at the end of the list loads the next 100 commits.
+
+History only reads the repository: it does not check out, revert or create commits. Clicking a file in **Changes** returns the Diff Tab to the working tree.
+
 ## Browse and preview project files (Files & Preview)
 
 - **Switch to the file tree**: switch the tab at the top of the right sidebar to **Files** to expand and browse project folders as you would in a file manager.

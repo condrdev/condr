@@ -3,7 +3,7 @@
 //! file list never disagree, and the filesystem watcher that asks for those recomputations.
 
 use super::*;
-use condr_core::protocol::GitBaseChanges;
+use condr_core::protocol::{GitBaseChanges, GitHead};
 use condr_core::{GitBase, GitChanges, GitError, GitFingerprint};
 use notify::Watcher as _;
 use std::collections::HashMap;
@@ -76,6 +76,9 @@ pub(super) fn workspace_git_snapshot(
         base: git.base.as_ref().map(|(base, changes)| GitBaseChanges {
             branch: base.name().to_owned(),
             changes: changes.clone(),
+        }),
+        head: Some(GitHead {
+            commit: git.repository.head().map(str::to_owned),
         }),
     }
 }

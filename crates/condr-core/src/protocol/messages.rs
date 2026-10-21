@@ -68,6 +68,30 @@ pub enum ClientMessage {
         against: DiffBase,
         /// Every line as context rather than three (ADR 0046).
         full_context: bool,
+        /// The path as this commit changed it, against its first parent, instead of the
+        /// working tree; `against` is then ignored (ADR 0046).
+        commit: Option<String>,
+    },
+    /// A page of a Workspace's History (ADR 0046): up to `limit` commits after skipping
+    /// `skip`, walking from `from`, or from `HEAD` when `from` is `None`. Answered with
+    /// [`ServerMessage::GitLog`]. Only a Server that reports [`WorkspaceGitSnapshot::head`]
+    /// knows it.
+    GitLog {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        from: Option<String>,
+        skip: u32,
+        limit: u32,
+    },
+    /// One commit's message and files (ADR 0046), answered with [`ServerMessage::GitCommit`].
+    GitCommit {
+        server_id: ServerId,
+        session_id: SessionId,
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        commit: String,
     },
     /// One level of a Workspace's directory tree for the Files sidebar (ADR 0018),
     /// answered with [`ServerMessage::Directory`].
@@ -577,6 +601,15 @@ pub struct WorkspaceGitSnapshot {
     /// The working tree against the base (ADR 0034), from the same pass; `None` when the
     /// Workspace has no base or the Server predates it.
     pub base: Option<GitBaseChanges>,
+    /// Where `HEAD` points (ADR 0046); `None` only from a Server without History.
+    pub head: Option<GitHead>,
+}
+
+/// Where a Workspace's `HEAD` points (ADR 0046).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHead {
+    /// The commit as hex; `None` while `HEAD` is unborn.
+    pub commit: Option<String>,
 }
 
 /// The base view of a Workspace's changes (ADR 0034).
@@ -772,6 +805,19 @@ pub enum ServerMessage {
         /// Relative to the Workspace root, as requested.
         path: RelativePathBuf,
         result: Result<crate::FileDiff, String>,
+    },
+    /// The reply to [`ClientMessage::GitLog`].
+    GitLog {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        result: Result<crate::GitLog, String>,
+    },
+    /// The reply to [`ClientMessage::GitCommit`].
+    GitCommit {
+        request_id: u64,
+        workspace_id: WorkspaceId,
+        commit: String,
+        result: Result<crate::CommitDetails, String>,
     },
     /// The reply to [`ClientMessage::ListDirectory`].
     Directory {

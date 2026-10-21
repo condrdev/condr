@@ -12,6 +12,7 @@ mod file_entries;
 pub(crate) mod file_icons;
 mod files;
 mod gui_state;
+mod history;
 mod ime;
 #[cfg(unix)]
 mod login_environment;
@@ -54,12 +55,12 @@ use condr_core::protocol::{
     WorkspaceGitSnapshot, relative_age, uptime_text,
 };
 use condr_core::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, BrowsedDirectory, DirectoryListing,
-    FileContent, FileDiff, PaneDirection, PaneId, PaneLayout, ProxyMode, ProxySetting, Session,
-    SessionSnapshot, SplitDirection, Tab, TabId, TerminalCommand, TerminalCursor, TerminalKey,
-    TerminalKeyEventKind, TerminalModifiers, TerminalMouseButton, TerminalMouseEvent,
-    TerminalMouseTracking, TerminalPosition, TerminalSelection, TerminalSelectionUnit,
-    TerminalSize, Workspace, WorkspaceId,
+    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, BrowsedDirectory, CommitDetails,
+    CommitSummary, DirectoryListing, FileContent, FileDiff, GitLog, PaneDirection, PaneId,
+    PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabId,
+    TerminalCommand, TerminalCursor, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
+    TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
+    TerminalSelection, TerminalSelectionUnit, TerminalSize, Workspace, WorkspaceId,
 };
 use condr_server::{
     ClientConnection, ConnectionCancellation, DeviceKey, Endpoint, ServerConfig, TcpEndpoint,

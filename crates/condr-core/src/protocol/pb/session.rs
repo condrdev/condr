@@ -7,10 +7,11 @@ use crate::snapshot::{
     WorkspaceSnapshot,
 };
 use crate::{
-    AgentKind, AgentResume, AgentSnapshot, AgentState, DiffHunk, DiffLine, DiffLineKind,
-    DirectoryEntry, DirectoryListing, FileContent, FileDiff, FileDiffContent, FileKind,
-    GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitUpstream, PaneDirection, PaneId,
-    SessionSnapshot, SplitDirection, TabId, WorkspaceId, WorktreeAssociation,
+    AgentKind, AgentResume, AgentSnapshot, AgentState, CommitDetails, CommitSummary, DiffHunk,
+    DiffLine, DiffLineKind, DirectoryEntry, DirectoryListing, FileContent, FileDiff,
+    FileDiffContent, FileKind, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog,
+    GitUpstream, PaneDirection, PaneId, SessionSnapshot, SplitDirection, TabId, WorkspaceId,
+    WorktreeAssociation,
     agent_discovery::AgentInstallation,
     agent_hooks::{HooksAction, HooksReport, HooksState},
 };
@@ -750,6 +751,78 @@ impl TryFrom<super::FileContent> for FileContent {
             Content::Image(bytes) => Self::Image { bytes },
             Content::Binary(_) => Self::Binary,
             Content::TooLarge(bytes) => Self::TooLarge { bytes },
+        })
+    }
+}
+
+/// More commits than this in one History page are a broken peer, not a long history.
+const MAX_LOG_COMMITS: usize = 1000;
+
+impl From<&GitLog> for super::GitLog {
+    fn from(log: &GitLog) -> Self {
+        Self {
+            from: log.from.clone(),
+            commits: log
+                .commits
+                .iter()
+                .map(|commit| super::CommitSummary {
+                    id: commit.id.clone(),
+                    subject: commit.subject.clone(),
+                    author: commit.author.clone(),
+                    time: commit.time,
+                })
+                .collect(),
+            more: log.more,
+        }
+    }
+}
+
+impl TryFrom<super::GitLog> for GitLog {
+    type Error = WireError;
+
+    fn try_from(log: super::GitLog) -> WireResult<Self> {
+        bounded(log.commits.len(), MAX_LOG_COMMITS, "History commits")?;
+        Ok(Self {
+            from: log.from,
+            commits: log
+                .commits
+                .into_iter()
+                .map(|commit| CommitSummary {
+                    id: commit.id,
+                    subject: commit.subject,
+                    author: commit.author,
+                    time: commit.time,
+                })
+                .collect(),
+            more: log.more,
+        })
+    }
+}
+
+impl From<&CommitDetails> for super::CommitDetails {
+    fn from(details: &CommitDetails) -> Self {
+        Self {
+            id: details.id.clone(),
+            parents: details.parents.clone(),
+            author: details.author.clone(),
+            time: details.time,
+            message: details.message.clone(),
+            changes: Some((&details.changes).into()),
+        }
+    }
+}
+
+impl TryFrom<super::CommitDetails> for CommitDetails {
+    type Error = WireError;
+
+    fn try_from(details: super::CommitDetails) -> WireResult<Self> {
+        Ok(Self {
+            id: details.id,
+            parents: details.parents,
+            author: details.author,
+            time: details.time,
+            message: details.message,
+            changes: required(details.changes, "commit changes")?.try_into()?,
         })
     }
 }

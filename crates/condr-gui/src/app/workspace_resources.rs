@@ -14,13 +14,30 @@ pub(super) struct WorkspaceResources {
     pub(super) pending_diffs: HashMap<ResourcePath, u64>,
     pub(super) pending_directories: HashMap<ResourcePath, u64>,
     pub(super) pending_files: HashMap<ResourcePath, u64>,
+    /// Each Workspace's History as far as it was loaded (ADR 0046).
+    pub(super) logs: HashMap<WorkspaceId, GitLog>,
+    /// The page each Workspace waits for: its request and how many commits it skips.
+    pub(super) pending_logs: HashMap<WorkspaceId, (u64, u32)>,
+    /// Unfolded commits; a commit never changes, so only a reset drops them.
+    pub(super) commits: HashMap<(WorkspaceId, String), Result<CommitDetails, String>>,
+    pub(super) pending_commits: HashMap<(WorkspaceId, String), u64>,
+    /// One file of one commit, as its Diff Tab shows it.
+    pub(super) commit_diffs: HashMap<CommitPath, Result<FileDiff, String>>,
+    /// The `GitDiff` requests for them; the reply names only the path.
+    pub(super) pending_commit_diffs: HashMap<u64, CommitPath>,
 }
+
+/// A Workspace, a commit id and a path in that commit.
+pub(super) type CommitPath = (WorkspaceId, String, RelativePathBuf);
 
 impl WorkspaceResources {
     pub(super) fn clear_pending(&mut self) {
         self.pending_diffs.clear();
         self.pending_directories.clear();
         self.pending_files.clear();
+        self.pending_logs.clear();
+        self.pending_commits.clear();
+        self.pending_commit_diffs.clear();
     }
 
     pub(super) fn reset(&mut self) {
@@ -30,6 +47,9 @@ impl WorkspaceResources {
         self.directories.clear();
         self.files.clear();
         self.files_generation += 1;
+        self.logs.clear();
+        self.commits.clear();
+        self.commit_diffs.clear();
     }
 
     pub(super) fn retain_workspaces(&mut self, live: &HashSet<WorkspaceId>) {
@@ -40,6 +60,13 @@ impl WorkspaceResources {
         self.pending_directories
             .retain(|(id, _), _| live.contains(id));
         self.pending_files.retain(|(id, _), _| live.contains(id));
+        self.logs.retain(|id, _| live.contains(id));
+        self.pending_logs.retain(|id, _| live.contains(id));
+        self.commits.retain(|(id, _), _| live.contains(id));
+        self.pending_commits.retain(|(id, _), _| live.contains(id));
+        self.commit_diffs.retain(|(id, _, _), _| live.contains(id));
+        self.pending_commit_diffs
+            .retain(|_, (id, _, _)| live.contains(id));
     }
 
     pub(super) fn invalidate_diffs(&mut self, workspace_id: WorkspaceId) {
@@ -87,6 +114,36 @@ impl WorkspaceResources {
         self.pending_diffs.remove(&slot);
         self.diffs.insert(slot, result);
         self.diffs_generation += 1;
+        true
+    }
+
+    /// A History page: the first replaces what is shown, a later one extends it when it
+    /// walked from the same commit.
+    pub(super) fn accept_log(
+        &mut self,
+        workspace_id: WorkspaceId,
+        request_id: u64,
+        result: Result<GitLog, String>,
+    ) -> bool {
+        let Some((pending, skip)) = self.pending_logs.get(&workspace_id).copied() else {
+            return false;
+        };
+        if pending != request_id {
+            return false;
+        }
+        self.pending_logs.remove(&workspace_id);
+        // ponytail: a failed page shows as the end of History; the next refresh asks again.
+        let page = result.unwrap_or_default();
+        match self.logs.get_mut(&workspace_id) {
+            Some(log) if skip > 0 && log.from == page.from => {
+                log.commits.extend(page.commits);
+                log.more = page.more;
+            }
+            _ if skip > 0 => {}
+            _ => {
+                self.logs.insert(workspace_id, page);
+            }
+        }
         true
     }
 

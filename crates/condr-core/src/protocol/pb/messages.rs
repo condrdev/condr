@@ -8,17 +8,18 @@ use crate::agent_discovery::AgentInstallation;
 use crate::agent_hooks::HooksReport;
 use crate::protocol::{
     AgentCommand, AgentError, AgentInfo, AgentResponse, BootstrapBatch, BootstrapHeader,
-    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, LayoutCommand,
-    LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata, PaneTerminalSnapshot,
-    RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo, ServerId,
-    ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionEvent, SessionId,
-    SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage, WorkspaceGitSnapshot,
+    BootstrapRecord, ClientMessage, ClipboardImageFormat, DiffBase, GitBaseChanges, GitHead,
+    LayoutCommand, LayoutResult, PaneAgentSnapshot, PaneTerminalFrame, PaneTerminalMetadata,
+    PaneTerminalSnapshot, RuntimeEpoch, ServerAdminCommand, ServerAdminResponse, ServerClientInfo,
+    ServerId, ServerLogRecord, ServerMessage, ServerSetting, ServerSettings, SessionEvent,
+    SessionId, SessionOverview, TerminalFrameBatch, TerminalFrameChunk, UnknownMessage,
+    WorkspaceGitSnapshot,
 };
 use crate::snapshot::MAX_SNAPSHOT_PANES;
 use crate::{
-    AgentKind, AgentSnapshot, BrowsedDirectory, DirectoryListing, FileContent, FileDiff, FileKind,
-    FileMutation, FileMutationResult, PaneId, ProxyMode, ProxySetting, SessionSnapshot, TabId,
-    TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
+    AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails, DirectoryListing, FileContent,
+    FileDiff, FileKind, FileMutation, FileMutationResult, GitLog, PaneId, ProxyMode, ProxySetting,
+    SessionSnapshot, TabId, TerminalCommand, TerminalView, TerminalViewFrame, WorkspaceId,
 };
 
 fn pane(id: u64) -> PaneId {
@@ -216,6 +217,9 @@ fn encode_git(git: &WorkspaceGitSnapshot) -> super::WorkspaceGitSnapshot {
             branch: base.branch.clone(),
             changes: Some((&base.changes).into()),
         }),
+        head: git.head.as_ref().map(|head| super::GitHead {
+            commit: head.commit.clone(),
+        }),
     }
 }
 
@@ -235,6 +239,9 @@ fn decode_git(git: super::WorkspaceGitSnapshot) -> WireResult<WorkspaceGitSnapsh
                 })
             })
             .transpose()?,
+        head: git.head.map(|head| GitHead {
+            commit: head.commit,
+        }),
     })
 }
 
@@ -341,6 +348,7 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 path,
                 against,
                 full_context,
+                commit,
             } => Message::GitDiff(GitDiffRequest {
                 server_id: server_id.0,
                 session_id: session_id.0,
@@ -352,6 +360,37 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                     DiffBase::MergeBase => super::DiffBase::MergeBase,
                 } as i32,
                 full_context: *full_context,
+                commit: commit.clone(),
+            }),
+            ClientMessage::GitLog {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                from,
+                skip,
+                limit,
+            } => Message::GitLog(super::GitLogRequest {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                from: from.clone(),
+                skip: *skip,
+                limit: *limit,
+            }),
+            ClientMessage::GitCommit {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                commit,
+            } => Message::GitCommit(super::GitCommitRequest {
+                server_id: server_id.0,
+                session_id: session_id.0,
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                commit: commit.clone(),
             }),
             ClientMessage::ListDirectory {
                 server_id,
@@ -537,6 +576,23 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                     super::DiffBase::MergeBase => DiffBase::MergeBase,
                 },
                 full_context: diff.full_context,
+                commit: diff.commit,
+            },
+            Message::GitLog(request) => ClientMessage::GitLog {
+                server_id: ServerId(request.server_id),
+                session_id: SessionId(request.session_id),
+                request_id: request.request_id,
+                workspace_id: workspace(request.workspace_id),
+                from: request.from,
+                skip: request.skip,
+                limit: request.limit,
+            },
+            Message::GitCommit(request) => ClientMessage::GitCommit {
+                server_id: ServerId(request.server_id),
+                session_id: SessionId(request.session_id),
+                request_id: request.request_id,
+                workspace_id: workspace(request.workspace_id),
+                commit: request.commit,
             },
             Message::ListDirectory(request) => ClientMessage::ListDirectory {
                 server_id: ServerId(request.server_id),
@@ -1671,6 +1727,32 @@ impl TryFrom<&ServerMessage> for super::ServerMessage {
                     Err(error) => git_diff_reply::Result::Err(error.clone()),
                 }),
             }),
+            ServerMessage::GitLog {
+                request_id,
+                workspace_id,
+                result,
+            } => Message::GitLog(super::GitLogReply {
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                result: Some(match result {
+                    Ok(log) => git_log_reply::Result::Ok(log.into()),
+                    Err(error) => git_log_reply::Result::Err(error.clone()),
+                }),
+            }),
+            ServerMessage::GitCommit {
+                request_id,
+                workspace_id,
+                commit,
+                result,
+            } => Message::GitCommit(super::GitCommitReply {
+                request_id: *request_id,
+                workspace_id: workspace_id.as_u64(),
+                commit: commit.clone(),
+                result: Some(match result {
+                    Ok(details) => git_commit_reply::Result::Ok(details.into()),
+                    Err(error) => git_commit_reply::Result::Err(error.clone()),
+                }),
+            }),
             ServerMessage::Directory {
                 request_id,
                 workspace_id,
@@ -1879,6 +1961,23 @@ fn decode_server_message(message: server_message::Message) -> WireResult<ServerM
             result: match member(reply.result)? {
                 git_diff_reply::Result::Ok(diff) => Ok(FileDiff::try_from(diff)?),
                 git_diff_reply::Result::Err(error) => Err(error),
+            },
+        },
+        Message::GitLog(reply) => ServerMessage::GitLog {
+            request_id: reply.request_id,
+            workspace_id: workspace(reply.workspace_id),
+            result: match member(reply.result)? {
+                git_log_reply::Result::Ok(log) => Ok(GitLog::try_from(log)?),
+                git_log_reply::Result::Err(error) => Err(error),
+            },
+        },
+        Message::GitCommit(reply) => ServerMessage::GitCommit {
+            request_id: reply.request_id,
+            workspace_id: workspace(reply.workspace_id),
+            commit: reply.commit,
+            result: match member(reply.result)? {
+                git_commit_reply::Result::Ok(details) => Ok(CommitDetails::try_from(details)?),
+                git_commit_reply::Result::Err(error) => Err(error),
             },
         },
         Message::Directory(reply) => ServerMessage::Directory {

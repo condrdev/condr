@@ -261,6 +261,13 @@ impl Condr {
                     }
                     SessionEvent::WorkspaceGitChanged { workspace_id, git } => {
                         let connection = &mut self.connections[index];
+                        // `HEAD` moved: History shows the new commits (ADR 0046).
+                        let head = git.as_ref().and_then(|git| git.head.as_ref());
+                        let head_moved = connection
+                            .resources
+                            .logs
+                            .get(&workspace_id)
+                            .is_some_and(|log| head.is_some_and(|head| head.commit != log.from));
                         if let Some(git) = git {
                             connection.model.workspace_git.insert(workspace_id, git);
                         } else {
@@ -268,6 +275,9 @@ impl Condr {
                         }
                         // The working tree moved: every diff of it is stale.
                         self.forget_workspace_diffs(key, workspace_id);
+                        if head_moved {
+                            self.reload_history(key, workspace_id);
+                        }
                         git_changed = true;
                         notify = true;
                     }
@@ -647,6 +657,19 @@ impl Condr {
                 path,
                 result,
             } => {
+                let resources = &mut self.connections[index].resources;
+                // One file of one commit (ADR 0046): its request says which.
+                if let Some(slot) = resources.pending_commit_diffs.remove(&request_id) {
+                    if slot.0 != workspace_id || slot.2 != path {
+                        return IncomingEffect::default();
+                    }
+                    resources.commit_diffs.insert(slot, result);
+                    return IncomingEffect {
+                        rebuild: self.active_connection == key,
+                        notify: true,
+                        ..IncomingEffect::default()
+                    };
+                }
                 if !self.connections[index].resources.accept_diff(
                     (workspace_id, path),
                     request_id,
@@ -654,6 +677,38 @@ impl Condr {
                 ) {
                     return IncomingEffect::default();
                 }
+                IncomingEffect {
+                    rebuild: self.active_connection == key,
+                    notify: true,
+                    ..IncomingEffect::default()
+                }
+            }
+            ServerMessage::GitLog {
+                request_id,
+                workspace_id,
+                result,
+            } => IncomingEffect {
+                notify: self.connections[index].resources.accept_log(
+                    workspace_id,
+                    request_id,
+                    result,
+                ),
+                ..IncomingEffect::default()
+            },
+            ServerMessage::GitCommit {
+                request_id,
+                workspace_id,
+                commit,
+                result,
+            } => {
+                let resources = &mut self.connections[index].resources;
+                let slot = (workspace_id, commit);
+                if resources.pending_commits.get(&slot) != Some(&request_id) {
+                    return IncomingEffect::default();
+                }
+                resources.pending_commits.remove(&slot);
+                resources.commits.insert(slot, result);
+                // A Diff Tab on this commit takes its status and message from it.
                 IncomingEffect {
                     rebuild: self.active_connection == key,
                     notify: true,

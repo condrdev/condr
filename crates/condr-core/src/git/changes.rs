@@ -97,3 +97,42 @@ pub struct FileDiff {
     pub path: RelativePathBuf,
     pub content: FileDiffContent,
 }
+
+/// One commit as History lists it (ADR 0046).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CommitSummary {
+    /// The full id, as hex.
+    pub id: String,
+    /// The first line of the message.
+    pub subject: String,
+    pub author: String,
+    /// The author's time, in seconds since the Unix epoch.
+    pub time: i64,
+}
+
+/// One page of a Workspace's History: the commits reachable from `from`, newest commit time
+/// first, as `git log` lists them.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GitLog {
+    /// The commit the walk started from, which later pages name to stay put while `HEAD`
+    /// moves; `None` for an unborn `HEAD`.
+    pub from: Option<String>,
+    pub commits: Vec<CommitSummary>,
+    /// Further commits follow this page.
+    pub more: bool,
+}
+
+/// One commit unfolded in History: its whole message and the files it changed against its
+/// first parent, or against nothing for a root commit.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CommitDetails {
+    pub id: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub time: i64,
+    pub message: String,
+    pub changes: GitChanges,
+}
+
+/// How many commits a History page holds.
+pub const HISTORY_PAGE: u32 = 100;

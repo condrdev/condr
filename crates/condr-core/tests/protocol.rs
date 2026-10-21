@@ -315,6 +315,9 @@ fn bootstrap_assembler_reassembles_multiple_record_chunks() {
                 branch: "origin/main".into(),
                 changes: Default::default(),
             }),
+            head: Some(condr_core::protocol::GitHead {
+                commit: Some("8f3c".into()),
+            }),
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];
@@ -491,6 +494,7 @@ fn bootstrap_assembler_rejects_duplicate_ids_per_record_kind() {
             upstream: None,
             changes: Default::default(),
             base: None,
+            head: None,
         }),
         BootstrapRecord::ZoomedPane(pane_id),
     ];

@@ -4,6 +4,8 @@
 
 mod changes;
 #[cfg(feature = "runtime")]
+mod history;
+#[cfg(feature = "runtime")]
 mod repository;
 #[cfg(feature = "runtime")]
 mod status;
@@ -11,8 +13,9 @@ mod status;
 use serde::{Deserialize, Serialize};
 
 pub use changes::{
-    DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitChangeEntry, GitChangeStatus,
-    GitChanges, GitDiffStat, MAX_DIFF_BYTES, MAX_GIT_CHANGES,
+    CommitDetails, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent,
+    GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog, HISTORY_PAGE, MAX_DIFF_BYTES,
+    MAX_GIT_CHANGES,
 };
 #[cfg(feature = "runtime")]
 pub use repository::{

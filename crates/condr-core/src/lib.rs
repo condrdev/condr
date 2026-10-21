@@ -34,8 +34,9 @@ pub use files::{
 #[cfg(feature = "runtime")]
 pub use files::{browse_directory, list_directory, mutate_file, read_file};
 pub use git::{
-    DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent, GitChangeEntry, GitChangeStatus,
-    GitChanges, GitDiffStat, GitUpstream, MAX_DIFF_BYTES, MAX_GIT_CHANGES,
+    CommitDetails, CommitSummary, DiffHunk, DiffLine, DiffLineKind, FileDiff, FileDiffContent,
+    GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat, GitLog, GitUpstream, HISTORY_PAGE,
+    MAX_DIFF_BYTES, MAX_GIT_CHANGES,
 };
 #[cfg(feature = "runtime")]
 pub use git::{

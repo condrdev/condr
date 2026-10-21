@@ -712,6 +712,7 @@ pub(super) fn handle_client(
                 path,
                 against,
                 full_context,
+                commit,
             } => {
                 let repository = {
                     let state = state.lock().expect("server state lock poisoned");
@@ -727,6 +728,10 @@ pub(super) fn handle_client(
                             .get(&workspace_id)
                             .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
                             .and_then(|git| {
+                                if commit.is_some() {
+                                    // A commit's own changes name a renamed file's old path.
+                                    return Ok((git.repository.clone(), None, None));
+                                }
                                 let (changes, base) = match (against, &git.base) {
                                     (DiffBase::Head, _) => (&git.changes, None),
                                     (DiffBase::MergeBase, Some((base, changes))) => {
@@ -752,9 +757,18 @@ pub(super) fn handle_client(
                 let outbound = outbound.clone();
                 thread::spawn(move || {
                     let result = repository.and_then(|(repository, old_path, base)| {
-                        repository
-                            .file_diff(&path, old_path.as_deref(), base.as_ref(), full_context)
-                            .map_err(|error| error.to_string())
+                        match &commit {
+                            Some(commit) => {
+                                repository.commit_file_diff(commit, &path, full_context)
+                            }
+                            None => repository.file_diff(
+                                &path,
+                                old_path.as_deref(),
+                                base.as_ref(),
+                                full_context,
+                            ),
+                        }
+                        .map_err(|error| error.to_string())
                     });
                     queue_message(
                         &outbound,
@@ -762,6 +776,64 @@ pub(super) fn handle_client(
                             request_id,
                             workspace_id,
                             path,
+                            result,
+                        },
+                    )
+                });
+                false
+            }
+            ClientMessage::GitLog {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                from,
+                skip,
+                limit,
+            } => {
+                // A long history walks for a while: off this loop (ADR 0046).
+                let repository = workspace_repository(&state, server_id, session_id, workspace_id);
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    let limit = limit.min(MAX_LOG_PAGE);
+                    let result = repository.and_then(|repository| {
+                        repository
+                            .log(from.as_deref(), skip, limit)
+                            .map_err(|error| error.to_string())
+                    });
+                    queue_message(
+                        &outbound,
+                        ServerMessage::GitLog {
+                            request_id,
+                            workspace_id,
+                            result,
+                        },
+                    )
+                });
+                false
+            }
+            ClientMessage::GitCommit {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                commit,
+            } => {
+                // Up to a thousand files to count: off this loop (ADR 0046).
+                let repository = workspace_repository(&state, server_id, session_id, workspace_id);
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    let result = repository.and_then(|repository| {
+                        repository
+                            .commit(&commit)
+                            .map_err(|error| error.to_string())
+                    });
+                    queue_message(
+                        &outbound,
+                        ServerMessage::GitCommit {
+                            request_id,
+                            workspace_id,
+                            commit,
                             result,
                         },
                     )
@@ -1124,6 +1196,26 @@ pub(super) fn handle_client(
 
 /// The Root Directory a Files request reads under, or why it cannot; takes and releases
 /// the state lock so the disk is read outside it.
+/// The largest History page a Client may ask for; the wire refuses more (ADR 0046).
+const MAX_LOG_PAGE: u32 = 1000;
+
+/// The repository a Workspace is in, for History's requests.
+fn workspace_repository(
+    state: &Arc<Mutex<RuntimeState>>,
+    server_id: ServerId,
+    session_id: SessionId,
+    workspace_id: WorkspaceId,
+) -> Result<condr_core::GitRepository, String> {
+    workspace_root(state, server_id, session_id, workspace_id)?;
+    state
+        .lock()
+        .expect("server state lock poisoned")
+        .workspace_git
+        .get(&workspace_id)
+        .map(|git| git.repository.clone())
+        .ok_or_else(|| "the Workspace is not in a Git repository".to_string())
+}
+
 fn workspace_root(
     state: &Arc<Mutex<RuntimeState>>,
     server_id: ServerId,
