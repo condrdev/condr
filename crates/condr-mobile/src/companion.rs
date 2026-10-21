@@ -13,12 +13,13 @@ use condr_client::{
     Cancellation, ClientConnection, ConnectionIo, DeviceKey, Incoming, P2pEndpoint, P2pNode,
     RemoteEndpoint, RemoteStream, SessionModel, TcpEndpoint,
 };
-use condr_core::protocol::{ClientMessage, ServerMessage, SessionEvent};
+use condr_core::protocol::{ClientMessage, Hello, ServerMessage, SessionEvent};
 use condr_core::{
     PaneId, ProxySetting, TerminalCommand, TerminalPosition, TerminalScroll, TerminalSelectionUnit,
     TerminalSide, TerminalSize,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, mpsc};
 use std::thread;
 
@@ -37,6 +38,8 @@ struct Shared {
     /// What a Server records this phone as (ADR 0040).
     /// The name this phone goes by to a Server; a Server learns it at pairing (ADR 0040).
     name: Mutex<String>,
+    /// What every `Hello` says as `push` (ADR 0047): one flag for the whole app.
+    push: AtomicBool,
     listener: Arc<dyn Listener>,
     runtime: tokio::runtime::Runtime,
     state: Mutex<State>,
@@ -240,6 +243,7 @@ impl Companion {
         let shared = Arc::new(Shared {
             key,
             name: Mutex::new(name),
+            push: AtomicBool::new(false),
             listener,
             runtime,
             state: Mutex::new(state),
@@ -276,7 +280,7 @@ impl Companion {
             (RemoteEndpoint::Tcp(tcp), address)
         };
         // Reading this `Hello` is what records the pairing on the Server.
-        let connection = ClientConnection::connect_overview(&endpoint, self.shared.name())
+        let connection = ClientConnection::connect_overview(&endpoint, self.shared.hello())
             .map_err(|error| MobileError::Connection(error.to_string()))?;
         // The Device is listed by the Server's machine name unless the app names it; a
         // Server too old to say its name leaves the link's host or id.
@@ -312,6 +316,42 @@ impl Companion {
         if !name.is_empty() {
             *self.shared.name.lock().expect("name lock poisoned") = name;
         }
+    }
+
+    /// Whether this phone takes pushes through Condr Cloud (ADR 0047): the app says true
+    /// once it has notification permission and its registration succeeded. When the
+    /// answer changes, every open connection is made again so each Server learns it now
+    /// rather than on the next connection.
+    pub fn set_push(&self, push: bool) {
+        if self.shared.push.swap(push, Ordering::Relaxed) == push {
+            return;
+        }
+        let addresses: Vec<String> = self
+            .shared
+            .lock()
+            .devices
+            .iter()
+            .filter(|(_, device)| {
+                matches!(
+                    device.status,
+                    DeviceStatus::Connected | DeviceStatus::Connecting
+                )
+            })
+            .map(|(address, _)| address.clone())
+            .collect();
+        for address in addresses {
+            self.shared.connect(&address);
+        }
+    }
+
+    /// A token for Condr Cloud signed with this phone's key, good for five minutes (ADR
+    /// 0047). The app sends it as `Authorization: Condr <token>` to [`crate::cloud_url`]
+    /// and never logs it.
+    pub fn cloud_token(&self) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        condr_client::cloud::token(&self.shared.key, condr_client::cloud::DEFAULT_URL, now)
     }
 
     /// The name this phone shows a Device under from now on; a blank one changes
@@ -445,6 +485,7 @@ impl Companion {
             .iter()
             .map(|(address, device)| DeviceView {
                 address: address.clone(),
+                device_id: self.shared.device_id(address),
                 label: device.label.clone(),
                 status: device.status.clone(),
             })
@@ -805,7 +846,7 @@ impl Shared {
             .spawn(move || {
                 let result = ClientConnection::connect_watching(
                     &endpoint,
-                    shared.name(),
+                    shared.hello(),
                     watched.clone(),
                     cancellation,
                 );
@@ -1123,8 +1164,24 @@ fn apply_message(
 }
 
 impl Shared {
-    fn name(&self) -> String {
-        self.name.lock().expect("name lock poisoned").clone()
+    /// The Device id `address` names: the Peer-to-peer id or the TCP Server's key.
+    fn device_id(&self, address: &str) -> Option<String> {
+        let id = if address.starts_with("p2p://") {
+            P2pEndpoint::parse(address).ok()?.device
+        } else {
+            TcpEndpoint::parse(address, self.key.clone())
+                .ok()?
+                .server_key
+        };
+        Some(id.to_string())
+    }
+
+    /// What this phone says in `Hello`: its name and whether it takes pushes.
+    fn hello(&self) -> Hello {
+        Hello {
+            push: self.push.load(Ordering::Relaxed),
+            ..Hello::new(self.name.lock().expect("name lock poisoned").clone())
+        }
     }
 }
 

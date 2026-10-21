@@ -34,6 +34,19 @@ final class Router {
         agentsPath = [.pane(ref)]
     }
 
+    /// Opens a Pane from a notification, over its Device's Workspace list, where the app
+    /// stays if the Pane is gone (ADR 0047).
+    func openNotified(_ ref: PaneRef) {
+        tab = .agents
+        agentsPath = [.device(ref.address), .pane(ref)]
+    }
+
+    /// The Pane is gone: its page leaves whichever stack shows it.
+    func close(_ ref: PaneRef) {
+        agentsPath.removeAll { $0 == .pane(ref) }
+        devicesPath.removeAll { $0 == .pane(ref) }
+    }
+
     func forget(_ address: String) {
         let stays = { (route: DeviceRoute) -> Bool in
             switch route {

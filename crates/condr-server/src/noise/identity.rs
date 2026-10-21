@@ -7,7 +7,12 @@ pub const INVITE_TTL: Duration = Duration::from_secs(10 * 60);
 
 const DEVICE_KEY_FILE: &str = "device-key";
 
-const AUTHORIZED_FILE: &str = "authorized-clients";
+const AUTHORIZED_FILE: &str = "authorized-clients.json";
+
+/// compat(0.1.13): the line file `authorized-clients.json` replaced, which ADR 0033's move
+/// out of the configuration directory still moves by this name. Goes with
+/// `convert_legacy_list` (ADR 0047).
+const LEGACY_AUTHORIZED_FILE: &str = "authorized-clients";
 
 const INVITE_FILE: &str = "pending-invite";
 
@@ -24,14 +29,38 @@ pub struct ServerIdentity {
     always_authorized: Vec<PublicKey>,
 }
 
-/// One line of `authorized-clients`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// One entry of `authorized-clients.json`.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AuthorizedClient {
+    #[serde(with = "device_id")]
     pub key: PublicKey,
+    pub name: String,
     pub paired_at: u64,
     /// When the device last completed a handshake, as Unix seconds.
     pub last_seen: u64,
-    pub name: String,
+    /// Whether the device last said `push` in `Hello`; a missing field reads as false
+    /// (ADR 0047).
+    #[serde(default)]
+    pub push: bool,
+}
+
+/// `AuthorizedClient::key` in JSON: the Device id, the fingerprint people see.
+mod device_id {
+    use super::PublicKey;
+
+    pub fn serialize<S: serde::Serializer>(
+        key: &PublicKey,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(key)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<PublicKey, D::Error> {
+        let text = <String as serde::Deserialize>::deserialize(deserializer)?;
+        PublicKey::parse(&text).map_err(serde::de::Error::custom)
+    }
 }
 
 /// The one redeemable invite of a Server; a new invite replaces it.
@@ -46,14 +75,16 @@ impl ServerIdentity {
     /// connects out with, plus the paired devices and the pending invite kept beside it.
     /// Processes on the host itself use the local socket, so no device is authorized by
     /// default. A machine whose key is created now has no paired devices either: an
-    /// `authorized-clients` left from before the key existed can never match, so it goes.
+    /// `authorized-clients.json` left from before the key existed can never match, so it goes.
     pub fn load_or_create(directory: &Path) -> io::Result<Self> {
         let key = with_store_lock(directory, || {
             let path = directory.join(DEVICE_KEY_FILE);
             if !path.exists() {
                 match fs::remove_file(directory.join(AUTHORIZED_FILE)) {
                     Ok(()) => {
-                        tracing::warn!("device-key created; discarded the old authorized-clients")
+                        tracing::warn!(
+                            "device-key created; discarded the old authorized-clients.json"
+                        )
                     }
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                     Err(error) => return Err(error),
@@ -99,10 +130,23 @@ impl ServerIdentity {
             .any(|client| client.key == *remote))
     }
 
+    /// The paired Devices that last said `push` in `Hello` (ADR 0047), as the store on disk
+    /// lists them right now.
+    pub(crate) fn push_recipients(&self) -> io::Result<Vec<PublicKey>> {
+        let Some(store) = &self.store else {
+            return Ok(Vec::new());
+        };
+        Ok(read_authorized(store)?
+            .into_iter()
+            .filter(|client| client.push)
+            .map(|client| client.key)
+            .collect())
+    }
+
     /// Notes that `remote` connected now under `name`, so a device renamed since it paired
-    /// is listed by its new name; an empty name keeps the old one, and a device the store
-    /// does not list is ignored.
-    pub fn record_seen(&self, remote: &PublicKey, name: &str) -> io::Result<()> {
+    /// is listed by its new name, and whether it takes pushes (ADR 0047); an empty name
+    /// keeps the old one, and a device the store does not list is ignored.
+    pub fn record_seen(&self, remote: &PublicKey, name: &str, push: bool) -> io::Result<()> {
         let Some(store) = &self.store else {
             return Ok(());
         };
@@ -112,6 +156,7 @@ impl ServerIdentity {
                 return Ok(());
             };
             client.last_seen = now();
+            client.push = push;
             let name = single_spaced(name);
             if !name.is_empty() {
                 client.name = name;
@@ -146,6 +191,7 @@ impl ServerIdentity {
                     paired_at,
                     last_seen: paired_at,
                     name: single_spaced(name),
+                    push: false,
                 });
                 write_authorized(store, &clients)?;
             }
@@ -179,8 +225,8 @@ impl Authority for ServerIdentity {
         ServerIdentity::complete_pairing(self, device, name, invite)
     }
 
-    fn record_seen(&self, device: &PublicKey, name: &str) -> io::Result<()> {
-        ServerIdentity::record_seen(self, device, name)
+    fn record_seen(&self, device: &PublicKey, name: &str, push: bool) -> io::Result<()> {
+        ServerIdentity::record_seen(self, device, name, push)
     }
 }
 
@@ -196,7 +242,12 @@ fn single_spaced(name: &str) -> String {
 pub(crate) struct LazyIdentity(Mutex<Option<Arc<ServerIdentity>>>);
 
 impl LazyIdentity {
-    fn get(&self) -> io::Result<Arc<ServerIdentity>> {
+    /// One already loaded, such as the identity a TCP listener answers with.
+    pub(crate) fn loaded(identity: Arc<ServerIdentity>) -> Self {
+        Self(Mutex::new(Some(identity)))
+    }
+
+    pub(crate) fn get(&self) -> io::Result<Arc<ServerIdentity>> {
         let mut identity = self
             .0
             .lock()
@@ -227,8 +278,8 @@ impl Authority for LazyIdentity {
         self.get()?.complete_pairing(device, name, invite)
     }
 
-    fn record_seen(&self, device: &PublicKey, name: &str) -> io::Result<()> {
-        self.get()?.record_seen(device, name)
+    fn record_seen(&self, device: &PublicKey, name: &str, push: bool) -> io::Result<()> {
+        self.get()?.record_seen(device, name, push)
     }
 }
 
@@ -245,7 +296,9 @@ impl fmt::Debug for ServerIdentity {
 /// Where this host keeps `device-key`, the authorized list and the invite: the data
 /// directory, which no dotfiles repository or roaming profile carries off (ADR 0033).
 /// Releases up to 0.1.6 kept them beside `config.toml`; a store still there is moved
-/// here the first time anything asks, so pairings survive the update.
+/// here the first time anything asks, so pairings survive the update. Releases up to
+/// 0.1.13 kept the paired devices as lines in `authorized-clients`, which is converted
+/// to `authorized-clients.json` straight after.
 pub fn identity_directory() -> io::Result<PathBuf> {
     let directory = condr_core::data_directory().ok_or_else(|| {
         io::Error::new(
@@ -258,6 +311,14 @@ pub fn identity_directory() -> io::Result<PathBuf> {
     // update in place (ADR 0033).
     if let Some(legacy) = condr_core::config_directory().filter(|legacy| *legacy != directory) {
         adopt_legacy_store(&legacy, &directory)?;
+    }
+    // compat(0.1.13): releases up to 0.1.13 kept the paired devices as lines in
+    // `authorized-clients`. Delete this call, `convert_legacy_list`,
+    // `parse_legacy_authorized`, `LEGACY_AUTHORIZED_FILE` and their tests once those
+    // installs no longer update in place (ADR 0047). A failed conversion leaves the old
+    // file for the next opener rather than failing a GUI that only wants its device key.
+    if let Err(error) = convert_legacy_list(&directory) {
+        tracing::warn!(%error, "could not convert authorized-clients");
     }
     Ok(directory)
 }
@@ -274,7 +335,8 @@ fn adopt_legacy_store(legacy: &Path, directory: &Path) -> io::Result<()> {
         if directory.join(DEVICE_KEY_FILE).exists() {
             return Ok(());
         }
-        for name in [AUTHORIZED_FILE, INVITE_FILE, DEVICE_KEY_FILE] {
+        // Those releases only had the old list, which `convert_legacy_list` converts next.
+        for name in [LEGACY_AUTHORIZED_FILE, INVITE_FILE, DEVICE_KEY_FILE] {
             move_file(&legacy.join(name), &directory.join(name))?;
         }
         let _ = fs::remove_file(legacy.join(LOCK_FILE));
@@ -285,6 +347,61 @@ fn adopt_legacy_store(legacy: &Path, directory: &Path) -> io::Result<()> {
         );
         Ok(())
     })
+}
+
+/// compat(0.1.13): goes with the call in `identity_directory`.
+///
+/// Converts `authorized-clients` to `authorized-clients.json` when only the old file is
+/// there, and deletes it once the new one is written.
+fn convert_legacy_list(directory: &Path) -> io::Result<()> {
+    let legacy = directory.join(LEGACY_AUTHORIZED_FILE);
+    let pending = || legacy.exists() && !directory.join(AUTHORIZED_FILE).exists();
+    if !pending() {
+        return Ok(());
+    }
+    with_store_lock(directory, || {
+        if !pending() {
+            return Ok(());
+        }
+        let clients = parse_legacy_authorized(&fs::read_to_string(&legacy)?)?;
+        write_authorized(directory, &clients)?;
+        fs::remove_file(&legacy)?;
+        tracing::info!(
+            devices = clients.len(),
+            "converted authorized-clients to authorized-clients.json"
+        );
+        Ok(())
+    })
+}
+
+/// compat(0.1.13): goes with `convert_legacy_list`.
+///
+/// The `key paired-at last-seen name` lines of `authorized-clients`, keys in hex.
+fn parse_legacy_authorized(text: &str) -> io::Result<Vec<AuthorizedClient>> {
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let malformed = || {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("malformed authorized-clients line: {line}"),
+                )
+            };
+            let mut fields = line.splitn(4, ' ');
+            let (Some(key), Some(paired_at), Some(last_seen), Some(name)) =
+                (fields.next(), fields.next(), fields.next(), fields.next())
+            else {
+                return Err(malformed());
+            };
+            Ok(AuthorizedClient {
+                key: PublicKey::parse_hex(key)?,
+                name: name.to_owned(),
+                paired_at: paired_at.parse().map_err(|_| malformed())?,
+                last_seen: last_seen.parse().map_err(|_| malformed())?,
+                push: false,
+            })
+        })
+        .collect()
 }
 
 /// compat(0.1.6): goes with `adopt_legacy_store`.
@@ -415,35 +532,19 @@ fn read_invite(directory: &Path) -> io::Result<Option<Invite>> {
     Ok((invite.expires_at > now()).then_some(invite))
 }
 
+/// The paired devices in `authorized-clients.json`, none when the file is missing.
 pub fn read_authorized(directory: &Path) -> io::Result<Vec<AuthorizedClient>> {
     let text = match fs::read_to_string(directory.join(AUTHORIZED_FILE)) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
-    text.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            let malformed = || {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("malformed authorized-clients line: {line}"),
-                )
-            };
-            let mut fields = line.splitn(4, ' ');
-            let (Some(key), Some(paired_at), Some(last_seen), Some(name)) =
-                (fields.next(), fields.next(), fields.next(), fields.next())
-            else {
-                return Err(malformed());
-            };
-            Ok(AuthorizedClient {
-                key: PublicKey::parse_hex(key)?,
-                paired_at: paired_at.parse().map_err(|_| malformed())?,
-                last_seen: last_seen.parse().map_err(|_| malformed())?,
-                name: name.to_owned(),
-            })
-        })
-        .collect()
+    serde_json::from_str(&text).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("malformed {AUTHORIZED_FILE}: {error}"),
+        )
+    })
 }
 
 /// Removes the unique client matching `prefix` and returns its full key.
@@ -472,18 +573,8 @@ pub fn revoke(directory: &Path, prefix: &str) -> io::Result<Option<PublicKey>> {
 }
 
 fn write_authorized(directory: &Path, clients: &[AuthorizedClient]) -> io::Result<()> {
-    let text = clients
-        .iter()
-        .map(|client| {
-            format!(
-                "{} {} {} {}\n",
-                client.key.to_hex(),
-                client.paired_at,
-                client.last_seen,
-                client.name
-            )
-        })
-        .collect::<String>();
+    let mut text = serde_json::to_string_pretty(clients)?;
+    text.push('\n');
     fs::create_dir_all(directory)?;
     let target = crate::persistence::resolve_write_target(&directory.join(AUTHORIZED_FILE));
     atomicwrites::AtomicFile::new(&target, atomicwrites::AllowOverwrite)

@@ -21,8 +21,7 @@ extension SavedDevice: @retroactive Codable {
 }
 
 /// The paired Devices as the app keeps them, beside the key (ADR 0040): each an address
-/// without its invite and the name the Server goes by, in the app group's defaults so
-/// the push extension can read them later.
+/// without its invite and the name the Server goes by, in the app group's defaults.
 @MainActor
 final class SavedDeviceStore {
     static let appGroup = "group.dev.condr.companion"

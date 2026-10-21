@@ -377,6 +377,63 @@ fn a_missing_server_is_a_json_error() {
     );
 }
 
+/// compat(0.1.13): goes with `convert_legacy_list` (ADR 0047). The offline CLI opening the
+/// store first converts the line file: `clients` straight after the move out of the
+/// configuration directory (ADR 0033), `revoke` in a data directory that still has it.
+#[test]
+fn the_offline_cli_converts_the_authorized_line_file() {
+    let root = std::env::temp_dir().join(format!("condr-authorized-{}", uuid::Uuid::new_v4()));
+    let (config, data) = (root.join("config"), root.join("data"));
+    let key = condr_server::noise::PublicKey::from_bytes([0x55; 32]);
+    let line = format!("{} 1 2 old laptop\n", key.to_hex());
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_condr"))
+            .args(args)
+            .env("CONDR_SOCKET_PATH", root.join("absent.sock"))
+            .env("CONDR_CONFIG_DIR", &config)
+            .env("CONDR_DATA_DIR", &data)
+            .env_remove("CONDR_ENV")
+            .env_remove("CONDR_PANE_ID")
+            .output()
+            .unwrap()
+    };
+    let listed = || -> Value {
+        serde_json::from_slice(&std::fs::read(data.join("authorized-clients.json")).unwrap())
+            .unwrap()
+    };
+
+    condr_server::noise::load_device_key(&config).unwrap();
+    std::fs::write(config.join("authorized-clients"), &line).unwrap();
+    let output = run(&["server", "clients"]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("old laptop") && stdout.contains(&key.to_string()));
+    assert!(!config.join("authorized-clients").exists());
+    assert!(!data.join("authorized-clients").exists());
+    assert_eq!(
+        listed(),
+        serde_json::json!([{
+            "key": key.to_string(),
+            "name": "old laptop",
+            "paired_at": 1,
+            "last_seen": 2,
+            "push": false,
+        }])
+    );
+
+    std::fs::remove_file(data.join("authorized-clients.json")).unwrap();
+    std::fs::write(data.join("authorized-clients"), &line).unwrap();
+    // No Server runs to drop live connections, so this fails after the file edit.
+    let output = run(&["server", "revoke", &key.to_string()[..6]]);
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(&key.to_string()),
+        "{output:?}"
+    );
+    assert!(!data.join("authorized-clients").exists());
+    assert_eq!(listed(), serde_json::json!([]));
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `--device` reaches a saved TCP Device with this machine's device key; `device list`
 /// and `workspace list --all-devices` report the ones that do not answer instead of
 /// hiding them.

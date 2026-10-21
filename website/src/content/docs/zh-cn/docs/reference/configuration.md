@@ -273,7 +273,7 @@ url = "http://user:password@proxy:8080"
 | --- | --- | --- | --- |
 | `config.toml` | 配置 | 全局窗口与 Server 核心配置 | 所有参数回退为默认值，已保存的远程连接列表清空 |
 | `device-key` | 数据 | 设备非对称加密密钥 | 下次启动重新生成公私钥对并清空配对表；既有对端连接需重新授权 |
-| `authorized-clients` | 数据 | 配对白名单列表（每行一台设备） | 已配对设备下次连接时被拒绝，需重新配对 |
+| `authorized-clients.json` | 数据 | 配对白名单列表（JSON 数组，每台设备一项） | 已配对设备下次连接时被拒绝，需重新配对 |
 | `pending-invite` | 数据 | 当前生效的一次性配对票据 | 对应邀请链接立即失效 |
 | `condr-server-<id>.snapshot` | 状态 | Session 结构快照（Workspace、Tab 与 Pane 布局） | *需停机操作*。下次冷启动时丢弃所有会话上下文（磁盘已检出 Worktree 不受损） |
 | `condr-gui.state` | 状态 | 前端窗口几何尺寸、分栏折叠与各 Workspace 打开的 Tab 状态 | 窗口重置为初始居中尺寸与默认布局 |
@@ -284,7 +284,7 @@ url = "http://user:password@proxy:8080"
 > **安全与权限约束**：密钥与 Invite 属于敏感鉴权文件。在 Linux / macOS 下，权限必须限制为 `0600`（所有者读写），任何组读或其他可读权限将导致 Condr 拒绝加载；Windows 环境下程序会自动配置 ACL，将其严格收敛至当前用户上下文。
 
 :::note[目录演进兼容性]
-0.1.6 及更早版本将 `device-key`、`authorized-clients` 及 `pending-invite` 存放在配置目录下。新版本初次启动时，会自动将上述状态迁移至数据目录，密钥及配对拓扑保持兼容无损。
+0.1.6 及更早版本将 `device-key`、配对白名单及 `pending-invite` 存放在配置目录下。新版本初次启动时，会自动将上述状态迁移至数据目录，密钥及配对拓扑保持兼容无损。0.1.13 及更早版本以逐行文本 `authorized-clients` 保存配对白名单；新版本首次读取时会将其转换为 `authorized-clients.json`，既有配对不受影响。
 :::
 
 ---

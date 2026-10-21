@@ -18,9 +18,10 @@ mod terminal;
 pub mod uri;
 
 pub use agent::{
-    AgentDetector, AgentDisplayState, AgentEvent, AgentEventKind, AgentKind, AgentPublish,
-    AgentResume, AgentSnapshot, AgentSpec, AgentState, AgentSupport, AgentTracker, BlockedKind,
-    ProcessProbeResult, ProgramState, ProgramStatus, hook as agent_hook, hooks as agent_hooks,
+    AgentAlert, AgentDetector, AgentDisplayState, AgentEvent, AgentEventKind, AgentKind,
+    AgentPublish, AgentResume, AgentSnapshot, AgentSpec, AgentState, AgentSupport, AgentTracker,
+    BlockedKind, ProcessProbeResult, ProgramState, ProgramStatus, hook as agent_hook,
+    hooks as agent_hooks,
 };
 #[cfg(feature = "runtime")]
 pub use agent::{ProcessInfo, identify_agent_among, identify_agent_process};

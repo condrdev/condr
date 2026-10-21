@@ -17,6 +17,7 @@ curve25519-dalek.workspace = true
 getrandom.workspace = true
 hyper-util.workspace = true
 iroh.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 snow.workspace = true
 socket2.workspace = true

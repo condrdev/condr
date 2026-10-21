@@ -65,6 +65,13 @@ pub fn fingerprint(seed: Vec<u8>) -> Result<String, MobileError> {
     device_key(&seed).map(|key| key.public().to_string())
 }
 
+/// Condr Cloud's base URL, which every [`Companion::cloud_token`] names (ADR 0047). The
+/// phone always takes the default; only a desktop reads `CONDR_CLOUD_URL`.
+#[uniffi::export]
+pub fn cloud_url() -> String {
+    condr_client::cloud::DEFAULT_URL.to_owned()
+}
+
 fn device_key(seed: &[u8]) -> Result<DeviceKey, MobileError> {
     let seed: [u8; 32] = seed
         .try_into()

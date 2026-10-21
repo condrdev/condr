@@ -75,12 +75,14 @@ targets:
     entitlements:
       path: Condr/Condr.entitlements
       properties:
-        # The Device key's Keychain item, shared with the push extension later (ADR 0040).
+        # The Device key's Keychain item (ADR 0040).
         keychain-access-groups:
           - $(AppIdentifierPrefix)dev.condr.companion
         # The paired-device list, beside the key (ADR 0040).
         com.apple.security.application-groups:
           - group.dev.condr.companion
+        # Pushes through Condr Cloud (ADR 0047). An App Store export signs it as production.
+        aps-environment: development
     preBuildScripts:
       - name: Build CondrKit
         shell: /bin/sh

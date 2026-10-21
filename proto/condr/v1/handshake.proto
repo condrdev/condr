@@ -23,6 +23,9 @@ message Hello {
   string client_name = 3;
   // The oldest Server protocol this Client works with.
   uint32 min_server_protocol = 4;
+  // The first Client hint (ADR 0028): this Client takes the Server's pushes through Condr
+  // Cloud (ADR 0047). False from the GUI, the CLI and a Client that predates it.
+  bool push = 5;
 }
 
 message Credential {

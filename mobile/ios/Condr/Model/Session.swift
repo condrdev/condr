@@ -205,6 +205,19 @@ final class Session {
         devices.first { $0.address == address }
     }
 
+    /// The Pane a notification names, on a Device paired here.
+    func ref(_ pushed: PushedPane) -> PaneRef? {
+        devices.first { $0.deviceId == pushed.device }
+            .map { PaneRef(address: $0.address, pane: pushed.pane) }
+    }
+
+    /// A notification shows in the foreground only while its Device is not connected here:
+    /// a connected one's change already raises a `Banner`, and the Pane on screen none.
+    func presents(_ pushed: PushedPane) -> Bool {
+        guard let ref = ref(pushed) else { return true }
+        return device(ref.address)?.status != .connected && shown != ref
+    }
+
     func pane(_ ref: PaneRef) -> PaneView? {
         workspaces[ref.address]?.lazy.flatMap(\.panes).first { $0.id == ref.pane }
     }

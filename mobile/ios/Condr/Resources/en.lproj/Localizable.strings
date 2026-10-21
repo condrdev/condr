@@ -1,0 +1,5 @@
+/* A push's title (ADR 0047), as the desktop notification words it. The argument is the
+   Agent's name, such as "Claude Code". */
+"push_finished" = "%@ finished";
+"push_failed" = "%@ failed";
+"push_blocked" = "%@ needs your input";

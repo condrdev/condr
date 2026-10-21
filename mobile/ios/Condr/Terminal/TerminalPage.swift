@@ -17,6 +17,7 @@ struct TerminalPage: View {
     @Environment(Session.self) private var session
     @Environment(Preferences.self) private var preferences
     @Environment(Alerts.self) private var alerts
+    @Environment(Router.self) private var router
     @State private var grid: Grid?
     @State private var text = ""
     @State private var control = false
@@ -66,8 +67,14 @@ struct TerminalPage: View {
             }
             .onDisappear { session.hide(ref) }
         } else {
-            // Forgotten or gone while this page was up: the stack is about to drop it.
+            // Forgotten while this page was up: the stack is about to drop it. A Pane that
+            // closed, or that a notification named after it closed, leaves once its Device
+            // is reached and has no such Pane (ADR 0047).
             Color(hex: Palette.background).ignoresSafeArea()
+                .onChange(of: session.device(ref.address)?.connected, initial: true) {
+                    _, connected in
+                    if connected == true { router.close(ref) }
+                }
         }
     }
 

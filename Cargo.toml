@@ -61,6 +61,10 @@ iroh = { version = "1.2", default-features = false, features = ["tls-ring"] }
 netwatch = "0.19"
 # The Invite drawn as a QR code for the Companion to scan (ADR 0040); no dependencies.
 qrcode = { version = "0.14", default-features = false }
+# Pushes to Condr Cloud (ADR 0047): the reqwest iroh already builds, on its ring provider,
+# plus the system proxy hyper-util already reads for the relay (ADR 0038).
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # The system proxy for the relay (ADR 0038); already built for iroh's reqwest.
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 url = "2"

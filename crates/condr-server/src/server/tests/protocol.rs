@@ -668,6 +668,55 @@ fn only_a_local_connection_changes_the_proxy_and_one_field_leaves_the_others() {
     thread.join().unwrap().unwrap();
 }
 
+/// A paired device's `push` lands in `authorized-clients.json` with every handshake, beside
+/// its last-seen time (ADR 0047).
+#[test]
+fn a_paired_devices_push_is_recorded_on_every_handshake() {
+    use crate::noise::{self, DeviceKey, ServerIdentity};
+
+    let directory = std::env::temp_dir().join(format!(
+        "condr-server-push-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let identity = ServerIdentity::load_or_create(&directory).unwrap();
+    let server_key = identity.public_key();
+    let server = BoundServer::bind(
+        ServerConfig::ephemeral(directory.join("condr.sock"))
+            .with_listen("127.0.0.1:0".parse().unwrap())
+            .with_identity(identity),
+    )
+    .unwrap();
+    let handle = server.handle();
+    let address = server.local_addr().unwrap().unwrap();
+    let thread = thread::spawn(move || server.run());
+
+    let device_key = DeviceKey::generate().unwrap();
+    let device = |invite| {
+        let mut tcp = TcpEndpoint::at(address, server_key, device_key.clone());
+        tcp.invite = invite;
+        Endpoint::tcp(tcp)
+    };
+    let invite = noise::create_invite(&directory).unwrap();
+    let phone = Hello {
+        push: true,
+        ..Hello::new("phone")
+    };
+    drop(ClientConnection::connect_overview(&device(Some(invite.secret)), phone).unwrap());
+    let paired = noise::read_authorized(&directory).unwrap();
+    assert!(paired[0].push, "pairing records the push its Hello said");
+    assert!(paired[0].last_seen >= paired[0].paired_at);
+
+    drop(ClientConnection::connect_overview(&device(None), "phone").unwrap());
+    let reconnected = noise::read_authorized(&directory).unwrap();
+    assert!(!reconnected[0].push, "a Hello without push clears it");
+    assert!(reconnected[0].last_seen >= paired[0].last_seen);
+
+    handle.stop();
+    thread.join().unwrap().unwrap();
+    let _ = std::fs::remove_dir_all(directory);
+}
+
 #[test]
 fn revoking_a_device_drops_its_live_connections_and_refuses_its_return() {
     use crate::noise::{self, DeviceKey, ServerIdentity};

@@ -298,6 +298,38 @@ impl AgentTracker {
     }
 }
 
+/// Why an Agent's change calls its person: the desktop notification and the Companion's
+/// push fire on the same changes (ADR 0047).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentAlert {
+    Finished,
+    Failed,
+    /// `updated`: it was Blocked already and now waits for something else, which replaces
+    /// the earlier alert without asking for attention again.
+    NeedsInput {
+        updated: bool,
+    },
+}
+
+impl AgentAlert {
+    /// What the change from `previous` to `next` calls for, if anything. An Idle straight
+    /// after work is a finish too: an agent that reports no `done` (Codex before 0.164)
+    /// ends its turns that way. Blocked counts from anywhere else, since a login prompt
+    /// arrives straight from Idle.
+    pub fn between(previous: Option<&AgentSnapshot>, next: &AgentSnapshot) -> Option<Self> {
+        use AgentState::{Blocked, Done, Error, Idle, Working};
+        let previous = previous?;
+        match (previous.state, next.state) {
+            (Working | Blocked, Done | Idle) => Some(Self::Finished),
+            (Working | Blocked, Error) => Some(Self::Failed),
+            (Blocked, Blocked) => (next.detail.is_some() && next.detail != previous.detail)
+                .then_some(Self::NeedsInput { updated: true }),
+            (_, Blocked) => Some(Self::NeedsInput { updated: false }),
+            _ => None,
+        }
+    }
+}
+
 /// A native conversation to reopen in a fresh shell after a Server restart.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentResume {
@@ -373,5 +405,76 @@ mod tests {
             );
         }
         assert_eq!(AgentKind::parse_label("other"), None);
+    }
+
+    /// The changes that notify the desktop and push to the Companion (ADR 0047).
+    #[test]
+    fn alerts_fire_on_finish_failure_and_each_new_question() {
+        use AgentAlert::{Failed, Finished, NeedsInput};
+        use AgentState::{Blocked, Done, Error, Idle, Unknown, Working};
+        let agent = |state, detail: Option<&str>| AgentSnapshot {
+            session_id: None,
+            kind: AgentKind::Claude,
+            state,
+            detail: detail.map(str::to_owned),
+        };
+        let asked = Some("Bash: rm -rf target");
+        for (previous, next, alert) in [
+            (
+                Some(agent(Working, None)),
+                agent(Done, None),
+                Some(Finished),
+            ),
+            (
+                Some(agent(Working, None)),
+                agent(Idle, None),
+                Some(Finished),
+            ),
+            (
+                Some(agent(Blocked, asked)),
+                agent(Done, None),
+                Some(Finished),
+            ),
+            (
+                Some(agent(Working, None)),
+                agent(Error, asked),
+                Some(Failed),
+            ),
+            (
+                Some(agent(Blocked, asked)),
+                agent(Error, None),
+                Some(Failed),
+            ),
+            (
+                Some(agent(Idle, None)),
+                agent(Blocked, asked),
+                Some(NeedsInput { updated: false }),
+            ),
+            (
+                Some(agent(Working, None)),
+                agent(Blocked, None),
+                Some(NeedsInput { updated: false }),
+            ),
+            (
+                Some(agent(Blocked, asked)),
+                agent(Blocked, Some("Write: notes.md")),
+                Some(NeedsInput { updated: true }),
+            ),
+            (Some(agent(Blocked, asked)), agent(Blocked, asked), None),
+            (Some(agent(Blocked, asked)), agent(Blocked, None), None),
+            (None, agent(Blocked, asked), None),
+            (Some(agent(Idle, None)), agent(Working, None), None),
+            (Some(agent(Unknown, None)), agent(Idle, None), None),
+            (Some(agent(Done, None)), agent(Idle, None), None),
+            (Some(agent(Idle, None)), agent(Error, asked), None),
+        ] {
+            assert_eq!(
+                AgentAlert::between(previous.as_ref(), &next),
+                alert,
+                "{:?} -> {:?}",
+                previous.as_ref().map(|agent| agent.state),
+                next.state
+            );
+        }
     }
 }

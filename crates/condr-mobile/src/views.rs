@@ -57,6 +57,9 @@ pub enum DeviceStatus {
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct DeviceView {
     pub address: String,
+    /// The Device id its address names, what Condr Cloud and a push know it by (ADR
+    /// 0047); none for an address that does not parse.
+    pub device_id: Option<String>,
     pub label: String,
     pub status: DeviceStatus,
 }

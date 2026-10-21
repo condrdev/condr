@@ -31,6 +31,7 @@ nonisolated final class FakeClient: CompanionProtocol {
         var submits: [String] = []
         var selections: [String] = []
         var lifecycle: [String] = []
+        var pushes: [Bool] = []
     }
 
     let state: Mutex<State>
@@ -89,6 +90,8 @@ nonisolated final class FakeClient: CompanionProtocol {
     }
 
     func setName(name: String) { state.withLock { $0.names.append(name) } }
+    func setPush(push: Bool) { state.withLock { $0.pushes.append(push) } }
+    func cloudToken() -> String { "signed" }
 
     func pair(link: String, label: String?) throws -> SavedDevice {
         try state.withLock { state in
@@ -96,10 +99,9 @@ nonisolated final class FakeClient: CompanionProtocol {
                 throw MobileError.Invalid(message: "not a link")
             }
             state.pairs.append((link, label))
+            let address = String(link.prefix(while: { $0 != "." }))
             let device = DeviceView(
-                address: String(link.prefix(while: { $0 != "." })), label: label ?? "desk",
-                status: .connected
-            )
+                address: address, deviceId: address, label: label ?? "desk", status: .connected)
             state.devices.append(device)
             return SavedDevice(address: device.address, label: device.label)
         }
@@ -176,7 +178,9 @@ enum Fixture {
 
     static func world(_ status: AgentStatus, detail: String? = nil) -> FakeClient.State {
         var state = FakeClient.State()
-        state.devices = [DeviceView(address: address, label: "desk", status: .connected)]
+        state.devices = [
+            DeviceView(address: address, deviceId: "server", label: "desk", status: .connected)
+        ]
         state.workspaces = [
             address: [
                 WorkspaceView(

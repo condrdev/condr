@@ -19,7 +19,7 @@ Condr 按数据用途遵循 XDG 和各平台目录规范：
 | 用途 | Linux | Windows | macOS |
 | --- | --- | --- | --- |
 | `config.toml` | `$XDG_CONFIG_HOME/condr`，默认 `~/.config/condr` | `%APPDATA%\condr` | `~/Library/Application Support/condr` |
-| `device-key`、`authorized-clients`、`pending-invite` | `$XDG_DATA_HOME/condr`，默认 `~/.local/share/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
+| `device-key`、`authorized-clients.json`、`pending-invite` | `$XDG_DATA_HOME/condr`，默认 `~/.local/share/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
 | Managed Worktree | `$XDG_DATA_HOME/condr/worktrees`，默认 `~/.local/share/condr/worktrees` | `%LOCALAPPDATA%\condr\worktrees` | `~/Library/Application Support/condr/worktrees` |
 | Snapshot | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Application Support/condr` |
 | Log | `$XDG_STATE_HOME/condr`，默认 `~/.local/state/condr` | `%LOCALAPPDATA%\condr` | `~/Library/Logs/condr` |

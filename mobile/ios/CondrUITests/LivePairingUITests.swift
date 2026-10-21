@@ -47,6 +47,11 @@ final class LivePairingUITests: XCTestCase {
             NSPredicate(format: "label BEGINSWITH %@", "Paired with")
         )
         .firstMatch
+        // The first pairing raises the notification prompt, which shields the screen; Don't
+        // Allow keeps the run off Condr Cloud.
+        let decline = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts
+            .buttons.firstMatch
+        if decline.waitForExistence(timeout: 15) { decline.tap() }
         if !paired.waitForExistence(timeout: 30) {
             let texts = app.staticTexts.allElementsBoundByIndex.map { $0.label }
             let scalars = pasted.unicodeScalars.prefix(16).map { String($0.value, radix: 16) }

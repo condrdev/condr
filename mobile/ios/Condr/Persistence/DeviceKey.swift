@@ -2,10 +2,9 @@ import CondrKit
 import Foundation
 import Security
 
-/// This phone's Device key seed, kept by the Keychain under the app's shared access group
-/// so the push extension can read it later, available after the first unlock and never
-/// leaving this device (ADR 0040). The library generates it once; the app hands it back
-/// at every start.
+/// This phone's Device key seed, kept by the Keychain under the app's access group,
+/// available after the first unlock and never leaving this device (ADR 0040). The
+/// library generates it once; the app hands it back at every start.
 enum DeviceKey {
     struct KeychainError: Error, LocalizedError {
         let status: OSStatus

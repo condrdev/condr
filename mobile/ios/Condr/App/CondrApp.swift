@@ -2,33 +2,84 @@ import CondrKit
 import Network
 import SwiftUI
 import Synchronization
+import UserNotifications
 
 @main
 struct CondrApp: App {
-    @State private var stores: Stores?
-    @State private var failure: String?
-
-    init() {
-        do {
-            _stores = State(initialValue: try Stores.make())
-        } catch {
-            _failure = State(initialValue: error.localizedDescription)
-        }
-    }
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
         WindowGroup {
-            if let stores {
+            switch delegate.stores {
+            case .success(let stores):
                 Root()
                     .environment(stores.session)
                     .environment(stores.router)
                     .environment(stores.preferences)
                     .environment(stores.lock)
                     .environment(stores.alerts)
-            } else {
-                StartupFailure(message: failure ?? "")
+                    .environment(stores.push)
+            case .failure(let error):
+                StartupFailure(message: error.localizedDescription)
             }
         }
+    }
+}
+
+/// Builds the app's objects as iOS launches it, so a notification tapped to launch it
+/// finds them, and hands them what APNs and the notification center say (ADR 0047).
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    let stores = Result { try Stores.make() }
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func application(
+        _ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data
+    ) {
+        guard let push = try? stores.get().push else { return }
+        Task { await push.received(token: token) }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: any Error
+    ) {
+        guard let push = try? stores.get().push else { return }
+        push.failed()
+    }
+
+    /// In the foreground a notification shows only while its Device is not connected here.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        let pushed = PushedPane(notification.request.content.userInfo)
+        return await presents(pushed) ? [.banner, .list, .sound] : []
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        guard let pushed = PushedPane(response.notification.request.content.userInfo) else {
+            return
+        }
+        await open(pushed)
+    }
+
+    private func presents(_ pushed: PushedPane?) -> Bool {
+        guard let pushed, let session = try? stores.get().session else { return true }
+        return session.presents(pushed)
+    }
+
+    /// The Pane a tapped notification names (ADR 0041), over its Device's Workspace list.
+    private func open(_ pushed: PushedPane) {
+        guard let stores = try? stores.get(), let ref = stores.session.ref(pushed) else { return }
+        stores.router.openNotified(ref)
     }
 }
 
@@ -40,6 +91,8 @@ struct Stores {
     let preferences: Preferences
     let lock: AppLock
     let alerts: Alerts
+    /// None in a demo scene, which registers nowhere.
+    let push: Push?
 
     static func make() throws -> Stores {
         if let scene = DemoScene.launched { return demo(scene) }
@@ -51,15 +104,17 @@ struct Stores {
         let listener = SessionListener()
         let client = try Companion(
             seed: seed, name: preferences.phoneName, devices: saved.devices, listener: listener)
+        let phone = try fingerprint(seed: seed)
         let session = Session(
-            client: client, fingerprint: try fingerprint(seed: seed), saved: saved, alerts: alerts,
-            router: router)
+            client: client, fingerprint: phone, saved: saved, alerts: alerts, router: router)
+        let push = Push(client: client)
         listener.bind {
             Task { @MainActor [weak session] in session?.refresh() }
         }
         let lock = AppLock(authenticator: DeviceAuthenticator(), paired: session.paired)
         return Stores(
-            session: session, router: router, preferences: preferences, lock: lock, alerts: alerts)
+            session: session, router: router, preferences: preferences, lock: lock, alerts: alerts,
+            push: push)
     }
 
     /// A scene for review or a UI test: the demo world, a store that forgets between
@@ -116,7 +171,8 @@ struct Stores {
         default: break
         }
         return Stores(
-            session: session, router: router, preferences: preferences, lock: lock, alerts: alerts)
+            session: session, router: router, preferences: preferences, lock: lock, alerts: alerts,
+            push: nil)
     }
 }
 
@@ -148,6 +204,7 @@ struct Root: View {
     @Environment(Router.self) private var router
     @Environment(AppLock.self) private var lock
     @Environment(Alerts.self) private var alerts
+    @Environment(Push.self) private var push: Push?
     @Environment(\.scenePhase) private var phase
     @State private var curtain = Curtain()
     @State private var network = NetworkMonitor()
@@ -172,6 +229,7 @@ struct Root: View {
             // welcome for the tabs before its last step is shown.
             if self.onboarding == nil || !paired { self.onboarding = !paired }
         }
+        .onChange(of: session.devices.map(\.address)) { Task { await registerPush() } }
         .overlay(alignment: .top) { BannerView() }
         .overlay(alignment: .bottom) {
             // Inside a Pane the toast sits over the input bar, from the terminal itself.
@@ -205,6 +263,7 @@ struct Root: View {
                 session.resume()
                 session.setActive(true)
                 network.start { session.networkChanged() }
+                Task { await registerPush() }
             case .inactive:
                 session.setActive(false)
                 // Leaving the screen shields it at once, so the app switcher's snapshot
@@ -221,6 +280,20 @@ struct Root: View {
                 break
             }
         }
+    }
+
+    /// Asks for notifications once a Device is paired, with the system's prompt only and
+    /// never again once answered, then registers with Condr Cloud (ADR 0047).
+    private func registerPush() async {
+        guard let push else { return }
+        let center = UNUserNotificationCenter.current()
+        var status = await center.notificationSettings().authorizationStatus
+        if status == .notDetermined, session.paired {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            status = await center.notificationSettings().authorizationStatus
+        }
+        if status == .authorized { UIApplication.shared.registerForRemoteNotifications() }
+        await push.update(status: status, servers: session.devices.compactMap(\.deviceId))
     }
 
     private func raiseCurtain() {

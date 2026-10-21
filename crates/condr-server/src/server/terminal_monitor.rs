@@ -271,6 +271,10 @@ pub(super) fn apply_agent_refresh(
         state.complete_agent_waits();
         return;
     }
+    // The one place that sees both states, so pushes are found here (ADR 0047).
+    let alert = next
+        .as_ref()
+        .and_then(|next| condr_core::AgentAlert::between(previous, next));
     match &next {
         Some(agent) => {
             state.agents.insert(pane_id, agent.clone());
@@ -288,6 +292,9 @@ pub(super) fn apply_agent_refresh(
                     .as_ref()
                     .is_some_and(|agent| agent.kind.spec().reads_kitty_keys),
         );
+    }
+    if let (Some(alert), Some(agent)) = (alert, &next) {
+        state.push_agent_alert(pane_id, alert, agent);
     }
     state.publish_background(SessionEvent::AgentChanged {
         pane_id,

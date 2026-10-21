@@ -32,16 +32,35 @@ pub struct Hello {
     /// The oldest Server protocol this Client works with; `0` from a peer that predates
     /// the field.
     pub min_server_protocol: u32,
+    /// The first Client hint (ADR 0028): this Client takes the Server's pushes through
+    /// Condr Cloud (ADR 0047). Only the Companion says it; `false` from a peer that
+    /// predates the field.
+    pub push: bool,
 }
 
 impl Hello {
+    /// A `Hello` from `client_name` with no hints.
     pub fn new(client_name: impl Into<String>) -> Self {
         Self {
             protocol: PROTOCOL_VERSION,
             build: crate::build_identity().to_owned(),
             client_name: client_name.into(),
             min_server_protocol: MIN_SERVER_PROTOCOL,
+            push: false,
         }
+    }
+}
+
+/// A Client that gives only its name, as the GUI and the CLI do.
+impl From<&str> for Hello {
+    fn from(client_name: &str) -> Self {
+        Self::new(client_name)
+    }
+}
+
+impl From<String> for Hello {
+    fn from(client_name: String) -> Self {
+        Self::new(client_name)
     }
 }
 

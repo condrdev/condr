@@ -2,6 +2,7 @@
 //! ends of the TCP and Peer-to-peer transports, and the connection the GUI, the CLI and the
 //! Companion share. `condr-server` adds the desktop's local socket, SSH and `Tunnel`.
 
+pub mod cloud;
 mod connection;
 pub mod frames;
 mod io;

@@ -251,7 +251,7 @@ impl Condr {
                                 self.notify_agent_change(
                                     key,
                                     pane_id,
-                                    change.previous.map(|previous| previous.state),
+                                    change.previous.as_ref(),
                                     &agent,
                                     cx,
                                 );

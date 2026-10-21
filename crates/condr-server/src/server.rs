@@ -5,6 +5,7 @@ mod clipboard_image;
 mod config;
 mod layout;
 mod local;
+mod push;
 mod recovery;
 mod subscriptions;
 mod terminal_monitor;
@@ -155,6 +156,8 @@ pub struct BoundServer {
     p2p_enabled: bool,
     /// The identity the Peer-to-peer endpoint uses; `None` loads it from disk on demand.
     identity: Option<Arc<ServerIdentity>>,
+    /// Where pushes go (ADR 0047); `None` sends none.
+    cloud_url: Option<String>,
 }
 
 impl BoundServer {
@@ -218,6 +221,7 @@ impl BoundServer {
             startup_terminals,
             p2p_enabled: config.p2p,
             identity: resolved_identity,
+            cloud_url: config.cloud_url,
         })
     }
 
@@ -277,25 +281,27 @@ impl BoundServer {
         // when enabled and dials for local `Tunnel` frames either way. Built here because
         // it needs the runtime this `spawn_blocking` task runs on.
         let (p2p_sender, p2p_accepted) = std::sync::mpsc::channel();
-        let authority: Arc<dyn crate::noise::Authority> = match &self.identity {
-            Some(identity) => Arc::clone(identity) as _,
-            None => Arc::new(crate::noise::LazyIdentity::default()),
-        };
+        let identity = Arc::new(match &self.identity {
+            Some(identity) => crate::noise::LazyIdentity::loaded(Arc::clone(identity)),
+            None => crate::noise::LazyIdentity::default(),
+        });
         let accept: crate::p2p::Accept = Box::new(move |stream| {
             p2p_sender
                 .send(EndpointStream::P2p(stream))
                 .map_err(|_| io::Error::other("the Server stopped accepting"))
         });
+        let proxy = self
+            .state
+            .lock()
+            .expect("server state lock poisoned")
+            .settings
+            .proxy
+            .clone();
         let p2p = crate::p2p::P2pNode::new(
             tokio::runtime::Handle::current(),
-            authority,
+            Arc::clone(&identity) as _,
             crate::p2p::Network::Condr,
-            self.state
-                .lock()
-                .expect("server state lock poisoned")
-                .settings
-                .proxy
-                .clone(),
+            proxy.clone(),
             self.p2p_enabled.then_some(accept),
         );
         if self.p2p_enabled
@@ -304,6 +310,22 @@ impl BoundServer {
             tracing::error!("p2p endpoint not bound: {error}");
         }
         self.state.lock().expect("server state lock poisoned").p2p = Some(Arc::clone(&p2p));
+        if let Some(base_url) = self.cloud_url.take() {
+            match push::Pushes::start(
+                &tokio::runtime::Handle::current(),
+                base_url,
+                identity,
+                &proxy,
+            ) {
+                Ok(pushes) => {
+                    self.state
+                        .lock()
+                        .expect("server state lock poisoned")
+                        .pushes = Some(pushes);
+                }
+                Err(error) => tracing::error!("pushes to Condr Cloud are off: {error}"),
+            }
+        }
 
         tracing::info!(
             version = condr_core::build_identity(),
@@ -552,6 +574,9 @@ struct RuntimeState {
     /// This machine's Peer-to-peer endpoint, so a `Tunnel` frame can dial (ADR 0026); set
     /// once the runtime is up.
     p2p: Option<Arc<crate::p2p::P2pNode>>,
+    /// Where an Agent's change goes to the Companion (ADR 0047); set once the runtime is
+    /// up, and only for a Server with a Condr Cloud URL.
+    pushes: Option<push::Pushes>,
     /// Clipboard images staged for each Client (ADR 0012); removed with the Client.
     staged_images: std::collections::HashMap<u64, Vec<PathBuf>>,
     settings_write: Arc<Mutex<()>>,
@@ -699,6 +724,7 @@ impl RuntimeState {
             watched_terminals: std::collections::HashMap::new(),
             tcp_peers: std::collections::HashMap::new(),
             p2p: None,
+            pushes: None,
             staged_images: std::collections::HashMap::new(),
             settings_write: Arc::new(Mutex::new(())),
             persistence,

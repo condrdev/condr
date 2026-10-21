@@ -192,37 +192,33 @@ pub struct ClientConnection<S> {
 }
 
 impl<S: ServerStream> ClientConnection<S> {
+    /// Every connect takes `hello` as a Client name, or as a [`Hello`] carrying the
+    /// Client's hints (ADR 0028), as the Companion's `push` (ADR 0047).
     pub fn connect<C: Connector<Stream = S>>(
         endpoint: &C,
-        client_name: impl Into<String>,
+        hello: impl Into<Hello>,
     ) -> io::Result<Self> {
-        Self::connect_cancellable(endpoint, client_name, Cancellation::default())
+        Self::connect_cancellable(endpoint, hello, Cancellation::default())
     }
 
     /// The caller owns cancellation from before SSH spawn through connected I/O.
     pub fn connect_cancellable<C: Connector<Stream = S>>(
         endpoint: &C,
-        client_name: impl Into<String>,
+        hello: impl Into<Hello>,
         cancellation: Cancellation<S>,
     ) -> io::Result<Self> {
-        Self::connect_with_state(endpoint, client_name.into(), true, None, cancellation)
+        Self::connect_with_state(endpoint, hello.into(), true, None, cancellation)
     }
 
     /// Like [`Self::connect_cancellable`], limiting this connection's terminal frames to
     /// `panes` before the Bootstrap, which then carries views only for them (ADR 0041).
     pub fn connect_watching<C: Connector<Stream = S>>(
         endpoint: &C,
-        client_name: impl Into<String>,
+        hello: impl Into<Hello>,
         panes: HashSet<PaneId>,
         cancellation: Cancellation<S>,
     ) -> io::Result<Self> {
-        Self::connect_with_state(
-            endpoint,
-            client_name.into(),
-            true,
-            Some(panes),
-            cancellation,
-        )
+        Self::connect_with_state(endpoint, hello.into(), true, Some(panes), cancellation)
     }
 
     pub fn cancellation(&self) -> Cancellation<S> {
@@ -232,20 +228,14 @@ impl<S: ServerStream> ClientConnection<S> {
     /// Connects for CLI inspection and mutations, without requesting terminal views.
     pub fn connect_overview<C: Connector<Stream = S>>(
         endpoint: &C,
-        client_name: impl Into<String>,
+        hello: impl Into<Hello>,
     ) -> io::Result<Self> {
-        Self::connect_with_state(
-            endpoint,
-            client_name.into(),
-            false,
-            None,
-            Cancellation::default(),
-        )
+        Self::connect_with_state(endpoint, hello.into(), false, None, Cancellation::default())
     }
 
     fn connect_with_state<C: Connector<Stream = S>>(
         endpoint: &C,
-        client_name: String,
+        hello: Hello,
         terminal_views: bool,
         watched: Option<HashSet<PaneId>>,
         cancellation: Cancellation<S>,
@@ -254,7 +244,7 @@ impl<S: ServerStream> ClientConnection<S> {
             let stream = cancellation.connect(endpoint)?;
             let result = Self::handshake(
                 stream,
-                client_name.clone(),
+                hello.clone(),
                 terminal_views,
                 watched.clone(),
                 cancellation.clone(),
@@ -280,12 +270,12 @@ impl<S: ServerStream> ClientConnection<S> {
 
     fn handshake(
         stream: S,
-        client_name: impl Into<String>,
+        hello: Hello,
         terminal_views: bool,
         watched: Option<HashSet<PaneId>>,
         cancellation: Cancellation<S>,
     ) -> io::Result<Self> {
-        let (mut stream, welcome) = Self::welcome(stream, client_name)?;
+        let (mut stream, welcome) = Self::welcome(stream, hello)?;
         let session_id = welcome.session_id;
         let server_build = welcome.build;
         let server_device_name = welcome.device_name;
@@ -508,7 +498,7 @@ impl<S: ServerStream> ClientConnection<S> {
     /// Hello/Welcome only: enough to know a compatible Server answers, without pulling
     /// its whole Bootstrap. The local probe uses this so startup does not transfer every
     /// terminal view once for the probe and again for the real connection.
-    pub fn welcome(mut stream: S, client_name: impl Into<String>) -> io::Result<(S, Welcome)> {
+    pub fn welcome(mut stream: S, hello: impl Into<Hello>) -> io::Result<(S, Welcome)> {
         // A refused handshake surfaces as an I/O error with its own kind; keep it so
         // callers can tell "not authorized" from a framing problem. A read timeout is
         // `WouldBlock` on macOS and iOS ("os error 35"), which says nothing to a person.
@@ -525,11 +515,8 @@ impl<S: ServerStream> ClientConnection<S> {
             other => io::Error::other(other.to_string()),
         };
         stream.set_read_timeout(Some(stream.welcome_timeout()))?;
-        condr_core::protocol::write_message(
-            &mut stream,
-            &ClientHandshake::Hello(Hello::new(client_name)),
-        )
-        .map_err(io_error)?;
+        condr_core::protocol::write_message(&mut stream, &ClientHandshake::Hello(hello.into()))
+            .map_err(io_error)?;
         let welcome: Welcome = condr_core::protocol::read_message(&mut stream).map_err(io_error)?;
         if let Some(refusal) = welcome.refusal.clone() {
             return Err(Refused {

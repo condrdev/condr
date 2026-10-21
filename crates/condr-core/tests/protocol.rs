@@ -30,6 +30,21 @@ fn hello_round_trip_uses_a_varint_length_prefix() {
     );
 }
 
+/// The Companion's `push` hint (ADR 0047) survives the wire.
+#[test]
+fn hello_push_round_trips() {
+    let message = ClientHandshake::Hello(Hello {
+        push: true,
+        ..Hello::new("phone")
+    });
+    let mut bytes = Vec::new();
+    write_message(&mut bytes, &message).unwrap();
+    assert_eq!(
+        read_message::<_, ClientHandshake>(&mut bytes.as_slice()).unwrap(),
+        message
+    );
+}
+
 /// The handshake is frozen (ADR 0027, 0028): these are protocol 1's first frames, and
 /// every later build must keep reading them, with or without fields added since.
 #[test]
@@ -52,6 +67,8 @@ fn handshake_frames_from_protocol_1_keep_decoding() {
             build: "1.2.3+abc".into(),
             client_name: "gui".into(),
             min_server_protocol: 1,
+            // Absent on the wire from a Client that predates it.
+            push: false,
         })
     );
 

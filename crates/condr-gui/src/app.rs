@@ -55,7 +55,7 @@ use condr_core::protocol::{
     WorkspaceGitSnapshot, relative_age, uptime_text,
 };
 use condr_core::{
-    AgentDisplayState, AgentKind, AgentSnapshot, AgentState, BrowsedDirectory, CommitDetails,
+    AgentAlert, AgentDisplayState, AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails,
     CommitSummary, DirectoryListing, FileContent, FileDiff, GitLog, PaneDirection, PaneId,
     PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabId,
     TerminalCommand, TerminalCursor, TerminalKey, TerminalKeyEventKind, TerminalModifiers,

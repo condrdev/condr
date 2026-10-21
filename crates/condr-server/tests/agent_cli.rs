@@ -25,6 +25,12 @@ struct Server {
 
 impl Server {
     fn start() -> Self {
+        Self::start_with(|_, _| {})
+    }
+
+    /// `configure` gets the configuration and data directory before the Server starts, and
+    /// its command.
+    fn start_with(configure: impl FnOnce(&std::path::Path, &mut Command)) -> Self {
         let root = std::env::temp_dir().join(format!("condr-agent-cli-{}", unique_suffix()));
         let bin = root.join("bin directory");
         std::fs::create_dir_all(&bin).unwrap();
@@ -104,6 +110,7 @@ done
             .env("CONDR_TEST_PROMPTS", root.join("prompts"))
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
+        configure(&config, &mut command);
         let child = command.spawn().unwrap();
         let server = Self {
             child,
@@ -806,4 +813,143 @@ fn hooks_persist_the_conversation_and_a_cold_restart_resumes_it_once() {
                 .is_none()
         );
     }
+}
+
+/// Condr Cloud on a local port, answering every request 202; each request's head and
+/// JSON body arrive on the channel.
+fn cloud() -> (String, std::sync::mpsc::Receiver<(String, Value)>) {
+    use std::io::{BufRead as _, Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (requests, received) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let (Ok(mut stream), requests) = (stream, requests.clone()) else {
+                return;
+            };
+            thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut head = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            return;
+                        }
+                        if line == "\r\n" {
+                            break;
+                        }
+                        head.push_str(&line);
+                    }
+                    let length = header(&head, "content-length").map_or(0, |n| n.parse().unwrap());
+                    let mut body = vec![0; length];
+                    reader.read_exact(&mut body).unwrap();
+                    let _ = requests.send((head, serde_json::from_slice(&body).unwrap()));
+                    let reply = r#"{"code":"200"}"#;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{reply}",
+                        reply.len()
+                    );
+                }
+            });
+        }
+    });
+    (url, received)
+}
+
+fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.eq_ignore_ascii_case(name).then(|| value.trim())
+    })
+}
+
+/// The monitor finds a finished turn on its probe thread and the Server pushes it once,
+/// signed, to the paired phone that asked for pushes (ADR 0047).
+#[test]
+fn a_finished_turn_pushes_once_to_condr_cloud() {
+    let (url, requests) = cloud();
+    let server_key = condr_server::DeviceKey::generate().unwrap();
+    let phone = condr_server::DeviceKey::generate().unwrap();
+    let server = Server::start_with(|data, command| {
+        let key = data.join("device-key");
+        std::fs::write(&key, format!("{}\n", server_key.seed_hex())).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::write(
+            data.join("authorized-clients.json"),
+            serde_json::json!([{
+                "key": phone.public().to_string(),
+                "name": "phone",
+                "paired_at": 1,
+                "last_seen": 1,
+                "push": true,
+            }])
+            .to_string(),
+        )
+        .unwrap();
+        // The stand-in is local; whatever proxy the environment names cannot reach it.
+        let config = data.join("config.toml");
+        let mut text = std::fs::read_to_string(&config).unwrap();
+        text.push_str("\n[network.proxy]\nmode = \"none\"\n");
+        std::fs::write(&config, text).unwrap();
+        command.env("CONDR_CLOUD_URL", &url);
+    });
+    let pane = server.pane();
+    server.ok(&[
+        "agent", "start", "worker", "--kind", "claude", "--pane", &pane,
+    ]);
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    };
+    let issued_from = now();
+    let prompted = server.ok(&[
+        "agent",
+        "prompt",
+        "worker",
+        "hello",
+        "--wait",
+        "--timeout",
+        "8000",
+    ]);
+    assert_eq!(prompted["agent"]["agent_status"], "done");
+    let (head, body) = requests
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap_or_else(|_| panic!("no push arrived\n{}", server.diagnostics()));
+    let issued_by = now();
+    assert!(
+        head.starts_with("POST /api/push/send HTTP/1.1\r\n"),
+        "{head}"
+    );
+    assert_eq!(header(&head, "api-version"), Some("1"));
+    let token = header(&head, "authorization")
+        .and_then(|value| value.strip_prefix("Condr "))
+        .expect("a Condr token");
+    assert!(
+        (issued_from..=issued_by)
+            .any(|issued_at| token == condr_client::cloud::token(&server_key, &url, issued_at)),
+        "signed with the Server's device key for this Condr Cloud"
+    );
+    assert_eq!(body["to"], serde_json::json!([phone.public().to_string()]));
+    assert_eq!(body["titleLocKey"], "push_finished");
+    assert_eq!(
+        body["titleLocArgs"],
+        serde_json::json!([condr_core::AgentKind::Claude.label()])
+    );
+    assert_eq!(body["pane"], pane);
+    assert!(
+        body["body"]
+            .as_str()
+            .unwrap()
+            .ends_with(&condr_server::noise::device_name()),
+        "{body}"
+    );
+    assert!(
+        requests.recv_timeout(Duration::from_secs(2)).is_err(),
+        "Idle -> Working -> Done pushes exactly once"
+    );
 }

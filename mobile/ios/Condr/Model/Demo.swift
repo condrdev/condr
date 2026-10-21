@@ -49,10 +49,10 @@ nonisolated enum DemoWorld {
     }
 
     static let devices: [DeviceView] = [
-        DeviceView(address: macmini, label: "macmini", status: .connected),
-        DeviceView(address: jpdev, label: "jpdev", status: .connected),
+        DeviceView(address: macmini, deviceId: "macmini", label: "macmini", status: .connected),
+        DeviceView(address: jpdev, deviceId: "jpdev", label: "jpdev", status: .connected),
         DeviceView(
-            address: studio, label: "studio",
+            address: studio, deviceId: "studio", label: "studio",
             status: .failed(reason: "No answer from studio.local. Is Condr running there?")),
     ]
 
@@ -89,7 +89,8 @@ nonisolated enum DemoWorld {
 
     /// One computer running fifteen Agents beside the usual two, to try the design at scale.
     static let crowd: ([DeviceView], [String: [WorkspaceView]]) = {
-        let box = DeviceView(address: buildbox, label: "buildbox", status: .connected)
+        let box = DeviceView(
+            address: buildbox, deviceId: "buildbox", label: "buildbox", status: .connected)
         let workspaces = [
             WorkspaceView(
                 id: 21, name: "api", root: "~/src/api",
@@ -157,7 +158,8 @@ nonisolated enum DemoWorld {
         ]
         return (
             [
-                crowdDevices[0], DeviceView(address: gpu, label: "gpu-01", status: .connected),
+                crowdDevices[0],
+                DeviceView(address: gpu, deviceId: "gpu", label: "gpu-01", status: .connected),
                 devices[0], devices[1], devices[2],
             ],
             workspaces
@@ -409,6 +411,8 @@ nonisolated final class DemoClient: CompanionProtocol {
     }
 
     func setName(name: String) {}
+    func setPush(push: Bool) {}
+    func cloudToken() -> String { "" }
 
     func pair(link: String, label: String?) throws -> SavedDevice {
         guard link.hasPrefix("p2p://") || link.hasPrefix("tcp://"), link.contains(".") else {

@@ -20,33 +20,23 @@ impl Condr {
         &self,
         key: ConnectionKey,
         pane_id: PaneId,
-        previous: Option<AgentState>,
+        previous: Option<&AgentSnapshot>,
         agent: &AgentSnapshot,
         cx: &mut App,
     ) {
         if !self.notifications {
             return;
         }
-        // Blocked to Blocked is a new question or request: the Server publishes only
-        // changed snapshots. It replaces the toast without asking for attention again.
-        // An Idle straight after work is a finish too: an agent that reports no `done`
-        // (Codex before 0.164) ends its turns that way.
-        let (title, attention) = match (previous, agent.state) {
-            (
-                Some(AgentState::Working | AgentState::Blocked),
-                AgentState::Done | AgentState::Idle,
-            ) => (format!("{} finished", agent.kind.label()), true),
-            (Some(AgentState::Working | AgentState::Blocked), AgentState::Error) => {
-                (format!("{} failed", agent.kind.label()), true)
+        // The rule the Server pushes to the Companion by too (ADR 0047). A Blocked that
+        // waits for something new replaces the toast without asking for attention again.
+        let label = agent.kind.label();
+        let (title, attention) = match AgentAlert::between(previous, agent) {
+            Some(AgentAlert::Finished) => (format!("{label} finished"), true),
+            Some(AgentAlert::Failed) => (format!("{label} failed"), true),
+            Some(AgentAlert::NeedsInput { updated }) => {
+                (format!("{label} needs your input"), !updated)
             }
-            // Blocked from anywhere else: a login prompt arrives straight from Idle.
-            (Some(previous), AgentState::Blocked) if previous != AgentState::Blocked => {
-                (format!("{} needs your input", agent.kind.label()), true)
-            }
-            (Some(AgentState::Blocked), AgentState::Blocked) if agent.detail.is_some() => {
-                (format!("{} needs your input", agent.kind.label()), false)
-            }
-            _ => return,
+            None => return,
         };
         let Some(connection) = self.connection(key) else {
             return;

@@ -16,6 +16,7 @@ impl From<&ClientHandshake> for super::ClientHandshake {
                 build: hello.build.clone(),
                 client_name: hello.client_name.clone(),
                 min_server_protocol: hello.min_server_protocol,
+                push: hello.push,
             }),
             ClientHandshake::Credential { invite } => Kind::Credential(Credential {
                 invite: invite.to_vec(),
@@ -40,6 +41,7 @@ impl TryFrom<super::ClientHandshake> for ClientHandshake {
                 build: hello.build,
                 client_name: hello.client_name,
                 min_server_protocol: hello.min_server_protocol,
+                push: hello.push,
             }),
             Kind::Credential(credential) => Self::Credential {
                 invite: key(credential.invite, "invite")?,

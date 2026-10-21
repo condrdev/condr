@@ -32,9 +32,10 @@ fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() 
     let second = PublicKey::from_bytes([0xab; 32]);
     let clients = [first, second].map(|key| AuthorizedClient {
         key,
+        name: "device".into(),
         paired_at: 1,
         last_seen: 2,
-        name: "device".into(),
+        push: true,
     });
     write_authorized(&directory, &clients).unwrap();
     let before = fs::read(directory.join(AUTHORIZED_FILE)).unwrap();
@@ -59,7 +60,25 @@ fn revoke_requires_a_unique_prefix_without_changing_ambiguous_or_missing_keys() 
     fs::remove_dir_all(directory).unwrap();
 }
 
-// compat(0.1.6): goes with `adopt_legacy_store`.
+/// compat(0.1.13): `clients` as lines of `authorized-clients`, as releases up to 0.1.13
+/// wrote them.
+fn write_legacy_authorized(directory: &Path, clients: &[AuthorizedClient]) {
+    fs::create_dir_all(directory).unwrap();
+    let lines = clients
+        .iter()
+        .map(|client| {
+            let key = client.key.to_hex();
+            format!(
+                "{key} {} {} {}\n",
+                client.paired_at, client.last_seen, client.name
+            )
+        })
+        .collect::<String>();
+    fs::write(directory.join(LEGACY_AUTHORIZED_FILE), lines).unwrap();
+}
+
+// compat(0.1.6): goes with `adopt_legacy_store`; the conversion after it is
+// compat(0.1.13) and goes with `convert_legacy_list`.
 #[test]
 fn the_identity_files_move_out_of_the_legacy_directory_once() {
     let root = std::env::temp_dir().join(format!(
@@ -71,17 +90,22 @@ fn the_identity_files_move_out_of_the_legacy_directory_once() {
     let key = load_device_key(&legacy).unwrap();
     let client = AuthorizedClient {
         key: DeviceKey::generate().unwrap().public(),
+        name: "laptop".into(),
         paired_at: 1,
         last_seen: 2,
-        name: "laptop".into(),
+        push: false,
     };
-    write_authorized(&legacy, std::slice::from_ref(&client)).unwrap();
+    write_legacy_authorized(&legacy, std::slice::from_ref(&client));
 
+    // The move keeps the old name; the conversion straight after gives the new file.
     adopt_legacy_store(&legacy, &directory).unwrap();
     assert_eq!(load_device_key(&directory).unwrap(), key);
-    assert_eq!(read_authorized(&directory).unwrap(), vec![client]);
+    assert!(directory.join(LEGACY_AUTHORIZED_FILE).exists());
     assert!(!legacy.join(DEVICE_KEY_FILE).exists());
-    assert!(!legacy.join(AUTHORIZED_FILE).exists());
+    assert!(!legacy.join(LEGACY_AUTHORIZED_FILE).exists());
+    convert_legacy_list(&directory).unwrap();
+    assert_eq!(read_authorized(&directory).unwrap(), vec![client]);
+    assert!(!directory.join(LEGACY_AUTHORIZED_FILE).exists());
 
     // A key already in place is kept; a later file beside `config.toml` is left alone.
     let later = load_device_key(&legacy).unwrap();
@@ -261,7 +285,7 @@ fn an_invite_pairs_a_new_device_once_and_a_bad_invite_does_not() {
 }
 
 #[test]
-fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
+fn authorized_clients_keep_last_seen_and_a_missing_push_reads_false() {
     let directory =
         std::env::temp_dir().join(format!("condr-noise-seen-{}-{}", std::process::id(), now()));
     fs::create_dir_all(&directory).unwrap();
@@ -271,39 +295,133 @@ fn authorized_clients_keep_last_seen_and_reject_legacy_lines() {
     assert!(read_authorized(&directory).unwrap().is_empty());
     let old = DeviceKey::generate().unwrap().public();
     let new = DeviceKey::generate().unwrap().public();
-    let (old_hex, new_hex) = (old.to_hex(), new.to_hex());
     fs::write(
         directory.join(AUTHORIZED_FILE),
-        format!("{old_hex} 100 old laptop\n"),
+        format!(
+            r#"[{{"key": "{}", "name": "old laptop", "paired_at": 100, "last_seen": 100}}]"#,
+            old.to_hex()
+        ),
     )
     .unwrap();
-    assert!(read_authorized(&directory).is_err());
+    assert!(
+        read_authorized(&directory).is_err(),
+        "keys are Device ids, not hex"
+    );
     fs::write(
         directory.join(AUTHORIZED_FILE),
-        format!("{old_hex} 100 100 old laptop\n{new_hex} 200 300 new laptop\n"),
+        format!(
+            r#"[
+  {{"key": "{old}", "name": "old laptop", "paired_at": 100, "last_seen": 100}},
+  {{"key": "{new}", "name": "new laptop", "paired_at": 200, "last_seen": 300, "push": true}}
+]"#
+        ),
     )
     .unwrap();
 
     let clients = read_authorized(&directory).unwrap();
     assert_eq!((clients[0].paired_at, clients[0].last_seen), (100, 100));
     assert_eq!(clients[0].name, "old laptop");
+    assert!(!clients[0].push, "a missing push reads as false");
     assert_eq!((clients[1].paired_at, clients[1].last_seen), (200, 300));
     assert_eq!(clients[1].name, "new laptop");
+    assert!(clients[1].push);
 
-    identity.record_seen(&old, "").unwrap();
+    identity.record_seen(&old, "", true).unwrap();
     let clients = read_authorized(&directory).unwrap();
     assert!(clients[0].last_seen >= now() - 5);
     assert_eq!(clients[0].name, "old laptop", "no name keeps the old one");
+    assert!(clients[0].push, "the handshake's push is recorded");
     assert_eq!(clients[1].last_seen, 300, "other devices are untouched");
 
-    identity.record_seen(&old, " renamed\tlaptop ").unwrap();
+    identity
+        .record_seen(&old, " renamed\tlaptop ", false)
+        .unwrap();
     let clients = read_authorized(&directory).unwrap();
     assert_eq!(
         clients[0].name, "renamed laptop",
         "a renamed device is listed by it"
     );
+    assert!(!clients[0].push, "a later handshake without push clears it");
     assert_eq!(clients[1].name, "new laptop");
+    assert!(clients[1].push, "another device's handshake keeps its push");
     let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn authorized_clients_round_trip_as_pretty_json_with_device_ids() {
+    let directory =
+        std::env::temp_dir().join(format!("condr-noise-json-{}-{}", std::process::id(), now()));
+    let clients = [(0x11, "phone", true), (0x22, "desk top", false)].map(|(byte, name, push)| {
+        AuthorizedClient {
+            key: PublicKey::from_bytes([byte; 32]),
+            name: name.into(),
+            paired_at: 10,
+            last_seen: 20,
+            push,
+        }
+    });
+    write_authorized(&directory, &clients[..1]).unwrap();
+    assert_eq!(
+        fs::read_to_string(directory.join(AUTHORIZED_FILE)).unwrap(),
+        format!(
+            r#"[
+  {{
+    "key": "{}",
+    "name": "phone",
+    "paired_at": 10,
+    "last_seen": 20,
+    "push": true
+  }}
+]
+"#,
+            clients[0].key
+        )
+    );
+    write_authorized(&directory, &clients).unwrap();
+    assert_eq!(read_authorized(&directory).unwrap(), clients);
+    write_authorized(&directory, &[]).unwrap();
+    assert!(read_authorized(&directory).unwrap().is_empty());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+// compat(0.1.13): goes with `convert_legacy_list`.
+#[test]
+fn the_line_file_converts_to_json_once_and_is_deleted() {
+    let directory = std::env::temp_dir().join(format!(
+        "condr-noise-convert-{}-{}",
+        std::process::id(),
+        now()
+    ));
+    let clients = [0x33, 0x44].map(|byte| AuthorizedClient {
+        key: PublicKey::from_bytes([byte; 32]),
+        name: format!("device {byte}"),
+        paired_at: 5,
+        last_seen: 6,
+        push: false,
+    });
+    write_legacy_authorized(&directory, &clients);
+    convert_legacy_list(&directory).unwrap();
+    assert_eq!(read_authorized(&directory).unwrap(), clients);
+    assert!(!directory.join(LEGACY_AUTHORIZED_FILE).exists());
+    assert_eq!(
+        revoke(&directory, &clients[0].key.to_string()).unwrap(),
+        Some(clients[0].key)
+    );
+    assert_eq!(read_authorized(&directory).unwrap(), [clients[1].clone()]);
+
+    // Only a missing JSON file triggers it: an old file beside the new one is left alone.
+    write_legacy_authorized(&directory, &clients);
+    convert_legacy_list(&directory).unwrap();
+    assert_eq!(read_authorized(&directory).unwrap(), [clients[1].clone()]);
+    assert!(directory.join(LEGACY_AUTHORIZED_FILE).exists());
+
+    // A file that does not parse stays where it is, and nothing is written.
+    fs::remove_file(directory.join(AUTHORIZED_FILE)).unwrap();
+    fs::write(directory.join(LEGACY_AUTHORIZED_FILE), "stale\n").unwrap();
+    assert!(convert_legacy_list(&directory).is_err());
+    assert!(directory.join(LEGACY_AUTHORIZED_FILE).exists());
+    assert!(!directory.join(AUTHORIZED_FILE).exists());
+    fs::remove_dir_all(directory).unwrap();
 }
 
 /// A TCP Invite's host candidates (ADR 0040): the default route's address first, the

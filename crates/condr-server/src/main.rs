@@ -556,6 +556,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
             if let Some(path) = snapshot {
                 config = config.with_snapshot_path(path);
             }
+            config = config.with_cloud_url(condr_client::cloud::base_url());
             // Dropped when this arm returns, before `exit`, so the writer drains.
             let _log_guard = condr_server::logging::init(&config.log_file_stem());
             if detached {
@@ -662,7 +663,7 @@ fn run_server_command(command: ServerCommand) -> io::Result<i32> {
                 // The file edit stands, but nobody closed the device's live connections;
                 // a script must not read that as a complete revocation.
                 Err(error) => Err(failure(
-                    "revoked in authorized-clients, but its live connections were not dropped",
+                    "revoked in authorized-clients.json, but its live connections were not dropped",
                     [endpoint.describe_connect_error(&error)],
                 )),
             }

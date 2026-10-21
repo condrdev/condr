@@ -6,7 +6,8 @@ use std::io;
 
 /// A Device's Ed25519 public key; its 43-character base64url form is the fingerprint shown
 /// to people and carried in `tcp://` and `p2p://` links, and the same 32 bytes are the
-/// Device's Peer-to-peer endpoint id (ADR 0025). The identity files keep hex.
+/// Device's Peer-to-peer endpoint id (ADR 0025). `authorized-clients.json` keeps it too
+/// (ADR 0047).
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct PublicKey([u8; 32]);
 
@@ -31,11 +32,13 @@ impl PublicKey {
         decode(text).map(Self)
     }
 
-    /// Parses the hex form the identity files store.
+    /// compat(0.1.13): parses the hex form of the line file `authorized-clients`. Delete
+    /// this and `to_hex` with the server's `parse_legacy_authorized` (ADR 0047).
     pub fn parse_hex(hex: &str) -> io::Result<Self> {
         hex_decode(hex).map(Self)
     }
 
+    /// compat(0.1.13): goes with `parse_hex`.
     pub fn to_hex(&self) -> String {
         hex_encode(&self.0)
     }

@@ -15,6 +15,9 @@ pub struct ServerConfig {
     pub(super) identity: Option<Arc<ServerIdentity>>,
     /// The device key `ephemeral_tcp` authorized, so tests can connect over TCP.
     pub(super) test_device: Option<DeviceKey>,
+    /// Condr Cloud's base URL, where pushes to the Companion go (ADR 0047); `None` sends
+    /// none. Only `condr server run` sets it, so no Server a test starts pushes by chance.
+    pub(super) cloud_url: Option<String>,
 }
 
 impl ServerConfig {
@@ -38,6 +41,7 @@ impl Default for ServerConfig {
             config_path,
             identity: None,
             test_device: None,
+            cloud_url: None,
         }
     }
 }
@@ -140,6 +144,7 @@ impl ServerConfig {
             config_path: condr_core::config_path(),
             identity: None,
             test_device: None,
+            cloud_url: None,
         }
     }
 
@@ -153,6 +158,7 @@ impl ServerConfig {
             config_path: None,
             identity: None,
             test_device: None,
+            cloud_url: None,
         }
     }
 
@@ -179,6 +185,7 @@ impl ServerConfig {
             config_path: None,
             identity: Some(Arc::new(identity)),
             test_device: Some(client_key),
+            cloud_url: None,
         })
     }
 
@@ -189,6 +196,11 @@ impl ServerConfig {
 
     pub fn with_identity(mut self, identity: ServerIdentity) -> Self {
         self.identity = Some(Arc::new(identity));
+        self
+    }
+
+    pub fn with_cloud_url(mut self, url: impl Into<String>) -> Self {
+        self.cloud_url = Some(url.into());
         self
     }
 

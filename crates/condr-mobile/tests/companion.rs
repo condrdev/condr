@@ -6,6 +6,7 @@ use condr_core::{
 };
 use condr_mobile::{
     Change, Companion, DeviceStatus, Event, Key, Listener, SavedDevice, TerminalScreen,
+    generate_seed,
 };
 use condr_server::{BoundServer, ClientConnection, Endpoint, ServerConfig};
 use std::io::Read as _;
@@ -192,6 +193,90 @@ fn outside_a_pane_the_companion_gets_events_but_no_terminal() {
     handle.stop();
     drop(desktop);
     server_thread.join().unwrap().unwrap();
+}
+
+/// The app's `push` reaches every Server in `Hello` (ADR 0047): a change reconnects the
+/// open connections at once, the same answer again costs nothing.
+#[test]
+fn changing_push_reconnects_open_connections() {
+    let server =
+        BoundServer::bind(ServerConfig::ephemeral_tcp("127.0.0.1:0".parse().unwrap()).unwrap())
+            .unwrap();
+    let handle = server.handle();
+    let Endpoint::Tcp(tcp) = server.endpoint().clone() else {
+        panic!("an ephemeral TCP Server answers over TCP");
+    };
+    let address = format!("tcp://{}@{}", tcp.server_key, tcp.authority());
+    let server_thread = std::thread::spawn(move || server.run());
+
+    let companion = Companion::new(
+        tcp.client_key.seed().to_vec(),
+        "phone".into(),
+        vec![SavedDevice {
+            address,
+            label: "desk".into(),
+        }],
+        Arc::new(Counter::default()),
+    )
+    .unwrap();
+    let status = || companion.devices()[0].status.clone();
+    // Before `resume` nothing is open, so nothing reconnects.
+    companion.set_push(true);
+    assert_eq!(status(), DeviceStatus::Suspended);
+    companion.resume();
+    wait_until("the connection", || status() == DeviceStatus::Connected);
+
+    companion.set_push(true);
+    assert_eq!(status(), DeviceStatus::Connected, "the same answer");
+    companion.set_push(false);
+    assert_eq!(status(), DeviceStatus::Connecting, "a new answer");
+    wait_until("the new connection", || status() == DeviceStatus::Connected);
+
+    companion.close();
+    handle.stop();
+    server_thread.join().unwrap().unwrap();
+}
+
+/// A Device is listed with the id Condr Cloud and a push name it by (ADR 0047): the
+/// Peer-to-peer id or the TCP Server's key.
+#[test]
+fn a_device_is_listed_with_its_device_id() {
+    let p2p = condr_client::DeviceKey::generate()
+        .unwrap()
+        .public()
+        .to_string();
+    let tcp = condr_client::DeviceKey::generate()
+        .unwrap()
+        .public()
+        .to_string();
+    let saved = |address: String| SavedDevice {
+        address,
+        label: "desk".into(),
+    };
+    let companion = Companion::new(
+        generate_seed().unwrap(),
+        "phone".into(),
+        vec![
+            saved(format!("p2p://{p2p}")),
+            saved(format!("tcp://{tcp}@studio.local:7417")),
+            saved("tcp://not-a-key@studio.local:7417".into()),
+        ],
+        Arc::new(Counter::default()),
+    )
+    .unwrap();
+    let ids = |address: &str| {
+        companion
+            .devices()
+            .into_iter()
+            .find(|device| device.address == address)
+            .unwrap()
+            .device_id
+    };
+    assert_eq!(p2p.len(), 43);
+    assert_eq!(ids(&format!("p2p://{p2p}")), Some(p2p));
+    assert_eq!(ids(&format!("tcp://{tcp}@studio.local:7417")), Some(tcp));
+    assert_eq!(ids("tcp://not-a-key@studio.local:7417"), None);
+    companion.close();
 }
 
 /// Scrolling is the Pane's, shared by every viewer (ADR 0036): a swipe over a shell scrolls
