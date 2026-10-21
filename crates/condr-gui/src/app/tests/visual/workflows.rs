@@ -216,6 +216,52 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
     assert!(tab_renamed, "Tab rename did not reach the server");
 }
 
+/// A rebuild that does not move the terminal target, such as the one a Git refresh
+/// triggers, leaves the keyboard with an open context menu. GPUI Kit focuses a menu once,
+/// when it opens, so a rebuild that refocused the terminal took its keys away.
+#[test]
+fn a_rebuild_leaves_an_open_context_menu_the_keyboard() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, _| {
+            this.send_layout(LayoutCommand::CreateWorkspace {
+                name: None,
+                root_directory: std::env::temp_dir(),
+            });
+        });
+    });
+    let mut workspace_id = None;
+    assert!(wait_until(window, |window| {
+        window.read(|app| {
+            workspace_id = view
+                .read(app)
+                .presented()
+                .map(|(_, _, workspace_id, _)| workspace_id);
+            workspace_id.is_some()
+        })
+    }));
+    window.update(|window, cx| _ = window.draw(cx));
+    let row = window
+        .debug_bounds(sidebar_workspace_selector(workspace_id.unwrap()))
+        .expect("the Workspace should render in the sidebar");
+    window.simulate_mouse_down(row.center(), MouseButton::Right, Modifiers::default());
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+
+    window.update(|window, cx| view.update(cx, |this, cx| this.rebuild_dock(window, cx)));
+    window.run_until_parked();
+    window.update(|window, cx| _ = window.draw(cx));
+    window.simulate_keystrokes("down enter");
+    window.run_until_parked();
+    assert!(
+        window.update(|window, cx| window.has_active_dialog(cx)),
+        "Rename Workspace should open its dialog from the keyboard after a rebuild"
+    );
+}
+
 #[test]
 fn worktree_actions_use_the_workspace_context_and_real_server() {
     let _serial_guard = acquire_visual_test_lock();

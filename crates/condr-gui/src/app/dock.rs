@@ -352,6 +352,10 @@ impl Condr {
             collect_layout_pane_ids(&layout, &mut surface.pane_ids);
         }
 
+        // Focus follows the presented Pane, not every rebuild: one for a Git refresh must
+        // leave an open context menu or a sidebar field holding the keyboard.
+        let retargeted = self.terminal_input.target != Some((key, focused))
+            || self.active_dock_surface != Some(surface_key);
         self.terminal_input.target = Some((key, focused));
         self.active_dock_surface = Some(surface_key);
         let needs_rebuild = self.dock_surfaces.get(&surface_key).is_none_or(|surface| {
@@ -390,7 +394,9 @@ impl Condr {
                 self.dock_rebuild_count += 1;
             }
         }
-        self.focus_pane_panel(surface_key, focused, window, cx);
+        if retargeted || needs_rebuild {
+            self.focus_pane_panel(surface_key, focused, window, cx);
+        }
     }
 
     pub(super) fn build_dock_layout(
