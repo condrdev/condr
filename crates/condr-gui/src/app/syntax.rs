@@ -1,4 +1,4 @@
-//! Syntax highlighting for the read-only Editors, the Preview and Diff Tabs (ADR 0032),
+//! Syntax highlighting for the Preview Tab's Editor (ADR 0032),
 //! and the code blocks of a rendered Markdown file (ADR 0037): the Sublime syntaxes `bat`
 //! curates, parsed by syntect on Oniguruma behind GPUI Kit's `InputHighlighter` and code
 //! block seams, and coloured by the theme Settings picks.

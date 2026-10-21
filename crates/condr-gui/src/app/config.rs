@@ -33,7 +33,7 @@ const TERMINAL_TABLE: [&str; 2] = ["client", "terminal"];
 const FONT_FAMILY_KEY: &str = "font_family";
 const FONT_SIZE_KEY: &str = "font_size";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
-// The Preview and Diff Tabs' bat theme (ADR 0032).
+// The Preview Tab's bat theme (ADR 0032).
 const CODE_TABLE: [&str; 2] = ["client", "code"];
 const CODE_THEME_KEY: &str = "theme";
 

@@ -98,7 +98,7 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
             window.update(|window, cx| _ = window.draw(cx));
             window.debug_bounds("diff-body").is_some()
         }),
-        "the Server's diff should reach the Editor"
+        "the Server's diff should reach the Diff Tab"
     );
     let workspace_id = window.read(|app| {
         view.read(app)
@@ -121,24 +121,22 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     });
     assert_eq!(tab_count, 2, "one terminal Tab and one Diff Tab");
 
-    // "Show File" opens the Preview Tab at the new-file line under the diff cursor: the
-    // unified text is "@@ -1,2 +1,3 @@", " alpha", "-beta", "+BETA", "+gamma", so a cursor on
-    // "-beta" lands on "BETA", the second line of the file.
-    window.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            let editor = view
+    // "Show File" opens the Preview Tab at the new-file line last clicked in the diff:
+    // the hunk is " alpha", "-beta", "+BETA", "+gamma", so a click on the old side's
+    // "beta" lands on "BETA", the second line of the file.
+    window.update(|_, cx| {
+        view.update(cx, |view, _| {
+            let viewer = view
                 .files_view
-                .diff_editors
-                .values()
+                .diff_viewers
+                .values_mut()
                 .next()
-                .expect("one Diff Tab Editor");
-            editor.state.update(cx, |state, cx| {
-                state.set_cursor_position(
-                    gpui_kit::component::input::Position::new(2, 0),
-                    window,
-                    cx,
-                );
-            });
+                .expect("one Diff Tab viewer");
+            viewer.clicked = Some(gpui_kit::component::diff::DiffLinePosition::new(
+                crate::app::changes::PATCH_PATH,
+                gpui_kit::component::diff::DiffSide::Original,
+                2,
+            ));
         });
     });
     let show_file = window
@@ -201,19 +199,16 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
             })
         })
     }));
-    // And its diff replaces the first one's in the Editor after that single click.
+    // And its diff replaces the first one's after that single click.
     assert!(
         wait_until(window, |window| {
             window.update(|window, cx| _ = window.draw(cx));
             window.update(|_, cx| {
                 view.read(cx)
                     .files_view
-                    .diff_editors
+                    .diff_viewers
                     .values()
-                    .any(|editor| {
-                        let text = editor.state.read(cx).value();
-                        text.contains("+new") && !text.contains("BETA")
-                    })
+                    .any(|viewer| viewer.patch.contains("+new") && !viewer.patch.contains("BETA"))
             })
         }),
         "the retargeted Diff Tab should show the second file's hunks"
@@ -325,9 +320,9 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
             window.update(|_, cx| {
                 view.read(cx)
                     .files_view
-                    .diff_editors
+                    .diff_viewers
                     .values()
-                    .any(|editor| editor.state.read(cx).value().contains("+agent"))
+                    .any(|viewer| viewer.patch.contains("+agent"))
             })
         }),
         "the Diff Tab should show the committed file against the base"
@@ -343,9 +338,9 @@ fn the_changes_comparison_switches_between_head_and_the_base_branch() {
                 && window.read(|app| {
                     view.read(app)
                         .files_view
-                        .diff_editors
+                        .diff_viewers
                         .values()
-                        .all(|editor| editor.content == crate::app::changes::DiffContent::Unchanged)
+                        .all(|viewer| viewer.content == crate::app::changes::DiffContent::Unchanged)
                 })
         }),
         "against HEAD the committed file is unchanged"

@@ -240,7 +240,7 @@ impl Condr {
             self.terminal_input.target = None;
             self.active_dock_surface = None;
             if let Some(path) = diff {
-                self.sync_diff_view(key, _workspace_id, tab_id, path, window, cx);
+                self.sync_diff_view(key, _workspace_id, tab_id, path, cx);
             } else if let Some(path) = file {
                 self.sync_file_view(key, _workspace_id, tab_id, path, window, cx);
             }

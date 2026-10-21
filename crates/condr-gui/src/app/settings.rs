@@ -121,7 +121,7 @@ pub(super) struct SettingsWindow {
     owner: WeakEntity<Condr>,
     focus_handle: FocusHandle,
     pub(super) color_scheme: Entity<ColorSchemeSelect>,
-    /// The Preview and Diff Tabs' theme, the same kind of Select.
+    /// The Preview Tab's theme, the same kind of Select.
     pub(super) code_theme: Entity<ColorSchemeSelect>,
     /// The font as last committed from this window. `Condr` only ever holds the
     /// normalized form, so a half-edited value never reaches the theme or the config

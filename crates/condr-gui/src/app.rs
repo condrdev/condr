@@ -285,7 +285,7 @@ pub(crate) struct Condr {
     sidebar_workspace_open: HashMap<(ConnectionKey, WorkspaceId), Entity<bool>>,
     terminal_font: TerminalFont,
     terminal_color_scheme: SharedString,
-    /// The Preview and Diff Tabs' font size; they share the terminal's font family.
+    /// The Preview Tab's font size; it shares the terminal's font family.
     code_font_size: f32,
     /// What "Open in" offers, once the startup scan has reported; `None` hides the button.
     open_targets: Option<Vec<open_in::OpenTarget>>,
@@ -488,7 +488,10 @@ impl Condr {
                 .map_or(INITIAL_CHANGES_WIDTH, |width| {
                     px(width).max(MIN_CHANGES_WIDTH).min(MAX_CHANGES_WIDTH)
                 }),
-            files_view: FilesViewState::default(),
+            files_view: FilesViewState {
+                diff_unified: restored_state.diff_unified,
+                ..FilesViewState::default()
+            },
             directory_browser: None,
             sidebar_workspace_open: HashMap::new(),
             terminal_font,

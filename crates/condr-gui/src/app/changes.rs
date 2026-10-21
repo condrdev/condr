@@ -1,15 +1,16 @@
 //! The Changes sidebar and the Diff Tab (ADR 0017): the presented Workspace's working-tree
-//! changes as the Server reports them, and one file's diff in GPUI Kit's read-only Editor.
+//! changes as the Server reports them, and one file's diff in GPUI Kit's `Diff` (ADR 0046).
 //! Everything shown here is Server data; the Client only asks and draws.
 
 use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::protocol::DiffBase;
 use condr_core::{
-    DiffLineKind, FileDiffContent, GitChangeEntry, GitChangeStatus, GitChanges, GitDiffStat,
-    MAX_GIT_CHANGES,
+    DiffHunk, DiffLineKind, FileDiffContent, GitChangeEntry, GitChangeStatus, GitChanges,
+    GitDiffStat, MAX_GIT_CHANGES,
 };
-use gpui_kit::component::input::{TextDecoration, TextDecorationCollection};
+use gpui_kit::component::button::ButtonGroup;
+use gpui_kit::component::diff::{Diff, DiffFile, DiffLinePosition, DiffMode, DiffSide, DiffState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
 
@@ -207,21 +208,27 @@ pub(super) fn tree_indent(depth: usize, past_chevron: bool) -> Rems {
     rems(0.5 + 0.875 * depth as f32 + chevron)
 }
 
-/// The Diff Tab's Editor and what it currently shows.
-pub(super) struct DiffEditor {
-    pub(super) state: Entity<EditorState>,
-    decorations: TextDecorationCollection,
-    /// The path and the connection's diff generation the Editor text was built from.
+/// The Diff Tab's Kit `Diff` and what it currently shows (ADR 0046).
+pub(super) struct DiffViewer {
+    pub(super) state: Entity<DiffState>,
+    /// The path and the connection's diff generation the state was built from.
     shown: Option<(RelativePathBuf, u64)>,
+    /// The patch last handed to the state. A refetch that writes the same one leaves the
+    /// view alone, since `set_files` resets its scrolling and folds.
+    pub(super) patch: String,
     pub(super) content: DiffContent,
+    /// The line last clicked: where Show File lands, and where a changed diff scrolls back.
+    pub(super) clicked: Option<DiffLinePosition>,
 }
+
+/// The one name every patch gives its file. The Tab header shows the path, and Kit's
+/// parser then never meets a path that needs quoting.
+pub(super) const PATCH_PATH: &str = "file";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DiffContent {
     Loading,
-    Text {
-        stat: GitDiffStat,
-    },
+    Text,
     /// Both sides are identical: the file left the change list.
     Unchanged,
     Binary,
@@ -895,8 +902,8 @@ impl Condr {
             || "Against HEAD".to_owned(),
             |git| comparison_label(git, against),
         );
-        let editor = self.files_view.diff_editors.get(&(key, tab_id));
-        let content = editor.map_or(DiffContent::Loading, |editor| editor.content.clone());
+        let viewer = self.files_view.diff_viewers.get(&(key, tab_id));
+        let content = viewer.map_or(DiffContent::Loading, |viewer| viewer.content.clone());
         let header = h_flex()
             .debug_selector(|| "diff-header".into())
             .flex_none()
@@ -930,6 +937,31 @@ impl Condr {
             .when_some(entry.and_then(|entry| entry.stat), |this, stat| {
                 this.child(diff_stat(stat, cx))
             })
+            .when(content == DiffContent::Text, |this| {
+                let owner = cx.weak_entity();
+                let unified = self.files_view.diff_unified;
+                this.child(
+                    ButtonGroup::new("diff-mode")
+                        .ghost()
+                        .xsmall()
+                        .child(
+                            Button::new("diff-mode-split")
+                                .debug_selector(|| "diff-mode-split".into())
+                                .label("Split")
+                                .selected(!unified),
+                        )
+                        .child(
+                            Button::new("diff-mode-unified")
+                                .debug_selector(|| "diff-mode-unified".into())
+                                .label("Unified")
+                                .selected(unified),
+                        )
+                        .on_click(move |selected, _, cx| {
+                            let unified = selected.first() == Some(&1);
+                            let _ = owner.update(cx, |this, cx| this.set_diff_unified(unified, cx));
+                        }),
+                )
+            })
             .child({
                 // A deleted file has nothing on disk to show.
                 let deleted = entry.is_some_and(|entry| entry.status == GitChangeStatus::Deleted);
@@ -956,27 +988,35 @@ impl Condr {
                         });
                     })
             });
-        let body = match (&content, editor) {
-            (DiffContent::Text { .. }, Some(editor)) => div()
-                .debug_selector(|| "diff-body".into())
-                .flex_1()
-                .min_h_0()
-                .w_full()
-                // The code theme's background: the Editor draws none of its own.
-                .when_some(
-                    theme.highlight_theme.style.editor_background,
-                    |this, background| this.bg(background),
-                )
-                .child(
-                    Editor::new(&editor.state)
-                        .readonly(true)
-                        .appearance(false)
-                        .bordered(false)
-                        .font_family(self.terminal_font.family.clone())
-                        .text_size(px(self.code_font_size))
-                        .h(relative(1.)),
-                )
-                .into_any_element(),
+        let body = match (&content, viewer) {
+            (DiffContent::Text, Some(viewer)) => {
+                let owner = cx.weak_entity();
+                div()
+                    .debug_selector(|| "diff-body".into())
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(
+                        // The Tab header already names the file, its status and its counts.
+                        // Two columns wrap: Kit sizes each to the longest line, which would
+                        // push the new side out of view.
+                        Diff::new(&viewer.state)
+                            .header_visible(false)
+                            .soft_wrap(!self.files_view.diff_unified)
+                            .on_line_click(move |position, _, _, cx| {
+                                let position = position.clone();
+                                let _ = owner.update(cx, |this, _| {
+                                    if let Some(viewer) =
+                                        this.files_view.diff_viewers.get_mut(&(key, tab_id))
+                                    {
+                                        viewer.clicked = Some(position);
+                                    }
+                                });
+                            })
+                            .size_full(),
+                    )
+                    .into_any_element()
+            }
             (DiffContent::Loading, _) => empty_state("Loading diff…", cx),
             (DiffContent::Unchanged, _) => empty_state(format!("No changes in {path_text}"), cx),
             (DiffContent::Binary, _) => empty_state("Binary file", cx),
@@ -997,7 +1037,7 @@ impl Condr {
                 .text_color(theme.danger)
                 .child(reason.clone())
                 .into_any_element(),
-            (DiffContent::Text { .. }, None) => empty_state("Loading diff…", cx),
+            (DiffContent::Text, None) => empty_state("Loading diff…", cx),
         };
         v_flex()
             .debug_selector(|| "diff-tab".into())
@@ -1007,9 +1047,9 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The Diff Tab's "Show File": opens the file in the Preview Tab at the line the diff
-    /// cursor is on, so the hunk's surroundings are one click away (ADR 0017). The line is
-    /// this Client's presentation: it waits in `pending_file_line` until the text lands.
+    /// The Diff Tab's "Show File": opens the file in the Preview Tab at the line last
+    /// clicked in the diff, or at the first change (ADR 0017, ADR 0046). The line is this
+    /// Client's presentation: it waits in `pending_file_line` until the text lands.
     fn show_file_from_diff(
         &mut self,
         key: ConnectionKey,
@@ -1019,11 +1059,11 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let row = self
+        let clicked = self
             .files_view
-            .diff_editors
+            .diff_viewers
             .get(&(key, tab_id))
-            .map(|editor| editor.state.read(cx).cursor_position().line as usize);
+            .and_then(|viewer| viewer.clicked.clone());
         let line = self
             .connection(key)
             .and_then(|connection| {
@@ -1037,23 +1077,21 @@ impl Condr {
                 FileDiffContent::Text { hunks } => Some(hunks),
                 _ => None,
             })
-            .zip(row)
-            .and_then(|(hunks, row)| file_line_for_diff_row(hunks, row));
+            .and_then(|hunks| file_line_for_click(hunks, clicked.as_ref()));
         self.files_view.pending_file_line =
             line.map(|line| (key, workspace_id, path.clone(), line));
         self.show_file_on(key, workspace_id, path, window, cx);
     }
 
-    /// Brings the Diff Tab's Editor in line with the Server's answer for its file: asks
-    /// for the diff once, then lays the hunks out as unified text with tinted lines.
-    /// Called from `rebuild_dock`, the one place that sees every presentation change.
+    /// Brings the Diff Tab's `Diff` in line with the Server's answer for its file: asks for
+    /// the diff once, then hands the hunks to Kit as a patch (ADR 0046). Called from
+    /// `rebuild_dock`, the one place that sees every presentation change.
     pub(super) fn sync_diff_view(
         &mut self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         tab_id: TabId,
         path: RelativePathBuf,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(connection) = self.connection(key) else {
@@ -1070,72 +1108,108 @@ impl Condr {
                 .pending_diffs
                 .contains_key(&(workspace_id, path.clone()));
         let answer = answer.cloned();
+        let status = connection
+            .model
+            .workspace_git
+            .get(&workspace_id)
+            .and_then(|git| {
+                shown_changes(git, self.diff_base(key, workspace_id, git))
+                    .entries
+                    .iter()
+                    .find(|entry| entry.path == path)
+                    .map(|entry| entry.status)
+            });
         if request {
             self.request_diff(key, workspace_id, path.clone());
         }
 
-        let editor = self
+        let mode = diff_mode(self.files_view.diff_unified);
+        let viewer = self
             .files_view
-            .diff_editors
+            .diff_viewers
             .entry((key, tab_id))
-            .or_insert_with(|| {
-                let state = cx.new(|cx| {
-                    let mut state = EditorState::new(window, cx)
-                        .language("diff")
-                        .line_number(true)
-                        .soft_wrap(false)
-                        .indent_guides(false)
-                        .folding(false)
-                        .searchable(true);
-                    state.set_highlighter_factory(super::syntax::highlighter_factory(cx), cx);
-                    state
-                });
-                let decorations = state.update(cx, |state, cx| {
-                    state.create_decorations_collection(Vec::new(), cx)
-                });
-                DiffEditor {
-                    state,
-                    decorations,
-                    shown: None,
-                    content: DiffContent::Loading,
-                }
+            .or_insert_with(|| DiffViewer {
+                state: cx.new(|cx| DiffState::new([], cx).with_mode(mode)),
+                shown: None,
+                patch: String::new(),
+                content: DiffContent::Loading,
+                clicked: None,
             });
         let Some(answer) = answer else {
-            if editor
+            if viewer
                 .shown
                 .as_ref()
                 .is_none_or(|(shown, _)| *shown != path)
             {
-                editor.content = DiffContent::Loading;
-                editor.shown = None;
+                viewer.content = DiffContent::Loading;
+                viewer.shown = None;
             }
             return;
         };
-        if editor.shown.as_ref() == Some(&(path.clone(), generation)) {
+        if viewer.shown.as_ref() == Some(&(path.clone(), generation)) {
             return;
         }
-        editor.shown = Some((path, generation));
-        let (text, decorations, content) = match answer {
-            Err(reason) => (String::new(), Vec::new(), DiffContent::Failed(reason)),
+        let retargeted = viewer
+            .shown
+            .as_ref()
+            .is_none_or(|(shown, _)| *shown != path);
+        viewer.shown = Some((path, generation));
+        if retargeted {
+            viewer.clicked = None;
+        }
+        let patch = match answer {
+            Err(reason) => Err(DiffContent::Failed(reason)),
             Ok(diff) => match diff.content {
-                FileDiffContent::Binary => (String::new(), Vec::new(), DiffContent::Binary),
-                FileDiffContent::TooLarge { bytes } => {
-                    (String::new(), Vec::new(), DiffContent::TooLarge { bytes })
-                }
-                FileDiffContent::Text { hunks } if hunks.is_empty() => {
-                    (String::new(), Vec::new(), DiffContent::Unchanged)
-                }
-                FileDiffContent::Text { hunks } => {
-                    let (text, decorations, stat) = unified_text(&hunks, cx);
-                    (text, decorations, DiffContent::Text { stat })
-                }
+                FileDiffContent::Binary => Err(DiffContent::Binary),
+                FileDiffContent::TooLarge { bytes } => Err(DiffContent::TooLarge { bytes }),
+                FileDiffContent::Text { hunks } if hunks.is_empty() => Err(DiffContent::Unchanged),
+                FileDiffContent::Text { hunks } => Ok(patch_text(status, &hunks)),
             },
         };
-        editor.content = content;
-        editor
-            .state
-            .update(cx, |state, cx| state.set_value(text, window, cx));
-        editor.decorations.set(decorations, cx);
+        let patch = match patch {
+            Ok(patch) => patch,
+            Err(content) => {
+                viewer.content = content;
+                viewer.patch.clear();
+                return;
+            }
+        };
+        if patch == viewer.patch {
+            viewer.content = DiffContent::Text;
+            return;
+        }
+        match DiffFile::parse(&patch) {
+            Ok(files) => {
+                let clicked = viewer.clicked.clone();
+                viewer.state.update(cx, |state, cx| {
+                    state.set_files(files, cx);
+                    // ponytail: Kit keeps no viewport across `set_files`, so a changed
+                    // diff returns to the line last clicked, else to the top; keep the
+                    // top line once Kit can say which it is.
+                    if let Some(line) = clicked {
+                        state.scroll_to_line(line, cx);
+                    }
+                });
+                viewer.content = DiffContent::Text;
+                viewer.patch = patch;
+            }
+            Err(error) => {
+                viewer.content = DiffContent::Failed(format!("Could not show this diff: {error}"));
+                viewer.patch.clear();
+            }
+        }
+    }
+
+    fn set_diff_unified(&mut self, unified: bool, cx: &mut Context<Self>) {
+        self.files_view.diff_unified = unified;
+        let mode = diff_mode(unified);
+        for viewer in self.files_view.diff_viewers.values() {
+            viewer
+                .state
+                .update(cx, |state, cx| state.set_mode(mode, cx));
+        }
+        self.schedule_state_save(cx);
+        cx.notify();
     }
 
     fn request_diff(
@@ -1168,6 +1242,7 @@ impl Condr {
             workspace_id,
             path: path.clone(),
             against,
+            full_context: true,
         }) {
             connection
                 .resources
@@ -1206,86 +1281,86 @@ pub(super) fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement
         .into_any_element()
 }
 
-/// The hunks as unified-diff text, the byte ranges of added and removed lines tinted, and
-/// the line counts. The `diff` grammar colours the prefixes; the tint marks whole lines.
-/// The 0-based line of the new file that `row` of `unified_text`'s layout is about: a
-/// hunk header stands for the hunk's first line, a removed line for the new-file line it
-/// was removed before, and a row past the last hunk for the end of that hunk. `None` when
-/// there is no hunk at all.
-fn file_line_for_diff_row(hunks: &[condr_core::DiffHunk], row: usize) -> Option<u32> {
-    let mut display = 0;
-    for hunk in hunks {
-        // `new_start` is 1-based and 0 for a file with no lines left.
-        let mut new_line = hunk.new_start.max(1);
-        if row == display {
-            return Some(new_line - 1);
-        }
-        display += 1;
-        for line in &hunk.lines {
-            if row == display {
-                return Some(new_line - 1);
-            }
-            display += 1;
-            if line.kind != DiffLineKind::Removed {
-                new_line += 1;
-            }
-        }
+fn diff_mode(unified: bool) -> DiffMode {
+    if unified {
+        DiffMode::Unified
+    } else {
+        DiffMode::Split
     }
-    hunks
-        .last()
-        .map(|hunk| (hunk.new_start + hunk.new_lines).max(1) - 1)
 }
 
-fn unified_text(
-    hunks: &[condr_core::DiffHunk],
-    cx: &App,
-) -> (String, Vec<TextDecoration>, GitDiffStat) {
-    let added_tint = cx.theme().success.opacity(0.15);
-    let removed_tint = cx.theme().danger.opacity(0.15);
-    let mut text = String::new();
-    let mut decorations = Vec::new();
-    let mut stat = GitDiffStat::default();
-    for (index, hunk) in hunks.iter().enumerate() {
-        if index > 0 {
-            text.push('\n');
-        }
+/// The Server's hunks written as the Git patch Kit's `DiffFile::parse` reads (ADR 0046):
+/// the wire carries structured lines, and Kit has no constructor that takes them.
+fn patch_text(status: Option<GitChangeStatus>, hunks: &[DiffHunk]) -> String {
+    let added = matches!(
+        status,
+        Some(GitChangeStatus::Added | GitChangeStatus::Untracked)
+    );
+    let old = if added {
+        "/dev/null".to_owned()
+    } else {
+        format!("a/{PATCH_PATH}")
+    };
+    let new = if status == Some(GitChangeStatus::Deleted) {
+        "/dev/null".to_owned()
+    } else {
+        format!("b/{PATCH_PATH}")
+    };
+    let mut text = format!("--- {old}\n+++ {new}\n");
+    for hunk in hunks {
         text.push_str(&format!(
-            "@@ -{},{} +{},{} @@",
+            "@@ -{},{} +{},{} @@\n",
             hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines
         ));
         for line in &hunk.lines {
-            text.push('\n');
-            let start = text.len();
-            let (prefix, tint) = match line.kind {
-                DiffLineKind::Context => (' ', None),
-                DiffLineKind::Added => {
-                    stat.added += 1;
-                    ('+', Some(added_tint))
-                }
-                DiffLineKind::Removed => {
-                    stat.deleted += 1;
-                    ('-', Some(removed_tint))
-                }
-            };
-            text.push(prefix);
+            text.push(match line.kind {
+                DiffLineKind::Context => ' ',
+                DiffLineKind::Added => '+',
+                DiffLineKind::Removed => '-',
+            });
             text.push_str(&line.text);
-            if let Some(tint) = tint {
-                decorations.push(TextDecoration::new(
-                    start..text.len(),
-                    HighlightStyle {
-                        background_color: Some(tint),
-                        ..HighlightStyle::default()
-                    },
-                ));
-            }
+            text.push('\n');
         }
     }
-    (text, decorations, stat)
+    text
+}
+
+/// The 0-based line of the new file a click in the diff is about: the line itself on the
+/// new side, and for a line only the old side has, the new line it was removed before. With
+/// no click, the first change. `None` when there is no line at all.
+fn file_line_for_click(hunks: &[DiffHunk], clicked: Option<&DiffLinePosition>) -> Option<u32> {
+    let lines = || hunks.iter().flat_map(|hunk| &hunk.lines);
+    let old_number = match clicked {
+        Some(position) if position.side() == DiffSide::Modified => {
+            return u32::try_from(position.line()).ok().map(|line| line - 1);
+        }
+        Some(position) => u32::try_from(position.line()).ok(),
+        None => {
+            let first = lines().find(|line| line.kind != DiffLineKind::Context)?;
+            if let Some(new) = first.new_number {
+                return Some(new - 1);
+            }
+            first.old_number
+        }
+    }?;
+    let mut after = lines().skip_while(|line| line.old_number != Some(old_number));
+    let clicked = after.next()?;
+    if let Some(new) = clicked.new_number {
+        return Some(new - 1);
+    }
+    // Removed: the next line the new side has, or the end of the file.
+    after
+        .find_map(|line| line.new_number)
+        .map(|new| new - 1)
+        .or_else(|| lines().filter_map(|line| line.new_number).next_back())
+        .or(Some(0))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ChangeNode, ChangesSection, change_tree, file_line_for_diff_row};
+    use super::{
+        ChangeNode, ChangesSection, PATCH_PATH, change_tree, file_line_for_click, patch_text,
+    };
     use condr_core::{GitChangeEntry, GitChangeStatus};
     use relative_path::{RelativePath, RelativePathBuf};
 
@@ -1361,28 +1436,27 @@ mod tests {
         assert!(matches!(&tree[2], ChangeNode::File { name, .. } if name == "README.md"));
     }
 
-    #[test]
-    fn a_diff_row_names_the_new_file_line_it_is_about() {
+    fn hunks() -> [condr_core::DiffHunk; 2] {
         use condr_core::{DiffHunk, DiffLine, DiffLineKind};
-        let line = |kind, new_number| DiffLine {
+        let line = |kind, old_number, new_number, text: &str| DiffLine {
             kind,
-            old_number: None,
+            old_number,
             new_number,
-            text: String::new(),
+            text: text.to_owned(),
         };
         // @@ -1,2 +1,3 @@ / " alpha" / "-beta" / "+BETA" / "+gamma"
         // @@ -10,1 +11,1 @@ / "-old" / "+new"
-        let hunks = [
+        [
             DiffHunk {
                 old_start: 1,
                 old_lines: 2,
                 new_start: 1,
                 new_lines: 3,
                 lines: vec![
-                    line(DiffLineKind::Context, Some(1)),
-                    line(DiffLineKind::Removed, None),
-                    line(DiffLineKind::Added, Some(2)),
-                    line(DiffLineKind::Added, Some(3)),
+                    line(DiffLineKind::Context, Some(1), Some(1), "alpha"),
+                    line(DiffLineKind::Removed, Some(2), None, "beta"),
+                    line(DiffLineKind::Added, None, Some(2), "BETA"),
+                    line(DiffLineKind::Added, None, Some(3), "gamma"),
                 ],
             },
             DiffHunk {
@@ -1391,36 +1465,84 @@ mod tests {
                 new_start: 11,
                 new_lines: 1,
                 lines: vec![
-                    line(DiffLineKind::Removed, None),
-                    line(DiffLineKind::Added, Some(11)),
+                    line(DiffLineKind::Removed, Some(10), None, "old"),
+                    line(DiffLineKind::Added, None, Some(11), "new"),
                 ],
             },
-        ];
-        let rows: Vec<Option<u32>> = (0..9)
-            .map(|row| file_line_for_diff_row(&hunks, row))
-            .collect();
+        ]
+    }
+
+    #[test]
+    fn a_clicked_diff_line_names_the_new_file_line_it_is_about() {
+        use gpui_kit::component::diff::{DiffLinePosition, DiffSide};
+        let hunks = hunks();
+        let click = |side, line| {
+            file_line_for_click(&hunks, Some(&DiffLinePosition::new(PATCH_PATH, side, line)))
+        };
+        assert_eq!(click(DiffSide::Modified, 2), Some(1), "BETA");
         assert_eq!(
-            rows,
-            [
-                Some(0),  // hunk header: its first line
-                Some(0),  // " alpha"
-                Some(1),  // "-beta": where it was removed, i.e. "BETA"
-                Some(1),  // "+BETA"
-                Some(2),  // "+gamma"
-                Some(10), // second hunk header
-                Some(10), // "-old"
-                Some(10), // "+new"
-                Some(11), // past the end: after the last hunk
-            ]
+            click(DiffSide::Original, 1),
+            Some(0),
+            "alpha, on the old side"
         );
-        assert_eq!(file_line_for_diff_row(&[], 0), None);
-        let emptied = [DiffHunk {
+        assert_eq!(
+            click(DiffSide::Original, 2),
+            Some(1),
+            "beta was removed before BETA"
+        );
+        assert_eq!(
+            click(DiffSide::Original, 10),
+            Some(10),
+            "old was removed before new"
+        );
+        assert_eq!(
+            file_line_for_click(&hunks, None),
+            Some(1),
+            "no click: the first change"
+        );
+        assert_eq!(file_line_for_click(&[], None), None);
+        let emptied = [condr_core::DiffHunk {
             old_start: 1,
             old_lines: 1,
             new_start: 0,
             new_lines: 0,
-            lines: vec![line(DiffLineKind::Removed, None)],
+            lines: vec![condr_core::DiffLine {
+                kind: condr_core::DiffLineKind::Removed,
+                old_number: Some(1),
+                new_number: None,
+                text: String::new(),
+            }],
         }];
-        assert_eq!(file_line_for_diff_row(&emptied, 1), Some(0));
+        assert_eq!(file_line_for_click(&emptied, None), Some(0));
+    }
+
+    #[test]
+    fn hunks_written_as_a_patch_parse_back_with_their_status() {
+        use gpui_kit::component::diff::{DiffFile, DiffFileStatus};
+        let parse = |status| {
+            let mut files = DiffFile::parse(&patch_text(status, &hunks())).unwrap();
+            assert_eq!(files.len(), 1);
+            files.remove(0)
+        };
+        let modified = parse(Some(GitChangeStatus::Modified));
+        assert_eq!(modified.status(), DiffFileStatus::Modified);
+        assert_eq!((modified.additions(), modified.deletions()), (3, 2));
+        assert_eq!(modified.path().as_ref(), PATCH_PATH);
+
+        let added = [condr_core::DiffHunk {
+            old_start: 0,
+            old_lines: 0,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![condr_core::DiffLine {
+                kind: condr_core::DiffLineKind::Added,
+                old_number: None,
+                new_number: Some(1),
+                text: "new".into(),
+            }],
+        }];
+        let file = DiffFile::parse(&patch_text(Some(GitChangeStatus::Untracked), &added)).unwrap();
+        assert_eq!(file[0].status(), DiffFileStatus::Added);
+        assert_eq!(parse(None).status(), DiffFileStatus::Modified);
     }
 }

@@ -340,6 +340,7 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                 workspace_id,
                 path,
                 against,
+                full_context,
             } => Message::GitDiff(GitDiffRequest {
                 server_id: server_id.0,
                 session_id: session_id.0,
@@ -350,6 +351,7 @@ impl TryFrom<&ClientMessage> for super::ClientMessage {
                     DiffBase::Head => super::DiffBase::Head,
                     DiffBase::MergeBase => super::DiffBase::MergeBase,
                 } as i32,
+                full_context: *full_context,
             }),
             ClientMessage::ListDirectory {
                 server_id,
@@ -525,6 +527,7 @@ fn decode_client_message(message: super::ClientMessage) -> WireResult<ClientMess
                     super::DiffBase::Head => DiffBase::Head,
                     super::DiffBase::MergeBase => DiffBase::MergeBase,
                 },
+                full_context: diff.full_context,
             },
             Message::ListDirectory(request) => ClientMessage::ListDirectory {
                 server_id: ServerId(request.server_id),

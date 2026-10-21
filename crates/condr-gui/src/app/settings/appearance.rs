@@ -390,7 +390,7 @@ fn font_size_stepper(
         ))
 }
 
-/// The Preview and Diff Tabs' font size, apart from the terminal's; both start at the
+/// The Preview Tab's font size, apart from the terminal's; both start at the
 /// theme's mono font size.
 fn code_font_size_item(owner: &WeakEntity<Condr>) -> SettingItem {
     let get = owner.clone();
@@ -560,7 +560,7 @@ fn code_theme_item(owner: &WeakEntity<Condr>, select: &Entity<ColorSchemeSelect>
                 reset_code_theme(&reset_owner, &reset_select, window, cx)
             }),
     )
-    .description("Syntax themes for files and diffs.")
+    .description("Syntax themes for files.")
 }
 
 /// Whether Reset All has anything to do for the code theme.

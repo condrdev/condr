@@ -34,6 +34,8 @@ pub(super) struct GuiState {
     pub sidebar_width: Option<f32>,
     pub sidebar_collapsed: bool,
     pub changes_width: Option<f32>,
+    /// Diff Tabs show one column rather than two (ADR 0046).
+    pub diff_unified: bool,
     /// The Device whose Workspace the window showed.
     pub active_server: Option<ServerId>,
     /// Keyed by the Server's own id, which outlives connection order, Device renames
@@ -240,6 +242,8 @@ mod wire {
         active_server: Option<u64>,
         #[prost(map = "uint64, message", tag = "6")]
         servers: HashMap<u64, Server>,
+        #[prost(bool, tag = "7")]
+        diff_unified: bool,
     }
 
     /// `mode` 1 windowed, 2 maximized, 3 fullscreen.
@@ -300,6 +304,7 @@ mod wire {
                 sidebar_width: state.sidebar_width,
                 sidebar_collapsed: state.sidebar_collapsed,
                 changes_width: state.changes_width,
+                diff_unified: state.diff_unified,
                 active_server: state.active_server.map(|server| server.0),
                 servers: state
                     .servers
@@ -353,6 +358,7 @@ mod wire {
                 sidebar_width: state.sidebar_width,
                 sidebar_collapsed: state.sidebar_collapsed,
                 changes_width: state.changes_width,
+                diff_unified: state.diff_unified,
                 active_server: state.active_server.map(ServerId),
                 servers: state
                     .servers
@@ -464,6 +470,7 @@ impl Condr {
             sidebar_width: Some(self.sidebar_width.into()),
             sidebar_collapsed: self.sidebar_collapsed,
             changes_width: Some(self.changes_width.into()),
+            diff_unified: self.files_view.diff_unified,
             // Until the active connection has bootstrapped (a slow first start), the
             // file's answer stands rather than `None`.
             active_server: self
@@ -566,6 +573,7 @@ mod tests {
             sidebar_width: Some(240.),
             sidebar_collapsed: true,
             changes_width: Some(300.),
+            diff_unified: true,
             active_server: Some(ServerId(7)),
             servers: HashMap::new(),
         };

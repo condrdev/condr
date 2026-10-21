@@ -32,8 +32,11 @@ pub(super) struct FilesViewState {
     /// tracked change and a new file is a row in two sections.
     pub(super) collapsed_change_dirs:
         HashSet<(ConnectionKey, WorkspaceId, ChangesSection, RelativePathBuf)>,
-    /// The Diff Tabs' Editors, by connection and Tab; pruned with the Tabs.
-    pub(super) diff_editors: HashMap<(ConnectionKey, TabId), DiffEditor>,
+    /// The Diff Tabs' viewers, by connection and Tab; pruned with the Tabs.
+    pub(super) diff_viewers: HashMap<(ConnectionKey, TabId), DiffViewer>,
+    /// Every Diff Tab shows one column rather than two (ADR 0046): how this person reads
+    /// diffs, remembered in the state file.
+    pub(super) diff_unified: bool,
     /// Which view the right sidebar shows per Workspace (ADR 0018), remembered in the
     /// GUI state file. Others open on Changes, or Files outside a repository.
     pub(super) sidebar_views: HashMap<(ConnectionKey, WorkspaceId), SidebarView>,
@@ -98,7 +101,7 @@ impl FilesViewState {
                             .is_some_and(|tab| tab.terminals().is_some())
                     }))
         });
-        self.diff_editors.retain(|(connection, id), _| {
+        self.diff_viewers.retain(|(connection, id), _| {
             *connection != key
                 || session
                     .is_some_and(|session| session.tab(*id).is_some_and(|tab| tab.diff().is_some()))

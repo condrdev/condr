@@ -116,6 +116,8 @@ message GitDiffRequest {
   uint64 workspace_id = 4;
   string path = 5;
   DiffBase against = 6;
+  // Every line as context, so the viewer folds unchanged runs itself (ADR 0046).
+  bool full_context = 7;
 }
 
 message PathRequest {

@@ -711,6 +711,7 @@ pub(super) fn handle_client(
                 workspace_id,
                 path,
                 against,
+                full_context,
             } => {
                 let repository = {
                     let state = state.lock().expect("server state lock poisoned");
@@ -745,21 +746,27 @@ pub(super) fn handle_client(
                             })
                     }
                 };
-                // The diff reads blobs and files: never under the state lock.
-                let result = repository.and_then(|(repository, old_path, base)| {
-                    repository
-                        .file_diff(&path, old_path.as_deref(), base.as_ref())
-                        .map_err(|error| error.to_string())
+                // The diff reads blobs and files, never under the state lock, and a whole
+                // large file takes a while: off this loop, which also carries the Client's
+                // terminal input (ADR 0046).
+                let outbound = outbound.clone();
+                thread::spawn(move || {
+                    let result = repository.and_then(|(repository, old_path, base)| {
+                        repository
+                            .file_diff(&path, old_path.as_deref(), base.as_ref(), full_context)
+                            .map_err(|error| error.to_string())
+                    });
+                    queue_message(
+                        &outbound,
+                        ServerMessage::GitDiff {
+                            request_id,
+                            workspace_id,
+                            path,
+                            result,
+                        },
+                    )
                 });
-                queue_message(
-                    &outbound,
-                    ServerMessage::GitDiff {
-                        request_id,
-                        workspace_id,
-                        path,
-                        result,
-                    },
-                )
+                false
             }
             ClientMessage::ListDirectory {
                 server_id,

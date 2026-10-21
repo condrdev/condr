@@ -32,7 +32,9 @@ Each Workspace remembers its own choice.
 
 1. Click any file in the **Changes** list, and a **Diff** Tab opens in the center area automatically.
 2. The page highlights exactly how the file differs from what you compare against, and the title bar names it, for example `Against main`.
-3. Click **Show File** in the title bar to jump straight to a preview of the file's full content.
+3. **Split** shows the old and new file side by side; **Unified** shows them in one column. The choice in the title bar applies to every Diff Tab and is remembered.
+4. Unchanged stretches are folded; click a fold to show more lines above or below it, or all of them.
+5. Click **Show File** in the title bar to open the file in the Preview Tab at the line you last clicked in the diff.
 
 > **Tip**: For very large binary files, or any single file over 1 MiB, the detailed comparison is hidden automatically to protect performance.
 

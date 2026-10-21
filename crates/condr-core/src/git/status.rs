@@ -86,11 +86,16 @@ impl GitRepository {
     /// [`GitChangeEntry::old_path`] reports it; without it a rename diffs as wholly added.
     /// A path in neither side is an error; a path in both with identical content yields no
     /// hunks.
+    ///
+    /// With `full_context` the file comes back as one hunk holding every line, so a viewer can
+    /// fold and unfold the unchanged runs itself (ADR 0046); when that passes the size limit,
+    /// the usual three lines of context are returned instead.
     pub fn file_diff(
         &self,
         path: &RelativePath,
         old_path: Option<&RelativePath>,
         base: Option<&GitBase>,
+        full_context: bool,
     ) -> Result<FileDiff, GitError> {
         if !crate::valid_diff_path(path) || old_path.is_some_and(|old| !crate::valid_diff_path(old))
         {
@@ -99,25 +104,14 @@ impl GitRepository {
         let repo = self.open()?;
         let mut differ = Differ::new(&repo, base)?;
         let content = differ.diff(path, old_path, |diff, input| {
-            let hunks = UnifiedDiff::new(
-                diff,
-                input,
-                HunkCollector::default(),
-                ContextSize::symmetrical(DIFF_CONTEXT_LINES),
-            )
-            .consume()
-            .map_err(git_error)?;
-            // Two small sides can still produce more hunk text than a protocol frame holds
-            // (a file of one-byte lines); the same cap applies to the output.
-            let bytes = hunks
-                .iter()
-                .flat_map(|hunk| &hunk.lines)
-                .map(|line| line.text.len() as u64 + DIFF_LINE_OVERHEAD)
-                .sum::<u64>();
-            if bytes > MAX_DIFF_BYTES {
-                return Ok(FileDiffContent::TooLarge { bytes });
+            if full_context {
+                let lines = input.before.len().max(input.after.len());
+                let content = hunks_content(diff, input, u32::try_from(lines).unwrap_or(u32::MAX))?;
+                if !matches!(content, FileDiffContent::TooLarge { .. }) {
+                    return Ok(content);
+                }
             }
-            Ok(FileDiffContent::Text { hunks })
+            hunks_content(diff, input, DIFF_CONTEXT_LINES)
         })?;
         Ok(FileDiff {
             path: path.to_relative_path_buf(),
@@ -332,6 +326,34 @@ fn fold_status_item(item: gix::status::Item) -> Option<FoldedStatus> {
             }
         },
     })
+}
+
+/// The diff as hunks with `context` lines around each change, or the placeholder for hunks
+/// past the size limit.
+fn hunks_content(
+    diff: &Diff,
+    input: &InternedInput<&[u8]>,
+    context: u32,
+) -> Result<FileDiffContent, GitError> {
+    let hunks = UnifiedDiff::new(
+        diff,
+        input,
+        HunkCollector::default(),
+        ContextSize::symmetrical(context),
+    )
+    .consume()
+    .map_err(git_error)?;
+    // Two small sides can still produce more hunk text than a protocol frame holds (a file
+    // of one-byte lines); the same cap applies to the output.
+    let bytes = hunks
+        .iter()
+        .flat_map(|hunk| &hunk.lines)
+        .map(|line| line.text.len() as u64 + DIFF_LINE_OVERHEAD)
+        .sum::<u64>();
+    if bytes > MAX_DIFF_BYTES {
+        return Ok(FileDiffContent::TooLarge { bytes });
+    }
+    Ok(FileDiffContent::Text { hunks })
 }
 
 /// Diffs the blobs of `HEAD`, or of a base's merge base, against worktree files.

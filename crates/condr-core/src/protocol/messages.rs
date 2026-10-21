@@ -56,9 +56,8 @@ pub enum ClientMessage {
         pane_id: PaneId,
         lines: u32,
     },
-    /// One file's working-tree diff against `HEAD` (ADR 0017), answered with
-    /// [`ServerMessage::GitDiff`]. `against` is fixed to `HEAD` today and reserved for
-    /// the branch-against-base view.
+    /// One file's working-tree diff against `HEAD` or the base (ADR 0017, ADR 0034),
+    /// answered with [`ServerMessage::GitDiff`].
     GitDiff {
         server_id: ServerId,
         session_id: SessionId,
@@ -67,6 +66,8 @@ pub enum ClientMessage {
         /// Relative to the Workspace root.
         path: RelativePathBuf,
         against: DiffBase,
+        /// Every line as context rather than three (ADR 0046).
+        full_context: bool,
     },
     /// One level of a Workspace's directory tree for the Files sidebar (ADR 0018),
     /// answered with [`ServerMessage::Directory`].
