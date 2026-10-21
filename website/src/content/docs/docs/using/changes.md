@@ -3,7 +3,7 @@ title: Changes and file preview
 description: Quickly see which files an Agent changed, compare code diffs (Diff) and preview project files in Condr.
 ---
 
-When an Agent modifies or refactors your code, you need to confirm quickly which files it changed and whether the changes are right. Condr has built-in views for file changes and previews, and lets you make small edits to files directly, so you can review the work without opening an external IDE.
+When an Agent modifies or refactors your code, you need to quickly confirm which files changed and whether the changes are correct. Condr provides built-in views for file changes and previews and lets you make small edits to files directly, so you can review work without opening an external IDE.
 
 ## Open the changes panel (Changes)
 
@@ -40,7 +40,7 @@ Each Workspace remembers its own choice.
 
 - **Switch to the file tree**: switch the tab at the top of the right sidebar to **Files** to expand and browse project folders as you would in a file manager.
 - **Change markers**: a folder with changes carries a dot, and files ignored by `.gitignore` are grayed out automatically.
-- **Click to preview**: click any text file to open it in the **Preview** Tab. The syntax highlighting and scroll position refresh automatically when the file changes on disk.
+- **Click to preview**: click any text file to open it in the **Preview** Tab. Syntax highlighting and scroll position refresh automatically when the file changes on disk.
 - **Rendered Markdown and images**: Markdown and SVG files open rendered by default; switch between **Preview** and **Source** in the Tab header. Images (PNG, JPEG, GIF, WebP, BMP, ICO and TIFF under roughly 2 MiB) scale automatically to fit, and animated images play automatically. Images in Markdown files are loaded locally from the project; web images display their alt text instead.
 
 ## Edit files (Preview)
@@ -49,8 +49,8 @@ The **Source** view of the Preview Tab is an editor, on local and remote Devices
 
 - **Edit and save**: type into the file, then press `Cmd + S` (macOS) or `Ctrl + S` (Windows/Linux). A dot in the Tab header marks unsaved changes. Nothing is saved automatically, so your edits never race the Agent's.
 - **Line endings are kept**: a file that uses Windows line endings (`CRLF`) keeps them for the lines you add.
-- **When the file changes on disk**: if the Agent writes the file while you have unsaved changes, your text stays as it is and the header says **Changed on disk**. Saving then asks whether to **Overwrite** the file with your text, or to **Discard and Reload** it.
-- **Unsaved changes are never dropped silently**: before you switch to another file, close the Tab or quit Condr, Condr asks whether to save. If another device switches or closes the Tab, you can still save your text, copy it, or discard it.
+- **When the file changes on disk**: if the Agent writes the file while you have unsaved changes, your text stays as it is and the header says **Changed on disk**. Saving then asks whether to **Overwrite** the file with your text or to **Discard and Reload** it.
+- **Unsaved changes are never dropped silently**: before you switch to another file, close the Tab or quit Condr, Condr asks whether to save. If another device switches or closes the Tab, you can still save your text, copy it or discard it.
 - **Read-only files**: files that are not valid UTF-8 text, binary files and files over 1 MiB can be viewed but not edited; the header says why.
 
 ## Right-click menu
@@ -61,8 +61,8 @@ Right-click a file in the Changes or Files list to choose one of these common ac
 - **Insert Path into Terminal**: paste the file's relative path into the most recently used terminal Pane, ready to pass to a command-line tool.
 - **Copy Relative Path / Copy Path**: copy the file's relative or absolute path in one click.
 - **Reveal in Finder / Reveal in File Explorer / Open Containing Folder**: show the file or folder in the system file manager (local Devices only).
-- **New File… / New Folder…**: create an entry in the Files view: inside a folder, beside a file, or at the project root from the empty area below the tree. A new file opens in the Preview Tab, ready to type.
+- **New File… / New Folder…**: create an entry in the Files view: inside a folder, beside a file or at the project root from the empty area below the tree. A new file opens in the Preview Tab, ready to type.
 - **Rename…**: rename a file or folder within its folder. A name that is already taken is refused.
-- **Delete…**: delete a file, or a folder with everything in it, after you confirm. Deletion is permanent and skips the system trash.
+- **Delete…**: delete a file or a folder with everything in it, after you confirm. Deletion is permanent and skips the system trash.
 
 Condr never changes anything inside `.git`.

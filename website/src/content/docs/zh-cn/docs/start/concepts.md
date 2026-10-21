@@ -38,7 +38,7 @@ Device（物理机/虚拟机，持有唯一 Ed25519 密钥）
 | **Device / Server** | 运行 Condr 的机器抽象。每台设备持有唯一的加密身份（Device Key），关闭客户端不影响 Server 运行。 |
 | **Session** | 服务端维护的布局拓扑。布局变动实时写入快照，Server 重启后自动恢复结构与 Agent 会话上下文。 |
 | **Workspace** | 项目任务单元，锚定唯一的绝对路径**根目录**。支持基于 Git Worktree 派生出隔离的 **Managed Worktree** 独立工作区。 |
-| **Tab** | Workspace 内的页面。分为**终端 Tab**（承载分屏窗格，支持快捷键 `1~9` 切换）与**查看 Tab**（Diff 审查页，以及也能编辑文件的 Preview 页）。 |
+| **Tab** | Workspace 内的页面，分为**终端 Tab**（承载分屏窗格，支持快捷键 `1~9` 切换）与**查看 Tab**（Diff 审查页以及支持编辑文件的 Preview 页）。 |
 | **Pane / Terminal** | 布局叶子节点与虚拟终端引擎（基于 Rust `alacritty_terminal`）。支持水平/垂直切分、缩放与进程树安全级联退出。 |
 | **Agent** | 运行在 Pane 内受识别的命令行程序。状态实时同至侧边栏，支持阻断原因提取。 |
 

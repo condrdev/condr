@@ -61,7 +61,7 @@ Manages Devices, project Workspaces and Agent state. Drag Devices or Workspaces 
 
 * **Files (project tree)**: browse the project's directories. Folders with changes carry a dot, and files ignored through `.gitignore` are greyed out. Click a file to view it in the Preview Tab.
 * **Changes**: active in Git repositories only. Lists changed files with added and removed lines, grouped as `Conflicts`, `Tracked` and `Untracked`. Click a file to review it in the Diff Tab.
-* **Context menu**: copy the relative or absolute path, insert the path into the terminal, open the file in a local editor or reveal it in the file manager, and create, rename or delete files and folders.
+* **Context menu**: copy the relative or absolute path, insert the path into the terminal, open the file in a local editor or reveal it in the file manager. It also creates, renames and deletes files and folders.
 
 ---
 
