@@ -4276,10 +4276,10 @@ https://www.jetbrains.com/idea/
 
 ## Overview of licenses
 
-* Apache License 2.0 (710)
-* MIT License (209)
+* Apache License 2.0 (683)
+* MIT License (206)
 * Unicode License v3 (19)
-* BSD 3-Clause "New" or "Revised" License (13)
+* BSD 3-Clause "New" or "Revised" License (12)
 * ISC License (8)
 * BSD Zero Clause License (4)
 * zlib License (4)
@@ -4287,7 +4287,6 @@ https://www.jetbrains.com/idea/
 * Mozilla Public License 2.0 (3)
 * BSD 2-Clause "Simplified" License (2)
 * Community Data License Agreement Permissive 2.0 (1)
-* bzip2 and libbzip2 License v1.0.6 (1)
 
 ## License texts
 
@@ -5216,7 +5215,6 @@ Used by:
 Used by:
 
 * [as-raw-xcb-connection 1.0.1](https://github.com/psychon/as-raw-xcb-connection)
-* [clang-sys 1.9.1](https://github.com/KyleMayes/clang-sys)
 * [cmov 0.5.4](https://github.com/RustCrypto/utils)
 * [ctutils 0.4.2](https://github.com/RustCrypto/utils)
 * [encoding_rs 0.8.35](https://github.com/hsivonen/encoding_rs)
@@ -5680,6 +5678,7 @@ Used by:
 * [windows-sys 0.48.0](https://github.com/microsoft/windows-rs)
 * [windows-sys 0.52.0](https://github.com/microsoft/windows-rs)
 * [windows-sys 0.59.0](https://github.com/microsoft/windows-rs)
+* [windows-sys 0.60.2](https://github.com/microsoft/windows-rs)
 * [windows-sys 0.61.2](https://github.com/microsoft/windows-rs)
 * [windows-targets 0.48.5](https://github.com/microsoft/windows-rs)
 * [windows-targets 0.52.6](https://github.com/microsoft/windows-rs)
@@ -8490,7 +8489,6 @@ Used by:
 Used by:
 
 * [async-broadcast 0.7.2](https://github.com/smol-rs/async-broadcast)
-* [futures-concurrency 7.7.1](https://github.com/yoshuawuyts/futures-concurrency)
 
                                  Apache License
                            Version 2.0, January 2004
@@ -11869,7 +11867,7 @@ limitations under the License.
 
 Used by:
 
-* [notify-types 1.0.1](https://github.com/notify-rs/notify.git)
+* [notify-types 2.1.0](https://github.com/notify-rs/notify.git)
 
                               Apache License
                         Version 2.0, January 2004
@@ -13356,7 +13354,6 @@ Used by:
 * [arc-swap 1.9.2](https://github.com/vorner/arc-swap)
 * [arrayvec 0.7.8](https://github.com/bluss/arrayvec)
 * [async-channel 2.5.0](https://github.com/smol-rs/async-channel)
-* [async-compression 0.4.43](https://github.com/Nullus157/async-compression)
 * [async-executor 1.14.0](https://github.com/smol-rs/async-executor)
 * [async-fs 2.2.0](https://github.com/smol-rs/async-fs)
 * [async-io 2.6.0](https://github.com/smol-rs/async-io)
@@ -13366,7 +13363,6 @@ Used by:
 * [async-signal 0.2.14](https://github.com/smol-rs/async-signal)
 * [async-task 4.7.1](https://github.com/smol-rs/async-task)
 * [atomic-waker 1.1.2](https://github.com/smol-rs/atomic-waker)
-* [atomic 0.5.3](https://github.com/Amanieu/atomic-rs)
 * [autocfg 1.5.1](https://github.com/cuviper/autocfg)
 * [backtrace 0.3.76](https://github.com/rust-lang/backtrace-rs)
 * [base64 0.22.1](https://github.com/marshallpierce/rust-base64)
@@ -13375,16 +13371,11 @@ Used by:
 * [bitflags 2.13.1](https://github.com/bitflags/bitflags)
 * [blocking 1.7.0](https://github.com/smol-rs/blocking)
 * [bstr 1.13.1](https://github.com/BurntSushi/bstr)
-* [bzip2 0.6.1](https://github.com/trifectatechfoundation/bzip2-rs)
 * [cc 1.4.4](https://github.com/rust-lang/cc-rs)
-* [cexpr 0.6.0](https://github.com/jethrogb/rust-cexpr)
 * [cfg-if 1.0.4](https://github.com/rust-lang/cfg-if)
-* [cgl 0.3.2](https://github.com/servo/cgl-rs)
 * [cmake 0.1.58](https://github.com/rust-lang/cmake-rs)
 * [cocoa-foundation 0.2.1](https://github.com/servo/core-foundation-rs)
 * [cocoa 0.26.0](https://github.com/servo/core-foundation-rs)
-* [compression-codecs 0.4.38](https://github.com/Nullus157/async-compression)
-* [compression-core 0.4.32](https://github.com/Nullus157/async-compression)
 * [concurrent-queue 2.5.0](https://github.com/smol-rs/concurrent-queue)
 * [const-random-macro 0.1.16](https://github.com/tkaitchuck/constrandom)
 * [const-random 0.1.18](https://github.com/tkaitchuck/constrandom)
@@ -13392,14 +13383,11 @@ Used by:
 * [core-foundation 0.10.1](https://github.com/servo/core-foundation-rs)
 * [core-foundation 0.9.4](https://github.com/servo/core-foundation-rs)
 * [core-graphics-types 0.2.0](https://github.com/servo/core-foundation-rs)
-* [core-graphics2 0.5.2](https://github.com/rust-media/apple-media-rs)
 * [core-graphics 0.24.0](https://github.com/servo/core-foundation-rs)
 * [core-text 21.0.0](https://github.com/servo/core-foundation-rs)
-* [core-video 0.5.2](https://github.com/rust-media/apple-media-rs)
 * [crossbeam-channel 0.5.17](https://github.com/crossbeam-rs/crossbeam)
 * [crossbeam-deque 0.8.7](https://github.com/crossbeam-rs/crossbeam)
 * [crossbeam-epoch 0.9.20](https://github.com/crossbeam-rs/crossbeam)
-* [crossbeam-queue 0.3.13](https://github.com/crossbeam-rs/crossbeam)
 * [crossbeam-utils 0.8.22](https://github.com/crossbeam-rs/crossbeam)
 * [curve25519-dalek-derive 0.1.1](https://github.com/dalek-cryptography/curve25519-dalek)
 * [data-url 0.3.2](https://github.com/servo/rust-url)
@@ -13441,7 +13429,6 @@ Used by:
 * [idna_adapter 1.2.2](https://github.com/hsivonen/idna_adapter)
 * [indexmap 2.14.0](https://github.com/indexmap-rs/indexmap)
 * [io-close 0.3.7](https://gitlab.com/wufz/io-close)
-* [io-surface 0.16.1](https://github.com/servo/core-foundation-rs)
 * [ipconfig 0.3.4](https://github.com/liranringel/ipconfig)
 * [itertools 0.11.0](https://github.com/rust-itertools/itertools)
 * [itertools 0.13.0](https://github.com/rust-itertools/itertools)
@@ -13481,7 +13468,6 @@ Used by:
 * [png 0.17.16](https://github.com/image-rs/image-png)
 * [png 0.18.1](https://github.com/image-rs/image-png)
 * [polling 3.11.0](https://github.com/smol-rs/polling)
-* [pollster 0.2.5](https://github.com/zesterer/pollster)
 * [pollster 0.4.0](https://github.com/zesterer/pollster)
 * [postcard-derive 0.2.2](https://github.com/jamesmunns/postcard)
 * [postcard 1.1.3](https://github.com/jamesmunns/postcard)
@@ -13515,10 +13501,10 @@ Used by:
 * [scopeguard 1.2.0](https://github.com/bluss/scopeguard)
 * [security-framework-sys 2.17.0](https://github.com/kornelski/rust-security-framework)
 * [security-framework 3.7.0](https://github.com/kornelski/rust-security-framework)
-* [serde_fmt 1.1.0](https://github.com/KodrAus/serde_fmt.git)
 * [shellexpand 3.1.2](https://gitlab.com/ijackson/rust-shellexpand)
 * [signal-hook-registry 1.4.8](https://github.com/vorner/signal-hook)
 * [signal-hook 0.4.4](https://github.com/vorner/signal-hook)
+* [similar 2.7.0](https://github.com/mitsuhiko/similar)
 * [simplecss 0.2.2](https://github.com/linebender/simplecss)
 * [smallvec 1.15.2](https://github.com/servo/rust-smallvec)
 * [smol 2.0.2](https://github.com/smol-rs/smol)
@@ -13545,7 +13531,7 @@ Used by:
 * [unicode-ccc 0.4.0](https://github.com/RazrFalcon/unicode-ccc)
 * [unicode-id 0.3.6](https://github.com/Boshen/unicode-id)
 * [unicode-normalization 0.1.25](https://github.com/unicode-rs/unicode-normalization)
-* [unicode-properties 0.1.4](https://github.com/unicode-rs/unicode-properties)
+* [unicode-properties 0.1.3](https://github.com/unicode-rs/unicode-properties)
 * [unicode-segmentation 1.13.3](https://github.com/unicode-rs/unicode-segmentation)
 * [unicode-vo 0.1.0](https://github.com/RazrFalcon/unicode-vo)
 * [unicode-width 0.1.14](https://github.com/unicode-rs/unicode-width)
@@ -13553,8 +13539,6 @@ Used by:
 * [unicode-xid 0.2.6](https://github.com/unicode-rs/unicode-xid)
 * [url 2.5.8](https://github.com/servo/rust-url)
 * [uuid 1.26.0](https://github.com/uuid-rs/uuid)
-* [value-bag-serde1 1.13.2](https://crates.io/crates/value-bag-serde1)
-* [value-bag 1.13.2](https://github.com/sval-rs/value-bag)
 * [version_check 0.9.5](https://github.com/SergioBenitez/version_check)
 * [waker-fn 1.2.0](https://github.com/smol-rs/waker-fn)
 * [xml5ever 0.18.1](https://github.com/servo/html5ever)
@@ -13982,7 +13966,6 @@ Used by:
 * [bit-set 0.9.1](https://github.com/contain-rs/bit-set)
 * [bit-vec 0.9.1](https://github.com/contain-rs/bit-vec)
 * [downcast-rs 1.2.1](https://github.com/marcianx/downcast-rs)
-* [minimal-lexical 0.2.1](https://github.com/Alexhuszagh/minimal-lexical)
 * [presser 0.3.1](https://github.com/EmbarkStudios/presser)
 * [qoi 0.4.1](https://github.com/aldanor/qoi-rust)
 
@@ -18755,7 +18738,6 @@ Used by:
 * [dyn-clone 1.0.20](https://github.com/dtolnay/dyn-clone)
 * [enum-assoc 1.4.1](https://github.com/Eolu/enum-assoc)
 * [enumn 0.1.14](https://github.com/dtolnay/enumn)
-* [erased-serde 0.4.10](https://github.com/dtolnay/erased-serde)
 * [etagere 0.2.15](https://github.com/nical/etagere)
 * [fdeflate 0.3.7](https://github.com/image-rs/fdeflate)
 * [gix-actor 0.42.0](https://github.com/GitoxideLabs/gitoxide)
@@ -18811,9 +18793,9 @@ Used by:
 * [gl_generator 0.14.0](https://github.com/brendanzab/gl-rs/)
 * [gpu-descriptor-types 0.2.0](https://github.com/zakarumych/gpu-descriptor)
 * [gpu-descriptor 0.3.2](https://github.com/zakarumych/gpu-descriptor)
-* [gpui-fps 0.6.0](https://github.com/longbridge/gpui-kit/tree/main/crates/fps)
-* [gpui-kit-assets 0.7.0](https://github.com/longbridge/gpui-kit)
-* [gpui-kit 0.7.0](https://github.com/longbridge/gpui-kit)
+* [gpui-fps 0.6.4](https://github.com/longbridge/gpui-kit/tree/main/crates/fps)
+* [gpui-kit-assets 0.8.0](https://github.com/longbridge/gpui-kit)
+* [gpui-kit 0.8.0](https://github.com/longbridge/gpui-kit)
 * [granit-parser 0.0.7](https://github.com/bourumir-wyngs/granit-parser)
 * [half 2.7.1](https://github.com/VoidStarKat/half-rs)
 * [ident_case 1.0.1](https://github.com/TedDriggs/ident_case)
@@ -18828,8 +18810,6 @@ Used by:
 * [iroh 1.2.0](https://github.com/n0-computer/iroh)
 * [itoa 1.0.18](https://github.com/dtolnay/itoa)
 * [khronos_api 3.1.0](https://github.com/brendanzab/gl-rs/)
-* [leak 0.1.2](https://github.com/jmesmon/leak.git)
-* [leaky-cow 0.1.1](https://github.com/notriddle/rust-leaky-cow)
 * [libc 0.2.189](https://github.com/rust-lang/libc)
 * [linebender_resource_handle 0.1.1](https://github.com/linebender/raw_resource_handle)
 * [litrs 1.0.0](https://github.com/LukasKalbertodt/litrs)
@@ -18840,7 +18820,7 @@ Used by:
 * [lyon_tessellation 1.0.20](https://github.com/nical/lyon)
 * [mac-notification-sys 0.6.15](https://github.com/h4llow3En/mac-notification-sys)
 * [mac 0.1.1](https://github.com/reem/rust-mac.git)
-* [mach2 0.5.0](https://github.com/JohnTitor/mach2)
+* [mach2 0.6.0](https://github.com/JohnTitor/mach2)
 * [miniz_oxide 0.8.9](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide)
 * [n0-error-macros 1.0.1](https://github.com/n0-computer/n0-error)
 * [naga 29.0.4](https://github.com/gfx-rs/wgpu)
@@ -18855,15 +18835,12 @@ Used by:
 * [objc2-core-foundation 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-graphics 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-image 0.3.2](https://github.com/madsmtm/objc2)
-* [objc2-core-location 0.3.2](https://github.com/madsmtm/objc2)
-* [objc2-core-media 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-text 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-video 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-core-wlan 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-io-kit 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-metal 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-quartz-core 0.3.2](https://github.com/madsmtm/objc2)
-* [objc2-screen-capture-kit 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-security-foundation 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-security 0.3.2](https://github.com/madsmtm/objc2)
 * [objc2-system-configuration 0.3.2](https://github.com/madsmtm/objc2)
@@ -18904,7 +18881,6 @@ Used by:
 * [serde_repr 0.1.21](https://github.com/dtolnay/serde-repr)
 * [serde_urlencoded 0.7.1](https://github.com/nox/serde_urlencoded)
 * [serial2 0.2.38](https://github.com/de-vri-es/serial2-rs)
-* [shlex 1.3.0](https://github.com/comex/rust-shlex)
 * [shlex 2.0.1](https://github.com/comex/rust-shlex)
 * [simdutf8 0.1.5](https://github.com/rusticstuff/simdutf8)
 * [siphasher 1.0.3](https://github.com/jedisct1/rust-siphash)
@@ -18921,7 +18897,6 @@ Used by:
 * [thiserror 2.0.20](https://github.com/dtolnay/thiserror)
 * [time-core 0.1.9](https://github.com/time-rs/time)
 * [time 0.3.55](https://github.com/time-rs/time)
-* [typeid 1.0.3](https://github.com/dtolnay/typeid)
 * [unicode-ident 1.0.24](https://github.com/dtolnay/unicode-ident)
 * [usvg 0.45.1](https://github.com/linebender/resvg)
 * [usvg 0.46.0](https://github.com/linebender/resvg)
@@ -19021,29 +18996,26 @@ limitations under the License.
 
 Used by:
 
-* [gpui-pre-apple 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-collections 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-derive-refineable 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client-tls 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-http-client 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-linux 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-macos 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-macros 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-perf 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-platform 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-refineable 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-reqwest-client 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-scheduler 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-shared-string 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-sum-tree 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-util-macros 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-util 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-wgpu 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-windows 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-zlog 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing-macro 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre-ztracing 0.3.7](https://github.com/zed-industries/zed)
-* [gpui-pre 0.3.7](https://github.com/zed-industries/zed)
+* [gpui-pre-apple 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-collections 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-derive-refineable 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client-tls 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-http-client 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-linux 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-macos 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-macros 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-platform 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-refineable 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-reqwest-client 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-scheduler 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-shared-string 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-sum-tree 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-util 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-wgpu 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-windows 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing-macro 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre-ztracing 0.3.9](https://github.com/zed-industries/zed)
+* [gpui-pre 0.3.9](https://github.com/zed-industries/zed)
 
 Copyright 2022 - 2025 Zed Industries, Inc.
 
@@ -19275,9 +19247,9 @@ Apache License
 
 Used by:
 
-* [gpui-base 0.7.0](https://github.com/longbridge/gpui-kit)
-* [gpui-component-macros 0.7.0](https://crates.io/crates/gpui-component-macros)
-* [gpui-component 0.7.0](https://github.com/longbridge/gpui-kit)
+* [gpui-base 0.8.0](https://github.com/longbridge/gpui-kit)
+* [gpui-component-macros 0.8.0](https://crates.io/crates/gpui-component-macros)
+* [gpui-component 0.8.0](https://github.com/longbridge/gpui-kit)
 
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
 
@@ -19798,45 +19770,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Used by:
 
-* [bindgen 0.72.1](https://github.com/rust-lang/rust-bindgen)
-
-BSD 3-Clause License
-
-Copyright (c) 2013, Jyun-Yan You
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-* Redistributions of source code must retain the above copyright notice, this
-  list of conditions and the following disclaimer.
-
-* Redistributions in binary form must reproduce the above copyright notice,
-  this list of conditions and the following disclaimer in the documentation
-  and/or other materials provided with the distribution.
-
-* Neither the name of the copyright holder nor the names of its
-  contributors may be used to endorse or promote products derived from
-  this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
---------------------------------------------------------------------------------
-
-### BSD 3-Clause "New" or "Revised" License
-
-Used by:
-
 * [tiny-skia-path 0.11.4](https://github.com/RazrFalcon/tiny-skia/tree/master/path)
 * [tiny-skia 0.11.4](https://github.com/RazrFalcon/tiny-skia)
 
@@ -20127,7 +20060,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Used by:
 
-* [notify 7.0.0](https://github.com/notify-rs/notify.git)
+* [notify 8.2.0](https://github.com/notify-rs/notify.git)
 
 Creative Commons CC0 1.0 Universal
 
@@ -20425,7 +20358,7 @@ THIS SOFTWARE.
 
 Used by:
 
-* [inotify 0.10.2](https://github.com/hannobraun/inotify)
+* [inotify 0.11.5](https://github.com/hannobraun/inotify-rs)
 
 Copyright (c) Hanno Braun and contributors
 
@@ -20735,36 +20668,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
-
---------------------------------------------------------------------------------
-
-### MIT License
-
-Used by:
-
-* [nom 7.1.3](https://github.com/Geal/nom)
-
-Copyright (c) 2014-2019 Geoffroy Couprie
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
@@ -22580,37 +22483,6 @@ SOFTWARE.
 
 Used by:
 
-* [postage 0.5.0](https://github.com/austinjones/postage-rs)
-
-MIT License
-
-Copyright (c) 2022 Austin Jones
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-
---------------------------------------------------------------------------------
-
-### MIT License
-
-Used by:
-
 * [oo7 0.6.0](https://github.com/linux-credentials/oo7)
 
 MIT License
@@ -23025,24 +22897,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
---------------------------------------------------------------------------------
-
-### MIT License
-
-Used by:
-
-* [x11-clipboard 0.9.3](https://github.com/quininer/x11-clipboard)
-
-MIT License
-Copyright (c) 2017 quininer@live.com
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
@@ -25280,63 +25134,5 @@ the following restrictions:
     misrepresented as being the original software.
 
 3. This notice may not be removed or altered from any source distribution.
-
---------------------------------------------------------------------------------
-
-### bzip2 and libbzip2 License v1.0.6
-
-Used by:
-
-* [libbz2-rs-sys 0.2.5](https://github.com/trifectatechfoundation/libbzip2-rs)
-
-
---------------------------------------------------------------------------
-
-The original program, "bzip2", the associated library "libbzip2", and all
-documentation, are
-
-Copyright (C) 1996-2021 Julian R Seward.
-Copyright (C) 2019-2020 Federico Mena Quintero
-Copyright (C) 2021 Micah Snyder
-
-This Rust translation, "libbzip2-rs" is a derived work based on "bzip2" and
-"libbzip2", and is Copyright (C) 2024-2025 Trifecta Tech Foundation and contributors
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions
-are met:
-
-1. Redistributions of source code must retain the above copyright
-   notice, this list of conditions and the following disclaimer.
-
-2. The origin of this software must not be misrepresented; you must
-   not claim that you wrote the original software.  If you use this
-   software in a product, an acknowledgment in the product
-   documentation would be appreciated but is not required.
-
-3. Altered source versions must be plainly marked as such, and must
-   not be misrepresented as being the original software.
-
-4. The name of the author may not be used to endorse or promote
-   products derived from this software without specific prior written
-   permission.
-
-THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
-OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
-GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-Julian Seward, jseward@acm.org
-bzip2/libbzip2 version 1.1.0 of 6 September 2010
-
---------------------------------------------------------------------------
-
 
 --------------------------------------------------------------------------------
