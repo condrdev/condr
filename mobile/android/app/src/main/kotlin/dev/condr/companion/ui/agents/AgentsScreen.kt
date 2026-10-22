@@ -76,6 +76,7 @@ fun AgentsScreen() {
         ),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+      item { Score(Modifier.padding(bottom = 18.dp)) }
       item { SectionTitle("Needs you", needsYou.size, AgentStatus.BLOCKED.tint) }
       if (needsYou.isEmpty()) {
         item { AllClear(working = working.size) }

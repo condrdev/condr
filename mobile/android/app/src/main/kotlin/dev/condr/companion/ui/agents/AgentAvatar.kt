@@ -45,7 +45,7 @@ object AgentMarks {
 
 /** An Agent's mark on a rounded square, its state as a dot at the corner. */
 @Composable
-fun AgentAvatar(kind: String?, status: AgentStatus, side: Dp) {
+fun AgentAvatar(kind: String?, status: AgentStatus, side: Dp, shell: Boolean = false) {
   Box(Modifier.size(side)) {
     Box(
       Modifier.size(side)
@@ -56,7 +56,14 @@ fun AgentAvatar(kind: String?, status: AgentStatus, side: Dp) {
       contentAlignment = Alignment.Center,
     ) {
       val mark = AgentMarks.resource(kind)
-      if (mark != null) {
+      if (shell) {
+        Icon(
+          painterResource(R.drawable.ic_terminal),
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.onSurfaceVariant,
+          modifier = Modifier.size(side * 0.55f),
+        )
+      } else if (mark != null) {
         Icon(
           painterResource(mark),
           contentDescription = null,
@@ -72,11 +79,13 @@ fun AgentAvatar(kind: String?, status: AgentStatus, side: Dp) {
         )
       }
     }
-    Box(
-      Modifier.align(Alignment.BottomEnd)
-        .size(side * 0.32f)
-        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
-        .background(status.tint, CircleShape)
-    )
+    if (!shell) {
+      Box(
+        Modifier.align(Alignment.BottomEnd)
+          .size(side * 0.32f)
+          .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+          .background(status.tint, CircleShape)
+      )
+    }
   }
 }

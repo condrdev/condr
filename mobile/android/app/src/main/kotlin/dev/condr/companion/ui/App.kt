@@ -1,22 +1,42 @@
 package dev.condr.companion.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
@@ -33,6 +53,7 @@ import dev.condr.companion.ui.settings.LostPhoneScreen
 import dev.condr.companion.ui.settings.PhoneNameScreen
 import dev.condr.companion.ui.settings.SettingsScreen
 import dev.condr.companion.ui.terminal.TerminalPage
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import uniffi.condr_mobile.AgentStatus
 
@@ -44,7 +65,11 @@ val LocalStores = staticCompositionLocalOf<Stores> { error("No Stores") }
 @Composable
 fun App(stores: Stores) {
   CompositionLocalProvider(LocalStores provides stores) {
-    if (stores.session.paired) MainTabs() else WelcomeScreen()
+    Box(Modifier.fillMaxSize()) {
+      if (stores.session.paired) MainTabs() else WelcomeScreen()
+      Overlays()
+      if (stores.lock.locked) LockScreen()
+    }
   }
 }
 
@@ -115,4 +140,89 @@ private fun DeviceStack(path: MutableList<DeviceRoute>, root: @Composable () -> 
         entry<DeviceRoute.Pane> { TerminalPage(it.ref) }
       },
   )
+}
+
+/**
+ * What the app says over its screens (ADR 0020): a banner for an Agent elsewhere that needs you or
+ * finished, as a snackbar with Open; an error to read, copy and dismiss, as a dialog; and a passing
+ * notice.
+ */
+@Composable
+private fun Overlays() {
+  val stores = LocalStores.current
+  val alerts = stores.alerts
+  val router = stores.router
+  val context = LocalContext.current
+  val host = remember { SnackbarHostState() }
+  val banner = alerts.banner
+  LaunchedEffect(banner?.id) {
+    val shown = banner ?: return@LaunchedEffect
+    if (shown.quiet) return@LaunchedEffect
+    val result =
+      host.showSnackbar(
+        message = "${shown.title} · ${shown.detail}",
+        actionLabel = "Open",
+        duration = SnackbarDuration.Long,
+        withDismissAction = true,
+      )
+    if (result == SnackbarResult.ActionPerformed) router.open(shown.ref)
+    alerts.dismissBanner()
+  }
+  val notice = alerts.notice
+  LaunchedEffect(notice) {
+    val text = notice ?: return@LaunchedEffect
+    host.showSnackbar(text, duration = SnackbarDuration.Short)
+  }
+  Box(Modifier.fillMaxSize()) {
+    SnackbarHost(host, Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp))
+  }
+  val error = alerts.error
+  if (error != null) {
+    AlertDialog(
+      onDismissRequest = { alerts.dismissError() },
+      title = { Text("Something went wrong") },
+      text = { Text(error) },
+      confirmButton = { TextButton(onClick = { alerts.dismissError() }) { Text("OK") } },
+      dismissButton = {
+        TextButton(
+          onClick = {
+            context
+              .getSystemService(android.content.ClipboardManager::class.java)
+              .setPrimaryClip(android.content.ClipData.newPlainText("Condr", error))
+          }
+        ) {
+          Text("Copy")
+        }
+      },
+    )
+  }
+}
+
+/** The lock over everything (ADR 0041): it asks as it appears, and again on the button. */
+@Composable
+private fun LockScreen() {
+  val lock = LocalStores.current.lock
+  val scope = rememberCoroutineScope()
+  LaunchedEffect(Unit) { if (lock.promptsOnAppear) lock.unlock() }
+  Column(
+    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).padding(32.dp),
+    verticalArrangement = Arrangement.Center,
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    Icon(
+      Icons.Filled.Lock,
+      contentDescription = null,
+      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+      modifier = Modifier.size(40.dp),
+    )
+    Text(
+      "Condr is locked",
+      style = MaterialTheme.typography.headlineSmall,
+      fontWeight = FontWeight.Bold,
+      modifier = Modifier.padding(top = 20.dp, bottom = 24.dp),
+    )
+    Button(onClick = { scope.launch { lock.unlock() } }, enabled = !lock.authenticating) {
+      Text("Unlock")
+    }
+  }
 }

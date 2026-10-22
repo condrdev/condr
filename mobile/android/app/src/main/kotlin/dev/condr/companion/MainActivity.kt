@@ -1,6 +1,7 @@
 package dev.condr.companion
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,14 +21,15 @@ class MainActivity : ComponentActivity() {
     installSplashScreen()
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
-    stores = (application as CompanionApplication).stores(scene(intent))
+    stores = stores(intent)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
     setContent { CondrTheme { stores?.let { App(it) } } }
   }
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
-    stores = (application as CompanionApplication).stores(scene(intent))
+    stores = stores(intent)
   }
 
   override fun onResume() {
@@ -41,5 +43,11 @@ class MainActivity : ComponentActivity() {
   }
 
   /** `adb shell am start -e scene agents`: a demo scene for review and the UI tests. */
-  private fun scene(intent: Intent?): DemoScene? = DemoScene.named(intent?.getStringExtra("scene"))
+  private fun stores(intent: Intent?): Stores {
+    val scene = DemoScene.named(intent?.getStringExtra("scene"))
+    return (application as CompanionApplication).stores(scene).also {
+      it.scrub = intent?.getStringExtra("scrub")
+      it.focus = intent?.getStringExtra("focus") == "true"
+    }
+  }
 }

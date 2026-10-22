@@ -77,6 +77,13 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
       return Preferences(store, runBlocking { store.data.first() })
     }
 
+    /** Preferences that forget between launches: a demo scene's. */
+    fun ephemeral(context: Context): Preferences {
+      val file = context.cacheDir.resolve("demo-preferences.preferences_pb").also { it.delete() }
+      val store = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create { file }
+      return Preferences(store, androidx.datastore.preferences.core.emptyPreferences())
+    }
+
     /** The name the person gave this phone in its settings, to offer at pairing. */
     fun systemDeviceName(context: Context): String =
       Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf {

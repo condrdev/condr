@@ -47,6 +47,8 @@ val AgentStatus.title: String
       AgentStatus.UNKNOWN -> "Not reporting"
     }
 
+fun urgencyOf(status: AgentStatus): Int = status.urgency
+
 /** In the order a score draws them: most urgent first, stable within a state. */
 fun List<AgentItem>.byUrgency(): List<AgentItem> = sortedBy { it.agent.status.urgency }
 
