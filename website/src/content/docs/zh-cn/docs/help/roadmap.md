@@ -13,7 +13,7 @@ Condr 0.1 正处于公开预览阶段。本页列出后续准备开发的功能�
 
 **iPhone 版公开测试中**。iPhone 版现已可通过 TestFlight 安装，详见[手机端](/zh-cn/docs/using/mobile/)：支持查看各设备上的 Agent 与 Needs you 列表，打开 Pane 进行阅读和回复。接下来按此顺序推进：
 
-1. **推送通知**：当 Agent 完成任务或需要你介入时，手机将收到通知。推送内容由 Server 使用手机公钥进行端到端加密，负责中转推送的服务器以及 Apple 和 Google 均无法解密。Android 端仅经由 Google 推送服务投递，未搭载 Google 服务的手机仅在 App 打开时刷新。
+1. **推送通知**：已实现，随下一个桌面版本和 TestFlight build 发布。当 Agent 完成、出错或需要你介入时，手机会收到通知。通知经 Condr 运营的 Condr Cloud 转交 Apple 或 Google 的推送服务，内容包括 Agent 名称与状态、Workspace、终端标题和 Server 名称，不含任何终端内容，详见[隐私](/zh-cn/docs/help/privacy/)。Android 端仅经由 Google 推送服务投递，未搭载 Google 服务的手机仅在 App 打开时刷新。
 2. **Android 版**：功能与 iPhone 版保持一致。在首个正式版发布前，将以签名 APK 的形式通过 GitHub Releases 提供。
 
 App Store 与 Google Play 上架将随 Condr 首个正式版一并进行。
