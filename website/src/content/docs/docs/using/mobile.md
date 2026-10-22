@@ -1,25 +1,34 @@
 ---
 title: Mobile app
-description: Install Condr on your iPhone, pair it with your computers, and check on and answer your Agents away from your desk.
+description: Install Condr on your iPhone or Android phone, pair it with your computers, and check on and answer your Agents away from your desk.
 ---
 
-Condr for iPhone shows every Agent on the computers you pair with it, lists the ones waiting for you first, and opens any Pane so you can read and reply. It is in public beta on TestFlight. An Android app is planned; see the [Roadmap](/docs/help/roadmap/).
+Condr for iPhone and Android shows every Agent on the computers you pair with it, lists the ones waiting for you first, and opens any Pane so you can read and reply. The iPhone app is in public beta on TestFlight; the Android app ships as an APK with every Condr release until it reaches Google Play with the first stable release (see the [Roadmap](/docs/help/roadmap/)).
 
 ---
 
 ## Requirements
 
-* An iPhone with iOS 26 or later.
+* An iPhone with iOS 26 or later, or an Android phone with Android 10 or later.
 * Condr 0.1.13 or later on each computer you pair.
 
 ---
 
 ## Install
 
+### iPhone
+
 1. Install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store.
 2. On the iPhone, open the [Condr beta invitation](https://testflight.apple.com/join/6qQE7Pbx) and tap **Accept**, then **Install**.
 
 When a new beta comes out, update the app in TestFlight. Each beta expires after 90 days, usually after a newer one is out.
+
+### Android
+
+1. On the phone, open the [nightly prerelease](https://github.com/condrdev/condr/releases/tag/nightly) (or a [release](https://github.com/condrdev/condr/releases)) and download `condr-companion-<version>.apk`.
+2. Open the download and allow installing from your browser when Android asks.
+
+To update, install a newer APK over it: every APK is signed with the same key, so the phone keeps its pairings. Notifications need Google Play services; a phone without them stays up to date only while the app is open.
 
 ---
 
@@ -41,7 +50,7 @@ To try the app without a computer, tap **No computer to pair? Try Demo** under *
 * **Agents**: every Agent on every paired computer, with **Needs you** at the top: the Agents that are Blocked or failed, with what they said. Tap one to open its Pane.
 * **In a Pane**: the phone becomes one more window on the terminal and sizes it to the phone's screen. Clicking or typing in the Pane on the computer takes the size back, and it also returns within seconds after you leave the Pane on the phone. Type with the keyboard; the key row above it has Escape, Tab, Shift-Tab, Control, the arrows, Home, End, Page Up and Page Down. Swipe to scroll, tap to click or open a link, and long-press to copy.
 * **What it doesn't do**: the phone doesn't create or close Workspaces, Tabs or Panes, or start Agents. Do that on the computer.
-* **App lock**: the app asks for Face ID, Touch ID, or the passcode when it starts and when you return after more than five minutes away. You can turn the lock off in the app's Settings.
+* **App lock**: the app asks for Face ID, Touch ID, or the passcode on an iPhone, and for your fingerprint, face, or screen lock on Android, when it starts and when you return after more than five minutes away. You can turn the lock off in the app's Settings.
 
 ---
 
@@ -49,7 +58,7 @@ To try the app without a computer, tap **No computer to pair? Try Demo** under *
 
 * The app is connected only while it is open, and it sends no notifications yet. Push notifications for an Agent that finishes or needs you are next on the [Roadmap](/docs/help/roadmap/).
 * Computers connected over SSH can't be paired with the phone. Use Peer-to-peer or TCP.
-* iPhone only; no iPad version.
+* Phones only; no iPad or tablet layout.
 
 ---
 
