@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "condr-client"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "base64 0.22.1",
  "condr-core",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "condr-core"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "alacritty_terminal",
  "atomicwrites",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "condr-gui"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "async-channel",
  "condr-client",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "condr-mobile"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "condr-client",
  "condr-core",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "condr-server"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "atomicwrites",
  "clap",
