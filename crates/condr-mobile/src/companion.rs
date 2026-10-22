@@ -459,8 +459,9 @@ impl Companion {
         }
     }
 
-    /// Ends everything; the object is unusable afterwards.
-    pub fn close(&self) {
+    /// Ends everything; the object is unusable afterwards. Named for what uniffi's Kotlin
+    /// gives every object already: a `close()` of its own (ADR 0048).
+    pub fn shutdown(&self) {
         self.suspend();
         self.shared.lock().closed = true;
         self.shared.wake.notify_one();
@@ -734,7 +735,7 @@ impl Companion {
 
 impl Drop for Companion {
     fn drop(&mut self) {
-        self.close();
+        self.shutdown();
     }
 }
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The brand's two colours (assets/brand). -->
+    <color name="ink">#1D1D1F</color>
+    <color name="paper">#F5F5F7</color>
+</resources>

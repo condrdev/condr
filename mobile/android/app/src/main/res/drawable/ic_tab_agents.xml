@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The logo's bars, as the Agents tab (assets/brand). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="128"
+    android:viewportHeight="128"
+    android:tint="?attr/colorControlNormal">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M48,24 h42 a2,2 0 0 1 2,2 v8 a2,2 0 0 1 -2,2 h-42 a2,2 0 0 1 -2,-2 v-8 a2,2 0 0 1 2,-2 z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M35.5,36 h12 a2,2 0 0 1 2,2 v52 a2,2 0 0 1 -2,2 h-12 a2,2 0 0 1 -2,-2 v-52 a2,2 0 0 1 2,-2 z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M48,92 h42 a2,2 0 0 1 2,2 v8 a2,2 0 0 1 -2,2 h-42 a2,2 0 0 1 -2,-2 v-8 a2,2 0 0 1 2,-2 z" />
+</vector>

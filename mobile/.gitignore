@@ -10,3 +10,10 @@
 /ios/Condr/Condr.entitlements
 # Xcode writes the strings it extracts into it on every build; track it again once the app is translated.
 /ios/Condr/Resources/Localizable.xcstrings
+# Gradle and Android Studio.
+/android/.gradle/
+/android/.kotlin/
+/android/.idea/
+/android/local.properties
+/android/**/build/
+/android/app/google-services.json

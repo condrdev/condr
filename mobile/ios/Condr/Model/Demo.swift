@@ -364,7 +364,7 @@ nonisolated final class DemoClient: CompanionProtocol {
         state = Mutex(State(devices: world.devices, workspaces: world.workspaces))
     }
 
-    func close() {}
+    func shutdown() {}
     func resume() {}
     func suspend() {}
     func setActive(active: Bool) {}

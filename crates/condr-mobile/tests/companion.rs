@@ -116,7 +116,7 @@ fn a_burst_of_frames_costs_one_changed_until_the_app_takes_it() {
         counter.0.load(Ordering::SeqCst) > before + 1
     });
 
-    companion.close();
+    companion.shutdown();
     handle.stop();
     drop(desktop);
     server_thread.join().unwrap().unwrap();
@@ -189,7 +189,7 @@ fn outside_a_pane_the_companion_gets_events_but_no_terminal() {
         "no terminal changed on the phone"
     );
 
-    companion.close();
+    companion.shutdown();
     handle.stop();
     drop(desktop);
     server_thread.join().unwrap().unwrap();
@@ -232,7 +232,7 @@ fn changing_push_reconnects_open_connections() {
     assert_eq!(status(), DeviceStatus::Connecting, "a new answer");
     wait_until("the new connection", || status() == DeviceStatus::Connected);
 
-    companion.close();
+    companion.shutdown();
     handle.stop();
     server_thread.join().unwrap().unwrap();
 }
@@ -276,7 +276,7 @@ fn a_device_is_listed_with_its_device_id() {
     assert_eq!(ids(&format!("p2p://{p2p}")), Some(p2p));
     assert_eq!(ids(&format!("tcp://{tcp}@studio.local:7417")), Some(tcp));
     assert_eq!(ids("tcp://not-a-key@studio.local:7417"), None);
-    companion.close();
+    companion.shutdown();
 }
 
 /// Scrolling is the Pane's, shared by every viewer (ADR 0036): a swipe over a shell scrolls
@@ -365,7 +365,7 @@ fn scrolling_up_shows_in_the_screen_and_bottom_brings_it_back() {
             .is_some_and(|screen| screen.scrolled_lines == 0)
     });
 
-    companion.close();
+    companion.shutdown();
     handle.stop();
     drop(desktop);
     server_thread.join().unwrap().unwrap();
@@ -406,7 +406,7 @@ fn a_server_that_does_not_know_the_phone_marks_it_revoked() {
     });
     assert_eq!(companion.devices()[0].status, DeviceStatus::Revoked);
 
-    companion.close();
+    companion.shutdown();
     handle.stop();
     server_thread.join().unwrap().unwrap();
 }
@@ -519,7 +519,7 @@ impl Shown {
     }
 
     fn stop(self) {
-        self.companion.close();
+        self.companion.shutdown();
         self.handle.stop();
         self.thread.join().unwrap().unwrap();
     }
@@ -776,5 +776,5 @@ fn suspend_breaks_off_a_dial_in_progress() {
         DeviceStatus::Suspended,
         "no failure turns up later"
     );
-    companion.close();
+    companion.shutdown();
 }

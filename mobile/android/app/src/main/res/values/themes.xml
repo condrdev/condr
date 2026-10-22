@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window's theme before Compose draws; everything visible is Compose's. -->
+    <style name="Theme.Condr" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/paper</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/ink</item>
+    </style>
+</resources>

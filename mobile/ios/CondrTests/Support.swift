@@ -44,7 +44,7 @@ nonisolated final class FakeClient: CompanionProtocol {
         state.withLock { change(&$0) }
     }
 
-    func close() { state.withLock { $0.lifecycle.append("close") } }
+    func shutdown() { state.withLock { $0.lifecycle.append("shutdown") } }
     func resume() { state.withLock { $0.lifecycle.append("resume") } }
     func suspend() { state.withLock { $0.lifecycle.append("suspend") } }
     func setActive(active: Bool) {

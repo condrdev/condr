@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The same bars in one colour: the themed launcher icon and the notification's small icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="128"
+    android:viewportHeight="128"
+    android:tint="?attr/colorControlNormal">
+    <group
+        android:scaleX="0.75"
+        android:scaleY="0.75"
+        android:pivotX="64"
+        android:pivotY="64">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M50,24 h38 a2,2 0 0 1 2,2 v8 a2,2 0 0 1 -2,2 h-38 a2,2 0 0 1 -2,-2 v-8 a2,2 0 0 1 2,-2 z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M37.5,36 h8 a2,2 0 0 1 2,2 v52 a2,2 0 0 1 -2,2 h-8 a2,2 0 0 1 -2,-2 v-52 a2,2 0 0 1 2,-2 z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M50,92 h38 a2,2 0 0 1 2,2 v8 a2,2 0 0 1 -2,2 h-38 a2,2 0 0 1 -2,-2 v-8 a2,2 0 0 1 2,-2 z" />
+    </group>
+</vector>
