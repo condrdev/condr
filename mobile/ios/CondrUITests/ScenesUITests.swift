@@ -137,19 +137,22 @@ final class ScenesUITests: XCTestCase {
         }
     }
 
-    /// The app lock is on unless turned off, and turning it off asks first (ADR 0041).
-    @MainActor func testTheAppLockCanBeTurnedOff() {
+    /// The app lock is off until turned on, and turning it on asks nothing (ADR 0048).
+    @MainActor func testTheAppLockCanBeTurnedOn() {
         let app = launch("settings")
         let toggle = app.switches["Lock with Face ID"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 15))
-        XCTAssertEqual(toggle.value as? String, "1")
-        let control = toggle.switches.firstMatch.exists ? toggle.switches.firstMatch : toggle
-        control.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
         XCTAssertTrue(
             app.staticTexts[
                 "Anyone who can open this iPhone can open Condr and reach your computers."
             ]
-            .waitForExistence(timeout: 5))
-        XCTAssertEqual(toggle.value as? String, "0")
+            .exists)
+        let control = toggle.switches.firstMatch.exists ? toggle.switches.firstMatch : toggle
+        control.tap()
+        XCTAssertTrue(
+            app.staticTexts["Condr asks for Face ID when it opens and after five minutes away."]
+                .waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "1")
     }
 }
