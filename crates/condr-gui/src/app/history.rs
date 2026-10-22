@@ -2,10 +2,11 @@
 //! the files a selected one changed, and one of those files in the Workspace's Diff Tab. It
 //! reads only; nothing here acts on the repository.
 
-use super::changes::{diff_stat, empty_state, status_glyph};
+use super::change_tree::{TreeRow, directory_row, file_row, tree_rows};
+use super::changes::empty_state;
 use super::*;
 use condr_core::protocol::{DiffBase, relative_age};
-use condr_core::{GitChangeEntry, GitChangeStatus, HISTORY_PAGE, MAX_GIT_CHANGES};
+use condr_core::{GitChangeEntry, HISTORY_PAGE, MAX_GIT_CHANGES};
 use gpui_kit::base::text::TextView;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -186,7 +187,7 @@ impl Condr {
             .into_any_element()
     }
 
-    /// The files the selected commit changed, as Changes draws its rows, under a count.
+    /// The files the selected commit changed, as Changes draws its tree, under a count.
     fn render_commit_files(
         &self,
         key: ConnectionKey,
@@ -243,10 +244,17 @@ impl Condr {
         if details.changes.entries.is_empty() {
             list = list.child(note("No file changes".into(), muted));
         }
-        for entry in &details.changes.entries {
-            let selected = shown == Some(entry.path.as_relative_path());
+        let entries: Vec<&GitChangeEntry> = details.changes.entries.iter().collect();
+        let folded = |path: &RelativePath| {
+            self.files_view.collapsed_commit_dirs.contains(&(
+                key,
+                workspace_id,
+                path.to_relative_path_buf(),
+            ))
+        };
+        for row in tree_rows(&entries, folded) {
             list =
-                list.child(self.render_commit_file(key, workspace_id, commit, entry, selected, cx));
+                list.child(self.render_commit_file_row(key, workspace_id, commit, row, shown, cx));
         }
         if details.changes.truncated {
             list = list.child(note(
@@ -271,92 +279,56 @@ impl Condr {
             .into_any_element()
     }
 
-    fn render_commit_file(
+    /// A row of a commit's files: a directory folds, a file shows in the Diff Tab as the
+    /// commit changed it.
+    fn render_commit_file_row(
         &self,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         commit: &CommitSummary,
-        entry: &GitChangeEntry,
-        selected: bool,
+        row: TreeRow<'_>,
+        shown: Option<&RelativePath>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme();
-        let selector: SharedString =
-            format!("commit-file-{}-{}", short_id(&commit.id), entry.path).into();
         let owner = cx.weak_entity();
-        let path = entry.path.clone();
-        let commit = commit.clone();
-        let name = entry
-            .path
-            .file_name()
-            .unwrap_or(entry.path.as_str())
-            .to_owned();
-        let directory = entry
-            .path
-            .parent()
-            .map(|parent| parent.to_string())
-            .filter(|parent| !parent.is_empty());
-        h_flex()
-            .id(selector.clone())
-            .debug_selector(move || selector.to_string())
-            .h_7()
-            .w_full()
-            .min_w_0()
-            .px_2()
-            .gap_2()
-            .items_center()
-            .cursor_pointer()
-            .rounded(theme.radius)
-            .text_sm()
-            .when(!selected, |this| {
-                this.hover(|this| {
-                    this.bg(theme.sidebar_accent.opacity(0.8))
-                        .text_color(theme.sidebar_accent_foreground)
+        match row {
+            TreeRow::Directory {
+                label,
+                path,
+                depth,
+                folded,
+            } => directory_row(format!("commit-files-dir-{path}"), label, depth, folded, cx)
+                .on_click(move |_, _, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        let dir = (key, workspace_id, path.clone());
+                        if !this.files_view.collapsed_commit_dirs.remove(&dir) {
+                            this.files_view.collapsed_commit_dirs.insert(dir);
+                        }
+                        cx.notify();
+                    });
                 })
-            })
-            .when(selected, |this| {
-                this.bg(theme.tokens.sidebar_accent)
-                    .text_color(theme.sidebar_accent_foreground)
-            })
-            .on_click(move |_, window, cx| {
-                let _ = owner.update(cx, |this, cx| {
-                    this.show_commit_diff(
-                        key,
-                        workspace_id,
-                        commit.clone(),
-                        path.clone(),
-                        window,
-                        cx,
-                    );
-                });
-            })
-            .child(status_glyph(entry.status, cx))
-            .child(
-                h_flex()
-                    .min_w_0()
-                    .flex_1()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex_none()
-                            .when(entry.status == GitChangeStatus::Deleted, |this| {
-                                this.line_through().text_color(theme.muted_foreground)
-                            })
-                            .child(name),
-                    )
-                    .when_some(directory, |this, directory| {
-                        this.child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(directory),
-                        )
-                    }),
-            )
-            .when_some(entry.stat, |this, stat| this.child(diff_stat(stat, cx)))
-            .into_any_element()
+                .into_any_element(),
+            TreeRow::File { name, entry, depth } => {
+                let id = format!("commit-file-{}-{}", short_id(&commit.id), entry.path);
+                let selected = shown == Some(entry.path.as_relative_path());
+                let commit = commit.clone();
+                let path = entry.path.clone();
+                file_row(id, name, entry, depth, selected, cx)
+                    .on_click(move |_, window, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.show_commit_diff(
+                                key,
+                                workspace_id,
+                                commit.clone(),
+                                path.clone(),
+                                window,
+                                cx,
+                            );
+                        });
+                    })
+                    .into_any_element()
+            }
+        }
     }
 
     /// The Diff Tab's second header row for a commit: its subject, short id, author and

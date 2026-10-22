@@ -3,7 +3,8 @@
 //! rendered when it is Markdown or an image (ADR 0037). The Editor saves what it edits
 //! back to the Server (ADR 0045); `file_edits` holds that side.
 
-use super::changes::{empty_state, status_color, status_glyph, tree_indent};
+use super::change_tree::{status_color, status_glyph, tree_indent};
+use super::changes::empty_state;
 use super::preview::{
     DecodedImage, PreviewImages, Rendering, image_summary, release_images, render_image,
     rendering_for,
@@ -42,6 +43,8 @@ pub(super) struct FilesViewState {
     pub(super) diff_commits: HashMap<(ConnectionKey, WorkspaceId), super::history::DiffCommit>,
     /// The commit each Workspace's History lists the files of, below its commits.
     pub(super) selected_commits: HashMap<(ConnectionKey, WorkspaceId), String>,
+    /// Directories folded shut in those files' tree, whichever commit is selected.
+    pub(super) collapsed_commit_dirs: HashSet<(ConnectionKey, WorkspaceId, RelativePathBuf)>,
     /// The Diff Tab shows a commit's whole message, not only its subject.
     pub(super) commit_message_open: bool,
     /// Refreshes the user asked for and the Server has not answered yet (ADR 0046), each
@@ -105,6 +108,8 @@ impl FilesViewState {
             .retain(|(connection, id), _| workspace_live(*connection, *id));
         self.selected_commits
             .retain(|(connection, id), _| workspace_live(*connection, *id));
+        self.collapsed_commit_dirs
+            .retain(|(connection, id, _)| workspace_live(*connection, *id));
         self.last_terminal_tabs.retain(|(connection, id), tab_id| {
             workspace_live(*connection, *id)
                 && (*connection != key

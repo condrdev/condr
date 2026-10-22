@@ -1,4 +1,5 @@
 mod actions;
+mod change_tree;
 mod changes;
 mod config;
 mod connection;
