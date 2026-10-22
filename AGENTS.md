@@ -42,7 +42,7 @@ crates/condr-client  # what a Client does with a Server short of drawing it: Dev
 crates/condr-server  # builds `condr`: the Server process (`condr server …`) and CLI subcommands; owns Session, terminal runtime, persistence and connections
 crates/condr-gui     # builds `condr-gui`: pure client, connects to one or more servers, renders with GPUI
 crates/condr-mobile  # the Companion's one library: a uniffi layer over `condr-client` that the iOS and Android apps link (ADR 0039)
-mobile/              # the Companion's apps: ios/ (SwiftUI; `project.yml` is the XcodeGen source of its project, with the CondrKit package and SwiftTerm) and android/ (Compose); `script/build-mobile.sh` builds their library
+mobile/              # the Companion's apps: ios/ (SwiftUI; `project.yml` is the XcodeGen source of its project, with the CondrKit package and SwiftTerm) and android/ (Jetpack Compose with Material 3 Expressive, a Gradle project whose `condr` module runs the build script itself; ADR 0048); `script/build-mobile.sh` builds their library
 assets/              # one copy of everything the GUI, packaging, README and website share: brand/ (logo and its generated icons), agents/ (agent CLI marks), screenshots/
 ```
 

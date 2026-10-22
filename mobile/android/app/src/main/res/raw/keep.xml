@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FCM resolves a push's title key by name (ADR 0047), and the font licence is read by name. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/push_finished,@string/push_failed,@string/push_blocked,@raw/ofl_jetbrains_mono" />

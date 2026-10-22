@@ -8,7 +8,7 @@ Condr 的 iOS 与 Android App（ADR 0039、0040、0041）。两端界面都是�
 
 - Rust targets：`rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-linux-android x86_64-linux-android`
 - iOS：Xcode 26（`xcode-select` 指向它，或设置 `DEVELOPER_DIR`）；`mise use -g xcodegen` 装 XcodeGen
-- Android：JDK、Android SDK 与 NDK、`cargo-ndk`；`ANDROID_HOME` 指向 SDK
+- Android：JDK 17 或更新（本机用 25）、Android SDK（platform 37.2、build-tools 36.0.0）与 NDK、`cargo-ndk`；`ANDROID_HOME` 指向 SDK
 
 ## 构建库和绑定
 
@@ -67,3 +67,50 @@ TEST_RUNNER_CONDR_INVITE='tcp://…@127.0.0.1:7418' TEST_RUNNER_CONDR_DEVICE_NAM
 ### 真机
 
 模拟器没有相机，扫码页会退回到粘贴链接。真机运行在 Xcode 里选自己的开发团队即可，`project.yml` 里的团队是作者的。
+
+## Android App
+
+`android/` 是一个 Gradle 工程（Kotlin DSL，版本目录在 `gradle/libs.versions.toml`）：`app` 是 App，`condr` 是库模块，它的 `preBuild` 会先跑 `script/build-mobile.sh android`，所以 Gradle 构建永远链接当前的库。界面按 ADR 0048：Jetpack Compose 与 Material 3 Expressive（取自 `material3` 1.5.0 的 beta，钉死版本，不开全局 opt-in），Navigation 3，没有 ViewModel，Application 级的 `Session` 把库的状态投影给 Compose；终端由 `ui/terminal/TerminalCanvas.kt` 自绘 Server 的格子。
+
+```sh
+cd android
+./gradlew :app:installDebug                                   # 装到已连接的设备或模拟器
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:ktfmtCheck
+./gradlew ktfmtFormat                                         # 格式化（Google 风格）
+./gradlew :app:assembleRelease -Prelease -PversionCode=N      # Rust release 库 + R8；有 ANDROID_KEYSTORE_FILE/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_PASSWORD 时用上传密钥签名，否则 debug 密钥
+```
+
+推送要 `app/google-services.json`（不提交；没有它也能构建，App 显示通知不可用）。`compileSdk` 是 37.2（Compose 1.13 的 beta 需要），`targetSdk` 36，`minSdk` 29。
+
+### 结构
+
+- `CompanionApplication` / `MainActivity` / `Stores`：进程级的对象装配、前后台与网络回调、通知点开进 Pane
+- `model/`：`Session`（库的状态与变更）、`Router`、`Preferences`（Preferences DataStore）、`AppLock`（系统的 BiometricPrompt）、`Alerts`、`Push`（Condr Cloud 登记）
+- `persistence/`：Keystore 包裹的 Device 密钥、Proto DataStore 里的配对列表
+- `demo/`：演示世界与 `DemoClient`，和 iOS 的 `Demo.swift` 一一对应
+- `push/`：通知渠道与 FCM 服务
+- `ui/`：`agents`（首页与 Score）、`devices`、`settings`、`pairing`、`terminal`（Canvas 渲染、键排、输入栏）、`theme`
+
+### 演示场景
+
+和 iOS 同一份场景名单，经 Intent extra 启动：
+
+```sh
+adb shell am start -n dev.condr.companion/.MainActivity -e scene agents
+adb shell am start -n dev.condr.companion/.MainActivity -e scene agents -e scrub 0:1   # 定住一次 Score 的滑动
+adb shell am start -n dev.condr.companion/.MainActivity -e scene terminal -e focus true
+```
+
+`scan` 在 Android 上只到配对页：扫码是 Google Play services 的系统界面，没有 Play services 的手机只能粘贴链接。
+
+### 测试
+
+JVM 单测只测纯 Kotlin（`Push` 的登记逻辑对假发送器）。连真实 Server 的端到端配对测试默认跳过，给它一个邀请就在模拟器上走完配对并看到 Agents 页（App 须未配对，`adb uninstall dev.condr.companion`；模拟器经 `10.0.2.2` 访问宿主机）：
+
+```sh
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.invite='tcp://…@10.0.2.2:7419' \
+  -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+```
+
+Agent 的标由 `script/generate-android-agent-marks.py` 从 `assets/agents/` 生成到 `app/src/main/res/drawable/agent_*.xml`，改了标就重跑它。终端字体是 JetBrains Mono（OFL，`res/raw/ofl_jetbrains_mono.txt`）。

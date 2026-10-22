@@ -1,8 +1,9 @@
 name: Mobile
 
-# The Companion's packages around its library (ADR 0039): the bindings generate, the Swift
-# package compiles against them, and the iOS app's tests run on a simulator. ci.yml builds the
-# library itself on every change.
+# The Companion's apps around its library (ADR 0039): the bindings generate, the Swift
+# package compiles against them, the iOS app's tests run on a simulator, and the Android app
+# builds, lints and runs its unit tests (ADR 0048). ci.yml builds the library itself on every
+# change.
 on:
   push:
     branches: [main]
@@ -72,4 +73,16 @@ jobs:
           key: android
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo install cargo-ndk --locked --version 4.1.2
-      - run: script/build-mobile.sh android
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Install the Android SDK packages the app compiles against
+        run: |
+          yes 2>/dev/null | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" >/dev/null
+      # Gradle runs script/build-mobile.sh android before the app builds (ADR 0039).
+      - name: Build, format-check, lint and unit-test the app
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon :app:assembleDebug :app:ktfmtCheck :app:lintDebug :app:testDebugUnitTest

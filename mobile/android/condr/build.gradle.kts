@@ -5,28 +5,27 @@
 plugins { alias(libs.plugins.android.library) }
 
 android {
-    namespace = "uniffi.condr_mobile"
-    compileSdk = 37
-    compileSdkMinor = 2
-    defaultConfig { minSdk = 29 }
-    // Gradle must not strip the Rust library's symbols with its own tools: cargo-ndk
-    // already produced what release profile asked for.
-    packaging { jniLibs.keepDebugSymbols += "**/libcondr_mobile.so" }
+  namespace = "uniffi.condr_mobile"
+  compileSdk = 37
+  compileSdkMinor = 2
+  defaultConfig { minSdk = 29 }
 }
 
 val buildMobile =
-    tasks.register<Exec>("buildMobile") {
-        description = "Builds libcondr_mobile.so per ABI and generates the Kotlin bindings"
-        workingDir = rootDir.parentFile.parentFile
-        commandLine("script/build-mobile.sh", "android")
-        if (System.getenv("CONDR_MOBILE_PROFILE") == null) {
-            environment("CONDR_MOBILE_PROFILE", if (project.hasProperty("release")) "release" else "debug")
-        }
-        inputs.dir(workingDir.resolve("crates"))
-        inputs.dir(workingDir.resolve("proto"))
-        outputs.dir(layout.projectDirectory.dir("src/main/jniLibs"))
-        outputs.dir(layout.projectDirectory.dir("src/main/kotlin"))
-    }
+  tasks.register<Exec>("buildMobile") {
+    description = "Builds libcondr_mobile.so per ABI and generates the Kotlin bindings"
+    workingDir = rootDir.parentFile.parentFile
+    commandLine("script/build-mobile.sh", "android")
+    val profile =
+      System.getenv("CONDR_MOBILE_PROFILE") ?: if (project.hasProperty("release")) "release" else "debug"
+    environment("CONDR_MOBILE_PROFILE", profile)
+    // The profile is an input: a release build after a debug one rebuilds the library.
+    inputs.property("profile", profile)
+    inputs.dir(workingDir.resolve("crates"))
+    inputs.dir(workingDir.resolve("proto"))
+    outputs.dir(layout.projectDirectory.dir("src/main/jniLibs"))
+    outputs.dir(layout.projectDirectory.dir("src/main/kotlin"))
+  }
 
 tasks.named("preBuild") { dependsOn(buildMobile) }
 

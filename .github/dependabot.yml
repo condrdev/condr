@@ -4,3 +4,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The Android app's Gradle plugins and libraries (ADR 0048); material3 stays pinned to
+  # its beta until 1.5.0 is stable, so its bumps are merged by hand.
+  - package-ecosystem: gradle
+    directory: /mobile/android
+    schedule:
+      interval: weekly

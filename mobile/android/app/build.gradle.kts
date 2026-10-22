@@ -27,6 +27,8 @@ android {
     versionName = "0.1"
     versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    // The two ABIs the library is built for (ADR 0039); JNA's other ones stay out.
+    ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
   }
 
   buildFeatures {
@@ -34,11 +36,26 @@ android {
     buildConfig = true
   }
 
+  // The upload key (ADR 0048): CI passes the keystore and its passwords through the
+  // environment; a build without them is signed with the debug key, as a local one is.
+  val keystore = System.getenv("ANDROID_KEYSTORE_FILE")?.let(::file)?.takeIf { it.exists() }
+  if (keystore != null) {
+    signingConfigs.create("upload") {
+      storeFile = keystore
+      storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+      keyAlias = "condr-upload"
+      keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      signingConfig =
+        if (keystore != null) signingConfigs.getByName("upload")
+        else signingConfigs.getByName("debug")
     }
   }
 

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The window's theme before Compose draws; everything visible is Compose's. -->
-    <style name="Theme.Condr" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowSplashScreenBackground">@color/paper</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/ink</item>
+    <!-- The splash the system draws before Compose does; everything visible after is Compose's. -->
+    <style name="Theme.Condr" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ink</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Condr.App</item>
     </style>
+    <style name="Theme.Condr.App" parent="android:Theme.Material.NoActionBar" />
 </resources>
