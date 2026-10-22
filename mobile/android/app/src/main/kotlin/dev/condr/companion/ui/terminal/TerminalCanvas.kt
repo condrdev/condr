@@ -143,6 +143,18 @@ fun TerminalCanvas(
 
 private class Faces(val regular: Typeface, val italic: Typeface)
 
+/** Draws `screen` onto `canvas` at `rows` × `columns`, the renderer's one entry point. */
+fun drawTerminal(
+  canvas: android.graphics.Canvas,
+  screen: TerminalScreen,
+  rows: Int,
+  columns: Int,
+  regular: Typeface,
+  italic: Typeface,
+  metrics: CellMetrics,
+  textSize: Float,
+) = Renderer(Faces(regular, italic), metrics, textSize).draw(canvas, screen, rows, columns)
+
 /** A cell's size for the font: the width of "W" and the font's line height. */
 class CellMetrics(face: Typeface, textSize: Float) {
   val width: Float

@@ -105,7 +105,7 @@ adb shell am start -n dev.condr.companion/.MainActivity -e scene terminal -e foc
 
 ### 测试
 
-JVM 单测只测纯 Kotlin（`Push` 的登记逻辑对假发送器）。连真实 Server 的端到端配对测试默认跳过，给它一个邀请就在模拟器上走完配对并看到 Agents 页（App 须未配对，`adb uninstall dev.condr.companion`；模拟器经 `10.0.2.2` 访问宿主机）：
+JVM 单测只测纯 Kotlin（`Push` 的登记逻辑对假发送器）。模拟器上的 `connectedDebugAndroidTest` 跑每个演示场景（`ScenesTest`）和终端渲染器对位图的检查（`RendererTest`：格子尺寸、宽字符占两列、选区与光标的颜色）。连真实 Server 的端到端配对测试（`LivePairingTest`）只在给了邀请时才进入运行，它在模拟器上走完配对并看到 Agents 页（App 须未配对，`adb uninstall dev.condr.companion`；模拟器经 `10.0.2.2` 访问宿主机）：
 
 ```sh
 ./gradlew :app:connectedDebugAndroidTest \

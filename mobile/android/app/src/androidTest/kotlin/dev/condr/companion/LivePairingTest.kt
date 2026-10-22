@@ -18,7 +18,8 @@ import org.junit.Test
  *     ./gradlew :app:connectedDebugAndroidTest \
  *       -Pandroid.testInstrumentationRunnerArguments.invite='tcp://…@10.0.2.2:7419'
  *
- * The app must not be paired yet (`adb uninstall dev.condr.companion` first).
+ * The app must not be paired yet (`adb uninstall dev.condr.companion` first). Without the argument
+ * the build leaves this class out of the run.
  */
 class LivePairingTest {
   @get:Rule val compose = createAndroidComposeRule<MainActivity>()

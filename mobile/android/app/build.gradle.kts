@@ -27,6 +27,11 @@ android {
     versionName = "0.1"
     versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    // The pairing test against a real Server runs only when an Invite is passed:
+    // -Pandroid.testInstrumentationRunnerArguments.invite='tcp://…'
+    if (!project.hasProperty("android.testInstrumentationRunnerArguments.invite")) {
+      testInstrumentationRunnerArguments["notClass"] = "dev.condr.companion.LivePairingTest"
+    }
     // The two ABIs the library is built for (ADR 0039); JNA's other ones stay out.
     ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
   }
@@ -98,4 +103,5 @@ dependencies {
   androidTestImplementation(libs.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.runner)
+  androidTestImplementation(libs.androidx.test.core)
 }

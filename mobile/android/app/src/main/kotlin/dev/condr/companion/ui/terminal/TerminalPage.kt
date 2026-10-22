@@ -72,7 +72,9 @@ import dev.condr.companion.model.name
 import dev.condr.companion.model.needsYou
 import dev.condr.companion.model.place
 import dev.condr.companion.model.title
+import dev.condr.companion.ui.ErrorToast
 import dev.condr.companion.ui.LocalStores
+import dev.condr.companion.ui.NoticeToast
 import dev.condr.companion.ui.agents.AgentMarks
 import dev.condr.companion.ui.theme.StatusGlyph
 import dev.condr.companion.ui.theme.tint
@@ -243,7 +245,10 @@ fun TerminalPage(ref: PaneRef) {
       Column(
         Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
       ) {
+        NoticeToast()
+        ErrorToast()
         KeyRow(
           control = control,
           onControl = { control = it },
