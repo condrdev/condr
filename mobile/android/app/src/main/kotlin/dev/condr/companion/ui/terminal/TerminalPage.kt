@@ -76,6 +76,7 @@ import dev.condr.companion.ui.ErrorToast
 import dev.condr.companion.ui.LocalStores
 import dev.condr.companion.ui.NoticeToast
 import dev.condr.companion.ui.agents.AgentMarks
+import dev.condr.companion.ui.theme.DarkSystemBars
 import dev.condr.companion.ui.theme.StatusGlyph
 import dev.condr.companion.ui.theme.tint
 import kotlinx.coroutines.delay
@@ -147,15 +148,8 @@ fun TerminalPage(ref: PaneRef) {
     onDispose { session.hide(ref) }
   }
   LaunchedEffect(Unit) { if (stores.focus) focus.requestFocus() }
-  // The page is dark whatever the theme, so the status bar's icons go light while it shows.
-  val view = androidx.compose.ui.platform.LocalView.current
-  DisposableEffect(view) {
-    val window = (view.context as? android.app.Activity)?.window
-    val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
-    val wasLight = controller?.isAppearanceLightStatusBars
-    controller?.isAppearanceLightStatusBars = false
-    onDispose { if (wasLight != null) controller.isAppearanceLightStatusBars = wasLight }
-  }
+  // The page is dark whatever the theme.
+  DarkSystemBars()
 
   val screen = session.screen
   val agent = pane.agent

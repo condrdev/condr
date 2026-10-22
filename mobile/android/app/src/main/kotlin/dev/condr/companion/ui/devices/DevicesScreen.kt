@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
@@ -230,6 +231,11 @@ fun DeviceScreen(address: String) {
       MediumFlexibleTopAppBar(
         title = { Text(device.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         scrollBehavior = scroll,
+        navigationIcon = {
+          IconButton(onClick = { path.removeAt(path.lastIndex) }) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+          }
+        },
         actions = {
           IconButton(onClick = { menu = true }) {
             Icon(Icons.Filled.MoreVert, contentDescription = "More")

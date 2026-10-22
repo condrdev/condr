@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,8 +18,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilledTonalIconToggleButton
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,16 +80,26 @@ fun KeyRow(
     ) {
       TextKey("esc", "Escape") { press(Key.Escape) }
       TextKey("tab", "Tab") { press(Key.Tab) }
-      FilledTonalIconToggleButton(
-        checked = control,
-        onCheckedChange = onControl,
-        modifier = Modifier.semantics { contentDescription = "Control" },
+      FilledTonalButton(
+        onClick = { onControl(!control) },
+        contentPadding = PaddingValues(horizontal = 10.dp),
+        colors =
+          if (control)
+            ButtonDefaults.filledTonalButtonColors(
+              containerColor = MaterialTheme.colorScheme.primary,
+              contentColor = MaterialTheme.colorScheme.onPrimary,
+            )
+          else ButtonDefaults.filledTonalButtonColors(),
+        modifier =
+          Modifier.height(40.dp).widthIn(min = 48.dp).semantics { contentDescription = "Control" },
       ) {
         Text(
           "ctrl",
           fontFamily = FontFamily.Monospace,
           fontWeight = FontWeight.SemiBold,
           style = MaterialTheme.typography.labelLarge,
+          maxLines = 1,
+          softWrap = false,
         )
       }
       ArrowKey(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Left") { press(Key.Left) }
@@ -106,16 +117,18 @@ fun KeyRow(
 
 @Composable
 private fun TextKey(title: String, label: String, action: () -> Unit) {
-  FilledTonalIconButton(
+  FilledTonalButton(
     onClick = action,
-    modifier = Modifier.widthIn(min = 48.dp).semantics { contentDescription = label },
+    contentPadding = PaddingValues(horizontal = 10.dp),
+    modifier = Modifier.height(40.dp).widthIn(min = 48.dp).semantics { contentDescription = label },
   ) {
     Text(
       title,
       fontFamily = FontFamily.Monospace,
       fontWeight = FontWeight.SemiBold,
       style = MaterialTheme.typography.labelLarge,
-      modifier = Modifier.padding(horizontal = 6.dp),
+      maxLines = 1,
+      softWrap = false,
     )
   }
 }

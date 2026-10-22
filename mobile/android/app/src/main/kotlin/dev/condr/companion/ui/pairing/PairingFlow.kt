@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,7 +38,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -87,6 +87,7 @@ import dev.condr.companion.model.byUrgency
 import dev.condr.companion.model.name
 import dev.condr.companion.ui.LocalStores
 import dev.condr.companion.ui.agents.AgentAvatar
+import dev.condr.companion.ui.theme.DarkSystemBars
 import dev.condr.companion.ui.theme.Logo
 import dev.condr.companion.ui.theme.NumberedStep
 import dev.condr.companion.ui.theme.StepTitle
@@ -235,6 +236,7 @@ private fun Welcome(next: () -> Unit) {
     kotlinx.coroutines.delay(400)
     stage = 3
   }
+  DarkSystemBars()
   val logoAlpha by animateFloatAsState(if (stage >= 1) 1f else 0f, label = "logo")
   val stageAlpha by animateFloatAsState(if (stage >= 2) 1f else 0f, tween(900), label = "stage")
   val wordsAlpha by animateFloatAsState(if (stage >= 3) 1f else 0f, tween(800), label = "words")
@@ -444,8 +446,9 @@ private fun InviteIllustration() {
   }
 }
 
-/** The link under the code, pasted, in a sheet. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The link under the code, pasted, in a dialog: it keeps clear of the keyboard on every Android.
+ */
 @Composable
 private fun PasteLink(dismiss: () -> Unit, done: (String) -> Unit) {
   var link by remember { mutableStateOf("") }
@@ -462,39 +465,31 @@ private fun PasteLink(dismiss: () -> Unit, done: (String) -> Unit) {
         if (trimmed.isEmpty()) "Paste the link first."
         else "That isn't a pairing link. It starts with p2p:// or tcp://."
   }
-  ModalBottomSheet(onDismissRequest = dismiss) {
-    Column(
-      Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).imePadding(),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-      Text(
-        "Paste a link",
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.SemiBold,
-      )
-      Text(
-        "Copy the link under the code on your computer and paste it here.",
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-      OutlinedTextField(
-        value = link,
-        onValueChange = {
-          link = it
-          problem = null
-        },
-        placeholder = { Text("p2p://… or tcp://…") },
-        isError = problem != null,
-        supportingText = problem?.let { { Text(it) } },
-        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, autoCorrectEnabled = false),
-        keyboardActions = KeyboardActions(onDone = { submit() }),
-        modifier = Modifier.fillMaxWidth().focusRequester(focus),
-      )
-      Button(onClick = submit, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-        Text("Continue")
+  AlertDialog(
+    onDismissRequest = dismiss,
+    title = { Text("Paste a link") },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Copy the link under the code on your computer and paste it here.")
+        OutlinedTextField(
+          value = link,
+          onValueChange = {
+            link = it
+            problem = null
+          },
+          placeholder = { Text("p2p://… or tcp://…") },
+          isError = problem != null,
+          supportingText = problem?.let { { Text(it) } },
+          textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+          keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, autoCorrectEnabled = false),
+          keyboardActions = KeyboardActions(onDone = { submit() }),
+          modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        )
       }
-    }
-  }
+    },
+    confirmButton = { TextButton(onClick = submit) { Text("Continue") } },
+    dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
+  )
 }
 
 // The name

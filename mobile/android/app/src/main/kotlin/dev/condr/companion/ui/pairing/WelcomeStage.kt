@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -209,22 +210,28 @@ fun WelcomeStage(playing: Boolean, modifier: Modifier = Modifier) {
           totalWidth - with(density) { 104.dp.toPx() },
         )
       val y = baseline - h - with(density) { 28.dp.toPx() }
+      var captionWidth by remember { mutableStateOf(0) }
       Box(Modifier.fillMaxSize()) {
         Surface(
           shape = MaterialTheme.shapes.extraLarge,
           color = Color(0xFF2A2A2E),
           contentColor = paper,
           modifier =
-            Modifier.offset { IntOffset(0, (y - with(density) { 18.dp.toPx() }).roundToInt()) }
-              .padding(start = 0.dp)
-              .align(Alignment.TopStart)
-              .offset { IntOffset((x - with(density) { 104.dp.toPx() }).roundToInt(), 0) }
-              .size(width = 208.dp, height = 36.dp),
+            Modifier.align(Alignment.TopStart)
+              .offset {
+                val half = captionWidth / 2
+                val left =
+                  (x - half)
+                    .roundToInt()
+                    .coerceIn(0, (totalWidth - captionWidth).roundToInt().coerceAtLeast(0))
+                IntOffset(left, (y - with(density) { 18.dp.toPx() }).roundToInt())
+              }
+              .onSizeChanged { captionWidth = it.width },
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 13.dp),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
           ) {
             AgentMarks.resource(s.kind)?.let {
               Icon(painterResource(it), contentDescription = null, modifier = Modifier.size(15.dp))
@@ -234,6 +241,7 @@ fun WelcomeStage(playing: Boolean, modifier: Modifier = Modifier) {
               style = MaterialTheme.typography.labelLarge,
               fontWeight = FontWeight.SemiBold,
               maxLines = 1,
+              softWrap = false,
             )
           }
         }

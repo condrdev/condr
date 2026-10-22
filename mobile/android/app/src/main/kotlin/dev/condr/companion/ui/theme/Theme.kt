@@ -115,3 +115,37 @@ val AgentStatus.tint: Color
     }
 
 @Composable fun tintOf(status: AgentStatus): Color = status.tint
+
+/**
+ * While a page that is dark whatever the theme shows, the status and navigation bars take light
+ * icons and, where Android still draws a bar of its own (three-button navigation before 15), a dark
+ * one; both go back as the page leaves.
+ */
+@Composable
+fun DarkSystemBars() {
+  val view = androidx.compose.ui.platform.LocalView.current
+  androidx.compose.runtime.DisposableEffect(view) {
+    val window = (view.context as? android.app.Activity)?.window
+    val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+    val wasLightStatus = controller?.isAppearanceLightStatusBars
+    val wasLightNavigation = controller?.isAppearanceLightNavigationBars
+    @Suppress("DEPRECATION") val wasNavigationColor = window?.navigationBarColor
+    controller?.isAppearanceLightStatusBars = false
+    controller?.isAppearanceLightNavigationBars = false
+    @Suppress("DEPRECATION")
+    if (window != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM)
+      window.navigationBarColor = 0xFF1D1D1F.toInt()
+    onDispose {
+      if (wasLightStatus != null) controller.isAppearanceLightStatusBars = wasLightStatus
+      if (wasLightNavigation != null)
+        controller.isAppearanceLightNavigationBars = wasLightNavigation
+      @Suppress("DEPRECATION")
+      if (
+        window != null &&
+          wasNavigationColor != null &&
+          Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM
+      )
+        window.navigationBarColor = wasNavigationColor
+    }
+  }
+}
