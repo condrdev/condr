@@ -40,6 +40,15 @@ class ScenesTest {
   }
 
   @Test
+  fun pairOffersTheCodeThePastedLinkAndTheDemo() {
+    open("pair").use {
+      shows("Show the pairing code on your computer")
+      shows("Paste a link", substring = true)
+      shows("Try Demo", substring = true)
+    }
+  }
+
+  @Test
   fun agentsListsWhatNeedsYou() {
     open("agents").use {
       shows("Needs you")

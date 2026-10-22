@@ -72,10 +72,22 @@ val LocalStores = staticCompositionLocalOf<Stores> { error("No Stores") }
 fun App(stores: Stores) {
   CompositionLocalProvider(LocalStores provides stores) {
     Box(Modifier.fillMaxSize()) {
-      // The first pairing's flow stays up through its last step, until the person moves on.
+      // The first pairing's flow stays up through its last step, until the person moves on,
+      // which is when the app asks to notify (ADR 0048).
       var onboarding by remember(stores) { mutableStateOf(!stores.session.paired) }
-      if (onboarding) PairingFlow(firstLaunch = true, finished = { onboarding = false })
-      else MainTabs()
+      var trying by remember { mutableStateOf(false) }
+      val pushes = rememberPushes()
+      if (onboarding) {
+        PairingFlow(
+          firstLaunch = true,
+          finished = {
+            onboarding = false
+            pushes.ask()
+          },
+          tryDemo = { trying = true },
+        )
+      } else MainTabs()
+      if (trying) DemoExperience(exit = { trying = false })
       if (stores.router.pairingAnother) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
           PairingFlow(firstLaunch = false, finished = { stores.router.pairingAnother = false })
@@ -168,7 +180,13 @@ private fun rememberPushes(): Pushes {
     val push = push ?: return@LaunchedEffect
     Notifications.fetchToken(context, received = { push.received(it) }, failed = { push.failed() })
   }
-  LaunchedEffect(push, granted, servers) { push?.update(granted, servers) }
+  LaunchedEffect(push, granted, servers) {
+    android.util.Log.i(
+      "condr.push",
+      "update granted=$granted servers=${servers.size} push=${push != null}",
+    )
+    push?.update(granted, servers)
+  }
   return remember(ask) {
     Pushes {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !granted) {

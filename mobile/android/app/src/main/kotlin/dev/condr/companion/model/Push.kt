@@ -141,7 +141,9 @@ class Push(
     val headers =
       mutableMapOf("API-Version" to "1", "Authorization" to "Condr ${client.cloudToken()}")
     if (body != null) headers["Content-Type"] = "application/json"
-    val (status, answer) = send(method, "$cloud/api/push/device", headers, body) ?: return false
+    val reply = send(method, "$cloud/api/push/device", headers, body)
+    android.util.Log.i("condr.push", "$method ${reply?.first} ${reply?.second?.take(80)}")
+    val (status, answer) = reply ?: return false
     if (status !in 200..299) return false
     return runCatching {
         Json { ignoreUnknownKeys = true }.decodeFromString(Reply.serializer(), answer).code == "200"

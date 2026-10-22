@@ -48,7 +48,12 @@ object Notifications {
 
   /** Asks FCM for this launch's token; the app's `Push` hears the answer. */
   fun fetchToken(context: Context, received: suspend (String) -> Unit, failed: () -> Unit) {
+    android.util.Log.i("condr.push", "fetching token")
     if (!reachable(context)) {
+      android.util.Log.i(
+        "condr.push",
+        "unreachable: play=${GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)} firebase=${FirebaseApp.getApps(context).size}",
+      )
       failed()
       return
     }
