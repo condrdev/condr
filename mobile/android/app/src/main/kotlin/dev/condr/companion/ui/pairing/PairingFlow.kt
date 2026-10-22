@@ -345,6 +345,19 @@ private fun InviteStep(
         },
         secondary = {
           if (scannable) TextButton(onClick = { pasting = true }) { Text("Paste a link instead") }
+          if (tryDemo != null) {
+            TextButton(onClick = tryDemo) {
+              Text(
+                buildAnnotatedString {
+                  withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                    append("No computer to pair? ")
+                  }
+                  append("Try Demo")
+                },
+                style = MaterialTheme.typography.bodySmall,
+              )
+            }
+          }
         },
       )
     },
