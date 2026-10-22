@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,14 +27,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,20 +55,17 @@ fun AgentsScreen() {
   val stores = LocalStores.current
   val session = stores.session
   val router = stores.router
-  val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
   val needsYou = session.agents(AgentStatus.BLOCKED, AgentStatus.ERROR)
   val done = session.agents(AgentStatus.DONE)
   val working = session.agents(AgentStatus.WORKING)
   val idle = session.agents(AgentStatus.IDLE, AgentStatus.UNKNOWN)
-  Scaffold(
-    modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-    topBar = { MediumFlexibleTopAppBar(title = { Text("Agents") }, scrollBehavior = scroll) },
-  ) { insets ->
+  // The tab names the screen and the score heads it, as on iOS: no bar of its own.
+  Scaffold(contentWindowInsets = WindowInsets.statusBars) { insets ->
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
       contentPadding =
         PaddingValues(
-          top = insets.calculateTopPadding() + 4.dp,
+          top = insets.calculateTopPadding() + 14.dp,
           bottom = insets.calculateBottomPadding() + 24.dp,
           start = 16.dp,
           end = 16.dp,

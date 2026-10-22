@@ -11,10 +11,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,8 +36,6 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -50,6 +51,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -256,7 +258,10 @@ fun TerminalPage(ref: PaneRef) {
           // The keyboard moves only when asked, since every appearance resizes the Pane for
           // every viewer (ADR 0041).
           AnimatedVisibility(visible = focused) {
-            FilledTonalIconButton(onClick = { focusManager.clearFocus() }) {
+            FilledTonalIconButton(
+              onClick = { focusManager.clearFocus() },
+              modifier = Modifier.size(48.dp),
+            ) {
               Icon(
                 painterResource(R.drawable.ic_keyboard_hide),
                 contentDescription = "Hide keyboard",
@@ -264,45 +269,69 @@ fun TerminalPage(ref: PaneRef) {
             }
           }
           // A draft of as many lines as the reply needs; Return is a line break, and the
-          // terminal's Return is on the key row.
-          TextField(
-            value = text,
-            onValueChange = { new ->
-              // With Ctrl on, the key just typed goes as Ctrl+key and the draft stays as it was.
-              if (control && new.length > text.length) {
-                val kept = text.commonPrefixWith(new).length
-                new.getOrNull(kept)?.let { press(Key.Character(it.toString())) }
-              } else {
-                text = new
-              }
-            },
-            placeholder = {
-              Text(
-                when {
-                  agent == null -> "Command"
-                  agent.status == AgentStatus.BLOCKED -> "Reply, or pick with ↑ ↓ and return"
-                  else -> "Message ${agent.label}"
-                }
+          // terminal's Return is on the key row. The field stands as tall as the buttons.
+          Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+          ) {
+            Box(
+              Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+              contentAlignment = Alignment.CenterStart,
+            ) {
+              BasicTextField(
+                value = text,
+                onValueChange = { new ->
+                  // With Ctrl on, the key just typed goes as Ctrl+key and the draft stays as it
+                  // was.
+                  if (control && new.length > text.length) {
+                    val kept = text.commonPrefixWith(new).length
+                    new.getOrNull(kept)?.let { press(Key.Character(it.toString())) }
+                  } else {
+                    text = new
+                  }
+                },
+                maxLines = 5,
+                textStyle =
+                  MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface
+                  ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions =
+                  KeyboardOptions(
+                    capitalization =
+                      if (agent == null) KeyboardCapitalization.None
+                      else KeyboardCapitalization.Sentences,
+                    autoCorrectEnabled = agent != null,
+                  ),
+                modifier =
+                  Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged {
+                    focused = it.isFocused
+                  },
+                decorationBox = { inner ->
+                  if (text.isEmpty()) {
+                    Text(
+                      when {
+                        agent == null -> "Command"
+                        agent.status == AgentStatus.BLOCKED -> "Reply, or pick with ↑ ↓ and return"
+                        else -> "Message ${agent.label}"
+                      },
+                      style = MaterialTheme.typography.bodyLarge,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
+                  inner()
+                },
               )
-            },
-            maxLines = 5,
-            shape = MaterialTheme.shapes.extraLarge,
-            colors =
-              TextFieldDefaults.colors(
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-              ),
-            keyboardOptions =
-              KeyboardOptions(
-                capitalization =
-                  if (agent == null) KeyboardCapitalization.None
-                  else KeyboardCapitalization.Sentences,
-                autoCorrectEnabled = agent != null,
-              ),
-            modifier =
-              Modifier.weight(1f).focusRequester(focus).onFocusChanged { focused = it.isFocused },
-          )
-          FilledIconButton(onClick = ::submit, enabled = text.isNotEmpty()) {
+            }
+          }
+          FilledIconButton(
+            onClick = ::submit,
+            enabled = text.isNotEmpty(),
+            modifier = Modifier.size(48.dp),
+          ) {
             Icon(painterResource(R.drawable.ic_send), contentDescription = "Send")
           }
         }

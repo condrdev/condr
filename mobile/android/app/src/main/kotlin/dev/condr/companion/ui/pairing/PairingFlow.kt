@@ -3,6 +3,8 @@ package dev.condr.companion.ui.pairing
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -84,7 +87,6 @@ import dev.condr.companion.model.byUrgency
 import dev.condr.companion.model.name
 import dev.condr.companion.ui.LocalStores
 import dev.condr.companion.ui.agents.AgentAvatar
-import dev.condr.companion.ui.theme.Bars
 import dev.condr.companion.ui.theme.Logo
 import dev.condr.companion.ui.theme.NumberedStep
 import dev.condr.companion.ui.theme.StepTitle
@@ -120,7 +122,7 @@ fun canScan(context: Context): Boolean =
  * Devices it opens on the code step with a way out.
  */
 @Composable
-fun PairingFlow(firstLaunch: Boolean, finished: () -> Unit) {
+fun PairingFlow(firstLaunch: Boolean, finished: () -> Unit, tryDemo: (() -> Unit)? = null) {
   val stores = LocalStores.current
   val session = stores.session
   val preferences = stores.preferences
@@ -187,6 +189,7 @@ fun PairingFlow(firstLaunch: Boolean, finished: () -> Unit) {
             cancel = if (firstLaunch) null else finished,
             back = if (firstLaunch) ({ path.removeAt(path.lastIndex) }) else null,
             found = ::take,
+            tryDemo = if (firstLaunch) tryDemo else null,
           )
         }
         entry<PairingStep.Name> {
@@ -223,11 +226,23 @@ fun PairingFlow(firstLaunch: Boolean, finished: () -> Unit) {
 private fun Welcome(next: () -> Unit) {
   val paper = Color(0xFFF5F5F7)
   val ink = Color(0xFF1D1D1F)
+  var stage by remember { mutableStateOf(0) }
+  LaunchedEffect(Unit) {
+    kotlinx.coroutines.delay(300)
+    stage = 1
+    kotlinx.coroutines.delay(500)
+    stage = 2
+    kotlinx.coroutines.delay(400)
+    stage = 3
+  }
+  val logoAlpha by animateFloatAsState(if (stage >= 1) 1f else 0f, label = "logo")
+  val stageAlpha by animateFloatAsState(if (stage >= 2) 1f else 0f, tween(900), label = "stage")
+  val wordsAlpha by animateFloatAsState(if (stage >= 3) 1f else 0f, tween(800), label = "words")
   Column(Modifier.fillMaxSize().background(ink).systemBarsPadding().padding(horizontal = 28.dp)) {
     Row(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(9.dp),
-      modifier = Modifier.padding(top = 8.dp),
+      modifier = Modifier.padding(top = 8.dp).alpha(logoAlpha),
     ) {
       Logo(30.dp, paper)
       Text(
@@ -238,38 +253,31 @@ private fun Welcome(next: () -> Unit) {
       )
     }
     Spacer(Modifier.weight(1f))
-    // ponytail: the iOS welcome plays three computers' scores; a still score stands in here.
-    Bars(
-      listOf(
-        uniffi.condr_mobile.AgentStatus.BLOCKED,
-        uniffi.condr_mobile.AgentStatus.DONE,
-        uniffi.condr_mobile.AgentStatus.WORKING,
-        uniffi.condr_mobile.AgentStatus.WORKING,
-        uniffi.condr_mobile.AgentStatus.IDLE,
-      ),
-      tall = 120.dp,
-      widest = 22.dp,
-      spacing = 8.dp,
+    WelcomeStage(
+      playing = stage >= 2,
+      modifier = Modifier.fillMaxWidth().height(250.dp).alpha(stageAlpha),
     )
-    Spacer(Modifier.height(40.dp))
-    Text(
-      "Every agent,\nwithin reach.",
-      style = MaterialTheme.typography.displaySmall,
-      fontWeight = FontWeight.Bold,
-      color = paper,
-      lineHeight = 44.sp,
-    )
-    Spacer(Modifier.height(14.dp))
-    Text(
-      "See which agent waits for you, read what it did, and answer it. From anywhere.",
-      style = MaterialTheme.typography.titleMedium,
-      color = paper.copy(alpha = 0.6f),
-    )
+    Spacer(Modifier.weight(1f))
+    Column(Modifier.alpha(wordsAlpha)) {
+      Text(
+        "Every agent,\nwithin reach.",
+        style = MaterialTheme.typography.displaySmall,
+        fontWeight = FontWeight.Bold,
+        color = paper,
+        lineHeight = 44.sp,
+      )
+      Spacer(Modifier.height(14.dp))
+      Text(
+        "See which agent waits for you, read what it did, and answer it. From anywhere.",
+        style = MaterialTheme.typography.titleMedium,
+        color = paper.copy(alpha = 0.6f),
+      )
+    }
     Spacer(Modifier.weight(1f))
     Button(
       onClick = next,
       colors = ButtonDefaults.buttonColors(containerColor = paper, contentColor = ink),
-      modifier = Modifier.fillMaxWidth().height(56.dp),
+      modifier = Modifier.fillMaxWidth().height(56.dp).alpha(wordsAlpha),
     ) {
       Text(
         "Pair with your computer",
@@ -289,7 +297,12 @@ private fun Welcome(next: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InviteStep(cancel: (() -> Unit)?, back: (() -> Unit)?, found: (String) -> Unit) {
+private fun InviteStep(
+  cancel: (() -> Unit)?,
+  back: (() -> Unit)?,
+  found: (String) -> Unit,
+  tryDemo: (() -> Unit)? = null,
+) {
   val context = LocalContext.current
   val stores = LocalStores.current
   var pasting by remember { mutableStateOf(false) }
@@ -686,9 +699,23 @@ private fun ConnectingStep(
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Spacer(Modifier.height(80.dp))
+      var rose by remember { mutableStateOf(0) }
+      var shown by remember { mutableStateOf(0) }
+      LaunchedEffect(found.size, paired) {
+        if (paired == null) return@LaunchedEffect
+        // Each Agent's bar rises, then its row, as they come.
+        for (index in rose until found.size) {
+          kotlinx.coroutines.delay(if (index == 0) 250L else 110L)
+          rose = index + 1
+        }
+        for (index in shown until found.size) {
+          kotlinx.coroutines.delay(if (index == 0) 300L else 140L)
+          shown = index + 1
+        }
+      }
       Box(Modifier.height(160.dp), contentAlignment = Alignment.Center) {
         if (paired != null && found.isNotEmpty()) {
-          Bars(found.map { it.agent.status }, tall = 120.dp, widest = 18.dp, spacing = 7.dp)
+          Rising(found.map { it.agent.status }, rose, paired.label)
         } else if (paired == null && pairing.phase is Pairing.Phase.Pairing) {
           CircularProgressIndicator()
         } else {
@@ -762,5 +789,39 @@ private fun StepFooter(primary: @Composable () -> Unit, secondary: @Composable (
   ) {
     primary()
     secondary()
+  }
+}
+
+/** The new computer's bars rising one by one, then its name. */
+@Composable
+private fun Rising(statuses: List<uniffi.condr_mobile.AgentStatus>, shown: Int, label: String) {
+  Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(
+      verticalAlignment = Alignment.Bottom,
+      horizontalArrangement = Arrangement.spacedBy(9.dp),
+      modifier = Modifier.height(120.dp),
+    ) {
+      statuses.forEachIndexed { index, status ->
+        val target =
+          if (index < shown) dev.condr.companion.ui.theme.barHeight(status, 120f, 0.5f) else 0f
+        val height by animateFloatAsState(target, tween(550), label = "bar")
+        val color =
+          if (
+            status == uniffi.condr_mobile.AgentStatus.IDLE ||
+              status == uniffi.condr_mobile.AgentStatus.UNKNOWN
+          )
+            MaterialTheme.colorScheme.outlineVariant
+          else dev.condr.companion.ui.theme.tintOf(status)
+        Box(
+          Modifier.size(width = 24.dp, height = height.dp)
+            .background(color, RoundedCornerShape(5.dp))
+        )
+      }
+    }
+    Text(
+      label,
+      style = MaterialTheme.typography.titleSmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
   }
 }

@@ -113,3 +113,5 @@ val AgentStatus.tint: Color
       AgentStatus.IDLE,
       AgentStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+
+@Composable fun tintOf(status: AgentStatus): Color = status.tint

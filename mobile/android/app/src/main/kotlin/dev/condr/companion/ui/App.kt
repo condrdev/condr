@@ -7,13 +7,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -22,10 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -198,58 +196,13 @@ private fun DeviceStack(path: MutableList<DeviceRoute>, root: @Composable () -> 
 }
 
 /**
- * What the app says over its screens (ADR 0020): a banner for an Agent elsewhere that needs you or
- * finished, as a snackbar with Open; an error to read, copy and dismiss, as a dialog; and a passing
- * notice.
+ * What the app says over its screens (ADR 0020): the banner at the top, the toasts at the bottom.
  */
 @Composable
 private fun Overlays() {
-  val stores = LocalStores.current
-  val alerts = stores.alerts
-  val router = stores.router
-  val context = LocalContext.current
-  val host = remember { SnackbarHostState() }
-  val banner = alerts.banner
-  LaunchedEffect(banner?.id) {
-    val shown = banner ?: return@LaunchedEffect
-    if (shown.quiet) return@LaunchedEffect
-    val result =
-      host.showSnackbar(
-        message = "${shown.title} · ${shown.detail}",
-        actionLabel = "Open",
-        duration = SnackbarDuration.Long,
-        withDismissAction = true,
-      )
-    if (result == SnackbarResult.ActionPerformed) router.open(shown.ref)
-    alerts.dismissBanner()
-  }
-  val notice = alerts.notice
-  LaunchedEffect(notice) {
-    val text = notice ?: return@LaunchedEffect
-    host.showSnackbar(text, duration = SnackbarDuration.Short)
-  }
   Box(Modifier.fillMaxSize()) {
-    SnackbarHost(host, Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp))
-  }
-  val error = alerts.error
-  if (error != null) {
-    AlertDialog(
-      onDismissRequest = { alerts.dismissError() },
-      title = { Text("Something went wrong") },
-      text = { Text(error) },
-      confirmButton = { TextButton(onClick = { alerts.dismissError() }) { Text("OK") } },
-      dismissButton = {
-        TextButton(
-          onClick = {
-            context
-              .getSystemService(android.content.ClipboardManager::class.java)
-              .setPrimaryClip(android.content.ClipData.newPlainText("Condr", error))
-          }
-        ) {
-          Text("Copy")
-        }
-      },
-    )
+    BannerView(Modifier.align(Alignment.TopCenter))
+    BottomToasts(Modifier.align(Alignment.BottomCenter))
   }
 }
 
@@ -278,6 +231,49 @@ private fun LockScreen() {
     )
     Button(onClick = { scope.launch { lock.unlock() } }, enabled = !lock.authenticating) {
       Text("Unlock")
+    }
+  }
+}
+
+/**
+ * A visit to the sample world, over the pairing page: its preferences and Devices live apart from
+ * the real app, and leaving returns to the same step of pairing.
+ */
+@Composable
+private fun DemoExperience(exit: () -> Unit) {
+  val context = LocalContext.current
+  val stores = remember { Stores.demo(context, dev.condr.companion.demo.DemoScene.AGENTS) }
+  androidx.compose.runtime.DisposableEffect(stores) { onDispose { stores.client.shutdown() } }
+  // Pairing always happens in the real app, never against sample Devices.
+  LaunchedEffect(stores.router.pairingAnother, stores.session.paired) {
+    if (stores.router.pairingAnother || !stores.session.paired) exit()
+  }
+  androidx.activity.compose.BackHandler(onBack = exit)
+  CompositionLocalProvider(LocalStores provides stores) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+          Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 4.dp),
+      ) {
+        Column(Modifier.weight(1f)) {
+          Text(
+            "Demo Mode",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+          )
+          Text(
+            "Sample data · No live connection",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+        TextButton(onClick = exit) { Text("Exit Demo") }
+      }
+      Box(Modifier.fillMaxSize()) {
+        MainTabs()
+        Overlays()
+      }
     }
   }
 }
