@@ -1,3 +1,5 @@
 /target
 .claude/settings.local.json
 .DS_Store
+# Scratch files for review, never committed.
+/draft

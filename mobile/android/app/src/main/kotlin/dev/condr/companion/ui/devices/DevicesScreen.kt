@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
@@ -29,7 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
@@ -89,19 +88,25 @@ fun DevicesScreen() {
   Scaffold(
     modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
     topBar = { LargeTopAppBar(title = { Text("Devices") }, scrollBehavior = scroll) },
-    floatingActionButton = {
-      ExtendedFloatingActionButton(
-        onClick = { router.pairingAnother = true },
-        icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-        text = { Text("Pair a computer") },
-      )
-    },
   ) { insets ->
     LazyColumn(Modifier.fillMaxSize().padding(insets)) {
       items(stores.session.devices, key = { it.address }) { device ->
         DeviceRow(device) { router.devicesPath.add(DeviceRoute.Device(device.address)) }
       }
-      item { Spacer(Modifier.height(88.dp)) }
+      item {
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        ListItem(
+          headlineContent = { Text("Pair a computer", color = MaterialTheme.colorScheme.primary) },
+          leadingContent = {
+            Icon(
+              painterResource(R.drawable.ic_qr_scanner),
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.primary,
+            )
+          },
+          modifier = Modifier.clickable { router.pairingAnother = true },
+        )
+      }
     }
   }
 }
