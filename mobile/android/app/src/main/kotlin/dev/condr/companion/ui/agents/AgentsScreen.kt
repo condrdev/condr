@@ -1,7 +1,9 @@
 package dev.condr.companion.ui.agents
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -284,12 +286,21 @@ private fun AllClear(working: Int) {
         )
       },
       leadingContent = {
-        Icon(
-          Icons.Filled.Check,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.onSurfaceVariant,
-          modifier = Modifier.size(28.dp),
-        )
+        Box(
+          Modifier.size(42.dp)
+            .background(
+              MaterialTheme.colorScheme.surfaceContainerHighest,
+              RoundedCornerShape(13.dp),
+            ),
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(
+            Icons.Filled.Check,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+          )
+        }
       },
       colors =
         ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),

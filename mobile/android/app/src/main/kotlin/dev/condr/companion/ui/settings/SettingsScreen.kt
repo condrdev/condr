@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -24,16 +27,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -57,6 +61,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -67,10 +72,10 @@ import dev.condr.companion.BuildConfig
 import dev.condr.companion.R
 import dev.condr.companion.model.Preferences
 import dev.condr.companion.model.SettingsRoute
-import dev.condr.companion.push.Notifications
 import dev.condr.companion.ui.LocalStores
 import dev.condr.companion.ui.terminal.TerminalFont
 import dev.condr.companion.ui.terminal.TerminalPalette
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,19 +93,22 @@ fun SettingsScreen() {
     modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
     topBar = { MediumFlexibleTopAppBar(title = { Text("Settings") }, scrollBehavior = scroll) },
   ) { insets ->
-    Column(Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState())) {
-      ListItem(
-        headlineContent = {
-          Text(
-            preferences.phoneName.ifBlank { Preferences.systemDeviceName(context) },
-            fontWeight = FontWeight.Medium,
-          )
-        },
-        supportingContent = {
-          val count = session.devices.size
-          Text("Paired with $count ${if (count == 1) "computer" else "computers"}")
-        },
-        leadingContent = {
+    Column(
+      Modifier.fillMaxSize()
+        .padding(insets)
+        .verticalScroll(rememberScrollState())
+        .padding(horizontal = 16.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Group {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(14.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .clickable { router.settingsPath.add(SettingsRoute.PhoneName) }
+              .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
           Box(
             Modifier.size(52.dp)
               .background(
@@ -115,126 +123,182 @@ fun SettingsScreen() {
               modifier = Modifier.size(28.dp),
             )
           }
-        },
-        trailingContent = {
-          Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-          )
-        },
-        modifier = Modifier.clickable { router.settingsPath.add(SettingsRoute.PhoneName) },
-      )
+          Column(Modifier.weight(1f)) {
+            Text(
+              preferences.phoneName.ifBlank { Preferences.systemDeviceName(context) },
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.SemiBold,
+            )
+            val count = session.devices.size
+            Text(
+              "Paired with $count ${if (count == 1) "computer" else "computers"}",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+          Chevron()
+        }
+      }
 
       SectionHeader("Terminal")
-      TextSize(preferences)
-
-      SectionHeader("Notifications")
-      val push = stores.push
-      val reachable = push?.available == true && Notifications.reachable(context)
-      val granted = Notifications.granted(context)
-      ListItem(
-        headlineContent = { Text("When an agent finishes or needs you") },
-        supportingContent = {
-          Text(
-            when {
-              push == null -> "Not in the demo."
-              !reachable -> "This phone can't receive notifications."
-              !granted -> "Turned off in the system's settings for Condr."
-              else -> "Even while Condr is closed."
-            }
-          )
-        },
-        trailingContent = {
-          Switch(
-            checked = reachable && granted && push.on,
-            enabled = reachable,
-            onCheckedChange = {
-              context.startActivity(
-                Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                  .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
-              )
-            },
-          )
-        },
-      )
+      Group { TextSize(preferences) }
 
       SectionHeader("Security")
-      ListItem(
-        headlineContent = { Text("Lock with ${lock.method}") },
-        supportingContent = {
+      Group {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+        ) {
           Text(
-            when {
-              !lock.available -> "Set a screen lock on this phone to lock Condr."
-              lock.enabled ->
-                "Condr asks for your ${lock.method} when it opens and after five minutes away."
-              else -> "Anyone who can open this phone can open Condr and reach your computers."
-            }
+            "Lock with ${lock.method}",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
           )
-        },
-        trailingContent = {
           Switch(
             checked = lock.enabled && lock.available,
             enabled = lock.available,
             onCheckedChange = { on -> scope.launch { lock.setEnabled(on) } },
           )
-        },
-      )
-      // The start of the key is enough to tell this phone's row apart under a computer's
-      // Paired devices, and for `condr server revoke` there.
-      ListItem(
-        headlineContent = { Text("Key") },
-        supportingContent = { Text(session.fingerprint.take(8) + "…") },
-        trailingContent = {
-          IconButton(
-            onClick = {
-              context
-                .getSystemService(ClipboardManager::class.java)
-                .setPrimaryClip(ClipData.newPlainText("Condr key", session.fingerprint))
-              stores.alerts.notify("Copied to clipboard")
-            }
-          ) {
-            Icon(painterResource(R.drawable.ic_copy), contentDescription = "Copy the whole key")
-          }
-        },
-      )
-      ListItem(
-        headlineContent = { Text("If you lose this phone") },
-        trailingContent = {
-          Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
+        }
+        Separator()
+        // The start of the key is enough to tell this phone's row apart under a computer's
+        // Paired devices, and for `condr server revoke` there; a long press copies it whole.
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier =
+            Modifier.fillMaxWidth()
+              .heightIn(min = 56.dp)
+              .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                  context
+                    .getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("Condr key", session.fingerprint))
+                  stores.alerts.notify("Copied to clipboard")
+                },
+                onLongClickLabel = "Copy the whole key",
+              )
+              .padding(horizontal = 16.dp),
+        ) {
+          Text("Key", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+          Text(
+            session.fingerprint.take(8) + "…",
+            style = MaterialTheme.typography.bodyLarge,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
-        },
-        modifier = Modifier.clickable { router.settingsPath.add(SettingsRoute.LostPhone) },
+        }
+        Separator()
+        NavigationRow("If you lose this phone") { router.settingsPath.add(SettingsRoute.LostPhone) }
+      }
+      Footer(
+        when {
+          !lock.available -> "Set a screen lock on this phone to lock Condr."
+          lock.enabled ->
+            "Condr asks for your ${lock.method} when it opens and after five minutes away."
+          else -> "Anyone who can open this phone can open Condr and reach your computers."
+        }
       )
 
-      SectionHeader("About")
-      ListItem(
-        headlineContent = { Text("Version") },
-        supportingContent = { Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") },
-      )
-      ListItem(
-        headlineContent = { Text("condr.dev") },
-        trailingContent = {
+      Spacer(Modifier.height(8.dp))
+      Group {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+        ) {
+          Text(
+            "Version",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+          )
+          Text(
+            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+        Separator()
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier =
+            Modifier.fillMaxWidth()
+              .heightIn(min = 56.dp)
+              .clickable {
+                context.startActivity(
+                  Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://condr.dev"))
+                )
+              }
+              .padding(horizontal = 16.dp),
+        ) {
+          Text(
+            "condr.dev",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+          )
           Icon(
-            Icons.Filled.Share,
+            painterResource(R.drawable.ic_open_in_new),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.outline,
             modifier = Modifier.size(18.dp),
           )
-        },
-        modifier =
-          Modifier.clickable {
-            context.startActivity(
-              Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://condr.dev"))
-            )
-          },
-      )
-      Spacer(Modifier.size(24.dp))
+        }
+      }
+      Spacer(Modifier.height(24.dp))
     }
   }
+}
+
+/** A section's rows on one rounded surface, as Android's own settings group them. */
+@Composable
+private fun Group(content: @Composable () -> Unit) {
+  Surface(
+    shape = RoundedCornerShape(24.dp),
+    color = MaterialTheme.colorScheme.surfaceContainer,
+    modifier = Modifier.fillMaxWidth(),
+  ) {
+    Column { content() }
+  }
+}
+
+@Composable
+private fun Separator() =
+  HorizontalDivider(
+    Modifier.padding(start = 16.dp),
+    color = MaterialTheme.colorScheme.outlineVariant,
+  )
+
+@Composable
+private fun Chevron() =
+  Icon(
+    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+    contentDescription = null,
+    tint = MaterialTheme.colorScheme.outline,
+  )
+
+@Composable
+private fun NavigationRow(title: String, open: () -> Unit) {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier =
+      Modifier.fillMaxWidth()
+        .heightIn(min = 56.dp)
+        .clickable(onClick = open)
+        .padding(horizontal = 16.dp),
+  ) {
+    Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+    Chevron()
+  }
+}
+
+/** What a section's setting means, under it. */
+@Composable
+private fun Footer(text: String) {
+  Text(
+    text,
+    style = MaterialTheme.typography.bodySmall,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.padding(horizontal = 16.dp),
+  )
 }
 
 @Composable
@@ -243,7 +307,7 @@ private fun SectionHeader(title: String) {
     title,
     style = MaterialTheme.typography.titleSmall,
     color = MaterialTheme.colorScheme.primary,
-    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
   )
 }
 
@@ -255,28 +319,32 @@ private fun SectionHeader(title: String) {
 private fun TextSize(preferences: Preferences) {
   val measurer = rememberTextMeasurer()
   val density = LocalDensity.current
-  Column(
-    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
+  Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Text("Text size", style = MaterialTheme.typography.bodyLarge)
-      Spacer(Modifier.weight(1f))
+      Text("Text size", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
       Text(
         "%.1f sp".format(preferences.fontSize),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
     }
-    Slider(
-      value = preferences.fontSize,
-      onValueChange = { preferences.fontSize = (it * 2).toInt() / 2f },
-      valueRange = Preferences.SMALLEST_FONT..Preferences.LARGEST_FONT,
-      steps = ((Preferences.LARGEST_FONT - Preferences.SMALLEST_FONT) * 2).toInt() - 1,
-    )
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text("A", style = MaterialTheme.typography.labelSmall)
+      // Continuous, kept to half points, as iOS's slider steps without drawing a tick per step.
+      Slider(
+        value = preferences.fontSize,
+        onValueChange = { preferences.fontSize = (it * 2).roundToInt() / 2f },
+        valueRange = Preferences.SMALLEST_FONT..Preferences.LARGEST_FONT,
+        modifier = Modifier.weight(1f),
+      )
+      Text("A", style = MaterialTheme.typography.titleLarge)
+    }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
       val style = TerminalFont.style(preferences.fontSize.sp)
       val cell = measurer.measure("0", style).size.width
-      val columns = with(density) { ((maxWidth - 8.dp * 2).toPx() / cell).toInt() }
+      val columns = with(density) { ((maxWidth + 32.dp - 20.dp).toPx() / cell).toInt() }
       Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Column(
           Modifier.fillMaxWidth()
@@ -367,6 +435,13 @@ fun PhoneNameScreen() {
       onValueChange = { draft = it },
       singleLine = true,
       label = { Text("Name") },
+      trailingIcon = {
+        if (draft.isNotEmpty()) {
+          IconButton(onClick = { draft = "" }) {
+            Icon(Icons.Filled.Close, contentDescription = "Clear")
+          }
+        }
+      },
       keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
       keyboardActions = KeyboardActions(onDone = { router.settingsPath.removeLastOrNull() }),
       modifier = Modifier.fillMaxWidth().padding(insets).padding(16.dp).focusRequester(focus),
