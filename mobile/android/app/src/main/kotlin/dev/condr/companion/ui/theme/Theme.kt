@@ -83,6 +83,21 @@ fun CondrTheme(content: @Composable () -> Unit) {
   )
 }
 
+/** The terminal's chrome is always dark, over the library's dark scheme (ADR 0048). */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun TerminalTheme(content: @Composable () -> Unit) {
+  val context = LocalContext.current
+  val scheme =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(context)
+    else NeutralDark
+  MaterialExpressiveTheme(
+    colorScheme = scheme,
+    motionScheme = MotionScheme.expressive(),
+    content = content,
+  )
+}
+
 /**
  * The desktop sidebar's tones for an Agent's state, as fixed semantic colours: they do not follow
  * the wallpaper (ADR 0048).

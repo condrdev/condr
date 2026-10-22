@@ -56,6 +56,7 @@ import dev.condr.companion.ui.settings.LostPhoneScreen
 import dev.condr.companion.ui.settings.PhoneNameScreen
 import dev.condr.companion.ui.settings.SettingsScreen
 import dev.condr.companion.ui.terminal.TerminalPage
+import dev.condr.companion.ui.theme.TerminalTheme
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import uniffi.condr_mobile.AgentStatus
@@ -89,8 +90,15 @@ private fun MainTabs() {
   val stores = LocalStores.current
   val router = stores.router
   val session = stores.session
+  val inPane =
+    when (router.tab) {
+      AppTab.AGENTS -> router.agentsPath.lastOrNull() is DeviceRoute.Pane
+      AppTab.DEVICES -> router.devicesPath.lastOrNull() is DeviceRoute.Pane
+      AppTab.SETTINGS -> false
+    }
   Scaffold(
     bottomBar = {
+      if (inPane) return@Scaffold
       NavigationBar {
         val needsYou = session.agents(AgentStatus.BLOCKED, AgentStatus.ERROR).size
         NavigationBarItem(
@@ -118,7 +126,10 @@ private fun MainTabs() {
       }
     }
   ) { insets ->
-    Box(Modifier.fillMaxSize().padding(bottom = insets.calculateBottomPadding())) {
+    // A Pane's page draws to the bottom edge and keeps its own insets.
+    Box(
+      Modifier.fillMaxSize().padding(bottom = if (inPane) 0.dp else insets.calculateBottomPadding())
+    ) {
       when (router.tab) {
         AppTab.AGENTS -> DeviceStack(router.agentsPath, root = { AgentsScreen() })
         AppTab.DEVICES -> DeviceStack(router.devicesPath, root = { DevicesScreen() })
@@ -148,7 +159,7 @@ private fun DeviceStack(path: MutableList<DeviceRoute>, root: @Composable () -> 
       entryProvider {
         entry<Home> { root() }
         entry<DeviceRoute.Device> { DeviceScreen(it.address) }
-        entry<DeviceRoute.Pane> { TerminalPage(it.ref) }
+        entry<DeviceRoute.Pane> { TerminalTheme { TerminalPage(it.ref) } }
       },
   )
 }
