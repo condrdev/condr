@@ -33,6 +33,7 @@ class Stores(
   val client: CompanionInterface,
   /** A demo scene connects nowhere and registers for nothing. */
   val scene: DemoScene?,
+  val context: Context,
 ) {
   /** `-e scrub "<device index>:<bar index>"` holds a scrub of the score for review. */
   var scrub: String? = null
@@ -51,7 +52,16 @@ class Stores(
       val session = Session(client, fingerprint(seed), saved, alerts, router, context)
       listener.bind { session.refresh() }
       val lock = AppLock(DeviceAuthenticator(context), session.paired, preferences)
-      return Stores(session, router, preferences, alerts, lock, client, scene = null)
+      return Stores(
+        session,
+        router,
+        preferences,
+        alerts,
+        lock,
+        client,
+        scene = null,
+        context = context,
+      )
     }
 
     /** A scene for review or a UI test: the demo world, stores that forget between launches. */
@@ -109,7 +119,7 @@ class Stores(
       }
       val lock =
         AppLock(DemoAuthenticator, paired = scene == DemoScene.LOCK, preferences = preferences)
-      return Stores(session, router, preferences, alerts, lock, client, scene)
+      return Stores(session, router, preferences, alerts, lock, client, scene, context)
     }
   }
 }

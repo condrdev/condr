@@ -28,8 +28,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +51,7 @@ import dev.condr.companion.model.SettingsRoute
 import dev.condr.companion.ui.agents.AgentsScreen
 import dev.condr.companion.ui.devices.DeviceScreen
 import dev.condr.companion.ui.devices.DevicesScreen
-import dev.condr.companion.ui.pairing.WelcomeScreen
+import dev.condr.companion.ui.pairing.PairingFlow
 import dev.condr.companion.ui.settings.LostPhoneScreen
 import dev.condr.companion.ui.settings.PhoneNameScreen
 import dev.condr.companion.ui.settings.SettingsScreen
@@ -66,7 +69,15 @@ val LocalStores = staticCompositionLocalOf<Stores> { error("No Stores") }
 fun App(stores: Stores) {
   CompositionLocalProvider(LocalStores provides stores) {
     Box(Modifier.fillMaxSize()) {
-      if (stores.session.paired) MainTabs() else WelcomeScreen()
+      // The first pairing's flow stays up through its last step, until the person moves on.
+      var onboarding by remember(stores) { mutableStateOf(!stores.session.paired) }
+      if (onboarding) PairingFlow(firstLaunch = true, finished = { onboarding = false })
+      else MainTabs()
+      if (stores.router.pairingAnother) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+          PairingFlow(firstLaunch = false, finished = { stores.router.pairingAnother = false })
+        }
+      }
       Overlays()
       if (stores.lock.locked) LockScreen()
     }
