@@ -93,8 +93,8 @@ object DemoAuthenticator : Authenticator {
 
 /**
  * The app lock (ADR 0041): the owner's finger, face or screen lock when the app starts and when it
- * comes back after more than five minutes away. It is on unless the owner turned it off, which asks
- * them first; before anything is paired there is nothing to protect.
+ * comes back after more than five minutes away. It is off until the owner turns it on, and turning
+ * it off asks them first; before anything is paired there is nothing to protect.
  */
 class AppLock(
   private val authenticator: Authenticator,
@@ -110,7 +110,7 @@ class AppLock(
 
   private var leftAt: Long? = null
 
-  /** Whether the lock is on; it is until the owner turns it off. */
+  /** Whether the lock is on; it is not until the owner turns it on. */
   val enabled: Boolean
     get() = preferences.lockOn
 

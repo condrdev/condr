@@ -42,8 +42,9 @@ struct DeviceAuthenticator: Authenticator {
 }
 
 /// The app lock (ADR 0041): the owner's face, finger or passcode when the app starts and
-/// when it comes back after more than five minutes away. It is on unless the owner turned
-/// it off, which asks them first; before anything is paired there is nothing to protect.
+/// when it comes back after more than five minutes away. It is off until the owner turns it
+/// on, and turning it off again asks them first; before anything is paired there is nothing
+/// to protect.
 @Observable
 @MainActor
 final class AppLock {
@@ -52,7 +53,7 @@ final class AppLock {
 
     private(set) var locked: Bool
     private(set) var authenticating = false
-    /// Whether the lock is on; it is until the owner turns it off.
+    /// Whether the lock is on; it is not until the owner turns it on.
     private(set) var enabled: Bool
     private var leftAt: Date?
     private let authenticator: any Authenticator
@@ -66,7 +67,7 @@ final class AppLock {
         self.authenticator = authenticator
         self.defaults = defaults
         self.now = now
-        let enabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
+        let enabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? false
         self.enabled = enabled
         locked = paired && enabled && authenticator.available
     }

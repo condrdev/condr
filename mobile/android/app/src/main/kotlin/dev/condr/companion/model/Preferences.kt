@@ -29,7 +29,7 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
   private val fontSizeState = mutableStateOf(initial[FONT_SIZE] ?: DEFAULT_FONT)
   private val phoneNameState = mutableStateOf(initial[PHONE_NAME] ?: "")
   private val namedState = mutableStateOf(initial[PHONE_NAME] != null)
-  private val lockOnState = mutableStateOf(initial[LOCK_ON] ?: true)
+  private val lockOnState = mutableStateOf(initial[LOCK_ON] ?: false)
   private val pushOnState = mutableStateOf(initial[PUSH_ON] ?: false)
   private var pushRegisteredValue = initial[PUSH_REGISTERED] ?: false
 
@@ -53,7 +53,7 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
   val named: Boolean
     get() = namedState.value
 
-  /** The lock is on until the owner turns it off (ADR 0041). */
+  /** The lock is off until the owner turns it on (ADR 0048). */
   var lockOn: Boolean
     get() = lockOnState.value
     set(value) {
@@ -99,7 +99,9 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
 
     /** Preferences that forget between launches: a demo scene's. */
     fun ephemeral(context: Context): Preferences {
-      val file = context.cacheDir.resolve("demo-preferences.preferences_pb").also { it.delete() }
+      // Its own file each time: DataStore refuses two instances over one file, and a demo
+      // scene may follow another in the same process.
+      val file = context.cacheDir.resolve("demo-${java.util.UUID.randomUUID()}.preferences_pb")
       val store = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create { file }
       return Preferences(store, androidx.datastore.preferences.core.emptyPreferences())
     }

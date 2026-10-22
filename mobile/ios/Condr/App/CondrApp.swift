@@ -141,6 +141,8 @@ struct Stores {
         let session = Session(
             client: DemoClient(scene: scene), fingerprint: DemoWorld.fingerprint, saved: saved,
             alerts: alerts, router: router)
+        // The lock scene shows the lock, which is off until the owner turns it on.
+        if scene == .lock { defaults.set(true, forKey: "lock.enabled") }
         let lock = AppLock(
             authenticator: DemoAuthenticator(), paired: scene == .lock, defaults: defaults)
         switch scene {

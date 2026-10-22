@@ -50,7 +50,7 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 * **Agents**：显示所有已配对电脑上的 Agent，顶部为 **Needs you** 列表：汇总处于 Blocked 或失败状态的 Agent，以及它们给出的说明。轻点即可打开对应的 Pane。
 * **在 Pane 中**：手机成为该终端的一个新窗口，并根据手机屏幕自动调整终端尺寸。在电脑端的该 Pane 中点击或输入，终端尺寸将恢复为电脑尺寸；在手机上退出该 Pane 后，几秒内也会自动恢复电脑端尺寸。你可以直接使用软键盘输入，键盘上方提供按键排，包含 Escape、Tab、Shift-Tab、Control、方向键、Home、End、Page Up 与 Page Down。滑动可滚动浏览终端内容，轻点可触发点击或打开链接，长按可选中复制。
 * **不支持的操作**：手机端不能创建或关闭 Workspace、Tab 与 Pane，亦无法启动 Agent。这些操作请在电脑端完成。
-* **App 锁**：App 启动时，或切至后台超过 5 分钟再次返回时，会要求验证身份：iPhone 上是 Face ID、触控 ID 或锁屏密码，Android 上是指纹、人脸或锁屏密码。你可以在 App 内的 Settings 中关闭此锁定。
+* **App 锁**：App 启动时，或切至后台超过 5 分钟再次返回时，会要求验证身份：iPhone 上是 Face ID、触控 ID 或锁屏密码，Android 上是指纹、人脸或锁屏密码。此锁定默认关闭，可在 App 内的 Settings 中开启。
 
 ---
 

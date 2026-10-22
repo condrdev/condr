@@ -77,6 +77,8 @@ class Stores(
       val alerts = Alerts(bannerLifetimeMillis = null, noticeLifetimeMillis = null)
       val saved = SavedDeviceStore.ephemeral(context)
       val client = DemoClient(scene)
+      // The lock scene shows the lock, which is off until the owner turns it on.
+      if (scene == DemoScene.LOCK) preferences.lockOn = true
       val session = Session(client, DemoWorld.FINGERPRINT, saved, alerts, router, context)
       val macmini1 = PaneRef(DemoWorld.MACMINI, 1u)
       when (scene) {

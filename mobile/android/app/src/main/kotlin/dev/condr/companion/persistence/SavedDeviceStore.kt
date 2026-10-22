@@ -83,7 +83,7 @@ private constructor(private val store: DataStore<SavedDevices>, initial: SavedDe
     fun ephemeral(context: Context): SavedDeviceStore {
       val store =
         DataStoreFactory.create(serializer = SavedDevicesSerializer) {
-          context.cacheDir.resolve("demo-devices.json").also { it.delete() }
+          context.cacheDir.resolve("demo-${java.util.UUID.randomUUID()}.json")
         }
       return SavedDeviceStore(store, SavedDevices())
     }

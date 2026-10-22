@@ -50,7 +50,7 @@ To try the app without a computer, tap **No computer to pair? Try Demo** under *
 * **Agents**: every Agent on every paired computer, with **Needs you** at the top: the Agents that are Blocked or failed, with what they said. Tap one to open its Pane.
 * **In a Pane**: the phone becomes one more window on the terminal and sizes it to the phone's screen. Clicking or typing in the Pane on the computer takes the size back, and it also returns within seconds after you leave the Pane on the phone. Type with the keyboard; the key row above it has Escape, Tab, Shift-Tab, Control, the arrows, Home, End, Page Up and Page Down. Swipe to scroll, tap to click or open a link, and long-press to copy.
 * **What it doesn't do**: the phone doesn't create or close Workspaces, Tabs or Panes, or start Agents. Do that on the computer.
-* **App lock**: the app asks for Face ID, Touch ID, or the passcode on an iPhone, and for your fingerprint, face, or screen lock on Android, when it starts and when you return after more than five minutes away. You can turn the lock off in the app's Settings.
+* **App lock**: the app asks for Face ID, Touch ID, or the passcode on an iPhone, and for your fingerprint, face, or screen lock on Android, when it starts and when you return after more than five minutes away. It is off until you turn it on in the app's Settings.
 
 ---
 

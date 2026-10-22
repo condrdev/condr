@@ -35,6 +35,8 @@ class CompanionApplication : Application() {
 
   override fun onCreate() {
     super.onCreate()
+    // What demo scenes of earlier launches left behind.
+    cacheDir.listFiles { file -> file.name.startsWith("demo-") }?.forEach { it.delete() }
     dev.condr.companion.push.Notifications.createChannel(this)
     ProcessLifecycleOwner.get()
       .lifecycle
