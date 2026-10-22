@@ -14,6 +14,20 @@
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.Condr">
+        <!-- Pushes the system shows while the app is in the background (ADR 0047, ADR 0048). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="agents" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_launcher_monochrome" />
+        <service
+            android:name=".push.CondrMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <!-- Google's code scanner fetches its UI module from Play services on install. -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"

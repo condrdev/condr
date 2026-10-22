@@ -27,19 +27,36 @@ class LivePairingTest {
 
   @Test
   fun pairsOverAPastedLinkAndShowsTheComputersAgents() {
-    assumeTrue("Pass an Invite with -Pandroid.testInstrumentationRunnerArguments.invite=…", !invite.isNullOrBlank())
+    assumeTrue(
+      "Pass an Invite with -Pandroid.testInstrumentationRunnerArguments.invite=…",
+      !invite.isNullOrBlank(),
+    )
     compose.onNodeWithText("Pair with your computer").performClick()
-    compose.waitUntil(5_000) { compose.onAllNodes(hasText("Paste a link", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    compose.waitUntil(5_000) {
+      compose
+        .onAllNodes(hasText("Paste a link", substring = true))
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
     // Either the only button, without Google Play services, or the alternative under Scan.
     compose.onAllNodes(hasText("Paste a link", substring = true)).onFirst().performClick()
     compose.onNodeWithText("p2p://… or tcp://…").performTextInput(invite!!)
     compose.onNodeWithText("Continue").performClick()
     // The first pairing asks for the phone's name, offered as the system's.
-    compose.waitUntil(5_000) { compose.onAllNodes(hasText("Name this phone")).fetchSemanticsNodes().isNotEmpty() }
+    compose.waitUntil(5_000) {
+      compose.onAllNodes(hasText("Name this phone")).fetchSemanticsNodes().isNotEmpty()
+    }
     compose.onNodeWithText("Continue").performClick()
-    compose.waitUntil(30_000) { compose.onAllNodes(hasText("Paired with", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    compose.waitUntil(30_000) {
+      compose
+        .onAllNodes(hasText("Paired with", substring = true))
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
     compose.onNodeWithText("Show my agents").performClick()
-    compose.waitUntil(5_000) { compose.onAllNodes(hasText("Needs you")).fetchSemanticsNodes().isNotEmpty() }
+    compose.waitUntil(5_000) {
+      compose.onAllNodes(hasText("Needs you")).fetchSemanticsNodes().isNotEmpty()
+    }
     compose.onNodeWithText("Needs you").assertIsDisplayed()
   }
 }

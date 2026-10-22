@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     stores = stores(intent)
+    opened(intent)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
     setContent { CondrTheme { stores?.let { App(it) } } }
   }
@@ -30,6 +31,14 @@ class MainActivity : ComponentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     stores = stores(intent)
+    opened(intent)
+  }
+
+  /** The Pane a tapped notification names (ADR 0047), over its Device's Workspace list. */
+  private fun opened(intent: Intent?) {
+    val stores = stores ?: return
+    val pushed = dev.condr.companion.push.Notifications.pushed(intent) ?: return
+    stores.session.ref(pushed)?.let { stores.router.openNotified(it) }
   }
 
   override fun onResume() {

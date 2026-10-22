@@ -3,7 +3,13 @@ plugins {
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.ktfmt)
+  alias(libs.plugins.google.services) apply false
 }
+
+// Firebase's configuration comes from google-services.json, which stays out of the
+// repository; a checkout without it still builds, and its app reports pushes unavailable.
+if (file("google-services.json").exists())
+  apply(plugin = libs.plugins.google.services.get().pluginId)
 
 android {
   namespace = "dev.condr.companion"
@@ -65,9 +71,12 @@ dependencies {
   implementation(libs.serialization.json)
   implementation(libs.coroutines.android)
   implementation(libs.play.services.code.scanner)
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.messaging)
   debugImplementation(libs.compose.ui.tooling)
   debugImplementation(libs.compose.ui.test.manifest)
   testImplementation(libs.junit)
+  testImplementation(libs.coroutines.test)
   androidTestImplementation(platform(libs.compose.bom))
   androidTestImplementation(libs.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.ext.junit)

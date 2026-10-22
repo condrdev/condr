@@ -1,5 +1,8 @@
 package dev.condr.companion.ui
 
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +51,7 @@ import dev.condr.companion.Stores
 import dev.condr.companion.model.AppTab
 import dev.condr.companion.model.DeviceRoute
 import dev.condr.companion.model.SettingsRoute
+import dev.condr.companion.push.Notifications
 import dev.condr.companion.ui.agents.AgentsScreen
 import dev.condr.companion.ui.devices.DeviceScreen
 import dev.condr.companion.ui.devices.DevicesScreen
@@ -148,6 +152,35 @@ private fun MainTabs() {
     }
   }
 }
+
+/**
+ * Keeps Condr Cloud told what this phone accepts (ADR 0047): the permission as it stands, the
+ * Devices paired, and FCM's token, fetched once per launch.
+ */
+@Composable
+private fun rememberPushes(): Pushes {
+  val stores = LocalStores.current
+  val push = stores.push
+  val context = LocalContext.current
+  var granted by remember { mutableStateOf(Notifications.granted(context)) }
+  val ask =
+    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+  val servers = stores.session.devices.mapNotNull { it.deviceId }
+  LaunchedEffect(push) {
+    val push = push ?: return@LaunchedEffect
+    Notifications.fetchToken(context, received = { push.received(it) }, failed = { push.failed() })
+  }
+  LaunchedEffect(push, granted, servers) { push?.update(granted, servers) }
+  return remember(ask) {
+    Pushes {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !granted) {
+        ask.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+      }
+    }
+  }
+}
+
+class Pushes(val ask: () -> Unit)
 
 /** The Agents and Devices tabs both open a Device's Workspaces and a Pane (ADR 0041). */
 @Composable

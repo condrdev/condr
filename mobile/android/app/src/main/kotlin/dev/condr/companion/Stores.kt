@@ -13,6 +13,7 @@ import dev.condr.companion.model.DeviceAuthenticator
 import dev.condr.companion.model.DeviceRoute
 import dev.condr.companion.model.PaneRef
 import dev.condr.companion.model.Preferences
+import dev.condr.companion.model.Push
 import dev.condr.companion.model.Router
 import dev.condr.companion.model.Session
 import dev.condr.companion.model.SessionListener
@@ -30,6 +31,8 @@ class Stores(
   val preferences: Preferences,
   val alerts: Alerts,
   val lock: AppLock,
+  /** None in a demo scene, which registers nowhere. */
+  val push: Push?,
   val client: CompanionInterface,
   /** A demo scene connects nowhere and registers for nothing. */
   val scene: DemoScene?,
@@ -52,12 +55,14 @@ class Stores(
       val session = Session(client, fingerprint(seed), saved, alerts, router, context)
       listener.bind { session.refresh() }
       val lock = AppLock(DeviceAuthenticator(context), session.paired, preferences)
+      val push = Push(client, preferences)
       return Stores(
         session,
         router,
         preferences,
         alerts,
         lock,
+        push,
         client,
         scene = null,
         context = context,
@@ -119,7 +124,7 @@ class Stores(
       }
       val lock =
         AppLock(DemoAuthenticator, paired = scene == DemoScene.LOCK, preferences = preferences)
-      return Stores(session, router, preferences, alerts, lock, client, scene, context)
+      return Stores(session, router, preferences, alerts, lock, null, client, scene, context)
     }
   }
 }

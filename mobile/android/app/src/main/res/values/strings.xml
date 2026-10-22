@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Condr</string>
+    <!-- The titles a push carries as a key with the Agent's name (ADR 0047). -->
+    <string name="push_finished">%1$s finished</string>
+    <string name="push_failed">%1$s failed</string>
+    <string name="push_blocked">%1$s needs you</string>
 </resources>

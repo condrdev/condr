@@ -38,9 +38,6 @@ data class AgentItem(
   val agent: AgentView,
 )
 
-/** The Pane a notification names (ADR 0047). */
-data class PushedPane(val device: String, val pane: ULong)
-
 /**
  * What the library tells the app: the paired Devices, their Workspaces and Agents, the "Needs you"
  * list, and the screen of the one Pane on display (ADR 0039, ADR 0041). It re-reads what `changed`

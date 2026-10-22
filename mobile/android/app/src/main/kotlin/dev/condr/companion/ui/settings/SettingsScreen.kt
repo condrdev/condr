@@ -67,6 +67,7 @@ import dev.condr.companion.BuildConfig
 import dev.condr.companion.R
 import dev.condr.companion.model.Preferences
 import dev.condr.companion.model.SettingsRoute
+import dev.condr.companion.push.Notifications
 import dev.condr.companion.ui.LocalStores
 import dev.condr.companion.ui.terminal.TerminalFont
 import dev.condr.companion.ui.terminal.TerminalPalette
@@ -127,6 +128,36 @@ fun SettingsScreen() {
 
       SectionHeader("Terminal")
       TextSize(preferences)
+
+      SectionHeader("Notifications")
+      val push = stores.push
+      val reachable = push?.available == true && Notifications.reachable(context)
+      val granted = Notifications.granted(context)
+      ListItem(
+        headlineContent = { Text("When an agent finishes or needs you") },
+        supportingContent = {
+          Text(
+            when {
+              push == null -> "Not in the demo."
+              !reachable -> "This phone can't receive notifications."
+              !granted -> "Turned off in the system's settings for Condr."
+              else -> "Even while Condr is closed."
+            }
+          )
+        },
+        trailingContent = {
+          Switch(
+            checked = reachable && granted && push.on,
+            enabled = reachable,
+            onCheckedChange = {
+              context.startActivity(
+                Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                  .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+              )
+            },
+          )
+        },
+      )
 
       SectionHeader("Security")
       ListItem(

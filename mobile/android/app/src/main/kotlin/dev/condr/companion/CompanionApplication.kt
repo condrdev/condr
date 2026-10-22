@@ -30,8 +30,12 @@ class CompanionApplication : Application() {
     return built
   }
 
+  /** The stores built so far, for the messaging service. */
+  fun current(): Stores? = stores
+
   override fun onCreate() {
     super.onCreate()
+    dev.condr.companion.push.Notifications.createChannel(this)
     ProcessLifecycleOwner.get()
       .lifecycle
       .addObserver(

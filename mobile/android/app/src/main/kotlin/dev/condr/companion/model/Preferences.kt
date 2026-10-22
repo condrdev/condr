@@ -30,6 +30,8 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
   private val phoneNameState = mutableStateOf(initial[PHONE_NAME] ?: "")
   private val namedState = mutableStateOf(initial[PHONE_NAME] != null)
   private val lockOnState = mutableStateOf(initial[LOCK_ON] ?: true)
+  private val pushOnState = mutableStateOf(initial[PUSH_ON] ?: false)
+  private var pushRegisteredValue = initial[PUSH_REGISTERED] ?: false
 
   var fontSize: Float
     get() = fontSizeState.value
@@ -59,6 +61,22 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
       write { it[LOCK_ON] = value }
     }
 
+  /** What every `Hello` says about pushes, as the last registration left it (ADR 0047). */
+  var pushOn: Boolean
+    get() = pushOnState.value
+    set(value) {
+      pushOnState.value = value
+      write { it[PUSH_ON] = value }
+    }
+
+  /** Whether Condr Cloud may hold a registration to remove. */
+  var pushRegistered: Boolean
+    get() = pushRegisteredValue
+    set(value) {
+      pushRegisteredValue = value
+      write { it[PUSH_REGISTERED] = value }
+    }
+
   private fun write(edit: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
     scope.launch { store.edit(edit) }
   }
@@ -70,6 +88,8 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
     private val FONT_SIZE = floatPreferencesKey("terminal.fontSize")
     private val PHONE_NAME = stringPreferencesKey("phone.name")
     private val LOCK_ON = booleanPreferencesKey("lock.on")
+    private val PUSH_ON = booleanPreferencesKey("push.on")
+    private val PUSH_REGISTERED = booleanPreferencesKey("push.registered")
 
     /** The app's preferences, read now: a few bytes, before anything is drawn. */
     fun load(context: Context): Preferences {
@@ -81,6 +101,25 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
     fun ephemeral(context: Context): Preferences {
       val file = context.cacheDir.resolve("demo-preferences.preferences_pb").also { it.delete() }
       val store = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create { file }
+      return Preferences(store, androidx.datastore.preferences.core.emptyPreferences())
+    }
+
+    /** Preferences over a store that never touches a file, for tests. */
+    fun inMemory(): Preferences {
+      val store =
+        object : DataStore<Prefs> {
+          private val state =
+            kotlinx.coroutines.flow.MutableStateFlow(
+              androidx.datastore.preferences.core.emptyPreferences()
+            )
+          override val data: kotlinx.coroutines.flow.Flow<Prefs> = state
+
+          override suspend fun updateData(transform: suspend (t: Prefs) -> Prefs): Prefs {
+            val next = transform(state.value)
+            state.value = next
+            return next
+          }
+        }
       return Preferences(store, androidx.datastore.preferences.core.emptyPreferences())
     }
 
