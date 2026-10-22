@@ -31,7 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -87,7 +87,7 @@ fun DevicesScreen() {
   val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
   Scaffold(
     modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-    topBar = { LargeTopAppBar(title = { Text("Devices") }, scrollBehavior = scroll) },
+    topBar = { MediumFlexibleTopAppBar(title = { Text("Devices") }, scrollBehavior = scroll) },
   ) { insets ->
     LazyColumn(Modifier.fillMaxSize().padding(insets)) {
       items(stores.session.devices, key = { it.address }) { device ->
@@ -227,7 +227,7 @@ fun DeviceScreen(address: String) {
   Scaffold(
     modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
     topBar = {
-      LargeTopAppBar(
+      MediumFlexibleTopAppBar(
         title = { Text(device.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         scrollBehavior = scroll,
         actions = {

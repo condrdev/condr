@@ -22,7 +22,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -63,7 +63,7 @@ fun AgentsScreen() {
   val idle = session.agents(AgentStatus.IDLE, AgentStatus.UNKNOWN)
   Scaffold(
     modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-    topBar = { LargeTopAppBar(title = { Text("Agents") }, scrollBehavior = scroll) },
+    topBar = { MediumFlexibleTopAppBar(title = { Text("Agents") }, scrollBehavior = scroll) },
   ) { insets ->
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
