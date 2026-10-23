@@ -39,11 +39,13 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dev.condr.companion.ui.agents.AgentMarks
 import dev.condr.companion.ui.theme.barHeight
+import dev.condr.companion.ui.theme.reducedMotion
 import dev.condr.companion.ui.theme.tint
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -105,8 +107,10 @@ fun WelcomeStage(playing: Boolean, modifier: Modifier = Modifier) {
   val paper = Color(0xFFF5F5F7)
   var cue by remember { mutableStateOf<Int?>(null) }
   var time by remember { mutableFloatStateOf(0f) }
-  LaunchedEffect(playing) {
-    if (!playing) return@LaunchedEffect
+  // Remove animations holds the bars still; the stories still take turns.
+  val still = reducedMotion()
+  LaunchedEffect(playing, still) {
+    if (!playing || still) return@LaunchedEffect
     while (true) withInfiniteAnimationFrameMillis { time = it / 1000f }
   }
   LaunchedEffect(playing) {
@@ -131,7 +135,8 @@ fun WelcomeStage(playing: Boolean, modifier: Modifier = Modifier) {
   val tints = remember { mutableMapOf<AgentStatus, Color>() }
   for (status in AgentStatus.entries) tints[status] = status.tint
   val density = LocalDensity.current
-  BoxWithConstraints(modifier.fillMaxSize()) {
+  // A picture of what the words say: TalkBack reads the words.
+  BoxWithConstraints(modifier.fillMaxSize().clearAndSetSemantics {}) {
     val margin = with(density) { 26.dp.toPx() }
     val gap = with(density) { 30.dp.toPx() }
     val spacing = with(density) { 7.dp.toPx() }

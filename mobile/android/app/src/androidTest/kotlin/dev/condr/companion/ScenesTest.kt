@@ -44,7 +44,7 @@ class ScenesTest {
     open("pair").use {
       shows("Show the pairing code on your computer")
       shows("Paste a link", substring = true)
-      shows("Try Demo", substring = true)
+      shows("Try demo", substring = true)
     }
   }
 
