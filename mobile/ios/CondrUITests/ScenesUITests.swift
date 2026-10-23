@@ -10,6 +10,13 @@ final class ScenesUITests: XCTestCase {
         return app
     }
 
+    /// Waits for `element` to match `format`, as long as a busy CI simulator needs.
+    @MainActor private func becomes(_ element: XCUIElement, _ format: String, _ arguments: Any...) {
+        expectation(
+            for: NSPredicate(format: format, argumentArray: arguments), evaluatedWith: element)
+        waitForExpectations(timeout: 10)
+    }
+
     @MainActor private func assertLandmark(
         _ scene: String, _ query: (XCUIApplication) -> XCUIElement
     ) {
@@ -80,8 +87,9 @@ final class ScenesUITests: XCTestCase {
         XCTAssertFalse(send.isEnabled, "an empty draft has nothing to send")
         // Return in the field is a line break; the terminal's Return is on the key row.
         field.tap()
-        field.typeText("Ship it\nplease")
-        XCTAssertEqual(field.value as? String, "Ship it\nplease")
+        // A busy CI simulator drops keys from one long typeText; a word at a time keeps up.
+        for part in ["Ship ", "it", "\n", "please"] { field.typeText(part) }
+        becomes(field, "value == %@", "Ship it\nplease")
         XCTAssertTrue(send.isEnabled)
         // The terminal's Backspace, tapped and held, touches neither the draft nor Send.
         let backspace = app.buttons["terminalBackspace"]
@@ -91,11 +99,10 @@ final class ScenesUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "Ship it\nplease", "Backspace left the draft alone")
         XCTAssertTrue(send.isEnabled)
         send.tap()
-        expectation(for: NSPredicate(format: "isEnabled == NO"), evaluatedWith: send)
-        waitForExpectations(timeout: 2)
+        becomes(send, "isEnabled == NO")
         app.buttons["Hide Keyboard"].tap()
-        XCTAssertFalse(
-            app.buttons["Hide Keyboard"].waitForExistence(timeout: 2), "the keyboard went")
+        // The keyboard went.
+        becomes(app.buttons["Hide Keyboard"], "exists == NO")
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10))
     }
