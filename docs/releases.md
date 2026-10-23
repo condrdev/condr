@@ -40,7 +40,7 @@ The iPhone and Android app share one version, `MARKETING_VERSION` in `mobile/ver
    git push origin companion-v0.1.15
    ```
 
-3. `companion.yml` checks the tag against the file, builds the APK, signed with the upload key it will not go without, and publishes it with `SHA256SUMS` as **Condr Companion 0.1.15**, never marked Latest, and archives the iPhone app and uploads it to TestFlight. The APK is published only once the iPhone build is uploaded, so the two ship together. In App Store Connect, add the processed build to the public group. Every Companion release is a new version, and a version's first build for external testers goes through Beta App Review, usually within a day.
+3. `companion.yml` checks the tag against the file, builds the APK, signed with the upload key it will not go without, and publishes it with `SHA256SUMS` as **Condr Companion 0.1.15**, never marked Latest, and archives the iPhone app and uploads it to TestFlight. The APK is published only once the iPhone build is uploaded, so the two ship together, and then condr.dev redeploys so its download page links that APK. In App Store Connect, add the processed build to the public group. Every Companion release is a new version, and a version's first build for external testers goes through Beta App Review, usually within a day.
 
 The notes take the commits since the previous `companion-v*` tag (the first release starts from `v0.1.14`) that touch `mobile/`, `crates/condr-mobile/`, `crates/condr-client/`, which both apps link, or the two mobile scripts. Preview them with the command `companion.yml` runs, `--tag companion-v<next>` and all. `gh workflow run companion.yml`, on any branch or tag, builds and signs both platforms and publishes nothing, which checks the secrets.
 

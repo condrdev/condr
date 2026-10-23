@@ -254,3 +254,9 @@ jobs:
             --notes-file release-notes.md \
             --verify-tag \
             --latest=false
+
+  website:
+    name: Point condr.dev/download at the APK
+    needs: publish
+    uses: ./.github/workflows/website.yml
+    secrets: inherit

@@ -1,13 +1,13 @@
 ---
 import Site from "../layouts/Site.astro";
-import { version } from "../version";
+import { companionVersion, version } from "../version";
 
 const repo = "https://github.com/condrdev/condr";
 const release = `${repo}/releases/tag/v${version}`;
 const app = (target: string) => `${repo}/releases/download/v${version}/condr-${version}-${target}`;
 const testflight = "https://testflight.apple.com/join/6qQE7Pbx";
-// The Companion has releases of its own, apart from the desktop's version (ADR 0049).
-const apk = `${repo}/releases?q=companion`;
+// The Companion's releases are its own, apart from the desktop's (ADR 0049).
+const apk = `${repo}/releases/download/companion-v${companionVersion}/condr-companion-${companionVersion}.apk`;
 
 const platforms = [
     {

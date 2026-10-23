@@ -7,6 +7,8 @@ name: Website
 # Cargo.toml version and /version.txt names it for the install scripts and the
 # GUI's stable update check, so release.yml calls this once that release is
 # published (a Cargo.toml push alone would point at files that do not exist yet).
+# Its Android link names mobile/version.xcconfig's APK, so companion.yml calls it
+# once the Companion's release is published too (ADR 0049).
 
 on:
   push:
