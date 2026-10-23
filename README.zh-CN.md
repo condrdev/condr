@@ -17,8 +17,7 @@
 <p align="center">
   <a href="https://github.com/condrdev/condr/releases/latest"><img src="https://img.shields.io/github/v/release/condrdev/condr?label=version&color=brightgreen" alt="最新版本" /></a>
   <a href="https://condr.dev/download/"><img src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue" alt="支持 macOS、Windows 和 Linux" /></a>
-  <a href="https://testflight.apple.com/join/6qQE7Pbx"><img src="https://img.shields.io/badge/supported-iOS-blue" alt="iOS 版（TestFlight）" /></a>
-  <a href="https://condr.dev/download/"><img src="https://img.shields.io/badge/supported-Android-blue" alt="Android 版" /></a>
+  <a href="https://condr.dev/download/"><img src="https://img.shields.io/badge/supported-iOS%20%C2%B7%20Android-blue" alt="iOS 与 Android 版" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache 2.0 许可证" /></a>
 </p>
 
