@@ -1,6 +1,7 @@
 package dev.condr.companion.ui.terminal
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -40,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -95,14 +95,7 @@ fun KeyRow(
       ) {
         onControl(!control)
       }
-      IconKey(rememberVectorPainter(Icons.AutoMirrored.Filled.KeyboardArrowLeft), "Left") {
-        press(Key.Left)
-      }
-      IconKey(rememberVectorPainter(Icons.Filled.KeyboardArrowUp), "Up") { press(Key.Up) }
-      IconKey(rememberVectorPainter(Icons.Filled.KeyboardArrowDown), "Down") { press(Key.Down) }
-      IconKey(rememberVectorPainter(Icons.AutoMirrored.Filled.KeyboardArrowRight), "Right") {
-        press(Key.Right)
-      }
+      ArrowKeys(press)
       TextKey("⇧tab", "Shift-Tab") { press(Key.BackTab) }
       TextKey("home", "Home") { press(Key.Home) }
       TextKey("end", "End") { press(Key.End) }
@@ -152,6 +145,44 @@ private fun IconKey(icon: Painter, label: String, action: () -> Unit) {
     modifier = KeyModifier.semantics { contentDescription = label },
   ) {
     Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+  }
+}
+
+/**
+ * The four arrows as one key, as the iPhone groups them, narrower apiece so ↑ and ↓ show beside
+ * Ctrl without a swipe.
+ */
+@Composable
+private fun ArrowKeys(press: (Key) -> Unit) {
+  val colors = ButtonDefaults.filledTonalButtonColors()
+  Row(
+    Modifier.height(40.dp)
+      .clip(ButtonDefaults.shape)
+      .background(colors.containerColor)
+      .padding(horizontal = 2.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    for ((icon, label, key) in
+      listOf(
+        Triple(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Left", Key.Left),
+        Triple(Icons.Filled.KeyboardArrowUp, "Up", Key.Up),
+        Triple(Icons.Filled.KeyboardArrowDown, "Down", Key.Down),
+        Triple(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Right", Key.Right),
+      )) {
+      Box(
+        Modifier.size(width = 34.dp, height = 40.dp)
+          .clickable(role = Role.Button) { press(key) }
+          .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          icon,
+          contentDescription = null,
+          tint = colors.contentColor,
+          modifier = Modifier.size(20.dp),
+        )
+      }
+    }
   }
 }
 
