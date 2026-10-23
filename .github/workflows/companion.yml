@@ -115,16 +115,20 @@ jobs:
       # An App Store Connect team key with the Admin role, which may create the cloud-managed
       # distribution certificate and the App Store profile (ADR 0049); the notary key's
       # Developer role cannot.
-      - name: Check the App Store Connect key
+      - name: Check the App Store Connect key and the development certificate
         env:
           APPLE_ASC_KEY: ${{ secrets.APPLE_ASC_KEY }}
           APPLE_ASC_KEY_ID: ${{ secrets.APPLE_ASC_KEY_ID }}
           APPLE_ASC_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          APPLE_DEVELOPMENT_P12: ${{ secrets.APPLE_DEVELOPMENT_P12 }}
+          APPLE_DEVELOPMENT_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPMENT_P12_PASSWORD }}
         run: |
-          if [ -z "$APPLE_ASC_KEY" ] || [ -z "$APPLE_ASC_KEY_ID" ] || [ -z "$APPLE_ASC_ISSUER" ]; then
-            echo "APPLE_ASC_KEY, APPLE_ASC_KEY_ID and APPLE_NOTARY_ISSUER must be set; see docs/releases.md" >&2
-            exit 1
-          fi
+          for name in APPLE_ASC_KEY APPLE_ASC_KEY_ID APPLE_ASC_ISSUER APPLE_DEVELOPMENT_P12 APPLE_DEVELOPMENT_P12_PASSWORD; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "$name is not set; see docs/releases.md" >&2
+              exit 1
+            fi
+          done
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -137,6 +141,27 @@ jobs:
       - name: Generate the app's project
         working-directory: mobile/ios
         run: mise exec xcodegen@2.46.0 -- xcodegen generate
+      # The team's one CI development certificate (ADR 0049): the archive is signed for
+      # development before the export signs it for the App Store, and a runner without a
+      # certificate of its own has the API create a new one every run.
+      - name: Import the development certificate
+        env:
+          APPLE_DEVELOPMENT_P12: ${{ secrets.APPLE_DEVELOPMENT_P12 }}
+          APPLE_DEVELOPMENT_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPMENT_P12_PASSWORD }}
+        run: |
+          keychain=$RUNNER_TEMP/signing.keychain-db
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          # The certificate's issuer, which a fresh runner may lack.
+          curl -fsSLo "$RUNNER_TEMP/AppleWWDRCAG3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k "$keychain" -T /usr/bin/codesign
+          printf '%s' "$APPLE_DEVELOPMENT_P12" | base64 --decode >"$RUNNER_TEMP/development.p12"
+          security import "$RUNNER_TEMP/development.p12" -k "$keychain" -P "$APPLE_DEVELOPMENT_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security find-identity -v -p codesigning "$keychain" | grep -q "Apple Development"
       - name: Archive
         working-directory: mobile/ios
         env:
