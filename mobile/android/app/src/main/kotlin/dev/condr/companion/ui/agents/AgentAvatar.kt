@@ -53,6 +53,8 @@ fun AgentAvatar(
   side: Dp,
   shell: Boolean = false,
   surface: Color = MaterialTheme.colorScheme.surface,
+  /** A Blocked glyph pulses where one wait is the subject: a banner. */
+  ripple: Boolean = false,
 ) {
   Box(Modifier.size(side)) {
     Box(
@@ -80,7 +82,7 @@ fun AgentAvatar(
           .background(surface, CircleShape)
           .padding(side * 0.06f)
       ) {
-        StatusGlyph(status, side * 0.27f)
+        StatusGlyph(status, side * 0.27f, ripple = ripple)
       }
     }
   }

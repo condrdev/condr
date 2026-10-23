@@ -724,7 +724,7 @@ private fun PreviewRow(name: String, key: String) {
       )
     }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-      Text(name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+      Text(name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
       Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -901,9 +901,7 @@ private fun ConnectingStep(
                 )
               ListItem(
                 modifier = Modifier.alpha(arrived).offset(y = 12.dp * (1 - arrived)),
-                headlineContent = {
-                  Text(item.pane.name, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                },
+                headlineContent = { Text(item.pane.name, fontWeight = FontWeight.SemiBold) },
                 supportingContent = {
                   Text(
                     agentStatusLine(
@@ -911,8 +909,7 @@ private fun ConnectingStep(
                       item.agent.status,
                       item.agent.detail,
                       kind = true,
-                    ),
-                    maxLines = 1,
+                    )
                   )
                 },
                 leadingContent = {

@@ -289,9 +289,10 @@ private fun Failed(text: String) {
 @Composable
 private fun BlockedOnView(detail: BlockedOn) {
   Column(Modifier.fillMaxWidth()) {
+    // A well inset in the card: a shade over the card's colour, so it shows on it.
     androidx.compose.material3.Surface(
       shape = RoundedCornerShape(16.dp),
-      color = MaterialTheme.colorScheme.surfaceContainerHighest,
+      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
       modifier = Modifier.fillMaxWidth(),
     ) {
       Column(

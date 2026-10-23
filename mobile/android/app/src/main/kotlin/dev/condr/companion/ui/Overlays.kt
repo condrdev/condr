@@ -100,14 +100,13 @@ fun BannerView(modifier: Modifier = Modifier) {
           status = shown.status,
           side = 38.dp,
           surface = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
+          ripple = true,
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
           Text(
             shown.title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
           )
           Text(
             shown.detail,

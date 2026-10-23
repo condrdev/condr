@@ -483,12 +483,19 @@ private fun PaneRow(pane: PaneView, open: () -> Unit) {
       )
     },
     trailingContent = {
-      if (pane.attention) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        if (pane.attention) {
+          Icon(
+            Icons.Filled.Notifications,
+            contentDescription = "Rang the bell",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+          )
+        }
         Icon(
-          Icons.Filled.Notifications,
-          contentDescription = "Rang the bell",
-          tint = MaterialTheme.colorScheme.onSurfaceVariant,
-          modifier = Modifier.size(18.dp),
+          Icons.AutoMirrored.Filled.KeyboardArrowRight,
+          contentDescription = null,
+          tint = MaterialTheme.colorScheme.outline,
         )
       }
     },
