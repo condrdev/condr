@@ -42,7 +42,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"（ADR 0036 已去掉 controller 租约）。没有 capability，密钥也没有进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
 - Windows 代码签名（SmartScreen）。
 - 终端内搜索。
-- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，iOS 的 Companion 经 TestFlight 公开链接分发，Android 以签名 APK 在 GitHub Releases 发布；App Store 与 Google Play 随首个正式版上架（ADR 0041）。
+- 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，iOS 的 Companion 经 TestFlight 公开链接分发，Android 以签名 APK 在 GitHub Releases 的 Companion 版本中发布（ADR 0049）；App Store 与 Google Play 随首个正式版上架（ADR 0041）。
 
 **已知限制**（出现摩擦再立 Issue）：
 
@@ -56,7 +56,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 移动端 Companion（iOS 与 Android）
 
-**状态**：下述 1–7 步已在 iOS 完成：iOS 经 TestFlight 公开测试（第 6 步），推送已实现并在真机走通（第 7 步），随下一个桌面版本和 TestFlight build 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 nightly 与正式版流水线产出；真机与 FCM 的验证待 Firebase 项目建好。
+**状态**：下述 1–7 步已在 iOS 完成：iOS 经 TestFlight 公开测试（第 6 步），推送已实现并在真机走通（第 7 步），随下一个桌面版本和 TestFlight build 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）；真机与 FCM 的验证待 Firebase 项目建好。
 
 **为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `detail`，把它们带到手机上是这一层能做、单个厂商不会做的事。
 

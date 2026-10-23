@@ -77,8 +77,10 @@ cd android
 ./gradlew :app:installDebug                                   # 装到已连接的设备或模拟器
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:ktfmtCheck
 ./gradlew ktfmtFormat                                         # 格式化（Google 风格）
-./gradlew :app:assembleRelease -Prelease -PversionCode=N      # Rust release 库 + R8；有 ANDROID_KEYSTORE_FILE/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_PASSWORD 时用上传密钥签名，否则 debug 密钥
+./gradlew :app:assembleRelease -Prelease                     # Rust release 库 + R8；有 ANDROID_KEYSTORE_FILE/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_PASSWORD 时用上传密钥签名，否则 debug 密钥
 ```
+
+两端共用 `version.xcconfig` 里的版本号，Android 的 `versionCode` 与 iOS 的构建号都由它算出；发版是推一个 `companion-v<版本>` tag，见 [docs/releases.md](../docs/releases.md#companion-release)（ADR 0049）。
 
 推送要 `app/google-services.json`（不提交；没有它也能构建，App 显示通知不可用）。`compileSdk` 是 37.2（Compose 1.13 的 beta 需要），`targetSdk` 36，`minSdk` 29。
 

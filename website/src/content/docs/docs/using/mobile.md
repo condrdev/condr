@@ -3,7 +3,7 @@ title: Mobile app
 description: Install Condr on your iPhone or Android phone, pair it with your computers, and check on and answer your Agents away from your desk.
 ---
 
-Condr for iPhone and Android shows every Agent on the computers you pair with it, lists the ones waiting for you first, and opens any Pane so you can read and reply. The iPhone app is in public beta on TestFlight; the Android app ships as an APK with every Condr release until it reaches Google Play with the first stable release (see the [Roadmap](/docs/help/roadmap/)).
+Condr for iPhone and Android shows every Agent on the computers you pair with it, lists the ones waiting for you first, and opens any Pane so you can read and reply. The iPhone app is in public beta on TestFlight; the Android app ships as an APK in its own releases on GitHub until it reaches Google Play with the first stable release (see the [Roadmap](/docs/help/roadmap/)).
 
 ---
 
@@ -25,7 +25,7 @@ When a new beta comes out, update the app in TestFlight. Each beta expires after
 
 ### Android
 
-1. On the phone, open the [nightly prerelease](https://github.com/condrdev/condr/releases/tag/nightly) (or a [release](https://github.com/condrdev/condr/releases)) and download `condr-companion-<version>.apk`.
+1. On the phone, open the latest [Condr Companion release](https://github.com/condrdev/condr/releases?q=companion) and download `condr-companion-<version>.apk`.
 2. Open the download and allow installing from your browser when Android asks.
 
 To update, install a newer APK over it: every APK is signed with the same key, so the phone keeps its pairings. Notifications need Google Play services; a phone without them stays up to date only while the app is open.

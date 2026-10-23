@@ -1,6 +1,6 @@
 # Releases
 
-Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the desktop installer and the headless archive for Linux x86_64/arm64, macOS arm64 and Windows x86_64, and the Companion's Android APK (ADR 0048), all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. Client and Server have no cross-build compatibility promise; update them together. Every binary reports its build as `<version>+<12-character commit>` (`condr --version`, `condr-gui --version`; ADR 0027), a nightly with `(nightly)` after it, and a GUI connected to a Server of another build marks that Device in the sidebar.
+Condr publishes two kinds of builds. `nightly.yml` and `release.yml` both call the reusable `build.yml`, which packages the desktop installer and the headless archive for Linux x86_64/arm64, macOS arm64 and Windows x86_64, all from one commit, with `SHA256SUMS` and a `BUILD-COMMIT` file inside each package. The Companion, the iPhone and Android app, has its own version and release (ADR 0049, [below](#companion-release)); the nightly is the desktop's alone. Client and Server have no cross-build compatibility promise; update them together. Every binary reports its build as `<version>+<12-character commit>` (`condr --version`, `condr-gui --version`; ADR 0027), a nightly with `(nightly)` after it, and a GUI connected to a Server of another build marks that Device in the sidebar.
 
 Intel Macs get no package: Apple has ended the architecture, GitHub's last x86_64 macOS runner retires in 2027, and stapling its notarization kept failing there. The Windows GUI ships as its installer alone, with no portable ZIP; the headless ZIP stays, since `install.ps1` installs the CLI from it.
 
@@ -10,7 +10,7 @@ Intel Macs get no package: Apple has ended the architecture, GitHub's last x86_6
 - Builds the current `main`. If the `nightly` tag already points at `HEAD`, the scheduled run exits without building.
 - Recreates the mutable **Nightly** prerelease and its `nightly` tag at the built commit, so only assets from that commit are attached.
 - Its notes list the `feat` and `fix` commits since the latest `v*` tag, the same way a versioned release does (without the Update section), and link the compare view of every commit since.
-- Package names carry the 12-character short SHA: `condr-0.1.0-<sha>-linux-x86_64.AppImage`, `condr-headless-0.1.0-<sha>-macos-arm64.tar.gz`, `condr-companion-0.1.0-<sha>.apk`.
+- Package names carry the 12-character short SHA: `condr-0.1.0-<sha>-linux-x86_64.AppImage`, `condr-headless-0.1.0-<sha>-macos-arm64.tar.gz`.
 - `nightly` is the only mutable tag, and only the workflow recreates it.
 - The workflow creates the tag with the built-in `GITHUB_TOKEN`, which GitHub refuses when the target commit's `.github/workflows/` files differ from `main`. In practice that only happens when a workflow change lands on `main` while a nightly is still building; the publish step then fails with HTTP 403 and the next run succeeds.
 
@@ -26,7 +26,32 @@ Intel Macs get no package: Apple has ended the architecture, GitHub's last x86_6
 
 3. The workflow verifies the tag matches `Cargo.toml`, builds with `CONDR_RELEASE=1` (package names without the SHA), and creates a release marked **Latest**. It fails instead of overwriting an existing release, so a published version's packages never change. GitHub's immutable releases setting stays off: `nightly.yml` deletes the Nightly release and recreates it under the same `nightly` tag, which an immutable release forbids.
 
-The release notes come from the commits since the previous `v*` tag: [git-cliff](https://git-cliff.org) with `cliff.toml` lists `feat` commits under New and `fix` commits under Fixed, by subject, skips every other type and `feat(website)`, and ends with the Update section. So a `feat` or `fix` subject is a line of the release notes. Preview them before tagging with `git cliff --unreleased --tag v<next> --strip header`; a summary sentence or a note that only the new Server has something can be added by editing the published release.
+The release notes come from the commits since the previous `v*` tag: [git-cliff](https://git-cliff.org) with `cliff.toml` lists `feat` commits under New and `fix` commits under Fixed, by subject, skips every other type and `feat(website)`, and ends with the Update section. `release.yml` and `nightly.yml` leave out a commit whose every file is the Companion's (`mobile/`, `crates/condr-mobile/` and its two scripts) or documentation (`docs/`, `website/`, `.github/`, Markdown, `.gitignore`); one that touches the desktop too is in both, and the Companion's own changes are in its notes. So a `feat` or `fix` subject is a line of the release notes. Preview them before tagging with `git cliff --unreleased --tag v<next> --strip header` and the `--exclude-path` list `release.yml` passes; a summary sentence or a note that only the new Server has something can be added by editing the published release.
+
+## Companion release
+
+The iPhone and Android app share one version, `MARKETING_VERSION` in `mobile/version.xcconfig`, released apart from the desktop (ADR 0049). Android's `versionCode` and the iPhone's build number follow from it, so the version is the only number to change; every release bumps it, even one that changes a single platform.
+
+1. Bump `MARKETING_VERSION` in `mobile/version.xcconfig` and merge it to `main`.
+2. Tag the merged commit and push the tag:
+
+   ```bash
+   git tag companion-v0.1.15 <commit>
+   git push origin companion-v0.1.15
+   ```
+
+3. `companion.yml` checks the tag against the file, builds the APK, signed with the upload key it will not go without, and publishes it with `SHA256SUMS` as **Condr Companion 0.1.15**, never marked Latest, and archives the iPhone app and uploads it to TestFlight. The APK is published only once the iPhone build is uploaded, so the two ship together. In App Store Connect, add the processed build to the public group. Every Companion release is a new version, and a version's first build for external testers goes through Beta App Review, usually within a day.
+
+The notes take the commits since the previous `companion-v*` tag (the first release starts from `v0.1.14`) that touch `mobile/`, `crates/condr-mobile/`, `crates/condr-client/`, which both apps link, or the two mobile scripts. Preview them with the command `companion.yml` runs, `--tag companion-v<next>` and all. `gh workflow run companion.yml`, on any branch or tag, builds and signs both platforms and publishes nothing, which checks the secrets.
+
+The iPhone upload signs with an App Store Connect team key that has the **Admin** role, so `xcodebuild -allowProvisioningUpdates` may create the cloud-managed distribution certificate and the App Store profile; the notary key's Developer role cannot. Create it under Users and Access › Integrations › App Store Connect API › Team Keys.
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_ASC_KEY` | The Admin key's `.p8`, base64-encoded |
+| `APPLE_ASC_KEY_ID` | Its Key ID |
+| `APPLE_NOTARY_ISSUER` | The team's Issuer ID, shared with the notary key |
+| `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` | The APK's upload key (ADR 0048) |
 
 ## macOS signing and notarization
 

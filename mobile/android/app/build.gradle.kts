@@ -11,6 +11,19 @@ plugins {
 if (file("google-services.json").exists())
   apply(plugin = libs.plugins.google.services.get().pluginId)
 
+// The Companion's version, which the iPhone app reads from the same file (ADR 0049).
+val companionVersion: String =
+  rootProject.file("../version.xcconfig").readLines().firstNotNullOf {
+    Regex("""^MARKETING_VERSION\s*=\s*(\S+)""").find(it)?.groupValues?.get(1)
+  }
+
+// The version as one integer, as Android compares installs and Google Play uploads:
+// 0.1.15 is 1015. Only the version moves it, so every release bumps the version.
+val companionVersionCode: Int =
+  companionVersion.split(".").map(String::toInt).let { (major, minor, patch) ->
+    major * 1_000_000 + minor * 1_000 + patch
+  }
+
 android {
   namespace = "dev.condr.companion"
   // Compiled against 37.2, which the Compose 1.13 betas need; targets 36, which Google Play
@@ -23,9 +36,9 @@ android {
     applicationId = "dev.condr.companion"
     minSdk = 29
     targetSdk = 36
-    // The iOS app's marketing version; CI passes the run number (ADR 0048).
-    versionName = "0.1"
-    versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
+    // One version with the iPhone app, from mobile/version.xcconfig (ADR 0049).
+    versionName = companionVersion
+    versionCode = companionVersionCode
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     // The pairing test against a real Server runs only when an Invite is passed:
     // -Pandroid.testInstrumentationRunnerArguments.invite='tcp://…'

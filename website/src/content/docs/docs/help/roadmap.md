@@ -14,7 +14,7 @@ Condr 0.1 is in Public Preview. This page lists what comes next; the order is th
 **iPhone in public beta.** The iPhone app is available through TestFlight; see [Mobile app](/docs/using/mobile/). It shows the Agents on each of your Devices and the Needs you list, and opens Panes so you can read and reply. Next, in this order:
 
 1. **Push notifications**, built and shipping with the next desktop release and TestFlight build: your phone gets a notification when an Agent finishes, fails or needs you. It travels through Condr Cloud, a small service Condr runs, to Apple's or Google's push service, and says which Agent, its state, the Workspace, the terminal's title and the Server's name, never anything from the terminal itself; see [Privacy](/docs/help/privacy/). On Android they arrive only through Google's push service; a phone without Google services updates only while the app is open.
-2. **The Android app**, built, with the same features as the iPhone app. Until the first stable release it ships as a signed APK with every release on GitHub, nightlies included; see [Mobile app](/docs/using/mobile/).
+2. **The Android app**, built, with the same features as the iPhone app. Until the first stable release it ships as a signed APK in its own releases on GitHub; see [Mobile app](/docs/using/mobile/).
 
 Condr comes to the App Store and Google Play with its first stable release.
 

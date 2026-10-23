@@ -3,7 +3,7 @@ title: 手机端
 description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位时也能查看并回复 Agent。
 ---
 
-手机版 Condr（iPhone 与 Android）可显示所有已配对电脑上的 Agent，将等待你处理的 Agent 置于最前，并支持打开任意 Pane 进行查看与回复。iPhone 版目前通过 TestFlight 公开测试；Android 版随每个 Condr 版本以 APK 形式发布，首个正式版时上架 Google Play（详见[路线图](/zh-cn/docs/help/roadmap/)）。
+手机版 Condr（iPhone 与 Android）可显示所有已配对电脑上的 Agent，将等待你处理的 Agent 置于最前，并支持打开任意 Pane 进行查看与回复。iPhone 版目前通过 TestFlight 公开测试；Android 版以 APK 形式在 GitHub 上单独发布，首个正式版时上架 Google Play（详见[路线图](/zh-cn/docs/help/roadmap/)）。
 
 ---
 
@@ -25,7 +25,7 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 
 ### Android
 
-1. 在手机上打开 [nightly 预发布](https://github.com/condrdev/condr/releases/tag/nightly)（或某个[正式版](https://github.com/condrdev/condr/releases)），下载 `condr-companion-<版本>.apk`。
+1. 在手机上打开最新的 [Condr Companion 版本](https://github.com/condrdev/condr/releases?q=companion)，下载 `condr-companion-<版本>.apk`。
 2. 打开下载的文件，按 Android 的提示允许从浏览器安装。
 
 更新时直接安装更新的 APK 即可：每个 APK 都用同一把密钥签名，手机会保留已有的配对。通知依赖 Google Play 服务；没有它的手机只在 App 打开时保持更新。

@@ -1,7 +1,11 @@
 # Release notes from the commits since the previous `v*` tag (docs/releases.md).
-# `release.yml` runs `git cliff --latest --strip header`; preview the next release with
-# `git cliff --unreleased --tag v<next> --strip header`. `nightly.yml` runs
-# `git cliff --unreleased --strip header`, which has no version and so no Update section.
+# `release.yml` runs `git cliff --latest --tag <tag> --strip header` with `--exclude-path` for
+# the Companion's and the docs' files; preview the next release with
+# `git cliff --unreleased --tag v<next> --strip header` and the same excludes. `nightly.yml`
+# runs `git cliff --unreleased --strip header` with them, which has no version and so no
+# Update section.
+# `companion.yml` passes its own range, `--tag-pattern ^companion-v` and `--include-path`
+# for the Companion's files (ADR 0049).
 
 [changelog]
 body = """
@@ -13,11 +17,15 @@ body = """
 {% endfor %}
 {% if version -%}
 ## Update
-
+{% if version is starting_with("companion-v") %}
+- Android: install the APK below over the one you have; it keeps your pairings.
+- iPhone: TestFlight offers {{ version | trim_start_matches(pat="companion-v") }} once Apple has processed it.
+{% else %}
 Update the app and every Device's Server to {{ version | trim_start_matches(pat="v") }}.
 
 - Desktop: download the installer below.
 - Headless Server: `curl -fsSL https://condr.dev/install.sh | sh`, or on Windows `irm https://condr.dev/install.ps1 | iex`.
+{% endif -%}
 {% endif -%}
 """
 trim = true

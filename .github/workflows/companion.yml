@@ -1,0 +1,231 @@
+name: Companion
+
+# Pushing an immutable `companion-v*` tag ships the Companion, apart from the desktop
+# (ADR 0049): the Android APK on a GitHub release of its own, never marked Latest, and the
+# iPhone build uploaded to TestFlight. Run on demand, on any ref, it builds and signs both and
+# publishes nothing, which checks the secrets before a tag needs them.
+
+on:
+  push:
+    tags:
+      - 'companion-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check the tag against mobile/version.xcconfig
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: version
+        run: |
+          version=$(sed -n 's/^MARKETING_VERSION *= *//p' mobile/version.xcconfig)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "companion-v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match mobile/version.xcconfig's $version" >&2
+            exit 1
+          fi
+
+  android:
+    name: Android app
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CONDR_RELEASE: '1'
+      # The library's build identity (ADR 0027).
+      CONDR_BUILD_COMMIT: ${{ github.sha }}
+    # The secrets reach only the steps that use them, not the third-party actions.
+    steps:
+      # The upload key (ADR 0048): an APK signed with any other cannot install over the last.
+      - name: Check the upload key
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "ANDROID_KEYSTORE, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_PASSWORD must be set; see docs/releases.md" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup target add aarch64-linux-android x86_64-linux-android
+      - run: cargo install cargo-ndk --locked --version 4.1.2
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install the Android SDK packages the app compiles against
+        run: |
+          yes 2>/dev/null | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" >/dev/null
+      - name: Build the APK
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE" | base64 -d > "$RUNNER_TEMP/condr-upload.jks"
+          ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/condr-upload.jks" ./gradlew --no-daemon :app:assembleRelease -Prelease
+      - name: Name the APK like the desktop's packages
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          mkdir -p dist
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "dist/condr-companion-$VERSION.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: condr-companion
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  ios:
+    name: iPhone app
+    needs: check
+    # iOS 26 (ADR 0042) needs a 26 SDK, which macos-26's default Xcode has.
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      CONDR_RELEASE: '1'
+      CONDR_BUILD_COMMIT: ${{ github.sha }}
+      CONDR_MOBILE_PROFILE: release
+    # The secrets reach only the steps that use them, not the third-party actions.
+    steps:
+      # An App Store Connect team key with the Admin role, which may create the cloud-managed
+      # distribution certificate and the App Store profile (ADR 0049); the notary key's
+      # Developer role cannot.
+      - name: Check the App Store Connect key
+        env:
+          APPLE_ASC_KEY: ${{ secrets.APPLE_ASC_KEY }}
+          APPLE_ASC_KEY_ID: ${{ secrets.APPLE_ASC_KEY_ID }}
+          APPLE_ASC_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+        run: |
+          if [ -z "$APPLE_ASC_KEY" ] || [ -z "$APPLE_ASC_KEY_ID" ] || [ -z "$APPLE_ASC_ISSUER" ]; then
+            echo "APPLE_ASC_KEY, APPLE_ASC_KEY_ID and APPLE_NOTARY_ISSUER must be set; see docs/releases.md" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      # SwiftPM resolves the library's xcframework before Xcode's pre-build phase runs.
+      - run: script/build-mobile.sh ios
+      - uses: jdx/mise-action@v4
+        with:
+          install: false
+      - name: Generate the app's project
+        working-directory: mobile/ios
+        run: mise exec xcodegen@2.46.0 -- xcodegen generate
+      - name: Archive
+        working-directory: mobile/ios
+        env:
+          APPLE_ASC_KEY: ${{ secrets.APPLE_ASC_KEY }}
+          APPLE_ASC_KEY_ID: ${{ secrets.APPLE_ASC_KEY_ID }}
+          APPLE_ASC_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+        run: |
+          printf '%s' "$APPLE_ASC_KEY" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
+          # SwiftTerm ships a build plugin, which a command-line build must be told to trust.
+          xcodebuild archive -project Condr.xcodeproj -scheme Condr -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Condr.xcarchive" \
+            -skipPackagePluginValidation -skipMacroValidation -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$APPLE_ASC_KEY_ID" -authenticationKeyIssuerID "$APPLE_ASC_ISSUER"
+          version=$(sed -n 's/^MARKETING_VERSION *= *//p' ../version.xcconfig)
+          build=$(plutil -extract ApplicationProperties.CFBundleVersion raw "$RUNNER_TEMP/Condr.xcarchive/Info.plist")
+          test "$build" = "$version" || { echo "archived build $build is not $version" >&2; exit 1; }
+      - name: Upload to TestFlight
+        working-directory: mobile/ios
+        env:
+          # A pushed tag uploads; a run on demand only signs the export.
+          DESTINATION: ${{ github.event_name == 'push' && 'upload' || 'export' }}
+          APPLE_ASC_KEY_ID: ${{ secrets.APPLE_ASC_KEY_ID }}
+          APPLE_ASC_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>$DESTINATION</string>
+            <key>teamID</key><string>XN79X9928S</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Condr.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$APPLE_ASC_KEY_ID" -authenticationKeyIssuerID "$APPLE_ASC_ISSUER"
+
+  publish:
+    name: Create the Companion release
+    needs: [check, android, ios]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # The whole history and every tag, so the notes find the previous Companion release.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Write the release notes
+        # git-cliff itself, so the path patterns reach it quoted. With --include-path it does
+        # not find tags in the range, so --tag names the version the notes are for.
+        run: |
+          # Before the first Companion tag, the APK last shipped with the desktop's v0.1.14.
+          previous=$(git describe --tags --abbrev=0 --match 'companion-v*' "$GITHUB_REF_NAME^" 2>/dev/null || echo v0.1.14)
+          pipx run git-cliff==2.14.2 "$previous..HEAD" --tag "$GITHUB_REF_NAME" \
+            --tag-pattern '^companion-v' \
+            --include-path 'mobile/**' --include-path 'crates/condr-mobile/**' \
+            --include-path 'crates/condr-client/**' \
+            --include-path script/build-mobile.sh \
+            --include-path script/generate-android-agent-marks.py \
+            --strip header --output release-notes.md
+      - uses: actions/download-artifact@v8
+        with:
+          name: condr-companion
+          path: dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CONDR_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; tags are immutable" >&2
+            exit 1
+          fi
+          (cd dist && sha256sum * > SHA256SUMS)
+          # Latest stays the desktop's: condr.dev/download and every update check follow it.
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Condr Companion $CONDR_VERSION" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            --latest=false

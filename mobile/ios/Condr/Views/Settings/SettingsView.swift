@@ -159,11 +159,9 @@ struct SettingsView: View {
 }
 
 extension Bundle {
-    /// "0.1 (1)"
+    /// "0.1.15": the build number is the version itself (ADR 0049).
     var versionText: String {
-        let version = infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "\(version) (\(build))"
+        infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
     }
 }
 

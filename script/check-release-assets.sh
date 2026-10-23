@@ -15,5 +15,3 @@ done
 for target in linux-x86_64.tar.gz linux-arm64.tar.gz macos-arm64.tar.gz windows-x86_64.zip; do
     test -s "$dist/condr-headless-${package_version}-${target}"
 done
-# The Companion's Android app ships beside the desktop packages (ADR 0048).
-test -s "$dist/condr-companion-${package_version}.apk"

@@ -59,9 +59,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Write the changes since the latest release
-        uses: orhun/git-cliff-action@v4
-        with:
-          args: --unreleased --strip header --output changes.md
+        # As release.yml writes them: the Companion's own changes are its notes' (ADR 0049).
+        run: |
+          pipx run git-cliff==2.14.2 --unreleased --strip header --output changes.md \
+            --exclude-path 'mobile/**' --exclude-path 'crates/condr-mobile/**' \
+            --exclude-path script/build-mobile.sh \
+            --exclude-path script/generate-android-agent-marks.py \
+            --exclude-path 'docs/**' --exclude-path 'website/**' --exclude-path '.github/**' \
+            --exclude-path '*.md' --exclude-path .gitignore
       - uses: actions/download-artifact@v8
         with:
           name: condr-dist

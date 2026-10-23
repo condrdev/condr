@@ -44,6 +44,10 @@ targets:
     sources:
       - path: Condr
         type: syncedFolder
+    # The version, shared with the Android app (ADR 0049).
+    configFiles:
+      Debug: ../version.xcconfig
+      Release: ../version.xcconfig
     dependencies:
       - package: CondrKit
       - package: SwiftTerm
@@ -55,8 +59,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.condr.companion
         # iPhone only; at the project level XcodeGen's iOS target preset overrides it with "1,2".
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "0.1"
-        CURRENT_PROJECT_VERSION: "4"
         GENERATE_INFOPLIST_FILE: YES
         # Merged into the generated plist: the export-compliance answer, which has no
         # INFOPLIST_KEY_ setting, so App Store Connect stops asking it for every build.

@@ -52,9 +52,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Write the release notes
-        uses: orhun/git-cliff-action@v4
-        with:
-          args: --latest --strip header --output release-notes.md
+        # git-cliff itself, so the path patterns reach it quoted. The Companion's own
+        # changes go in its release notes (ADR 0049); one that touches the desktop too, and
+        # every other file, stays here. --tag keeps the version when the tagged commit is
+        # one of those left out.
+        run: |
+          pipx run git-cliff==2.14.2 --latest --tag "$GITHUB_REF_NAME" --strip header --output release-notes.md \
+            --exclude-path 'mobile/**' --exclude-path 'crates/condr-mobile/**' \
+            --exclude-path script/build-mobile.sh \
+            --exclude-path script/generate-android-agent-marks.py \
+            --exclude-path 'docs/**' --exclude-path 'website/**' --exclude-path '.github/**' \
+            --exclude-path '*.md' --exclude-path .gitignore
       - uses: actions/download-artifact@v8
         with:
           name: condr-dist

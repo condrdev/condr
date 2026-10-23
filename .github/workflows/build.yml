@@ -2,7 +2,8 @@ name: Build packages
 
 # Reusable: builds the desktop installer and the headless archive for every
 # platform from one commit, verifies them, and uploads the whole set with
-# SHA256SUMS as the `condr-dist` artifact. Called by nightly.yml and release.yml.
+# SHA256SUMS as the `condr-dist` artifact. Called by nightly.yml and release.yml;
+# the Companion ships from companion.yml (ADR 0049).
 
 on:
   workflow_call:
@@ -179,61 +180,9 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  android:
-    # The Companion's APK, signed with the upload key when the secrets exist (ADR 0048).
-    name: Android app
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - run: rustup target add aarch64-linux-android x86_64-linux-android
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: android
-      - run: cargo install cargo-ndk --locked --version 4.1.2
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '25'
-      - uses: gradle/actions/setup-gradle@v6
-      - name: Install the Android SDK packages the app compiles against
-        run: |
-          yes 2>/dev/null | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" >/dev/null
-      - name: Decode the upload key
-        if: env.ANDROID_KEYSTORE != ''
-        run: |
-          printf '%s' "$ANDROID_KEYSTORE" | base64 -d > "$RUNNER_TEMP/condr-upload.jks"
-          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/condr-upload.jks" >> "$GITHUB_ENV"
-      - name: Build the APK
-        working-directory: mobile/android
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon :app:assembleRelease -Prelease -PversionCode="$GITHUB_RUN_NUMBER"
-      - name: Name the APK like the other packages
-        env:
-          CONDR_COMMIT: ${{ github.sha }}
-        run: |
-          version=$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
-          if [ "$CONDR_RELEASE" != 1 ]; then version="$version-$(printf '%s' "$CONDR_COMMIT" | cut -c 1-12)"; fi
-          mkdir -p dist
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk "dist/condr-companion-$version.apk"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: condr-android
-          path: dist/*.apk
-          if-no-files-found: error
-          retention-days: 1
-
   verify:
     name: Verify the full package set
-    needs: [linux, windows, macos, android]
+    needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:

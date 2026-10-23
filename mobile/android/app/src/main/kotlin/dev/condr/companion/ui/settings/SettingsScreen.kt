@@ -215,7 +215,7 @@ fun SettingsScreen() {
             modifier = Modifier.weight(1f),
           )
           Text(
-            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            BuildConfig.VERSION_NAME,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
