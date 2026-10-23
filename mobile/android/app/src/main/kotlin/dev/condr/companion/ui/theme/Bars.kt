@@ -1,5 +1,10 @@
 package dev.condr.companion.ui.theme
 
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -19,7 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -72,7 +83,7 @@ fun Bars(
   /** How far the header has folded, 1 open to 0.3 folded: heights shrink, corners stay round. */
   fold: Float = 1f,
 ) {
-  val breathing = animated && statuses.contains(AgentStatus.WORKING)
+  val breathing = animated && !reducedMotion() && statuses.contains(AgentStatus.WORKING)
   var time by remember { mutableFloatStateOf(0f) }
   LaunchedEffect(breathing) {
     if (!breathing) return@LaunchedEffect
@@ -132,14 +143,75 @@ fun Fallen(width: Dp, modifier: Modifier = Modifier) {
   }
 }
 
-/** An Agent's state as a dot: filled in its colour, a ring when idle, grey when unknown. */
+/**
+ * The status glyph the desktop tucks into an Agent mark's corner: a hollow circle for Idle, a
+ * filled one for Working, Blocked and Done, an info mark for Unknown. A Blocked one ripples only
+ * where one wait is the subject: a terminal's title.
+ */
 @Composable
-fun StatusGlyph(status: AgentStatus, size: Dp = 9.dp, modifier: Modifier = Modifier) {
+fun StatusGlyph(
+  status: AgentStatus,
+  size: Dp = 9.dp,
+  modifier: Modifier = Modifier,
+  ripple: Boolean = false,
+) {
   val tint = status.tint
-  Canvas(modifier.size(size)) {
+  val muted = MaterialTheme.colorScheme.onSurfaceVariant
+  val rippling = ripple && status == AgentStatus.BLOCKED && !reducedMotion()
+  val spread =
+    if (rippling)
+      rememberInfiniteTransition(label = "ripple")
+        .animateFloat(
+          0f,
+          1f,
+          infiniteRepeatable(tween(1600, easing = LinearOutSlowInEasing)),
+          "spread",
+        )
+        .value
+    else 0f
+  // The info mark gets a layer of its own, so its "i" clears to what is behind the glyph; the
+  // others draw unclipped, a ripple past their bounds.
+  Canvas(
+    modifier
+      .size(size)
+      .graphicsLayer(
+        compositingStrategy =
+          if (status == AgentStatus.UNKNOWN) CompositingStrategy.Offscreen
+          else CompositingStrategy.Auto
+      )
+      .semantics { contentDescription = status.title }
+  ) {
+    val radius = this.size.minDimension / 2
+    if (rippling) {
+      drawCircle(
+        tint.copy(alpha = 0.8f * (1 - spread)),
+        radius = radius * (1 + 1.4f * spread),
+        style = Stroke(1.5.dp.toPx()),
+      )
+    }
     when (status) {
-      AgentStatus.IDLE ->
-        drawCircle(tint, style = Stroke(maxOf(1.2.dp.toPx(), this.size.minDimension / 6)))
+      AgentStatus.IDLE -> {
+        val line = maxOf(1.2.dp.toPx(), this.size.minDimension / 6)
+        drawCircle(muted, radius = radius - line / 2, style = Stroke(line))
+      }
+      AgentStatus.UNKNOWN -> {
+        // SF Symbols' info.circle.fill: an "i" cut out of a filled circle.
+        drawCircle(muted)
+        val stem = radius * 0.22f
+        drawRoundRect(
+          Color.Transparent,
+          Offset(center.x - stem / 2, center.y - radius * 0.12f),
+          Size(stem, radius * 0.62f),
+          CornerRadius(stem / 2),
+          blendMode = BlendMode.Clear,
+        )
+        drawCircle(
+          Color.Transparent,
+          radius = stem * 0.7f,
+          center = Offset(center.x, center.y - radius * 0.42f),
+          blendMode = BlendMode.Clear,
+        )
+      }
       else -> drawCircle(tint)
     }
   }

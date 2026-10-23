@@ -3,7 +3,9 @@
 
 Each mark is a few <path> elements on a 24-unit viewBox, filled with currentColor; the
 drawable keeps the geometry, takes evenodd where the SVG asks, and tints with the
-theme's colorControlNormal like every other icon. Run after changing assets/agents/.
+theme's colorControlNormal like every other icon. Only the kinds Condr supports get one,
+those with a spec in crates/condr-core/src/agent/, as the iOS app's asset catalog has. Run
+after changing assets/agents/.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "assets" / "agents"
+SPECS = ROOT / "crates" / "condr-core" / "src" / "agent"
 TARGET = ROOT / "mobile" / "android" / "app" / "src" / "main" / "res" / "drawable"
 NS = "{http://www.w3.org/2000/svg}"
 
@@ -80,6 +83,8 @@ def convert(svg: pathlib.Path) -> str:
 def main() -> None:
     TARGET.mkdir(parents=True, exist_ok=True)
     for svg in sorted(SOURCE.glob("*.svg")):
+        if not (SPECS / f"{svg.stem}.rs").exists():
+            continue
         name = "agent_" + re.sub(r"[^a-z0-9]", "_", svg.stem.lower())
         (TARGET / f"{name}.xml").write_text(convert(svg))
         print(name)
