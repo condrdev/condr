@@ -1,5 +1,6 @@
 package dev.condr.companion.ui.terminal
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -11,23 +12,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
@@ -38,7 +39,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -58,11 +60,11 @@ import kotlinx.coroutines.launch
 import uniffi.condr_mobile.Key
 
 /**
- * The keys the soft keyboard lacks (ADR 0041), on Material's floating toolbar (ADR 0048): Esc, Tab,
- * a sticky Ctrl and the arrows first, which is what a permission prompt or a numbered question
- * needs, then, a swipe along, Shift-Tab, Home, End and the page keys; a key cut off at the edge
- * shows that the row scrolls. Past a divider, Backspace and Return stay put, since a line already
- * in the program's composer is edited there, not in the field.
+ * The keys the soft keyboard lacks (ADR 0041), each one of Material's tonal buttons on the page
+ * itself (ADR 0048): Esc, Tab, a sticky Ctrl and the arrows first, which is what a permission
+ * prompt or a numbered question needs, then, a swipe along, Shift-Tab, Home, End and the page keys;
+ * a key cut off at the edge shows that the row scrolls. Past a divider, Backspace and Return stay
+ * put, since a line already in the program's composer is edited there, not in the field.
  */
 @Composable
 fun KeyRow(
@@ -71,19 +73,17 @@ fun KeyRow(
   press: (Key) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  HorizontalFloatingToolbar(expanded = true, modifier = modifier.fillMaxWidth()) {
-    // The keys take the room left beside Backspace and Return; a key cut off at the edge shows
-    // that the row scrolls.
+  Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     Row(
-      horizontalArrangement = Arrangement.spacedBy(2.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically,
       modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
     ) {
       TextKey("esc", "Escape") { press(Key.Escape) }
       TextKey("tab", "Tab") { press(Key.Tab) }
-      FilledTonalButton(
-        onClick = { onControl(!control) },
-        contentPadding = PaddingValues(horizontal = 10.dp),
+      TextKey(
+        "ctrl",
+        "Control",
         colors =
           if (control)
             ButtonDefaults.filledTonalButtonColors(
@@ -91,48 +91,47 @@ fun KeyRow(
               contentColor = MaterialTheme.colorScheme.onPrimary,
             )
           else ButtonDefaults.filledTonalButtonColors(),
-        modifier =
-          Modifier.height(40.dp).widthIn(min = 48.dp).semantics {
-            contentDescription = "Control"
-            selected = control
-          },
+        modifier = Modifier.semantics { selected = control },
       ) {
-        Text(
-          "ctrl",
-          fontFamily = FontFamily.Monospace,
-          fontWeight = FontWeight.SemiBold,
-          style = MaterialTheme.typography.labelLarge,
-          maxLines = 1,
-          softWrap = false,
-        )
+        onControl(!control)
       }
-      ArrowKey(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Left") { press(Key.Left) }
-      ArrowKey(Icons.Filled.KeyboardArrowUp, "Up") { press(Key.Up) }
-      ArrowKey(Icons.Filled.KeyboardArrowDown, "Down") { press(Key.Down) }
-      ArrowKey(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Right") { press(Key.Right) }
+      IconKey(rememberVectorPainter(Icons.AutoMirrored.Filled.KeyboardArrowLeft), "Left") {
+        press(Key.Left)
+      }
+      IconKey(rememberVectorPainter(Icons.Filled.KeyboardArrowUp), "Up") { press(Key.Up) }
+      IconKey(rememberVectorPainter(Icons.Filled.KeyboardArrowDown), "Down") { press(Key.Down) }
+      IconKey(rememberVectorPainter(Icons.AutoMirrored.Filled.KeyboardArrowRight), "Right") {
+        press(Key.Right)
+      }
       TextKey("⇧tab", "Shift-Tab") { press(Key.BackTab) }
       TextKey("home", "Home") { press(Key.Home) }
       TextKey("end", "End") { press(Key.End) }
       TextKey("pgup", "Page Up") { press(Key.PageUp) }
       TextKey("pgdn", "Page Down") { press(Key.PageDown) }
     }
-    VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
+    VerticalDivider(Modifier.padding(horizontal = 8.dp).height(24.dp))
     RepeatingKey(contentDescription = "Backspace") { press(Key.Backspace) }
-    IconButton(
-      onClick = { press(Key.Enter) },
-      modifier = Modifier.semantics { contentDescription = "Return" },
-    ) {
-      Icon(painterResource(R.drawable.ic_return), contentDescription = null)
-    }
+    Spacer(Modifier.width(6.dp))
+    IconKey(painterResource(R.drawable.ic_return), "Return") { press(Key.Enter) }
   }
 }
 
+/** Every key the same height, and wide enough for a thumb. */
+private val KeyModifier = Modifier.height(40.dp).widthIn(min = 48.dp)
+
 @Composable
-private fun TextKey(title: String, label: String, action: () -> Unit) {
+private fun TextKey(
+  title: String,
+  label: String,
+  colors: ButtonColors = ButtonDefaults.filledTonalButtonColors(),
+  modifier: Modifier = Modifier,
+  action: () -> Unit,
+) {
   FilledTonalButton(
     onClick = action,
+    colors = colors,
     contentPadding = PaddingValues(horizontal = 10.dp),
-    modifier = Modifier.height(40.dp).widthIn(min = 48.dp).semantics { contentDescription = label },
+    modifier = modifier.then(KeyModifier).semantics { contentDescription = label },
   ) {
     Text(
       title,
@@ -146,23 +145,28 @@ private fun TextKey(title: String, label: String, action: () -> Unit) {
 }
 
 @Composable
-private fun ArrowKey(icon: ImageVector, label: String, action: () -> Unit) {
-  IconButton(
+private fun IconKey(icon: Painter, label: String, action: () -> Unit) {
+  FilledTonalButton(
     onClick = action,
-    modifier = Modifier.size(40.dp).semantics { contentDescription = label },
+    contentPadding = PaddingValues(horizontal = 10.dp),
+    modifier = KeyModifier.semantics { contentDescription = label },
   ) {
-    Icon(icon, contentDescription = null)
+    Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
   }
 }
 
-/** A key that goes down on touch and repeats while held, as a hardware key does. */
+/**
+ * A key that goes down on touch and repeats while held, as a hardware key does, drawn as the other
+ * keys are.
+ */
 @Composable
 private fun RepeatingKey(contentDescription: String, press: () -> Unit) {
   val scope = rememberCoroutineScope()
   val interactions = remember { MutableInteractionSource() }
+  val colors = ButtonDefaults.filledTonalButtonColors()
   Box(
-    Modifier.size(48.dp)
-      .clip(CircleShape)
+    KeyModifier.clip(ButtonDefaults.shape)
+      .background(colors.containerColor)
       .indication(interactions, ripple())
       .semantics {
         this.contentDescription = contentDescription
@@ -192,6 +196,11 @@ private fun RepeatingKey(contentDescription: String, press: () -> Unit) {
       },
     contentAlignment = Alignment.Center,
   ) {
-    Icon(painterResource(R.drawable.ic_backspace), contentDescription = null)
+    Icon(
+      painterResource(R.drawable.ic_backspace),
+      contentDescription = null,
+      tint = colors.contentColor,
+      modifier = Modifier.size(20.dp),
+    )
   }
 }
