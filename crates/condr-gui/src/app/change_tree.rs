@@ -37,17 +37,33 @@ pub(super) fn diff_stat(stat: GitDiffStat, cx: &App) -> AnyElement {
             this.child(
                 div()
                     .text_color(cx.theme().success)
-                    .child(format!("+{}", stat.added)),
+                    .child(format!("+{}", compact_count(stat.added))),
             )
         })
         .when(stat.deleted > 0, |this| {
             this.child(
                 div()
                     .text_color(cx.theme().danger)
-                    .child(format!("−{}", stat.deleted)),
+                    .child(format!("−{}", compact_count(stat.deleted))),
             )
         })
         .into_any_element()
+}
+
+/// A line count as the stat shows it: `999`, `1.2k`, `12k`, `3.4M`, rounded down so it never
+/// claims more lines than there are.
+fn compact_count(n: u32) -> String {
+    let (unit, suffix) = match n {
+        0..1_000 => return n.to_string(),
+        1_000..1_000_000 => (1_000, "k"),
+        _ => (1_000_000, "M"),
+    };
+    let (whole, tenth) = (n / unit, n % unit / (unit / 10));
+    if whole < 10 && tenth > 0 {
+        format!("{whole}.{tenth}{suffix}")
+    } else {
+        format!("{whole}{suffix}")
+    }
 }
 
 /// Changed files as a directory tree, the way Zed's git panel shows them: a
@@ -280,7 +296,7 @@ pub(super) fn file_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{ChangeNode, change_tree};
+    use super::{ChangeNode, change_tree, compact_count};
     use condr_core::{GitChangeEntry, GitChangeStatus};
     use relative_path::{RelativePath, RelativePathBuf};
 
@@ -291,6 +307,13 @@ mod tests {
             status: GitChangeStatus::Modified,
             stat: None,
         }
+    }
+
+    #[test]
+    fn large_line_counts_shorten_to_k_and_m() {
+        let shown = [0, 999, 1_000, 1_234, 9_999, 10_500, 999_999, 1_000_000, 3_456_789]
+            .map(compact_count);
+        assert_eq!(shown, ["0", "999", "1k", "1.2k", "9.9k", "10k", "999k", "1M", "3.4M"]);
     }
 
     #[test]
