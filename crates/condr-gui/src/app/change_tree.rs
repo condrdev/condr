@@ -311,9 +311,16 @@ mod tests {
 
     #[test]
     fn large_line_counts_shorten_to_k_and_m() {
-        let shown = [0, 999, 1_000, 1_234, 9_999, 10_500, 999_999, 1_000_000, 3_456_789]
-            .map(compact_count);
-        assert_eq!(shown, ["0", "999", "1k", "1.2k", "9.9k", "10k", "999k", "1M", "3.4M"]);
+        let shown = [
+            0, 999, 1_000, 1_234, 9_999, 10_500, 999_999, 1_000_000, 3_456_789,
+        ]
+        .map(compact_count);
+        assert_eq!(
+            shown,
+            [
+                "0", "999", "1k", "1.2k", "9.9k", "10k", "999k", "1M", "3.4M"
+            ]
+        );
     }
 
     #[test]
