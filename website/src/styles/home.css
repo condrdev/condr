@@ -140,7 +140,8 @@ code { font-family: var(--mono); font-size: .875em; }
 .download-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
 /* The two mobile platforms, in the download button's place but inert and grey. */
 .download-stores { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.download-stores span { display: flex; justify-content: center; align-items: center; height: 52px; box-shadow: inset 0 0 0 1px var(--line); color: var(--grey); font-weight: 600; }
+.download-stores a { display: flex; justify-content: center; align-items: center; height: 52px; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font-weight: 600; text-decoration: none; }
+.download-stores a:hover { color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .download-choice { display: flex; border: 1px solid var(--line); }
 .download-choice label { position: relative; cursor: pointer; }
 .download-choice input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
