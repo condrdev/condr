@@ -21,7 +21,9 @@ final class LivePairingUITests: XCTestCase {
             app.tabBars.buttons["Devices"].tap()
             app.buttons["Pair a Computer"].tap()
         }
-        app.buttons["Paste a Link Instead"].tap()
+        // A phone without a camera, the simulator among them, offers the link first.
+        let instead = app.buttons["Paste a Link Instead"]
+        (instead.waitForExistence(timeout: 5) ? instead : app.buttons["Paste a Link"]).tap()
         UIPasteboard.general.string = invite
         let field =
             app.textViews.firstMatch.waitForExistence(timeout: 5)

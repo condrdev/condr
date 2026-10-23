@@ -32,7 +32,11 @@ struct PairingFlow: View {
             case .connecting, .paired: 3
             default: nil
             }
-        _path = State(initialValue: start.map { Array(order[(firstLaunch ? 0 : 1)...$0]) } ?? [])
+        _path = State(
+            initialValue: start.map { last in
+                // The scanner gives way to the step after it, as `take` does.
+                order[(firstLaunch ? 0 : 1)...last].filter { $0 != .scan || $0 == order[last] }
+            } ?? [])
         _link = State(initialValue: start == nil ? "" : DemoWorld.jpdev + ".f3a91c0d")
     }
 
@@ -90,6 +94,9 @@ struct PairingFlow: View {
     /// straight to pairing once it has a name.
     private func take(_ link: String) {
         self.link = link
+        // The scanner stops on the code it found, so the step after it replaces it: back
+        // returns to the code step, not to a frozen camera.
+        path.removeAll { $0 == .scan }
         if preferences.named {
             connect()
         } else if path.last != .name {
@@ -319,11 +326,21 @@ struct InviteStep: View {
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaBar(edge: .bottom) {
             VStack(spacing: 0) {
-                StepFooter {
-                    PrimaryButton("Scan Code", systemImage: "qrcode.viewfinder", action: scan)
-                } secondary: {
-                    Button("Paste a Link Instead") { pasting = true }
-                        .font(.subheadline.weight(.medium))
+                // Without a camera the link is the way in, not the alternative. A demo scene
+                // shows the step as a phone with a camera would.
+                if CodeScanner.available || DemoScene.launched != nil {
+                    StepFooter {
+                        PrimaryButton("Scan Code", systemImage: "qrcode.viewfinder", action: scan)
+                    } secondary: {
+                        Button("Paste a Link Instead") { pasting = true }
+                            .font(.subheadline.weight(.medium))
+                    }
+                } else {
+                    StepFooter {
+                        PrimaryButton("Paste a Link") { pasting = true }
+                    } secondary: {
+                        EmptyView()
+                    }
                 }
                 if offersDemo {
                     Button {
@@ -503,6 +520,7 @@ struct PasteLink: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .focused($focused)
+                    .onChange(of: link) { withAnimation { problem = nil } }
                     .padding(14)
                     .background(
                         Color(.secondarySystemBackground),
@@ -692,16 +710,19 @@ struct PairedPreview: View {
                         .font(.system(size: 13, weight: .semibold))
                         .contentTransition(.interpolate)
                         .animation(.snappy, value: name)
-                    Text(key)
-                        .font(.system(size: 10.5).monospaced())
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
-                Text("Just now")
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color(hex: Palette.green))
+                            .frame(width: 6, height: 6)
+                        Text("Connected")
+                        Text("·")
+                        Text(key.prefix(8)).monospaced()
+                    }
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
         }
         .foregroundStyle(.white)
