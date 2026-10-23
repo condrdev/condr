@@ -1,15 +1,12 @@
 package dev.condr.companion.push
 
-import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.firebase.FirebaseApp
@@ -41,10 +38,9 @@ object Notifications {
     GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) ==
       ConnectionResult.SUCCESS && FirebaseApp.getApps(context).isNotEmpty()
 
+  /** Allowed: the permission from Android 13 on, the app's switch in system settings on all. */
   fun granted(context: Context): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-      ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-        PackageManager.PERMISSION_GRANTED
+    NotificationManagerCompat.from(context).areNotificationsEnabled()
 
   /** Asks FCM for this launch's token; the app's `Push` hears the answer. */
   fun fetchToken(context: Context, received: suspend (String) -> Unit, failed: () -> Unit) {

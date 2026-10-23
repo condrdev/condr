@@ -26,20 +26,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.condr.companion.model.Banner
 import dev.condr.companion.ui.agents.AgentAvatar
 import dev.condr.companion.ui.theme.tint
+import uniffi.condr_mobile.AgentStatus
 
 /**
  * An Agent elsewhere started to need you or finished, while you look at something else: a card at
@@ -54,6 +59,16 @@ fun BannerView(modifier: Modifier = Modifier) {
     banner != null && !banner.quiet && stores.session.shown != banner.ref && !stores.lock.locked
   val last = remember { mutableStateOf(banner) }
   if (banner != null) last.value = banner
+  // Every banner is felt, a quiet one too, as iOS's warning, error and success.
+  val haptics = LocalHapticFeedback.current
+  LaunchedEffect(banner?.id) {
+    when (banner?.status) {
+      AgentStatus.BLOCKED -> haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+      AgentStatus.ERROR -> haptics.performHapticFeedback(HapticFeedbackType.Reject)
+      AgentStatus.DONE -> haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+      else -> {}
+    }
+  }
   AnimatedVisibility(
     visible = visible,
     enter = slideInVertically { -it } + fadeIn(),
@@ -70,7 +85,7 @@ fun BannerView(modifier: Modifier = Modifier) {
           .pointerInput(shown.id) {
             detectVerticalDragGestures { _, delta -> if (delta < -4) alerts.dismissBanner() }
           }
-          .clickable {
+          .clickable(onClickLabel = "Opens its terminal") {
             alerts.dismissBanner()
             stores.router.open(shown.ref)
           },
@@ -80,7 +95,12 @@ fun BannerView(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(start = 12.dp, end = 18.dp, top = 11.dp, bottom = 11.dp),
       ) {
-        AgentAvatar(kind = shown.kind, status = shown.status, side = 38.dp)
+        AgentAvatar(
+          kind = shown.kind,
+          status = shown.status,
+          side = 38.dp,
+          surface = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
+        )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
           Text(
             shown.title,

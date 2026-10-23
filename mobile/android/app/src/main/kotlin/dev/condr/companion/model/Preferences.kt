@@ -32,6 +32,7 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
   private val lockOnState = mutableStateOf(initial[LOCK_ON] ?: false)
   private val pushOnState = mutableStateOf(initial[PUSH_ON] ?: false)
   private var pushRegisteredValue = initial[PUSH_REGISTERED] ?: false
+  private var pushAskedValue = initial[PUSH_ASKED] ?: false
 
   var fontSize: Float
     get() = fontSizeState.value
@@ -77,6 +78,17 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
       write { it[PUSH_REGISTERED] = value }
     }
 
+  /**
+   * Whether the system's notification prompt was shown: like iOS's, it is asked once, and Android
+   * shows it twice at most.
+   */
+  var pushAsked: Boolean
+    get() = pushAskedValue
+    set(value) {
+      pushAskedValue = value
+      write { it[PUSH_ASKED] = value }
+    }
+
   private fun write(edit: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
     scope.launch { store.edit(edit) }
   }
@@ -90,6 +102,7 @@ class Preferences private constructor(private val store: DataStore<Prefs>, initi
     private val LOCK_ON = booleanPreferencesKey("lock.on")
     private val PUSH_ON = booleanPreferencesKey("push.on")
     private val PUSH_REGISTERED = booleanPreferencesKey("push.registered")
+    private val PUSH_ASKED = booleanPreferencesKey("push.asked")
 
     /** The app's preferences, read now: a few bytes, before anything is drawn. */
     fun load(context: Context): Preferences {

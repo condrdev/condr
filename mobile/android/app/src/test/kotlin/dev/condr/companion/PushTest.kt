@@ -79,7 +79,6 @@ class PushTest {
     val push = push()
     push.update(granted = true, servers = listOf("mac"))
     push.failed()
-    assertFalse(push.available)
     assertFalse(push.on)
     assertTrue(requests.isEmpty())
   }

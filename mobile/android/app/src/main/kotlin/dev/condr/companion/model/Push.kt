@@ -53,10 +53,6 @@ class Push(
   var on: Boolean by mutableStateOf(preferences.pushOn)
     private set
 
-  /** Whether this phone can be reached at all: Google Play services with Firebase behind them. */
-  var available: Boolean by mutableStateOf(true)
-    private set
-
   private var granted: Boolean? = null
   private var servers: List<String> = emptyList()
   private var token: String? = null
@@ -82,7 +78,6 @@ class Push(
 
   /** FCM gave this launch's token, or a new one. */
   suspend fun received(token: String) {
-    available = true
     if (token == this.token) return
     this.token = token
     register()
@@ -90,7 +85,6 @@ class Push(
 
   /** FCM gave no token: nothing can reach this phone. */
   fun failed() {
-    available = false
     token = null
     attempt += 1
     set(false)
@@ -142,7 +136,6 @@ class Push(
       mutableMapOf("API-Version" to "1", "Authorization" to "Condr ${client.cloudToken()}")
     if (body != null) headers["Content-Type"] = "application/json"
     val reply = send(method, "$cloud/api/push/device", headers, body)
-    android.util.Log.i("condr.push", "$method ${reply?.first} ${reply?.second?.take(80)}")
     val (status, answer) = reply ?: return false
     if (status !in 200..299) return false
     return runCatching {

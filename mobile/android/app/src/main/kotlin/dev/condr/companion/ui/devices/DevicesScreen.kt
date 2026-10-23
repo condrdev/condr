@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
@@ -36,6 +39,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -54,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -243,6 +248,7 @@ fun DeviceScreen(address: String) {
           DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
               text = { Text("Rename…") },
+              leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
               onClick = {
                 menu = false
                 newLabel = device.label
@@ -251,6 +257,12 @@ fun DeviceScreen(address: String) {
             )
             DropdownMenuItem(
               text = { Text("Forget ${device.label}") },
+              leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+              colors =
+                MenuDefaults.itemColors(
+                  textColor = MaterialTheme.colorScheme.error,
+                  leadingIconColor = MaterialTheme.colorScheme.error,
+                ),
               onClick = {
                 menu = false
                 forgetting = true
@@ -312,6 +324,7 @@ fun DeviceScreen(address: String) {
           onValueChange = { newLabel = it },
           singleLine = true,
           label = { Text("Name") },
+          keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
         )
       },
       confirmButton = {

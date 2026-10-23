@@ -3,6 +3,7 @@ package dev.condr.companion.model
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -118,7 +119,8 @@ class Session(
   private fun copied(text: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
     clipboard.setPrimaryClip(ClipData.newPlainText("Condr", text))
-    alerts.notify("Copied to clipboard")
+    // From Android 13 on the system confirms a copy itself.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) alerts.notify("Copied to clipboard")
   }
 
   /**

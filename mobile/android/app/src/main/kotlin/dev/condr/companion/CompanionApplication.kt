@@ -7,6 +7,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import dev.condr.companion.demo.DemoScene
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,25 +45,50 @@ class CompanionApplication : Application() {
         object : DefaultLifecycleObserver {
           override fun onStart(owner: LifecycleOwner) {
             stores?.takeIf { it.scene == null }?.session?.resume()
+            network.start()
           }
 
           override fun onStop(owner: LifecycleOwner) {
+            network.stop()
             val session = stores?.takeIf { it.scene == null }?.session ?: return
             scope.launch { session.suspend() }
           }
         }
       )
-    getSystemService(ConnectivityManager::class.java)
-      .registerDefaultNetworkCallback(
-        object : ConnectivityManager.NetworkCallback() {
-          override fun onAvailable(network: Network) = changed()
-
-          override fun onLost(network: Network) = changed()
-
-          private fun changed() {
-            scope.launch { stores?.takeIf { it.scene == null }?.session?.networkChanged() }
-          }
-        }
-      )
   }
+
+  /**
+   * The platform's network changes, feeding the library while the app is in the foreground (ADR
+   * 0040). The callback's first report describes the network as it is, not a change, and is
+   * skipped.
+   */
+  private val network =
+    object : ConnectivityManager.NetworkCallback() {
+      private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
+      private val first = AtomicBoolean(false)
+      private var started = false
+
+      fun start() {
+        if (started) return
+        started = true
+        // With no network yet there is no first report: the next one is a change.
+        first.set(connectivity.activeNetwork != null)
+        connectivity.registerDefaultNetworkCallback(this)
+      }
+
+      fun stop() {
+        if (!started) return
+        started = false
+        connectivity.unregisterNetworkCallback(this)
+      }
+
+      override fun onAvailable(network: Network) = changed()
+
+      override fun onLost(network: Network) = changed()
+
+      private fun changed() {
+        if (first.getAndSet(false)) return
+        scope.launch { stores?.takeIf { it.scene == null }?.session?.networkChanged() }
+      }
+    }
 }

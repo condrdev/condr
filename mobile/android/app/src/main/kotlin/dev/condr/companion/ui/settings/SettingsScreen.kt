@@ -3,6 +3,7 @@ package dev.condr.companion.ui.settings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -174,7 +175,9 @@ fun SettingsScreen() {
                   context
                     .getSystemService(ClipboardManager::class.java)
                     .setPrimaryClip(ClipData.newPlainText("Condr key", session.fingerprint))
-                  stores.alerts.notify("Copied to clipboard")
+                  // From Android 13 on the system confirms a copy itself.
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
+                    stores.alerts.notify("Copied to clipboard")
                 },
                 onLongClickLabel = "Copy the whole key",
               )

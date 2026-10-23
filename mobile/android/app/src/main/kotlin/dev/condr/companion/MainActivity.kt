@@ -12,25 +12,37 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.condr.companion.demo.DemoScene
 import dev.condr.companion.ui.App
+import dev.condr.companion.ui.StartupFailure
 import dev.condr.companion.ui.theme.CondrTheme
 
 class MainActivity : ComponentActivity() {
   private var stores by mutableStateOf<Stores?>(null)
 
+  /** Why the app's objects could not be built: the Device key would not keep. */
+  private var failure by mutableStateOf<String?>(null)
+
   override fun onCreate(savedInstanceState: Bundle?) {
     installSplashScreen()
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
-    stores = stores(intent)
-    opened(intent)
+    runCatching { stores = stores(intent) }.onFailure { failure = it.message ?: it.toString() }
+    // A recreated Activity, or one reopened from Recents, has its notification behind it.
+    val fresh =
+      savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0
+    if (fresh) opened(intent)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
-    setContent { CondrTheme { stores?.let { App(it) } } }
+    setContent {
+      CondrTheme {
+        failure?.let { StartupFailure(it) }
+        stores?.let { App(it) }
+      }
+    }
   }
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
-    stores = stores(intent)
+    runCatching { stores = stores(intent) }.onFailure { failure = it.message ?: it.toString() }
     opened(intent)
   }
 
@@ -51,8 +63,12 @@ class MainActivity : ComponentActivity() {
     super.onPause()
   }
 
-  /** `adb shell am start -e scene agents`: a demo scene for review and the UI tests. */
+  /**
+   * `adb shell am start -e scene agents`: a demo scene for review and the UI tests, in a debug
+   * build only, so no other app can swap the real connection for sample data.
+   */
   private fun stores(intent: Intent?): Stores {
+    if (!BuildConfig.DEBUG) return (application as CompanionApplication).stores(null)
     val scene = DemoScene.named(intent?.getStringExtra("scene"))
     return (application as CompanionApplication).stores(scene).also {
       it.scrub = intent?.getStringExtra("scrub")
