@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -39,6 +41,8 @@ class TerminalTouches(
   val released: (Offset) -> Unit,
   /** Wheel motion at the finger, positive towards what came before. */
   val wheel: (Cell, Int) -> Unit,
+  /** A swipe started. */
+  val swiped: () -> Unit,
 )
 
 /**
@@ -66,6 +70,10 @@ fun TerminalCanvas(
   }
   val textSize = with(density) { fontSizeSp.sp.toPx() }
   val metrics = remember(textSize) { CellMetrics(faces.regular, textSize) }
+  // The gestures outlive a composition: they act on the screen and handlers of the latest one.
+  val latestScreen by rememberUpdatedState(screen)
+  val latestMetrics by rememberUpdatedState(metrics)
+  val latestTouches by rememberUpdatedState(touches)
   BoxWithConstraints(modifier) {
     val width = with(density) { maxWidth.toPx() }
     val height = with(density) { maxHeight.toPx() }
@@ -74,7 +82,8 @@ fun TerminalCanvas(
     LaunchedEffect(rows, columns) { onGrid(rows, columns) }
 
     fun cell(at: Offset): Cell? {
-      val screen = screen ?: return null
+      val screen = latestScreen ?: return null
+      val metrics = latestMetrics
       val row = floor(at.y / metrics.height).toInt().coerceIn(0, screen.rows.toInt() - 1)
       val column = floor(at.x / metrics.width).toInt().coerceIn(0, screen.columns.toInt() - 1)
       return Cell(row.toUShort(), column.toUShort())
@@ -82,53 +91,61 @@ fun TerminalCanvas(
 
     Canvas(
       Modifier.fillMaxSize()
-        .pointerInput(screen?.columns, screen?.rows) {
+        .pointerInput(Unit) {
           detectTapGestures { at ->
             val hit = cell(at) ?: return@detectTapGestures
-            val index = hit.row.toInt() * screen!!.columns.toInt() + hit.column.toInt()
-            touches.tap(hit, screen.cells.getOrNull(index))
+            val screen = latestScreen ?: return@detectTapGestures
+            val index = hit.row.toInt() * screen.columns.toInt() + hit.column.toInt()
+            latestTouches.tap(hit, screen.cells.getOrNull(index))
           }
         }
-        .pointerInput(screen?.columns, screen?.rows) {
+        .pointerInput(Unit) {
           var anchor: Cell? = null
           var reached: Cell? = null
+          var finger = Offset.Zero
           detectDragGesturesAfterLongPress(
             onDragStart = { at ->
               val hit = cell(at) ?: return@detectDragGesturesAfterLongPress
               anchor = hit
               reached = hit
+              finger = at
               haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-              touches.longPress(hit)
+              latestTouches.longPress(hit)
             },
             onDrag = { change, _ ->
               val from = anchor ?: return@detectDragGesturesAfterLongPress
+              finger = change.position
               val to = cell(change.position) ?: return@detectDragGesturesAfterLongPress
               if (to != reached) {
                 reached = to
-                touches.drag(from, to)
+                latestTouches.drag(from, to)
               }
             },
             onDragEnd = {
               anchor = null
-              touches.released(Offset.Zero)
+              latestTouches.released(finger)
             },
             onDragCancel = { anchor = null },
           )
         }
-        .pointerInput(screen?.columns, screen?.rows) {
+        .pointerInput(Unit) {
           // A swipe is wheel motion at the finger, a line per cell height, a finger moving
           // down showing what came before.
           var dragged = 0f
           detectVerticalDragGestures(
-            onDragStart = { dragged = 0f },
+            onDragStart = {
+              dragged = 0f
+              latestTouches.swiped()
+            },
             onDragEnd = { dragged = 0f },
             onDragCancel = { dragged = 0f },
           ) { change, delta ->
             dragged += delta
-            val lines = (abs(dragged) / metrics.height).toInt() * if (dragged < 0) -1 else 1
+            val height = latestMetrics.height
+            val lines = (abs(dragged) / height).toInt() * if (dragged < 0) -1 else 1
             if (lines != 0) {
-              dragged -= lines * metrics.height
-              cell(change.position)?.let { touches.wheel(it, lines) }
+              dragged -= lines * height
+              cell(change.position)?.let { latestTouches.wheel(it, lines) }
             }
           }
         }

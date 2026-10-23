@@ -4,15 +4,20 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -26,14 +31,21 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -59,24 +71,13 @@ fun KeyRow(
   press: (Key) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  HorizontalFloatingToolbar(
-    expanded = true,
-    modifier = modifier,
-    trailingContent = {
-      VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
-      RepeatingKey(contentDescription = "Backspace") { press(Key.Backspace) }
-      IconButton(
-        onClick = { press(Key.Enter) },
-        modifier = Modifier.semantics { contentDescription = "Return" },
-      ) {
-        Icon(painterResource(R.drawable.ic_return), contentDescription = null)
-      }
-    },
-  ) {
+  HorizontalFloatingToolbar(expanded = true, modifier = modifier.fillMaxWidth()) {
+    // The keys take the room left beside Backspace and Return; a key cut off at the edge shows
+    // that the row scrolls.
     Row(
       horizontalArrangement = Arrangement.spacedBy(2.dp),
       verticalAlignment = Alignment.CenterVertically,
-      modifier = Modifier.widthIn(max = 260.dp).horizontalScroll(rememberScrollState()),
+      modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
     ) {
       TextKey("esc", "Escape") { press(Key.Escape) }
       TextKey("tab", "Tab") { press(Key.Tab) }
@@ -91,7 +92,10 @@ fun KeyRow(
             )
           else ButtonDefaults.filledTonalButtonColors(),
         modifier =
-          Modifier.height(40.dp).widthIn(min = 48.dp).semantics { contentDescription = "Control" },
+          Modifier.height(40.dp).widthIn(min = 48.dp).semantics {
+            contentDescription = "Control"
+            selected = control
+          },
       ) {
         Text(
           "ctrl",
@@ -111,6 +115,14 @@ fun KeyRow(
       TextKey("end", "End") { press(Key.End) }
       TextKey("pgup", "Page Up") { press(Key.PageUp) }
       TextKey("pgdn", "Page Down") { press(Key.PageDown) }
+    }
+    VerticalDivider(Modifier.height(24.dp).padding(horizontal = 4.dp))
+    RepeatingKey(contentDescription = "Backspace") { press(Key.Backspace) }
+    IconButton(
+      onClick = { press(Key.Enter) },
+      modifier = Modifier.semantics { contentDescription = "Return" },
+    ) {
+      Icon(painterResource(R.drawable.ic_return), contentDescription = null)
     }
   }
 }
@@ -147,12 +159,24 @@ private fun ArrowKey(icon: ImageVector, label: String, action: () -> Unit) {
 @Composable
 private fun RepeatingKey(contentDescription: String, press: () -> Unit) {
   val scope = rememberCoroutineScope()
+  val interactions = remember { MutableInteractionSource() }
   Box(
     Modifier.size(48.dp)
-      .semantics { this.contentDescription = contentDescription }
+      .clip(CircleShape)
+      .indication(interactions, ripple())
+      .semantics {
+        this.contentDescription = contentDescription
+        role = Role.Button
+        onClick {
+          press()
+          true
+        }
+      }
       .pointerInput(Unit) {
         awaitEachGesture {
-          awaitFirstDown()
+          val down = awaitFirstDown()
+          val touch = PressInteraction.Press(down.position)
+          interactions.tryEmit(touch)
           press()
           val repeating: Job = scope.launch {
             delay(450)
@@ -163,6 +187,7 @@ private fun RepeatingKey(contentDescription: String, press: () -> Unit) {
           }
           waitForUpOrCancellation()
           repeating.cancel()
+          interactions.tryEmit(PressInteraction.Release(touch))
         }
       },
     contentAlignment = Alignment.Center,

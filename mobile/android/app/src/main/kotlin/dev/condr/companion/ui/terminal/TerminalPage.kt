@@ -1,10 +1,13 @@
 package dev.condr.companion.ui.terminal
 
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,25 +47,35 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import dev.condr.companion.R
 import dev.condr.companion.model.PaneRef
@@ -79,6 +92,7 @@ import dev.condr.companion.ui.agents.AgentMarks
 import dev.condr.companion.ui.theme.DarkSystemBars
 import dev.condr.companion.ui.theme.StatusGlyph
 import dev.condr.companion.ui.theme.tint
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import uniffi.condr_mobile.AgentStatus
 import uniffi.condr_mobile.Key
@@ -111,11 +125,12 @@ fun TerminalPage(ref: PaneRef) {
     return
   }
   var grid by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-  var text by remember { mutableStateOf("") }
-  var control by remember { mutableStateOf(false) }
+  // The draft and Ctrl outlive a rotation.
+  var text by rememberSaveable { mutableStateOf("") }
+  var control by rememberSaveable { mutableStateOf(false) }
   var focused by remember { mutableStateOf(false) }
-  var copyAt by remember { mutableStateOf<androidx.compose.ui.unit.IntOffset?>(null) }
-  var baseSize by remember { mutableStateOf<Float?>(null) }
+  /** Where a long press let go with a selection: Copy shows there. */
+  var copyAt by remember { mutableStateOf<Offset?>(null) }
   val focus = remember { FocusRequester() }
   val path =
     if (router.tab == dev.condr.companion.model.AppTab.AGENTS) router.agentsPath
@@ -154,6 +169,8 @@ fun TerminalPage(ref: PaneRef) {
   val screen = session.screen
   val agent = pane.agent
   Scaffold(
+    // A pinch anywhere on the page sizes the text.
+    modifier = Modifier.pinchToSize(preferences),
     containerColor = Color(TerminalPalette.BACKGROUND),
     topBar = {
       TopAppBar(
@@ -168,10 +185,13 @@ fun TerminalPage(ref: PaneRef) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
+            modifier = Modifier.semantics(mergeDescendants = true) {},
           ) {
-            AgentMarks.resource(agent?.kind)?.let {
-              Icon(painterResource(it), contentDescription = null, modifier = Modifier.size(18.dp))
-            }
+            Icon(
+              painterResource(AgentMarks.resource(agent?.kind) ?: R.drawable.ic_terminal),
+              contentDescription = null,
+              modifier = Modifier.size(18.dp),
+            )
             Column {
               Text(
                 pane.name,
@@ -184,7 +204,7 @@ fun TerminalPage(ref: PaneRef) {
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
               ) {
                 if (agent != null) {
-                  StatusGlyph(agent.status, 6.dp)
+                  StatusGlyph(agent.status, 6.dp, ripple = true)
                   Text(
                     agent.status.title,
                     style = MaterialTheme.typography.labelSmall,
@@ -217,15 +237,23 @@ fun TerminalPage(ref: PaneRef) {
             Icon(Icons.Filled.MoreVert, contentDescription = "More")
           }
           DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            Text(
+              "Text size",
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
             DropdownMenuItem(
-              text = { Text("Smaller text") },
+              text = { Text("Smaller") },
+              leadingIcon = { Text("A", style = MaterialTheme.typography.labelSmall) },
               onClick = {
                 preferences.fontSize -= 1f
                 menu = false
               },
             )
             DropdownMenuItem(
-              text = { Text("Larger text") },
+              text = { Text("Larger") },
+              leadingIcon = { Text("A", style = MaterialTheme.typography.titleLarge) },
               onClick = {
                 preferences.fontSize += 1f
                 menu = false
@@ -317,8 +345,6 @@ fun TerminalPage(ref: PaneRef) {
                       },
                       style = MaterialTheme.typography.bodyLarge,
                       color = MaterialTheme.colorScheme.onSurfaceVariant,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis,
                     )
                   }
                   inner()
@@ -337,19 +363,7 @@ fun TerminalPage(ref: PaneRef) {
       }
     },
   ) { insets ->
-    Box(
-      Modifier.fillMaxSize().padding(insets).padding(horizontal = GUTTER).pointerInput(Unit) {
-        detectTransformGestures { _, _, zoom, _ ->
-          if (zoom == 1f) return@detectTransformGestures
-          val base = baseSize ?: preferences.fontSize.also { baseSize = it }
-          preferences.fontSize =
-            ((base * zoom * 2).toInt() / 2f).coerceIn(
-              Preferences.SMALLEST_FONT,
-              Preferences.LARGEST_FONT,
-            )
-        }
-      }
-    ) {
+    Box(Modifier.fillMaxSize().padding(insets).padding(horizontal = GUTTER)) {
       TerminalCanvas(
         screen = screen,
         fontSizeSp = preferences.fontSize,
@@ -360,8 +374,7 @@ fun TerminalPage(ref: PaneRef) {
               copyAt = null
               when {
                 screen?.hasSelection == true -> session.clearSelection()
-                cell?.link != null ->
-                  context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cell.link)))
+                cell?.link != null -> cell.link?.let { openLink(context, it) }
                 screen?.mouseTracking == true -> session.click(at.row, at.column)
                 else -> focusManager.clearFocus()
               }
@@ -371,8 +384,9 @@ fun TerminalPage(ref: PaneRef) {
               session.selectWord(at.row, at.column)
             },
             drag = { from, to -> session.selectRange(from.row, from.column, to.row, to.column) },
-            released = { copyAt = androidx.compose.ui.unit.IntOffset(0, 0) },
+            released = { copyAt = it },
             wheel = { at, lines -> session.wheel(at.row, at.column, lines) },
+            swiped = { copyAt = null },
           ),
         modifier = Modifier.fillMaxSize(),
       )
@@ -409,9 +423,11 @@ fun TerminalPage(ref: PaneRef) {
         }
       }
       // Copy, offered once a long press lets go with a selection (ADR 0008).
-      if (copyAt != null && screen?.hasSelection == true) {
+      val finger = copyAt
+      if (finger != null && screen?.hasSelection == true) {
+        val margin = with(LocalDensity.current) { 12.dp.roundToPx() }
         Popup(
-          alignment = Alignment.TopCenter,
+          popupPositionProvider = AboveFinger(finger, margin),
           properties = PopupProperties(focusable = false),
           onDismissRequest = { copyAt = null },
         ) {
@@ -419,7 +435,6 @@ fun TerminalPage(ref: PaneRef) {
             shape = MaterialTheme.shapes.large,
             tonalElevation = 6.dp,
             shadowElevation = 6.dp,
-            modifier = Modifier.padding(top = 8.dp),
           ) {
             TextButton(
               onClick = {
@@ -440,3 +455,68 @@ fun TerminalPage(ref: PaneRef) {
     }
   }
 }
+
+/**
+ * Copy over the finger where it let go, as iOS's edit menu sits, or under it when there is no room
+ * above; `finger` is in the terminal's own coordinates.
+ */
+private class AboveFinger(private val finger: Offset, private val margin: Int) :
+  PopupPositionProvider {
+  override fun calculatePosition(
+    anchorBounds: IntRect,
+    windowSize: IntSize,
+    layoutDirection: LayoutDirection,
+    popupContentSize: IntSize,
+  ): IntOffset {
+    val x =
+      (anchorBounds.left + finger.x.roundToInt() - popupContentSize.width / 2).coerceIn(
+        0,
+        (windowSize.width - popupContentSize.width).coerceAtLeast(0),
+      )
+    val above = anchorBounds.top + finger.y.roundToInt() - popupContentSize.height - margin
+    val y =
+      if (above >= anchorBounds.top) above else anchorBounds.top + finger.y.roundToInt() + margin
+    return IntOffset(x, y)
+  }
+}
+
+/** A link from the terminal, if the phone has an app for it; one it can't open does nothing. */
+private fun openLink(context: Context, link: String) {
+  val uri = Uri.parse(link)
+  if (uri.scheme.isNullOrEmpty()) return
+  try {
+    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+  } catch (_: ActivityNotFoundException) {}
+}
+
+/**
+ * Two fingers size the text, from where it stood when the pinch began; they reach the page before
+ * the terminal's own touches, so a pinch never scrolls or selects.
+ */
+private fun Modifier.pinchToSize(preferences: Preferences) =
+  pointerInput(preferences) {
+    awaitEachGesture {
+      awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+      var start: Pair<Float, Float>? = null
+      do {
+        val event = awaitPointerEvent(PointerEventPass.Initial)
+        val fingers = event.changes.filter { it.pressed }
+        if (fingers.size >= 2) {
+          val span = (fingers[0].position - fingers[1].position).getDistance()
+          val (size, from) = start ?: (preferences.fontSize to span).also { start = it }
+          if (from > 0f) {
+            val next =
+              ((size * span / from) * 2)
+                .roundToInt()
+                .div(2f)
+                .coerceIn(
+                  Preferences.SMALLEST_FONT,
+                  Preferences.LARGEST_FONT,
+                )
+            if (next != preferences.fontSize) preferences.fontSize = next
+          }
+          event.changes.forEach { it.consume() }
+        }
+      } while (event.changes.any { it.pressed })
+    }
+  }
