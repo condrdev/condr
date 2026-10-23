@@ -74,6 +74,9 @@ url = "2"
 syntect = { version = "5.3", default-features = false, features = ["plist-load"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
 relative-path = { version = "2.0", features = ["serde"] }
+# Which emoji characters Unicode draws as text, for the terminal's font on Windows; already
+# built for GPUI.
+unicode-properties = { version = "0.1", default-features = false, features = ["emoji"] }
 toml = "1.0"
 # Format-preserving writes, so a hand-edited config.toml keeps its comments.
 toml_edit = "0.25"

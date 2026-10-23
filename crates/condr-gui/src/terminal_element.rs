@@ -312,7 +312,7 @@ impl Element for TerminalElement {
                 }
 
                 let line = render_cache.shaped_line(&cell.text, foreground, flags, || {
-                    let font = cell_font(style.font(), flags);
+                    let font = cell_font(style.font(), &cell.text, flags);
                     let underline = (flags & ALL_UNDERLINES != 0).then_some(UnderlineStyle {
                         thickness: px(1.),
                         color: Some(foreground),
@@ -396,7 +396,7 @@ impl Element for TerminalElement {
                     font_size,
                     &[TextRun {
                         len: cell.text.len(),
-                        font: cell_font(style.font(), cell.flags),
+                        font: cell_font(style.font(), &cell.text, cell.flags),
                         color: palette.cursor_text,
                         background_color: None,
                         underline: None,

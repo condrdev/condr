@@ -1,4 +1,6 @@
 use super::*;
+use gpui_kit::FontFallbacks;
+use unicode_properties::{EmojiStatus, UnicodeEmoji};
 
 #[derive(Clone, PartialEq)]
 pub(super) struct TerminalRenderCacheKey {
@@ -111,19 +113,52 @@ pub(super) struct ShapedCell {
     pub(super) line: Rc<ShapedLine>,
 }
 
-pub(super) fn cell_font(mut font: Font, flags: u16) -> Font {
+pub(super) fn cell_font(mut font: Font, text: &str, flags: u16) -> Font {
     if flags & BOLD != 0 {
         font = font.bold();
     }
     if flags & ITALIC != 0 {
         font = font.italic();
     }
+    if let Some(family) = TEXT_SYMBOL_FONT
+        && text_presentation(text)
+    {
+        font.fallbacks = Some(FontFallbacks::from_fonts(vec![family.into()]));
+    }
     font
+}
+
+/// Where the terminal font lacks a character such as Claude Code's `⏺` or `✳`, Windows
+/// falls back to the colour Segoe UI Emoji even though Unicode draws it as text; Segoe UI
+/// Symbol has the monochrome glyph. macOS already falls back to a text font.
+#[cfg(windows)]
+const TEXT_SYMBOL_FONT: Option<&str> = Some("Segoe UI Symbol");
+#[cfg(not(windows))]
+const TEXT_SYMBOL_FONT: Option<&str> = None;
+
+/// An emoji character Unicode draws as text unless U+FE0F follows it.
+fn text_presentation(text: &str) -> bool {
+    text.chars().next().is_some_and(|c| {
+        matches!(
+            c.emoji_status(),
+            EmojiStatus::EmojiOther | EmojiStatus::EmojiModifierBase
+        )
+    }) && !text.contains('\u{FE0F}')
 }
 
 #[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_text_presentation_emoji_take_the_symbol_font() {
+        for text in ["⏺", "✳", "©", "☝"] {
+            assert!(text_presentation(text), "{text}");
+        }
+        for text in ["😀", "✅", "✳\u{FE0F}", "a", "*", ""] {
+            assert!(!text_presentation(text), "{text:?}");
+        }
+    }
 
     #[test]
     fn render_cache_reuses_unchanged_cells_across_terminal_frames() {
