@@ -85,16 +85,26 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         history.right() <= refresh.left(),
         "History {history:?} runs under Refresh {refresh:?}"
     );
+    let diffs_generation = |window: &mut VisualTestContext| {
+        window.read(|app| {
+            view.read(app)
+                .connection(1)
+                .unwrap()
+                .resources
+                .diffs_generation
+        })
+    };
+    let before = diffs_generation(window);
     window.simulate_click(refresh.center(), Modifiers::default());
-    assert!(
-        window.read(|app| !view.read(app).files_view.refreshing.is_empty()),
-        "the click should start a refresh"
-    );
+    // The click runs the window until idle, and the Server can answer within that, so
+    // the spinner may already be gone here. What only an asked-for rescan does is end
+    // the refresh and drop the shown diffs; the five-second timeout drops nothing.
     assert!(
         wait_until(window, |window| {
             window.read(|app| view.read(app).files_view.refreshing.is_empty())
+                && diffs_generation(window) > before
         }),
-        "the Server's rescan should end the refresh"
+        "the click should start a refresh that the Server's rescan ends"
     );
 
     let changes = window.debug_bounds("condr-changes-column").unwrap();
