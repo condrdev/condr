@@ -60,8 +60,8 @@ use condr_core::protocol::{
 use condr_core::{
     AgentAlert, AgentDisplayState, AgentKind, AgentSnapshot, BrowsedDirectory, CommitDetails,
     CommitSummary, DirectoryListing, FileContent, FileDiff, GitLog, PaneDirection, PaneId,
-    PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabId,
-    TerminalCommand, TerminalCursor, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
+    PaneLayout, ProxyMode, ProxySetting, Session, SessionSnapshot, SplitDirection, Tab, TabContent,
+    TabId, TerminalCommand, TerminalCursor, TerminalKey, TerminalKeyEventKind, TerminalModifiers,
     TerminalMouseButton, TerminalMouseEvent, TerminalMouseTracking, TerminalPosition,
     TerminalSelection, TerminalSelectionUnit, TerminalSize, Workspace, WorkspaceId,
 };

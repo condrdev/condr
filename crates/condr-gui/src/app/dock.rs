@@ -18,8 +18,6 @@ pub(super) struct DockSurface {
     pub(super) layout_size: Option<Size<Pixels>>,
 }
 
-impl Condr {}
-
 /// A Pane header under drag (ADR 0005 layout, mouse form): the Kit Dock carries it as
 /// an opaque `AnyDrag`, resolves the drop zone and paints the placeholder, and reports
 /// the landing group and edge; only Condr turns that into a Layout command.
@@ -235,14 +233,19 @@ impl Condr {
             .expect("presented Tab belongs to the restored Session");
         // A viewer Tab has no Panes and no Dock (ADR 0017); the body renders it directly.
         let Some(tab_layout) = tab.layout().cloned() else {
-            let diff = tab.diff().map(|diff| diff.path().to_relative_path_buf());
-            let file = tab.file().map(|file| file.path().to_relative_path_buf());
+            let viewer = match tab.content() {
+                TabContent::Diff(diff) => Some((true, diff.path().to_relative_path_buf())),
+                TabContent::File(file) => Some((false, file.path().to_relative_path_buf())),
+                TabContent::Terminals(_) => None,
+            };
             self.terminal_input.target = None;
             self.active_dock_surface = None;
-            if let Some(path) = diff {
-                self.sync_diff_view(key, _workspace_id, tab_id, path, cx);
-            } else if let Some(path) = file {
-                self.sync_file_view(key, _workspace_id, tab_id, path, window, cx);
+            match viewer {
+                Some((true, path)) => self.sync_diff_view(key, _workspace_id, tab_id, path, cx),
+                Some((false, path)) => {
+                    self.sync_file_view(key, _workspace_id, tab_id, path, window, cx)
+                }
+                None => {}
             }
             return;
         };
@@ -259,11 +262,7 @@ impl Condr {
                     .id()
             });
         let authoritative_layout = connection
-            .model
-            .zoomed_panes
-            .iter()
-            .copied()
-            .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
+            .zoomed_pane(tab)
             .map(PaneLayout::Pane)
             .unwrap_or(tab_layout);
         // Where "Insert Path into Terminal" goes once a viewer Tab takes the active slot.
@@ -554,12 +553,7 @@ impl Condr {
         let Some(layout) = tab.layout().cloned() else {
             return;
         };
-        let zoomed = connection
-            .model
-            .zoomed_panes
-            .iter()
-            .any(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id));
-        if zoomed {
+        if connection.zoomed_pane(tab).is_some() {
             return;
         }
         let mut ratios = Vec::new();

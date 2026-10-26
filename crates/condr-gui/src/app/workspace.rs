@@ -63,14 +63,14 @@ impl Condr {
             .flatten()
             .map(|surface| surface.area.clone());
         // A viewer Tab has no Dock; its body is the diff or the file (ADR 0017, ADR 0018).
-        let viewer = session.tab(active_tab).and_then(|tab| {
-            if let Some(diff) = tab.diff() {
+        let viewer = session.tab(active_tab).and_then(|tab| match tab.content() {
+            TabContent::Diff(diff) => {
                 Some(self.render_diff_tab(key, workspace_id, active_tab, diff.path(), cx))
-            } else {
-                tab.file().map(|file| {
-                    self.render_file_tab(key, workspace_id, active_tab, file.path(), cx)
-                })
             }
+            TabContent::File(file) => {
+                Some(self.render_file_tab(key, workspace_id, active_tab, file.path(), cx))
+            }
+            TabContent::Terminals(_) => None,
         });
         let strip = self.render_tab_strip(key, workspace_id, workspace, active_tab, can_mutate, cx);
         // The veil covers the Panes rather than replacing them: the Dock keeps its

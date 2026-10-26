@@ -381,10 +381,11 @@ impl ServerConnection {
         let session = self.session()?;
         let (_, tab_id) = self.viewed(session)?;
         let tab = session.tab(tab_id)?;
-        let path = tab
-            .diff()
-            .map(|diff| diff.path())
-            .or_else(|| tab.file().map(|file| file.path()))?;
+        let path = match tab.content() {
+            TabContent::Diff(diff) => diff.path(),
+            TabContent::File(file) => file.path(),
+            TabContent::Terminals(_) => return None,
+        };
         Some((tab.id(), path.to_relative_path_buf()))
     }
 
@@ -392,13 +393,18 @@ impl ServerConnection {
         let session = self.session()?;
         let (_, tab_id) = self.viewed(session)?;
         let tab = session.tab(tab_id)?;
+        self.zoomed_pane(tab)
+            .map(PaneLayout::Pane)
+            .or_else(|| tab.layout().cloned())
+    }
+
+    /// The Pane of `tab` this Client shows zoomed, if any.
+    pub(super) fn zoomed_pane(&self, tab: &Tab) -> Option<PaneId> {
         self.model
             .zoomed_panes
             .iter()
             .copied()
             .find(|pane_id| tab.panes().iter().any(|pane| pane.id() == *pane_id))
-            .map(PaneLayout::Pane)
-            .or_else(|| tab.layout().cloned())
     }
 
     /// Asks the Server to install, remove or report one agent's hooks on its machine.

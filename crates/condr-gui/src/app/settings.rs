@@ -920,17 +920,10 @@ impl SettingsWindow {
     /// did. Read from `self`: this runs inside render, where the entity cannot be read
     /// through its handle.
     fn connection_hooks(&self, cx: &App) -> (Vec<HooksReport>, Option<String>) {
-        self.owner
-            .upgrade()
-            .and_then(|owner| {
-                owner
-                    .read(cx)
-                    .connections
-                    .iter()
-                    .find(|connection| connection.key == self.selected_server)
-                    .map(|connection| (connection.hooks.clone(), connection.hooks_error.clone()))
-            })
-            .unwrap_or_default()
+        self.selected_connection(cx, |connection| {
+            (connection.hooks.clone(), connection.hooks_error.clone())
+        })
+        .unwrap_or_default()
     }
 }
 

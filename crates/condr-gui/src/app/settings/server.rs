@@ -33,23 +33,26 @@ where
     }
 }
 
+/// What `read` makes of Device `key`'s connection, while the main window is there.
+pub(super) fn read_connection<T>(
+    owner: &WeakEntity<Condr>,
+    key: ConnectionKey,
+    cx: &App,
+    read: impl FnOnce(&ServerConnection) -> T,
+) -> Option<T> {
+    owner.upgrade()?.read(cx).connection(key).map(read)
+}
+
 /// The shell a Server currently stores, as its Bootstrap or last event reported it.
 pub(super) fn connection_shell(
     owner: &WeakEntity<Condr>,
     key: ConnectionKey,
     cx: &App,
 ) -> SharedString {
-    owner
-        .upgrade()
-        .and_then(|owner| {
-            owner
-                .read(cx)
-                .connections
-                .iter()
-                .find(|connection| connection.key == key)
-                .map(|connection| connection.model.settings.shell.clone().into())
-        })
-        .unwrap_or_default()
+    read_connection(owner, key, cx, |connection| {
+        connection.model.settings.shell.clone().into()
+    })
+    .unwrap_or_default()
 }
 
 /// What picking a Device in the picker does; tests call it without the widget.
@@ -217,17 +220,10 @@ pub(super) fn connection_proxy_url(
     key: ConnectionKey,
     cx: &App,
 ) -> SharedString {
-    owner
-        .upgrade()
-        .and_then(|owner| {
-            owner
-                .read(cx)
-                .connections
-                .iter()
-                .find(|connection| connection.key == key)
-                .map(|connection| connection.model.settings.proxy.url.clone().into())
-        })
-        .unwrap_or_default()
+    read_connection(owner, key, cx, |connection| {
+        connection.model.settings.proxy.url.clone().into()
+    })
+    .unwrap_or_default()
 }
 
 /// What choosing a proxy mode does; tests call it without the dropdown.
@@ -300,13 +296,7 @@ impl SettingsWindow {
         cx: &App,
         read: impl FnOnce(&ServerConnection) -> T,
     ) -> Option<T> {
-        let owner = self.owner.upgrade()?;
-        owner
-            .read(cx)
-            .connections
-            .iter()
-            .find(|c| c.key == self.selected_server)
-            .map(read)
+        read_connection(&self.owner, self.selected_server, cx, read)
     }
 
     /// Saves the Listen address draft if it is a complete `host:port`; anything else is
@@ -1272,16 +1262,8 @@ pub(super) fn connection_listen(
     key: ConnectionKey,
     cx: &App,
 ) -> SharedString {
-    owner
-        .upgrade()
-        .and_then(|owner| {
-            owner
-                .read(cx)
-                .connections
-                .iter()
-                .find(|c| c.key == key)
-                .and_then(|c| c.listen.clone())
-        })
+    read_connection(owner, key, cx, |connection| connection.listen.clone())
+        .flatten()
         .unwrap_or_else(|| DEFAULT_LISTEN.to_owned())
         .into()
 }
@@ -1475,11 +1457,7 @@ impl Condr {
         key: ConnectionKey,
         setting: ServerSetting,
     ) -> bool {
-        let Some(connection) = self
-            .connections
-            .iter_mut()
-            .find(|connection| connection.key == key)
-        else {
+        let Some(connection) = self.connection_mut(key) else {
             return false;
         };
         let Some(server_id) = connection.model.server_id else {
@@ -1491,7 +1469,7 @@ impl Condr {
     /// Asks a Server for the state of every agent's hooks on its machine. The replies
     /// arrive as `AgentResult`s and land on the connection, one row per agent.
     pub(in crate::app) fn request_agent_hooks(&mut self, key: ConnectionKey) {
-        if let Some(connection) = self.connections.iter_mut().find(|c| c.key == key) {
+        if let Some(connection) = self.connection_mut(key) {
             for agent in AgentKind::ALL {
                 connection.send_agent_hooks(agent, HooksAction::Status);
             }
@@ -1506,7 +1484,7 @@ impl Condr {
         agent: AgentKind,
         action: HooksAction,
     ) {
-        if let Some(connection) = self.connections.iter_mut().find(|c| c.key == key) {
+        if let Some(connection) = self.connection_mut(key) {
             connection.send_agent_hooks(agent, action);
         }
     }
