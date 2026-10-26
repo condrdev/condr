@@ -36,7 +36,7 @@ Condr has no user accounts and collects no telemetry. It contacts only these fiv
 * **Shared by incoming and outgoing connections**: the Server accepting connections and the local window and command line connecting out all use this one key. So each Device has a single fingerprint and takes a single line in the other side's authorized list.
 * **Fingerprint format**: the fingerprint is a 43-character base64url string. It appears as the Device key in connection links and as Fingerprint in `condr server status`.
 * **Permissions on Linux and macOS**: the file's permissions must be `0600`. If other users have access to it, Condr refuses to load the key and reports `… is readable by other users (mode …); make it 0600 or delete it`, and TCP and Peer-to-peer connections cannot start.
-* **Permissions on Windows**: the file admits only its owner and SYSTEM and does not inherit its parent folder's permissions. Condr checks and resets this ACL every time it reads the file.
+* **Permissions on Windows**: the file admits only its owner and SYSTEM and does not inherit its parent folder's permissions. Condr sets this ACL when it creates the file.
 * **No isolation from your own user**: the key is stored as a plain text file, not in the operating system's keychain. Any local process running as your user can read it.
 
 ### Replacing the key

@@ -283,8 +283,8 @@ For the variables set in every Pane, see [Agent automation](/docs/using/automati
 
 > **Security and permissions**: the key and the invite are sensitive authentication files. On Linux and macOS their permissions must be `0600` (owner read and write); any group or other read permission makes Condr refuse to load them. On Windows, Condr sets their ACL itself and restricts them to the current user.
 
-:::note[Directory migration]
-Releases up to 0.1.6 stored `device-key`, the pairing allowlist and `pending-invite` in the config directory. The first start of a newer release moves them to the data directory automatically, and the key and every pairing carry over intact. Releases up to 0.1.13 kept the allowlist as lines in `authorized-clients`; a newer release converts it to `authorized-clients.json` the first time it opens it, and every pairing carries over.
+:::note[Allowlist format]
+Releases up to 0.1.13 kept the allowlist as lines in `authorized-clients`; a newer release converts it to `authorized-clients.json` the first time it opens it, and every pairing carries over.
 :::
 
 ---

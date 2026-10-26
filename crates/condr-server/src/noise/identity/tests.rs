@@ -77,44 +77,6 @@ fn write_legacy_authorized(directory: &Path, clients: &[AuthorizedClient]) {
     fs::write(directory.join(LEGACY_AUTHORIZED_FILE), lines).unwrap();
 }
 
-// compat(0.1.6): goes with `adopt_legacy_store`; the conversion after it is
-// compat(0.1.13) and goes with `convert_legacy_list`.
-#[test]
-fn the_identity_files_move_out_of_the_legacy_directory_once() {
-    let root = std::env::temp_dir().join(format!(
-        "condr-noise-adopt-{}-{}",
-        std::process::id(),
-        now()
-    ));
-    let (legacy, directory) = (root.join("config"), root.join("data"));
-    let key = load_device_key(&legacy).unwrap();
-    let client = AuthorizedClient {
-        key: DeviceKey::generate().unwrap().public(),
-        name: "laptop".into(),
-        paired_at: 1,
-        last_seen: 2,
-        push: false,
-    };
-    write_legacy_authorized(&legacy, std::slice::from_ref(&client));
-
-    // The move keeps the old name; the conversion straight after gives the new file.
-    adopt_legacy_store(&legacy, &directory).unwrap();
-    assert_eq!(load_device_key(&directory).unwrap(), key);
-    assert!(directory.join(LEGACY_AUTHORIZED_FILE).exists());
-    assert!(!legacy.join(DEVICE_KEY_FILE).exists());
-    assert!(!legacy.join(LEGACY_AUTHORIZED_FILE).exists());
-    convert_legacy_list(&directory).unwrap();
-    assert_eq!(read_authorized(&directory).unwrap(), vec![client]);
-    assert!(!directory.join(LEGACY_AUTHORIZED_FILE).exists());
-
-    // A key already in place is kept; a later file beside `config.toml` is left alone.
-    let later = load_device_key(&legacy).unwrap();
-    adopt_legacy_store(&legacy, &directory).unwrap();
-    assert_eq!(load_device_key(&directory).unwrap(), key);
-    assert_eq!(load_device_key(&legacy).unwrap(), later);
-    fs::remove_dir_all(root).unwrap();
-}
-
 /// `icacls` on `path`: one `account:(flags)` entry per line, `(I)` marking inherited ones.
 #[cfg(windows)]
 fn icacls(path: &Path) -> String {
@@ -131,21 +93,11 @@ fn secret_files_admit_only_their_owner_on_windows() {
     let directory =
         std::env::temp_dir().join(format!("condr-noise-dacl-{}-{}", std::process::id(), now()));
     write_secret_file(&directory.join("fresh"), "secret").unwrap();
-    // compat(0.1.6): the "old" file goes with `windows::restrict_to_owner`. A file from an
-    // older release inherits its directory's entries until it is read.
-    fs::write(directory.join("old"), "secret\n").unwrap();
-    assert!(icacls(&directory.join("old")).contains("(I)"));
-    assert_eq!(
-        read_secret_file(&directory.join("old")).unwrap().as_deref(),
-        Some("secret\n")
-    );
-    for name in ["fresh", "old"] {
-        let acl = icacls(&directory.join(name));
-        let entries: Vec<&str> = acl.lines().filter(|line| line.contains(":(")).collect();
-        assert_eq!(entries.len(), 2, "{acl}");
-        assert!(entries.iter().all(|entry| !entry.contains("(I)")), "{acl}");
-        assert!(entries.iter().all(|entry| entry.ends_with(":(F)")), "{acl}");
-    }
+    let acl = icacls(&directory.join("fresh"));
+    let entries: Vec<&str> = acl.lines().filter(|line| line.contains(":(")).collect();
+    assert_eq!(entries.len(), 2, "{acl}");
+    assert!(entries.iter().all(|entry| !entry.contains("(I)")), "{acl}");
+    assert!(entries.iter().all(|entry| entry.ends_with(":(F)")), "{acl}");
     fs::remove_dir_all(directory).unwrap();
 }
 

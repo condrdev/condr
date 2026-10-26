@@ -241,7 +241,7 @@ fn default_window_options(state: Option<gui_state::WindowState>, cx: &App) -> Wi
 pub(crate) struct Condr {
     client_config_path: Option<PathBuf>,
     config_save: Option<Task<()>>,
-    /// This machine's Device key for TCP Servers, kept beside `config.toml`. `None` when
+    /// This machine's Device key for TCP Servers, kept in the data directory. `None` when
     /// it could not be loaded or created; TCP Servers are then unavailable rather than
     /// reached with a key an attacker could predict.
     device_key: Option<DeviceKey>,

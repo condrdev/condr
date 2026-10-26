@@ -295,10 +295,8 @@ impl fmt::Debug for ServerIdentity {
 
 /// Where this host keeps `device-key`, the authorized list and the invite: the data
 /// directory, which no dotfiles repository or roaming profile carries off (ADR 0033).
-/// Releases up to 0.1.6 kept them beside `config.toml`; a store still there is moved
-/// here the first time anything asks, so pairings survive the update. Releases up to
-/// 0.1.13 kept the paired devices as lines in `authorized-clients`, which is converted
-/// to `authorized-clients.json` straight after.
+/// Releases up to 0.1.13 kept the paired devices as lines in `authorized-clients`, which
+/// is converted to `authorized-clients.json` the first time anything asks.
 pub fn identity_directory() -> io::Result<PathBuf> {
     let directory = condr_core::data_directory().ok_or_else(|| {
         io::Error::new(
@@ -306,12 +304,6 @@ pub fn identity_directory() -> io::Result<PathBuf> {
             "no data directory is available; set CONDR_DATA_DIR",
         )
     })?;
-    // compat(0.1.6): releases up to 0.1.6 kept the files beside `config.toml`. Delete this
-    // call, `adopt_legacy_store`, `move_file` and their test once those installs no longer
-    // update in place (ADR 0033).
-    if let Some(legacy) = condr_core::config_directory().filter(|legacy| *legacy != directory) {
-        adopt_legacy_store(&legacy, &directory)?;
-    }
     // compat(0.1.13): releases up to 0.1.13 kept the paired devices as lines in
     // `authorized-clients`. Delete this call, `convert_legacy_list`,
     // `parse_legacy_authorized`, `LEGACY_AUTHORIZED_FILE` and their tests once those
@@ -321,32 +313,6 @@ pub fn identity_directory() -> io::Result<PathBuf> {
         tracing::warn!(%error, "could not convert authorized-clients");
     }
     Ok(directory)
-}
-
-/// compat(0.1.6): goes with the call in `identity_directory`.
-///
-/// Moves the identity files from `legacy` into `directory` unless `directory` already has
-/// a key. `device-key` goes last, so a process that sees it also sees the list beside it.
-fn adopt_legacy_store(legacy: &Path, directory: &Path) -> io::Result<()> {
-    if !legacy.join(DEVICE_KEY_FILE).exists() || directory.join(DEVICE_KEY_FILE).exists() {
-        return Ok(());
-    }
-    with_store_lock(directory, || {
-        if directory.join(DEVICE_KEY_FILE).exists() {
-            return Ok(());
-        }
-        // Those releases only had the old list, which `convert_legacy_list` converts next.
-        for name in [LEGACY_AUTHORIZED_FILE, INVITE_FILE, DEVICE_KEY_FILE] {
-            move_file(&legacy.join(name), &directory.join(name))?;
-        }
-        let _ = fs::remove_file(legacy.join(LOCK_FILE));
-        tracing::info!(
-            from = %legacy.display(),
-            to = %directory.display(),
-            "moved the device key and paired devices to the data directory"
-        );
-        Ok(())
-    })
 }
 
 /// compat(0.1.13): goes with the call in `identity_directory`.
@@ -402,17 +368,6 @@ fn parse_legacy_authorized(text: &str) -> io::Result<Vec<AuthorizedClient>> {
             })
         })
         .collect()
-}
-
-/// compat(0.1.6): goes with `adopt_legacy_store`.
-///
-/// Renames `from` to `to`, copying across file systems; a missing `from` is nothing to move.
-fn move_file(from: &Path, to: &Path) -> io::Result<()> {
-    match fs::rename(from, to) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(_) => fs::copy(from, to).and_then(|_| fs::remove_file(from)),
-    }
 }
 
 /// How a GUI introduces itself in `Hello`, and so how a paired device is listed: the
@@ -600,9 +555,7 @@ fn with_store_lock<T>(directory: &Path, f: impl FnOnce() -> io::Result<T>) -> io
 }
 
 /// Reads a secret file, `None` when absent. On Unix a file readable by others is refused
-/// rather than trusted, since a leaked key must be replaced, not reused. On Windows the
-/// file is given the owner-only DACL instead: a file from a release before 0.1.7 carries
-/// whatever its directory handed down, and that is every updated machine, not a leak.
+/// rather than trusted, since a leaked key must be replaced, not reused.
 pub(super) fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
     match fs::read_to_string(path) {
         Ok(text) => {
@@ -621,12 +574,6 @@ pub(super) fn read_secret_file(path: &Path) -> io::Result<Option<String>> {
                     ));
                 }
             }
-            // compat(0.1.6): files written before 0.1.7 inherited their directory's ACL.
-            // Delete this call, `windows::restrict_to_owner`, the "old" half of its test and
-            // the `Win32_Security_Authorization` feature once those installs no longer update
-            // in place (ADR 0033).
-            #[cfg(windows)]
-            windows::restrict_to_owner(path)?;
             Ok(Some(text))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -677,11 +624,7 @@ mod windows {
     };
     use std::os::windows::io::FromRawHandle as _;
     use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Security::Authorization::{SE_FILE_OBJECT, SetNamedSecurityInfoW};
-    use windows_sys::Win32::Security::{
-        DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
-        SECURITY_ATTRIBUTES,
-    };
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
     use windows_sys::Win32::Storage::FileSystem::{CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL};
 
     fn owner_only() -> io::Result<SecurityDescriptor> {
@@ -724,45 +667,6 @@ mod windows {
         }
         // SAFETY: a fresh handle this process owns and nothing else closes.
         Ok(unsafe { File::from_raw_handle(handle) })
-    }
-
-    /// compat(0.1.6): goes with the call in `read_secret_file`.
-    ///
-    /// Replaces the DACL of the file at `path` with the owner-only one, inheritance off.
-    pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
-        let descriptor = owner_only()?;
-        let (mut present, mut defaulted, mut dacl) = (0, 0, std::ptr::null_mut());
-        // SAFETY: `descriptor` is a valid security descriptor and the out-pointers are
-        // live locals for the duration of the call.
-        let found = unsafe {
-            GetSecurityDescriptorDacl(
-                descriptor.as_sd().cast_mut(),
-                &raw mut present,
-                &raw mut dacl,
-                &raw mut defaulted,
-            )
-        };
-        if found == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let name = wide(path)?;
-        // SAFETY: `name` is NUL-terminated and `dacl` points into `descriptor`; both live
-        // until the call returns.
-        let status = unsafe {
-            SetNamedSecurityInfoW(
-                name.as_ptr(),
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                dacl,
-                std::ptr::null(),
-            )
-        };
-        if status != 0 {
-            return Err(io::Error::from_raw_os_error(status as i32));
-        }
-        Ok(())
     }
 }
 
