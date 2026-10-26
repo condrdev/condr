@@ -7,8 +7,6 @@ impl Condr {
         owner: WeakEntity<Condr>,
     ) -> PopupMenu {
         let ssh_owner = owner.clone();
-        let p2p_owner = owner.clone();
-        let tcp_owner = owner;
         menu = menu.item(
             PopupMenuItem::new("SSH")
                 .icon(IconName::SquareTerminal)
@@ -16,30 +14,26 @@ impl Condr {
                     let _ = ssh_owner.update(cx, |this, cx| this.prompt_add_server_ssh(window, cx));
                 }),
         );
-        menu = menu.item(
-            PopupMenuItem::new("Peer-to-peer")
-                .icon(Icon::new(super::super::sidebar::CondrIconName::Waypoints))
+        menu.item(
+            PopupMenuItem::new("Pairing link")
+                .icon(Icon::new(gpui_kit::assets::IconName::Link))
                 .on_click(move |_, window, cx| {
-                    let _ = p2p_owner.update(cx, |this, cx| this.prompt_add_server_p2p(window, cx));
+                    let _ = owner.update(cx, |this, cx| this.prompt_add_server_link(window, cx));
                 }),
-        );
-        menu.item(PopupMenuItem::new("TCP").icon(IconName::Network).on_click(
-            move |_, window, cx| {
-                let _ = tcp_owner.update(cx, |this, cx| this.prompt_add_server_tcp(window, cx));
-            },
-        ))
+        )
     }
 
-    pub(in crate::app) fn prompt_add_server_p2p(
+    /// A TCP or Peer-to-peer link: the Invite says which, so the menu does not ask.
+    pub(in crate::app) fn prompt_add_server_link(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.prompt_add_server_input(
-            "Pair a Peer-to-peer Device",
+            "Pair a Device",
             "Pairing link",
-            "Paste p2p://… invite link",
-            Some("p2p://"),
+            "Paste the tcp://… or p2p://… link",
+            &["tcp://", "p2p://"],
             None,
             window,
             cx,
@@ -55,24 +49,8 @@ impl Condr {
             "Connect over SSH",
             "SSH address",
             "user@host[:port]",
+            &[],
             Some("ssh://"),
-            Some("ssh://"),
-            window,
-            cx,
-        );
-    }
-
-    pub(in crate::app) fn prompt_add_server_tcp(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.prompt_add_server_input(
-            "Pair a TCP Device",
-            "Pairing link",
-            "Paste tcp://… invite link",
-            Some("tcp://"),
-            None,
             window,
             cx,
         );
@@ -84,12 +62,12 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         // Kept as the direct address prompt for the start page and keyboard workflow.
-        // The sidebar exposes the three explicit modes through its PopupMenu.
+        // The sidebar exposes SSH and a pairing link through its PopupMenu.
         self.prompt_add_server_input(
             "Connect Remote Device",
             "Address",
             "ssh://user@host, tcp://… or p2p://… link",
-            None,
+            &[],
             None,
             window,
             cx,
@@ -102,7 +80,8 @@ impl Condr {
         title: &'static str,
         field_label: &'static str,
         placeholder: &'static str,
-        expected_scheme: Option<&'static str>,
+        // Any of these, or anything when empty.
+        expected_schemes: &'static [&'static str],
         prefix: Option<&'static str>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -121,10 +100,13 @@ impl Condr {
             true,
             None,
             move |this, value, _, cx| {
-                if let Some(scheme) = expected_scheme
-                    && !value.trim().to_ascii_lowercase().starts_with(scheme)
+                let lower = value.trim().to_ascii_lowercase();
+                if !expected_schemes.is_empty()
+                    && !expected_schemes
+                        .iter()
+                        .any(|scheme| lower.starts_with(scheme))
                 {
-                    return Err(format!("Paste a {scheme} address"));
+                    return Err(format!("Paste a {} link", expected_schemes.join(" or ")));
                 }
                 this.add_server_from_address(&value, cx)
             },

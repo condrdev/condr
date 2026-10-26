@@ -1072,6 +1072,39 @@ fn ssh_prompt_supplies_the_scheme_and_tolerates_a_typed_one() {
 }
 
 #[test]
+fn pairing_link_prompt_takes_a_tcp_or_p2p_link_but_not_ssh() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let count =
+        |window: &mut VisualTestContext| window.read(|app| view.read(app).connections.len());
+    let before = count(window);
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.prompt_add_server_link(window, cx));
+    });
+    submit_text_dialog(window, "ssh://builder@127.0.0.1:1");
+    window.run_until_parked();
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    assert_eq!(count(window), before);
+    window.update(|window, cx| window.close_dialog(cx));
+
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| this.prompt_add_server_link(window, cx));
+    });
+    submit_text_dialog(
+        window,
+        &format!(
+            "tcp://{}@127.0.0.1:4242",
+            DeviceKey::from_seed([7; 32]).public()
+        ),
+    );
+    window.run_until_parked();
+    assert!(!window.update(|window, cx| window.has_active_dialog(cx)));
+    assert_eq!(count(window), before + 1);
+}
+
+#[test]
 fn ssh_addresses_add_edit_and_use_remote_paths() {
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();

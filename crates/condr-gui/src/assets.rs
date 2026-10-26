@@ -57,7 +57,7 @@ const CONDR_ICON_PATHS: [&str; 29] = [
 ];
 
 // Lucide icons Kit bundles but does not load by default.
-gpui_kit::assets::icon_assets!(KitIcons, [Rows2, Columns2]);
+gpui_kit::assets::icon_assets!(KitIcons, [Rows2, Columns2, Link]);
 
 pub(super) struct CondrAssets {
     pub(super) base: Assets,
@@ -105,9 +105,6 @@ impl AssetSource for CondrAssets {
             )))),
             "icons/coffee.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/coffee.svg"
-            )))),
-            "icons/waypoints.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
-                "../assets/icons/waypoints.svg"
             )))),
             "icons/qr-code.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/qr-code.svg"
