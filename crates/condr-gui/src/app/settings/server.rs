@@ -1,5 +1,6 @@
 use super::sidebar::CondrIconName;
 use super::*;
+use crate::app::dialogs::{DangerConfirm, confirm_danger};
 use gpui_kit::component::setting::RenderOptions;
 use gpui_kit::component::switch::Switch;
 
@@ -535,27 +536,17 @@ fn confirm_restart(settings: &Entity<SettingsWindow>, window: &mut Window, cx: &
         let this = settings.read(cx);
         (this.owner.clone(), this.selected_server)
     };
-    window.defer(cx, move |window, cx| {
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let owner = owner.clone();
-            alert
-                .confirm()
-                .title("Restart Condr on this device?")
-                .description(
-                    "Every pane and agent on this device stops; Condr windows reconnect on \
-                     their own.",
-                )
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text("Restart")
-                        .ok_variant(ButtonVariant::Danger),
-                )
-                .on_ok(move |_, _, cx| {
-                    let _ = owner.update(cx, |owner, cx| owner.restart_server(key, cx));
-                    true
-                })
-        });
-    });
+    confirm_danger(
+        owner,
+        DangerConfirm::new(
+            "Restart Condr on this device?",
+            "Every pane and agent on this device stops; Condr windows reconnect on their own.",
+            "Restart",
+        ),
+        move |owner, _, cx| owner.restart_server(key, cx),
+        window,
+        cx,
+    );
 }
 
 fn server_restart_row(
@@ -1259,33 +1250,19 @@ fn revoke_button(
                 (this.owner.clone(), this.selected_server)
             };
             let key = key.clone();
-            let name = name.clone();
-            window.defer(cx, move |window, cx| {
-                window.open_alert_dialog(cx, move |alert, _, _| {
-                    let owner = owner.clone();
-                    let key = key.clone();
-                    alert
-                        .confirm()
-                        .title(format!("Revoke \u{201c}{name}\u{201d}?"))
-                        .description(
-                            "It disconnects now and needs a new pairing code to connect again.",
-                        )
-                        .button_props(
-                            DialogButtonProps::default()
-                                .ok_text("Revoke")
-                                .ok_variant(ButtonVariant::Danger),
-                        )
-                        .on_ok(move |_, _, cx| {
-                            let _ = owner.update(cx, |owner, _| {
-                                owner.server_admin(
-                                    selected,
-                                    ServerAdminCommand::Revoke { key: key.clone() },
-                                )
-                            });
-                            true
-                        })
-                });
-            });
+            confirm_danger(
+                owner,
+                DangerConfirm::new(
+                    format!("Revoke “{name}”?"),
+                    "It disconnects now and needs a new pairing code to connect again.",
+                    "Revoke",
+                ),
+                move |owner, _, _| {
+                    owner.server_admin(selected, ServerAdminCommand::Revoke { key: key.clone() });
+                },
+                window,
+                cx,
+            );
         })
 }
 

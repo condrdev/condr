@@ -1,6 +1,7 @@
 //! Creating, renaming and deleting entries from the Files and Changes views (ADR 0045),
 //! and showing one in this machine's file manager.
 
+use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
 use condr_core::{FileKind, FileMutation, FileMutationResult};
 
@@ -464,43 +465,23 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let owner = cx.weak_entity();
         let description = match kind {
             FileKind::Directory => {
                 format!("{path} and everything in it will be deleted permanently.")
             }
             FileKind::File => format!("{path} will be deleted permanently."),
         };
-        window.defer(cx, move |window, cx| {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                let owner = owner.clone();
+        let title = format!("Delete “{}”?", path.file_name().unwrap_or(path.as_str()));
+        confirm_danger(
+            cx.weak_entity(),
+            DangerConfirm::new(title, description, "Delete"),
+            move |this, _, cx| {
                 let path = path.clone();
-                alert
-                    .title(format!(
-                        "Delete {}?",
-                        path.file_name().unwrap_or(path.as_str())
-                    ))
-                    .description(description.clone())
-                    .button_props(
-                        DialogButtonProps::default()
-                            .ok_text("Delete")
-                            .ok_variant(ButtonVariant::Danger)
-                            .show_cancel(true)
-                            .on_ok(move |_, _, cx| {
-                                let path = path.clone();
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.send_entry(
-                                        key,
-                                        workspace_id,
-                                        EntryRequest::Delete { path },
-                                        cx,
-                                    )
-                                });
-                                true
-                            }),
-                    )
-            });
-        });
+                this.send_entry(key, workspace_id, EntryRequest::Delete { path }, cx);
+            },
+            window,
+            cx,
+        );
     }
 
     /// The edits a row's menu offers below its read-only actions: New File and New Folder

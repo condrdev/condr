@@ -76,7 +76,7 @@ use file_entries::*;
 use files::*;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::dialog::{Cancel, Confirm, DialogButtonProps, DialogFooter};
+use gpui_kit::component::dialog::{Cancel, Confirm, DialogFooter};
 use gpui_kit::component::dock::{
     AnyDrag, BasePanel, DockArea, DockAreaRenderer, DockEvent, DockLayout, DockPlacement,
     DropTarget as DockDropTarget, PaneRef, PanelEvent, PanelId, PanelInfo, PanelState,

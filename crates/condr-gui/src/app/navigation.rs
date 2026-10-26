@@ -1,3 +1,4 @@
+use super::dialogs::{DangerConfirm, confirm_danger};
 use super::*;
 
 impl Condr {
@@ -584,22 +585,15 @@ impl Condr {
             self.send_layout_to(key, command);
             return;
         };
-        let owner = cx.weak_entity();
-        window.defer(cx, move |window, cx| {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                let owner = owner.clone();
-                let command = command.clone();
-                alert
-                    .confirm()
-                    .title(title)
-                    .description(description.clone())
-                    .on_ok(move |_, _, cx| {
-                        let _ =
-                            owner.update(cx, |this, _| this.send_layout_to(key, command.clone()));
-                        true
-                    })
-            });
-        });
+        confirm_danger(
+            cx.weak_entity(),
+            DangerConfirm::new(title, description, "Close"),
+            move |this, _, _| {
+                this.send_layout_to(key, command.clone());
+            },
+            window,
+            cx,
+        );
     }
 
     /// The confirmation a Pane or Tab close needs because it would stop a running agent.

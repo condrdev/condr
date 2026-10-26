@@ -15,6 +15,60 @@ pub(super) fn port_text_is_plausible(text: &str) -> bool {
     text.is_empty() || text.parse::<u16>().is_ok()
 }
 
+/// What a confirmation before an action that cannot be undone says. A name in the title
+/// sits in curly quotes.
+pub(in crate::app) struct DangerConfirm {
+    pub(in crate::app) title: String,
+    pub(in crate::app) description: String,
+    /// The red button, named for the action: "Delete", not "OK".
+    pub(in crate::app) ok: &'static str,
+    pub(in crate::app) cancel: &'static str,
+}
+
+impl DangerConfirm {
+    pub(in crate::app) fn new(
+        title: impl Into<String>,
+        description: impl Into<String>,
+        ok: &'static str,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            description: description.into(),
+            ok,
+            cancel: "Cancel",
+        }
+    }
+}
+
+/// Asks before an action that cannot be undone, then runs `on_ok` on Condr and closes.
+/// It takes the owner rather than `&mut Condr` so the Settings window opens it the same way.
+pub(in crate::app) fn confirm_danger(
+    owner: WeakEntity<Condr>,
+    confirm: DangerConfirm,
+    on_ok: impl Fn(&mut Condr, &mut Window, &mut Context<Condr>) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let on_ok = Rc::new(on_ok);
+    window.defer(cx, move |window, cx| {
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let owner = owner.clone();
+            let on_ok = on_ok.clone();
+            alert
+                .confirm()
+                .title(confirm.title.clone())
+                .description(confirm.description.clone())
+                .ok_text(confirm.ok)
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text(confirm.cancel)
+                .on_ok(move |_, window, cx| {
+                    let _ = owner.update(cx, |this, cx| on_ok(this, window, cx));
+                    true
+                })
+        });
+    });
+}
+
 impl Condr {
     /// Shows a failure the user did not cause inside a dialog: a red toast on the main
     /// window that stays until dismissed, with a Copy button so the text can be pasted
@@ -418,33 +472,20 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let owner = cx.weak_entity();
-        window.defer(cx, move |window, cx| {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                let owner = owner.clone();
-                alert
-                    .title(format!("Remove worktree \"{workspace_name}\"?"))
-                    .description(
-                        "The worktree directory will be deleted. Modified or untracked files prevent removal; the branch is kept.",
-                    )
-                    .button_props(
-                        DialogButtonProps::default()
-                            .ok_text("Remove")
-                            .ok_variant(ButtonVariant::Danger)
-                            .show_cancel(true)
-                            .on_ok(move |_, _, cx| {
-                                owner
-                                    .update(cx, |this, _| {
-                                        this.send_layout_to(
-                                            key,
-                                            LayoutCommand::RemoveWorktree { workspace_id },
-                                        )
-                                    })
-                                    .is_ok_and(|request_id| request_id.is_some())
-                            }),
-                    )
-            });
-        });
+        confirm_danger(
+            cx.weak_entity(),
+            DangerConfirm::new(
+                format!("Remove worktree “{workspace_name}”?"),
+                "The worktree directory will be deleted. Modified or untracked files prevent \
+                 removal; the branch is kept.",
+                "Remove",
+            ),
+            move |this, _, _| {
+                this.send_layout_to(key, LayoutCommand::RemoveWorktree { workspace_id });
+            },
+            window,
+            cx,
+        );
     }
 
     pub(super) fn prompt_rename_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -1,5 +1,7 @@
 use super::super::*;
-use crate::app::dialogs::{host_text_is_plausible, port_text_is_plausible};
+use crate::app::dialogs::{
+    DangerConfirm, confirm_danger, host_text_is_plausible, port_text_is_plausible,
+};
 
 impl Condr {
     pub(in crate::app) fn add_server_menu(
@@ -388,30 +390,25 @@ impl Condr {
         };
         connection.update_restart_offered = true;
         let server = connection.server_build.clone().unwrap_or_default();
-        let owner = cx.weak_entity();
-        window.defer(cx, move |window, cx| {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                let owner = owner.clone();
-                alert
-                    .title("Restart Condr to finish updating?")
-                    .description(format!(
-                        "This device still runs Condr {server}; this window is {}. Programs \
-                         in its terminals end; Workspaces and Agent conversations reopen.",
-                        condr_core::build_identity()
-                    ))
-                    .button_props(
-                        DialogButtonProps::default()
-                            .ok_text("Restart")
-                            .ok_variant(ButtonVariant::Danger)
-                            .cancel_text("Later")
-                            .show_cancel(true)
-                            .on_ok(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| this.restart_server(key, cx));
-                                true
-                            }),
-                    )
-            });
-        });
+        let confirm = DangerConfirm::new(
+            "Restart Condr to finish updating?",
+            format!(
+                "This device still runs Condr {server}; this window is {}. Programs in its \
+                 terminals end; Workspaces and Agent conversations reopen.",
+                condr_core::build_identity()
+            ),
+            "Restart",
+        );
+        confirm_danger(
+            cx.weak_entity(),
+            DangerConfirm {
+                cancel: "Later",
+                ..confirm
+            },
+            move |this, _, cx| this.restart_server(key, cx),
+            window,
+            cx,
+        );
     }
 
     pub(in crate::app) fn confirm_delete_server_on(
@@ -421,33 +418,23 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let owner = cx.weak_entity();
-        window.defer(cx, move |window, cx| {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                let owner = owner.clone();
-                alert
-                    .title(format!("Delete \"{name}\"?"))
-                    .description("This removes the device from Condr. Its terminals keep running.")
-                    .button_props(
-                        DialogButtonProps::default()
-                            .ok_text("Delete")
-                            .ok_variant(ButtonVariant::Danger)
-                            .show_cancel(true)
-                            .on_ok(move |_, window, cx| {
-                                let _ = owner.update(cx, |this, cx| {
-                                    this.confirm_unsaved(
-                                        UnsavedScope::Device(key),
-                                        Box::new(move |this, window, cx| {
-                                            this.remove_server(key, window, cx)
-                                        }),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                                true
-                            }),
-                    )
-            });
-        });
+        confirm_danger(
+            cx.weak_entity(),
+            DangerConfirm::new(
+                format!("Delete “{name}”?"),
+                "This removes the device from Condr. Its terminals keep running.",
+                "Delete",
+            ),
+            move |this, window, cx| {
+                this.confirm_unsaved(
+                    UnsavedScope::Device(key),
+                    Box::new(move |this, window, cx| this.remove_server(key, window, cx)),
+                    window,
+                    cx,
+                )
+            },
+            window,
+            cx,
+        );
     }
 }
