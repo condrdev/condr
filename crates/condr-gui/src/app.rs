@@ -33,6 +33,7 @@ mod syntax;
 mod terminal_input;
 mod terminal_panel;
 mod updates;
+mod viewer_header;
 mod workspace;
 mod workspace_resources;
 

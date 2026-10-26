@@ -3,16 +3,16 @@
 //! rendered when it is Markdown or an image (ADR 0037). The Editor saves what it edits
 //! back to the Server (ADR 0045); `file_edits` holds that side.
 
-use super::change_tree::{RowKind, status_color, status_glyph, tree_indent, tree_row};
+use super::change_tree::{RowKind, status_color, tree_indent, tree_row};
 use super::placeholders::{empty_state, failed_state, list_note, too_large};
 use super::preview::{
     DecodedImage, NoImage, PreviewImages, Rendering, image_summary, release_images, render_image,
     rendering_for,
 };
+use super::viewer_header::{header_meta, mode_toggle, viewer_header};
 use super::*;
 use condr_core::{DirectoryEntry, FileKind};
 use gpui_kit::base::text::TextViewState;
-use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::input::{Position, RopeExt as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use std::path::{Path, PathBuf};
@@ -1058,23 +1058,16 @@ impl Condr {
         let owner = cx.weak_entity();
         let toggle_path = path.to_relative_path_buf();
         let toggle = rendering.map(|_| {
-            ButtonGroup::new("file-view-mode")
-                .ghost()
-                .xsmall()
-                .child(
-                    Button::new("file-view-rendered")
-                        .debug_selector(|| "file-view-rendered".into())
-                        .label("Preview")
-                        .selected(!source),
-                )
-                .child(
-                    Button::new("file-view-source")
-                        .debug_selector(|| "file-view-source".into())
-                        .label("Source")
-                        .selected(source),
-                )
-                .on_click(move |selected, _, cx| {
-                    let source = selected.first() == Some(&1);
+            mode_toggle(
+                "file-view-mode",
+                Button::new("file-view-rendered")
+                    .debug_selector(|| "file-view-rendered".into())
+                    .label("Preview"),
+                Button::new("file-view-source")
+                    .debug_selector(|| "file-view-source".into())
+                    .label("Source"),
+                source,
+                move |source, cx| {
                     let _ = owner.update(cx, |this, cx| {
                         if let Some(editor) = this.files_view.file_editors.get_mut(&(key, tab_id)) {
                             editor.source = source;
@@ -1091,31 +1084,11 @@ impl Condr {
                             cx.notify();
                         }
                     });
-                })
-        });
-        h_flex()
-            .debug_selector(|| "file-header".into())
-            .flex_none()
-            .h_9()
-            .w_full()
-            .px_3()
-            .gap_2()
-            .items_center()
-            .border_b_1()
-            .border_color(theme.border)
-            .child(type_icon(
-                file_icons::file_icon_for_path(Path::new(path.as_str()), theme.is_dark()),
-                false,
-            ))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .truncate()
-                    .text_sm()
-                    .font_medium()
-                    .child(path.to_string()),
+                },
             )
+        });
+        let muted = theme.muted_foreground;
+        viewer_header("file-header", path, entry.map(|entry| entry.status), cx)
             .when(dirty, |this| {
                 this.child(
                     div()
@@ -1133,31 +1106,11 @@ impl Condr {
                 )
             })
             .when_some(note, |this, (note, warning)| {
-                this.child(
-                    div()
-                        .debug_selector(|| "file-note".into())
-                        .flex_none()
-                        .text_xs()
-                        .text_color(if warning {
-                            theme.warning
-                        } else {
-                            theme.muted_foreground
-                        })
-                        .child(note),
-                )
+                let color = if warning { theme.warning } else { muted };
+                this.child(header_meta("file-note", note, color))
             })
             .when_some(summary, |this, summary| {
-                this.child(
-                    div()
-                        .debug_selector(|| "file-image-summary".into())
-                        .flex_none()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(summary),
-                )
-            })
-            .when_some(entry, |this, entry| {
-                this.child(status_glyph(entry.status, cx))
+                this.child(header_meta("file-image-summary", summary, muted))
             })
             .children(toggle)
             .into_any_element()

@@ -3,18 +3,18 @@
 //! Everything shown here is Server data; the Client only asks and draws.
 
 use super::change_tree::{
-    TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, status_glyph, tree_rows,
+    TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, tree_rows,
 };
 use super::history::history_branch;
 use super::placeholders::{empty_state, failed_state, list_note, too_large};
 use super::sidebar::CondrIconName;
+use super::viewer_header::{header_meta, mode_toggle, viewer_header};
 use super::*;
 use condr_core::protocol::DiffBase;
 use condr_core::{
     DiffHunk, DiffLineKind, FileDiffContent, GitChangeEntry, GitChangeStatus, GitChanges,
     GitDiffStat, MAX_GIT_CHANGES,
 };
-use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::diff::{Diff, DiffFile, DiffLinePosition, DiffMode, DiffSide, DiffState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -798,67 +798,31 @@ impl Condr {
         };
         let viewer = self.files_view.diff_viewers.get(&(key, tab_id));
         let content = viewer.map_or(DiffContent::Loading, |viewer| viewer.content.clone());
-        let header = h_flex()
-            .debug_selector(|| "diff-header".into())
-            .flex_none()
-            .h_9()
-            .w_full()
-            .px_3()
-            .gap_2()
-            .items_center()
-            .border_b_1()
-            .border_color(theme.border)
-            .when_some(entry, |this, entry| {
-                this.child(status_glyph(entry.status, cx))
-            })
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .truncate()
-                    .text_sm()
-                    .font_medium()
-                    .child(path_text.clone()),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "diff-comparison".into())
-                    .flex_none()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(comparison),
-            )
+        let muted = theme.muted_foreground;
+        let header = viewer_header("diff-header", path, entry.map(|entry| entry.status), cx)
+            .child(header_meta("diff-comparison", comparison, muted))
             .when_some(entry.and_then(|entry| entry.stat), |this, stat| {
                 this.child(diff_stat(stat, cx))
             })
             .when(content == DiffContent::Text, |this| {
                 let owner = cx.weak_entity();
-                let unified = self.files_view.diff_unified;
-                this.child(
-                    ButtonGroup::new("diff-mode")
-                        .ghost()
-                        .xsmall()
-                        .child(
-                            Button::new("diff-mode-split")
-                                .debug_selector(|| "diff-mode-split".into())
-                                .icon(Icon::new(gpui_kit::assets::IconName::Columns2))
-                                .tooltip("Split")
-                                .accessibility_label("Split")
-                                .selected(!unified),
-                        )
-                        .child(
-                            Button::new("diff-mode-unified")
-                                .debug_selector(|| "diff-mode-unified".into())
-                                .icon(Icon::new(gpui_kit::assets::IconName::Rows2))
-                                .tooltip("Unified")
-                                .accessibility_label("Unified")
-                                .selected(unified),
-                        )
-                        .on_click(move |selected, _, cx| {
-                            let unified = selected.first() == Some(&1);
-                            let _ = owner.update(cx, |this, cx| this.set_diff_unified(unified, cx));
-                        }),
-                )
+                this.child(mode_toggle(
+                    "diff-mode",
+                    Button::new("diff-mode-split")
+                        .debug_selector(|| "diff-mode-split".into())
+                        .icon(Icon::new(gpui_kit::assets::IconName::Columns2))
+                        .tooltip("Split")
+                        .accessibility_label("Split"),
+                    Button::new("diff-mode-unified")
+                        .debug_selector(|| "diff-mode-unified".into())
+                        .icon(Icon::new(gpui_kit::assets::IconName::Rows2))
+                        .tooltip("Unified")
+                        .accessibility_label("Unified"),
+                    self.files_view.diff_unified,
+                    move |unified, cx| {
+                        let _ = owner.update(cx, |this, cx| this.set_diff_unified(unified, cx));
+                    },
+                ))
             })
             .child({
                 // A deleted file has nothing on disk to show.
