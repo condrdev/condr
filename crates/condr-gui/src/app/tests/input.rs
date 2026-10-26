@@ -255,19 +255,30 @@ fn hover_clears_only_from_the_pane_that_owns_it() {
 }
 
 #[test]
-fn alt_v_alone_is_the_image_paste_gesture_and_maps_only_supported_formats() {
-    assert!(is_image_paste_gesture(&Keystroke::parse("alt-v").unwrap()));
-    let mut function_chord = Keystroke::parse("alt-v").unwrap();
+fn image_paste_is_ctrl_v_or_alt_v_on_windows_and_maps_only_supported_formats() {
+    let gesture = |keys: &str| is_image_paste_gesture(&Keystroke::parse(keys).unwrap());
+    let (image_paste, other) = if cfg!(windows) {
+        ("alt-v", "ctrl-v")
+    } else {
+        ("ctrl-v", "alt-v")
+    };
+    assert!(gesture(image_paste));
+    let mut function_chord = Keystroke::parse(image_paste).unwrap();
     function_chord.modifiers.function = true;
     assert!(!is_image_paste_gesture(&function_chord));
-    for keys in ["v", "ctrl-v", "alt-shift-v", "ctrl-alt-v", "cmd-v", "alt-c"] {
-        assert!(
-            !is_image_paste_gesture(&Keystroke::parse(keys).unwrap()),
-            "{keys}"
-        );
+    for keys in [
+        other,
+        "v",
+        "alt-shift-v",
+        "ctrl-shift-v",
+        "ctrl-alt-v",
+        "cmd-v",
+        "ctrl-c",
+    ] {
+        assert!(!gesture(keys), "{keys}");
     }
-    // Alt+V is not a text-paste shortcut either: on a local Server it reaches the PTY.
-    assert!(terminal_clipboard_shortcut(&Keystroke::parse("alt-v").unwrap(), false).is_none());
+    // Nor is it a text-paste shortcut: on a local Server it reaches the PTY.
+    assert!(terminal_clipboard_shortcut(&Keystroke::parse(image_paste).unwrap(), false).is_none());
     use condr_core::protocol::ClipboardImageFormat as Wire;
     assert_eq!(
         clipboard_image_format(gpui_kit::ImageFormat::Png),

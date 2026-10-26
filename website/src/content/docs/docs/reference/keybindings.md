@@ -85,17 +85,18 @@ Every key combination not declared on this page passes through to the child proc
 * **Conflicts on Windows**:
   * `Ctrl + C` with nothing selected passes through to the foreground application, usually to interrupt the current command.
   * `Ctrl + V` is always intercepted by Condr to paste, and the raw key is never sent to the child process.
-* **Linux**: `Ctrl + C` and `Ctrl + V` always pass through to the current child process.
+* **Linux**: `Ctrl + C` and `Ctrl + V` pass through to the current child process. The one exception is `Ctrl + V` with an image on the clipboard in a remote Pane, which sends the image (see below); macOS does the same.
 
 ---
 
 ## Terminal: send an image to a remote Device
 
-| Action | macOS | Windows / Linux |
-| :--- | :--- | :--- |
-| Paste the clipboard image | `Option + V` | `Alt + V` |
+| Action | macOS | Windows | Linux |
+| :--- | :--- | :--- | :--- |
+| Paste the clipboard image | `Ctrl + V` | `Alt + V` | `Ctrl + V` |
 
 * **How it works**: only in Panes running on a remote Device. Condr uploads the local clipboard image to a temporary directory on that Device in the background, and fills its absolute remote path in at the command-line cursor for a CLI Agent or another program to read.
+* **Which key**: the one you paste images into a local Agent with. On Windows `Ctrl + V` pastes text, which is why Claude Code there takes `Alt + V` too.
 * **Fallback**: with no image on the clipboard, or when the current Pane is on the local Device, the key passes straight through to the foreground program.
 * **Limits and lifetime**:
   * One image can be at most **16 MiB**.

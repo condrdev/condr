@@ -60,7 +60,7 @@ command = ["code-insiders", "--reuse-window"]
 
 | Action | macOS | Windows / Linux |
 | --- | --- | --- |
-| Paste an image to a remote Device | Option+V | Alt+V |
+| Paste an image to a remote Device | Ctrl+V | Alt+V on Windows, Ctrl+V on Linux |
 | Select text while a program has mouse mode on | Shift+drag | Shift+drag |
 | Open a link in the terminal | Cmd+click | Ctrl+click |
 

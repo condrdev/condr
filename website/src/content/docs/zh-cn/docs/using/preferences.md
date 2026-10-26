@@ -59,7 +59,7 @@ command = ["code-insiders", "--reuse-window"]
 
 | 动作 | macOS | Windows / Linux |
 | --- | --- | --- |
-| 粘贴图片到远程 Device | Option+V | Alt+V |
+| 粘贴图片到远程 Device | Ctrl+V | Windows 上 Alt+V，Linux 上 Ctrl+V |
 | 程序开启鼠标模式时选择文本 | Shift+拖动 | Shift+拖动 |
 | 打开终端里的链接 | Cmd+点击 | Ctrl+点击 |
 

@@ -155,12 +155,13 @@ impl Condr {
     }
 }
 
-/// `Alt+V` alone: the image-paste gesture the common Agent CLIs use (ADR 0012).
+/// The image-paste gesture (ADR 0012), the key Claude Code pastes images with: `Ctrl+V`,
+/// and `Alt+V` on Windows, where `Ctrl+V` pastes text.
 pub(in crate::app) fn is_image_paste_gesture(stroke: &Keystroke) -> bool {
     let modifiers = stroke.modifiers;
     stroke.key == "v"
-        && modifiers.alt
-        && !modifiers.control
+        && modifiers.alt == cfg!(windows)
+        && modifiers.control != cfg!(windows)
         && !modifiers.platform
         && !modifiers.shift
         && !modifiers.function
