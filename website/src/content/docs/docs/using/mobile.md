@@ -28,7 +28,7 @@ When a new beta comes out, update the app in TestFlight. Each beta expires after
 1. On the phone, open the latest [Condr Companion release](https://github.com/condrdev/condr/releases?q=companion) and download `condr-companion-<version>.apk`.
 2. Open the download and allow installing from your browser when Android asks.
 
-To update, install a newer APK over it: every APK is signed with the same key, so the phone keeps its pairings. Notifications need Google Play services; a phone without them stays up to date only while the app is open.
+To update, install a newer APK over it: every APK is signed with the same key, so the phone keeps its pairings.
 
 ---
 
@@ -56,7 +56,7 @@ To try the app without a computer, tap **No computer to pair? Try Demo** under *
 
 ## Limits
 
-* The app is connected only while it is open, and it sends no notifications yet. Push notifications for an Agent that finishes or needs you are next on the [Roadmap](/docs/help/roadmap/).
+* The app is connected only while it is open. The iPhone app gets a notification when an Agent finishes, fails or needs you; the Android app gets none yet, and once it does they will need Google Play services. See the [Roadmap](/docs/help/roadmap/).
 * Computers connected over SSH can't be paired with the phone. Use Peer-to-peer or TCP.
 * Phones only; no iPad or tablet layout.
 

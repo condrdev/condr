@@ -28,7 +28,7 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 1. 在手机上打开最新的 [Condr Companion 版本](https://github.com/condrdev/condr/releases?q=companion)，下载 `condr-companion-<版本>.apk`。
 2. 打开下载的文件，按 Android 的提示允许从浏览器安装。
 
-更新时直接安装更新的 APK 即可：每个 APK 都用同一把密钥签名，手机会保留已有的配对。通知依赖 Google Play 服务；没有它的手机只在 App 打开时保持更新。
+更新时直接安装更新的 APK 即可：每个 APK 都用同一把密钥签名，手机会保留已有的配对。
 
 ---
 
@@ -56,7 +56,7 @@ description: 在 iPhone 上安装 Condr，与你的电脑配对，离开工位�
 
 ## 限制
 
-* App 仅在打开时保持连接，目前尚未发送通知。Agent 完成或需要你介入时的推送通知是[路线图](/zh-cn/docs/help/roadmap/)中的下一步计划。
+* App 仅在打开时保持连接。Agent 完成、出错或需要你介入时，iPhone 版会收到通知；Android 版暂不支持通知，支持后将需要 Google Play 服务。详见[路线图](/zh-cn/docs/help/roadmap/)。
 * 通过 SSH 连接的电脑无法与手机配对，请使用 Peer-to-peer 或 TCP。
 * 仅支持手机，暂无 iPad 或平板布局。
 

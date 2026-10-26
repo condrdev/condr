@@ -1,6 +1,6 @@
 # Condr Roadmap
 
-> 最近核对：2026-10-06。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
+> 最近核对：2026-10-26。本文只回答三个问题：现在有什么、接下来做什么、什么留到远期。功能细节以 [ADR](adr/)、[CONTEXT.md](../CONTEXT.md)、[Development Build](development-build.md) 和 [Releases](releases.md) 为准，不在这里重复。
 
 ## 定位
 
@@ -18,9 +18,9 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 三问都过才排进近期；只过第一问的放到摩擦记录里等证据。
 
-## 现状（2026-10-05）
+## 现状（2026-10-26）
 
-单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭。0.1.0 于 2026-09-23 作为公开预览发布，到 2026-10-05 已发到 0.1.7。Windows 和 macOS 的新机器已经只看文档走通了安装、连接远程 Device、多 worktree 与多 Agent、断开 GUI 后重连和 Server 重启。官网文档有中英两版，已没有施工中的页面。仓库尚无外部用户反馈，Issue tracker 为空。
+单人维护，用 Condr 开发 Condr。MVP 七个阶段（GitHub #1–#16）已于 2026-08-30 关闭。0.1.0 于 2026-09-23 作为公开预览发布，到 2026-10-22 已发到 0.1.14。手机端 Companion 以自己的版本发布（ADR 0049），2026-10-23 为 0.1.15：iOS 经 TestFlight 公开测试，Android 以签名 APK 发布。Windows 和 macOS 的新机器已经只看文档走通了安装、连接远程 Device、多 worktree 与多 Agent、断开 GUI 后重连和 Server 重启。官网文档有中英两版，已没有施工中的页面。仓库尚无外部用户反馈，Issue tracker 为空。
 
 **已具备**
 
@@ -30,17 +30,20 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 | 终端 | `alacritty_terminal` + 自绘 GPUI 元素；合并视觉流（ADR 0004）；kitty keyboard、OSC 7/52/777、图片粘贴（含远程，ADR 0012）；Server 侧选区（ADR 0008） |
 | Agent | 每种 CLI 一个规格模块，9 种完整支持，Kimi 仅识别（ADR 0035）；状态只来自 CLI 自己：会说 Program Status Protocol 的经 OSC 7501 上报（ADR 0044），否则靠 hooks 经 OSC 777 回写（ADR 0014）；`Blocked` 和 `Error` 带 `detail`，sidebar、OS 通知、CLI JSON 和左侧栏顶部跨 Device 的「Needs you」列表都显示它（ADR 0024）；完成、失败或需输入时发 OS 通知 |
 | Agent 驱动 | `condr workspace|tab|pane|agent` 全部 JSON 输出；内嵌 Skill（`condr --skill`）；`agent start|prompt|wait` 可跨 Pane 编排；`--device <name>` 直连保存的远程 Device，`device list` 与 `workspace list --all-devices` 汇总多机（ADR 0022） |
-| Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；两种 Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032）；Preview Tab 渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037） |
+| Git | gix 只读查询 + Managed Worktree；右侧栏 Changes 和 Files、Diff Tab、Preview Tab（ADR 0017/0018）；Changes 与 Diff Tab 可在对 HEAD 和对 base 分支之间切换，Condr 新建的 worktree 记下分叉时父 Workspace 的分支（ADR 0034）；Preview Tab 用 syntect 高亮，主题和字号在 Settings 里选（ADR 0032），渲染 Markdown、SVG 和常见图片，动图始终播放（ADR 0037），并能编辑保存；Files 能新建、重命名、删除条目并在系统文件管理器中显示（ADR 0045）；Diff Tab 可并排或单栏显示并折叠未改动的行，右侧栏的 History 列出提交并在 Diff Tab 打开其文件（ADR 0046） |
 | 远程 | `ssh://` 转发远端私有 socket 并可拉起远端 Server（ADR 0015）；`tcp://` 走 `Noise_IKpsk2` 静态密钥 + 一次性 invite（ADR 0011）；`p2p://` 经 iroh 打洞或自建 relay 连 NAT 后的机器（ADR 0025/0026）；Settings 可签 invite、撤销设备；新建 Workspace 时可浏览远程 Device 的目录；机器唤醒后 GUI 重新探测每条连接 |
+| 移动端 | iOS 与 Android 的 Companion 共用一份 Rust 客户端库（ADR 0039），扫码或粘贴链接配对，经 `p2p://` 或 `tcp://` 连接（ADR 0040）；列出各 Device 的 Agent 与「Needs you」，打开的 Pane 是又一个窗口，能输入、滚动、选择并接管终端尺寸（ADR 0041）；App 锁可选；iPhone 在 Agent 完成、失败或进入 Blocked 时经 Condr Cloud 收到推送（ADR 0047） |
 | 诊断 | `tracing` 日志按天滚动写入 Log 目录，panic 带 backtrace（ADR 0019）；`condr server status --json` 报 uptime、各类计数、订阅客户端数和最近的 warn/error；三个带负载的 `cargo test` 分别量 VT 增量合并、monitor 按显示节拍发布和 GUI shaping 缓存 |
-| 发布 | nightly 与 `v*` 正式版共用一条流水线，产出 Linux/macOS x86_64/arm64 与 Windows x86_64 的 desktop 与 headless 包、校验和、安装脚本；macOS 包以 Developer ID 签名并公证；release notes 由 git-cliff 从 `feat`/`fix` 提交生成；GUI 按渠道检查新版本并提示，不自动安装（ADR 0029），更新后提示重启本机旧版 Server；协议按字段号演进，CI 对 `proto/` 跑 `buf lint` 和 `buf breaking`（ADR 0027/0028） |
-| 文档 | condr.dev 中英双语：入门、使用、参考、帮助四组页面，含 CLI、配置与快捷键参考，故障排查、安全模型、架构说明和 Windows SmartScreen 放行步骤 |
+| 发布 | nightly 与 `v*` 正式版共用一条流水线，产出 Linux x86_64/arm64、macOS arm64 与 Windows x86_64 的 desktop 与 headless 包（Windows 的 GUI 只有安装包）、校验和、安装脚本；macOS 包以 Developer ID 签名并公证；release notes 由 git-cliff 从 `feat`/`fix` 提交生成；GUI 按渠道检查新版本并提示，不自动安装（ADR 0029），更新后提示重启本机旧版 Server；协议按字段号演进，CI 对 `proto/` 跑 `buf lint` 和 `buf breaking`（ADR 0027/0028）；Companion 有自己的版本与 `companion-v*` 发布（ADR 0049） |
+| 文档 | condr.dev 中英双语：入门、使用、参考、帮助四组页面，含 CLI、配置与快捷键参考，故障排查、安全模型、架构说明和 Windows SmartScreen 放行步骤，以及手机端与隐私政策页 |
 
 **代码里确实没有的**
 
 - 可观测性：上面三个基准各自在进程内跑，整条 PTY → GPUI 链路的帧率仍靠 Windows 上手工观察。
 - 授权：认证即拥有整个 Session；唯一的分级是"只有 Local/SSH 连接能管理 Server"（ADR 0036 已去掉 controller 租约）。没有 capability，密钥也没有进 Keychain。invite 里的 `<server key>` 是 `Noise_IK` 握手的输入，Client 只对它加密第一条消息，所以 invite 本身就是信任锚，不需要再做首连指纹确认。
 - Windows 代码签名（SmartScreen）。
+- Diff Tab 的语法高亮：GPUI Kit 已在上游合入 Diff 的高亮器接口（gpui-kit#3618），等含它的版本发到 crates.io 再接 `syntax.rs`（ADR 0046）。
+- Android 的推送：Firebase 项目还没建，发布的 APK 不含 `google-services.json`，所以收不到推送，只在前台更新。
 - 终端内搜索。
 - 协议兼容窗口的长度尚未决定。ADR 0028 原定在首个正式版时决定；Releases 目前只写了 Client 与 Server 不承诺跨 build 兼容，需要一起更新。首个正式版把协议升到 `2`，定下两个最低版本，`WatchTerminals` 是第一个受门控的消息；在那之前，iOS 的 Companion 经 TestFlight 公开链接分发，Android 以签名 APK 在 GitHub Releases 的 Companion 版本中发布（ADR 0049）；App Store 与 Google Play 随首个正式版上架（ADR 0041）。
 
@@ -56,7 +59,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 ### 移动端 Companion（iOS 与 Android）
 
-**状态**：下述 1–7 步已在 iOS 完成：iOS 经 TestFlight 公开测试（第 6 步），推送已实现并在真机走通（第 7 步），随下一个桌面版本和 TestFlight build 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）；真机与 FCM 的验证待 Firebase 项目建好。
+**状态**：1–7 步已在 iOS 完成，推送随桌面 0.1.14 与 TestFlight 0.1 (4) 发布。Android（第 8 步）已按 ADR 0048 实现：配对、Agents / Devices / Settings、自绘终端、锁与推送都在模拟器上走通，APK 随 Companion 自己的版本发布（ADR 0049）。剩下的是 Android 真机验证和 FCM：Firebase 项目建好之前，发布的 APK 收不到推送。
 
 **为什么**：离开电脑时，用户最想知道哪个 Agent 做完了、哪个在等自己。厂商的 Remote Control 只管自家的 Agent；Condr 已经有跨 Agent、跨 Device 的「Needs you」列表和 `detail`，把它们带到手机上是这一层能做、单个厂商不会做的事。
 
