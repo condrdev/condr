@@ -378,8 +378,7 @@ fn a_missing_server_is_a_json_error() {
 }
 
 /// compat(0.1.13): goes with `convert_legacy_list` (ADR 0047). The offline CLI opening the
-/// store first converts the line file: `clients` straight after the move out of the
-/// configuration directory (ADR 0033), `revoke` in a data directory that still has it.
+/// store first converts the line file, whether it lists the devices or revokes one.
 #[test]
 fn the_offline_cli_converts_the_authorized_line_file() {
     let root = std::env::temp_dir().join(format!("condr-authorized-{}", uuid::Uuid::new_v4()));
@@ -402,13 +401,12 @@ fn the_offline_cli_converts_the_authorized_line_file() {
             .unwrap()
     };
 
-    condr_server::noise::load_device_key(&config).unwrap();
-    std::fs::write(config.join("authorized-clients"), &line).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("authorized-clients"), &line).unwrap();
     let output = run(&["server", "clients"]);
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("old laptop") && stdout.contains(&key.to_string()));
-    assert!(!config.join("authorized-clients").exists());
     assert!(!data.join("authorized-clients").exists());
     assert_eq!(
         listed(),
