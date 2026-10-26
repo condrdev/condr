@@ -496,24 +496,13 @@ impl Condr {
     }
 
     /// Shows an entry of a local Workspace selected in this machine's file manager; a
-    /// failure shows as a notification, as "Open in" does.
-    pub(super) fn reveal_entry(&self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |_, cx| {
-            let result = cx
-                .background_spawn({
-                    let path = path.clone();
-                    async move { open_in::reveal_entry(&path) }
-                })
-                .await;
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    window.push_notification(
-                        Notification::error(format!("Couldn't show {}: {error}", path.display())),
-                        cx,
-                    );
-                });
-            }
-        })
+    /// failure is a toast, as "Open in" does.
+    pub(super) fn reveal_entry(&self, path: PathBuf, cx: &mut Context<Self>) {
+        self.spawn_launch(
+            format!("show {}", path.display()),
+            move || open_in::reveal_entry(&path),
+            cx,
+        )
         .detach();
     }
 }

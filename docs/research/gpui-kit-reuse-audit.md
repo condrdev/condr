@@ -75,8 +75,8 @@
 
 第一批：低风险，行为不变或是明确的 bug
 
-- [ ] 两处报错 toast 改走 `report_error`（`files.rs:583`、`open_in.rs:632`）
-- [ ] `CONDR_ICON_PATHS` 补上 `waypoints.svg`，或改成一张表同时驱动 `load` / `list`
+- [x] 两处报错 toast 改走 `report_error`（`files.rs:583`、`open_in.rs:632`）：2026-10-26 连同后加的 Reveal 一起走 `Condr::spawn_launch`
+- [x] `CONDR_ICON_PATHS` 补上 `waypoints.svg`，或改成一张表同时驱动 `load` / `list`：2026-10-26 `waypoints.svg` 随 Peer-to-peer 菜单项一起删除
 - [ ] 删 `CondrIconName::FileText` 和 `assets/icons/file-text.svg`，改用 `IconName::FileText`
 - [ ] `color_scheme.rs` 的 `Color` 换成 `Hsla`（先确认不支持用户导入配色）
 - [x] 「已配对设备」换成 Kit `Table`（不换：几行设备不值一个 `TableDelegate`，改成 `SettingGroup` 每设备一行）

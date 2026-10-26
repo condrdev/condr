@@ -1290,3 +1290,27 @@ fn visual_context_can_resize_condr_window() {
     assert!(bounds.size.width > px(0.));
     assert!(bounds.size.height > px(0.));
 }
+
+#[test]
+fn a_program_that_fails_to_start_is_one_copyable_toast() {
+    let _serial_guard = acquire_visual_test_lock();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    window.update(|_, cx| {
+        view.update(cx, |this, cx| {
+            this.spawn_launch(
+                "open notes in Nothing".into(),
+                || Err(std::io::Error::other("not installed")),
+                cx,
+            )
+            .detach()
+        })
+    });
+    assert!(wait_until(window, |window| {
+        window
+            .read(|app| view.read(app).last_error.clone())
+            .as_deref()
+            == Some("Couldn't open notes in Nothing: not installed")
+    }));
+}

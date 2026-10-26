@@ -10,7 +10,6 @@ use super::sidebar::CondrIconName;
 use super::*;
 use gpui_kit::component::Side;
 use gpui_kit::component::button::DropdownButton;
-use gpui_kit::component::notification::Notification;
 use serde::Deserialize;
 use std::ffi::OsString;
 use std::io;
@@ -570,9 +569,9 @@ impl Condr {
             .accessibility_label(tooltip)
             .disabled(!is_local)
             .loading(opening)
-            .on_click(move |_, window, cx| {
+            .on_click(move |_, _, cx| {
                 let _ = primary_owner.update(cx, |this, cx| {
-                    this.open_workspace_in(key, workspace_id, current_id.clone(), window, cx)
+                    this.open_workspace_in(key, workspace_id, current_id.clone(), cx)
                 });
             });
         let control = if targets.len() > 1 {
@@ -595,13 +594,12 @@ impl Condr {
                                 PopupMenuItem::new(label.clone())
                                     .icon(icon.icon())
                                     .checked(*id == checked)
-                                    .on_click(move |_, window, cx| {
+                                    .on_click(move |_, _, cx| {
                                         let _ = owner.update(cx, |this, cx| {
                                             this.open_workspace_in(
                                                 key,
                                                 workspace_id,
                                                 id.clone(),
-                                                window,
                                                 cx,
                                             )
                                         });
@@ -636,7 +634,6 @@ impl Condr {
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         target_id: String,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(connection) = self.connection(key) else {
@@ -663,31 +660,21 @@ impl Condr {
         let project = project_root(workspace).to_path_buf();
         self.opening_workspace = Some((key, workspace_id));
         cx.notify();
-        cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn({
-                    let target = target.clone();
-                    let root = root.clone();
-                    async move { launch(&target, &root) }
-                })
-                .await;
-            let launched = result.is_ok();
-            let _ = cx.update(|window, cx| {
-                this.update(cx, |this, cx| match result {
-                    Ok(()) => this.remember_open_target(project, target.id, cx),
-                    Err(error) => window.push_notification(
-                        Notification::error(format!(
-                            "Couldn't open {} in {}: {error}",
-                            root.display(),
-                            target.label
-                        )),
-                        cx,
-                    ),
-                })
-            });
-            // The error notification is feedback enough; only a launch that went quiet
-            // keeps the spinner up.
-            if launched {
+        let started = self.spawn_launch(
+            format!("open {} in {}", root.display(), target.label),
+            {
+                let target = target.clone();
+                move || launch(&target, &root)
+            },
+            cx,
+        );
+        cx.spawn(async move |this, cx| {
+            // A failure's toast is feedback enough; only a launch that went quiet keeps
+            // the spinner up.
+            if started.await {
+                let _ = this.update(cx, |this, cx| {
+                    this.remember_open_target(project, target.id, cx)
+                });
                 cx.background_executor().timer(OPEN_IN_FEEDBACK).await;
             }
             let _ = this.update(cx, |this, cx| {
@@ -696,6 +683,26 @@ impl Condr {
             });
         })
         .detach();
+    }
+
+    /// Runs `launch`, which starts a program on this machine, off the UI thread. A
+    /// failure is one `report_error` toast, "Couldn't {what}: …" (ADR 0020); the task says
+    /// whether the program started.
+    pub(super) fn spawn_launch(
+        &self,
+        what: String,
+        launch: impl FnOnce() -> io::Result<()> + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        cx.spawn(async move |this, cx| {
+            let Err(error) = cx.background_spawn(async move { launch() }).await else {
+                return true;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.report_error(format!("Couldn't {what}: {error}"), cx)
+            });
+            false
+        })
     }
 
     fn remember_open_target(&mut self, project: PathBuf, id: String, cx: &mut Context<Self>) {

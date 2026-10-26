@@ -752,11 +752,16 @@ fn location_row(
                 .outline()
                 .label("Open")
                 .on_click(move |_, _, cx| {
-                    if let Err(error) = open_in::reveal(&path) {
-                        let _ = owner.update(cx, |owner, cx| {
-                            owner.report_error(format!("Failed to open {label}: {error}"), cx)
-                        });
-                    }
+                    let path = path.clone();
+                    let _ = owner.update(cx, |owner, cx| {
+                        owner
+                            .spawn_launch(
+                                format!("open {label}"),
+                                move || open_in::reveal(&path),
+                                cx,
+                            )
+                            .detach()
+                    });
                 })
         }),
     )

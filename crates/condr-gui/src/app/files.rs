@@ -14,7 +14,6 @@ use condr_core::{DirectoryEntry, FileKind};
 use gpui_kit::base::text::TextViewState;
 use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::input::{Position, RopeExt as _};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use std::path::{Path, PathBuf};
 
@@ -730,12 +729,12 @@ impl Condr {
                     menu.item(
                         PopupMenuItem::new(format!("Open in {label}"))
                             .disabled(!enabled || open_absolute.is_none())
-                            .on_click(move |_, window, cx| {
+                            .on_click(move |_, _, cx| {
                                 let Some(absolute) = open_absolute.clone() else {
                                     return;
                                 };
                                 let _ = open_owner.update(cx, |this, cx| {
-                                    this.open_path_in(target_id.clone(), absolute, window, cx);
+                                    this.open_path_in(target_id.clone(), absolute, cx);
                                 });
                             }),
                     )
@@ -898,14 +897,8 @@ impl Condr {
         Some((tab.id(), pane.id()))
     }
 
-    /// Opens one file in `target_id` on this machine; failure shows as a notification.
-    fn open_path_in(
-        &mut self,
-        target_id: String,
-        path: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Opens one file in `target_id` on this machine; a failure is a toast.
+    fn open_path_in(&mut self, target_id: String, path: PathBuf, cx: &mut Context<Self>) {
         let Some(target) = self
             .open_targets
             .as_deref()
@@ -914,26 +907,11 @@ impl Condr {
         else {
             return;
         };
-        cx.spawn_in(window, async move |_, cx| {
-            let result = cx
-                .background_spawn({
-                    let (target, path) = (target.clone(), path.clone());
-                    async move { open_in::launch(&target, &path) }
-                })
-                .await;
-            if let Err(error) = result {
-                let _ = cx.update(|window, cx| {
-                    window.push_notification(
-                        Notification::error(format!(
-                            "Couldn't open {} in {}: {error}",
-                            path.display(),
-                            target.label
-                        )),
-                        cx,
-                    );
-                });
-            }
-        })
+        self.spawn_launch(
+            format!("open {} in {}", path.display(), target.label),
+            move || open_in::launch(&target, &path),
+            cx,
+        )
         .detach();
     }
 
@@ -1677,9 +1655,9 @@ fn reveal_item(
     menu.item(
         PopupMenuItem::new(reveal_label())
             .disabled(!enabled)
-            .on_click(move |_, window, cx| {
+            .on_click(move |_, _, cx| {
                 let path = absolute.clone();
-                let _ = owner.update(cx, |this, cx| this.reveal_entry(path, window, cx));
+                let _ = owner.update(cx, |this, cx| this.reveal_entry(path, cx));
             }),
     )
 }
