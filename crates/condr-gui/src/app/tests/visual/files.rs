@@ -3,12 +3,11 @@ use super::*;
 /// A Server answer for `README.md` of `workspace_id`, fed the way the connection task does.
 fn readme_answer(this: &mut Condr, workspace_id: WorkspaceId, text: &str) -> Incoming {
     let connection = this.connection_mut(1).unwrap();
-    let request_id = connection.next_layout_request_id;
-    connection.next_layout_request_id += 1;
+    let request_id = connection.next_request_id();
     connection
         .resources
-        .pending_files
-        .insert((workspace_id, "README.md".into()), request_id);
+        .files
+        .asked((workspace_id, "README.md".into()), request_id);
     Incoming::Message(condr_core::protocol::ServerMessage::FileContent {
         request_id,
         workspace_id,
@@ -407,8 +406,8 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             this.connection_mut(1)
                 .unwrap()
                 .resources
-                .pending_directories
-                .insert((workspace_id, relative_path::RelativePathBuf::new()), 42);
+                .directories
+                .asked((workspace_id, relative_path::RelativePathBuf::new()), 42);
             let connection = this.connection(1).unwrap();
             let bootstrap = SessionBootstrap {
                 server_id: connection.model.server_id.unwrap(),
@@ -424,18 +423,10 @@ fn files_sidebar_lists_the_root_unfolds_a_directory_and_opens_one_preview_tab() 
             };
             let generation = connection.connect_generation;
             this.handle_incoming(1, generation, Incoming::Bootstrap(bootstrap), cx);
+            let resources = &this.connection(1).unwrap().resources;
             assert!(
-                this.connection(1)
-                    .unwrap()
-                    .resources
-                    .pending_directories
-                    .is_empty()
-                    && this
-                        .connection(1)
-                        .unwrap()
-                        .resources
-                        .pending_files
-                        .is_empty(),
+                resources.directories.pending_keys().next().is_none()
+                    && resources.files.pending_keys().next().is_none(),
                 "a request from before the Bootstrap must be forgotten with it"
             );
             assert!(
@@ -614,7 +605,7 @@ fn preview_tab_renders_images_and_the_images_markdown_draws() {
         resources
             .files
             .keys()
-            .chain(resources.pending_files.keys())
+            .chain(resources.files.pending_keys())
             .all(|(_, path)| !path.as_str().contains("badge"))
     }));
     let decoded = image(window, "shot.png").unwrap().unwrap();

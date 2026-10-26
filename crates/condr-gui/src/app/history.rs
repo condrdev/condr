@@ -236,7 +236,7 @@ impl Condr {
             None => {
                 // Asked here rather than on the click, so a reconnect that dropped the
                 // answer asks again.
-                if !resources.pending_commits.contains_key(&slot) {
+                if !resources.commits.is_pending(&slot) {
                     let owner = cx.weak_entity();
                     let id = commit.id.clone();
                     cx.defer(move |cx| {
@@ -545,10 +545,10 @@ impl Condr {
 
     fn request_commit(&mut self, key: ConnectionKey, workspace_id: WorkspaceId, commit: String) {
         let slot = (workspace_id, commit.clone());
-        if self.connection(key).is_none_or(|connection| {
-            connection.resources.commits.contains_key(&slot)
-                || connection.resources.pending_commits.contains_key(&slot)
-        }) {
+        if self
+            .connection(key)
+            .is_none_or(|connection| !connection.resources.commits.wants(&slot))
+        {
             return;
         }
         if let Some(request_id) = self.send_request(key, |server_id, session_id, request_id| {
@@ -561,10 +561,7 @@ impl Condr {
             }
         }) && let Some(connection) = self.connection_mut(key)
         {
-            connection
-                .resources
-                .pending_commits
-                .insert(slot, request_id);
+            connection.resources.commits.asked(slot, request_id);
         }
     }
 

@@ -352,7 +352,7 @@ impl Condr {
             };
             let slot = (workspace_id, path.clone());
             let Some((generation, answer)) = connection.resources.files.get(&slot).cloned() else {
-                if !connection.resources.pending_files.contains_key(&slot) {
+                if !connection.resources.files.is_pending(&slot) {
                     self.request_file(key, workspace_id, path);
                 }
                 continue;

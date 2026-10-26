@@ -657,22 +657,10 @@ impl Condr {
                 path,
                 result,
             } => {
-                let resources = &mut self.connections[index].resources;
-                // One file of one commit (ADR 0046): its request says which.
-                if let Some(slot) = resources.pending_commit_diffs.remove(&request_id) {
-                    if slot.0 != workspace_id || slot.2 != path {
-                        return IncomingEffect::default();
-                    }
-                    resources.commit_diffs.insert(slot, result);
-                    return IncomingEffect {
-                        rebuild: self.active_connection == key,
-                        notify: true,
-                        ..IncomingEffect::default()
-                    };
-                }
-                if !self.connections[index].resources.accept_diff(
-                    (workspace_id, path),
+                if !self.connections[index].resources.accept_git_diff(
                     request_id,
+                    workspace_id,
+                    path,
                     result,
                 ) {
                     return IncomingEffect::default();
@@ -701,13 +689,13 @@ impl Condr {
                 commit,
                 result,
             } => {
-                let resources = &mut self.connections[index].resources;
-                let slot = (workspace_id, commit);
-                if resources.pending_commits.get(&slot) != Some(&request_id) {
+                if !self.connections[index].resources.accept_commit(
+                    (workspace_id, commit),
+                    request_id,
+                    result,
+                ) {
                     return IncomingEffect::default();
                 }
-                resources.pending_commits.remove(&slot);
-                resources.commits.insert(slot, result);
                 // A Diff Tab on this commit takes its status and message from it.
                 IncomingEffect {
                     rebuild: self.active_connection == key,

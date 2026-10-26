@@ -382,8 +382,7 @@ impl Condr {
     ) {
         if self.connection(key).is_some_and(|connection| {
             let slot = (workspace_id, path.clone());
-            connection.resources.directories.contains_key(&slot)
-                || connection.resources.pending_directories.contains_key(&slot)
+            !connection.resources.directories.wants(&slot)
         }) {
             return;
         }
@@ -1205,8 +1204,8 @@ impl Condr {
         if answer.is_none()
             && !connection
                 .resources
-                .pending_files
-                .contains_key(&(workspace_id, path.clone()))
+                .files
+                .is_pending(&(workspace_id, path.clone()))
         {
             self.request_file(key, workspace_id, path.clone());
         }
@@ -1449,8 +1448,8 @@ impl Condr {
         }) {
             connection
                 .resources
-                .pending_directories
-                .insert((workspace_id, path), request_id);
+                .directories
+                .asked((workspace_id, path), request_id);
         }
     }
 
@@ -1476,8 +1475,8 @@ impl Condr {
         {
             connection
                 .resources
-                .pending_files
-                .insert((workspace_id, path), request_id);
+                .files
+                .asked((workspace_id, path), request_id);
         }
     }
 

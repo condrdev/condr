@@ -1032,9 +1032,7 @@ impl Condr {
         };
         let request = answer.is_none()
             && commit.is_none()
-            && !resources
-                .pending_diffs
-                .contains_key(&(workspace_id, path.clone()));
+            && !resources.diffs.is_pending(&(workspace_id, path.clone()));
         match &commit {
             Some(commit) if answer.is_none() => {
                 self.request_commit_diff(key, workspace_id, commit.clone(), path.clone());
@@ -1160,8 +1158,8 @@ impl Condr {
         {
             connection
                 .resources
-                .pending_diffs
-                .insert((workspace_id, path), request_id);
+                .diffs
+                .asked((workspace_id, path), request_id);
         }
     }
 }

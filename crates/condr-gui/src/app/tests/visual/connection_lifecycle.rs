@@ -45,8 +45,10 @@ fn failed_enqueue_does_not_register_layout_or_resource_work() {
                 this.connection(1)
                     .unwrap()
                     .resources
-                    .pending_directories
-                    .is_empty()
+                    .directories
+                    .pending_keys()
+                    .next()
+                    .is_none()
             );
             assert!(
                 this.send_layout_to(
