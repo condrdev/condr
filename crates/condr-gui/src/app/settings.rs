@@ -611,9 +611,34 @@ impl Render for SettingsWindow {
     }
 }
 
+/// A switch bound to one of Condr's own settings; without the main window it shows
+/// `default`.
+fn condr_switch(
+    owner: &WeakEntity<Condr>,
+    default: bool,
+    get: fn(&Condr) -> bool,
+    set: fn(&mut Condr, bool, &mut Context<Condr>),
+) -> SettingField<bool> {
+    let (value_owner, set_owner) = (owner.clone(), owner.clone());
+    SettingField::switch(
+        move |cx| {
+            value_owner
+                .upgrade()
+                .map_or(default, |owner| get(owner.read(cx)))
+        },
+        move |enabled, cx| {
+            let _ = set_owner.update(cx, |owner, cx| set(owner, enabled, cx));
+        },
+    )
+    .default_value(default)
+}
+
+/// A setting whose control is a small outlined button, made anew on every render.
+fn button_field(button: impl Fn() -> Button + 'static) -> SettingField<SharedString> {
+    SettingField::render(move |_, _, _| button().small().outline())
+}
+
 fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
-    let value_owner = owner.clone();
-    let set_owner = owner.clone();
     let test_owner = owner.clone();
     SettingPage::new("Notifications")
         .icon(IconName::Bell)
@@ -622,29 +647,21 @@ fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
                 .item(
                     SettingItem::new(
                         "Enable notifications",
-                        SettingField::switch(
-                            move |cx| {
-                                value_owner
-                                    .upgrade()
-                                    .is_none_or(|owner| owner.read(cx).notifications)
-                            },
-                            move |enabled, cx| {
-                                let _ = set_owner
-                                    .update(cx, |owner, cx| owner.set_notifications(enabled, cx));
-                            },
-                        )
-                        .default_value(true),
+                        condr_switch(
+                            owner,
+                            true,
+                            |condr| condr.notifications,
+                            |condr, enabled, cx| condr.set_notifications(enabled, cx),
+                        ),
                     )
                     .description("Agent finished or needs input."),
                 )
                 .item(SettingItem::new(
                     "Send a test notification",
-                    SettingField::render(move |_, _, _| {
+                    button_field(move || {
                         let owner = test_owner.clone();
                         Button::new("send-test-notification")
                             .debug_selector(|| "send-test-notification".into())
-                            .small()
-                            .outline()
                             .label("Send")
                             .on_click(move |_, _, cx| {
                                 let _ =
@@ -656,26 +673,18 @@ fn notifications_page(owner: &WeakEntity<Condr>) -> SettingPage {
 }
 
 fn power_page(owner: &WeakEntity<Condr>) -> SettingPage {
-    let value_owner = owner.clone();
-    let set_owner = owner.clone();
     SettingPage::new("Power")
         .icon(IconName::BatteryCharging)
         .group(
             SettingGroup::new().item(
                 SettingItem::new(
                     "Keep the screen awake",
-                    SettingField::switch(
-                        move |cx| {
-                            value_owner
-                                .upgrade()
-                                .is_some_and(|owner| owner.read(cx).keep_awake)
-                        },
-                        move |enabled, cx| {
-                            let _ =
-                                set_owner.update(cx, |owner, cx| owner.set_keep_awake(enabled, cx));
-                        },
-                    )
-                    .default_value(false),
+                    condr_switch(
+                        owner,
+                        false,
+                        |condr| condr.keep_awake,
+                        |condr, enabled, cx| condr.set_keep_awake(enabled, cx),
+                    ),
                 )
                 .description("No screen blanking, lock or idle sleep while Condr is running."),
             ),
@@ -683,26 +692,18 @@ fn power_page(owner: &WeakEntity<Condr>) -> SettingPage {
 }
 
 fn developer_page(owner: &WeakEntity<Condr>) -> SettingPage {
-    let value_owner = owner.clone();
-    let set_owner = owner.clone();
     SettingPage::new("Developer")
         .icon(IconName::Inspector)
         .group(
             SettingGroup::new().title("Diagnostics").item(
                 SettingItem::new(
                     "FPS monitor",
-                    SettingField::switch(
-                        move |cx| {
-                            value_owner
-                                .upgrade()
-                                .is_some_and(|owner| owner.read(cx).fps_monitor)
-                        },
-                        move |enabled, cx| {
-                            let _ = set_owner
-                                .update(cx, |owner, cx| owner.set_fps_monitor(enabled, cx));
-                        },
-                    )
-                    .default_value(false),
+                    condr_switch(
+                        owner,
+                        false,
+                        |condr| condr.fps_monitor,
+                        |condr, enabled, cx| condr.set_fps_monitor(enabled, cx),
+                    ),
                 )
                 .description("Show GPUI frame rate and resource telemetry."),
             ),
@@ -744,12 +745,10 @@ fn location_row(
     let owner = owner.clone();
     SettingItem::new(
         label,
-        SettingField::render(move |_, _, _| {
+        button_field(move || {
             let owner = owner.clone();
             let path = path.clone();
             Button::new(SharedString::from(format!("open-location-{label}")))
-                .small()
-                .outline()
                 .label("Open")
                 .on_click(move |_, _, cx| {
                     let path = path.clone();
@@ -776,10 +775,8 @@ fn about_page(owner: &WeakEntity<Condr>, open_on_update: bool, cx: &App) -> Sett
     let link_row = |label: &'static str, button: &'static str, url: &'static str| {
         SettingItem::new(
             label,
-            SettingField::render(move |_, _, _| {
+            button_field(move || {
                 Button::new(SharedString::from(format!("about-{button}")))
-                    .small()
-                    .outline()
                     .label(button)
                     .on_click(move |_, _, cx| cx.open_url(url))
             }),
@@ -830,8 +827,6 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
             (owner.updates.state().clone(), owner.updates.checking())
         })
         .unwrap_or_default();
-    let check_value_owner = owner.clone();
-    let check_set_owner = owner.clone();
     let selected_owner = owner.clone();
     let select_owner = owner.clone();
     let check_now_owner = owner.clone();
@@ -852,12 +847,10 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
             let url = update.url.clone();
             SettingItem::new(
                 format!("{} is available", update.name),
-                SettingField::render(move |_, _, _| {
+                button_field(move || {
                     let url = url.clone();
                     Button::new("about-view-update")
                         .debug_selector(|| "about-view-update".into())
-                        .small()
-                        .outline()
                         .label("View")
                         .on_click(move |_, _, cx| cx.open_url(&url))
                 }),
@@ -868,18 +861,12 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
         .item(
             SettingItem::new(
                 "Check automatically",
-                SettingField::switch(
-                    move |cx| {
-                        check_value_owner
-                            .upgrade()
-                            .is_none_or(|owner| owner.read(cx).updates.automatic())
-                    },
-                    move |enabled, cx| {
-                        let _ = check_set_owner
-                            .update(cx, |owner, cx| owner.set_auto_check_updates(enabled, cx));
-                    },
-                )
-                .default_value(true),
+                condr_switch(
+                    owner,
+                    true,
+                    |condr| condr.updates.automatic(),
+                    |condr, enabled, cx| condr.set_auto_check_updates(enabled, cx),
+                ),
             )
             .description("Every five hours while Condr runs.")
             .keywords(["update", "version"]),
@@ -912,12 +899,10 @@ fn updates_group(owner: &WeakEntity<Condr>, cx: &App) -> SettingGroup {
         .item(
             SettingItem::new(
                 "Check now",
-                SettingField::render(move |_, _, _| {
+                button_field(move || {
                     let owner = check_now_owner.clone();
                     Button::new("about-check-updates")
                         .debug_selector(|| "about-check-updates".into())
-                        .small()
-                        .outline()
                         .label("Check")
                         .loading(checking)
                         .on_click(move |_, _, cx| {
