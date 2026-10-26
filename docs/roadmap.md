@@ -8,7 +8,7 @@ Condr 是跨平台的原生多 Agent 终端控制面：一个常驻 Server 拥�
 
 一句话闭环：选项目（可选 worktree）→ 并行跑多个原生 Agent CLI → 一眼看状态、随时介入 → 关窗口任务继续 → 重连恢复 → 收尾。
 
-直接对手是 Herdr。Condr 相对它的差异是原生 GUI 而非 TUI、Windows 一等公民、Server 自带加密配对而非只靠 SSH、Git 侧栏与 Diff。这些差异要守住，不能被功能数量带偏。
+Condr 要守住的差异是原生 GUI 而非 TUI、Windows 一等公民、Server 自带加密配对而非只靠 SSH、Git 侧栏与 Diff，不能被功能数量带偏。
 
 判断新事项的三个问题，按顺序问：
 
@@ -133,18 +133,62 @@ ADR 要回答三个问题：
 
 **停在哪**：只做 GitHub，GitLab 和 Gitea 等真实需求。不在 Condr 里创建、合并或评审 PR，这些交给 Agent 和 `gh`。PR 合并后不自动删除 worktree，删除仍是用户的显式操作（ADR 0002）。不做从 Issue、PR 评论或聊天工具触发 Agent，那需要一个面向公网的服务。
 
+### 新建的 worktree 拿来就能用
+
+**为什么**：Managed Worktree 只检出已提交的文件。`.env` 这类被忽略的文件不在，依赖也没装，Agent 一启动就失败，用户得先手工准备。新建时只能从父 Workspace 的 HEAD 分叉，选不了 base 分支或远程分支；分支只以 `origin/x` 存在时，`create_worktree` 会从 HEAD 新建一个与远程无关的 `x`，而 `git worktree add` 这时会建一个跟踪 `origin/x` 的分支。`agent start|prompt|wait` 能在 CLI 里编排多个 Agent，CLI 却建不了 worktree，派出去的 Agent 只能共用一个目录。
+
+**做到哪**（按顺序，落地前先写 ADR）：
+
+1. 起点：分支只以 `origin/x` 存在时，像 git 一样建一个跟踪它的本地分支。新建时可以选 base 分支或远程分支，`CreateWorktree` 增加起点字段，GUI 的分支选择列出远程分支。ADR 补充 Base Branch（ADR 0034）在选定起点时记什么。
+2. CLI：`condr workspace create` 能新建 Managed Worktree，同样可选起点，并可在新 Workspace 的第一个 Pane 里启动 Agent、发出第一条提示；JSON 返回新的 Workspace 与 Pane。内嵌 Skill 写上“一个 Agent 一个 worktree”的编排方式。
+3. 初始化：仓库里一份可以提交的声明，写明要从父仓库复制的被忽略文件（考虑沿用 `.worktreeinclude` 的写法）、setup 命令和 teardown 命令，从父仓库已提交的版本读取。Server 在 `CreateWorktree` 之后复制文件，在新 Workspace 的第一个 Pane 里执行 setup，输出留在终端里；要启动 Agent 的，等 setup 结束再启动。Remove Worktree 之前执行 teardown。这是在执行仓库里写下的命令，所以第一次执行和声明内容变化时都要用户确认，确认记在 Server 这台机器上；Windows 要有 PowerShell 的写法。
+
+**停在哪**：setup 失败不自动删除 worktree，输出留在 Pane 里给人看。不做后台服务的监管、端口分配或反向代理（端口见上一节）。不做一个任务在多个仓库各开一个 worktree（见“多仓库 Workspace 的 Changes”）。
+
+### Server 开机自启
+
+**为什么**：Server 重启后能按 Session Snapshot 恢复结构并 resume 原生会话，但机器重启后没有人去启动它：TCP、Peer-to-peer 和手机都连不上，只有 SSH 能拉起远端的 Server。无头 Device 和配了手机的机器受影响最大。安装文档也写明了这一项还没有。
+
+**做到哪**：`condr server install` 增加开机自启的选项，安装脚本可以透传。Linux 写 systemd user unit，无头机器还要 `loginctl enable-linger`；macOS 写 launchd LaunchAgent；Windows 写登录时运行的启动项。`condr server status` 显示是否已注册，并能取消注册。由服务管理器启动时，Pane 的环境是否仍与在终端里启动一致（ADR 0031），要在三个平台上实测。
+
+**停在哪**：默认不注册，安装时显式选择。只以当前用户运行，不做系统级服务，不以 root 运行。
+
 ### 公开预览收尾，拿到第一批外部用户
 
-**为什么**：摩擦记录和远期表里几乎每一项的启动条件都是外部用户或真实需求。没有外部用户，这些条件不会满足，路线只能靠单人 dogfood 推进。但宣布带来的新用户会按宣布时的样子判断 Condr，所以先做完前五项再宣布，让他们第一次试用就能走完多 worktree 的完整流程，离开电脑也能在手机上看到 Agent 的状态。
+**为什么**：摩擦记录和远期表里几乎每一项的启动条件都是外部用户或真实需求。没有外部用户，这些条件不会满足，路线只能靠单人 dogfood 推进。但宣布带来的新用户会按宣布时的样子判断 Condr，所以先做完上面各项再宣布，让他们第一次试用就能走完多 worktree 的完整流程，离开电脑也能在手机上看到 Agent 的状态。
 
 **做到哪**（按顺序）：
 
-1. 前五项完成后，对外宣布。
+1. 上面各项完成后，对外宣布。
 2. 外部 Issue 按 [triage 标签](agents/triage-labels.md) 分流。缺陷直接修；功能请求进摩擦记录，同一件事出现两次以上再排。
 
 **停在哪**：Windows 安装包预览期仍不签名，文档已写明 SmartScreen 放行步骤。
 
 **退出条件**：外部用户按文档装好，并提出第一批 Issue。
+
+### WSL 发行版作为 Device
+
+**为什么**：Windows 是 Condr 的一等平台，可 Windows 上很多人在 WSL 里跑 Agent。今天在 Windows Server 的 Pane 里运行 `wsl`，进程表只看到 `wsl.exe`，认不出里面的 Agent，发行版里的 hooks 也找不到 `condr`。
+
+**做到哪**（落地前先写 ADR）：沿用 ADR 0015 的 bridge，Client 执行 `wsl.exe -d <distro> -- condr server bridge`，经 stdin/stdout 跑同一套协议，得到一个 `wsl://<distro>` Device。Server 跑在发行版里，Agent 检测、hooks 和 Git 都在 Linux 一侧照常工作。Connect Remote Device 列出本机已装的发行版；发行版里还没有 `condr` 时，给出安装命令。`condr --device` 同样可以直连。
+
+**停在哪**：只做 WSL 2。不自动在发行版里安装 `condr`，和 SSH 一样留给以后的远端安装。不做 Windows 与 WSL 之间的路径翻译。
+
+### 自定义快捷键
+
+**为什么**：窗口快捷键在终端之前处理，而且写死在代码里，和终端程序或用户的习惯冲突时只能改源码。macOS 上 Option 不能当 Meta 用，shell 的 `Option + B/F` 和 Claude Code 的 `meta+p` 都按不出来，快捷键参考里写明了这一点。
+
+**做到哪**：`config.toml` 的 `[client]` 下按动作名重绑或解绑快捷键，Settings 里可以改，快捷键参考页列出全部动作名。macOS 增加“Option 作为 Meta”的开关，左右 Option 可以分开设。
+
+**停在哪**：不做 `when` 条件表达式和多键序列。不改终端里程序自己的按键。
+
+### 多仓库 Workspace 的 Changes
+
+**为什么**：常见的做法是把几个仓库放在一个父目录下，一起交给 Agent。今天只有 Workspace 在某个仓库里时才有 Changes，父目录本身不是仓库，右侧栏就只剩 Files。
+
+**做到哪**（落地前先写 ADR）：Server 找出 Root Directory 下一层的子仓库，各算一份状态；Changes 和 History 按仓库分组，Diff Tab 用“仓库 + 路径”定位。ADR 要说明 Base Branch 和 Managed Worktree 在多仓库下的含义；先只做查看。
+
+**停在哪**：只往下找一层，不处理 submodule。多仓库 Workspace 不能新建 Managed Worktree：一个任务在多个仓库各开一个 worktree，会改变“一个 Workspace 一个 Root Directory”的模型，等真实需求再议。
 
 ## 按摩擦记录再做
 
