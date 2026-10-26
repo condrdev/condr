@@ -3,6 +3,7 @@
 //! Everything shown here is Server data; the Client only asks and draws.
 
 use super::change_tree::{TreeRow, diff_stat, directory_row, file_row, status_glyph, tree_rows};
+use super::history::history_branch;
 use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::protocol::DiffBase;
@@ -330,9 +331,13 @@ impl Condr {
                     .into_any_element(),
                 None => empty_state(format!("{workspace_name} is not a Git repository"), cx),
             },
-            SidebarView::History => {
-                self.render_history(key, workspace_id, shown_diff.as_deref(), cx)
-            }
+            SidebarView::History => v_flex()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .children(git.as_ref().map(|git| history_branch(git, cx)))
+                .child(self.render_history(key, workspace_id, shown_diff.as_deref(), cx))
+                .into_any_element(),
         };
         column.child(header).child(body).into_any_element()
     }

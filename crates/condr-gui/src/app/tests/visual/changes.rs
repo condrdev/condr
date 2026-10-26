@@ -475,6 +475,13 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
         String::from_utf8(output.stdout).unwrap().trim().to_owned()
     };
     let second = short_head(&repository);
+    // `main` tracks an `origin/main` one commit behind it, so History shows `↑1`.
+    run_git(&repository, ["remote", "add", "origin", "."]);
+    run_git(
+        &repository,
+        ["update-ref", "refs/remotes/origin/main", "HEAD~1"],
+    );
+    run_git(&repository, ["branch", "-q", "-u", "origin/main"]);
     // Uncommitted, so the Diff Tab first shows notes.txt from the working tree.
     std::fs::write(repository.join("notes.txt"), "alpha\nBETA\ngamma\n").unwrap();
 
@@ -533,6 +540,10 @@ fn history_lists_commits_and_shows_one_commits_file_in_the_diff_tab() {
             window.debug_bounds(commit_row).is_some()
         }),
         "History lists the latest commit"
+    );
+    assert!(
+        window.debug_bounds("history-upstream").is_some(),
+        "History shows how far the branch is ahead of its upstream"
     );
 
     // Selecting asks for the commit's files, listed below; one of them opens in the Diff Tab.

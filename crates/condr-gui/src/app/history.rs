@@ -4,6 +4,7 @@
 
 use super::change_tree::{TreeRow, directory_row, file_row, tree_rows};
 use super::changes::empty_state;
+use super::sidebar::upstream_label;
 use super::*;
 use condr_core::protocol::{DiffBase, relative_age};
 use condr_core::{GitChangeEntry, HISTORY_PAGE, MAX_GIT_CHANGES};
@@ -16,6 +17,41 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 pub(super) struct DiffCommit {
     pub(super) path: RelativePathBuf,
     pub(super) commit: CommitSummary,
+}
+
+/// History's first row, level with Changes' comparison row: the branch the commits are
+/// on and `↑N ↓N` against its upstream, as the Workspace's row in the left sidebar shows.
+pub(super) fn history_branch(git: &WorkspaceGitSnapshot, cx: &App) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    h_flex()
+        .flex_none()
+        .w_full()
+        .px_1()
+        .py_1()
+        .gap_2()
+        .justify_between()
+        .items_center()
+        .text_xs()
+        .text_color(muted)
+        // `px_1` and `h_5` are an xsmall Button's, so the name sits where "Against" does.
+        .child(
+            div()
+                .h_5()
+                .px_1()
+                .flex()
+                .items_center()
+                .min_w_0()
+                .truncate()
+                .child(git.branch.clone().unwrap_or_else(|| "detached".to_owned())),
+        )
+        .children(git.upstream.and_then(upstream_label).map(|label| {
+            div()
+                .debug_selector(|| "history-upstream".into())
+                .flex_none()
+                .pr_2()
+                .child(label)
+        }))
+        .into_any_element()
 }
 
 impl Condr {
