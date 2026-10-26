@@ -20,6 +20,7 @@ mod login_environment;
 mod navigation;
 mod notifications;
 mod open_in;
+mod placeholders;
 mod power;
 mod presentation;
 mod preview;

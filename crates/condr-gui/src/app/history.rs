@@ -3,7 +3,7 @@
 //! reads only; nothing here acts on the repository.
 
 use super::change_tree::{TreeRow, directory_row, file_row, row_highlight, tree_rows};
-use super::changes::empty_state;
+use super::placeholders::{empty_state, failed_state, list_note};
 use super::sidebar::upstream_label;
 use super::*;
 use condr_core::protocol::{DiffBase, relative_age};
@@ -223,18 +223,9 @@ impl Condr {
         shown: Option<&RelativePath>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (muted, danger, warning) = {
+        let (muted, warning) = {
             let theme = cx.theme();
-            (theme.muted_foreground, theme.danger, theme.warning)
-        };
-        let note = |text: String, color: Hsla| {
-            div()
-                .px_2()
-                .py_1()
-                .text_xs()
-                .text_color(color)
-                .child(text)
-                .into_any_element()
+            (theme.muted_foreground, theme.warning)
         };
         let slot = (workspace_id, commit.id.clone());
         let Some(connection) = self.connection(key) else {
@@ -257,7 +248,7 @@ impl Condr {
                 }
                 return empty_state("Loading…", cx);
             }
-            Some(Err(error)) => return note(error.clone(), danger),
+            Some(Err(error)) => return failed_state(error.clone(), cx),
             Some(Ok(details)) => details,
         };
         let mut list = v_flex()
@@ -268,8 +259,14 @@ impl Condr {
             .px_1()
             .pb_1()
             .overflow_y_scrollbar();
+        if details.changes.truncated {
+            list = list.child(list_note(
+                format!("Only the first {MAX_GIT_CHANGES} files are listed."),
+                warning,
+            ));
+        }
         if details.changes.entries.is_empty() {
-            list = list.child(note("No file changes".into(), muted));
+            list = list.child(list_note("No file changes", muted));
         }
         let entries: Vec<&GitChangeEntry> = details.changes.entries.iter().collect();
         let folded = |path: &RelativePath| {
@@ -282,12 +279,6 @@ impl Condr {
         for row in tree_rows(&entries, folded) {
             list =
                 list.child(self.render_commit_file_row(key, workspace_id, commit, row, shown, cx));
-        }
-        if details.changes.truncated {
-            list = list.child(note(
-                format!("Only the first {MAX_GIT_CHANGES} files are listed."),
-                warning,
-            ));
         }
         v_flex()
             .size_full()

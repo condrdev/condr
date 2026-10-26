@@ -4,9 +4,9 @@
 //! back to the Server (ADR 0045); `file_edits` holds that side.
 
 use super::change_tree::{RowKind, status_color, status_glyph, tree_indent, tree_row};
-use super::changes::empty_state;
+use super::placeholders::{empty_state, failed_state, list_note, too_large};
 use super::preview::{
-    DecodedImage, PreviewImages, Rendering, image_summary, release_images, render_image,
+    DecodedImage, NoImage, PreviewImages, Rendering, image_summary, release_images, render_image,
     rendering_for,
 };
 use super::*;
@@ -959,7 +959,8 @@ impl Condr {
         let body = match (image, markdown, &content, editor) {
             (Some(None), ..) => empty_state("Loading image…", cx),
             (Some(Some(Ok(image))), ..) => render_image(image),
-            (Some(Some(Err(reason))), ..) => empty_state(reason, cx),
+            (Some(Some(Err(NoImage::Note(note)))), ..) => empty_state(note, cx),
+            (Some(Some(Err(NoImage::Failed(reason)))), ..) => failed_state(reason, cx),
             (None, Some((markdown, scroll)), ..) => {
                 self.render_markdown(key, workspace_id, path, &markdown, scroll, cx)
             }
@@ -997,13 +998,9 @@ impl Condr {
                 _,
             ) => empty_state("Loading file…", cx),
             (None, None, FileViewContent::Binary, _) => empty_state("Binary file", cx),
-            (None, None, FileViewContent::TooLarge { bytes }, _) => empty_state(
-                format!(
-                    "File too large to show ({:.1} MiB)",
-                    *bytes as f64 / (1024. * 1024.)
-                ),
-                cx,
-            ),
+            (None, None, FileViewContent::TooLarge { bytes }, _) => {
+                empty_state(too_large("File", *bytes), cx)
+            }
             (None, None, FileViewContent::Failed(reason), _) => failed_state(reason.clone(), cx),
         };
         v_flex()
@@ -1025,7 +1022,7 @@ impl Condr {
         path: &RelativePath,
         rendering: Option<Rendering>,
         source: bool,
-        image: Option<&Option<Result<Arc<DecodedImage>, SharedString>>>,
+        image: Option<&Option<Result<Arc<DecodedImage>, NoImage>>>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
@@ -1619,19 +1616,6 @@ fn reveal_item(
     )
 }
 
-fn failed_state(reason: String, cx: &App) -> AnyElement {
-    div()
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .p_4()
-        .text_sm()
-        .text_color(cx.theme().danger)
-        .child(reason)
-        .into_any_element()
-}
-
 /// A muted note under a directory row: its listing loading, or why it failed.
 fn note_row(text: impl Into<SharedString>, depth: usize, cx: &App) -> AnyElement {
     div()
@@ -1649,16 +1633,14 @@ fn note_row(text: impl Into<SharedString>, depth: usize, cx: &App) -> AnyElement
 }
 
 pub(super) fn truncated_note(cx: &App) -> AnyElement {
-    div()
-        .px_2()
-        .py_1()
-        .text_xs()
-        .text_color(cx.theme().warning)
-        .child(format!(
+    list_note(
+        format!(
             "Only the first {} entries are listed.",
             condr_core::MAX_DIRECTORY_ENTRIES
-        ))
-        .into_any_element()
+        ),
+        cx.theme().warning,
+    )
+    .into_any_element()
 }
 
 #[cfg(test)]

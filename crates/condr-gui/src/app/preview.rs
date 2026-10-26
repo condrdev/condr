@@ -3,6 +3,7 @@
 //! Markdown, through GPUI Kit's TextView with Condr's images, links and highlighting. Every
 //! image comes from the Server through `ReadFile`, so a remote Workspace renders the same.
 
+use super::placeholders::too_large;
 use super::*;
 use gpui_kit::base::text::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
@@ -204,10 +205,26 @@ pub(super) type ImageKey = (ConnectionKey, WorkspaceId, RelativePathBuf);
 #[derive(Clone, Default)]
 pub(super) struct PreviewImages(Arc<Mutex<HashMap<ImageKey, ImageSlot>>>);
 
+/// Why the Preview Tab draws no picture: what the file is, which is no fault, or what went
+/// wrong reading or decoding it.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum NoImage {
+    Note(SharedString),
+    Failed(SharedString),
+}
+
+impl NoImage {
+    fn text(self) -> SharedString {
+        match self {
+            Self::Note(text) | Self::Failed(text) => text,
+        }
+    }
+}
+
 #[derive(Default)]
 struct ImageSlot {
     /// What is drawn; `None` until the first decode lands. A refetch keeps it on screen.
-    shown: Option<Result<Arc<DecodedImage>, SharedString>>,
+    shown: Option<Result<Arc<DecodedImage>, NoImage>>,
     /// The generation of the file answer decoded, or being decoded.
     fed: Option<u64>,
     /// The bytes `shown` was decoded from, so refetching the same picture keeps it.
@@ -222,7 +239,7 @@ impl PreviewImages {
     }
 
     /// What to draw for one file, `None` while it loads.
-    pub(super) fn get(&self, key: &ImageKey) -> Option<Result<Arc<DecodedImage>, SharedString>> {
+    pub(super) fn get(&self, key: &ImageKey) -> Option<Result<Arc<DecodedImage>, NoImage>> {
         self.slots().get(key).and_then(|slot| slot.shown.clone())
     }
 
@@ -294,7 +311,7 @@ impl PreviewImages {
         key: &ImageKey,
         generation: u64,
         digest: Option<u64>,
-        shown: Result<Arc<DecodedImage>, SharedString>,
+        shown: Result<Arc<DecodedImage>, NoImage>,
     ) -> Option<Arc<DecodedImage>> {
         let mut slots = self.slots();
         let slot = slots
@@ -360,22 +377,19 @@ impl Condr {
                 (Ok(FileContent::Text { text, .. }), Some(ImageFormat::Svg)) => {
                     Ok((text.into_bytes(), ImageFormat::Svg))
                 }
-                (Ok(FileContent::TooLarge { bytes }), _) => Err(format!(
-                    "Image too large to show ({})",
-                    file_size_text(bytes as usize)
-                )),
-                (Ok(_), _) => Err("Not an image".to_owned()),
-                (Err(reason), _) => Err(reason),
+                (Ok(FileContent::TooLarge { bytes }), _) => {
+                    Err(NoImage::Note(too_large("Image", bytes).into()))
+                }
+                (Ok(_), _) => Err(NoImage::Note("Not an image".into())),
+                (Err(reason), _) => Err(NoImage::Failed(reason.into())),
             };
             let (bytes, format) = match decodable {
                 Ok(decodable) => decodable,
                 Err(reason) => {
-                    let replaced = self.files_view.images.land(
-                        &image_key,
-                        generation,
-                        None,
-                        Err(reason.into()),
-                    );
+                    let replaced =
+                        self.files_view
+                            .images
+                            .land(&image_key, generation, None, Err(reason));
                     release_images(replaced.into_iter().collect(), cx);
                     continue;
                 }
@@ -419,7 +433,9 @@ impl Condr {
                 .background_spawn(async move { decode(bytes, format, svg) })
                 .await;
             this.update(cx, |this, cx| {
-                let shown = decoded.map(Arc::new).map_err(SharedString::from);
+                let shown = decoded
+                    .map(Arc::new)
+                    .map_err(|error| NoImage::Failed(error.into()));
                 let replaced =
                     this.files_view
                         .images
@@ -540,7 +556,7 @@ impl Condr {
                             images.get(&image_key).map(|shown| {
                                 shown
                                     .map(|image| image.frame(window, cx))
-                                    .map_err(ImageCacheError::Asset)
+                                    .map_err(|problem| ImageCacheError::Asset(problem.text()))
                             })
                         }))
                     })

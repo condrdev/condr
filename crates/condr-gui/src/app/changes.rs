@@ -6,6 +6,7 @@ use super::change_tree::{
     TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, status_glyph, tree_rows,
 };
 use super::history::history_branch;
+use super::placeholders::{empty_state, failed_state, list_note, too_large};
 use super::sidebar::CondrIconName;
 use super::*;
 use condr_core::protocol::DiffBase;
@@ -618,16 +619,12 @@ impl Condr {
             .pb_1()
             .overflow_y_scrollbar();
         if changes.truncated {
-            list = list.child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .text_xs()
-                    .text_color(warning)
-                    .child(format!(
-                        "Only the first {MAX_GIT_CHANGES} changes are listed; add a .gitignore for the rest."
-                    )),
-            );
+            list = list.child(list_note(
+                format!(
+                    "Only the first {MAX_GIT_CHANGES} changes are listed; add a .gitignore for the rest."
+                ),
+                warning,
+            ));
         }
         for section in ChangesSection::ORDER {
             let rows: Vec<&GitChangeEntry> = entries
@@ -921,23 +918,8 @@ impl Condr {
             (DiffContent::Loading, _) => empty_state("Loading diff…", cx),
             (DiffContent::Unchanged, _) => empty_state(format!("No changes in {path_text}"), cx),
             (DiffContent::Binary, _) => empty_state("Binary file", cx),
-            (DiffContent::TooLarge { bytes }, _) => empty_state(
-                format!(
-                    "Diff too large to show ({:.1} MiB)",
-                    *bytes as f64 / (1024. * 1024.)
-                ),
-                cx,
-            ),
-            (DiffContent::Failed(reason), _) => div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .text_sm()
-                .text_color(theme.danger)
-                .child(reason.clone())
-                .into_any_element(),
+            (DiffContent::TooLarge { bytes }, _) => empty_state(too_large("Diff", *bytes), cx),
+            (DiffContent::Failed(reason), _) => failed_state(reason.clone(), cx),
             (DiffContent::Text, None) => empty_state("Loading diff…", cx),
         };
         v_flex()
@@ -1206,19 +1188,6 @@ fn comparison_label(git: &WorkspaceGitSnapshot, against: DiffBase) -> String {
         (DiffBase::MergeBase, Some(base)) => format!("Against {}", base.branch),
         _ => "Against HEAD".to_owned(),
     }
-}
-
-pub(super) fn empty_state(text: impl Into<SharedString>, cx: &App) -> AnyElement {
-    div()
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .p_4()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
-        .child(text.into())
-        .into_any_element()
 }
 
 fn diff_mode(unified: bool) -> DiffMode {
