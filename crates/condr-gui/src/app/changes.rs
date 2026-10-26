@@ -291,9 +291,7 @@ impl Condr {
             SidebarView::History if !history => SidebarView::Changes,
             view => view,
         };
-        let against = git
-            .as_ref()
-            .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
+        let against = self.workspace_diff_base(key, workspace_id);
         let shown = git.as_ref().map(|git| shown_changes(git, against));
         let count = shown.map(|changes| changes.entries.len());
         let total = shown.and_then(|changes| {
@@ -481,6 +479,41 @@ impl Condr {
         } else {
             DiffBase::Head
         }
+    }
+
+    /// What a Workspace's Changes and Diff Tabs compare against, HEAD without Git.
+    fn workspace_diff_base(&self, key: ConnectionKey, workspace_id: WorkspaceId) -> DiffBase {
+        self.connection(key)
+            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
+            .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git))
+    }
+
+    /// The change a Diff Tab of `path` shows: its commit's own entry once History has the
+    /// commit, otherwise the Workspace's against its comparison.
+    fn diff_entry(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+    ) -> Option<&GitChangeEntry> {
+        let connection = self.connection(key)?;
+        let changes = match self.diff_commit(key, workspace_id, path) {
+            Some(commit) => {
+                let slot = (workspace_id, commit.id.clone());
+                &connection
+                    .resources
+                    .commits
+                    .get(&slot)?
+                    .as_ref()
+                    .ok()?
+                    .changes
+            }
+            None => {
+                let git = connection.model.workspace_git.get(&workspace_id)?;
+                shown_changes(git, self.diff_base(key, workspace_id, git))
+            }
+        };
+        changes.entries.iter().find(|entry| entry.path == path)
     }
 
     /// Switches what the Workspace's Changes compare against. The Diff Tab shows the other
@@ -764,33 +797,9 @@ impl Condr {
         let git = self
             .connection(key)
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id));
-        let against = git.map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
+        let against = self.workspace_diff_base(key, workspace_id);
         let commit = self.diff_commit(key, workspace_id, path);
-        let entry = match commit {
-            // The commit's own entry, once History has its details.
-            Some(commit) => self
-                .connection(key)
-                .and_then(|connection| {
-                    connection
-                        .resources
-                        .commits
-                        .get(&(workspace_id, commit.id.clone()))
-                })
-                .and_then(|details| details.as_ref().ok())
-                .and_then(|details| {
-                    details
-                        .changes
-                        .entries
-                        .iter()
-                        .find(|entry| entry.path == path)
-                }),
-            None => git.and_then(|git| {
-                shown_changes(git, against)
-                    .entries
-                    .iter()
-                    .find(|entry| entry.path == path)
-            }),
-        };
+        let entry = self.diff_entry(key, workspace_id, path);
         let comparison = match (commit, git) {
             (Some(commit), _) => format!("Commit {}", super::history::short_id(&commit.id)),
             (None, Some(git)) => comparison_label(git, against),
@@ -957,41 +966,21 @@ impl Condr {
             return;
         };
         let resources = &connection.resources;
+        let status = self
+            .diff_entry(key, workspace_id, &path)
+            .map(|entry| entry.status);
         // A commit's answer never changes, so it needs no generation.
-        let (answer, generation, status) = match &commit {
+        let (answer, generation) = match &commit {
             Some(commit) => (
                 resources
                     .commit_diffs
                     .get(&(workspace_id, commit.clone(), path.clone()))
                     .cloned(),
                 0,
-                resources
-                    .commits
-                    .get(&(workspace_id, commit.clone()))
-                    .and_then(|details| details.as_ref().ok())
-                    .and_then(|details| {
-                        details
-                            .changes
-                            .entries
-                            .iter()
-                            .find(|entry| entry.path == path)
-                    })
-                    .map(|entry| entry.status),
             ),
             None => (
                 resources.diffs.get(&(workspace_id, path.clone())).cloned(),
                 resources.diffs_generation,
-                connection
-                    .model
-                    .workspace_git
-                    .get(&workspace_id)
-                    .and_then(|git| {
-                        shown_changes(git, self.diff_base(key, workspace_id, git))
-                            .entries
-                            .iter()
-                            .find(|entry| entry.path == path)
-                            .map(|entry| entry.status)
-                    }),
             ),
         };
         let request = answer.is_none()
@@ -1101,10 +1090,7 @@ impl Condr {
         workspace_id: WorkspaceId,
         path: RelativePathBuf,
     ) {
-        let against = self
-            .connection(key)
-            .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
-            .map_or(DiffBase::Head, |git| self.diff_base(key, workspace_id, git));
+        let against = self.workspace_diff_base(key, workspace_id);
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
