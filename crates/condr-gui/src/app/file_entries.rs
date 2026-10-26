@@ -405,62 +405,50 @@ impl Condr {
         );
     }
 
-    /// The edits a row's menu offers below its read-only actions: New File and New Folder
-    /// in the Files view (`create_in` names where), then Rename and Delete, which a row
-    /// Changes shows as deleted cannot take.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn entry_edit_items(
+    /// New File… and New Folder…, created in `parent`.
+    pub(super) fn create_items(
+        menu: PopupMenu,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        parent: RelativePathBuf,
+        owner: WeakEntity<Self>,
+    ) -> PopupMenu {
+        [
+            ("New File…", FileKind::File),
+            ("New Folder…", FileKind::Directory),
+        ]
+        .into_iter()
+        .fold(menu, |menu, (label, kind)| {
+            let (owner, parent) = (owner.clone(), parent.clone());
+            menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                let parent = parent.clone();
+                let _ = owner.update(cx, |this, cx| {
+                    this.prompt_new_entry(
+                        key,
+                        workspace_id,
+                        parent,
+                        kind,
+                        String::new(),
+                        None,
+                        window,
+                        cx,
+                    )
+                });
+            }))
+        })
+    }
+
+    /// Rename… and Delete…, last in a row's menu; a row Changes shows as deleted cannot
+    /// take them.
+    pub(super) fn rename_delete_items(
         menu: PopupMenu,
         key: ConnectionKey,
         workspace_id: WorkspaceId,
         path: &RelativePath,
         kind: FileKind,
-        create_in: Option<RelativePathBuf>,
         exists: bool,
         owner: WeakEntity<Self>,
     ) -> PopupMenu {
-        let menu = match create_in {
-            Some(parent) => {
-                let (file_owner, folder_owner) = (owner.clone(), owner.clone());
-                let file_parent = parent.clone();
-                menu.item(
-                    PopupMenuItem::new("New File…").on_click(move |_, window, cx| {
-                        let parent = file_parent.clone();
-                        let _ = file_owner.update(cx, |this, cx| {
-                            this.prompt_new_entry(
-                                key,
-                                workspace_id,
-                                parent,
-                                FileKind::File,
-                                String::new(),
-                                None,
-                                window,
-                                cx,
-                            )
-                        });
-                    }),
-                )
-                .item(
-                    PopupMenuItem::new("New Folder…").on_click(move |_, window, cx| {
-                        let parent = parent.clone();
-                        let _ = folder_owner.update(cx, |this, cx| {
-                            this.prompt_new_entry(
-                                key,
-                                workspace_id,
-                                parent,
-                                FileKind::Directory,
-                                String::new(),
-                                None,
-                                window,
-                                cx,
-                            )
-                        });
-                    }),
-                )
-                .separator()
-            }
-            None => menu,
-        };
         let (rename_path, delete_path) = (path.to_relative_path_buf(), path.to_relative_path_buf());
         let rename_owner = owner.clone();
         menu.item(

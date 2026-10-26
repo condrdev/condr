@@ -609,32 +609,27 @@ impl Condr {
         let owner = cx.weak_entity();
         let show_path = path.to_relative_path_buf();
         let relative = path.to_string();
-        let (root, target_pane) = self
+        let target_pane = self
             .connection(key)
             .and_then(|connection| connection.session())
             .and_then(|session| {
                 let workspace = session.workspace(workspace_id)?;
-                let root = workspace.root_directory().to_path_buf();
-                let target_pane = self.insert_target_pane(key, session, workspace);
-                Some((Some(root), target_pane))
-            })
-            .unwrap_or((None, None));
+                self.insert_target_pane(key, session, workspace)
+            });
+        let (absolute, reveal) = self.entry_locations(key, workspace_id, path);
         let editor = self.connection(key).and_then(|connection| {
             let is_local = connection.endpoint.as_local_path().is_some();
-            let root = root.as_deref()?;
-            let session = connection.session()?;
-            let workspace = session.workspace(workspace_id)?;
+            let workspace = connection.session()?.workspace(workspace_id)?;
             let target = self.open_target_for(open_in::project_root(workspace))?;
+            let openable = absolute
+                .as_ref()
+                .is_some_and(|absolute| absolute.is_absolute());
             Some((
                 target.id.clone(),
                 target.label.clone(),
-                is_local && root.is_absolute(),
+                is_local && openable,
             ))
         });
-        let absolute = root.map(|root| absolute_path(&root, path));
-        let reveal = self
-            .local_root(key, workspace_id)
-            .map(|root| absolute_path(&root, path));
         let exists = show_file != Some(false);
         // The Files view creates beside a file; Changes does not create.
         let create_in = show_file.is_none().then(|| {
@@ -643,8 +638,6 @@ impl Condr {
                 .unwrap_or_default()
         });
         move |menu, _, _| {
-            let copy_relative = relative.clone();
-            let copy_absolute = absolute.clone();
             let open_absolute = absolute.clone();
             let open_owner = owner.clone();
             let insert_owner = owner.clone();
@@ -661,24 +654,7 @@ impl Condr {
                 ))
                 .separator()
             });
-            let menu = menu
-                .item(
-                    PopupMenuItem::new("Copy Relative Path").on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy_relative.clone()));
-                    }),
-                )
-                .item(
-                    PopupMenuItem::new("Copy Path")
-                        .disabled(copy_absolute.is_none())
-                        .on_click(move |_, _, cx| {
-                            if let Some(absolute) = &copy_absolute {
-                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                    absolute.display().to_string(),
-                                ));
-                            }
-                        }),
-                )
-                .separator();
+            let menu = path_copy_items(menu, relative.clone(), absolute.clone()).separator();
             let menu = match &editor {
                 Some((target_id, label, enabled)) => {
                     let target_id = target_id.clone();
@@ -715,17 +691,41 @@ impl Condr {
                     }),
             );
             let menu = reveal_item(menu, reveal.clone(), exists, owner.clone()).separator();
-            Condr::entry_edit_items(
+            let menu = match create_in.clone() {
+                Some(parent) => {
+                    Condr::create_items(menu, key, workspace_id, parent, owner.clone()).separator()
+                }
+                None => menu,
+            };
+            Condr::rename_delete_items(
                 menu,
                 key,
                 workspace_id,
                 &show_path,
                 FileKind::File,
-                create_in.clone(),
                 exists,
                 owner.clone(),
             )
         }
+    }
+
+    /// Where a Workspace entry is: on the Server's machine, and on this one when the
+    /// Workspace is local, to reveal it here.
+    fn entry_locations(
+        &self,
+        key: ConnectionKey,
+        workspace_id: WorkspaceId,
+        path: &RelativePath,
+    ) -> (Option<PathBuf>, Option<PathBuf>) {
+        let absolute = self
+            .connection(key)
+            .and_then(|connection| connection.session())
+            .and_then(|session| session.workspace(workspace_id))
+            .map(|workspace| absolute_path(workspace.root_directory(), path));
+        let reveal = self
+            .local_root(key, workspace_id)
+            .map(|root| absolute_path(&root, path));
+        (absolute, reveal)
     }
 
     /// The right-click menu of a directory row in the Files view: create inside it, the
@@ -738,48 +738,22 @@ impl Condr {
         cx: &Context<Self>,
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let owner = cx.weak_entity();
+        let (absolute, reveal) = self.entry_locations(key, workspace_id, path);
         let path = path.to_relative_path_buf();
-        let root = self
-            .connection(key)
-            .and_then(|connection| connection.session())
-            .and_then(|session| session.workspace(workspace_id))
-            .map(|workspace| workspace.root_directory().to_path_buf());
-        let absolute = root.map(|root| absolute_path(&root, &path));
-        let reveal = self
-            .local_root(key, workspace_id)
-            .map(|root| absolute_path(&root, &path));
         move |menu, _, _| {
-            let menu = Condr::entry_edit_items(
+            let menu = Condr::create_items(menu, key, workspace_id, path.clone(), owner.clone())
+                .separator();
+            let menu = path_copy_items(menu, path.to_string(), absolute.clone());
+            let menu = reveal_item(menu, reveal.clone(), true, owner.clone()).separator();
+            Condr::rename_delete_items(
                 menu,
                 key,
                 workspace_id,
                 &path,
                 FileKind::Directory,
-                Some(path.clone()),
                 true,
                 owner.clone(),
             )
-            .separator();
-            let copy_relative = path.to_string();
-            let copy_absolute = absolute.clone();
-            let menu = menu
-                .item(
-                    PopupMenuItem::new("Copy Relative Path").on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy_relative.clone()));
-                    }),
-                )
-                .item(
-                    PopupMenuItem::new("Copy Path")
-                        .disabled(copy_absolute.is_none())
-                        .on_click(move |_, _, cx| {
-                            if let Some(absolute) = &copy_absolute {
-                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                    absolute.display().to_string(),
-                                ));
-                            }
-                        }),
-                );
-            reveal_item(menu, reveal.clone(), true, owner.clone())
         }
     }
 
@@ -792,39 +766,12 @@ impl Condr {
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
         let owner = cx.weak_entity();
         move |menu, _, _| {
-            let menu = menu.item(PopupMenuItem::new("New File…").on_click({
-                let owner = owner.clone();
-                move |_, window, cx| {
-                    let _ = owner.update(cx, |this, cx| {
-                        this.prompt_new_entry(
-                            key,
-                            workspace_id,
-                            RelativePathBuf::new(),
-                            FileKind::File,
-                            String::new(),
-                            None,
-                            window,
-                            cx,
-                        )
-                    });
-                }
-            }));
-            let owner = owner.clone();
-            menu.item(
-                PopupMenuItem::new("New Folder…").on_click(move |_, window, cx| {
-                    let _ = owner.update(cx, |this, cx| {
-                        this.prompt_new_entry(
-                            key,
-                            workspace_id,
-                            RelativePathBuf::new(),
-                            FileKind::Directory,
-                            String::new(),
-                            None,
-                            window,
-                            cx,
-                        )
-                    });
-                }),
+            Condr::create_items(
+                menu,
+                key,
+                workspace_id,
+                RelativePathBuf::new(),
+                owner.clone(),
             )
         }
     }
@@ -1532,6 +1479,27 @@ impl Condr {
         release_images(self.files_view.retain_session(key, None), cx);
         self.clear_pending_requests(key);
     }
+}
+
+/// Copy Relative Path and Copy Path; the second is off when the Workspace has no root.
+fn path_copy_items(menu: PopupMenu, relative: String, absolute: Option<PathBuf>) -> PopupMenu {
+    let copy_absolute = absolute.clone();
+    menu.item(
+        PopupMenuItem::new("Copy Relative Path").on_click(move |_, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(relative.clone()));
+        }),
+    )
+    .item(
+        PopupMenuItem::new("Copy Path")
+            .disabled(absolute.is_none())
+            .on_click(move |_, _, cx| {
+                if let Some(absolute) = &copy_absolute {
+                    cx.write_to_clipboard(ClipboardItem::new_string(
+                        absolute.display().to_string(),
+                    ));
+                }
+            }),
+    )
 }
 
 /// "Reveal in Finder" and its counterparts, only for a Workspace on this machine.
