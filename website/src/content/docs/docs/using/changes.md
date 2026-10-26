@@ -15,7 +15,7 @@ The Changes view sorts modified files into three groups by Git status:
 - **Tracked**: tracked files that have been modified.
 - **Untracked**: files the Agent created that Git does not track yet.
 
-Each file shows how many lines were added and deleted, and the top sums up the total number of changed lines.
+Each file shows how many lines were added and deleted, and the right end of the comparison button's row above the list sums them up.
 
 The list follows the disk on its own. If it ever falls behind, for example on a network drive, click **Refresh** at the top right of the sidebar to have the Device scan the Workspace again; it refreshes Files and the open diff too.
 

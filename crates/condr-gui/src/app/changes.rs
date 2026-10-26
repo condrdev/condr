@@ -25,7 +25,7 @@ pub(super) enum SidebarView {
     History,
 }
 
-pub(super) const INITIAL_CHANGES_WIDTH: Pixels = px(300.);
+pub(super) const INITIAL_CHANGES_WIDTH: Pixels = px(320.);
 pub(super) const MIN_CHANGES_WIDTH: Pixels = px(200.);
 pub(super) const MAX_CHANGES_WIDTH: Pixels = px(480.);
 
@@ -277,7 +277,7 @@ impl Condr {
         let Some((key, workspace_id, workspace_name, git, shown_diff, shown_file)) = presented
         else {
             return column
-                .child(self.sidebar_header(None, SidebarView::Changes, None, None, false, cx))
+                .child(self.sidebar_header(None, SidebarView::Changes, None, false, cx))
                 .child(empty_state("No Workspace", cx))
                 .into_any_element();
         };
@@ -302,8 +302,7 @@ impl Condr {
                     deleted: sum.deleted + stat.deleted,
                 })
         });
-        let header =
-            self.sidebar_header(Some((key, workspace_id)), view, count, total, history, cx);
+        let header = self.sidebar_header(Some((key, workspace_id)), view, count, history, cx);
         let body = match view {
             SidebarView::Files => {
                 self.render_files_list(key, workspace_id, shown_file.as_deref(), cx)
@@ -313,7 +312,14 @@ impl Condr {
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .child(self.render_changes_comparison(key, workspace_id, git, against, cx))
+                    .child(self.render_changes_comparison(
+                        key,
+                        workspace_id,
+                        git,
+                        against,
+                        total,
+                        cx,
+                    ))
                     .child(self.render_changes_list(
                         key,
                         workspace_id,
@@ -331,20 +337,18 @@ impl Condr {
         column.child(header).child(body).into_any_element()
     }
 
-    /// The Files / Changes tabs, sized to their labels, with the change count in the
-    /// Changes tab and the summed `+N −N` at the far end whichever view is shown, the way
-    /// Zed totals a branch.
+    /// The Files / Changes / History tabs, sized to their labels, with the change count in
+    /// the Changes tab and Refresh at the far end whichever view is shown.
     fn sidebar_header(
         &self,
         target: Option<(ConnectionKey, WorkspaceId)>,
         view: SidebarView,
         count: Option<usize>,
-        total: Option<GitDiffStat>,
         history: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // GPUI Kit's own tab strip, as the Kit gallery shows it; the count rides in the
-        // Changes tab and the total takes the strip's free end.
+        // Changes tab and Refresh takes the strip's free end.
         let owner = cx.weak_entity();
         let selected = match view {
             SidebarView::Files => 0,
@@ -371,12 +375,7 @@ impl Condr {
                     });
                 })
         });
-        let suffix = h_flex()
-            .pr_2()
-            .gap_1()
-            .items_center()
-            .when_some(total, |this, total| this.child(diff_stat(total, cx)))
-            .children(refresh);
+        let suffix = h_flex().pr_2().items_center().children(refresh);
         TabBar::new("condr-sidebar-view")
             .selected_index(selected)
             .on_click(move |index, _, cx| {
@@ -522,6 +521,7 @@ impl Condr {
         workspace_id: WorkspaceId,
         git: &WorkspaceGitSnapshot,
         against: DiffBase,
+        total: Option<GitDiffStat>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let button = Button::new("changes-comparison")
@@ -573,7 +573,15 @@ impl Condr {
             // padding puts its label where the section chevrons start.
             .px_1()
             .py_1()
+            .gap_2()
+            .justify_between()
+            .items_center()
             .child(control)
+            // The summed `+N −N` of what this comparison shows, the way Zed totals a branch;
+            // `pr_2` inside the row's `px_1` lines it up with the rows' own stats.
+            .when_some(total, |this, total| {
+                this.child(div().pr_2().child(diff_stat(total, cx)))
+            })
             .into_any_element()
     }
 

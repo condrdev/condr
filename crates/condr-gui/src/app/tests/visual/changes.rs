@@ -76,6 +76,15 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
     let refresh = window
         .debug_bounds("sidebar-refresh")
         .expect("the sidebar header should offer Refresh");
+    // At the default width the three tabs and Refresh share the header without running
+    // into each other; the summed `+N −N` sits on the comparison row instead.
+    let history = window
+        .debug_bounds("sidebar-view-history")
+        .expect("a repository with a commit has History");
+    assert!(
+        history.right() <= refresh.left(),
+        "History {history:?} runs under Refresh {refresh:?}"
+    );
     window.simulate_click(refresh.center(), Modifiers::default());
     assert!(
         window.read(|app| !view.read(app).files_view.refreshing.is_empty()),
