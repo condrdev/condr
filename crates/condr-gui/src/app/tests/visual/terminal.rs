@@ -1,13 +1,11 @@
 use super::*;
 // Only the unix-only right-click test builds a reported motion by hand.
+use crate::app::terminal_input::IMAGE_PASTE_KEY;
 #[cfg(unix)]
 use crate::app::terminal_input::ReportedTerminalMouseMotion;
 use condr_core::DETECTED_LINK_FLAG;
 #[cfg(unix)]
 use condr_core::{TerminalMouseButton, TerminalMouseEvent};
-
-/// The image-paste gesture on this platform (ADR 0012).
-const IMAGE_PASTE: &str = if cfg!(windows) { "alt-v" } else { "ctrl-v" };
 
 #[cfg(unix)]
 #[test]
@@ -922,7 +920,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         gpui_kit::ImageFormat::Bmp,
         vec![0],
     )));
-    window.simulate_keystrokes(IMAGE_PASTE);
+    window.simulate_keystrokes(IMAGE_PASTE_KEY);
     assert!(wait_until_event_driven(window, |window| {
         window.read(|app| {
             let condr = view.read(app);
@@ -939,7 +937,7 @@ fn terminal_clipboard_shortcuts_paste_through_tcp_server() {
         .unwrap();
     let image = gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Bmp, bmp);
     window.write_to_clipboard(ClipboardItem::new_image(&image));
-    window.simulate_keystrokes(IMAGE_PASTE);
+    window.simulate_keystrokes(IMAGE_PASTE_KEY);
     window.simulate_keystrokes("enter");
     assert!(wait_until_event_driven(window, |window| {
         terminal_contains(window, &view, 1, pane_id, "CONDR_IMAGE_OK")
@@ -1051,7 +1049,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
             });
         }
         window.write_to_clipboard(clipboard);
-        window.simulate_keystrokes(IMAGE_PASTE);
+        window.simulate_keystrokes(IMAGE_PASTE_KEY);
         assert!(received.try_iter().any(|message| matches!(message,
             ClientMessage::Terminal { pane_id: target, command: TerminalCommand::Key { key: condr_core::TerminalKey::Character(text), modifiers, .. }, .. }
                 if target == pane_id && text == "v"
@@ -1062,7 +1060,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
             this.connection_mut(key).unwrap().endpoint = remote;
         })
     });
-    window.simulate_keystrokes(IMAGE_PASTE);
+    window.simulate_keystrokes(IMAGE_PASTE_KEY);
     // The header says the image is on its way until the writer reports it sent.
     let pasting = leaked_selector(format!("terminal-pane-pasting-{}", pane_id.as_u64()));
     window.update(|window, cx| _ = window.draw(cx));
@@ -1100,7 +1098,7 @@ fn terminal_clipboard_image_gesture_preserves_fallback_and_captures_the_target()
         vec![0; condr_core::protocol::MAX_CLIPBOARD_IMAGE_BYTES + 1],
     );
     window.write_to_clipboard(ClipboardItem::new_image(&oversized));
-    window.simulate_keystrokes(IMAGE_PASTE);
+    window.simulate_keystrokes(IMAGE_PASTE_KEY);
     assert!(!received.try_iter().any(|message| matches!(
         message,
         ClientMessage::PasteImage { .. }

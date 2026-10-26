@@ -157,6 +157,9 @@ impl Condr {
 
 /// The image-paste gesture (ADR 0012), the key Claude Code pastes images with: `Ctrl+V`,
 /// and `Alt+V` on Windows, where `Ctrl+V` pastes text.
+pub(in crate::app) const IMAGE_PASTE_KEY: &str = if cfg!(windows) { "alt-v" } else { "ctrl-v" };
+
+/// Whether `stroke` is [`IMAGE_PASTE_KEY`].
 pub(in crate::app) fn is_image_paste_gesture(stroke: &Keystroke) -> bool {
     let modifiers = stroke.modifiers;
     stroke.key == "v"

@@ -38,7 +38,7 @@ Click the menu in the top-right corner of a Pane:
 
 ### Send a screenshot to a remote Agent
 
-When you run an Agent on a remote server, copy a screenshot locally and press the same key you paste images into a local Agent with:
+When you run an Agent on a remote server, copy a screenshot locally and press the same key you paste images into a local Agent with. It follows the computer you are on, not the remote Device:
 
 - macOS / Linux: Ctrl+V
 - Windows: Alt+V

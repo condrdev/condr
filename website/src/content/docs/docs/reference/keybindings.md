@@ -96,7 +96,7 @@ Every key combination not declared on this page passes through to the child proc
 | Paste the clipboard image | `Ctrl + V` | `Alt + V` | `Ctrl + V` |
 
 * **How it works**: only in Panes running on a remote Device. Condr uploads the local clipboard image to a temporary directory on that Device in the background, and fills its absolute remote path in at the command-line cursor for a CLI Agent or another program to read.
-* **Which key**: the one you paste images into a local Agent with. On Windows `Ctrl + V` pastes text, which is why Claude Code there takes `Alt + V` too.
+* **Which key**: set by the platform the GUI runs on, whatever system the remote Device runs. A Windows GUI connected to a Mac takes `Alt + V`; a Mac GUI connected to Windows takes `Ctrl + V`. It is the key you paste images into a local Agent with on that platform: on Windows `Ctrl + V` pastes text, which is why Claude Code there takes `Alt + V` too.
 * **Fallback**: with no image on the clipboard, or when the current Pane is on the local Device, the key passes straight through to the foreground program.
 * **Limits and lifetime**:
   * One image can be at most **16 MiB**.

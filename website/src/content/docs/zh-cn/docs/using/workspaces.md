@@ -38,7 +38,7 @@ Workspace（工作区）是 Condr 管理项目的基本单位。一个工作区�
 
 ### 向远程 Agent 发送截图
 
-当你连接远程服务器跑 Agent 时，本地复制一张截图，直接在远程终端按下和本机给 Agent 粘贴图片相同的键：
+当你连接远程服务器跑 Agent 时，本地复制一张截图，直接在远程终端按下和本机给 Agent 粘贴图片相同的键。按键看你正在用的这台电脑，与远程 Device 无关：
 
 - macOS / Linux：Ctrl+V
 - Windows：Alt+V

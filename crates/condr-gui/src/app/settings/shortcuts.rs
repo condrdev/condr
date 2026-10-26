@@ -57,6 +57,23 @@ pub(in crate::app) const SHORTCUTS: &[(&str, &[Shortcut])] = &[
     ),
 ];
 
+/// The keys a focused terminal takes for the clipboard before any action sees them, so
+/// the keymap cannot show them; a test holds them to `terminal_clipboard_shortcut`.
+pub(super) const TERMINAL_COPY_KEYS: &[&str] = if cfg!(target_os = "macos") {
+    &["cmd-c", "ctrl-insert"]
+} else if cfg!(windows) {
+    &["ctrl-c", "ctrl-shift-c", "ctrl-insert"]
+} else {
+    &["ctrl-shift-c", "ctrl-insert"]
+};
+pub(super) const TERMINAL_PASTE_KEYS: &[&str] = if cfg!(target_os = "macos") {
+    &["cmd-v", "shift-insert"]
+} else if cfg!(windows) {
+    &["ctrl-v", "ctrl-shift-v", "shift-insert"]
+} else {
+    &["ctrl-shift-v", "shift-insert"]
+};
+
 /// The key context `bind_keys` registers the shortcuts under.
 pub(in crate::app) const SHORTCUT_CONTEXT: &str = "Condr";
 
@@ -64,20 +81,55 @@ pub(in crate::app) const SHORTCUT_CONTEXT: &str = "Condr";
 pub(super) fn shortcuts_page() -> SettingPage {
     SettingPage::new("Shortcuts")
         .icon(IconName::LayoutDashboard)
-        .groups(SHORTCUTS.iter().map(|(title, rows)| {
-            rows.iter().fold(
-                SettingGroup::new().title(*title),
-                |group, (label, action)| {
-                    group.item(SettingItem::new(
-                        *label,
-                        SettingField::render(move |_, window, _| {
-                            div().children(
-                                Kbd::binding_for_action(*action, Some(SHORTCUT_CONTEXT), window)
-                                    .map(|kbd| kbd.outline()),
-                            )
-                        }),
-                    ))
-                },
-            )
-        }))
+        .groups(
+            SHORTCUTS
+                .iter()
+                .map(|(title, rows)| {
+                    rows.iter().fold(
+                        SettingGroup::new().title(*title),
+                        |group, (label, action)| {
+                            group.item(SettingItem::new(
+                                *label,
+                                SettingField::render(move |_, window, _| {
+                                    div().children(
+                                        Kbd::binding_for_action(
+                                            *action,
+                                            Some(SHORTCUT_CONTEXT),
+                                            window,
+                                        )
+                                        .map(|kbd| kbd.outline()),
+                                    )
+                                }),
+                            ))
+                        },
+                    )
+                })
+                .chain([terminal_group()]),
+        )
+}
+
+/// The terminal's clipboard keys, every key that does each, and the image paste that
+/// only a remote Pane takes (ADR 0012).
+fn terminal_group() -> SettingGroup {
+    let rows: [(&str, &'static [&'static str]); 3] = [
+        ("Copy selection", TERMINAL_COPY_KEYS),
+        ("Paste text", TERMINAL_PASTE_KEYS),
+        (
+            "Paste image to a remote Device",
+            &[crate::app::terminal_input::IMAGE_PASTE_KEY],
+        ),
+    ];
+    rows.into_iter().fold(
+        SettingGroup::new().title("Terminal"),
+        |group, (label, keys)| {
+            group.item(SettingItem::new(
+                label,
+                SettingField::render(move |_, _, _| {
+                    h_flex().gap_1().children(keys.iter().map(|key| {
+                        Kbd::new(Keystroke::parse(key).expect("a valid keystroke")).outline()
+                    }))
+                }),
+            ))
+        },
+    )
 }

@@ -262,6 +262,7 @@ fn image_paste_is_ctrl_v_or_alt_v_on_windows_and_maps_only_supported_formats() {
     } else {
         ("ctrl-v", "alt-v")
     };
+    assert_eq!(super::super::terminal_input::IMAGE_PASTE_KEY, image_paste);
     assert!(gesture(image_paste));
     let mut function_chord = Keystroke::parse(image_paste).unwrap();
     function_chord.modifiers.function = true;

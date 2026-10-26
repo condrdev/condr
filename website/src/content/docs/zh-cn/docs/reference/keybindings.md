@@ -96,7 +96,7 @@ Condr 的快捷键分为两层逻辑：
 | 粘贴剪贴板图片 | `Ctrl + V` | `Alt + V` | `Ctrl + V` |
 
 * **投递逻辑**：仅针对运行在远程设备的 Pane 生效。Condr 会将本地剪贴板图片异步上传至该设备的临时目录，并将远程绝对路径自动回填至命令行光标处，供 CLI Agent 等程序读取。
-* **按键**：与在本机给 Agent 粘贴图片的按键相同。Windows 上 `Ctrl + V` 用来粘贴文字，所以 Claude Code 在 Windows 上也用 `Alt + V`。
+* **按键**：由 GUI 所在的平台决定，与远程 Device 的系统无关。Windows 上的 GUI 连接 Mac 时按 `Alt + V`，Mac 上的 GUI 连接 Windows 时按 `Ctrl + V`。它就是在这个平台上给本机 Agent 粘贴图片的按键：Windows 上 `Ctrl + V` 用来粘贴文字，所以 Claude Code 在 Windows 上也用 `Alt + V`。
 * **回退行为**：若剪贴板无图像资产，或当前 Pane 位于本机设备，该按键直接透传至前台程序。
 * **配额与生命周期**：
   * 单张图片最大支持 **16 MiB**。

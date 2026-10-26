@@ -1023,6 +1023,27 @@ mod tests {
         });
     }
 
+    /// The Terminal rows list the keys the terminal itself takes for copy and paste.
+    #[test]
+    fn the_terminal_rows_list_keys_the_terminal_takes() {
+        use crate::app::{TerminalClipboardShortcut, terminal_clipboard_shortcut};
+        let stroke = |key: &str| gpui_kit::Keystroke::parse(key).unwrap();
+        for key in super::shortcuts::TERMINAL_COPY_KEYS {
+            assert_eq!(
+                terminal_clipboard_shortcut(&stroke(key), true),
+                Some(TerminalClipboardShortcut::Copy),
+                "{key}"
+            );
+        }
+        for key in super::shortcuts::TERMINAL_PASTE_KEYS {
+            assert_eq!(
+                terminal_clipboard_shortcut(&stroke(key), false),
+                Some(TerminalClipboardShortcut::Paste),
+                "{key}"
+            );
+        }
+    }
+
     /// A listed action without a binding would render an empty row.
     #[cfg(feature = "test-support")]
     #[gpui_kit::test]

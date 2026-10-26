@@ -6,7 +6,7 @@ use super::*;
 
 #[cfg(test)]
 pub(super) use clipboard::clipboard_image_format;
-pub(super) use clipboard::{is_image_paste_gesture, prepare_clipboard_image};
+pub(super) use clipboard::{IMAGE_PASTE_KEY, is_image_paste_gesture, prepare_clipboard_image};
 #[cfg(test)]
 pub(super) use mouse::next_hovered_link;
 pub(super) use mouse::{ReportedTerminalMouse, ReportedTerminalMouseMotion};
