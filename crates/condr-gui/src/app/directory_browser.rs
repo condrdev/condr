@@ -208,8 +208,7 @@ impl Condr {
         if connection.status != ConnectionStatus::Connected {
             return;
         }
-        let request_id = connection.next_layout_request_id;
-        connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
+        let request_id = connection.next_request_id();
         if !connection.send(ClientMessage::BrowseDirectory {
             request_id,
             path: PathBuf::from(&directory),

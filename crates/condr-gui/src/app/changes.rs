@@ -1146,26 +1146,18 @@ impl Condr {
         let Some(connection) = self.connection_mut(key) else {
             return;
         };
-        let (Some(server_id), Some(session_id)) =
-            (connection.model.server_id, connection.model.session_id)
-        else {
-            return;
-        };
-        if connection.status != ConnectionStatus::Connected {
-            return;
-        }
-        let request_id = connection.next_layout_request_id;
-        connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-        if connection.send(ClientMessage::GitDiff {
-            server_id,
-            session_id,
-            request_id,
-            workspace_id,
-            path: path.clone(),
-            against,
-            full_context: true,
-            commit: None,
-        }) {
+        if let Some(request_id) =
+            connection.send_request(|server_id, session_id, request_id| ClientMessage::GitDiff {
+                server_id,
+                session_id,
+                request_id,
+                workspace_id,
+                path: path.clone(),
+                against,
+                full_context: true,
+                commit: None,
+            })
+        {
             connection
                 .resources
                 .pending_diffs

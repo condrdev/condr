@@ -417,6 +417,31 @@ impl ServerConnection {
 
     /// Enqueues a message without changing lifecycle state. The incoming task owns
     /// disconnect delivery, including when its writer has already closed this queue.
+    /// The next request id, which is never 0.
+    pub(super) fn next_request_id(&mut self) -> u64 {
+        let request_id = self.next_layout_request_id;
+        self.next_layout_request_id = request_id.wrapping_add(1).max(1);
+        request_id
+    }
+
+    /// Sends what `build` makes of this connection's ids and a fresh request id while it
+    /// is connected, and returns that id once the message is on its way.
+    pub(super) fn send_request(
+        &mut self,
+        build: impl FnOnce(ServerId, SessionId, u64) -> ClientMessage,
+    ) -> Option<u64> {
+        let (Some(server_id), Some(session_id)) = (self.model.server_id, self.model.session_id)
+        else {
+            return None;
+        };
+        if self.status != ConnectionStatus::Connected {
+            return None;
+        }
+        let request_id = self.next_request_id();
+        self.send(build(server_id, session_id, request_id))
+            .then_some(request_id)
+    }
+
     pub(super) fn send(&self, message: ClientMessage) -> bool {
         self.io
             .as_ref()

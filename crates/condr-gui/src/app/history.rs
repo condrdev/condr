@@ -609,27 +609,12 @@ impl Condr {
         }
     }
 
-    /// Sends what `build` makes of the connection's ids and a fresh request id, and returns
-    /// that id once it is on its way.
     fn send_request(
         &mut self,
         key: ConnectionKey,
         build: impl FnOnce(ServerId, SessionId, u64) -> ClientMessage,
     ) -> Option<u64> {
-        let connection = self.connection_mut(key)?;
-        let (Some(server_id), Some(session_id)) =
-            (connection.model.server_id, connection.model.session_id)
-        else {
-            return None;
-        };
-        if connection.status != ConnectionStatus::Connected {
-            return None;
-        }
-        let request_id = connection.next_layout_request_id;
-        connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-        connection
-            .send(build(server_id, session_id, request_id))
-            .then_some(request_id)
+        self.connection_mut(key)?.send_request(build)
     }
 }
 

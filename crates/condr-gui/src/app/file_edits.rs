@@ -187,27 +187,20 @@ impl Condr {
         cx: &mut App,
     ) -> Option<u64> {
         let connection = self.connection_mut(key)?;
-        let (Some(server_id), Some(session_id)) =
-            (connection.model.server_id, connection.model.session_id)
-        else {
-            return None;
-        };
-        let request_id = connection.next_layout_request_id;
-        if connection.status == ConnectionStatus::Connected
-            && connection.send(ClientMessage::MutateFile {
+        let request_id = connection.send_request(|server_id, session_id, request_id| {
+            ClientMessage::MutateFile {
                 server_id,
                 session_id,
                 request_id,
                 workspace_id,
                 mutation,
-            })
-        {
-            connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-            return Some(request_id);
+            }
+        });
+        if request_id.is_none() {
+            let label = connection.label.clone();
+            self.report_error(format!("{label} is not connected"), cx);
         }
-        let label = connection.label.clone();
-        self.report_error(format!("{label} is not connected"), cx);
-        None
+        request_id
     }
 
     /// Writes `text` to `path`, its line endings converted when the file had only `\r\n`.

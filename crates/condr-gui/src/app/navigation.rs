@@ -223,25 +223,16 @@ impl Condr {
             return None;
         }
         let connection = self.connection_mut(key)?;
-        let (Some(server_id), Some(session_id)) =
-            (connection.model.server_id, connection.model.session_id)
-        else {
+        // A layout change also waits until the subscription and any resync are done.
+        if !connection.can_mutate() {
             return None;
-        };
-        if connection.can_mutate() {
-            let request_id = connection.next_layout_request_id;
-            connection.next_layout_request_id = request_id.wrapping_add(1).max(1);
-            connection
-                .send(ClientMessage::Layout {
-                    server_id,
-                    session_id,
-                    request_id,
-                    command,
-                })
-                .then_some(request_id)
-        } else {
-            None
         }
+        connection.send_request(|server_id, session_id, request_id| ClientMessage::Layout {
+            server_id,
+            session_id,
+            request_id,
+            command,
+        })
     }
 
     pub(super) fn terminal_command(
