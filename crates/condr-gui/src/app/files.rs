@@ -3,7 +3,7 @@
 //! rendered when it is Markdown or an image (ADR 0037). The Editor saves what it edits
 //! back to the Server (ADR 0045); `file_edits` holds that side.
 
-use super::change_tree::{status_color, status_glyph, tree_indent};
+use super::change_tree::{RowKind, status_color, status_glyph, tree_indent, tree_row};
 use super::changes::empty_state;
 use super::preview::{
     DecodedImage, PreviewImages, Rendering, image_summary, release_images, render_image,
@@ -480,7 +480,6 @@ impl Condr {
     ) -> AnyElement {
         let theme = cx.theme();
         let selector: SharedString = format!("file-dir-{}", path.as_str()).into();
-        let id = selector.clone();
         let owner = cx.weak_entity();
         let menu = self.directory_context_menu(context.key, context.workspace_id, path, cx);
         let (key, workspace_id, toggle_path) = (
@@ -498,32 +497,13 @@ impl Condr {
                     .iter()
                     .any(|entry| entry.path.starts_with(path))
             });
-        h_flex()
-            .id(id)
-            .debug_selector(move || selector.to_string())
-            .h_7()
-            .w_full()
-            .min_w_0()
-            .pl(tree_indent(depth, false))
-            .pr_2()
-            .gap_1()
-            .items_center()
-            .cursor_pointer()
-            .rounded(theme.radius)
-            .text_sm()
-            .hover(|this| this.bg(theme.sidebar_accent.opacity(0.8)))
+        tree_row(selector, depth, RowKind::Directory { open: expanded }, cx)
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     this.toggle_files_directory(key, workspace_id, toggle_path.clone(), cx);
                 });
             })
             .context_menu(menu)
-            .child(
-                Icon::new(IconName::ChevronRight)
-                    .size_3p5()
-                    .text_color(theme.muted_foreground)
-                    .when(expanded, |icon| icon.rotate(percentage(90. / 360.))),
-            )
             .child(type_icon(file_icons::folder_icon(theme.is_dark()), ignored))
             .child(
                 div()
@@ -559,7 +539,6 @@ impl Condr {
     ) -> AnyElement {
         let theme = cx.theme();
         let selector: SharedString = format!("file-{}", path.as_str()).into();
-        let id = selector.clone();
         let owner = cx.weak_entity();
         let menu = self.file_context_menu(context.key, context.workspace_id, path, None, cx);
         let (key, workspace_id, path) = (
@@ -573,29 +552,7 @@ impl Condr {
             .and_then(|connection| connection.model.workspace_git.get(&workspace_id))
             .and_then(|git| git.changes.entries.iter().find(|entry| entry.path == path))
             .map(|entry| entry.status);
-        h_flex()
-            .id(id)
-            .debug_selector(move || selector.to_string())
-            .h_7()
-            .w_full()
-            .min_w_0()
-            .pl(tree_indent(depth, true))
-            .pr_2()
-            .gap_2()
-            .items_center()
-            .cursor_pointer()
-            .rounded(theme.radius)
-            .text_sm()
-            .when(!selected, |this| {
-                this.hover(|this| {
-                    this.bg(theme.sidebar_accent.opacity(0.8))
-                        .text_color(theme.sidebar_accent_foreground)
-                })
-            })
-            .when(selected, |this| {
-                this.bg(theme.tokens.sidebar_accent)
-                    .text_color(theme.sidebar_accent_foreground)
-            })
+        tree_row(selector, depth, RowKind::File { selected }, cx)
             .on_click(move |_, window, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     this.show_file_on(key, workspace_id, path.clone(), window, cx);

@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::change_tree::row_highlight;
 
 pub(super) type SidebarClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -214,17 +215,9 @@ impl CondrSidebarTreeItem {
             .gap_x_2()
             .rounded(cx.theme().radius)
             .text_sm()
-            .when(!active && !disabled, |this| {
-                this.hover(|this| {
-                    this.bg(cx.theme().sidebar_accent.opacity(0.8))
-                        .text_color(cx.theme().sidebar_accent_foreground)
-                })
-            })
-            .when(active, |this| {
-                this.font_medium()
-                    .bg(cx.theme().tokens.sidebar_accent)
-                    .text_color(cx.theme().sidebar_accent_foreground)
-            })
+            // A disabled row answers no pointer, so only its selection shows.
+            .when(active || !disabled, |this| row_highlight(this, active, cx))
+            .when(active, |this| this.font_medium())
             // Hover reveals the disclosure chevron over the icon and the actions menu over
             // the trailing text; at rest the row is
             // just icon, name and detail.

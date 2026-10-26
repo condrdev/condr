@@ -2,7 +2,7 @@
 //! the files a selected one changed, and one of those files in the Workspace's Diff Tab. It
 //! reads only; nothing here acts on the repository.
 
-use super::change_tree::{TreeRow, directory_row, file_row, tree_rows};
+use super::change_tree::{TreeRow, directory_row, file_row, row_highlight, tree_rows};
 use super::changes::empty_state;
 use super::sidebar::upstream_label;
 use super::*;
@@ -173,16 +173,7 @@ impl Condr {
             .py_1()
             .cursor_pointer()
             .rounded(theme.radius)
-            .when(!selected, |this| {
-                this.hover(|this| {
-                    this.bg(theme.sidebar_accent.opacity(0.8))
-                        .text_color(theme.sidebar_accent_foreground)
-                })
-            })
-            .when(selected, |this| {
-                this.bg(theme.tokens.sidebar_accent)
-                    .text_color(theme.sidebar_accent_foreground)
-            })
+            .map(|row| row_highlight(row, selected, cx))
             .on_click(move |_, _, cx| {
                 let _ = owner.update(cx, |this, cx| {
                     let selected = &mut this.files_view.selected_commits;

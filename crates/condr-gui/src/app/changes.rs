@@ -2,7 +2,9 @@
 //! changes as the Server reports them, and one file's diff in GPUI Kit's `Diff` (ADR 0046).
 //! Everything shown here is Server data; the Client only asks and draws.
 
-use super::change_tree::{TreeRow, diff_stat, directory_row, file_row, status_glyph, tree_rows};
+use super::change_tree::{
+    TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, status_glyph, tree_rows,
+};
 use super::history::history_branch;
 use super::sidebar::CondrIconName;
 use super::*;
@@ -601,12 +603,7 @@ impl Condr {
     ) -> AnyElement {
         // Copied out so the rows below can take `cx` again.
         let theme = cx.theme();
-        let (radius, accent, muted, warning) = (
-            theme.radius,
-            theme.sidebar_accent,
-            theme.muted_foreground,
-            theme.warning,
-        );
+        let (radius, muted, warning) = (theme.radius, theme.muted_foreground, theme.warning);
         let entries = &changes.entries;
         if entries.is_empty() {
             return empty_state("No changes", cx);
@@ -656,18 +653,13 @@ impl Condr {
                     .items_center()
                     .cursor_pointer()
                     .rounded(radius)
-                    .hover(move |this| this.bg(accent.opacity(0.8)))
+                    .map(|row| row_highlight(row, false, cx))
                     .on_click(move |_, _, cx| {
                         let _ = toggle_owner.update(cx, |this, cx| {
                             this.toggle_changes_section(section, cx);
                         });
                     })
-                    .child(
-                        Icon::new(IconName::ChevronRight)
-                            .size_3p5()
-                            .text_color(muted)
-                            .when(!collapsed, |icon| icon.rotate(percentage(90. / 360.))),
-                    )
+                    .child(disclosure(!collapsed, cx))
                     .child(div().text_xs().text_color(muted).child(format!(
                         "{} ({})",
                         section.title(),

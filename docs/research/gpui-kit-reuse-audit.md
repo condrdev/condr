@@ -88,7 +88,7 @@
 
 - [x] 先在 Windows 上复现 Tab 过多被裁掉，再把 Workspace Tab 栏换成 Kit `TabBar` / `Tab`（不换：Kit 的 Tab 变体都自带边框或底色，对不上标题栏里的 ghost 样式。Tab 行改为可横向滚动，激活的 Tab 滚入视野）
 - [ ] Changes 树换成 Kit `Tree`，处理折叠状态同步
-- [ ] 合并 Changes / Files 两棵树重复的行构建函数
+- [x] 合并 Changes / Files 两棵树重复的行构建函数：2026-10-26 `change_tree::tree_row` / `row_highlight` / `disclosure`，History 提交行和侧栏行也用 `row_highlight`
 
 可选：收益低
 

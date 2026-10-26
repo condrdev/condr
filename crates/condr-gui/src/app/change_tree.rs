@@ -208,6 +208,77 @@ pub(super) fn tree_rows<'a>(
     rows
 }
 
+/// What a tree row starts with: a directory's chevron, open or not, or a file's place
+/// past it and whether it is the file shown.
+#[derive(Clone, Copy)]
+pub(super) enum RowKind {
+    Directory { open: bool },
+    File { selected: bool },
+}
+
+/// The shell every sidebar tree row shares, the Files tree's and the change trees': its
+/// id, height, indent, highlight and, for a directory, the chevron. The caller adds the
+/// icon, the name and what trails it.
+pub(super) fn tree_row(id: SharedString, depth: usize, kind: RowKind, cx: &App) -> Stateful<Div> {
+    let selector = id.clone();
+    let (file, selected) = match kind {
+        RowKind::Directory { .. } => (false, false),
+        RowKind::File { selected } => (true, selected),
+    };
+    let row = h_flex()
+        .id(id)
+        .debug_selector(move || selector.to_string())
+        .h_7()
+        .w_full()
+        .min_w_0()
+        .pl(tree_indent(depth, file))
+        .pr_2()
+        .map(|row| if file { row.gap_2() } else { row.gap_1() })
+        .items_center()
+        .cursor_pointer()
+        .rounded(cx.theme().radius)
+        .text_sm();
+    let row = row_highlight(row, selected, cx);
+    match kind {
+        RowKind::Directory { open } => row.child(disclosure(open, cx)),
+        RowKind::File { .. } => row,
+    }
+}
+
+/// The highlight of a sidebar row: the accent while selected, a softer one under the
+/// pointer. Hover is always registered, in the selection's own colour on a selected row,
+/// because one registered only sometimes can leave a stale hover style behind when the
+/// row turns selected, as GPUI Kit's `ListItem` warns.
+pub(super) fn row_highlight<E: Styled + InteractiveElement + FluentBuilder>(
+    row: E,
+    selected: bool,
+    cx: &App,
+) -> E {
+    let theme = cx.theme();
+    let (accent, soft, text) = (
+        theme.tokens.sidebar_accent,
+        theme.sidebar_accent.opacity(0.8),
+        theme.sidebar_accent_foreground,
+    );
+    row.when(selected, |row| row.bg(accent).text_color(text))
+        .hover(move |style| {
+            let style = if selected {
+                style.bg(accent)
+            } else {
+                style.bg(soft)
+            };
+            style.text_color(text)
+        })
+}
+
+/// A directory's chevron, pointing down while it is open.
+pub(super) fn disclosure(open: bool, cx: &App) -> Icon {
+    Icon::new(IconName::ChevronRight)
+        .size_3p5()
+        .text_color(cx.theme().muted_foreground)
+        .when(open, |icon| icon.rotate(percentage(90. / 360.)))
+}
+
 /// A directory row: a chevron, a folder and the label.
 pub(super) fn directory_row(
     id: String,
@@ -216,37 +287,17 @@ pub(super) fn directory_row(
     folded: bool,
     cx: &App,
 ) -> Stateful<Div> {
-    let theme = cx.theme();
-    let selector = SharedString::from(id);
-    h_flex()
-        .id(selector.clone())
-        .debug_selector(move || selector.to_string())
-        .h_7()
-        .w_full()
-        .min_w_0()
-        .pl(tree_indent(depth, false))
-        .pr_2()
-        .gap_1()
-        .items_center()
-        .cursor_pointer()
-        .rounded(theme.radius)
-        .text_sm()
-        .hover(|this| this.bg(theme.sidebar_accent.opacity(0.8)))
-        .child(
-            Icon::new(IconName::ChevronRight)
-                .size_3p5()
-                .text_color(theme.muted_foreground)
-                .when(!folded, |icon| icon.rotate(percentage(90. / 360.))),
-        )
+    tree_row(id.into(), depth, RowKind::Directory { open: !folded }, cx)
         .child(
             Icon::new(IconName::Folder)
                 .size_4()
-                .text_color(theme.muted_foreground),
+                .text_color(cx.theme().muted_foreground),
         )
         .child(div().min_w_0().flex_1().truncate().child(label))
 }
 
-/// A file row: its status glyph, its name, cut short to fit, and `+N −N`.
+/// A file row: its status glyph, its name, cut short to fit, and `+N −N`. A deleted file's
+/// name is struck through, and muted unless it is the one shown.
 pub(super) fn file_row(
     id: String,
     name: String,
@@ -255,31 +306,8 @@ pub(super) fn file_row(
     selected: bool,
     cx: &App,
 ) -> Stateful<Div> {
-    let theme = cx.theme();
-    let selector = SharedString::from(id);
-    h_flex()
-        .id(selector.clone())
-        .debug_selector(move || selector.to_string())
-        .h_7()
-        .w_full()
-        .min_w_0()
-        .pl(tree_indent(depth, true))
-        .pr_2()
-        .gap_2()
-        .items_center()
-        .cursor_pointer()
-        .rounded(theme.radius)
-        .text_sm()
-        .when(!selected, |this| {
-            this.hover(|this| {
-                this.bg(theme.sidebar_accent.opacity(0.8))
-                    .text_color(theme.sidebar_accent_foreground)
-            })
-        })
-        .when(selected, |this| {
-            this.bg(theme.tokens.sidebar_accent)
-                .text_color(theme.sidebar_accent_foreground)
-        })
+    let muted = cx.theme().muted_foreground;
+    tree_row(id.into(), depth, RowKind::File { selected }, cx)
         .child(status_glyph(entry.status, cx))
         .child(
             div()
@@ -287,7 +315,8 @@ pub(super) fn file_row(
                 .flex_1()
                 .truncate()
                 .when(entry.status == GitChangeStatus::Deleted, |this| {
-                    this.line_through().text_color(theme.muted_foreground)
+                    this.line_through()
+                        .when(!selected, |this| this.text_color(muted))
                 })
                 .child(name),
         )
