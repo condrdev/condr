@@ -1,5 +1,8 @@
 mod dialogs;
 
+#[cfg(test)]
+pub(in crate::app) use dialogs::EditField;
+
 use super::*;
 
 pub(super) enum ConnectionInstallError {

@@ -149,6 +149,29 @@ fn rename_dialogs_commit_server_workspace_and_tab_names() {
             )
         });
     });
+    // A blank name keeps the dialog and says why under the field.
+    submit_text_dialog(window, "   ");
+    window.update(|window, cx| _ = window.draw(cx));
+    assert!(window.update(|window, cx| window.has_active_dialog(cx)));
+    assert!(window.debug_bounds("field-error").is_some());
+    window.update(|window, cx| {
+        window.dispatch_action(Box::new(gpui_kit::component::dialog::Cancel), cx)
+    });
+    window.update(|window, cx| {
+        view.update(cx, |this, cx| {
+            this.prompt_text(
+                "Rename Server",
+                "Save",
+                "Local".into(),
+                |this, name, _, _| {
+                    this.connection_mut(1).unwrap().label = name;
+                    Ok(())
+                },
+                window,
+                cx,
+            )
+        });
+    });
     submit_text_dialog(window, "Build Server");
     assert_eq!(
         window.read(|app| view.read(app).connection(1).unwrap().label.clone()),

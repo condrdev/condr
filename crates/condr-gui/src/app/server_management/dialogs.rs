@@ -1,7 +1,17 @@
 use super::super::*;
 use crate::app::dialogs::{
-    DangerConfirm, confirm_danger, host_text_is_plausible, port_text_is_plausible,
+    DangerConfirm, TextPrompt, confirm_danger, field_error, host_text_is_plausible,
+    open_form_dialog, port_text_is_plausible,
 };
+
+/// The part of an Edit Remote Device form a refusal is about, so it shows under that field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum EditField {
+    Name,
+    Address,
+    /// The saved device list itself, not one field.
+    Form,
+}
 
 impl Condr {
     pub(in crate::app) fn add_server_menu(
@@ -92,15 +102,19 @@ impl Condr {
             self.report_error(error, cx);
             return;
         }
-        self.prompt_text_input(
-            title.into(),
-            "Connect",
-            String::new(),
-            Some(field_label.into()),
-            Some(placeholder.into()),
+        let prompt = TextPrompt {
+            label: Some(field_label.into()),
+            placeholder: Some(placeholder.into()),
             prefix,
-            true,
-            None,
+            empty: if expected_schemes.is_empty() {
+                "Enter an address"
+            } else {
+                "Paste the link"
+            },
+            ..TextPrompt::new(title, "Connect", String::new())
+        };
+        self.prompt_text_input(
+            prompt,
             move |this, value, _, cx| {
                 let lower = value.trim().to_ascii_lowercase();
                 if !expected_schemes.is_empty()
@@ -213,102 +227,83 @@ impl Condr {
         let fingerprint =
             server_key.map(|key| cx.new(|cx| InputState::new(window, cx).default_value(key)));
         let owner = cx.weak_entity();
-        let error = cx.new(|_| None::<String>);
-        window.defer(cx, move |window, cx| {
-            let inputs_for_content = fields.clone();
-            let inputs_for_ok = fields.clone();
-            let owner = owner.clone();
-            window.open_dialog(cx, move |dialog, _, _| {
-                let inputs_for_content = inputs_for_content.clone();
-                let inputs_for_ok = inputs_for_ok.clone();
-                let fingerprint = fingerprint.clone();
-                let owner = owner.clone();
-                let content_error = error.clone();
-                let submit_error = error.clone();
-                dialog
-                    .title("Edit Remote Device")
-                    .content(move |content, _, cx| {
-                        let field = |(label, input): &(SharedString, Entity<InputState>)| {
+        let error = cx.new(|_| None::<(EditField, String)>);
+        let content = {
+            let (fields, error) = (fields.clone(), error.clone());
+            move |_: &mut Window, cx: &mut App| {
+                let field = |(label, input): &(SharedString, Entity<InputState>)| {
+                    v_flex()
+                        .gap_1()
+                        .child(div().text_sm().child(label.clone()))
+                        .child(Input::new(input).w_full())
+                };
+                let error = error.read(cx).clone();
+                let error_at = |at: EditField| {
+                    let message = error
+                        .clone()
+                        .filter(|(field, _)| *field == at)
+                        .map(|(_, message)| message);
+                    field_error(message, cx)
+                };
+                let [name, host, port] = &fields;
+                v_flex()
+                    .gap_2()
+                    .child(field(name).children(error_at(EditField::Name)))
+                    .when(ssh, |form| {
+                        form.child(field(host).children(error_at(EditField::Address)))
+                    })
+                    // Host and port belong together, as `host:port` reads.
+                    .when(!ssh && !p2p, |form| {
+                        form.child(
                             v_flex()
                                 .gap_1()
-                                .child(div().text_sm().child(label.clone()))
-                                .child(Input::new(input).w_full())
-                        };
-                        let [name, host, port] = &inputs_for_content;
-                        content.child(
-                            v_flex()
-                                .gap_2()
-                                .child(field(name))
-                                // Host and port belong together, as `host:port` reads.
-                                .when(ssh, |form| form.child(field(host)))
-                                .when(!ssh && !p2p, |form| {
-                                    form.child(
-                                        h_flex()
-                                            .gap_2()
-                                            .items_end()
-                                            .child(field(host).flex_1())
-                                            .child(field(port).w_24().flex_none()),
-                                    )
-                                })
-                                .when_some(fingerprint.clone(), |form, fingerprint| {
-                                    form.child(
-                                        v_flex()
-                                            .gap_1()
-                                            .child(div().text_sm().child("Fingerprint"))
-                                            .child(
-                                                Input::new(&fingerprint).readonly(true).w_full(),
-                                            ),
-                                    )
-                                })
-                                .when_some(content_error.read(cx).clone(), |form, error| {
-                                    form.child(
-                                        div().text_sm().text_color(cx.theme().danger).child(error),
-                                    )
-                                }),
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .items_end()
+                                        .child(field(host).flex_1())
+                                        .child(field(port).w_24().flex_none()),
+                                )
+                                .children(error_at(EditField::Address)),
                         )
                     })
-                    .footer(
-                        DialogFooter::new()
-                            .child(
-                                Button::new("dialog-cancel")
-                                    .debug_selector(|| "dialog-cancel".into())
-                                    .label("Cancel")
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(Box::new(Cancel), cx)
-                                    }),
-                            )
-                            .child(
-                                Button::new("dialog-primary-action")
-                                    .debug_selector(|| "dialog-primary-action".into())
-                                    .primary()
-                                    .label("Save")
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(Confirm { secondary: false }),
-                                            cx,
-                                        )
-                                    }),
-                            ),
-                    )
-                    .on_ok(move |_, window, cx| {
-                        let [name, host, port] = inputs_for_ok
-                            .each_ref()
-                            .map(|(_, input)| input.read(cx).value().trim().to_string());
-                        // A rejected value keeps the dialog and the typed text.
-                        owner
-                            .update(cx, |this, cx| {
-                                let result =
-                                    this.apply_server_edit(key, &name, &host, &port, window, cx);
-                                submit_error.update(cx, |error, cx| {
-                                    *error = result.as_ref().err().cloned();
-                                    cx.notify();
-                                });
-                                cx.notify();
-                                result.is_ok()
-                            })
-                            .unwrap_or(true)
+                    .when_some(fingerprint.clone(), |form, fingerprint| {
+                        form.child(
+                            v_flex()
+                                .gap_1()
+                                .child(div().text_sm().child("Fingerprint"))
+                                .child(Input::new(&fingerprint).readonly(true).w_full()),
+                        )
                     })
-            });
+                    .children(error_at(EditField::Form))
+                    .into_any_element()
+            }
+        };
+        let submit = {
+            let fields = fields.clone();
+            move |window: &mut Window, cx: &mut App| {
+                let [name, host, port] = fields
+                    .each_ref()
+                    .map(|(_, input)| input.read(cx).value().trim().to_string());
+                owner
+                    .update(cx, |this, cx| {
+                        let result = this.apply_server_edit(key, &name, &host, &port, window, cx);
+                        cx.notify();
+                        result
+                    })
+                    .unwrap_or(Ok(()))
+            }
+        };
+        window.defer(cx, move |window, cx| {
+            open_form_dialog(
+                "Edit Remote Device".into(),
+                "Save",
+                error,
+                content,
+                submit,
+                window,
+                cx,
+            );
             fields[0].1.update(cx, |input, cx| {
                 input.focus(window, cx);
                 input.select_all(window, cx);
@@ -317,7 +312,7 @@ impl Condr {
     }
 
     /// Applies an Edit Remote Device dialog. A changed host or port reconnects the Server at the
-    /// new address; the Server key stays. False keeps the dialog open with an error.
+    /// new address; the Server key stays. A refusal keeps the dialog open, under the field it names.
     pub(in crate::app) fn apply_server_edit(
         &mut self,
         key: ConnectionKey,
@@ -326,9 +321,9 @@ impl Condr {
         port: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(), String> {
+    ) -> Result<(), (EditField, String)> {
         if let Some(error) = self.servers_error.clone() {
-            return Err(error);
+            return Err((EditField::Form, error));
         }
         let Some(connection) = self.connection(key) else {
             return Ok(());
@@ -349,15 +344,20 @@ impl Condr {
         };
         let endpoint = match endpoint {
             Ok(endpoint) => endpoint,
-            Err(error) => return Err(format!("Invalid address: {error}")),
+            Err(error) => {
+                return Err((EditField::Address, format!("Invalid address: {error}")));
+            }
         };
         if name.is_empty() {
-            return Err("The device needs a name".into());
+            return Err((EditField::Name, "The device needs a name".into()));
         }
         if self.connections.iter().any(|connection| {
             connection.key != key && connection.endpoint.to_string() == endpoint.to_string()
         }) {
-            return Err("Another device already uses this address".into());
+            return Err((
+                EditField::Address,
+                "Another device already uses this address".into(),
+            ));
         }
         let Some(connection) = self.connection_mut(key) else {
             return Ok(());

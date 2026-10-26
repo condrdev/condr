@@ -1017,15 +1017,20 @@ fn editing_a_server_changes_its_name_and_address_but_never_the_local_one() {
                 connection.endpoint.tcp_host_port(),
                 Some(("lab.local", 5555))
             );
+            use crate::app::server_management::EditField;
             assert!(
-                this.apply_server_edit(2, "", "lab.local", "5555", window, cx)
-                    .is_err(),
-                "a blank name is refused"
+                matches!(
+                    this.apply_server_edit(2, "", "lab.local", "5555", window, cx),
+                    Err((EditField::Name, _))
+                ),
+                "a blank name is refused under Name"
             );
             assert!(
-                this.apply_server_edit(2, "Lab box", "lab.local", "0", window, cx)
-                    .is_err(),
-                "port 0 is refused"
+                matches!(
+                    this.apply_server_edit(2, "Lab box", "lab.local", "0", window, cx),
+                    Err((EditField::Address, _))
+                ),
+                "port 0 is refused under the address"
             );
             // The Local Server has no edit dialog at all.
             this.prompt_edit_server_on(1, window, cx);

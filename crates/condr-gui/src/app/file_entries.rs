@@ -1,7 +1,7 @@
 //! Creating, renaming and deleting entries from the Files and Changes views (ADR 0045),
 //! and showing one in this machine's file manager.
 
-use super::dialogs::{DangerConfirm, confirm_danger};
+use super::dialogs::{DangerConfirm, TextPrompt, confirm_danger};
 use super::*;
 use condr_core::{FileKind, FileMutation, FileMutationResult};
 
@@ -259,87 +259,6 @@ impl Condr {
         }
     }
 
-    /// A dialog that takes one name, keeps it while it is refused, and selects `selected`.
-    #[allow(clippy::too_many_arguments)]
-    fn prompt_entry_name(
-        &mut self,
-        title: String,
-        ok_text: &'static str,
-        initial: String,
-        selected: std::ops::Range<usize>,
-        error: Option<String>,
-        submit: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
-        + 'static,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
-        let error = cx.new(|_| error);
-        let owner = cx.weak_entity();
-        let submit = Rc::new(submit);
-        window.defer(cx, move |window, cx| {
-            let (dialog_input, dialog_error) = (input.clone(), error.clone());
-            window.open_dialog(cx, move |dialog, _, _| {
-                let (content_input, ok_input) = (dialog_input.clone(), dialog_input.clone());
-                let (content_error, ok_error) = (dialog_error.clone(), dialog_error.clone());
-                let (owner, submit) = (owner.clone(), submit.clone());
-                dialog
-                    .title(title.clone())
-                    .content(move |content, _, cx| {
-                        content.child(
-                            v_flex()
-                                .gap_1()
-                                .child(Input::new(&content_input).w_full())
-                                .when_some(content_error.read(cx).clone(), |field, error| {
-                                    field.child(
-                                        div().text_sm().text_color(cx.theme().danger).child(error),
-                                    )
-                                }),
-                        )
-                    })
-                    .footer(
-                        DialogFooter::new()
-                            .child(
-                                Button::new("dialog-cancel")
-                                    .debug_selector(|| "dialog-cancel".into())
-                                    .label("Cancel")
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(Box::new(Cancel), cx)
-                                    }),
-                            )
-                            .child(
-                                Button::new("dialog-primary-action")
-                                    .debug_selector(|| "dialog-primary-action".into())
-                                    .primary()
-                                    .label(ok_text)
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(Confirm { secondary: false }),
-                                            cx,
-                                        )
-                                    }),
-                            ),
-                    )
-                    .on_ok(move |_, window, cx| {
-                        let value = ok_input.read(cx).value().to_string();
-                        let submit = submit.clone();
-                        let result = owner
-                            .update(cx, |this, cx| submit(this, value, window, cx))
-                            .unwrap_or(Ok(()));
-                        ok_error.update(cx, |error, cx| {
-                            *error = result.as_ref().err().cloned();
-                            cx.notify();
-                        });
-                        result.is_ok()
-                    })
-            });
-            input.update(cx, |input, cx| {
-                input.focus(window, cx);
-                input.set_selected_range(selected, cx);
-            });
-        });
-    }
-
     /// Whether the cached listing of `directory` already holds `name`.
     fn listed(
         &self,
@@ -377,13 +296,14 @@ impl Condr {
             (FileKind::File, parent) => format!("New File in {parent}"),
             (FileKind::Directory, parent) => format!("New Folder in {parent}"),
         };
-        let selected = 0..initial.len();
-        self.prompt_entry_name(
-            title,
-            "Create",
-            initial,
-            selected,
+        let prompt = TextPrompt {
+            trim: false,
+            selected: Some(0..initial.len()),
             error,
+            ..TextPrompt::new(title, "Create", initial)
+        };
+        self.prompt_text_input(
+            prompt,
             move |this, name, _, cx| {
                 if let Some(problem) =
                     entry_name_problem(&name, |name| this.listed(key, workspace_id, &parent, name))
@@ -421,13 +341,14 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         let current = from.file_name().unwrap_or_default().to_owned();
-        let selected = name_stem(&initial, kind);
-        self.prompt_entry_name(
-            format!("Rename {from}"),
-            "Rename",
-            initial,
-            selected,
+        let prompt = TextPrompt {
+            trim: false,
+            selected: Some(name_stem(&initial, kind)),
             error,
+            ..TextPrompt::new(format!("Rename {from}"), "Rename", initial)
+        };
+        self.prompt_text_input(
+            prompt,
             move |this, name, _, cx| {
                 if name == current {
                     return Ok(());

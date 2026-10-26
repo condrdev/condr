@@ -69,6 +69,110 @@ pub(in crate::app) fn confirm_danger(
     });
 }
 
+/// The one line of text a dialog asks for. [`TextPrompt::new`] is the common case: no
+/// label, trimmed, everything selected.
+pub(in crate::app) struct TextPrompt {
+    pub(in crate::app) title: SharedString,
+    pub(in crate::app) ok_text: &'static str,
+    pub(in crate::app) initial: String,
+    pub(in crate::app) label: Option<SharedString>,
+    pub(in crate::app) placeholder: Option<SharedString>,
+    /// Shown inside the field and prepended to what the user types, so a fixed scheme
+    /// such as `ssh://` is never typed; typing or pasting it anyway is fine.
+    pub(in crate::app) prefix: Option<&'static str>,
+    pub(in crate::app) trim: bool,
+    /// Lists the directories on this Device under what the field names, for a path.
+    pub(in crate::app) browse: Option<ConnectionKey>,
+    /// What is selected as it opens; everything when `None`.
+    pub(in crate::app) selected: Option<std::ops::Range<usize>>,
+    /// Shown under the field as it opens: why the value it reopens with was refused.
+    pub(in crate::app) error: Option<String>,
+    /// Shown under the field when the value is blank.
+    pub(in crate::app) empty: &'static str,
+}
+
+impl TextPrompt {
+    pub(in crate::app) fn new(
+        title: impl Into<SharedString>,
+        ok_text: &'static str,
+        initial: String,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            ok_text,
+            initial,
+            label: None,
+            placeholder: None,
+            prefix: None,
+            trim: true,
+            browse: None,
+            selected: None,
+            error: None,
+            empty: "Enter a name",
+        }
+    }
+}
+
+/// A dialog around a form: Cancel and `ok_text` under it, and `ok_text` or Enter runs
+/// `submit`. A refusal keeps the dialog and what was typed, and lands in `error`, which
+/// `content` shows under the field it is about.
+pub(in crate::app) fn open_form_dialog<E: 'static>(
+    title: SharedString,
+    ok_text: &'static str,
+    error: Entity<Option<E>>,
+    content: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+    submit: impl Fn(&mut Window, &mut App) -> Result<(), E> + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let content = Rc::new(content);
+    let submit = Rc::new(submit);
+    window.open_dialog(cx, move |dialog, _, _| {
+        let (content, submit, error) = (content.clone(), submit.clone(), error.clone());
+        dialog
+            .title(title.clone())
+            .content(move |body, window, cx| body.child(content(window, cx)))
+            .footer(
+                DialogFooter::new()
+                    .child(
+                        Button::new("dialog-cancel")
+                            .debug_selector(|| "dialog-cancel".into())
+                            .label("Cancel")
+                            .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
+                    )
+                    .child(
+                        Button::new("dialog-primary-action")
+                            .debug_selector(|| "dialog-primary-action".into())
+                            .primary()
+                            .label(ok_text)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+                            }),
+                    ),
+            )
+            .on_ok(move |_, window, cx| {
+                let result = submit(window, cx);
+                let accepted = result.is_ok();
+                error.update(cx, |error, cx| {
+                    *error = result.err();
+                    cx.notify();
+                });
+                accepted
+            })
+    });
+}
+
+/// A form's refusal, in red under the field it is about.
+pub(in crate::app) fn field_error(error: Option<String>, cx: &App) -> Option<Div> {
+    error.map(|error| {
+        div()
+            .debug_selector(|| "field-error".into())
+            .text_sm()
+            .text_color(cx.theme().danger)
+            .child(error)
+    })
+}
+
 impl Condr {
     /// Shows a failure the user did not cause inside a dialog: a red toast on the main
     /// window that stays until dismissed, with a Copy button so the text can be pasted
@@ -110,19 +214,7 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prompt_text_input(
-            title.into(),
-            ok_text,
-            initial,
-            None,
-            None,
-            None,
-            true,
-            None,
-            apply,
-            window,
-            cx,
-        );
+        self.prompt_text_input(TextPrompt::new(title, ok_text, initial), apply, window, cx);
     }
 
     /// A path on `key`'s Device, typed or picked from the directories listed under the field.
@@ -137,14 +229,14 @@ impl Condr {
         cx: &mut Context<Self>,
     ) {
         self.prompt_text_input(
-            title.into(),
-            ok_text,
-            String::new(),
-            Some("Root directory".into()),
-            Some("Absolute path on the device".into()),
-            None,
-            false,
-            Some(key),
+            TextPrompt {
+                label: Some("Root directory".into()),
+                placeholder: Some("Absolute path on the device".into()),
+                trim: false,
+                browse: Some(key),
+                empty: "Enter a path",
+                ..TextPrompt::new(title, ok_text, String::new())
+            },
             apply,
             window,
             cx,
@@ -229,143 +321,96 @@ impl Condr {
             .detach();
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn prompt_text_input(
         &mut self,
-        title: SharedString,
-        ok_text: &'static str,
-        initial: String,
-        field_label: Option<SharedString>,
-        placeholder: Option<SharedString>,
-        // Shown inside the field and prepended to what the user types, so a fixed scheme
-        // such as `ssh://` is never typed; typing or pasting it anyway is fine.
-        prefix: Option<&'static str>,
-        trim_value: bool,
-        // Lists the directories on this Device under what the field names, for a path.
-        browse: Option<ConnectionKey>,
+        prompt: TextPrompt,
         apply: impl Fn(&mut Condr, String, &mut Window, &mut Context<Condr>) -> Result<(), String>
         + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let TextPrompt {
+            title,
+            ok_text,
+            initial,
+            label,
+            placeholder,
+            prefix,
+            trim,
+            browse,
+            selected,
+            error,
+            empty,
+        } = prompt;
         let input = cx.new(|cx| {
             let input = InputState::new(window, cx).default_value(initial);
-            if let Some(placeholder) = placeholder {
-                input.placeholder(placeholder)
-            } else {
-                input
+            match placeholder {
+                Some(placeholder) => input.placeholder(placeholder),
+                None => input,
             }
         });
         if let Some(key) = browse {
             self.open_directory_browser(key, &input, cx);
         }
         let owner = cx.weak_entity();
-        let apply = Rc::new(apply);
-        let error = cx.new(|_| None::<String>);
+        let error = cx.new(|_| error);
+        let content = {
+            let (input, owner, error) = (input.clone(), owner.clone(), error.clone());
+            move |_: &mut Window, cx: &mut App| {
+                let field = Input::new(&input)
+                    .w_full()
+                    .when_some(prefix, |field, prefix| {
+                        field.prefix(div().text_color(cx.theme().muted_foreground).child(prefix))
+                    });
+                v_flex()
+                    .gap_1()
+                    .when_some(label.clone(), |column, label| {
+                        column.child(div().text_sm().child(label))
+                    })
+                    .child(match browse {
+                        Some(_) => browser_field(&owner, &input, field),
+                        None => field.into_any_element(),
+                    })
+                    .children(browse.and_then(|_| render_directory_browser(&owner, &input, cx)))
+                    .children(field_error(error.read(cx).clone(), cx))
+                    .into_any_element()
+            }
+        };
+        let submit = {
+            let input = input.clone();
+            move |window: &mut Window, cx: &mut App| {
+                let value = input.read(cx).value().to_string();
+                let Some(value) = accepted_text_input(value, trim) else {
+                    return Err(empty.to_owned());
+                };
+                let value = match prefix {
+                    Some(prefix) => {
+                        format!("{prefix}{}", value.strip_prefix(prefix).unwrap_or(&value))
+                    }
+                    None => value,
+                };
+                // Enter and Create take the highlighted row, as the field says.
+                let value = match (browse, owner.upgrade()) {
+                    (Some(_), Some(condr)) => condr.read(cx).browser_choice(&value),
+                    _ => value,
+                };
+                owner
+                    .update(cx, |this, cx| {
+                        let result = apply(this, value, window, cx);
+                        cx.notify();
+                        result
+                    })
+                    .unwrap_or(Ok(()))
+            }
+        };
         window.defer(cx, move |window, cx| {
-            let input_for_content = input.clone();
-            let input_for_ok = input.clone();
-            let owner = owner.clone();
-            let apply = apply.clone();
-            window.open_dialog(cx, move |dialog, _, _| {
-                let input_for_content = input_for_content.clone();
-                let input_for_ok = input_for_ok.clone();
-                let owner = owner.clone();
-                let apply = apply.clone();
-                let field_label = field_label.clone();
-                let content_owner = owner.clone();
-                let content_error = error.clone();
-                let submit_error = error.clone();
-                dialog
-                    .title(title.clone())
-                    .content(move |content, _, cx| {
-                        let field = Input::new(&input_for_content).w_full().when_some(
-                            prefix,
-                            |input, prefix| {
-                                input.prefix(
-                                    div().text_color(cx.theme().muted_foreground).child(prefix),
-                                )
-                            },
-                        );
-                        content.child(
-                            v_flex()
-                                .gap_1()
-                                .when_some(field_label.clone(), |field, label| {
-                                    field.child(div().text_sm().child(label))
-                                })
-                                .child(match browse {
-                                    Some(_) => {
-                                        browser_field(&content_owner, &input_for_content, field)
-                                    }
-                                    None => field.into_any_element(),
-                                })
-                                .children(browse.and_then(|_| {
-                                    render_directory_browser(&content_owner, &input_for_content, cx)
-                                }))
-                                .when_some(content_error.read(cx).clone(), |field, error| {
-                                    field.child(
-                                        div().text_sm().text_color(cx.theme().danger).child(error),
-                                    )
-                                }),
-                        )
-                    })
-                    .footer(
-                        DialogFooter::new()
-                            .child(
-                                Button::new("dialog-cancel")
-                                    .debug_selector(|| "dialog-cancel".into())
-                                    .label("Cancel")
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(Box::new(Cancel), cx)
-                                    }),
-                            )
-                            .child(
-                                Button::new("dialog-primary-action")
-                                    .debug_selector(|| "dialog-primary-action".into())
-                                    .primary()
-                                    .label(ok_text)
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(Confirm { secondary: false }),
-                                            cx,
-                                        )
-                                    }),
-                            ),
-                    )
-                    .on_ok(move |_, window, cx| {
-                        let value = input_for_ok.read(cx).value().to_string();
-                        let Some(value) = accepted_text_input(value, trim_value) else {
-                            return false;
-                        };
-                        let value = match prefix {
-                            Some(prefix) => {
-                                format!("{prefix}{}", value.strip_prefix(prefix).unwrap_or(&value))
-                            }
-                            None => value,
-                        };
-                        // Enter and Create take the highlighted row, as the field says.
-                        let value = match (browse, owner.upgrade()) {
-                            (Some(_), Some(condr)) => condr.read(cx).browser_choice(&value),
-                            _ => value,
-                        };
-                        let apply = apply.clone();
-                        // A rejected value keeps the dialog and the typed text.
-                        owner
-                            .update(cx, |this, cx| {
-                                let result = apply(this, value, window, cx);
-                                submit_error.update(cx, |error, cx| {
-                                    *error = result.as_ref().err().cloned();
-                                    cx.notify();
-                                });
-                                cx.notify();
-                                result.is_ok()
-                            })
-                            .unwrap_or(true)
-                    })
-            });
+            open_form_dialog(title, ok_text, error, content, submit, window, cx);
             input.update(cx, |input, cx| {
                 input.focus(window, cx);
-                input.select_all(window, cx);
+                match selected {
+                    Some(range) => input.set_selected_range(range, cx),
+                    None => input.select_all(window, cx),
+                }
             });
         });
     }
@@ -415,10 +460,15 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prompt_text(
-            "Create Worktree",
-            "Create",
-            default_worktree_branch(&workspace_name),
+        self.prompt_text_input(
+            TextPrompt {
+                empty: "Enter a branch name",
+                ..TextPrompt::new(
+                    "Create Worktree",
+                    "Create",
+                    default_worktree_branch(&workspace_name),
+                )
+            },
             move |this, branch, window, cx| {
                 this.send_presenting_layout_to(
                     key,
