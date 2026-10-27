@@ -981,7 +981,6 @@ impl Condr {
             _ => None,
         });
         let editor = self.files_view.file_editors.get(&(key, tab_id));
-        let dirty = editor.is_some_and(|editor| editor.dirty);
         // What the person should know about editing it, most pressing first.
         let note = editor.and_then(|editor| {
             let gone = self
@@ -1036,22 +1035,6 @@ impl Condr {
         });
         let muted = theme.muted_foreground;
         viewer_header("file-header", path, entry.map(|entry| entry.status), cx)
-            .when(dirty, |this| {
-                this.child(
-                    div()
-                        .debug_selector(|| "file-unsaved".into())
-                        .id("file-unsaved")
-                        .flex_none()
-                        .size(px(8.))
-                        .rounded_full()
-                        .bg(theme.foreground)
-                        .tooltip(|window, cx| {
-                            Tooltip::new("Unsaved")
-                                .action(&SaveFile, Some("CondrPreview"))
-                                .build(window, cx)
-                        }),
-                )
-            })
             .when_some(note, |this, (note, warning)| {
                 let color = if warning { theme.warning } else { muted };
                 this.child(header_meta("file-note", note, color))

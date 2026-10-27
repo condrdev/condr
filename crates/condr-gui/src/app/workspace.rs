@@ -17,6 +17,33 @@ const TAB_MAX_WIDTH: Rems = rems(8.);
 const TAB_MIN_WIDTH: Rems = rems(6.);
 /// The hairline between two idle Tabs: shorter than the Tab, as Chrome draws it.
 const TAB_SEPARATOR_HEIGHT: Rems = rems(1.);
+/// What sits over a Tab's trailing end: a chip in the Tab's own colour, with a short fade
+/// before it, so a long name runs under it instead of colliding with it.
+fn trailing_chip(chip: Hsla, radius: Pixels, child: impl IntoElement) -> Div {
+    h_flex()
+        .absolute()
+        .right_0()
+        .top_0()
+        .bottom_0()
+        .items_center()
+        .child(div().w(px(14.)).h_full().bg(linear_gradient(
+            90.,
+            linear_color_stop(chip.opacity(0.), 0.),
+            linear_color_stop(chip, 1.),
+        )))
+        .child(
+            div()
+                .h_full()
+                .flex()
+                .items_center()
+                .pr_1()
+                .bg(chip)
+                .rounded_tr(radius)
+                .rounded_br(radius)
+                .child(child),
+        )
+}
+
 pub(super) fn tab_label(tab_index: usize, name: &str) -> String {
     let number = tab_index + 1;
     if name.is_empty() {
@@ -156,6 +183,24 @@ impl Condr {
             };
             let close_chip = cx.theme().background.blend(tint);
             let close_radius = cx.theme().radius;
+            // A Preview Tab with unsaved text marks it where the close button appears, as
+            // VS Code does, on the Tab's resting colour; hovering swaps in the close button.
+            let unsaved = self
+                .files_view
+                .file_editors
+                .get(&(key, tab_id))
+                .is_some_and(|editor| editor.dirty);
+            let rest_chip = if tab_id == active_tab {
+                close_chip
+            } else {
+                cx.theme().background
+            };
+            // The ghost Button's label colour, enabled or not.
+            let dot_color = if can_mutate {
+                cx.theme().secondary_foreground
+            } else {
+                cx.theme().muted_foreground.opacity(0.5)
+            };
             let tab_row = h_flex()
                 .id(("tab-menu", tab_id.as_u64()))
                 .flex_shrink_0()
@@ -239,59 +284,46 @@ impl Condr {
                             });
                         }),
                 )
-                // Hovering the Tab reveals a close button over its trailing end, as browser
-                // tabs do. It sits on a chip in the hovered Tab's own colour, with a short
-                // fade before it, so a long name runs under it instead of colliding with it.
-                .child(
-                    h_flex()
-                        .absolute()
-                        .right_0()
-                        .top_0()
-                        .bottom_0()
-                        .items_center()
-                        .opacity(0.)
-                        .group_hover(hover_group, |style| style.opacity(1.))
-                        .child(div().w(px(14.)).h_full().bg(linear_gradient(
-                            90.,
-                            linear_color_stop(close_chip.opacity(0.), 0.),
-                            linear_color_stop(close_chip, 1.),
-                        )))
-                        .child(
+                .when(unsaved, |this| {
+                    this.child(
+                        trailing_chip(
+                            rest_chip,
+                            close_radius,
+                            // The close button's own size, so the swap does not move.
                             div()
-                                .h_full()
+                                .debug_selector(move || format!("tab-unsaved-{}", tab_id.as_u64()))
+                                .size_5()
                                 .flex()
                                 .items_center()
-                                .pr_1()
-                                .bg(close_chip)
-                                .rounded_tr(close_radius)
-                                .rounded_br(close_radius)
-                                .child(
-                                    Button::new(("close-tab", tab_id.as_u64()))
-                                        .debug_selector(move || {
-                                            format!("close-tab-{}", tab_id.as_u64())
-                                        })
-                                        .xsmall()
-                                        .ghost()
-                                        .icon(Icon::new(IconName::Close).size_3())
-                                        .tooltip("Close Tab")
-                                        .disabled(!can_mutate)
-                                        // Neither a window move nor a Tab drag may start here.
-                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
-                                        })
-                                        .on_click(move |_, window, cx| {
-                                            let _ = close_owner.update(cx, |this, cx| {
-                                                this.close_tab_id(
-                                                    key,
-                                                    tab_id,
-                                                    closes_workspace,
-                                                    window,
-                                                    cx,
-                                                )
-                                            });
-                                        }),
-                                ),
-                        ),
+                                .justify_center()
+                                .child(div().size(px(8.)).rounded_full().bg(dot_color)),
+                        )
+                        .group_hover(hover_group.clone(), |style| style.opacity(0.)),
+                    )
+                })
+                // Hovering the Tab reveals a close button over its trailing end, as browser
+                // tabs do.
+                .child(
+                    trailing_chip(
+                        close_chip,
+                        close_radius,
+                        Button::new(("close-tab", tab_id.as_u64()))
+                            .debug_selector(move || format!("close-tab-{}", tab_id.as_u64()))
+                            .xsmall()
+                            .ghost()
+                            .icon(Icon::new(IconName::Close).size_3())
+                            .tooltip("Close Tab")
+                            .disabled(!can_mutate)
+                            // Neither a window move nor a Tab drag may start here.
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(move |_, window, cx| {
+                                let _ = close_owner.update(cx, |this, cx| {
+                                    this.close_tab_id(key, tab_id, closes_workspace, window, cx)
+                                });
+                            }),
+                    )
+                    .opacity(0.)
+                    .group_hover(hover_group, |style| style.opacity(1.)),
                 )
                 .context_menu(move |menu, _, _| {
                     let rename_owner = menu_owner.clone();

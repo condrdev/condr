@@ -719,7 +719,8 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
     // Typing marks the text unsaved; Enter's `\n` is saved as the file's `\r\n`.
     type_at_end(window, "three\n");
     assert!(dirty(window));
-    assert!(window.debug_bounds("file-unsaved").is_some());
+    let unsaved_mark = leaked_selector(format!("tab-unsaved-{}", tab_id.as_u64()));
+    assert!(window.debug_bounds(unsaved_mark).is_some());
     window.update(|window, cx| {
         view.update(cx, |this, cx| this.save_file(1, tab_id, None, window, cx));
     });
@@ -731,7 +732,7 @@ fn preview_tab_saves_edits_and_never_drops_unsaved_text() {
         }),
         "Save should write the text back with the file's own line breaks"
     );
-    assert!(window.debug_bounds("file-unsaved").is_none());
+    assert!(window.debug_bounds(unsaved_mark).is_none());
 
     // The agent writes the file under unsaved text: the text stays, the header says so,
     // and Save asks before it overwrites.
