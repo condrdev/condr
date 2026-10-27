@@ -5,6 +5,7 @@
 use super::change_tree::{
     TreeRow, diff_stat, directory_row, disclosure, file_row, row_highlight, tree_rows,
 };
+use super::files::language_for;
 use super::history::history_branch;
 use super::placeholders::{empty_state, failed_state, list_note, too_large};
 use super::sidebar::CondrIconName;
@@ -87,6 +88,8 @@ pub(super) struct DiffViewer {
     pub(super) content: DiffContent,
     /// The line last clicked: where Show File lands, and where a changed diff scrolls back.
     pub(super) clicked: Option<DiffLinePosition>,
+    /// The highlighter the state paints with, replaced when the code theme changes.
+    pub(super) highlighter: syntax::DiffHighlighter,
 }
 
 /// The one name every patch gives its file. The Tab header shows the path, and Kit's
@@ -995,16 +998,23 @@ impl Condr {
         }
 
         let mode = diff_mode(self.files_view.diff_unified);
+        let highlighter = syntax::diff_highlighter(cx);
         let viewer = self
             .files_view
             .diff_viewers
             .entry((key, tab_id))
             .or_insert_with(|| DiffViewer {
-                state: cx.new(|cx| DiffState::new([], cx).with_mode(mode)),
+                state: cx.new(|cx| {
+                    let highlight = highlighter.clone();
+                    DiffState::new([], cx)
+                        .with_mode(mode)
+                        .with_syntax_highlighter(move |language, text| highlight(language, text))
+                }),
                 shown: None,
                 patch: String::new(),
                 content: DiffContent::Loading,
                 clicked: None,
+                highlighter,
             });
         let source = (path, commit);
         let Some(answer) = answer else {
@@ -1025,9 +1035,12 @@ impl Condr {
             .shown
             .as_ref()
             .is_none_or(|(shown, _)| *shown != source);
+        // The patch names no path, so another file's could match it but not its language.
+        let language = language_for(&source.0);
         viewer.shown = Some((source, generation));
         if retargeted {
             viewer.clicked = None;
+            viewer.patch.clear();
         }
         let patch = match answer {
             Err(reason) => Err(DiffContent::Failed(reason)),
@@ -1052,6 +1065,9 @@ impl Condr {
         }
         match DiffFile::parse(&patch) {
             Ok(files) => {
+                let files = files
+                    .into_iter()
+                    .map(|file| file.with_language(language.clone()));
                 let clicked = viewer.clicked.clone();
                 viewer.state.update(cx, |state, cx| {
                     state.set_files(files, cx);
@@ -1069,6 +1085,21 @@ impl Condr {
                 viewer.content = DiffContent::Failed(format!("Could not show this diff: {error}"));
                 viewer.patch.clear();
             }
+        }
+    }
+
+    /// Hands every Diff the highlighter for the code theme painting now (ADR 0046).
+    pub(super) fn sync_diff_highlighters(&mut self, cx: &mut Context<Self>) {
+        let highlighter = syntax::diff_highlighter(cx);
+        for viewer in self.files_view.diff_viewers.values_mut() {
+            if Arc::ptr_eq(&viewer.highlighter, &highlighter) {
+                continue;
+            }
+            viewer.highlighter = highlighter.clone();
+            let highlight = highlighter.clone();
+            viewer.state.update(cx, |state, cx| {
+                state.set_syntax_highlighter(move |language, text| highlight(language, text), cx);
+            });
         }
     }
 

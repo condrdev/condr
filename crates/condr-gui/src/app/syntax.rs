@@ -1,7 +1,7 @@
-//! Syntax highlighting for the Preview Tab's Editor (ADR 0032),
-//! and the code blocks of a rendered Markdown file (ADR 0037): the Sublime syntaxes `bat`
-//! curates, parsed by syntect on Oniguruma behind GPUI Kit's `InputHighlighter` and code
-//! block seams, and coloured by the theme Settings picks.
+//! Syntax highlighting for the Preview Tab's Editor (ADR 0032), the code blocks of a
+//! rendered Markdown file (ADR 0037) and the Diff Tab (ADR 0046): the Sublime syntaxes
+//! `bat` curates, parsed by syntect on Oniguruma behind GPUI Kit's `InputHighlighter`,
+//! code block and Diff seams, and coloured by the theme Settings picks.
 
 use std::{
     cell::{Cell, RefCell},
@@ -186,43 +186,67 @@ pub(crate) fn highlighter_factory(cx: &App) -> InputHighlighterFactory {
 pub(crate) type CodeBlockHighlighter =
     Arc<dyn Fn(&CodeBlock) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync>;
 
+/// Colours one side of a Diff Tab hunk, given the file's language name.
+pub(crate) type DiffHighlighter =
+    Arc<dyn Fn(&str, &str) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync>;
+
 /// The code block highlighter for the theme painting now. Kit keeps a block's colours
 /// only while it is handed the same highlighter, so there is one per theme.
 pub(crate) fn code_block_highlighter(cx: &App) -> CodeBlockHighlighter {
+    highlighters(cx).0
+}
+
+/// The Diff highlighter for the theme painting now. Kit keeps the styles it returns, so
+/// a Diff handed another one still paints with that one's theme.
+pub(crate) fn diff_highlighter(cx: &App) -> DiffHighlighter {
+    highlighters(cx).1
+}
+
+fn highlighters(cx: &App) -> (CodeBlockHighlighter, DiffHighlighter) {
     thread_local! {
-        static SHARED: RefCell<Option<(&'static Theme, CodeBlockHighlighter)>> =
+        static SHARED: RefCell<Option<(&'static Theme, CodeBlockHighlighter, DiffHighlighter)>> =
             const { RefCell::new(None) };
     }
     let theme = painting(cx).get();
     SHARED.with_borrow_mut(|shared| match shared {
-        Some((shared_theme, highlighter)) if std::ptr::eq(*shared_theme, theme) => {
-            highlighter.clone()
+        Some((shared_theme, block, diff)) if std::ptr::eq(*shared_theme, theme) => {
+            (block.clone(), diff.clone())
         }
         _ => {
-            let highlighter = block_highlighter(theme);
-            *shared = Some((theme, highlighter.clone()));
-            highlighter
+            // ponytail: a block parses on the UI thread the first time it paints; Markdown
+            // blocks are short, move it off if a long one shows. Kit runs a Diff's off it.
+            let block: CodeBlockHighlighter = Arc::new(move |block| {
+                block.lang().map_or_else(Vec::new, |language| {
+                    highlight(theme, &language, &block.code())
+                })
+            });
+            let diff: DiffHighlighter =
+                Arc::new(move |language, text| highlight(theme, language, text));
+            *shared = Some((theme, block.clone(), diff.clone()));
+            (block, diff)
         }
     })
 }
 
-// ponytail: a block parses on the UI thread the first time it paints; Markdown blocks are
-// short, move it off if a long one shows.
-fn block_highlighter(theme: &'static Theme) -> CodeBlockHighlighter {
-    Arc::new(move |block| {
-        let Some(syntax) = block.lang().and_then(|language| syntax_for(&language)) else {
-            return Vec::new();
-        };
-        let Some(parsed) = parse(&block.code(), syntax, &AtomicBool::new(false)) else {
-            return Vec::new();
-        };
-        let mut styles = StackStyles::new(theme, parsed.stacks.len());
-        parsed
-            .spans
-            .iter()
-            .map(|(range, stack)| (range.clone(), styles.get(*stack, &parsed.stacks)))
-            .collect()
-    })
+/// Styles all of `text` at once, for Kit's seams that take styles rather than an
+/// `InputHighlighter`.
+fn highlight(
+    theme: &'static Theme,
+    language: &str,
+    text: &str,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let Some(syntax) = syntax_for(language) else {
+        return Vec::new();
+    };
+    let Some(parsed) = parse(text, syntax, &AtomicBool::new(false)) else {
+        return Vec::new();
+    };
+    let mut styles = StackStyles::new(theme, parsed.stacks.len());
+    parsed
+        .spans
+        .iter()
+        .map(|(range, stack)| (range.clone(), styles.get(*stack, &parsed.stacks)))
+        .collect()
 }
 
 fn syntax_for(language: &str) -> Option<&'static SyntaxReference> {
@@ -633,16 +657,21 @@ mod tests {
     }
 
     #[test]
-    fn code_blocks_are_coloured_by_their_info_string() {
-        let highlighter = block_highlighter(theme("GitHub Light", false));
+    fn code_blocks_and_diffs_are_coloured_by_their_language() {
+        let theme = theme("GitHub Light", false);
         let code = "fn main() {}\n";
-        let runs = highlighter(&CodeBlock::from_code(code, Some("rust")));
+        let runs = highlight(theme, "rust", code);
         let keyword = runs.iter().find(|(range, _)| range.start == 0).unwrap().1;
         let name = runs.iter().find(|(range, _)| range.start == 3).unwrap().1;
         assert_ne!(keyword.color, name.color);
+        assert_eq!(
+            highlight(theme, "rs", code),
+            runs,
+            "an extension names it too"
+        );
         assert!(
-            highlighter(&CodeBlock::from_code(code, None::<&str>)).is_empty(),
-            "a block without a language stays plain"
+            highlight(theme, "text", code).is_empty(),
+            "a name without a syntax stays plain"
         );
     }
 

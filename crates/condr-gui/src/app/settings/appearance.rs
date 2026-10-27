@@ -560,7 +560,7 @@ fn code_theme_item(owner: &WeakEntity<Condr>, select: &Entity<ColorSchemeSelect>
                 reset_code_theme(&reset_owner, &reset_select, window, cx)
             }),
     )
-    .description("Syntax themes for files.")
+    .description("Syntax themes for files and diffs.")
 }
 
 /// Whether Reset All has anything to do for the code theme.

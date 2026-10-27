@@ -250,6 +250,23 @@ fn changes_sidebar_lists_the_repository_and_opens_one_diff_tab() {
         }),
         "the retargeted Diff Tab should show the second file's hunks"
     );
+    // It is coloured by the file's language, and by the code theme Settings picks.
+    let painted = window.update(|_, cx| {
+        let view = view.read(cx);
+        let viewer = view.files_view.diff_viewers.values().next().unwrap();
+        assert_eq!(viewer.state.read(cx).files()[0].language().as_ref(), "txt");
+        viewer.highlighter.clone()
+    });
+    window.update(|_, cx| crate::app::syntax::set_code_theme("Solarized Light".into(), cx));
+    window.update(|_, cx| {
+        let view = view.read(cx);
+        let viewer = view.files_view.diff_viewers.values().next().unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&viewer.highlighter, &painted));
+        assert!(std::sync::Arc::ptr_eq(
+            &viewer.highlighter,
+            &crate::app::syntax::diff_highlighter(cx)
+        ));
+    });
 
     // The title bar toggle hides the sidebar.
     let toggle = window

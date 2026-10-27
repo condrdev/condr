@@ -319,6 +319,8 @@ pub(crate) struct Condr {
     pub(super) last_error: Option<String>,
     _window_activation_subscription: Subscription,
     _window_appearance_subscription: Subscription,
+    /// `syntax::apply_code_theme` writes Kit's theme whenever the code theme can change.
+    _theme_subscription: Subscription,
     _window_bounds_subscription: Subscription,
     _system_wake_subscription: Subscription,
     /// The GUI state file (ADR 0023); `None` in tests that want no file.
@@ -422,6 +424,8 @@ impl Condr {
         apply_terminal_font(&terminal_font, cx);
         apply_terminal_color_scheme(&terminal_color_scheme, cx);
         syntax::set_code_theme(code_theme, cx);
+        let theme_subscription =
+            cx.observe_global::<Theme>(|this, cx| this.sync_diff_highlighters(cx));
         let window_bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
             this.window_state = Some(window.window_bounds().into());
             this.schedule_state_save(cx);
@@ -518,6 +522,7 @@ impl Condr {
             last_error: None,
             _window_activation_subscription: window_activation_subscription,
             _window_appearance_subscription: window_appearance_subscription,
+            _theme_subscription: theme_subscription,
             _window_bounds_subscription: window_bounds_subscription,
             _system_wake_subscription: system_wake_subscription,
             state_path,

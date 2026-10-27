@@ -189,7 +189,7 @@ pub(super) fn terminal_path_text(relative: &str) -> String {
 
 /// The highlighter name for a file: its extension, which `syntax::highlighter_factory` resolves
 /// (`rs` → Rust); an unknown one leaves the text plain.
-fn language_for(path: &RelativePath) -> SharedString {
+pub(super) fn language_for(path: &RelativePath) -> SharedString {
     path.extension()
         .map(|extension| extension.to_ascii_lowercase())
         .unwrap_or_else(|| "text".to_owned())
