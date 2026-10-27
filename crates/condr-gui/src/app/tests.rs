@@ -36,6 +36,18 @@ use condr_core::{
 use condr_server::{DeviceKey, Endpoint, TcpEndpoint};
 use gpui_kit::{AssetSource as _, KeyDownEvent, Keystroke, Task};
 
+/// Parses `keys` as this platform's keymap does, `secondary-` included.
+pub(super) fn keystroke(keys: &str) -> Keystroke {
+    let os = if cfg!(target_os = "macos") {
+        gpui_kit::OperatingSystem::Mac
+    } else if cfg!(windows) {
+        gpui_kit::OperatingSystem::Windows
+    } else {
+        gpui_kit::OperatingSystem::Linux
+    };
+    Keystroke::parse_with_os(keys, os).unwrap()
+}
+
 fn terminal_cell(text: &str) -> TerminalCell {
     TerminalCell {
         text: text.into(),

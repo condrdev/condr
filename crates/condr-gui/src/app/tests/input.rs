@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn terminal_shortcut_fallback_maps_only_fixed_chords() {
-    let action = |keys: &str| fixed_shortcut(&Keystroke::parse(keys).unwrap());
+    let action = |keys: &str| fixed_shortcut(&keystroke(keys));
 
     assert!(action("ctrl-tab").unwrap().as_any().is::<NextTab>());
     assert!(
@@ -95,7 +95,7 @@ fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
         "alt"
     };
     for number in 1..=9 {
-        let action = fixed_shortcut(&Keystroke::parse(&format!("{modifier}-{number}")).unwrap())
+        let action = fixed_shortcut(&keystroke(&format!("{modifier}-{number}")))
             .expect("each numbered Tab has a shortcut");
         assert_eq!(
             action.as_any().downcast_ref::<ActivateTab>(),
@@ -115,18 +115,14 @@ fn numbered_tab_shortcuts_reserve_only_the_platforms_digit_chords() {
         }
         .into(),
     ] {
-        assert!(
-            fixed_shortcut(&Keystroke::parse(&chord).unwrap()).is_none(),
-            "{chord}"
-        );
+        assert!(fixed_shortcut(&keystroke(&chord)).is_none(), "{chord}");
     }
 }
 
 #[test]
 fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
-    let shortcut = |keys: &str, has_selection| {
-        terminal_clipboard_shortcut(&Keystroke::parse(keys).unwrap(), has_selection)
-    };
+    let shortcut =
+        |keys: &str, has_selection| terminal_clipboard_shortcut(&keystroke(keys), has_selection);
 
     // Ctrl+Shift+C/V: clipboard on Linux/Windows; on macOS every Ctrl chord is PTY input.
     let control_shift_copy =
@@ -171,7 +167,7 @@ fn terminal_clipboard_shortcuts_preserve_terminal_control_keys() {
 
 #[test]
 fn terminal_keys_follow_platform_keystroke_semantics() {
-    let key = |keys: &str| terminal_key_for(&Keystroke::parse(keys).unwrap());
+    let key = |keys: &str| terminal_key_for(&keystroke(keys));
     let character = |text: &str| Some(TerminalKey::Character(text.into()));
 
     // Plain text and shifted text arrive through the input handler, not as keys.
@@ -206,7 +202,7 @@ fn terminal_keys_follow_platform_keystroke_semantics() {
 #[test]
 fn printable_character_input_preference_bypasses_terminal_key_encoding() {
     let event = KeyDownEvent {
-        keystroke: Keystroke::parse("ctrl-alt-q->@").unwrap(),
+        keystroke: keystroke("ctrl-alt-q->@"),
         is_held: false,
         prefer_character_input: true,
     };
@@ -256,7 +252,7 @@ fn hover_clears_only_from_the_pane_that_owns_it() {
 
 #[test]
 fn image_paste_is_ctrl_v_or_alt_v_on_windows_and_maps_only_supported_formats() {
-    let gesture = |keys: &str| is_image_paste_gesture(&Keystroke::parse(keys).unwrap());
+    let gesture = |keys: &str| is_image_paste_gesture(&keystroke(keys));
     let (image_paste, other) = if cfg!(windows) {
         ("alt-v", "ctrl-v")
     } else {
@@ -264,7 +260,7 @@ fn image_paste_is_ctrl_v_or_alt_v_on_windows_and_maps_only_supported_formats() {
     };
     assert_eq!(super::super::terminal_input::IMAGE_PASTE_KEY, image_paste);
     assert!(gesture(image_paste));
-    let mut function_chord = Keystroke::parse(image_paste).unwrap();
+    let mut function_chord = keystroke(image_paste);
     function_chord.modifiers.function = true;
     assert!(!is_image_paste_gesture(&function_chord));
     for keys in [
@@ -279,7 +275,7 @@ fn image_paste_is_ctrl_v_or_alt_v_on_windows_and_maps_only_supported_formats() {
         assert!(!gesture(keys), "{keys}");
     }
     // Nor is it a text-paste shortcut: on a local Server it reaches the PTY.
-    assert!(terminal_clipboard_shortcut(&Keystroke::parse(image_paste).unwrap(), false).is_none());
+    assert!(terminal_clipboard_shortcut(&keystroke(image_paste), false).is_none());
     use condr_core::protocol::ClipboardImageFormat as Wire;
     assert_eq!(
         clipboard_image_format(gpui_kit::ImageFormat::Png),

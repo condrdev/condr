@@ -122,14 +122,14 @@ impl TerminalInput {
         }
         let bytes_len = bytes.len();
         self.pending_entries
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
                 (pending < INPUT_QUEUE_CAPACITY).then(|| pending + 1)
             })
             .map_err(|_| {
                 io::Error::new(io::ErrorKind::WouldBlock, "terminal input queue is full")
             })?;
         self.pending_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
                 pending
                     .checked_add(bytes_len)
                     .filter(|total| *total <= MAX_PENDING_INPUT_BYTES)
@@ -237,7 +237,7 @@ impl TerminalInput {
             ));
         }
         self.pending_control_entries
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
                 (pending < TERMINAL_CONTROL_QUEUE_RESERVE).then(|| pending + 1)
             })
             .map_err(|_| {

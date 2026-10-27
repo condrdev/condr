@@ -487,7 +487,7 @@ impl Condr {
             .relative()
             // The gutters are the TextView's padding, outside the list Kit scrolls on the
             // wheel; over them the wheel scrolls the same list.
-            .on_scroll_wheel(move |event, window, _| {
+            .on_scroll(move |event, window, _| {
                 if wheel_list.viewport_bounds().contains(&event.position) {
                     return;
                 }

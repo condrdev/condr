@@ -9,6 +9,18 @@ thread_local! {
     static FIXED_BINDINGS: Vec<KeyBinding> = fixed_bindings();
 }
 
+/// Cmd on macOS and Ctrl elsewhere, as `secondary-` was before `KeyBinding::new` stopped
+/// resolving it without an `App`.
+macro_rules! secondary {
+    ($keys:literal) => {
+        if cfg!(target_os = "macos") {
+            concat!("cmd-", $keys)
+        } else {
+            concat!("ctrl-", $keys)
+        }
+    };
+}
+
 pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
     if stroke.modifiers.function {
         return None;
@@ -52,13 +64,12 @@ pub(super) fn fixed_shortcut(stroke: &Keystroke) -> Option<Box<dyn Action>> {
 
 fn fixed_bindings() -> Vec<KeyBinding> {
     let mut bindings = vec![
-        // `secondary` is Cmd on macOS and Ctrl elsewhere.
-        KeyBinding::new("secondary-,", OpenSettings, Some("Condr")),
+        KeyBinding::new(secondary!(","), OpenSettings, Some("Condr")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Condr")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Condr")),
         // Workspaces stack vertically in the sidebar, so Up/Down walk them.
-        KeyBinding::new("secondary-shift-up", PreviousWorkspace, Some("Condr")),
-        KeyBinding::new("secondary-shift-down", NextWorkspace, Some("Condr")),
+        KeyBinding::new(secondary!("shift-up"), PreviousWorkspace, Some("Condr")),
+        KeyBinding::new(secondary!("shift-down"), NextWorkspace, Some("Condr")),
     ];
     let tab_modifier = if cfg!(target_os = "macos") {
         "cmd"
@@ -67,7 +78,8 @@ fn fixed_bindings() -> Vec<KeyBinding> {
     };
     bindings.extend((0..9).map(|index| {
         KeyBinding::new(
-            &format!("{tab_modifier}-{}", index + 1),
+            // Nine short strings, once per thread.
+            format!("{tab_modifier}-{}", index + 1).leak(),
             ActivateTab { index },
             Some("Condr"),
         )
@@ -126,7 +138,7 @@ pub(super) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("tab", TerminalTab, Some("CondrTerminal")),
         KeyBinding::new("shift-tab", TerminalBackTab, Some("CondrTerminal")),
-        KeyBinding::new("secondary-s", SaveFile, Some("CondrPreview")),
+        KeyBinding::new(secondary!("s"), SaveFile, Some("CondrPreview")),
     ]);
     cx.bind_keys(super::directory_browser::key_bindings());
     FIXED_BINDINGS.with(|bindings| cx.bind_keys(bindings.clone()));

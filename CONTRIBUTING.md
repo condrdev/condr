@@ -10,7 +10,7 @@ Thanks for your interest. Condr is early and moving fast, so please open an issu
 
 ## Building
 
-Rust `1.95.0`, pinned in `rust-toolchain.toml` so `rustup` picks it up automatically. CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `clippy` and `cargo test` on Linux and Windows for every pull request; see `docs/releases.md` for how builds are published.
+Rust `1.99.1`, pinned in `rust-toolchain.toml` so `rustup` picks it up automatically. CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `clippy` and `cargo test` on Linux and Windows for every pull request; see `docs/releases.md` for how builds are published.
 
 ```bash
 cargo build                 # everything

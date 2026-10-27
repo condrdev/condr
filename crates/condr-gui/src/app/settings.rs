@@ -1010,7 +1010,7 @@ mod tests {
     #[test]
     fn the_terminal_rows_list_keys_the_terminal_takes() {
         use crate::app::{TerminalClipboardShortcut, terminal_clipboard_shortcut};
-        let stroke = |key: &str| gpui_kit::Keystroke::parse(key).unwrap();
+        let stroke = crate::app::tests::keystroke;
         for key in super::shortcuts::TERMINAL_COPY_KEYS {
             assert_eq!(
                 terminal_clipboard_shortcut(&stroke(key), true),

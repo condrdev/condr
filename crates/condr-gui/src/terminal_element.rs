@@ -20,7 +20,7 @@ use gpui_kit::{
     ElementInputHandler, Entity, FocusHandle, Font, Global, GlobalElementId, Hitbox,
     HitboxBehavior, Hsla, InputHandler, InspectorElementId, IntoElement, LayoutId,
     Modifiers as GpuiModifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Size, StrikethroughStyle,
+    PaintQuad, Pixels, Point, ScrollDelta, ScrollEvent, ShapedLine, Size, StrikethroughStyle,
     Style, TextAlign, TextInputConfiguration, TextRun, TextStyle, TouchPhase, UTF16Selection,
     UnderlineStyle, Window, fill, outline, point, px, relative, rgb, size,
 };
@@ -503,7 +503,8 @@ impl Element for TerminalElement {
             TerminalInputHandler::new(bounds, self.view.clone()),
             cx,
         );
-        let cursor_style = if window.modifiers().secondary() && self.props.hovered_link.is_some() {
+        let cursor_style = if window.modifiers().secondary(cx) && self.props.hovered_link.is_some()
+        {
             CursorStyle::PointingHand
         } else {
             CursorStyle::IBeam
@@ -564,7 +565,7 @@ impl Element for TerminalElement {
             };
             let position = terminal_position(event.position, bounds, cell_size, terminal_size);
             if button == TerminalMouseButton::Left
-                && event.modifiers.secondary()
+                && event.modifiers.secondary(cx)
                 && let Some(link) = view
                     .read(cx)
                     .terminal(connection_key, pane_id)
@@ -741,7 +742,7 @@ impl Element for TerminalElement {
                     let pressed = view.update(cx, |view, _| {
                         view.take_pressed_terminal_link(connection_key, pane_id)
                     });
-                    if event.modifiers.secondary()
+                    if event.modifiers.secondary(cx)
                         && pointer_event_hits(&hitbox, event.position, window)
                     {
                         released_link = pressed;
@@ -813,7 +814,7 @@ impl Element for TerminalElement {
         let hitbox = prepaint.hitbox.clone();
         let view = self.view.clone();
         let scroll_remainder = self.props.scroll_remainder.clone();
-        window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+        window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
             if !phase.bubble() || !hitbox.should_handle_scroll(window) {
                 return;
             }

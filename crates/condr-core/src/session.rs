@@ -25,7 +25,7 @@ const MAX_NEXT_STABLE_ID_EXCLUSIVE: u64 = MAX_STABLE_ID + 1;
 fn reserve_ids(count: u64) -> Option<u64> {
     debug_assert!(count > 0);
     NEXT_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
             next.checked_add(count)
                 .filter(|end| *end <= MAX_NEXT_STABLE_ID_EXCLUSIVE)
         })

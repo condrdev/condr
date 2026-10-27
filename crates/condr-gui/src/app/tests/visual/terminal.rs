@@ -1269,7 +1269,7 @@ fn terminal_link_hover_and_modified_click_open_the_url() {
         "a plain click must not activate a terminal link"
     );
 
-    let secondary = Modifiers::secondary_key();
+    let secondary = window.update(|_, cx| Modifiers::secondary_key(cx));
     window.simulate_mouse_down(link_cell, MouseButton::Left, secondary);
     assert_eq!(
         window.opened_url(),
@@ -2096,7 +2096,8 @@ fn read_key_bytes(
 #[cfg(unix)]
 #[test]
 fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
-    use gpui_kit::{KeyDownEvent, KeyUpEvent, Keystroke};
+    use crate::app::tests::keystroke;
+    use gpui_kit::{KeyDownEvent, KeyUpEvent};
 
     let _serial_guard = acquire_visual_test_lock();
     let mut cx = TestAppContext::single();
@@ -2144,7 +2145,7 @@ fn a_program_that_asks_for_key_event_types_receives_repeats_and_releases() {
             && focus.is_some_and(|focus| window.update(|window, _| focus.is_focused(window)))
     }));
     let pane_id = pane_id.unwrap();
-    let stroke = |text: &str| Keystroke::parse(text).unwrap();
+    let stroke = keystroke;
 
     // Disambiguation and event types (3): Ctrl+C pressed, held and let go is
     // CSI 99;5:1u, CSI 99;5:2u, CSI 99;5:3u.
