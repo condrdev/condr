@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/hero.png" alt="Condr connected to local and remote Servers, with Claude Code and Codex running side by side in each Workspace" />
+  <img src="assets/screenshots/hero-with-phone.png" alt="Condr connected to local and remote Servers, running Claude Code and Codex side by side, with the mobile app to manage agents from anywhere" />
 </p>
 
 Condr is a lightweight app built for running many agents together and managing their terminals. Run Claude Code, Codex and any command-line program side by side in one window, on your own machine or on a remote server.
@@ -32,8 +32,6 @@ Condr has two parts:
 - **Server**: a service that stays running in the background. It hosts every terminal process and every agent's state, so background work never hangs up, even when you close the window or the network drops.
 - **Client**: a fast, native desktop app. It's a view you can attach at any time, and it connects to and manages several Servers from one place.
 
-A **mobile app** is also in development.
-
 ## Features
 
 - **Stays running** — Close your laptop or lose the connection, and your agents and long-running tasks carry on. Reconnect any time and pick up right where you left off.
@@ -42,6 +40,7 @@ A **mobile app** is also in development.
 - **Agent driven** — Agents can drive Condr in turn: create panes on their own, hand out tasks across panes, and talk to other agents.
 - **Real terminals** — Real terminals built on the `alacritty` core keep the whole native shell ecosystem, and paste a screenshot across devices in one step.
 - **Smooth** — Pure Rust from end to end, with no Electron. Small and responsive, even while agents are busy.
+- **Mobile app** — Manage your agents from your phone wherever you are: open any pane to read or reply, even away from your computer.
 
 ## Install
 
@@ -49,6 +48,7 @@ Pick what to install for where you'll use it:
 
 - **Your everyday dev machine**: install the **Desktop App** (Server included, works out of the box).
 - **A remote server or cloud host**: install the **Headless Server** (command line only, no graphical interface).
+- **Your phone**: install the **Mobile App** and pair it with your computers.
 
 > [!WARNING]
 > Condr 0.1 is a public preview; features and the protocol may change between versions. Keep the Client and the Server on the same version. For the latest features, download the [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) build, published automatically every day.
@@ -76,6 +76,17 @@ Run the install command in a terminal:
 | Linux x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | macOS Apple Silicon  | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
+
+### Mobile App (early preview)
+
+Install it on your phone, then pair it with each computer running Condr:
+
+| Platform         | Install                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| iPhone (iOS 26+) | [TestFlight public beta](https://testflight.apple.com/join/6qQE7Pbx)                      |
+| Android 10+      | APK from the [Companion releases](https://github.com/condrdev/condr/releases?q=companion) |
+
+See [Mobile app](https://condr.dev/docs/using/mobile/) in the docs for pairing.
 
 ## Quick Start
 

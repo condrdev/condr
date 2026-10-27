@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/hero.png" alt="Condr 同时连接本地和远程 Server，每个 Workspace 里并排运行 Claude Code 和 Codex" />
+  <img src="assets/screenshots/hero-with-phone.png" alt="Condr 同时连接本地和远程 Server 并排运行 Claude Code 和 Codex，通过手机端随时操控 Agent" />
 </p>
 
 Condr 是一个专为多 Agent 协同与终端管理打造的轻量应用。在一个窗口里同时运行 Claude Code、Codex 和任何命令行程序，无论是本地还是远程服务器。
@@ -32,8 +32,6 @@ Condr 由两部分组成：
 - **Server**：常驻后台的服务端。负责托管所有终端进程与 Agent 状态，哪怕关闭窗口或网络中断，后台任务也不会挂断。
 - **Client**：高性能原生桌面应用。作为可随时接入的视图窗口，支持在一处同时连接并管理多台 Server。
 
-**移动端 App** 正在开发中。
-
 ## 特性
 
 - **保持运行** — 合上笔记本或断开连接时， Agent 和长任务不再中断，随时重新连入接续上下文。
@@ -42,12 +40,14 @@ Condr 由两部分组成：
 - **Agent 驱动** — Agent 也能反向控制 Condr，自动创建窗格、跨窗格任务分发、与其他 Agent 沟通。
 - **真实终端** — 基于 `alacritty` 内核的真实终端，完整保留原生 Shell 生态，还支持跨设备的截图一键粘贴。
 - **极致流畅** — 纯 Rust 全栈打造，不使用 Electron。体积小，响应快，Agent 忙碌时界面不卡顿。
+- **移动端 App** — 通过手机随时随地管理 Agent，你可以打开任意 Pane 查看或者回复，离开电脑也不耽误。
 
 ## 安装
 
 根据你的使用场景选择安装组件：
 - **日常开发电脑**：安装 **桌面应用**（已内置 Server，开箱即用）。
 - **远程服务器 / 云主机**：安装 **Headless Server**（仅包含命令行工具，无图形界面）。
+- **你的手机**：安装 **手机端 App**，并与你的电脑配对。
 
 > [!WARNING]
 > Condr 0.1 为公开预览版，功能与协议可能随版本更新调整。请保持客户端（Client）与服务端（Server）版本一致。如需体验最新特性，可下载每天自动构建的 [Nightly](https://github.com/condrdev/condr/releases/tag/nightly) 版本。
@@ -75,6 +75,17 @@ Condr 由两部分组成：
 | Linux x86_64 / arm64 | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | macOS Apple Silicon  | `curl -fsSL https://condr.dev/install.sh \| sh` |
 | Windows x86_64       | `irm https://condr.dev/install.ps1 \| iex`      |
+
+### 移动端 App （早期预览）
+
+安装在你的手机上，再与每台运行 Condr 的电脑配对：
+
+| 平台             | 安装方式                                                                          |
+| ---------------- | --------------------------------------------------------------------------------- |
+| iPhone（iOS 26+） | [TestFlight 公开测试](https://testflight.apple.com/join/6qQE7Pbx)                 |
+| Android 10+      | 从 [Companion 发布页](https://github.com/condrdev/condr/releases?q=companion)下载 APK |
+
+配对步骤见官方文档站 [手机端](https://condr.dev/zh-cn/docs/using/mobile/)。
 
 ## 快速上手
 
