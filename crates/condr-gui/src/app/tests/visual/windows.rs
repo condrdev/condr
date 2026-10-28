@@ -149,7 +149,9 @@ fn a_detached_workspace_keeps_its_right_sidebar_and_lists_only_itself() {
         "a selection in the main window leaves the detached window alone"
     );
     // Selecting the detached one again shows its page: the sidebar and the keys agree.
-    let row = window.debug_bounds(sidebar_workspace_selector(first)).unwrap();
+    let row = window
+        .debug_bounds(sidebar_workspace_selector(first))
+        .unwrap();
     window.simulate_click(row.center(), Modifiers::default());
     draw(window);
     assert!(window.debug_bounds("shown-elsewhere").is_some());
@@ -369,4 +371,71 @@ fn a_detached_device_leaves_its_page_whose_bring_back_returns_it() {
     assert!(window_for(window, &view, scope).is_none());
     assert!(!window.windows().contains(&handle));
     assert!(window.debug_bounds(terminal_selector(pane_id)).is_some());
+}
+
+#[test]
+fn detached_windows_come_back_after_a_restart() {
+    let _serial_guard = acquire_visual_test_lock();
+    let first_root = TestDirectory::new("restart-detached-first");
+    let second_root = TestDirectory::new("restart-detached-second");
+    let state_directory = TestDirectory::new("restart-detached-state");
+    let path = state_directory.0.join(gui_state::STATE_FILE_NAME);
+    let (server, endpoint) = start_server();
+
+    let mut first_cx = TestAppContext::single();
+    first_cx.update(gpui_kit::init);
+    let (first, first_window) = connected_condr_at(
+        &mut first_cx,
+        endpoint.clone(),
+        gui_state::LoadedState::read(Some(path.clone())),
+    );
+    assert!(wait_until(first_window, |window| {
+        window.read(|app| {
+            first
+                .read(app)
+                .connection(1)
+                .is_some_and(ServerConnection::can_mutate)
+        })
+    }));
+    let (detached_workspace, _, detached_pane) =
+        create_workspace(first_window, &first, &first_root);
+    create_workspace(first_window, &first, &second_root);
+    let scope = WindowScope::Workspace(1, detached_workspace);
+    first_window.update(|window, cx| {
+        first.update(cx, |this, cx| this.open_in_new_window(scope, window, cx))
+    });
+    assert!(
+        wait_until(first_window, |_| {
+            gui_state::GuiState::read(Some(&path)).detached.len() == 1
+        }),
+        "the state file should list the detached window"
+    );
+    drop(first_cx);
+
+    let mut second_cx = TestAppContext::single();
+    second_cx.update(gpui_kit::init);
+    let (second, second_window) = connected_condr_at(
+        &mut second_cx,
+        endpoint.clone(),
+        gui_state::LoadedState::read(Some(path.clone())),
+    );
+    assert!(
+        wait_until(second_window, |window| window_for(window, &second, scope)
+            .is_some()),
+        "the detached window opens again once its Server bootstraps"
+    );
+    let handle = window_for(second_window, &second, scope).unwrap();
+    let mut detached = VisualTestContext::from_window(handle, second_window);
+    draw(&mut detached);
+    assert!(
+        detached
+            .debug_bounds(terminal_selector(detached_pane))
+            .is_some()
+    );
+    assert_eq!(
+        second_window.read(|app| app.active_window()),
+        Some(second_window.update(|window, _| window.window_handle())),
+        "the main window is activated last"
+    );
+    drop(server);
 }

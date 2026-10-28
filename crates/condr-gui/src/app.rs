@@ -315,15 +315,12 @@ pub(crate) struct Condr {
     _window_appearance_subscription: Subscription,
     /// `syntax::apply_code_theme` writes Kit's theme whenever the code theme can change.
     _theme_subscription: Subscription,
-    _window_bounds_subscription: Subscription,
     _system_wake_subscription: Subscription,
     /// The GUI state file (ADR 0023); `None` in tests that want no file.
     state_path: Option<PathBuf>,
     /// The state as read at startup: Servers not yet connected are restored from it when
     /// they bootstrap, and Servers never connected are written back from it unchanged.
     restored_state: gui_state::GuiState,
-    /// The window's bounds as last observed, so a save needs no `Window`.
-    window_state: Option<gui_state::WindowState>,
     /// A view change noticed where no context could schedule the save; `rebuild_dock`
     /// picks it up.
     state_dirty: bool,
@@ -423,10 +420,6 @@ impl Condr {
         syntax::set_code_theme(code_theme, cx);
         let theme_subscription =
             cx.observe_global::<Theme>(|this, cx| this.sync_diff_highlighters(cx));
-        let window_bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
-            this.window_state = Some(window.window_bounds().into());
-            this.schedule_state_save(cx);
-        });
         let owner = cx.weak_entity();
         let system_wake_subscription = cx.on_system_wake(move |cx| {
             let _ = owner.update(cx, |this, cx| this.probe_connections(cx));
@@ -508,10 +501,8 @@ impl Condr {
             last_error: None,
             _window_appearance_subscription: window_appearance_subscription,
             _theme_subscription: theme_subscription,
-            _window_bounds_subscription: window_bounds_subscription,
             _system_wake_subscription: system_wake_subscription,
             state_path,
-            window_state: Some(window.window_bounds().into()),
             restored_state,
             state_dirty: false,
             state_save: None,

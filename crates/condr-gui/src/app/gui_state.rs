@@ -41,6 +41,26 @@ pub(super) struct GuiState {
     /// Keyed by the Server's own id, which outlives connection order, Device renames
     /// and Server restarts; a Server never seen again keeps its entry.
     pub servers: HashMap<ServerId, ServerState>,
+    /// The detached windows (ADR 0043), each opened again once its Server bootstraps.
+    pub detached: Vec<DetachedWindowState>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct DetachedWindowState {
+    pub server: ServerId,
+    pub scope: SavedScope,
+    pub window: WindowState,
+    /// macOS places a window relative to its display, so the display comes back too.
+    pub display: Option<u64>,
+}
+
+/// A detached window's unit, by the ids the Snapshot persists, never by `ConnectionKey`,
+/// which is numbered by load order.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum SavedScope {
+    Device,
+    Workspace(WorkspaceId),
+    Tab(TabId),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -223,7 +243,7 @@ impl GuiState {
 /// `proto/`: nothing else reads it. A value this build does not know is dropped, which
 /// costs a window position or a sidebar choice at most.
 mod wire {
-    use super::{SidebarView, WindowRect, WindowState};
+    use super::{DetachedWindowState, SavedScope, SidebarView, WindowRect, WindowState};
     use condr_core::protocol::ServerId;
     use condr_core::{TabId, WorkspaceId};
     use std::collections::HashMap;
@@ -244,6 +264,53 @@ mod wire {
         servers: HashMap<u64, Server>,
         #[prost(bool, tag = "7")]
         diff_unified: bool,
+        #[prost(message, repeated, tag = "8")]
+        detached: Vec<Detached>,
+    }
+
+    /// `kind` 1 Device, 2 Workspace, 3 Tab; `id` names the Workspace or the Tab.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct Detached {
+        #[prost(uint64, tag = "1")]
+        server: u64,
+        #[prost(uint32, tag = "2")]
+        kind: u32,
+        #[prost(uint64, optional, tag = "3")]
+        id: Option<u64>,
+        #[prost(message, optional, tag = "4")]
+        window: Option<Window>,
+        #[prost(uint64, optional, tag = "5")]
+        display: Option<u64>,
+    }
+
+    fn window_to_wire(window: WindowState) -> Window {
+        let (mode, rect) = match window {
+            WindowState::Windowed(rect) => (1, rect),
+            WindowState::Maximized(rect) => (2, rect),
+            WindowState::Fullscreen(rect) => (3, rect),
+        };
+        Window {
+            mode,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
+
+    fn window_from_wire(window: Window) -> Option<WindowState> {
+        let rect = WindowRect {
+            x: window.x,
+            y: window.y,
+            width: window.width,
+            height: window.height,
+        };
+        match window.mode {
+            1 => Some(WindowState::Windowed(rect)),
+            2 => Some(WindowState::Maximized(rect)),
+            3 => Some(WindowState::Fullscreen(rect)),
+            _ => None,
+        }
     }
 
     /// `mode` 1 windowed, 2 maximized, 3 fullscreen.
@@ -287,20 +354,25 @@ mod wire {
     impl From<&super::GuiState> for GuiState {
         fn from(state: &super::GuiState) -> Self {
             Self {
-                window: state.window.map(|window| {
-                    let (mode, rect) = match window {
-                        WindowState::Windowed(rect) => (1, rect),
-                        WindowState::Maximized(rect) => (2, rect),
-                        WindowState::Fullscreen(rect) => (3, rect),
-                    };
-                    Window {
-                        mode,
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height,
-                    }
-                }),
+                window: state.window.map(window_to_wire),
+                detached: state
+                    .detached
+                    .iter()
+                    .map(|detached| {
+                        let (kind, id) = match detached.scope {
+                            SavedScope::Device => (1, None),
+                            SavedScope::Workspace(workspace_id) => (2, Some(workspace_id.as_u64())),
+                            SavedScope::Tab(tab_id) => (3, Some(tab_id.as_u64())),
+                        };
+                        Detached {
+                            server: detached.server.0,
+                            kind,
+                            id,
+                            window: Some(window_to_wire(detached.window)),
+                            display: detached.display,
+                        }
+                    })
+                    .collect(),
                 sidebar_width: state.sidebar_width,
                 sidebar_collapsed: state.sidebar_collapsed,
                 changes_width: state.changes_width,
@@ -342,20 +414,25 @@ mod wire {
     impl From<GuiState> for super::GuiState {
         fn from(state: GuiState) -> Self {
             Self {
-                window: state.window.and_then(|window| {
-                    let rect = WindowRect {
-                        x: window.x,
-                        y: window.y,
-                        width: window.width,
-                        height: window.height,
-                    };
-                    match window.mode {
-                        1 => Some(WindowState::Windowed(rect)),
-                        2 => Some(WindowState::Maximized(rect)),
-                        3 => Some(WindowState::Fullscreen(rect)),
-                        _ => None,
-                    }
-                }),
+                window: state.window.and_then(window_from_wire),
+                detached: state
+                    .detached
+                    .into_iter()
+                    .filter_map(|detached| {
+                        let scope = match (detached.kind, detached.id) {
+                            (1, _) => SavedScope::Device,
+                            (2, Some(id)) => SavedScope::Workspace(WorkspaceId::from_u64(id)),
+                            (3, Some(id)) => SavedScope::Tab(TabId::from_u64(id)),
+                            _ => return None,
+                        };
+                        Some(DetachedWindowState {
+                            server: ServerId(detached.server),
+                            scope,
+                            window: window_from_wire(detached.window?)?,
+                            display: detached.display,
+                        })
+                    })
+                    .collect(),
                 sidebar_width: state.sidebar_width,
                 sidebar_collapsed: state.sidebar_collapsed,
                 changes_width: state.changes_width,
@@ -427,6 +504,40 @@ impl Condr {
     /// Servers not yet bootstrapped keep what the file had.
     pub(super) fn collect_state(&self, cx: &App) -> GuiState {
         let mut servers = self.restored_state.servers.clone();
+        let bootstrapped: HashSet<ServerId> = self
+            .connections
+            .iter()
+            .filter(|connection| connection.session().is_some())
+            .filter_map(|connection| connection.model.server_id)
+            .collect();
+        // The detached windows open now, then those of Servers not bootstrapped yet as the
+        // file had them.
+        let mut detached: Vec<DetachedWindowState> = self.windows[1..]
+            .iter()
+            .filter_map(|view| {
+                let (key, scope) = match view.scope {
+                    WindowScope::Main => return None,
+                    WindowScope::Device(key) => (key, SavedScope::Device),
+                    WindowScope::Workspace(key, workspace_id) => {
+                        (key, SavedScope::Workspace(workspace_id))
+                    }
+                    WindowScope::Tab(key, tab_id) => (key, SavedScope::Tab(tab_id)),
+                };
+                Some(DetachedWindowState {
+                    server: self.connection(key)?.model.server_id?,
+                    scope,
+                    window: view.bounds,
+                    display: view.display.map(u64::from),
+                })
+            })
+            .collect();
+        detached.extend(
+            self.restored_state
+                .detached
+                .iter()
+                .filter(|saved| !bootstrapped.contains(&saved.server))
+                .cloned(),
+        );
         for connection in &self.connections {
             let (Some(server_id), Some(session)) =
                 (connection.model.server_id, connection.session())
@@ -468,7 +579,7 @@ impl Condr {
             );
         }
         GuiState {
-            window: self.window_state,
+            window: Some(self.main_view().bounds),
             sidebar_width: Some(self.main_view().sidebar_width.into()),
             sidebar_collapsed: self.main_view().sidebar_collapsed,
             changes_width: Some(self.main_view().changes_width.into()),
@@ -480,6 +591,7 @@ impl Condr {
                 .and_then(|connection| connection.model.server_id)
                 .or(self.restored_state.active_server),
             servers,
+            detached,
         }
     }
 
@@ -546,6 +658,52 @@ impl Condr {
             self.active_connection = key;
         }
         self.refresh_target_pane(key);
+        self.restore_detached_windows(key, server_id, cx);
+    }
+
+    /// After the main window, the detached windows of a Server that just bootstrapped,
+    /// whose units it still has; the main window is activated last (ADR 0043).
+    fn restore_detached_windows(
+        &mut self,
+        key: ConnectionKey,
+        server_id: ServerId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.connection(key).and_then(ServerConnection::session) else {
+            return;
+        };
+        let scopes: Vec<_> = self
+            .restored_state
+            .detached
+            .iter()
+            .filter(|saved| saved.server == server_id)
+            .filter_map(|saved| {
+                let scope = match saved.scope {
+                    SavedScope::Device => WindowScope::Device(key),
+                    SavedScope::Workspace(workspace_id) => {
+                        session.workspace(workspace_id)?;
+                        WindowScope::Workspace(key, workspace_id)
+                    }
+                    SavedScope::Tab(tab_id) => {
+                        session.tab(tab_id)?;
+                        WindowScope::Tab(key, tab_id)
+                    }
+                };
+                Some((scope, saved.window, saved.display))
+            })
+            .filter(|(scope, _, _)| self.window_for(*scope).is_none())
+            .collect();
+        if scopes.is_empty() {
+            return;
+        }
+        for (scope, window, display) in scopes {
+            let bounds = window.window_bounds(DEFAULT_WINDOW_SIZE, cx);
+            self.open_window(scope, bounds, display.map(DisplayId::from), cx);
+        }
+        let main = self.main_window();
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, _| window.activate_window());
+        });
     }
 }
 
@@ -553,8 +711,8 @@ impl Condr {
 mod tests {
     // Not `super::*`: the app module's glob brings in GPUI's `#[test]` macro.
     use super::{
-        GuiState, STATE_FILE_NAME, ServerState, WindowRect, WindowState, WorkspaceState,
-        on_a_display,
+        DetachedWindowState, GuiState, STATE_FILE_NAME, SavedScope, ServerState, WindowRect,
+        WindowState, WorkspaceState, on_a_display,
     };
     use crate::app::changes::SidebarView;
     use condr_core::protocol::ServerId;
@@ -578,6 +736,25 @@ mod tests {
             diff_unified: true,
             active_server: Some(ServerId(7)),
             servers: HashMap::new(),
+            detached: [
+                SavedScope::Device,
+                SavedScope::Workspace(WorkspaceId::from_u64(3)),
+                SavedScope::Tab(TabId::from_u64(9)),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, scope)| DetachedWindowState {
+                server: ServerId(7),
+                scope,
+                window: WindowState::Windowed(WindowRect {
+                    x: 40. * index as f32,
+                    y: 30.,
+                    width: 900.,
+                    height: 600.,
+                }),
+                display: (index > 0).then_some(index as u64),
+            })
+            .collect(),
         };
         let mut workspaces = HashMap::new();
         workspaces.insert(

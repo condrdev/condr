@@ -68,7 +68,11 @@ pub(super) struct WindowView {
     /// is scrolled into view once, which `last_scrolled_tab` remembers across renders.
     pub(super) tab_strip_scroll: ScrollHandle,
     pub(super) last_scrolled_tab: Cell<Option<TabId>>,
+    /// Where the window is, as last observed, so a save needs no `Window` (ADR 0023).
+    pub(super) bounds: gui_state::WindowState,
+    pub(super) display: Option<DisplayId>,
     _activation_subscription: Subscription,
+    _bounds_subscription: Subscription,
 }
 
 impl WindowView {
@@ -82,6 +86,15 @@ impl WindowView {
             }
             this.end_pointer_gesture_on_deactivation(window);
             this.sync_terminal_focus(window, cx);
+        });
+        let bounds_subscription = cx.observe_window_bounds(window, |this, window, cx| {
+            let display = window.display(cx).map(|display| display.id());
+            if this.owns_window(window) {
+                let view = this.window_view_mut(window);
+                view.bounds = window.window_bounds().into();
+                view.display = display;
+                this.schedule_state_save(cx);
+            }
         });
         Self {
             handle: window.window_handle(),
@@ -97,7 +110,10 @@ impl WindowView {
             changes_width: INITIAL_CHANGES_WIDTH,
             tab_strip_scroll: ScrollHandle::new(),
             last_scrolled_tab: Cell::new(None),
+            bounds: window.window_bounds().into(),
+            display: window.display(cx).map(|display| display.id()),
             _activation_subscription: activation_subscription,
+            _bounds_subscription: bounds_subscription,
         }
     }
 
@@ -324,9 +340,7 @@ impl Condr {
                 }
             }
         }
-        let size = self.window_state.map_or(window.bounds().size, |state| {
-            Bounds::<Pixels>::from(state.rect()).size
-        });
+        let size = Bounds::<Pixels>::from(self.main_view().bounds.rect()).size;
         let bounds = Bounds::new(window.bounds().origin + point(px(32.), px(32.)), size);
         self.open_window(
             scope,

@@ -32,7 +32,7 @@ GPUI's cross-window drag, `external_drag_payload`, was declined for this: it car
 
 ## State
 
-The state file (ADR 0023) keeps the main window as it does and gains the list of detached windows, each with its scope, bounds and display. A scope names its Device by `ServerId` and its Workspace or Tab by the ids the Snapshot persists, never by `ConnectionKey`, which is numbered by load order. A detached window restored before its Server bootstraps shows the Device's connection state until then.
+The state file (ADR 0023) keeps the main window as it does and gains the list of detached windows, each with its scope, bounds and display; the display matters because macOS places a window relative to its screen. A scope names its Device by `ServerId` and its Workspace or Tab by the ids the Snapshot persists, never by `ConnectionKey`, which is numbered by load order. Only a Bootstrap tells which Server a connection reached, so a detached window opens again at its Server's first Bootstrap of the run, when its unit is still there, and the main window is activated after it; a Server not reached this run keeps its entries in the file unchanged.
 
 ## What this means for the GUI
 
