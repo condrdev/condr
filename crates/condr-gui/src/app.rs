@@ -306,6 +306,9 @@ pub(crate) struct Condr {
     _code_font_save: Option<Task<()>>,
     /// Where the Tab, Workspace or Server being dragged would land; drawn as a line.
     drop_target: Option<sidebar::DropTarget>,
+    /// What the drag in flight would open in a window of its own if released outside its
+    /// window; cleared by the next press in case the release never came.
+    drag_out: Option<WindowScope>,
     /// Flushes a pending font save when the app quits before the debounce elapses.
     _quit_subscription: Subscription,
     /// Closing the main window quits, taking the detached windows with it (ADR 0043).
@@ -496,6 +499,7 @@ impl Condr {
             _font_save: None,
             _code_font_save: None,
             drop_target: None,
+            drag_out: None,
             _quit_subscription: quit_subscription,
             _main_window_closed: main_window_closed,
             last_error: None,

@@ -439,3 +439,51 @@ fn detached_windows_come_back_after_a_restart() {
     );
     drop(server);
 }
+
+#[test]
+fn a_tab_dragged_out_of_its_window_opens_at_the_cursor() {
+    let _serial_guard = acquire_visual_test_lock();
+    let root = TestDirectory::new("drag-out-tab");
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let (view, window, _server) = connected_condr(&mut cx);
+    let (_, tab_id, pane_id) = create_workspace(window, &view, &root);
+    draw(window);
+    let tab = window.debug_bounds(tab_selector(tab_id)).unwrap();
+    let viewport = window.update(|window, _| window.viewport_size());
+
+    // A release inside the window is an ordinary drop: nothing opens.
+    window.simulate_mouse_down(tab.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(
+        tab.center() + point(px(0.), px(200.)),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    window.simulate_mouse_up(
+        tab.center() + point(px(0.), px(200.)),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    draw(window);
+    assert!(window_for(window, &view, WindowScope::Tab(1, tab_id)).is_none());
+
+    // Past the window's edge it opens the Tab's window there.
+    let outside = point(viewport.width + px(40.), px(120.));
+    window.simulate_mouse_down(tab.center(), MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_move(
+        tab.center() + point(px(30.), px(0.)),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    window.simulate_mouse_move(outside, MouseButton::Left, Modifiers::default());
+    window.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+    window.run_until_parked();
+    let handle = window_for(window, &view, WindowScope::Tab(1, tab_id))
+        .expect("a Tab released outside its window opens in one of its own");
+    let mut detached = VisualTestContext::from_window(handle, window);
+    draw(&mut detached);
+    assert!(detached.debug_bounds(terminal_selector(pane_id)).is_some());
+    let main_origin = window.update(|window, _| window.bounds().origin);
+    let opened_origin = detached.update(|window, _| window.bounds().origin);
+    assert_eq!(opened_origin, main_origin + outside);
+}

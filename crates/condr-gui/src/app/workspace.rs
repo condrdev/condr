@@ -785,6 +785,34 @@ impl Render for Condr {
             .track_focus(&view.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_key_up(cx.listener(Self::key_up))
+            // Dragging a Tab, Workspace or Device out of the window detaches it (ADR 0043).
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<DraggedTab>, _, cx| {
+                    let tab = event.drag(cx);
+                    this.track_drag_out(WindowScope::Tab(tab.key, tab.tab_id));
+                }),
+            )
+            .on_drag_move(cx.listener(
+                |this, event: &DragMoveEvent<sidebar::DraggedWorkspace>, _, cx| {
+                    let workspace = event.drag(cx);
+                    this.track_drag_out(WindowScope::Workspace(
+                        workspace.key,
+                        workspace.workspace_id,
+                    ));
+                },
+            ))
+            .on_drag_move(cx.listener(
+                |this, event: &DragMoveEvent<sidebar::DraggedServer>, _, cx| {
+                    this.track_drag_out(WindowScope::Device(event.drag(cx).key));
+                },
+            ))
+            .capture_any_mouse_down(cx.listener(|this, _, _, _| this.drag_out = None))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    this.release_outside(event.position, window, cx)
+                }),
+            )
             .on_action(cx.listener(Self::action_terminal_tab))
             .on_action(cx.listener(Self::action_terminal_back_tab))
             .on_action(cx.listener(Self::action_add_server))

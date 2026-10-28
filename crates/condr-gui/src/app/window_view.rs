@@ -127,6 +127,30 @@ impl WindowView {
 }
 
 impl Condr {
+    /// Remembers what a Tab, Workspace or Device drag would detach: GPUI hands the dragged
+    /// value only to moves, and the release may come outside the window (ADR 0043).
+    pub(super) fn track_drag_out(&mut self, scope: WindowScope) {
+        self.drag_out = Some(scope);
+    }
+
+    /// A drag released outside its window opens the unit there, at the cursor. A Pane's
+    /// drag is the Dock's, and stays a cancelled drag.
+    pub(super) fn release_outside(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // An occluding element under the cursor also counts as "outside" the root; only
+        // the window's own edge does here. A maximized window has no outside.
+        let inside = Bounds::new(Point::default(), window.viewport_size()).contains(&position);
+        if let Some(scope) = self.drag_out.take()
+            && !inside
+        {
+            self.open_in_new_window_at(scope, position, window, cx);
+        }
+    }
+
     pub(super) fn owns_window(&self, window: &Window) -> bool {
         let handle = window.window_handle();
         self.windows.iter().any(|view| view.handle == handle)
@@ -308,6 +332,18 @@ impl Condr {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_in_new_window_at(scope, point(px(32.), px(32.)), window, cx);
+    }
+
+    /// Opens `scope`'s window with its top-left corner at `position` in `window`: cascaded
+    /// from it from the menu, at the cursor when dragged out.
+    pub(super) fn open_in_new_window_at(
+        &mut self,
+        scope: WindowScope,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(handle) = self.window_for(scope) {
             self.activate_window(handle, cx);
             return;
@@ -341,7 +377,7 @@ impl Condr {
             }
         }
         let size = Bounds::<Pixels>::from(self.main_view().bounds.rect()).size;
-        let bounds = Bounds::new(window.bounds().origin + point(px(32.), px(32.)), size);
+        let bounds = Bounds::new(window.bounds().origin + position, size);
         self.open_window(
             scope,
             WindowBounds::Windowed(bounds),
