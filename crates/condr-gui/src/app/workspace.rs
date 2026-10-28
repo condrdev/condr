@@ -988,6 +988,7 @@ fn bring_back_button(owner: WeakEntity<Condr>) -> AnyElement {
                 .debug_selector(|| "bring-back-window".into())
                 .ghost()
                 .small()
+                .icon(Icon::new(gpui_kit::assets::IconName::SquareArrowDownLeft))
                 .label("Bring Back")
                 .on_click(move |_, window, cx| {
                     let _ = owner.update(cx, |this, cx| this.bring_back_and_close(window, cx));
@@ -1057,6 +1058,7 @@ impl Condr {
                     .child(
                         Button::new("bring-back")
                             .debug_selector(|| "bring-back".into())
+                            .icon(Icon::new(gpui_kit::assets::IconName::SquareArrowDownLeft))
                             .label("Bring Back")
                             .on_click(move |_, _, cx| {
                                 let owner = owner.clone();
