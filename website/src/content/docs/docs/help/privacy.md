@@ -10,7 +10,7 @@ Condr has no accounts and no analytics. Neither the desktop app, the Server, nor
 ## What stays on your devices
 
 * **Your work**: terminals, Agent output, Workspaces, Git data, and files stay on the Device whose Server runs them. Other Devices see them only over connections you set up, and those are encrypted end to end. A notification carries a few details about an Agent, listed under Condr Cloud below, never terminal contents.
-* **Device keys**: a computer keeps its key in the `device-key` file in its data directory. The iPhone app keeps its key in the iOS Keychain, readable only on that phone and never restored to another one from a backup. Keys never leave the device.
+* **Device keys**: a computer keeps its key in the `device-key` file in its data directory. The iPhone app keeps its key in the iOS Keychain, readable only on that phone and never restored to another one from a backup. The Android app keeps it encrypted with a key from the Android Keystore, in storage that is never backed up. Keys never leave the device.
 * **The mobile app's data**: the computers you paired, the names you gave them, and your preferences are stored on the phone.
 
 ---
@@ -29,12 +29,24 @@ Condr has no accounts and no analytics. Neither the desktop app, the Server, nor
 
 ## The mobile app
 
-* **Camera**: used only to scan the pairing code your computer shows. Nothing is saved or sent.
-* **Face ID**: the app lock asks iOS, which tells Condr only whether you were recognized.
+* **Camera**: used only to scan the pairing code your computer shows. Nothing is saved or sent. On Android, Google's code scanner in Google Play services reads the code, so the app itself never gets the camera; while it scans, Google collects diagnostics about the scanner, such as the phone model, the app's version, an installation ID and how long scanning took, under [Google's privacy policy](https://policies.google.com/privacy). Pasting the link instead skips the scanner.
+* **Face ID, fingerprint or screen lock**: the app lock asks iOS or Android, which tells Condr only whether you were recognized.
 * **Local network**: used to connect directly to a computer on the same Wi-Fi.
 * **Connections**: the app connects only to the computers you paired with it, to the relay and DNS above when a computer uses Peer-to-peer, and to Condr Cloud if you allow notifications. It connects only while it is open.
-* **Notifications**: the app asks once, after your first pairing. If you decline, it never contacts Condr Cloud. Turning notifications off in iOS Settings stops them.
-* **Crash reports and TestFlight feedback**: if you share crash data with app developers in iOS Settings, or send feedback from TestFlight, Apple passes it to us under [Apple's privacy policy](https://www.apple.com/legal/privacy/).
+* **Notifications**: the app asks once, after your first pairing. If you decline, it never contacts Condr Cloud. Turning notifications off in the phone's settings stops them. The Android app doesn't get notifications yet.
+* **Crash reports and TestFlight feedback**: if you share crash data with app developers in iOS Settings, or send feedback from TestFlight, Apple passes it to us under [Apple's privacy policy](https://www.apple.com/legal/privacy/). If you installed the Android app from Google Play and share usage and diagnostics with Google, Google passes crash reports to us the same way, under [Google's privacy policy](https://policies.google.com/privacy).
+
+---
+
+## Deleting your data
+
+Condr has no accounts, so there is nothing to close. What Condr keeps about you goes like this:
+
+* **On your phone**: forget a computer in the app to remove it. Deleting the app removes everything it stored, its Device key included.
+* **In Condr Cloud**: turn notifications off for Condr in the phone's settings, or forget every computer, and the app deletes this phone's registration the next time it is open. A registration not refreshed for 90 days is deleted on its own. To have it deleted without the app, write to [hello@condr.dev](mailto:hello@condr.dev).
+* **The relay and DNS** store nothing, so there is nothing to delete.
+
+What Apple or Google collect, such as crash reports or the code scanner's diagnostics, is deleted under their own policies.
 
 ---
 
